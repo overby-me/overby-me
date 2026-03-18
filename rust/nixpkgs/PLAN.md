@@ -373,31 +373,33 @@ When combined with rust-nixos, this achieves a fully oxidized Linux system:
 
 ## Adding a New Component
 
-When creating a new Rust rewrite (e.g. `sed-rs`):
+All Rust rewrites live under `rust/` in the monorepo (e.g. `rust/sed`, `rust/grep`).
+Do **not** use `-rs` suffixes in directory names — the `rust/` prefix is sufficient.
+Do **not** touch bash or make replacements yet.
 
-1. **Create the subproject** at the monorepo root:
+When creating a new Rust rewrite (e.g. `rust/sed`):
+
+1. **Create the subproject** under `rust/`:
 
    ```text
-   sed-rs/
+   rust/sed/
    ├── Cargo.toml
    ├── Cargo.lock
-   ├── crates/
-   │   └── sed/
-   │       └── src/
-   ├── default.nix      # Package definition + devShell
-   ├── justfile
-   └── README.md
+   ├── src/
+   │   └── main.rs
+   ├── default.nix      # Package definition (flakelight module)
+   └── justfile
    ```
 
 2. **Wire it into rust-nixpkgs** by updating the component file:
 
    ```nix
-   # rust-nixpkgs/components/sed.nix
+   # rust/nixpkgs/components/sed.nix
    mkComponent {
      name = "gnused";
      original = pkgs.gnused;
-     replacement = pkgs.sed-rs;  # ← point to the new package
-     status = status.available;   # ← update status
+     replacement = pkgs.rust-sed;  # ← point to the new package
+     status = status.available;     # ← update status
      source = source.repo;
      phase = 2;
      ...
@@ -409,19 +411,14 @@ When creating a new Rust rewrite (e.g. `sed-rs`):
    ```nix
    imports = [
      ...
-     ./sed-rs
+     ./rust/sed
    ];
    ```
 
-4. **Add to commitlint scopes** in `.commitlintrc.yml`:
+   Commitlint scopes are auto-derived from directory structure, so `rust/sed`
+   is automatically available as a scope.
 
-   ```yaml
-   scope:
-     options:
-       - sed-rs
-   ```
-
-5. **Test** with `just test` in `rust-nixpkgs/`.
+4. **Test** with `just test` in `rust/nixpkgs/`.
 
 ---
 

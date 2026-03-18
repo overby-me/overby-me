@@ -1,15 +1,12 @@
-# gnused → sed-rs
+# gnused → uutils-sed
 #
 # GNU sed is used pervasively in stdenv for text substitution — configure
 # scripts, setup-hooks, substituteInPlace, and many build systems depend
-# on it. A replacement must support the full POSIX sed spec plus common
-# GNU extensions (-i in-place, -E extended regex, -z NUL-delimited).
+# on it.
 #
-# Existing Rust projects:
-#   - sd (https://github.com/chmln/sd) — simpler interface, NOT sed-compatible
-#   - none with full GNU sed flag compatibility
-#
-# Plan: create ../sed-rs as a drop-in GNU sed replacement.
+# uutils-sed (https://github.com/uutils/sed) is a Rust rewrite that
+# implements all POSIX commands plus common GNU extensions (-i, -E,
+# address ranges, branch/label commands). Packaged in nix/pkgs.
 {
   pkgs,
   mkComponent,
@@ -20,10 +17,10 @@
 mkComponent {
   name = "gnused";
   original = pkgs.gnused;
-  replacement = null;
-  status = status.planned;
-  source = source.repo;
+  replacement = pkgs.uutils-sed;
+  status = status.available;
+  source = source.nixpkgs;
   phase = 2;
   description = "Stream editor for filtering and transforming text";
-  notes = "Needs GNU sed flag compatibility (-i, -E, -z, address ranges, branch/label commands)";
+  notes = "Using uutils-sed — Rust rewrite from uutils project with GNU extension support";
 }
