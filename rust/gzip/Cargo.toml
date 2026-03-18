@@ -1,0 +1,16 @@
+[package]
+name = "rust-gzip"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[[bin]]
+name = "gzip"
+path = "src/main.rs"
+
+[dependencies]
+flate2 = "1"
+
+[profile.release]
+lto = true
+strip = true

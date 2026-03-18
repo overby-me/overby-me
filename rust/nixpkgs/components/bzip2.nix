@@ -1,14 +1,8 @@
-# bzip2 — bzip2 compression
-#
-# Original: bzip2 (Julian Seward's C implementation)
-# Replacement: bzip2-rs (future repo-root subproject)
+# bzip2 → rust-bzip2
 #
 # bzip2 is used by stdenv to decompress .bz2 source tarballs.
-# A drop-in must provide: bzip2, bunzip2, bzcat, bzip2recover.
-#
-# Candidates:
-#   - bzip2-rs (repo subproject, planned)
-#   - https://github.com/trifectatechfoundation/bzip2-rs (Rust port of libbzip2)
+# rust-bzip2 wraps the Rust bzip2 crate with full CLI compatibility.
+# Provides bzip2, bunzip2, and bzcat via argv[0] detection.
 {
   pkgs,
   mkComponent,
@@ -19,10 +13,10 @@
 mkComponent {
   name = "bzip2";
   original = pkgs.bzip2;
-  replacement = null;
-  status = status.planned;
+  replacement = pkgs.rust-bzip2;
+  status = status.available;
   source = source.repo;
   phase = 3;
   description = "bzip2 compression/decompression";
-  notes = "Trifecta Tech Foundation has a Rust libbzip2 port; CLI wrapper needed";
+  notes = "Using rust-bzip2 from rust/bzip2 — wraps Rust bzip2 crate";
 }

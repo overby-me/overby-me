@@ -1,0 +1,16 @@
+[package]
+name = "rust-xz"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[[bin]]
+name = "xz"
+path = "src/main.rs"
+
+[dependencies]
+xz2 = "0.1"
+
+[profile.release]
+lto = true
+strip = true

@@ -215,9 +215,18 @@
 
         ./slides
 
+        ./rust/awk
+        ./rust/bzip2
         ./rust/cachix
         ./rust/direnv
+        ./rust/grep
+        ./rust/gzip
         ./rust/h264toav1
+        ./rust/patch
+        ./rust/patchelf
+        ./rust/strip
+        ./rust/tar
+        ./rust/xz
         ./ironclaw/matrix
         ./ironclaw/bluesky
         ./ironclaw/signal

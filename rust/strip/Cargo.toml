@@ -1,0 +1,16 @@
+[package]
+name = "rust-strip"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[[bin]]
+name = "strip"
+path = "src/main.rs"
+
+[dependencies]
+object = { version = "0.36", features = ["read", "write"] }
+
+[profile.release]
+lto = true
+strip = true

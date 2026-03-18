@@ -1,0 +1,16 @@
+[package]
+name = "rust-bzip2"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[[bin]]
+name = "bzip2"
+path = "src/main.rs"
+
+[dependencies]
+bzip2 = "0.5"
+
+[profile.release]
+lto = true
+strip = true

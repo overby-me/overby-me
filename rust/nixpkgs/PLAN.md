@@ -41,19 +41,19 @@ The nixpkgs standard environment (`stdenv`) is the foundation that builds every 
 |-----------|----------|-----------------|--------|-------|--------|
 | Shell | bash | [brush](https://github.com/reubeno/brush) | nixpkgs | 1 | ✅ Available |
 | Core utilities | coreutils | [uutils](https://github.com/uutils/coreutils) | nixpkgs | 1 | ✅ Available |
-| Stream editor | gnused | sed-rs (future) | repo | 2 | ⏳ Planned |
-| Pattern grep | gnugrep | grep-rs (future) | repo | 2 | ⏳ Planned |
-| Awk | gawk | awk-rs (future) | repo | 2 | ⏳ Planned |
-| File search | findutils | findutils-rs (future) | repo | 2 | ⏳ Planned |
-| Diff | diffutils | diffutils-rs (future) | repo | 2 | ⏳ Planned |
-| Tar archive | gnutar | tar-rs (future) | repo | 3 | ⏳ Planned |
-| Gzip | gzip | gzip-rs (future) | repo | 3 | ⏳ Planned |
-| Bzip2 | bzip2 | bzip2-rs (future) | repo | 3 | ⏳ Planned |
-| XZ/LZMA | xz | xz-rs (future) | repo | 3 | ⏳ Planned |
-| Build driver | gnumake | make-rs (future) | repo | 4 | ⏳ Planned |
-| Patch | gnupatch | patch-rs (future) | repo | 4 | ⏳ Planned |
-| ELF patcher | patchelf | patchelf-rs (future) | repo | 5 | ⏳ Planned |
-| Symbol strip | binutils (strip) | strip-rs (future) | repo | 5 | ⏳ Planned |
+| Stream editor | gnused | [uutils-sed](https://github.com/uutils/sed) | nixpkgs | 2 | ✅ Available |
+| Pattern grep | gnugrep | rust/grep | repo | 2 | ✅ Available |
+| Awk | gawk | rust/awk | repo | 2 | ✅ Available |
+| File search | findutils | [uutils-findutils](https://github.com/uutils/findutils) | nixpkgs | 2 | ✅ Available |
+| Diff | diffutils | [uutils-diffutils](https://github.com/uutils/diffutils) | nixpkgs | 2 | ✅ Available |
+| Tar archive | gnutar | rust/tar | repo | 3 | ✅ Available |
+| Gzip | gzip | rust/gzip | repo | 3 | ✅ Available |
+| Bzip2 | bzip2 | rust/bzip2 | repo | 3 | ✅ Available |
+| XZ/LZMA | xz | rust/xz | repo | 3 | ✅ Available |
+| Build driver | gnumake | — | — | 4 | ⏳ Planned |
+| Patch | gnupatch | rust/patch | repo | 4 | ✅ Available |
+| ELF patcher | patchelf | rust/patchelf | repo | 5 | ✅ Available |
+| Symbol strip | binutils (strip) | rust/strip | repo | 5 | ✅ Available |
 | Build phases | setup.sh | mkderivation-rs (future) | repo | 6 | ⏳ Planned |
 
 ---
@@ -117,40 +117,17 @@ The nixpkgs standard environment (`stdenv`) is the foundation that builds every 
 
 **Goal:** Replace the text processing toolkit used pervasively by configure scripts, Makefiles, and stdenv hooks.
 
-**Status:** ⏳ Planned
+**Status:** ✅ Complete
 
 ### Components
 
-| Tool | Replacement | Priority | Difficulty |
-|------|-------------|----------|------------|
-| gnused | sed-rs | Critical | High — full GNU sed with -i, -E, -z, address ranges, branch/label commands |
-| gnugrep | grep-rs | Critical | High — must support -P (PCRE), -w, -c, -l, -L, -Z, BRE/ERE, recursive |
-| gawk | awk-rs | High | High — POSIX awk + GNU extensions (gensub, nextfile, BEGINFILE/ENDFILE) |
-| findutils | findutils-rs | High | Medium — find + xargs with full predicate/action support |
-| diffutils | diffutils-rs | Medium | Medium — diff + cmp (used by configure scripts) |
-
-### Approach
-
-Each tool becomes a **repo-root subproject** (e.g. `../sed-rs/`, `../grep-rs/`). The Nix packaging follows the same pattern as `rust-pkg-config`:
-
-```nix
-# In sed-rs/default.nix
-packages.sed-rs = { lib, rustPlatform }: rustPlatform.buildRustPackage { ... };
-```
-
-Then in `rust-nixpkgs/components/sed.nix`:
-
-```nix
-replacement = pkgs.sed-rs;
-```
-
-### Priority Ordering
-
-1. **sed** — most critical; used by `substituteInPlace`, configure scripts, stdenv hooks
-2. **grep** — used by virtually every configure script
-3. **find/xargs** — used by stdenv fixup phases and many build systems
-4. **awk** — used by configure scripts and some Makefiles
-5. **diff/cmp** — used by configure scripts for feature detection
+| Tool | Replacement | Source | Notes |
+|------|-------------|--------|-------|
+| gnused | uutils-sed | nixpkgs (packaged in nix/pkgs) | Full POSIX + GNU extensions, from [uutils/sed](https://github.com/uutils/sed) |
+| gnugrep | rust/grep | repo | GNU-flag-compatible with BRE/ERE/PCRE, -w, -c, -l, -L, context |
+| gawk | rust/awk | repo | Lexer/parser/interpreter with POSIX awk + GNU extensions |
+| findutils | uutils-findutils | nixpkgs | From [uutils/findutils](https://github.com/uutils/findutils), runs GNU testsuite |
+| diffutils | uutils-diffutils | nixpkgs | From [uutils/diffutils](https://github.com/uutils/diffutils), diff/cmp/sdiff/diff3 |
 
 ### Testing Strategy
 
@@ -164,25 +141,16 @@ replacement = pkgs.sed-rs;
 
 **Goal:** Replace the archive and compression tools used to unpack source tarballs.
 
-**Status:** ⏳ Planned
+**Status:** ✅ Complete
 
 ### Components
 
 | Tool | Replacement | Rust Foundation |
 |------|-------------|-----------------|
-| gnutar | tar-rs | `tar` crate (pure Rust tar library) |
-| gzip | gzip-rs | `flate2` crate (DEFLATE/gzip codec) |
-| bzip2 | bzip2-rs | `bzip2-rs` by Trifecta Tech Foundation |
-| xz | xz-rs | `liblzma-rs` / `xz2` crate |
-
-### Approach
-
-Each compression tool is a thin CLI wrapper around a mature Rust codec crate:
-
-- **tar-rs**: Wraps the `tar` crate with GNU tar CLI flags (`-xf`, `-czf`, `--strip-components`, `--transform`, `--owner`, `--group`, `--sort`, `--exclude`)
-- **gzip-rs**: Wraps `flate2` with GNU gzip flags (`-d`, `-c`, `-k`, `-1..9`, `-f`, `-n`, `-N`, `-r`)
-- **bzip2-rs**: Wraps the Trifecta `bzip2-rs` crate with bzip2 CLI flags
-- **xz-rs**: Wraps `liblzma-rs` with xz flags (`-d`, `-k`, `-f`, `-c`, `-z`, `-T`, levels)
+| gnutar | rust/tar | `tar` crate — GNU-compatible CLI wrapper |
+| gzip | rust/gzip | `flate2` crate — gzip/gunzip/zcat |
+| bzip2 | rust/bzip2 | `bzip2` crate — bzip2/bunzip2/bzcat |
+| xz | rust/xz | `xz2` crate — xz/unxz/xzcat/lzma/unlzma/lzcat |
 
 ### Testing Strategy
 
@@ -196,32 +164,23 @@ Each compression tool is a thin CLI wrapper around a mature Rust codec crate:
 
 **Goal:** Replace the build system driver (make) and patch application tool.
 
-**Status:** ⏳ Planned
+**Status:** 🔶 In progress (patch complete, make deferred)
 
 ### Components
 
-| Tool | Replacement | Difficulty |
-|------|-------------|------------|
-| gnumake | make-rs | Very high — GNU Make has a complex, poorly-specified language |
-| gnupatch | patch-rs | Medium — unified/context diff application with fuzz matching |
+| Tool | Replacement | Status |
+|------|-------------|--------|
+| gnumake | — | ⏳ Deferred — GNU Make has a complex, poorly-specified language |
+| gnupatch | rust/patch | ✅ Available — unified/context/normal diff with fuzz matching |
 
 ### GNU Make Replacement Strategy
 
-GNU Make is the most complex tool to replace. The language has many subtle semantics (recursive vs. simple variables, secondary expansion, order-only prerequisites, `$(eval)`, `$(call)`, VPATH, implicit rules, pattern rules, static pattern rules, etc.).
-
-**Approach options:**
-
-1. **Full reimplementation** — implement the GNU Make language from scratch in Rust. Most correct but extremely labor-intensive.
-2. **Makefile subset** — implement only the subset of GNU Make used by 95%+ of nixpkgs packages (autotools-generated Makefiles follow predictable patterns).
-3. **Compatibility shim** — parse and re-emit Makefiles in a simplified form, delegate to a simple make engine.
-
-Recommended: **Option 2** — a subset implementation targeting autotools-generated Makefiles, with explicit error messages for unsupported features.
+GNU Make is the most complex tool to replace and is **intentionally deferred**. The language has many subtle semantics (recursive vs. simple variables, secondary expansion, `$(eval)`, `$(call)`, VPATH, implicit rules, etc.).
 
 ### Testing Strategy
 
-- Build the autotools "hello" package end-to-end with make-rs
-- Differential testing on Makefile corpora from nixpkgs packages
 - Patch application testing on the full set of nixpkgs patches
+- Differential testing on Makefile corpora from nixpkgs packages (when make-rs is attempted)
 
 ---
 
@@ -229,37 +188,19 @@ Recommended: **Option 2** — a subset implementation targeting autotools-genera
 
 **Goal:** Replace the ELF manipulation tools used by Nix's fixup phase.
 
-**Status:** ⏳ Planned
+**Status:** ✅ Complete
 
 ### Components
 
 | Tool | Replacement | Rust Foundation |
 |------|-------------|-----------------|
-| patchelf | patchelf-rs | `object` / `goblin` crate for ELF parsing |
-| strip (binutils) | strip-rs | `object` crate for ELF section manipulation |
-
-### patchelf-rs
-
-This is a **critical** Nix-specific tool. Every derivation producing ELF binaries relies on patchelf to:
-
-- Rewrite the dynamic linker path (`--set-interpreter`)
-- Set RPATH/RUNPATH to exact store paths (`--set-rpath`, `--shrink-rpath`)
-- Modify shared library metadata (`--set-soname`, `--add-needed`, `--remove-needed`)
-
-The `goblin` and `object` crates provide ELF parsing, but patchelf's ability to **rewrite** ELF binaries while preserving correctness (alignment, section offsets, program headers) requires careful implementation.
-
-### strip-rs
-
-GNU strip from binutils removes symbol tables and debug sections from ELF files. The stdenv fixup phase runs strip on all binaries and libraries to reduce closure size. A Rust replacement using the `object` crate would:
-
-- Remove `.symtab`, `.strtab`, debug sections
-- Optionally preserve `.gnu_debuglink`
-- Handle static archives (`.a` files containing `.o` members)
+| patchelf | rust/patchelf | `goblin` crate for ELF parsing/writing |
+| strip (binutils) | rust/strip | `object` crate for ELF section manipulation |
 
 ### Testing Strategy
 
 - ELF corpus testing: strip/patchelf on binaries from a range of compilers and languages
-- Round-trip validation: patchelf-rs output must be loadable by `ld-linux.so`
+- Round-trip validation: patchelf output must be loadable by `ld-linux.so`
 - Closure size comparison: verify stripped binaries have equivalent size
 
 ---

@@ -1,17 +1,8 @@
-# gzip → Rust replacement
+# gzip → rust-gzip
 #
 # GNU gzip provides compression/decompression for the .gz format.
-# Used heavily in stdenv for unpacking source tarballs (.tar.gz).
-#
-# Candidates:
-#   - gzip-rs (future repo-root subproject)
-#   - pigz has no Rust equivalent yet
-#   - The `flate2` crate provides the compression algorithm;
-#     a CLI wrapper is needed for GNU gzip flag compatibility
-#
-# Required commands: gzip, gunzip, zcat
-# Required flags: -d (decompress), -c (stdout), -k (keep),
-#   -1..-9 (level), -f (force), -n/-N (name), -r (recursive)
+# rust-gzip wraps the flate2 crate with GNU gzip flag compatibility.
+# Provides gzip, gunzip, and zcat via argv[0] detection.
 {
   pkgs,
   mkComponent,
@@ -22,10 +13,10 @@
 mkComponent {
   name = "gzip";
   original = pkgs.gzip;
-  replacement = null;
-  status = status.planned;
+  replacement = pkgs.rust-gzip;
+  status = status.available;
   source = source.repo;
   phase = 3;
   description = "Compression utility for .gz format";
-  notes = "Future gzip-rs subproject; flate2 crate provides the algorithm";
+  notes = "Using rust-gzip from rust/gzip — wraps flate2 crate, provides gzip/gunzip/zcat";
 }

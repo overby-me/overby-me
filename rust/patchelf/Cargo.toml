@@ -1,0 +1,17 @@
+[package]
+name = "rust-patchelf"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[[bin]]
+name = "patchelf"
+path = "src/main.rs"
+
+[dependencies]
+goblin = "0.9"
+scroll = "0.12"
+
+[profile.release]
+lto = true
+strip = true

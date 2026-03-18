@@ -1,15 +1,9 @@
-# gawk → awk-rs (Rust rewrite)
+# gawk → rust-awk
 #
 # GNU Awk is used in stdenv by configure scripts, makefiles, and
-# various build system hooks. A replacement must support POSIX awk
-# semantics plus the GNU extensions commonly relied upon (gensub,
-# nextfile, BEGINFILE/ENDFILE, etc.).
-#
-# Candidate rewrites:
-#   - awk-rs (future repo-root subproject)
-#   - frawk (https://github.com/ezrosent/frawk) — fast but incomplete GNU compat
-#
-# For now this component is declared as planned with no replacement.
+# various build system hooks. rust-awk provides a POSIX awk
+# implementation with GNU extensions (gensub, etc.) using a proper
+# lexer/parser/interpreter architecture.
 {
   pkgs,
   mkComponent,
@@ -20,10 +14,10 @@
 mkComponent {
   name = "awk";
   original = pkgs.gawk;
-  replacement = null;
-  status = status.planned;
+  replacement = pkgs.rust-awk;
+  status = status.available;
   source = source.repo;
   phase = 2;
   description = "Pattern scanning and text processing language";
-  notes = "Needs GNU awk extension compatibility (gensub, nextfile, BEGINFILE/ENDFILE)";
+  notes = "Using rust-awk from rust/awk — POSIX awk with GNU extensions";
 }

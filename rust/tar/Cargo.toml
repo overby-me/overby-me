@@ -1,0 +1,20 @@
+[package]
+name = "rust-tar"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[[bin]]
+name = "tar"
+path = "src/main.rs"
+
+[dependencies]
+tar = "0.4"
+flate2 = "1"
+bzip2 = "0.5"
+xz2 = "0.1"
+walkdir = "2"
+
+[profile.release]
+lto = true
+strip = true
