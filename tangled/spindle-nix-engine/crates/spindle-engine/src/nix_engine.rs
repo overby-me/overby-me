@@ -26,6 +26,7 @@ use spindle_models::{
 
 /// Per-workflow runtime state, stored while the workflow is active.
 #[derive(Debug)]
+#[allow(dead_code)]
 struct WorkflowState {
     /// Path to the built Nix environment (store path with `bin/`, `sbin/`).
     nix_env_path: Option<PathBuf>,
@@ -257,7 +258,6 @@ impl Engine for NixEngine {
             .get(&wid.to_string())
             .ok_or_else(|| EngineError::Other(format!("no state for workflow {wid}")))?;
 
-        let workspace_dir = &state.workspace_dir;
         let command_str = step.command();
 
         if command_str.is_empty() {
@@ -270,9 +270,11 @@ impl Engine for NixEngine {
 
         // Build environment variables.
         let user = std::env::var("USER").unwrap_or_else(|_| "nobody".into());
+        // Inside the hakoniwa container, the workspace is at /workspace.
+        let container_workspace = "/workspace";
         let mut env_vars: Vec<(String, String)> = vec![
             ("PATH".into(), path),
-            ("HOME".into(), workspace_dir.to_string_lossy().into_owned()),
+            ("HOME".into(), container_workspace.into()),
             ("USER".into(), user),
             ("CI".into(), "true".into()),
         ];
@@ -285,7 +287,14 @@ impl Engine for NixEngine {
         // Write secrets to a temporary file that the step sources, rather than
         // passing them as env vars (which are visible via /proc/*/environ to
         // concurrent workflows running under the same UID).
-        let secrets_file = workspace_dir.join(format!(".spindle-secrets-{step_idx}"));
+        // Secrets file: written to the host-side container root (which maps to
+        // /workspace inside the container). The step sources it from the
+        // container path.
+        let host_workspace = state.container_root.join("workspace");
+        std::fs::create_dir_all(&host_workspace).ok();
+        let secrets_file_host = host_workspace.join(format!(".spindle-secrets-{step_idx}"));
+        let secrets_file_container =
+            PathBuf::from(container_workspace).join(format!(".spindle-secrets-{step_idx}"));
         if !secrets.is_empty() {
             use std::os::unix::fs::OpenOptionsExt;
             let mut contents = String::new();
@@ -299,23 +308,24 @@ impl Engine for NixEngine {
                 .create(true)
                 .truncate(true)
                 .mode(0o600)
-                .open(&secrets_file)
+                .open(&secrets_file_host)
                 .map_err(|e| EngineError::StepFailed {
                     exit_code: -1,
                     message: format!("failed to write secrets file: {e}"),
                 })?;
-            std::fs::write(&secrets_file, &contents).map_err(|e| EngineError::StepFailed {
+            std::fs::write(&secrets_file_host, &contents).map_err(|e| EngineError::StepFailed {
                 exit_code: -1,
                 message: format!("failed to write secrets file: {e}"),
             })?;
         }
 
         // Build the command: source the secrets file (if present) then run the step.
+        // The path references the container-side location.
         let full_command = if !secrets.is_empty() {
             format!(
                 ". '{}' && rm -f '{}' && {command_str}",
-                secrets_file.display(),
-                secrets_file.display()
+                secrets_file_container.display(),
+                secrets_file_container.display()
             )
         } else {
             command_str
@@ -343,11 +353,10 @@ impl Engine for NixEngine {
             }
         }
 
-        // Workspace is bind-mounted read-write at the same path.
-        container.bindmount_rw(
-            &workspace_dir.to_string_lossy(),
-            &workspace_dir.to_string_lossy(),
-        );
+        // Create a writable /workspace inside the container root (a tmpdir
+        // owned by the user namespace). Files persist across steps because
+        // rootdir points to a persistent directory per workflow.
+        container.dir("/workspace", 0o755);
         container.tmpfsmount("/tmp");
 
         if let Some(limit) = self.workflow_limits.limit_as {
@@ -359,7 +368,7 @@ impl Engine for NixEngine {
 
         let mut hako_cmd = container.command(&self.bash_path.to_string_lossy());
         hako_cmd.args(["-euo", "pipefail", "-c", &full_command]);
-        hako_cmd.current_dir(workspace_dir);
+        hako_cmd.current_dir(container_workspace);
         hako_cmd.stdout(hakoniwa::Stdio::piped());
         hako_cmd.stderr(hakoniwa::Stdio::piped());
 
@@ -423,7 +432,7 @@ impl Engine for NixEngine {
 
         // Always clean up the secrets file (the step rm's it on success, but
         // it may still exist if the step failed before reaching that point).
-        let _ = std::fs::remove_file(&secrets_file);
+        let _ = std::fs::remove_file(&secrets_file_host);
 
         if !status.success() {
             let exit_code = status.exit_code.unwrap_or(status.code);
