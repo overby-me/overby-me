@@ -253,16 +253,50 @@ impl Engine for NixEngine {
             env_vars.push((k.clone(), v.clone()));
         }
 
-        // Add secrets as env vars.
-        for secret in secrets {
-            env_vars.push((secret.key.clone(), secret.value.clone()));
+        // Write secrets to a temporary file that the step sources, rather than
+        // passing them as env vars (which are visible via /proc/*/environ to
+        // concurrent workflows running under the same UID).
+        let secrets_file = workspace_dir.join(format!(".spindle-secrets-{step_idx}"));
+        if !secrets.is_empty() {
+            use std::os::unix::fs::OpenOptionsExt;
+            let mut contents = String::new();
+            for secret in secrets {
+                // Shell-escape the value using single quotes with embedded quote handling.
+                let escaped = secret.value.replace('\'', "'\\''");
+                contents.push_str(&format!("export {}='{}'\n", secret.key, escaped));
+            }
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(&secrets_file)
+                .map_err(|e| EngineError::StepFailed {
+                    exit_code: -1,
+                    message: format!("failed to write secrets file: {e}"),
+                })?;
+            std::fs::write(&secrets_file, &contents).map_err(|e| EngineError::StepFailed {
+                exit_code: -1,
+                message: format!("failed to write secrets file: {e}"),
+            })?;
         }
+
+        // Build the command: source the secrets file (if present) then run the step.
+        let full_command = if !secrets.is_empty() {
+            format!(
+                ". '{}' && rm -f '{}' && {command_str}",
+                secrets_file.display(),
+                secrets_file.display()
+            )
+        } else {
+            command_str
+        };
 
         info!(%wid, step_idx, name = step.name(), "executing step");
 
         // Spawn the child process.
         let mut child = Command::new(&self.bash_path)
-            .args(["-euo", "pipefail", "-c", &command_str])
+            .args(["-euo", "pipefail", "-c", &full_command])
             .current_dir(workspace_dir)
             .env_clear()
             .envs(env_vars)
@@ -305,6 +339,10 @@ impl Engine for NixEngine {
         // Wait for stream tasks to finish.
         let _ = stdout_task.await;
         let _ = stderr_task.await;
+
+        // Always clean up the secrets file (the step rm's it on success, but
+        // it may still exist if the step failed before reaching that point).
+        let _ = std::fs::remove_file(&secrets_file);
 
         if !status.success() {
             let exit_code = status.code().unwrap_or(-1);
