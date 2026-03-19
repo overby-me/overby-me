@@ -19,7 +19,7 @@ rustPlatform.buildRustPackage {
     hash = "sha256-vsS3GATIVXzBiWgdzZfWXUcuV/zuuj5T1u+qntd0/Kg=";
   };
 
-  patches = [./toggle-fix.patch];
+  patches = [./toggle-fix.patch ./wezterm-class-fix.patch];
 
   cargoHash = "sha256-846q7q1Rt2z5qkGK1+IHazzuvR8i8IeU0vK/cWn2vwI=";
 

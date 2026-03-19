@@ -1,0 +1,17 @@
+diff --git a/src/process.rs b/src/process.rs
+index 1234567..abcdefg 100644
+--- a/src/process.rs
++++ b/src/process.rs
+@@ -58,7 +58,11 @@ fn get_class_args(command: &str) -> (Vec<String>, String) {
+             QUAKE_APP_ID.to_string(),
+         ),
+         // Most terminals support --class
+-        "cosmic-term" | "alacritty" | "kitty" | "wezterm" => (
++        "wezterm" => (
++            vec!["start".into(), "--class".into(), QUAKE_APP_ID.into()],
++            QUAKE_APP_ID.to_string(),
++        ),
++        "cosmic-term" | "alacritty" | "kitty" => (
+             vec!["--class".into(), QUAKE_APP_ID.into()],
+             QUAKE_APP_ID.to_string(),
+         ),

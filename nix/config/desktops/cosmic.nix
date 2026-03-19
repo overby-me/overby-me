@@ -29,6 +29,7 @@
     wantedBy = ["graphical-session.target"];
     partOf = ["graphical-session.target"];
     after = ["graphical-session.target"];
+    path = [pkgs.wezterm];
     serviceConfig = {
       ExecStart = "${pkgs.cosmic-ext-quake-terminal}/bin/cosmic-ext-quake-terminal";
       Restart = "on-failure";
