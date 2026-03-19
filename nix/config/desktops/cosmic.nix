@@ -5,6 +5,7 @@
       #cosmic-ext-applet-external-monitor-brightness
       cosmic-ext-applet-caffeine
       cosmic-ext-calculator
+      cosmic-ext-quake-terminal
       examine
       forecast
       tasks
