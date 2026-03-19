@@ -6,7 +6,7 @@
       cosmic-ext-applet-caffeine
       cosmic-ext-calculator
       cosmic-ext-quake-terminal
-      foot
+      wezterm
       examine
       forecast
       tasks
