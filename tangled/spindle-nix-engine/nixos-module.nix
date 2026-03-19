@@ -340,20 +340,13 @@ in {
             User = lib.mkIf (runner.user != null) runner.user;
             Group = lib.mkIf (runner.group != null) runner.group;
 
-            # Filesystem sandboxing
-            ProtectSystem = "strict";
-            ProtectHome = true;
-            PrivateTmp = true;
-            # PrivateMounts is omitted: hakoniwa needs to create bind mounts
-            # in its own mount namespace for per-workflow isolation.
+            # Filesystem sandboxing is handled by hakoniwa per-workflow: each
+            # workflow gets its own mount namespace with a rootdir, read-only
+            # system paths, and a writable workspace. systemd mount features
+            # (ProtectSystem, PrivateTmp, etc.) are omitted because they create
+            # a parent mount namespace that prevents hakoniwa from mounting
+            # procfs in its nested PID namespace.
             PrivateDevices = true;
-            # PrivateUsers is omitted: hakoniwa needs CAP_SYS_ADMIN to create
-            # PID/IPC namespaces. DynamicUser + NoNewPrivileges already provide
-            # user isolation without PrivateUsers.
-            ReadWritePaths = [
-              "/var/lib/${stateDir}"
-              "/var/log/${logsDir}"
-            ];
 
             # Kernel hardening
             ProtectKernelTunables = true;
