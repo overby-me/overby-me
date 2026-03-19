@@ -309,20 +309,13 @@ impl Engine for NixEngine {
         info!(%wid, step_idx, name = step.name(), "executing step");
 
         // Build a hakoniwa container for process isolation: separate PID/IPC
-        // namespaces, private /tmp, resource limits. The container mounts the
-        // host rootfs read-only and bind-mounts the workspace read-write.
+        // namespaces and resource limits. Filesystem isolation (rootfs, tmpfs)
+        // is skipped because bind-mount remounting fails inside user namespaces
+        // on systemd-managed services. The systemd service's ProtectSystem=strict
+        // already provides filesystem protection.
         let mut container = hakoniwa::Container::new();
         container.unshare(hakoniwa::Namespace::Pid);
         container.unshare(hakoniwa::Namespace::Ipc);
-        container.rootfs("/").map_err(|e| EngineError::StepFailed {
-            exit_code: -1,
-            message: format!("hakoniwa rootfs setup failed: {e}"),
-        })?;
-        container.tmpfsmount("/tmp");
-        container.bindmount_rw(
-            &workspace_dir.to_string_lossy(),
-            &workspace_dir.to_string_lossy(),
-        );
 
         if let Some(limit) = self.workflow_limits.limit_as {
             container.setrlimit(hakoniwa::Rlimit::As, limit, limit);
