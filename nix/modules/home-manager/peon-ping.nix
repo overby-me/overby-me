@@ -65,6 +65,9 @@ in {
       volume = 0.5;
       enabled = true;
       desktop_notifications = true;
+      categories = {
+        "task.acknowledge" = true;
+      };
     };
     installPacks = [
       # og-packs (bundled)
