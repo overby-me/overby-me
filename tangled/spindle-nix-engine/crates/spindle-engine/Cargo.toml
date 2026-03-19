@@ -18,3 +18,4 @@ serde_yaml = { workspace = true }
 tracing = { workspace = true }
 sha2 = "0.10"
 hex = "0.4"
+hakoniwa = "1.3.1"

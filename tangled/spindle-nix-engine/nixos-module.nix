@@ -117,17 +117,25 @@
         };
 
         workflowLimits = {
-          memoryMax = lib.mkOption {
-            type = lib.types.nullOr lib.types.str;
+          limitAs = lib.mkOption {
+            type = lib.types.nullOr lib.types.int;
             default = null;
-            example = "4G";
-            description = "Hard memory limit per workflow (systemd scope MemoryMax).";
+            example = 4294967296;
+            description = "Maximum virtual memory per workflow in bytes (hakoniwa rlimit).";
           };
 
-          tasksMax = lib.mkOption {
+          limitWalltime = lib.mkOption {
             type = lib.types.nullOr lib.types.int;
-            default = 128;
-            description = "Maximum tasks (processes/threads) per workflow.";
+            default = null;
+            example = 3600;
+            description = "Maximum wall time per step in seconds.";
+          };
+
+          limitNofile = lib.mkOption {
+            type = lib.types.nullOr lib.types.int;
+            default = null;
+            example = 1024;
+            description = "Maximum number of open file descriptors per workflow.";
           };
         };
       };
@@ -256,7 +264,6 @@ in {
           pkgs.git
           pkgs.gnutar
           pkgs.gzip
-          pkgs.systemd
           runner.nixPackage
         ]
         ++ runner.extraPackages);
@@ -290,11 +297,14 @@ in {
         // lib.optionalAttrs (runner.engine.extraNixFlags != []) {
           SPINDLE_ENGINE_EXTRA_NIX_FLAGS = lib.concatStringsSep " " runner.engine.extraNixFlags;
         }
-        // lib.optionalAttrs (runner.engine.workflowLimits.memoryMax != null) {
-          SPINDLE_ENGINE_WORKFLOW_MEMORY_MAX = runner.engine.workflowLimits.memoryMax;
+        // lib.optionalAttrs (runner.engine.workflowLimits.limitAs != null) {
+          SPINDLE_ENGINE_WORKFLOW_LIMIT_AS = toString runner.engine.workflowLimits.limitAs;
         }
-        // lib.optionalAttrs (runner.engine.workflowLimits.tasksMax != null) {
-          SPINDLE_ENGINE_WORKFLOW_TASKS_MAX = toString runner.engine.workflowLimits.tasksMax;
+        // lib.optionalAttrs (runner.engine.workflowLimits.limitWalltime != null) {
+          SPINDLE_ENGINE_WORKFLOW_LIMIT_WALLTIME = toString runner.engine.workflowLimits.limitWalltime;
+        }
+        // lib.optionalAttrs (runner.engine.workflowLimits.limitNofile != null) {
+          SPINDLE_ENGINE_WORKFLOW_LIMIT_NOFILE = toString runner.engine.workflowLimits.limitNofile;
         }
         // runner.extraEnvironment;
 
@@ -326,9 +336,7 @@ in {
             # User isolation
             DynamicUser = runner.user == null;
 
-            # Allow the service to create sub-cgroups (systemd scopes) for
-            # per-workflow isolation via systemd-run --scope.
-            Delegate = true;
+            # hakoniwa uses PID and IPC namespaces for per-workflow isolation.
             User = lib.mkIf (runner.user != null) runner.user;
             Group = lib.mkIf (runner.group != null) runner.group;
 
@@ -344,10 +352,6 @@ in {
               "/var/log/${logsDir}"
             ];
 
-            # systemd-run --scope needs D-Bus access to create transient scopes.
-            BindReadOnlyPaths = [
-              "/run/dbus/system_bus_socket"
-            ];
 
             # Kernel hardening
             ProtectKernelTunables = true;
@@ -362,7 +366,9 @@ in {
             NoNewPrivileges = true;
             RemoveIPC = true;
             RestrictSUIDSGID = true;
-            RestrictNamespaces = true;
+            # Allow PID, IPC and mount namespaces for hakoniwa per-workflow isolation.
+            # Other namespaces (user, cgroup, network, uts) remain blocked.
+            RestrictNamespaces = "~user cgroup net uts";
             RestrictRealtime = true;
             RestrictAddressFamilies = ["AF_INET" "AF_INET6" "AF_UNIX" "AF_NETLINK"];
 

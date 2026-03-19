@@ -135,13 +135,15 @@ pub struct SecretsConfig {
     pub openbao: OpenBaoConfig,
 }
 
-/// Per-workflow resource limits applied via systemd scopes.
+/// Per-workflow resource limits applied via hakoniwa.
 #[derive(Debug, Clone, Default)]
 pub struct WorkflowLimits {
-    /// Hard memory limit per workflow (e.g. `"4G"`).
-    pub memory_max: Option<String>,
-    /// Maximum tasks (processes/threads) per workflow.
-    pub tasks_max: Option<u32>,
+    /// Maximum virtual memory per workflow in bytes.
+    pub limit_as: Option<u64>,
+    /// Maximum wall time per step in seconds.
+    pub limit_walltime: Option<u64>,
+    /// Maximum number of open file descriptors per workflow.
+    pub limit_nofile: Option<u64>,
 }
 
 /// Engine configuration.
@@ -370,10 +372,15 @@ fn load_engine_config() -> Result<EngineConfig, ConfigError> {
     };
 
     let workflow_limits = WorkflowLimits {
-        memory_max: env::var("SPINDLE_ENGINE_WORKFLOW_MEMORY_MAX")
+        limit_as: env::var("SPINDLE_ENGINE_WORKFLOW_LIMIT_AS")
             .ok()
-            .filter(|v| !v.is_empty()),
-        tasks_max: env::var("SPINDLE_ENGINE_WORKFLOW_TASKS_MAX")
+            .filter(|v| !v.is_empty())
+            .and_then(|v| v.parse().ok()),
+        limit_walltime: env::var("SPINDLE_ENGINE_WORKFLOW_LIMIT_WALLTIME")
+            .ok()
+            .filter(|v| !v.is_empty())
+            .and_then(|v| v.parse().ok()),
+        limit_nofile: env::var("SPINDLE_ENGINE_WORKFLOW_LIMIT_NOFILE")
             .ok()
             .filter(|v| !v.is_empty())
             .and_then(|v| v.parse().ok()),

@@ -11,10 +11,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::Command;
 use tokio::sync::Mutex;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 use crate::nix_deps::{
     NixDeps, build_nix_env, parse_dependencies_from_yaml, parse_env_from_yaml,
@@ -35,13 +33,15 @@ struct WorkflowState {
     workspace_dir: PathBuf,
 }
 
-/// Per-workflow resource limits applied via systemd scopes.
+/// Per-workflow resource limits.
 #[derive(Debug, Clone, Default)]
 pub struct WorkflowLimits {
-    /// Hard memory limit per workflow (e.g. `"4G"`).
-    pub memory_max: Option<String>,
-    /// Maximum tasks (processes/threads) per workflow.
-    pub tasks_max: Option<u32>,
+    /// Maximum virtual memory per workflow in bytes (hakoniwa --limit-as).
+    pub limit_as: Option<u64>,
+    /// Maximum wall time per step in seconds (hakoniwa --limit-walltime).
+    pub limit_walltime: Option<u64>,
+    /// Maximum number of open file descriptors (hakoniwa --limit-nofile).
+    pub limit_nofile: Option<u64>,
 }
 
 /// The Nix engine: builds Nix closures from dependency specs and executes
@@ -61,8 +61,6 @@ pub struct NixEngine {
     states: Arc<Mutex<HashMap<String, WorkflowState>>>,
     /// Resolved path to the bash binary (found from PATH at construction time).
     bash_path: PathBuf,
-    /// Resolved path to `systemd-run` (if available).
-    systemd_run_path: Option<PathBuf>,
     /// Per-workflow resource limits.
     workflow_limits: WorkflowLimits,
 }
@@ -76,7 +74,7 @@ impl NixEngine {
     /// * `timeout` — Default workflow timeout.
     /// * `extra_nix_flags` — Extra flags passed to `nix build`.
     /// * `dev_mode` — Whether dev mode is enabled.
-    /// * `workflow_limits` — Per-workflow resource limits for systemd scopes.
+    /// * `workflow_limits` — Per-workflow resource limits.
     pub fn new(
         workspace_root: impl Into<PathBuf>,
         cache_dir: impl Into<PathBuf>,
@@ -89,13 +87,6 @@ impl NixEngine {
         // doesn't exist — bash lives in the Nix store and is only reachable
         // via PATH set by the systemd service.
         let bash_path = resolve_bash();
-        let systemd_run_path = resolve_from_path("systemd-run");
-
-        if let Some(ref path) = systemd_run_path {
-            info!(?path, "systemd-run found, workflow isolation enabled");
-        } else {
-            info!("systemd-run not found, workflow isolation disabled");
-        }
 
         Self {
             workspace_mgr: WorkspaceManager::new(workspace_root),
@@ -105,7 +96,6 @@ impl NixEngine {
             dev_mode,
             states: Arc::new(Mutex::new(HashMap::new())),
             bash_path,
-            systemd_run_path,
             workflow_limits,
         }
     }
@@ -318,98 +308,88 @@ impl Engine for NixEngine {
 
         info!(%wid, step_idx, name = step.name(), "executing step");
 
-        // Spawn the child process, optionally wrapped in a systemd scope for
-        // per-workflow isolation (own cgroup with resource limits).
-        // Scopes only support cgroup properties (MemoryMax, TasksMax, etc.),
-        // not execution properties (PrivateTmp, WorkingDirectory).
-        let mut child = 'spawn: {
-            if let Some(ref systemd_run) = self.systemd_run_path {
-                let scope_name =
-                    format!("spindle-{}-{step_idx}", wid.to_string().replace('/', "-"));
-                let mut cmd = Command::new(systemd_run);
-                cmd.args(["--scope", "--collect", "--quiet"]);
-                cmd.arg(format!("--unit={scope_name}"));
+        // Build a hakoniwa container for process isolation: separate PID/IPC
+        // namespaces, private /tmp, resource limits. The container mounts the
+        // host rootfs read-only and bind-mounts the workspace read-write.
+        let mut container = hakoniwa::Container::new();
+        container.unshare(hakoniwa::Namespace::Pid);
+        container.unshare(hakoniwa::Namespace::Ipc);
+        container.rootfs("/").map_err(|e| EngineError::StepFailed {
+            exit_code: -1,
+            message: format!("hakoniwa rootfs setup failed: {e}"),
+        })?;
+        container.tmpfsmount("/tmp");
+        container.bindmount_rw(
+            &workspace_dir.to_string_lossy(),
+            &workspace_dir.to_string_lossy(),
+        );
 
-                if let Some(ref mem) = self.workflow_limits.memory_max {
-                    cmd.args(["-p", &format!("MemoryMax={mem}")]);
-                }
-                if let Some(tasks) = self.workflow_limits.tasks_max {
-                    cmd.args(["-p", &format!("TasksMax={tasks}")]);
-                }
+        if let Some(limit) = self.workflow_limits.limit_as {
+            container.setrlimit(hakoniwa::Rlimit::As, limit, limit);
+        }
+        if let Some(limit) = self.workflow_limits.limit_nofile {
+            container.setrlimit(hakoniwa::Rlimit::Nofile, limit, limit);
+        }
 
-                // Pass environment variables via --setenv.
-                for (k, v) in &env_vars {
-                    cmd.arg("--setenv");
-                    cmd.arg(format!("{k}={v}"));
-                }
+        let mut hako_cmd = container.command(&self.bash_path.to_string_lossy());
+        hako_cmd.args(["-euo", "pipefail", "-c", &full_command]);
+        hako_cmd.current_dir(workspace_dir);
+        hako_cmd.stdout(hakoniwa::Stdio::piped());
+        hako_cmd.stderr(hakoniwa::Stdio::piped());
 
-                cmd.arg("--");
-                cmd.arg(&self.bash_path);
-                cmd.args([
-                    "--norc",
-                    "--noprofile",
-                    "-euo",
-                    "pipefail",
-                    "-c",
-                    &full_command,
-                ]);
+        for (k, v) in &env_vars {
+            hako_cmd.env(k, v);
+        }
 
-                match cmd
-                    .current_dir(workspace_dir)
-                    .env_clear()
-                    .stdout(std::process::Stdio::piped())
-                    .stderr(std::process::Stdio::piped())
-                    .kill_on_drop(true)
-                    .spawn()
-                {
-                    Ok(child) => break 'spawn child,
-                    Err(e) => {
-                        warn!(%e, "systemd-run scope failed, falling back to direct execution");
-                    }
-                }
-            }
+        if let Some(limit) = self.workflow_limits.limit_walltime {
+            hako_cmd.wait_timeout(limit);
+        }
 
-            Command::new(&self.bash_path)
-                .args(["-euo", "pipefail", "-c", &full_command])
-                .current_dir(workspace_dir)
-                .env_clear()
-                .envs(env_vars)
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .kill_on_drop(true)
-                .spawn()
-                .map_err(|e| EngineError::StepFailed {
-                    exit_code: -1,
-                    message: format!("failed to spawn step process: {e}"),
-                })?
-        };
+        let mut child = hako_cmd.spawn().map_err(|e| EngineError::StepFailed {
+            exit_code: -1,
+            message: format!("hakoniwa spawn failed: {e}"),
+        })?;
 
-        // Stream stdout and stderr to the logger.
-        let stdout = child.stdout.take().unwrap();
-        let stderr = child.stderr.take().unwrap();
+        // Stream stdout and stderr from hakoniwa's PipeReaders via blocking tasks.
+        let hako_stdout = child.stdout.take();
+        let hako_stderr = child.stderr.take();
 
         let mut stdout_writer = logger.data_writer(step_idx, "stdout".into());
         let mut stderr_writer = logger.data_writer(step_idx, "stderr".into());
 
-        let stdout_task = tokio::spawn(async move {
-            let mut reader = BufReader::new(stdout).lines();
-            while let Ok(Some(line)) = reader.next_line().await {
-                let _ = writeln!(stdout_writer, "{line}");
+        let stdout_task = tokio::task::spawn_blocking(move || {
+            if let Some(stdout) = hako_stdout {
+                let reader = std::io::BufReader::new(stdout);
+                for line in std::io::BufRead::lines(reader) {
+                    if let Ok(line) = line {
+                        let _ = writeln!(stdout_writer, "{line}");
+                    }
+                }
             }
         });
 
-        let stderr_task = tokio::spawn(async move {
-            let mut reader = BufReader::new(stderr).lines();
-            while let Ok(Some(line)) = reader.next_line().await {
-                let _ = writeln!(stderr_writer, "{line}");
+        let stderr_task = tokio::task::spawn_blocking(move || {
+            if let Some(stderr) = hako_stderr {
+                let reader = std::io::BufReader::new(stderr);
+                for line in std::io::BufRead::lines(reader) {
+                    if let Ok(line) = line {
+                        let _ = writeln!(stderr_writer, "{line}");
+                    }
+                }
             }
         });
 
         // Wait for the process to complete.
-        let status = child.wait().await.map_err(|e| EngineError::StepFailed {
-            exit_code: -1,
-            message: format!("failed to wait for step process: {e}"),
-        })?;
+        let status = tokio::task::spawn_blocking(move || child.wait())
+            .await
+            .map_err(|e| EngineError::StepFailed {
+                exit_code: -1,
+                message: format!("hakoniwa wait task panicked: {e}"),
+            })?
+            .map_err(|e| EngineError::StepFailed {
+                exit_code: -1,
+                message: format!("hakoniwa wait failed: {e}"),
+            })?;
 
         // Wait for stream tasks to finish.
         let _ = stdout_task.await;
@@ -420,7 +400,7 @@ impl Engine for NixEngine {
         let _ = std::fs::remove_file(&secrets_file);
 
         if !status.success() {
-            let exit_code = status.code().unwrap_or(-1);
+            let exit_code = status.exit_code.unwrap_or(status.code);
             error!(%wid, step_idx, exit_code, name = step.name(), "step failed");
             return Err(EngineError::StepFailed {
                 exit_code,
@@ -487,15 +467,6 @@ fn resolve_bash() -> PathBuf {
     let fallback = PathBuf::from("/bin/bash");
     info!(bash = %fallback.display(), "using fallback bash path");
     fallback
-}
-
-/// Resolve a binary by name from PATH. Returns `None` if not found.
-fn resolve_from_path(name: &str) -> Option<PathBuf> {
-    std::env::var("PATH").ok().and_then(|path| {
-        path.split(':')
-            .map(|dir| PathBuf::from(dir).join(name))
-            .find(|candidate| candidate.exists())
-    })
 }
 
 #[cfg(test)]
