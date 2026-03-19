@@ -327,14 +327,32 @@ impl Engine for NixEngine {
         // Build a hakoniwa container for per-workflow process isolation:
         // - PID namespace: workflows can't see each other's processes
         // - IPC namespace: no shared memory between workflows
+        // - Mount namespace: isolated /proc, read-only system paths
         //
-        // No mount namespace — the host filesystem is used directly so that
-        // workspace files persist across steps. The service runs as a dedicated
-        // static user without mount-namespace-creating systemd options, so
-        // hakoniwa can mount procfs for PID namespace isolation.
+        // PID namespace requires procfs which requires a mount namespace.
+        // rootdir creates a tmpdir root; we bind-mount system paths and the
+        // workspace into it. The service runs as a static user without
+        // systemd mount options, so bind-mount remounting works.
         let mut container = hakoniwa::Container::new();
         container.unshare(hakoniwa::Namespace::Pid);
         container.unshare(hakoniwa::Namespace::Ipc);
+
+        // Mount system paths read-only.
+        for dir in [
+            "/bin", "/etc", "/lib", "/lib64", "/lib32", "/sbin", "/usr", "/nix",
+        ] {
+            if std::path::Path::new(dir).exists() {
+                container.bindmount_ro(dir, dir);
+            }
+        }
+
+        // Workspace read-write, /dev for device nodes, /tmp.
+        container.bindmount_rw(
+            &workspace_dir.to_string_lossy(),
+            &workspace_dir.to_string_lossy(),
+        );
+        container.devfsmount("/dev");
+        container.tmpfsmount("/tmp");
 
         if let Some(limit) = self.workflow_limits.limit_as {
             container.setrlimit(hakoniwa::Rlimit::As, limit, limit);
