@@ -269,12 +269,11 @@ impl Engine for NixEngine {
         let path = build_path(state.nix_env_path.as_deref());
 
         // Build environment variables.
+        let workspace_dir = &state.workspace_dir;
         let user = std::env::var("USER").unwrap_or_else(|_| "nobody".into());
-        // Inside the hakoniwa container, the workspace is at /workspace.
-        let container_workspace = "/workspace";
         let mut env_vars: Vec<(String, String)> = vec![
             ("PATH".into(), path),
-            ("HOME".into(), container_workspace.into()),
+            ("HOME".into(), workspace_dir.to_string_lossy().into_owned()),
             ("USER".into(), user),
             ("CI".into(), "true".into()),
         ];
@@ -287,14 +286,7 @@ impl Engine for NixEngine {
         // Write secrets to a temporary file that the step sources, rather than
         // passing them as env vars (which are visible via /proc/*/environ to
         // concurrent workflows running under the same UID).
-        // Secrets file: written to the host-side container root (which maps to
-        // /workspace inside the container). The step sources it from the
-        // container path.
-        let host_workspace = state.container_root.join("workspace");
-        std::fs::create_dir_all(&host_workspace).ok();
-        let secrets_file_host = host_workspace.join(format!(".spindle-secrets-{step_idx}"));
-        let secrets_file_container =
-            PathBuf::from(container_workspace).join(format!(".spindle-secrets-{step_idx}"));
+        let secrets_file = workspace_dir.join(format!(".spindle-secrets-{step_idx}"));
         if !secrets.is_empty() {
             use std::os::unix::fs::OpenOptionsExt;
             let mut contents = String::new();
@@ -308,24 +300,23 @@ impl Engine for NixEngine {
                 .create(true)
                 .truncate(true)
                 .mode(0o600)
-                .open(&secrets_file_host)
+                .open(&secrets_file)
                 .map_err(|e| EngineError::StepFailed {
                     exit_code: -1,
                     message: format!("failed to write secrets file: {e}"),
                 })?;
-            std::fs::write(&secrets_file_host, &contents).map_err(|e| EngineError::StepFailed {
+            std::fs::write(&secrets_file, &contents).map_err(|e| EngineError::StepFailed {
                 exit_code: -1,
                 message: format!("failed to write secrets file: {e}"),
             })?;
         }
 
         // Build the command: source the secrets file (if present) then run the step.
-        // The path references the container-side location.
         let full_command = if !secrets.is_empty() {
             format!(
                 ". '{}' && rm -f '{}' && {command_str}",
-                secrets_file_container.display(),
-                secrets_file_container.display()
+                secrets_file.display(),
+                secrets_file.display()
             )
         } else {
             command_str
@@ -336,31 +327,14 @@ impl Engine for NixEngine {
         // Build a hakoniwa container for per-workflow process isolation:
         // - PID namespace: workflows can't see each other's processes
         // - IPC namespace: no shared memory between workflows
-        // - Mount namespace (via rootdir): isolated filesystem view
         //
-        // rootdir points to a persistent tmpdir per workflow (shared across
-        // steps). hakoniwa uses pivot_root to switch to this root, making all
-        // bind mounts owned by the user namespace (avoiding EPERM on remount).
+        // No mount namespace — the host filesystem is used directly so that
+        // workspace files persist across steps. The service runs as a dedicated
+        // static user without mount-namespace-creating systemd options, so
+        // hakoniwa can mount procfs for PID namespace isolation.
         let mut container = hakoniwa::Container::new();
         container.unshare(hakoniwa::Namespace::Pid);
         container.unshare(hakoniwa::Namespace::Ipc);
-        container.rootdir(&state.container_root);
-
-        // Mount system paths read-only.
-        for dir in [
-            "/bin", "/etc", "/lib", "/lib64", "/lib32", "/sbin", "/usr", "/nix",
-        ] {
-            if std::path::Path::new(dir).exists() {
-                container.bindmount_ro(dir, dir);
-            }
-        }
-
-        // Create writable directories inside the container root.
-        // Files in /workspace persist across steps via the shared rootdir.
-        container.dir("/workspace", 0o755);
-        container.dir("/proc", 0o555);
-        container.dir("/dev", 0o755);
-        container.tmpfsmount("/tmp");
 
         if let Some(limit) = self.workflow_limits.limit_as {
             container.setrlimit(hakoniwa::Rlimit::As, limit, limit);
@@ -371,7 +345,7 @@ impl Engine for NixEngine {
 
         let mut hako_cmd = container.command(&self.bash_path.to_string_lossy());
         hako_cmd.args(["-euo", "pipefail", "-c", &full_command]);
-        hako_cmd.current_dir(container_workspace);
+        hako_cmd.current_dir(workspace_dir);
         hako_cmd.stdout(hakoniwa::Stdio::piped());
         hako_cmd.stderr(hakoniwa::Stdio::piped());
 
@@ -431,7 +405,7 @@ impl Engine for NixEngine {
 
         // Always clean up the secrets file (the step rm's it on success, but
         // it may still exist if the step failed before reaching that point).
-        let _ = std::fs::remove_file(&secrets_file_host);
+        let _ = std::fs::remove_file(&secrets_file);
 
         if !status.success() {
             let exit_code = status.exit_code.unwrap_or(status.code);
