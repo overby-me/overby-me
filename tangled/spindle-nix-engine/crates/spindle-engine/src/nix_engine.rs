@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use tokio::io::AsyncBufReadExt;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info};
 
@@ -324,98 +325,49 @@ impl Engine for NixEngine {
 
         info!(%wid, step_idx, name = step.name(), "executing step");
 
-        // Build a hakoniwa container for per-workflow process isolation:
-        // - PID namespace: workflows can't see each other's processes
-        // - IPC namespace: no shared memory between workflows
-        // - Mount namespace: isolated /proc, read-only system paths
-        //
-        // PID namespace requires procfs which requires a mount namespace.
-        // rootdir creates a tmpdir root; we bind-mount system paths and the
-        // workspace into it. The service runs as a static user without
-        // systemd mount options, so bind-mount remounting works.
-        let mut container = hakoniwa::Container::new();
-        container.unshare(hakoniwa::Namespace::Pid);
-        container.unshare(hakoniwa::Namespace::Ipc);
+        // Spawn the child process directly. Per-workflow PID/IPC isolation via
+        // hakoniwa is planned but requires restructuring to run all steps in a
+        // single container (for workspace persistence across steps).
+        let mut child = tokio::process::Command::new(&self.bash_path)
+            .args(["-euo", "pipefail", "-c", &full_command])
+            .current_dir(workspace_dir)
+            .env_clear()
+            .envs(env_vars)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .map_err(|e| EngineError::StepFailed {
+                exit_code: -1,
+                message: format!("failed to spawn step process: {e}"),
+            })?;
 
-        // Mount system paths read-only.
-        for dir in [
-            "/bin", "/etc", "/lib", "/lib64", "/lib32", "/sbin", "/usr", "/nix",
-        ] {
-            if std::path::Path::new(dir).exists() {
-                container.bindmount_ro(dir, dir);
-            }
-        }
-
-        // Workspace read-write, /dev for device nodes, /tmp.
-        container.bindmount_rw(
-            &workspace_dir.to_string_lossy(),
-            &workspace_dir.to_string_lossy(),
-        );
-        container.devfsmount("/dev");
-        container.tmpfsmount("/tmp");
-
-        if let Some(limit) = self.workflow_limits.limit_as {
-            container.setrlimit(hakoniwa::Rlimit::As, limit, limit);
-        }
-        if let Some(limit) = self.workflow_limits.limit_nofile {
-            container.setrlimit(hakoniwa::Rlimit::Nofile, limit, limit);
-        }
-
-        let mut hako_cmd = container.command(&self.bash_path.to_string_lossy());
-        hako_cmd.args(["-euo", "pipefail", "-c", &full_command]);
-        hako_cmd.current_dir(workspace_dir);
-        hako_cmd.stdout(hakoniwa::Stdio::piped());
-        hako_cmd.stderr(hakoniwa::Stdio::piped());
-
-        for (k, v) in &env_vars {
-            hako_cmd.env(k, v);
-        }
-
-        if let Some(limit) = self.workflow_limits.limit_walltime {
-            hako_cmd.wait_timeout(limit);
-        }
-
-        let mut child = hako_cmd.spawn().map_err(|e| EngineError::StepFailed {
-            exit_code: -1,
-            message: format!("hakoniwa spawn failed: {e}"),
-        })?;
-
-        // Stream stdout and stderr from hakoniwa's PipeReaders via blocking tasks.
-        let hako_stdout = child.stdout.take();
-        let hako_stderr = child.stderr.take();
+        // Stream stdout and stderr to the logger.
+        let stdout = child.stdout.take().unwrap();
+        let stderr = child.stderr.take().unwrap();
 
         let mut stdout_writer = logger.data_writer(step_idx, "stdout".into());
         let mut stderr_writer = logger.data_writer(step_idx, "stderr".into());
 
-        let stdout_task = tokio::task::spawn_blocking(move || {
-            if let Some(stdout) = hako_stdout {
-                let reader = std::io::BufReader::new(stdout);
-                for line in std::io::BufRead::lines(reader).map_while(Result::ok) {
-                    let _ = writeln!(stdout_writer, "{line}");
-                }
+        let stdout_task = tokio::spawn(async move {
+            let mut reader = tokio::io::BufReader::new(stdout).lines();
+            while let Ok(Some(line)) = reader.next_line().await {
+                let _ = writeln!(stdout_writer, "{line}");
             }
         });
 
-        let stderr_task = tokio::task::spawn_blocking(move || {
-            if let Some(stderr) = hako_stderr {
-                let reader = std::io::BufReader::new(stderr);
-                for line in std::io::BufRead::lines(reader).map_while(Result::ok) {
-                    let _ = writeln!(stderr_writer, "{line}");
-                }
+        let stderr_task = tokio::spawn(async move {
+            let mut reader = tokio::io::BufReader::new(stderr).lines();
+            while let Ok(Some(line)) = reader.next_line().await {
+                let _ = writeln!(stderr_writer, "{line}");
             }
         });
 
         // Wait for the process to complete.
-        let status = tokio::task::spawn_blocking(move || child.wait())
-            .await
-            .map_err(|e| EngineError::StepFailed {
-                exit_code: -1,
-                message: format!("hakoniwa wait task panicked: {e}"),
-            })?
-            .map_err(|e| EngineError::StepFailed {
-                exit_code: -1,
-                message: format!("hakoniwa wait failed: {e}"),
-            })?;
+        let status = child.wait().await.map_err(|e| EngineError::StepFailed {
+            exit_code: -1,
+            message: format!("failed to wait for step process: {e}"),
+        })?;
 
         // Wait for stream tasks to finish.
         let _ = stdout_task.await;
@@ -426,15 +378,11 @@ impl Engine for NixEngine {
         let _ = std::fs::remove_file(&secrets_file);
 
         if !status.success() {
-            let exit_code = status.exit_code.unwrap_or(status.code);
-            let reason = &status.reason;
-            error!(%wid, step_idx, exit_code, %reason, name = step.name(), "step failed");
+            let exit_code = status.code().unwrap_or(-1);
+            error!(%wid, step_idx, exit_code, name = step.name(), "step failed");
             return Err(EngineError::StepFailed {
                 exit_code,
-                message: format!(
-                    "step {:?} exited with code {exit_code}: {reason}",
-                    step.name()
-                ),
+                message: format!("step {:?} exited with code {exit_code}", step.name()),
             });
         }
 
