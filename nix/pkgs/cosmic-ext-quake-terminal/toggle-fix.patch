@@ -1,0 +1,49 @@
+diff --git a/src/app.rs b/src/app.rs
+index 8ea3ee5..430b72c 100644
+--- a/src/app.rs
++++ b/src/app.rs
+@@ -388,20 +388,12 @@ impl QuakeTerminal {
+                 tracing::debug!("Toggle: still waiting for window to appear");
+             }
+             ToggleState::Visible => {
+-                if self.focused {
+-                    tracing::info!("Toggle: hiding terminal");
+-                    if let Some(ref controller) = self.wayland_controller {
+-                        controller.minimize();
+-                    }
+-                    self.state = ToggleState::Hidden;
+-                    self.focused = false;
+-                } else {
+-                    tracing::info!("Toggle: refocusing terminal (minimize first)");
+-                    if let Some(ref controller) = self.wayland_controller {
+-                        controller.minimize();
+-                    }
+-                    self.refocusing = true;
++                tracing::info!("Toggle: hiding terminal");
++                if let Some(ref controller) = self.wayland_controller {
++                    controller.minimize();
+                 }
++                self.state = ToggleState::Hidden;
++                self.focused = false;
+             }
+             ToggleState::Hidden => {
+                 tracing::info!("Toggle: showing terminal");
+diff --git a/src/process.rs b/src/process.rs
+index 1234567..abcdefg 100644
+--- a/src/process.rs
++++ b/src/process.rs
+@@ -55,8 +55,12 @@ fn get_class_args(command: &str) -> (Vec<String>, String) {
+             QUAKE_APP_ID.to_string(),
+         ),
+         // Most terminals support --class
+-        "cosmic-term" | "alacritty" | "kitty" | "wezterm" => (
+-            vec!["--class".into(), QUAKE_APP_ID.into()],
++        "cosmic-term" => (
++            vec![],
++            "com.system76.CosmicTerm".to_string(),
++        ),
++        "alacritty" | "kitty" | "wezterm" => (
++            vec!["--class".into(), QUAKE_APP_ID.into()],
+             QUAKE_APP_ID.to_string(),
+         ),
+         // Default: try --class and hope it works

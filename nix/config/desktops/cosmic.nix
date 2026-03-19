@@ -17,19 +17,22 @@
     sessionVariables = {
       COSMIC_DATA_CONTROL_ENABLED = 1;
     };
-    etc."xdg/autostart/cosmic-ext-quake-terminal.desktop".text = ''
-      [Desktop Entry]
-      Type=Application
-      Name=COSMIC Quake Terminal
-      Exec=${pkgs.cosmic-ext-quake-terminal}/bin/cosmic-ext-quake-terminal
-      NoDisplay=true
-      X-COSMIC-Autostart=true
-    '';
   };
   services = {
     desktopManager.cosmic.enable = true;
     displayManager.cosmic-greeter.enable = true;
     system76-scheduler.enable = true;
+  };
+  systemd.user.services.cosmic-ext-quake-terminal = {
+    description = "COSMIC Quake Terminal Daemon";
+    wantedBy = ["graphical-session.target"];
+    partOf = ["graphical-session.target"];
+    after = ["graphical-session.target"];
+    serviceConfig = {
+      ExecStart = "${pkgs.cosmic-ext-quake-terminal}/bin/cosmic-ext-quake-terminal";
+      Restart = "on-failure";
+      RestartSec = 3;
+    };
   };
   # Fix Zed open urls: https://github.com/NixOS/nixpkgs/issues/189851#issuecomment-1759954096
   systemd.user.extraConfig = ''
