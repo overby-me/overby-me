@@ -15,6 +15,11 @@ in {
       config.window_decorations = "NONE"
       config.default_prog = { "${zellij-cwd}/bin/zellij-cwd" }
 
+      wezterm.on("gui-startup", function(cmd)
+        local _, _, window = wezterm.mux.spawn_window(cmd or {})
+        window:gui_window():maximize()
+      end)
+
       return config
     '';
   };
