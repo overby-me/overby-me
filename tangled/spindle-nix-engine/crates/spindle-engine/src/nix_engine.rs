@@ -309,42 +309,16 @@ impl Engine for NixEngine {
         info!(%wid, step_idx, name = step.name(), "executing step");
 
         // Build a hakoniwa container for per-workflow process isolation:
-        // - User namespace: required to create other namespaces without root
         // - PID namespace: workflows can't see each other's processes
         // - IPC namespace: no shared memory between workflows
-        // - Mount namespace (via rootdir): private /tmp, isolated procfs
         //
-        // Uses rootdir() to create a fresh tmpdir root, then pivot_root into it.
-        // All mounts are new within the user namespace, avoiding EPERM on remount.
+        // Mount namespace isolation is not used because bind-mount remounting
+        // fails with EPERM in user namespaces (kernel restriction on mounts
+        // from outside the user namespace). The systemd service's
+        // ProtectSystem=strict already provides filesystem protection.
         let mut container = hakoniwa::Container::new();
         container.unshare(hakoniwa::Namespace::Pid);
         container.unshare(hakoniwa::Namespace::Ipc);
-        // rootdir creates a tmpdir as the container root and uses pivot_root
-        // to switch to it. This ensures all mounts are owned by the user
-        // namespace, avoiding EPERM on bind mount remounts.
-        container.rootdir(workspace_dir);
-
-        // Mount system paths read-only. /run is excluded because its mount
-        // propagation flags prevent remounting in a user namespace.
-        for dir in ["/bin", "/etc", "/lib", "/lib64", "/lib32", "/sbin", "/usr", "/nix"] {
-            if std::path::Path::new(dir).exists() {
-                container.bindmount_ro(dir, dir);
-            }
-        }
-        // Steps need the nix daemon socket for nix builds.
-        if std::path::Path::new("/nix/var/nix/daemon-socket").exists() {
-            container.bindmount_ro(
-                "/nix/var/nix/daemon-socket",
-                "/nix/var/nix/daemon-socket",
-            );
-        }
-
-        // Mount workspace read-write and private /tmp.
-        container.bindmount_rw(
-            &workspace_dir.to_string_lossy(),
-            &workspace_dir.to_string_lossy(),
-        );
-        container.tmpfsmount("/tmp");
 
         if let Some(limit) = self.workflow_limits.limit_as {
             container.setrlimit(hakoniwa::Rlimit::As, limit, limit);
