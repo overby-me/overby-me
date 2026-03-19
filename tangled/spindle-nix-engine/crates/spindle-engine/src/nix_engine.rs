@@ -319,14 +319,14 @@ impl Engine for NixEngine {
         info!(%wid, step_idx, name = step.name(), "executing step");
 
         // Spawn the child process, optionally wrapped in a systemd scope for
-        // per-workflow isolation (own cgroup, PrivateTmp, resource limits).
+        // per-workflow isolation (own cgroup with resource limits).
+        // Scopes only support cgroup properties (MemoryMax, TasksMax, etc.),
+        // not execution properties (PrivateTmp, WorkingDirectory).
         let mut child = if let Some(ref systemd_run) = self.systemd_run_path {
             let scope_name = format!("spindle-{}-{step_idx}", wid.to_string().replace('/', "-"));
             let mut cmd = Command::new(systemd_run);
             cmd.args(["--scope", "--collect", "--quiet"]);
             cmd.arg(format!("--unit={scope_name}"));
-            cmd.arg(format!("--working-directory={}", workspace_dir.display()));
-            cmd.args(["-p", "PrivateTmp=yes"]);
 
             if let Some(ref mem) = self.workflow_limits.memory_max {
                 cmd.args(["-p", &format!("MemoryMax={mem}")]);
@@ -352,7 +352,8 @@ impl Engine for NixEngine {
                 &full_command,
             ]);
 
-            cmd.env_clear()
+            cmd.current_dir(workspace_dir)
+                .env_clear()
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .kill_on_drop(true)
