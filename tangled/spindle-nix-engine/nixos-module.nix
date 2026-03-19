@@ -344,7 +344,8 @@ in {
             ProtectSystem = "strict";
             ProtectHome = true;
             PrivateTmp = true;
-            PrivateMounts = true;
+            # PrivateMounts is omitted: hakoniwa needs to create bind mounts
+            # in its own mount namespace for per-workflow isolation.
             PrivateDevices = true;
             # PrivateUsers is omitted: hakoniwa needs CAP_SYS_ADMIN to create
             # PID/IPC namespaces. DynamicUser + NoNewPrivileges already provide
