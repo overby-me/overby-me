@@ -17,65 +17,24 @@
     sessionVariables = {
       COSMIC_DATA_CONTROL_ENABLED = 1;
     };
-    etc = {
-      # Quake terminal: daemon via XDG autostart, hotkey via swhkd
-      # (COSMIC's built-in Spawn shortcuts break after Alt-Tab)
-      "xdg/autostart/cosmic-ext-quake-terminal.desktop".text = ''
-        [Desktop Entry]
-        Type=Application
-        Name=COSMIC Quake Terminal
-        Exec=${pkgs.cosmic-ext-quake-terminal}/bin/cosmic-ext-quake-terminal
-        NoDisplay=true
-        X-COSMIC-Autostart=true
-      '';
-      "swhkd/swhkdrc".text = ''
-        grave
-          ${pkgs.cosmic-ext-quake-terminal}/bin/cosmic-ext-quake-terminal toggle
-      '';
-    };
+    etc."xdg/autostart/cosmic-ext-quake-terminal.desktop".text = ''
+      [Desktop Entry]
+      Type=Application
+      Name=COSMIC Quake Terminal
+      Exec=${pkgs.cosmic-ext-quake-terminal}/bin/cosmic-ext-quake-terminal
+      NoDisplay=true
+      X-COSMIC-Autostart=true
+    '';
   };
   services = {
     desktopManager.cosmic.enable = true;
     displayManager.cosmic-greeter.enable = true;
     system76-scheduler.enable = true;
   };
-  systemd = {
-    # swhkd runs as root to read input devices; needs PKEXEC_UID and
-    # XDG_RUNTIME_DIR so it can find the swhks socket at /run/user/1000/swhkd.sock.
-    # ExecStartPre waits for the socket so swhkd doesn't grab input before swhks is ready.
-    services.swhkd = {
-      description = "Simple Wayland HotKey Daemon";
-      after = ["graphical.target"];
-      wantedBy = ["graphical.target"];
-      environment = {
-        PKEXEC_UID = "1000";
-        XDG_RUNTIME_DIR = "/run/user/1000";
-      };
-      serviceConfig = {
-        ExecStartPre = "${pkgs.bash}/bin/bash -c 'for i in $(seq 1 30); do [ -S /run/user/1000/swhkd.sock ] && exit 0; sleep 1; done; exit 1'";
-        ExecStart = "${pkgs.swhkd}/bin/swhkd -c /etc/swhkd/swhkdrc";
-        Restart = "on-failure";
-        RestartSec = 3;
-      };
-    };
-    user = {
-      # swhks user server for environment passing
-      services.swhks = {
-        description = "Simple Wayland HotKey Server";
-        wantedBy = ["graphical-session.target"];
-        partOf = ["graphical-session.target"];
-        serviceConfig = {
-          ExecStart = "${pkgs.swhkd}/bin/swhks";
-          Restart = "on-failure";
-          RestartSec = 3;
-        };
-      };
-      # Fix Zed open urls: https://github.com/NixOS/nixpkgs/issues/189851#issuecomment-1759954096
-      extraConfig = ''
-        DefaultEnvironment="PATH=/run/wrappers/bin:/etc/profiles/per-user/%u/bin:/nix/var/nix/profiles/default/bin:/run/current-system/sw/bin"
-      '';
-    };
-  };
+  # Fix Zed open urls: https://github.com/NixOS/nixpkgs/issues/189851#issuecomment-1759954096
+  systemd.user.extraConfig = ''
+    DefaultEnvironment="PATH=/run/wrappers/bin:/etc/profiles/per-user/%u/bin:/nix/var/nix/profiles/default/bin:/run/current-system/sw/bin"
+  '';
 
   # Needed to make Zed login work in Cosmic
   xdg.portal = {
