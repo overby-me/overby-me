@@ -324,11 +324,19 @@ impl Engine for NixEngine {
         // namespace, avoiding EPERM on bind mount remounts.
         container.rootdir(workspace_dir);
 
-        // Mount system paths read-only.
-        for dir in ["/bin", "/etc", "/lib", "/lib64", "/lib32", "/sbin", "/usr", "/nix", "/run"] {
+        // Mount system paths read-only. /run is excluded because its mount
+        // propagation flags prevent remounting in a user namespace.
+        for dir in ["/bin", "/etc", "/lib", "/lib64", "/lib32", "/sbin", "/usr", "/nix"] {
             if std::path::Path::new(dir).exists() {
                 container.bindmount_ro(dir, dir);
             }
+        }
+        // Steps need the nix daemon socket for nix builds.
+        if std::path::Path::new("/nix/var/nix/daemon-socket").exists() {
+            container.bindmount_ro(
+                "/nix/var/nix/daemon-socket",
+                "/nix/var/nix/daemon-socket",
+            );
         }
 
         // Mount workspace read-write and private /tmp.
