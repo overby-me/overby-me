@@ -10,13 +10,13 @@
 }:
 rustPlatform.buildRustPackage {
   pname = "cosmic-ext-quake-terminal";
-  version = "0.1.0";
+  version = "0.1.0-unstable-2026-02-13";
 
   src = fetchFromGitHub {
     owner = "M0Rf30";
     repo = "cosmic-ext-quake-terminal";
-    tag = "0.1.0";
-    hash = "sha256-OzCaepqGczy0a+j2QEODyNnxLgKqoR0GMX3TkBUAh6o=";
+    rev = "3852de8c453d5c8c6f56130bb9ac1b5a84890c68";
+    hash = "sha256-vsS3GATIVXzBiWgdzZfWXUcuV/zuuj5T1u+qntd0/Kg=";
   };
 
   cargoHash = "sha256-846q7q1Rt2z5qkGK1+IHazzuvR8i8IeU0vK/cWn2vwI=";
