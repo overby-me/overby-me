@@ -323,7 +323,7 @@ impl Engine for NixEngine {
         let mut child = if let Some(ref systemd_run) = self.systemd_run_path {
             let scope_name = format!("spindle-{}-{step_idx}", wid.to_string().replace('/', "-"));
             let mut cmd = Command::new(systemd_run);
-            cmd.args(["--scope", "--pipe", "--wait", "--collect", "--quiet"]);
+            cmd.args(["--scope", "--collect", "--quiet"]);
             cmd.arg(format!("--unit={scope_name}"));
             cmd.arg(format!("--working-directory={}", workspace_dir.display()));
             cmd.args(["-p", "PrivateTmp=yes"]);
