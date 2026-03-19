@@ -67,6 +67,7 @@ in {
       desktop_notifications = true;
       pack_rotation = [
         "peon"
+        "blood_elf_engineer"
         "murloc"
         "peasant"
         "wc2_peasant"
@@ -146,6 +147,15 @@ in {
           repo = "openpeon-wow-tauren";
           tag = "v1.0.0";
           hash = "sha256-dIleUfDQJjnbKCAzzYIOYvuAdkXse70O22vdCf1VTv0=";
+        };
+      }
+      {
+        name = "blood_elf_engineer";
+        src = pkgs.fetchFromGitHub {
+          owner = "noverby";
+          repo = "openpeon-blood-elf-engineer";
+          rev = "main";
+          hash = "sha256-48Yw/2Fhtp4tD6iAV7SrTFOpz824gQWI518neftx6so=";
         };
       }
     ];
