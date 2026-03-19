@@ -6,6 +6,7 @@
       cosmic-ext-applet-caffeine
       cosmic-ext-calculator
       cosmic-ext-quake-terminal
+      foot
       examine
       forecast
       tasks

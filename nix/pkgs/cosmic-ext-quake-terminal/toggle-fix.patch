@@ -28,22 +28,3 @@ index 8ea3ee5..430b72c 100644
              }
              ToggleState::Hidden => {
                  tracing::info!("Toggle: showing terminal");
-diff --git a/src/process.rs b/src/process.rs
-index 1234567..abcdefg 100644
---- a/src/process.rs
-+++ b/src/process.rs
-@@ -55,8 +55,12 @@ fn get_class_args(command: &str) -> (Vec<String>, String) {
-             QUAKE_APP_ID.to_string(),
-         ),
-         // Most terminals support --class
--        "cosmic-term" | "alacritty" | "kitty" | "wezterm" => (
--            vec!["--class".into(), QUAKE_APP_ID.into()],
-+        "cosmic-term" => (
-+            vec![],
-+            "com.system76.CosmicTerm".to_string(),
-+        ),
-+        "alacritty" | "kitty" | "wezterm" => (
-+            vec!["--class".into(), QUAKE_APP_ID.into()],
-             QUAKE_APP_ID.to_string(),
-         ),
-         // Default: try --class and hope it works
