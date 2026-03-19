@@ -139,8 +139,8 @@ in {
         src = pkgs.fetchFromGitHub {
           owner = "noverby";
           repo = "openpeon-blood-elf-engineer";
-          rev = "main";
-          hash = "sha256-48Yw/2Fhtp4tD6iAV7SrTFOpz824gQWI518neftx6so=";
+          rev = "185c5e0befe9a84039b10cf71d4ce9da087d6520";
+          hash = "sha256-XwFbExGow55859biIa8Q1BCi4Fn41j+o1etJFsGxavY=";
         };
       }
     ];
