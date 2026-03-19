@@ -216,6 +216,7 @@
         ./slides
 
         ./rust/awk
+        ./rust/bash
         ./rust/bzip2
         ./rust/cachix
         ./rust/direnv

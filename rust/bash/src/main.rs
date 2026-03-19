@@ -1,0 +1,189 @@
+mod ast;
+mod builtins;
+mod expand;
+mod interpreter;
+mod lexer;
+mod parser;
+
+use interpreter::Shell;
+use std::io::{self, BufRead, Write};
+
+fn main() {
+    let code = run();
+    // Flush stdout before exiting - std::process::exit() doesn't flush
+    std::io::stdout().flush().ok();
+    std::io::stderr().flush().ok();
+    std::process::exit(code);
+}
+
+fn run() -> i32 {
+    let args: Vec<String> = std::env::args().collect();
+    let mut shell = Shell::new();
+
+    let mut command_string: Option<String> = None;
+    let mut script_file: Option<String> = None;
+    let mut force_interactive = false;
+    let mut read_stdin = false;
+    let mut positional_start = None;
+    let mut i = 1;
+
+    while i < args.len() {
+        match args[i].as_str() {
+            "-c" => {
+                i += 1;
+                if i < args.len() {
+                    command_string = Some(args[i].clone());
+                    // Remaining args become positional parameters
+                    if i + 1 < args.len() {
+                        positional_start = Some(i + 1);
+                    }
+                    break;
+                } else {
+                    eprintln!("bash: -c: option requires an argument");
+                    return 2;
+                }
+            }
+            "-i" => force_interactive = true,
+            "-s" => read_stdin = true,
+            "-l" | "--login" => {}         // Accepted but ignored
+            "--norc" | "--noprofile" => {} // Accepted but ignored
+            "--" => {
+                i += 1;
+                if i < args.len() && script_file.is_none() && command_string.is_none() {
+                    script_file = Some(args[i].clone());
+                    if i + 1 < args.len() {
+                        positional_start = Some(i + 1);
+                    }
+                }
+                break;
+            }
+            arg if arg.starts_with('-') || arg.starts_with('+') => {
+                // Parse set-style options
+                let enable = arg.starts_with('-');
+                let flags = &arg[1..];
+                if flags == "o" {
+                    i += 1;
+                    if i < args.len() {
+                        match args[i].as_str() {
+                            "pipefail" => shell.opt_pipefail = enable,
+                            "errexit" => shell.opt_errexit = enable,
+                            "nounset" => shell.opt_nounset = enable,
+                            "xtrace" => shell.opt_xtrace = enable,
+                            _ => {}
+                        }
+                    }
+                } else {
+                    for flag in flags.chars() {
+                        match flag {
+                            'e' => shell.opt_errexit = enable,
+                            'u' => shell.opt_nounset = enable,
+                            'x' => shell.opt_xtrace = enable,
+                            'f' => shell.opt_noglob = enable,
+                            'C' => shell.opt_noclobber = enable,
+                            'n' => shell.opt_noexec = enable,
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            _ => {
+                // First non-option argument is the script file
+                script_file = Some(args[i].clone());
+                if i + 1 < args.len() {
+                    positional_start = Some(i + 1);
+                }
+                break;
+            }
+        }
+        i += 1;
+    }
+
+    // Set positional parameters
+    if let Some(start) = positional_start {
+        shell.positional = vec![
+            args.get(start - 1)
+                .cloned()
+                .unwrap_or_else(|| "bash".to_string()),
+        ];
+        shell.positional.extend(args[start..].to_vec());
+    } else if let Some(ref file) = script_file {
+        shell.positional = vec![file.clone()];
+    }
+
+    // Execute based on mode
+    if let Some(cmd) = command_string {
+        return shell.run_string(&cmd);
+    }
+
+    if let Some(file) = script_file
+        && !read_stdin
+    {
+        match std::fs::read_to_string(&file) {
+            Ok(content) => {
+                return shell.run_string(&content);
+            }
+            Err(e) => {
+                eprintln!("bash: {}: {}", file, e);
+                return 127;
+            }
+        }
+    }
+
+    // Interactive mode or reading from stdin
+    let is_tty = atty_is_tty();
+    let interactive = force_interactive || (is_tty && command_string.is_none());
+
+    if interactive {
+        run_interactive(&mut shell);
+        shell.last_status
+    } else {
+        // Read all of stdin and execute
+        let mut input = String::new();
+        io::stdin().read_to_string(&mut input).ok();
+        shell.run_string(&input)
+    }
+}
+
+fn run_interactive(shell: &mut Shell) {
+    let stdin = io::stdin();
+    let mut reader = stdin.lock();
+
+    loop {
+        // Print prompt
+        let ps1 = shell
+            .vars
+            .get("PS1")
+            .cloned()
+            .unwrap_or_else(|| "$ ".to_string());
+        eprint!("{}", ps1);
+        io::stderr().flush().ok();
+
+        let mut line = String::new();
+        match reader.read_line(&mut line) {
+            Ok(0) => break, // EOF
+            Err(_) => break,
+            _ => {}
+        }
+
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        // Handle multi-line input (check for unclosed quotes, etc.)
+        // For now, just execute line by line
+        shell.run_string(&line);
+    }
+}
+
+fn atty_is_tty() -> bool {
+    #[cfg(unix)]
+    {
+        nix::unistd::isatty(0).unwrap_or(false)
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
+}
+
+use std::io::Read;

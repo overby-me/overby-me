@@ -17,6 +17,8 @@ parms = "parms"
 ue = "ue"
 # Rust flate2 crate (DEFLATE/gzip codec)
 flate = "flate"
+# Bash test operator -ot (older than)
+ot = "ot"
 
 
 [default]

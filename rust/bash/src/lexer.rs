@@ -1,0 +1,972 @@
+use crate::ast::*;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Token {
+    Word(Word),
+    Newline,
+    Pipe,
+    AndIf,
+    OrIf,
+    Semi,
+    Amp,
+    DSemi,
+    LParen,
+    RParen,
+    Less,
+    Great,
+    DLess,
+    DGreat,
+    LessAnd,
+    GreatAnd,
+    LessGreat,
+    DLessDash,
+    Clobber,
+    TripleLess,
+    Eof,
+}
+
+struct HereDocPending {
+    delimiter: String,
+    strip_tabs: bool,
+    quoted: bool,
+}
+
+pub struct Lexer {
+    input: Vec<char>,
+    pos: usize,
+    pending_heredocs: Vec<HereDocPending>,
+    heredoc_bodies: Vec<Word>,
+    heredoc_index: usize,
+}
+
+impl Lexer {
+    pub fn new(input: &str) -> Self {
+        Self {
+            input: input.chars().collect(),
+            pos: 0,
+            pending_heredocs: Vec::new(),
+            heredoc_bodies: Vec::new(),
+            heredoc_index: 0,
+        }
+    }
+
+    fn peek(&self) -> Option<char> {
+        self.input.get(self.pos).copied()
+    }
+
+    fn advance(&mut self) -> Option<char> {
+        let ch = self.input.get(self.pos).copied();
+        if ch.is_some() {
+            self.pos += 1;
+        }
+        ch
+    }
+
+    fn peek_at(&self, offset: usize) -> Option<char> {
+        self.input.get(self.pos + offset).copied()
+    }
+
+    pub fn save_position(&self) -> usize {
+        self.pos
+    }
+
+    pub fn restore_position(&mut self, pos: usize) {
+        self.pos = pos;
+    }
+
+    fn skip_whitespace(&mut self) {
+        while let Some(ch) = self.peek() {
+            if ch == ' ' || ch == '\t' {
+                self.advance();
+            } else if ch == '\\' && self.peek_at(1) == Some('\n') {
+                // Line continuation
+                self.advance();
+                self.advance();
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn skip_comment(&mut self) {
+        if self.peek() == Some('#') {
+            while let Some(ch) = self.peek() {
+                if ch == '\n' {
+                    break;
+                }
+                self.advance();
+            }
+        }
+    }
+
+    pub fn next_token(&mut self) -> Token {
+        self.skip_whitespace();
+        self.skip_comment();
+
+        let ch = match self.peek() {
+            None => return Token::Eof,
+            Some(c) => c,
+        };
+
+        match ch {
+            '\n' => {
+                self.advance();
+                self.read_heredoc_bodies();
+                Token::Newline
+            }
+            '|' => {
+                self.advance();
+                if self.peek() == Some('|') {
+                    self.advance();
+                    Token::OrIf
+                } else {
+                    Token::Pipe
+                }
+            }
+            '&' => {
+                self.advance();
+                if self.peek() == Some('&') {
+                    self.advance();
+                    Token::AndIf
+                } else {
+                    Token::Amp
+                }
+            }
+            ';' => {
+                self.advance();
+                if self.peek() == Some(';') {
+                    self.advance();
+                    Token::DSemi
+                } else {
+                    Token::Semi
+                }
+            }
+            '(' => {
+                self.advance();
+                Token::LParen
+            }
+            ')' => {
+                self.advance();
+                Token::RParen
+            }
+            '<' => {
+                self.advance();
+                match self.peek() {
+                    Some('<') => {
+                        self.advance();
+                        if self.peek() == Some('<') {
+                            self.advance();
+                            Token::TripleLess
+                        } else if self.peek() == Some('-') {
+                            self.advance();
+                            self.register_heredoc(true);
+                            Token::DLessDash
+                        } else {
+                            self.register_heredoc(false);
+                            Token::DLess
+                        }
+                    }
+                    Some('&') => {
+                        self.advance();
+                        Token::LessAnd
+                    }
+                    Some('>') => {
+                        self.advance();
+                        Token::LessGreat
+                    }
+                    _ => Token::Less,
+                }
+            }
+            '>' => {
+                self.advance();
+                match self.peek() {
+                    Some('>') => {
+                        self.advance();
+                        Token::DGreat
+                    }
+                    Some('&') => {
+                        self.advance();
+                        Token::GreatAnd
+                    }
+                    Some('|') => {
+                        self.advance();
+                        Token::Clobber
+                    }
+                    _ => Token::Great,
+                }
+            }
+            _ => self.read_word(),
+        }
+    }
+
+    fn register_heredoc(&mut self, strip_tabs: bool) {
+        self.skip_whitespace();
+        let mut delimiter = String::new();
+        let mut quoted = false;
+
+        match self.peek() {
+            Some('\'') => {
+                quoted = true;
+                self.advance();
+                while let Some(ch) = self.advance() {
+                    if ch == '\'' {
+                        break;
+                    }
+                    delimiter.push(ch);
+                }
+            }
+            Some('"') => {
+                quoted = true;
+                self.advance();
+                while let Some(ch) = self.advance() {
+                    if ch == '"' {
+                        break;
+                    }
+                    delimiter.push(ch);
+                }
+            }
+            _ => {
+                while let Some(ch) = self.peek() {
+                    if ch.is_alphanumeric() || ch == '_' {
+                        delimiter.push(ch);
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+
+        self.pending_heredocs.push(HereDocPending {
+            delimiter,
+            strip_tabs,
+            quoted,
+        });
+    }
+
+    fn read_heredoc_bodies(&mut self) {
+        let heredocs: Vec<HereDocPending> = self.pending_heredocs.drain(..).collect();
+        for hd in heredocs {
+            let mut body = String::new();
+            loop {
+                let mut line = String::new();
+                loop {
+                    match self.advance() {
+                        None => break,
+                        Some('\n') => break,
+                        Some(ch) => line.push(ch),
+                    }
+                }
+                let check_line = if hd.strip_tabs {
+                    line.trim_start_matches('\t').to_string()
+                } else {
+                    line.clone()
+                };
+                if check_line == hd.delimiter {
+                    break;
+                }
+                if !body.is_empty() {
+                    body.push('\n');
+                }
+                if hd.strip_tabs {
+                    body.push_str(line.trim_start_matches('\t'));
+                } else {
+                    body.push_str(&line);
+                }
+                if self.pos >= self.input.len() {
+                    break;
+                }
+            }
+
+            let word = if hd.quoted {
+                vec![WordPart::SingleQuoted(body)]
+            } else {
+                parse_double_quoted_content(&body)
+            };
+            self.heredoc_bodies.push(word);
+        }
+    }
+}
+
+fn parse_double_quoted_content(s: &str) -> Word {
+    let chars: Vec<char> = s.chars().collect();
+    let mut parts = Vec::new();
+    let mut literal = String::new();
+    let mut i = 0;
+
+    while i < chars.len() {
+        match chars[i] {
+            '\\' if i + 1 < chars.len() => {
+                let next = chars[i + 1];
+                if matches!(next, '$' | '`' | '"' | '\\' | '\n') {
+                    if next != '\n' {
+                        literal.push(next);
+                    }
+                    i += 2;
+                } else {
+                    literal.push('\\');
+                    i += 1;
+                }
+            }
+            '$' => {
+                if !literal.is_empty() {
+                    parts.push(WordPart::Literal(std::mem::take(&mut literal)));
+                }
+                i += 1;
+                let part = parse_dollar(&chars, &mut i);
+                parts.push(part);
+            }
+            '`' => {
+                if !literal.is_empty() {
+                    parts.push(WordPart::Literal(std::mem::take(&mut literal)));
+                }
+                i += 1;
+                let mut cmd = String::new();
+                while i < chars.len() && chars[i] != '`' {
+                    if chars[i] == '\\' && i + 1 < chars.len() {
+                        cmd.push(chars[i + 1]);
+                        i += 2;
+                    } else {
+                        cmd.push(chars[i]);
+                        i += 1;
+                    }
+                }
+                if i < chars.len() {
+                    i += 1; // skip closing `
+                }
+                parts.push(WordPart::BacktickSub(cmd));
+            }
+            ch => {
+                literal.push(ch);
+                i += 1;
+            }
+        }
+    }
+    if !literal.is_empty() {
+        parts.push(WordPart::Literal(literal));
+    }
+    parts
+}
+
+fn parse_dollar(chars: &[char], i: &mut usize) -> WordPart {
+    if *i >= chars.len() {
+        return WordPart::Literal("$".to_string());
+    }
+
+    match chars[*i] {
+        '(' => {
+            *i += 1;
+            if *i < chars.len() && chars[*i] == '(' {
+                // Arithmetic: $(( ... ))
+                *i += 1;
+                let mut depth = 1;
+                let mut expr = String::new();
+                while *i < chars.len() && depth > 0 {
+                    if *i + 1 < chars.len() && chars[*i] == ')' && chars[*i + 1] == ')' {
+                        depth -= 1;
+                        if depth == 0 {
+                            *i += 2;
+                            break;
+                        }
+                        expr.push(')');
+                        expr.push(')');
+                        *i += 2;
+                    } else if *i + 1 < chars.len() && chars[*i] == '$' && chars[*i + 1] == '(' {
+                        if *i + 2 < chars.len() && chars[*i + 2] == '(' {
+                            depth += 1;
+                        }
+                        expr.push(chars[*i]);
+                        *i += 1;
+                    } else {
+                        expr.push(chars[*i]);
+                        *i += 1;
+                    }
+                }
+                WordPart::ArithSub(expr)
+            } else {
+                // Command substitution: $( ... )
+                let mut depth = 1;
+                let mut cmd = String::new();
+                while *i < chars.len() && depth > 0 {
+                    if chars[*i] == '(' {
+                        depth += 1;
+                    } else if chars[*i] == ')' {
+                        depth -= 1;
+                        if depth == 0 {
+                            *i += 1;
+                            break;
+                        }
+                    }
+                    cmd.push(chars[*i]);
+                    *i += 1;
+                }
+                WordPart::CommandSub(cmd)
+            }
+        }
+        '{' => {
+            *i += 1;
+            parse_brace_param(chars, i)
+        }
+        ch if ch == '_' || ch.is_alphabetic() => {
+            let mut name = String::new();
+            while *i < chars.len() && (chars[*i] == '_' || chars[*i].is_alphanumeric()) {
+                name.push(chars[*i]);
+                *i += 1;
+            }
+            WordPart::Variable(name)
+        }
+        ch if ch.is_ascii_digit() => {
+            let mut name = String::new();
+            name.push(chars[*i]);
+            *i += 1;
+            WordPart::Variable(name)
+        }
+        '@' | '*' | '#' | '?' | '-' | '$' | '!' | '0' => {
+            let name = chars[*i].to_string();
+            *i += 1;
+            WordPart::Variable(name)
+        }
+        _ => WordPart::Literal("$".to_string()),
+    }
+}
+
+fn parse_brace_param(chars: &[char], i: &mut usize) -> WordPart {
+    // ${#name} - length
+    if *i < chars.len() && chars[*i] == '#' {
+        let next = if *i + 1 < chars.len() {
+            chars[*i + 1]
+        } else {
+            '}'
+        };
+        if next != '}' {
+            *i += 1;
+            let name = read_param_name(chars, i);
+            if *i < chars.len() && chars[*i] == '}' {
+                *i += 1;
+            }
+            return WordPart::Param(ParamExpr {
+                name,
+                op: ParamOp::Length,
+            });
+        }
+    }
+
+    let name = read_param_name(chars, i);
+
+    if *i >= chars.len() || chars[*i] == '}' {
+        if *i < chars.len() {
+            *i += 1;
+        }
+        return WordPart::Param(ParamExpr {
+            name,
+            op: ParamOp::None,
+        });
+    }
+
+    let op = read_param_op(chars, i, &name);
+    if *i < chars.len() && chars[*i] == '}' {
+        *i += 1;
+    }
+    WordPart::Param(ParamExpr { name, op })
+}
+
+fn read_param_name(chars: &[char], i: &mut usize) -> String {
+    let mut name = String::new();
+    if *i < chars.len()
+        && (chars[*i] == '@'
+            || chars[*i] == '*'
+            || chars[*i] == '#'
+            || chars[*i] == '?'
+            || chars[*i] == '-'
+            || chars[*i] == '$'
+            || chars[*i] == '!'
+            || chars[*i].is_ascii_digit())
+    {
+        name.push(chars[*i]);
+        *i += 1;
+    } else {
+        while *i < chars.len() && (chars[*i] == '_' || chars[*i].is_alphanumeric()) {
+            name.push(chars[*i]);
+            *i += 1;
+        }
+    }
+    name
+}
+
+fn read_param_op(chars: &[char], i: &mut usize, _name: &str) -> ParamOp {
+    if *i >= chars.len() {
+        return ParamOp::None;
+    }
+
+    match chars[*i] {
+        ':' => {
+            *i += 1;
+            if *i >= chars.len() {
+                return ParamOp::None;
+            }
+            match chars[*i] {
+                '-' => {
+                    *i += 1;
+                    let word = read_param_word(chars, i);
+                    ParamOp::Default(true, word)
+                }
+                '=' => {
+                    *i += 1;
+                    let word = read_param_word(chars, i);
+                    ParamOp::Assign(true, word)
+                }
+                '?' => {
+                    *i += 1;
+                    let word = read_param_word(chars, i);
+                    ParamOp::Error(true, word)
+                }
+                '+' => {
+                    *i += 1;
+                    let word = read_param_word(chars, i);
+                    ParamOp::Alt(true, word)
+                }
+                _ => {
+                    // ${var:offset} or ${var:offset:length}
+                    let mut offset = String::new();
+                    while *i < chars.len() && chars[*i] != ':' && chars[*i] != '}' {
+                        offset.push(chars[*i]);
+                        *i += 1;
+                    }
+                    let length = if *i < chars.len() && chars[*i] == ':' {
+                        *i += 1;
+                        let mut l = String::new();
+                        while *i < chars.len() && chars[*i] != '}' {
+                            l.push(chars[*i]);
+                            *i += 1;
+                        }
+                        Some(l)
+                    } else {
+                        None
+                    };
+                    ParamOp::Substring(offset, length)
+                }
+            }
+        }
+        '-' => {
+            *i += 1;
+            let word = read_param_word(chars, i);
+            ParamOp::Default(false, word)
+        }
+        '=' => {
+            *i += 1;
+            let word = read_param_word(chars, i);
+            ParamOp::Assign(false, word)
+        }
+        '?' => {
+            *i += 1;
+            let word = read_param_word(chars, i);
+            ParamOp::Error(false, word)
+        }
+        '+' => {
+            *i += 1;
+            let word = read_param_word(chars, i);
+            ParamOp::Alt(false, word)
+        }
+        '#' => {
+            *i += 1;
+            if *i < chars.len() && chars[*i] == '#' {
+                *i += 1;
+                let word = read_param_word(chars, i);
+                ParamOp::TrimLargeLeft(word)
+            } else {
+                let word = read_param_word(chars, i);
+                ParamOp::TrimSmallLeft(word)
+            }
+        }
+        '%' => {
+            *i += 1;
+            if *i < chars.len() && chars[*i] == '%' {
+                *i += 1;
+                let word = read_param_word(chars, i);
+                ParamOp::TrimLargeRight(word)
+            } else {
+                let word = read_param_word(chars, i);
+                ParamOp::TrimSmallRight(word)
+            }
+        }
+        '/' => {
+            *i += 1;
+            let replace_all = *i < chars.len() && chars[*i] == '/';
+            if replace_all {
+                *i += 1;
+            }
+            let pattern = read_param_word_until(chars, i, '/');
+            let replacement = if *i < chars.len() && chars[*i] == '/' {
+                *i += 1;
+                read_param_word(chars, i)
+            } else {
+                vec![]
+            };
+            if replace_all {
+                ParamOp::ReplaceAll(pattern, replacement)
+            } else {
+                ParamOp::Replace(pattern, replacement)
+            }
+        }
+        _ => ParamOp::None,
+    }
+}
+
+fn read_param_word(chars: &[char], i: &mut usize) -> Word {
+    read_param_word_until(chars, i, '}')
+}
+
+fn read_param_word_until(chars: &[char], i: &mut usize, delim: char) -> Word {
+    let mut parts = Vec::new();
+    let mut literal = String::new();
+    let mut depth = 0;
+
+    while *i < chars.len() && (chars[*i] != delim || depth > 0) && chars[*i] != '}' {
+        match chars[*i] {
+            '\\' if *i + 1 < chars.len() => {
+                literal.push(chars[*i + 1]);
+                *i += 2;
+            }
+            '$' => {
+                if !literal.is_empty() {
+                    parts.push(WordPart::Literal(std::mem::take(&mut literal)));
+                }
+                *i += 1;
+                parts.push(parse_dollar(chars, i));
+            }
+            '\'' => {
+                *i += 1;
+                let mut s = String::new();
+                while *i < chars.len() && chars[*i] != '\'' {
+                    s.push(chars[*i]);
+                    *i += 1;
+                }
+                if *i < chars.len() {
+                    *i += 1;
+                }
+                parts.push(WordPart::SingleQuoted(s));
+            }
+            '"' => {
+                *i += 1;
+                let mut dq_parts = Vec::new();
+                let mut dq_lit = String::new();
+                while *i < chars.len() && chars[*i] != '"' {
+                    match chars[*i] {
+                        '\\' if *i + 1 < chars.len() => {
+                            let next = chars[*i + 1];
+                            if matches!(next, '$' | '`' | '"' | '\\') {
+                                dq_lit.push(next);
+                            } else {
+                                dq_lit.push('\\');
+                                dq_lit.push(next);
+                            }
+                            *i += 2;
+                        }
+                        '$' => {
+                            if !dq_lit.is_empty() {
+                                dq_parts.push(WordPart::Literal(std::mem::take(&mut dq_lit)));
+                            }
+                            *i += 1;
+                            dq_parts.push(parse_dollar(chars, i));
+                        }
+                        ch => {
+                            dq_lit.push(ch);
+                            *i += 1;
+                        }
+                    }
+                }
+                if *i < chars.len() {
+                    *i += 1;
+                }
+                if !dq_lit.is_empty() {
+                    dq_parts.push(WordPart::Literal(dq_lit));
+                }
+                parts.push(WordPart::DoubleQuoted(dq_parts));
+            }
+            '{' => {
+                depth += 1;
+                literal.push(chars[*i]);
+                *i += 1;
+            }
+            '}' if depth > 0 => {
+                depth -= 1;
+                literal.push(chars[*i]);
+                *i += 1;
+            }
+            ch => {
+                literal.push(ch);
+                *i += 1;
+            }
+        }
+    }
+    if !literal.is_empty() {
+        parts.push(WordPart::Literal(literal));
+    }
+    parts
+}
+
+impl Lexer {
+    fn read_word(&mut self) -> Token {
+        let mut parts = Vec::new();
+        let mut literal = String::new();
+
+        loop {
+            let ch = match self.peek() {
+                None => break,
+                Some(c) => c,
+            };
+
+            match ch {
+                // Word terminators
+                ' ' | '\t' | '\n' | ';' | '&' | '|' | '(' | ')' => break,
+                '<' | '>' => {
+                    // Check if this is an IO number
+                    if !literal.is_empty()
+                        && literal.chars().all(|c| c.is_ascii_digit())
+                        && parts.is_empty()
+                    {
+                        // This is an IO number followed by a redirect
+                        // Put the number back and let the caller handle it
+                        break;
+                    }
+                    break;
+                }
+                '#' if parts.is_empty() && literal.is_empty() => break,
+                '\\' => {
+                    self.advance();
+                    if let Some(next) = self.advance() {
+                        if next == '\n' {
+                            // Line continuation - skip
+                        } else {
+                            literal.push(next);
+                        }
+                    }
+                }
+                '\'' => {
+                    if !literal.is_empty() {
+                        parts.push(WordPart::Literal(std::mem::take(&mut literal)));
+                    }
+                    self.advance();
+                    let mut s = String::new();
+                    loop {
+                        match self.advance() {
+                            None | Some('\'') => break,
+                            Some(c) => s.push(c),
+                        }
+                    }
+                    parts.push(WordPart::SingleQuoted(s));
+                }
+                '"' => {
+                    if !literal.is_empty() {
+                        parts.push(WordPart::Literal(std::mem::take(&mut literal)));
+                    }
+                    self.advance();
+                    let mut dq_parts = Vec::new();
+                    let mut dq_lit = String::new();
+                    loop {
+                        match self.peek() {
+                            None | Some('"') => {
+                                self.advance();
+                                break;
+                            }
+                            Some('\\') => {
+                                self.advance();
+                                match self.peek() {
+                                    Some(c @ ('$' | '`' | '"' | '\\' | '\n')) => {
+                                        self.advance();
+                                        if c != '\n' {
+                                            dq_lit.push(c);
+                                        }
+                                    }
+                                    Some(c) => {
+                                        dq_lit.push('\\');
+                                        dq_lit.push(c);
+                                        self.advance();
+                                    }
+                                    None => dq_lit.push('\\'),
+                                }
+                            }
+                            Some('$') => {
+                                if !dq_lit.is_empty() {
+                                    dq_parts.push(WordPart::Literal(std::mem::take(&mut dq_lit)));
+                                }
+                                self.advance();
+                                let input_clone = self.input.clone();
+                                let part = parse_dollar(&input_clone, &mut self.pos);
+                                dq_parts.push(part);
+                            }
+                            Some('`') => {
+                                if !dq_lit.is_empty() {
+                                    dq_parts.push(WordPart::Literal(std::mem::take(&mut dq_lit)));
+                                }
+                                self.advance();
+                                let mut cmd = String::new();
+                                loop {
+                                    match self.peek() {
+                                        None | Some('`') => {
+                                            self.advance();
+                                            break;
+                                        }
+                                        Some('\\') => {
+                                            self.advance();
+                                            if let Some(c) = self.advance() {
+                                                cmd.push(c);
+                                            }
+                                        }
+                                        Some(c) => {
+                                            cmd.push(c);
+                                            self.advance();
+                                        }
+                                    }
+                                }
+                                dq_parts.push(WordPart::BacktickSub(cmd));
+                            }
+                            Some(c) => {
+                                dq_lit.push(c);
+                                self.advance();
+                            }
+                        }
+                    }
+                    if !dq_lit.is_empty() {
+                        dq_parts.push(WordPart::Literal(dq_lit));
+                    }
+                    parts.push(WordPart::DoubleQuoted(dq_parts));
+                }
+                '$' => {
+                    if !literal.is_empty() {
+                        parts.push(WordPart::Literal(std::mem::take(&mut literal)));
+                    }
+                    self.advance();
+                    if self.peek() == Some('\'') {
+                        // $'...' ANSI-C quoting
+                        self.advance();
+                        let mut s = String::new();
+                        loop {
+                            match self.advance() {
+                                None | Some('\'') => break,
+                                Some('\\') => match self.advance() {
+                                    Some('n') => s.push('\n'),
+                                    Some('t') => s.push('\t'),
+                                    Some('r') => s.push('\r'),
+                                    Some('\\') => s.push('\\'),
+                                    Some('\'') => s.push('\''),
+                                    Some('a') => s.push('\x07'),
+                                    Some('b') => s.push('\x08'),
+                                    Some('e') | Some('E') => s.push('\x1b'),
+                                    Some('f') => s.push('\x0c'),
+                                    Some('v') => s.push('\x0b'),
+                                    Some('0') => {
+                                        let mut val = 0u8;
+                                        for _ in 0..3 {
+                                            match self.peek() {
+                                                Some(c @ '0'..='7') => {
+                                                    val = val * 8 + (c as u8 - b'0');
+                                                    self.advance();
+                                                }
+                                                _ => break,
+                                            }
+                                        }
+                                        s.push(val as char);
+                                    }
+                                    Some('x') => {
+                                        let mut val = 0u8;
+                                        for _ in 0..2 {
+                                            match self.peek() {
+                                                Some(c) if c.is_ascii_hexdigit() => {
+                                                    val = val * 16 + c.to_digit(16).unwrap() as u8;
+                                                    self.advance();
+                                                }
+                                                _ => break,
+                                            }
+                                        }
+                                        s.push(val as char);
+                                    }
+                                    Some(c) => {
+                                        s.push('\\');
+                                        s.push(c);
+                                    }
+                                    None => s.push('\\'),
+                                },
+                                Some(c) => s.push(c),
+                            }
+                        }
+                        parts.push(WordPart::SingleQuoted(s));
+                    } else {
+                        let input_clone = self.input.clone();
+                        let part = parse_dollar(&input_clone, &mut self.pos);
+                        parts.push(part);
+                    }
+                }
+                '`' => {
+                    if !literal.is_empty() {
+                        parts.push(WordPart::Literal(std::mem::take(&mut literal)));
+                    }
+                    self.advance();
+                    let mut cmd = String::new();
+                    loop {
+                        match self.peek() {
+                            None | Some('`') => {
+                                self.advance();
+                                break;
+                            }
+                            Some('\\') => {
+                                self.advance();
+                                if let Some(c) = self.advance() {
+                                    if matches!(c, '$' | '`' | '\\') {
+                                        cmd.push(c);
+                                    } else {
+                                        cmd.push('\\');
+                                        cmd.push(c);
+                                    }
+                                }
+                            }
+                            Some(c) => {
+                                cmd.push(c);
+                                self.advance();
+                            }
+                        }
+                    }
+                    parts.push(WordPart::BacktickSub(cmd));
+                }
+                '~' if parts.is_empty() && literal.is_empty() => {
+                    self.advance();
+                    let mut user = String::new();
+                    while let Some(c) = self.peek() {
+                        if c.is_alphanumeric() || c == '_' || c == '-' || c == '.' {
+                            user.push(c);
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                    parts.push(WordPart::Tilde(user));
+                }
+                c => {
+                    literal.push(c);
+                    self.advance();
+                }
+            }
+        }
+
+        if !literal.is_empty() {
+            parts.push(WordPart::Literal(literal));
+        }
+
+        if parts.is_empty() {
+            Token::Eof
+        } else {
+            Token::Word(parts)
+        }
+    }
+
+    /// Get the next heredoc body (called by the parser when processing heredoc redirections).
+    pub fn take_heredoc_body(&mut self) -> Option<Word> {
+        if self.heredoc_index < self.heredoc_bodies.len() {
+            let body = self.heredoc_bodies[self.heredoc_index].clone();
+            self.heredoc_index += 1;
+            Some(body)
+        } else {
+            None
+        }
+    }
+}
