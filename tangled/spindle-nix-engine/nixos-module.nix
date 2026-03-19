@@ -343,10 +343,10 @@ in {
             # Filesystem sandboxing is handled by hakoniwa per-workflow: each
             # workflow gets its own mount namespace with a rootdir, read-only
             # system paths, and a writable workspace. systemd mount features
-            # (ProtectSystem, PrivateTmp, etc.) are omitted because they create
-            # a parent mount namespace that prevents hakoniwa from mounting
+            # (ProtectSystem, PrivateTmp, PrivateDevices, etc.) are omitted
+            # because they create a parent mount namespace with restricted proc
+            # options ("mount too revealing") that prevent hakoniwa from mounting
             # procfs in its nested PID namespace.
-            PrivateDevices = true;
 
             # Kernel hardening
             ProtectKernelTunables = true;
