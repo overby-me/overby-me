@@ -308,14 +308,37 @@ impl Engine for NixEngine {
 
         info!(%wid, step_idx, name = step.name(), "executing step");
 
-        // Build a hakoniwa container for process isolation: separate PID/IPC
-        // namespaces and resource limits. Filesystem isolation (rootfs, tmpfs)
-        // is skipped because bind-mount remounting fails inside user namespaces
-        // on systemd-managed services. The systemd service's ProtectSystem=strict
-        // already provides filesystem protection.
+        // Build a hakoniwa container for per-workflow process isolation:
+        // - User namespace: required to create other namespaces without root
+        // - PID namespace: workflows can't see each other's processes
+        // - IPC namespace: no shared memory between workflows
+        // - Mount namespace (via rootdir): private /tmp, isolated procfs
+        //
+        // Uses rootdir (tmpdir-based root) with explicit bind mounts for the
+        // paths workflows need. This gives hakoniwa full control of the mount
+        // namespace, avoiding conflicts with systemd's mount restrictions.
         let mut container = hakoniwa::Container::new();
         container.unshare(hakoniwa::Namespace::Pid);
         container.unshare(hakoniwa::Namespace::Ipc);
+
+        // Mount system paths read-only.
+        for dir in ["/bin", "/etc", "/lib", "/lib64", "/lib32", "/sbin", "/usr", "/nix", "/run"] {
+            if std::path::Path::new(dir).exists() {
+                container.bindmount_ro(dir, dir);
+            }
+        }
+
+        // Mount workspace read-write, private /tmp and /var/lib for state.
+        container.bindmount_rw(
+            &workspace_dir.to_string_lossy(),
+            &workspace_dir.to_string_lossy(),
+        );
+        container.tmpfsmount("/tmp");
+
+        // Mount /var/log for workflow log access.
+        if std::path::Path::new("/var/log").exists() {
+            container.bindmount_rw("/var/log", "/var/log");
+        }
 
         if let Some(limit) = self.workflow_limits.limit_as {
             container.setrlimit(hakoniwa::Rlimit::As, limit, limit);
