@@ -61,28 +61,10 @@ in {
     enable = true;
     package = peon-ping;
     settings = {
-      default_pack = "peon";
+      default_pack = "blood_elf_engineer";
       volume = 0.5;
       enabled = true;
       desktop_notifications = true;
-      pack_rotation = [
-        "peon"
-        "blood_elf_engineer"
-        "murloc"
-        "peasant"
-        "wc2_peasant"
-        "wc2_human_ships"
-        "wc2_sapper"
-        "wc3_brewmaster"
-        "wc3_corrupted_arthas"
-        "wc3_farseer"
-        "wc3_grunt"
-        "wc3_jaina"
-        "wc3_knight"
-        "warcraft-peon"
-        "wow-tauren"
-      ];
-      pack_rotation_mode = "random";
     };
     installPacks = [
       # og-packs (bundled)
