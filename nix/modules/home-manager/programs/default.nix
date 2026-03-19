@@ -20,6 +20,7 @@
     ./starship.nix
     ./tealdeer.nix
     ./vscode
+    ./wezterm.nix
     ./zed-editor
     ./zellij.nix
     ./zen-browser
