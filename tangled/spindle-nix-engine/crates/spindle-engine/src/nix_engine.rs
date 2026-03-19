@@ -31,6 +31,8 @@ struct WorkflowState {
     nix_env_path: Option<PathBuf>,
     /// Path to the workspace directory.
     workspace_dir: PathBuf,
+    /// Persistent rootdir for hakoniwa containers (shared across steps).
+    container_root: PathBuf,
 }
 
 /// Per-workflow resource limits.
@@ -201,9 +203,22 @@ impl Engine for NixEngine {
         };
 
         // Store the state.
+        // Create a persistent rootdir for hakoniwa containers. This tmpdir
+        // persists across all steps in the workflow and is cleaned up on destroy.
+        let container_root = workspace_dir.join(".container-root");
+        tokio::fs::create_dir_all(&container_root)
+            .await
+            .map_err(|e| {
+                EngineError::SetupFailed(format!(
+                    "failed to create container root {}: {e}",
+                    container_root.display()
+                ))
+            })?;
+
         let state = WorkflowState {
             nix_env_path,
             workspace_dir,
+            container_root,
         };
         self.states.lock().await.insert(wid.to_string(), state);
 
@@ -311,14 +326,29 @@ impl Engine for NixEngine {
         // Build a hakoniwa container for per-workflow process isolation:
         // - PID namespace: workflows can't see each other's processes
         // - IPC namespace: no shared memory between workflows
+        // - Mount namespace (via rootdir): isolated filesystem view
         //
-        // Mount namespace isolation is not used because bind-mount remounting
-        // fails with EPERM in user namespaces (kernel restriction on mounts
-        // from outside the user namespace). The systemd service's
-        // ProtectSystem=strict already provides filesystem protection.
+        // rootdir points to a persistent tmpdir per workflow (shared across
+        // steps). hakoniwa uses pivot_root to switch to this root, making all
+        // bind mounts owned by the user namespace (avoiding EPERM on remount).
         let mut container = hakoniwa::Container::new();
         container.unshare(hakoniwa::Namespace::Pid);
         container.unshare(hakoniwa::Namespace::Ipc);
+        container.rootdir(&state.container_root);
+
+        // Mount system paths read-only.
+        for dir in ["/bin", "/etc", "/lib", "/lib64", "/lib32", "/sbin", "/usr", "/nix"] {
+            if std::path::Path::new(dir).exists() {
+                container.bindmount_ro(dir, dir);
+            }
+        }
+
+        // Workspace is bind-mounted read-write at the same path.
+        container.bindmount_rw(
+            &workspace_dir.to_string_lossy(),
+            &workspace_dir.to_string_lossy(),
+        );
+        container.tmpfsmount("/tmp");
 
         if let Some(limit) = self.workflow_limits.limit_as {
             container.setrlimit(hakoniwa::Rlimit::As, limit, limit);
