@@ -2,6 +2,7 @@
   inputs,
   pkgs,
   config,
+  lib,
   ...
 }: let
   peon-ping = inputs.peon-ping.packages.${pkgs.system}.default;
@@ -26,7 +27,7 @@
     ];
   };
 
-  claudeSettings = {
+  claudeSettingsJson = (pkgs.formats.json {}).generate "claude-settings.json" {
     hooks = {
       SessionStart = [(mkHook {async = false;})];
       SessionEnd = [(mkHook {})];
@@ -39,6 +40,8 @@
       PreCompact = [(mkHook {})];
     };
   };
+
+  settingsPath = "${config.home.homeDirectory}/.claude/settings.json";
 in {
   imports = [inputs.peon-ping.homeManagerModules.default];
 
@@ -48,7 +51,10 @@ in {
       pkgs.libnotify
     ];
     file.".claude/hooks/peon-ping/peon.sh".source = "${peon-ping}/bin/peon";
-    file.".claude/settings.json".text = builtins.toJSON claudeSettings;
+    # Copy settings.json (not symlink) so Claude Code can write to it
+    activation.claudeSettings = lib.hm.dag.entryAfter ["writeBoundary"] ''
+      install -Dm644 ${claudeSettingsJson} ${settingsPath}
+    '';
   };
 
   programs.peon-ping = {
