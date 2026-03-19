@@ -314,12 +314,15 @@ impl Engine for NixEngine {
         // - IPC namespace: no shared memory between workflows
         // - Mount namespace (via rootdir): private /tmp, isolated procfs
         //
-        // Uses rootdir (tmpdir-based root) with explicit bind mounts for the
-        // paths workflows need. This gives hakoniwa full control of the mount
-        // namespace, avoiding conflicts with systemd's mount restrictions.
+        // Uses rootdir() to create a fresh tmpdir root, then pivot_root into it.
+        // All mounts are new within the user namespace, avoiding EPERM on remount.
         let mut container = hakoniwa::Container::new();
         container.unshare(hakoniwa::Namespace::Pid);
         container.unshare(hakoniwa::Namespace::Ipc);
+        // rootdir creates a tmpdir as the container root and uses pivot_root
+        // to switch to it. This ensures all mounts are owned by the user
+        // namespace, avoiding EPERM on bind mount remounts.
+        container.rootdir(workspace_dir);
 
         // Mount system paths read-only.
         for dir in ["/bin", "/etc", "/lib", "/lib64", "/lib32", "/sbin", "/usr", "/nix", "/run"] {
@@ -328,17 +331,12 @@ impl Engine for NixEngine {
             }
         }
 
-        // Mount workspace read-write, private /tmp and /var/lib for state.
+        // Mount workspace read-write and private /tmp.
         container.bindmount_rw(
             &workspace_dir.to_string_lossy(),
             &workspace_dir.to_string_lossy(),
         );
         container.tmpfsmount("/tmp");
-
-        // Mount /var/log for workflow log access.
-        if std::path::Path::new("/var/log").exists() {
-            container.bindmount_rw("/var/log", "/var/log");
-        }
 
         if let Some(limit) = self.workflow_limits.limit_as {
             container.setrlimit(hakoniwa::Rlimit::As, limit, limit);
