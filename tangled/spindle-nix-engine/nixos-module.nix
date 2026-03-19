@@ -158,6 +158,35 @@
         description = "Extra packages to include in PATH.";
       };
 
+      resourceLimits = {
+        memoryMax = lib.mkOption {
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+          example = "20G";
+          description = "Hard memory limit (systemd MemoryMax). Processes are killed if exceeded.";
+        };
+
+        memoryHigh = lib.mkOption {
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+          example = "16G";
+          description = "Soft memory limit (systemd MemoryHigh). Throttles allocation when exceeded.";
+        };
+
+        cpuQuota = lib.mkOption {
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+          example = "200%";
+          description = "CPU quota (systemd CPUQuota). 100% = one core.";
+        };
+
+        tasksMax = lib.mkOption {
+          type = lib.types.nullOr (lib.types.either lib.types.int lib.types.str);
+          default = 512;
+          description = "Maximum number of tasks (processes/threads) the service can spawn.";
+        };
+      };
+
       serviceOverrides = lib.mkOption {
         type = lib.types.attrs;
         default = {};
@@ -325,6 +354,12 @@ in {
 
             # Network — steps need network for git, API calls, etc.
             PrivateNetwork = false;
+
+            # Resource limits — prevent runaway workflows from OOM-killing the system.
+            MemoryMax = lib.mkIf (runner.resourceLimits.memoryMax != null) runner.resourceLimits.memoryMax;
+            MemoryHigh = lib.mkIf (runner.resourceLimits.memoryHigh != null) runner.resourceLimits.memoryHigh;
+            CPUQuota = lib.mkIf (runner.resourceLimits.cpuQuota != null) runner.resourceLimits.cpuQuota;
+            TasksMax = lib.mkIf (runner.resourceLimits.tasksMax != null) runner.resourceLimits.tasksMax;
 
             # Restart policy
             Restart = "on-failure";

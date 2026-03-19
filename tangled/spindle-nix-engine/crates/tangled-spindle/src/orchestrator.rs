@@ -125,6 +125,28 @@ pub fn process_pipeline_event(ctx: Arc<OrchestratorContext>, event: PipelineEven
         "processing pipeline event"
     );
 
+    // Verify the repo is registered on this spindle instance.
+    match ctx.db.get_repo(&repo_did, &repo_name) {
+        Ok(Some(_)) => {} // Repo is tracked — proceed.
+        Ok(None) => {
+            warn!(
+                pipeline = %pipeline_id,
+                repo_did = %repo_did,
+                repo_name = %repo_name,
+                "rejecting pipeline event: repo not registered on this spindle"
+            );
+            return;
+        }
+        Err(e) => {
+            error!(
+                %e,
+                pipeline = %pipeline_id,
+                "failed to check repo registration, rejecting pipeline event"
+            );
+            return;
+        }
+    }
+
     // Extract workflows from the record.
     let workflow_manifests = match &record.workflows {
         Some(wfs) if !wfs.is_empty() => wfs.clone(),

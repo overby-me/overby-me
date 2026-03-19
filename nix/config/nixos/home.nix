@@ -135,6 +135,11 @@
             queueSize = 100;
             workflowTimeout = "12h";
           };
+          resourceLimits = {
+            memoryHigh = "16G";
+            memoryMax = "20G";
+            tasksMax = 512;
+          };
         };
 
         searx = {
