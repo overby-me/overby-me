@@ -9,13 +9,7 @@
   packages.tangled-spindle-nix-engine = {
     lib,
     rustPlatform,
-    makeWrapper,
-    nix,
-    bash,
-    coreutils,
     git,
-    gnutar,
-    gzip,
   }:
     rustPlatform.buildRustPackage {
       pname = "tangled-spindle-nix-engine";
@@ -34,25 +28,7 @@
 
       nativeBuildInputs = [
         git
-        makeWrapper
       ];
-
-      # Runtime dependencies needed by the nix engine for step execution
-      postInstall = let
-        runtimePath = lib.makeBinPath [
-          bash
-          coreutils
-          git
-          gnutar
-          gzip
-          nix
-        ];
-      in ''
-        wrapProgram $out/bin/tangled-spindle \
-          --prefix PATH : ${runtimePath}
-        wrapProgram $out/bin/spindle-run \
-          --prefix PATH : ${runtimePath}
-      '';
 
       doCheck = true;
 
