@@ -347,16 +347,19 @@ impl Engine for NixEngine {
         container.rootdir(&state.container_root);
 
         // Mount system paths read-only.
-        for dir in ["/bin", "/etc", "/lib", "/lib64", "/lib32", "/sbin", "/usr", "/nix"] {
+        for dir in [
+            "/bin", "/etc", "/lib", "/lib64", "/lib32", "/sbin", "/usr", "/nix",
+        ] {
             if std::path::Path::new(dir).exists() {
                 container.bindmount_ro(dir, dir);
             }
         }
 
-        // Create a writable /workspace inside the container root (a tmpdir
-        // owned by the user namespace). Files persist across steps because
-        // rootdir points to a persistent directory per workflow.
+        // Create writable directories inside the container root.
+        // Files in /workspace persist across steps via the shared rootdir.
         container.dir("/workspace", 0o755);
+        container.dir("/proc", 0o555);
+        container.dir("/dev", 0o755);
         container.tmpfsmount("/tmp");
 
         if let Some(limit) = self.workflow_limits.limit_as {
@@ -395,10 +398,8 @@ impl Engine for NixEngine {
         let stdout_task = tokio::task::spawn_blocking(move || {
             if let Some(stdout) = hako_stdout {
                 let reader = std::io::BufReader::new(stdout);
-                for line in std::io::BufRead::lines(reader) {
-                    if let Ok(line) = line {
-                        let _ = writeln!(stdout_writer, "{line}");
-                    }
+                for line in std::io::BufRead::lines(reader).map_while(Result::ok) {
+                    let _ = writeln!(stdout_writer, "{line}");
                 }
             }
         });
@@ -406,10 +407,8 @@ impl Engine for NixEngine {
         let stderr_task = tokio::task::spawn_blocking(move || {
             if let Some(stderr) = hako_stderr {
                 let reader = std::io::BufReader::new(stderr);
-                for line in std::io::BufRead::lines(reader) {
-                    if let Ok(line) = line {
-                        let _ = writeln!(stderr_writer, "{line}");
-                    }
+                for line in std::io::BufRead::lines(reader).map_while(Result::ok) {
+                    let _ = writeln!(stderr_writer, "{line}");
                 }
             }
         });
