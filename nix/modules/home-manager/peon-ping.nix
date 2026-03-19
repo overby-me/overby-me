@@ -5,6 +5,11 @@
 }: {
   imports = [inputs.peon-ping.homeManagerModules.default];
 
+  home.packages = [
+    inputs.peon-ping.packages.${pkgs.system}.default
+    pkgs.libnotify
+  ];
+
   programs.peon-ping = {
     enable = true;
     package = inputs.peon-ping.packages.${pkgs.system}.default;
