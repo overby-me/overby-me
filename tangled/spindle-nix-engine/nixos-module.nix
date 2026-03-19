@@ -354,7 +354,6 @@ in {
               "/var/log/${logsDir}"
             ];
 
-
             # Kernel hardening
             ProtectKernelTunables = true;
             ProtectKernelModules = true;
@@ -368,9 +367,10 @@ in {
             NoNewPrivileges = true;
             RemoveIPC = true;
             RestrictSUIDSGID = true;
-            # Allow PID, IPC and mount namespaces for hakoniwa per-workflow isolation.
-            # Other namespaces (user, cgroup, network, uts) remain blocked.
-            RestrictNamespaces = "~user cgroup net uts";
+            # Allow PID, IPC, mount and user namespaces for hakoniwa per-workflow
+            # isolation. User namespaces are needed to create the others without
+            # root; NoNewPrivileges prevents capability escalation inside them.
+            RestrictNamespaces = "~cgroup net uts";
             RestrictRealtime = true;
             RestrictAddressFamilies = ["AF_INET" "AF_INET6" "AF_UNIX" "AF_NETLINK"];
 
