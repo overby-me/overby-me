@@ -344,6 +344,11 @@ in {
               "/var/log/${logsDir}"
             ];
 
+            # systemd-run --scope needs D-Bus access to create transient scopes.
+            BindReadOnlyPaths = [
+              "/run/dbus/system_bus_socket"
+            ];
+
             # Kernel hardening
             ProtectKernelTunables = true;
             ProtectKernelModules = true;

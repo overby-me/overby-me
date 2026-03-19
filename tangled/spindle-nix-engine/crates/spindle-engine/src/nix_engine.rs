@@ -14,7 +14,7 @@ use async_trait::async_trait;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::Mutex;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use crate::nix_deps::{
     NixDeps, build_nix_env, parse_dependencies_from_yaml, parse_env_from_yaml,
@@ -322,47 +322,53 @@ impl Engine for NixEngine {
         // per-workflow isolation (own cgroup with resource limits).
         // Scopes only support cgroup properties (MemoryMax, TasksMax, etc.),
         // not execution properties (PrivateTmp, WorkingDirectory).
-        let mut child = if let Some(ref systemd_run) = self.systemd_run_path {
-            let scope_name = format!("spindle-{}-{step_idx}", wid.to_string().replace('/', "-"));
-            let mut cmd = Command::new(systemd_run);
-            cmd.args(["--scope", "--collect", "--quiet"]);
-            cmd.arg(format!("--unit={scope_name}"));
+        let mut child = 'spawn: {
+            if let Some(ref systemd_run) = self.systemd_run_path {
+                let scope_name =
+                    format!("spindle-{}-{step_idx}", wid.to_string().replace('/', "-"));
+                let mut cmd = Command::new(systemd_run);
+                cmd.args(["--scope", "--collect", "--quiet"]);
+                cmd.arg(format!("--unit={scope_name}"));
 
-            if let Some(ref mem) = self.workflow_limits.memory_max {
-                cmd.args(["-p", &format!("MemoryMax={mem}")]);
+                if let Some(ref mem) = self.workflow_limits.memory_max {
+                    cmd.args(["-p", &format!("MemoryMax={mem}")]);
+                }
+                if let Some(tasks) = self.workflow_limits.tasks_max {
+                    cmd.args(["-p", &format!("TasksMax={tasks}")]);
+                }
+
+                // Pass environment variables via --setenv.
+                for (k, v) in &env_vars {
+                    cmd.arg("--setenv");
+                    cmd.arg(format!("{k}={v}"));
+                }
+
+                cmd.arg("--");
+                cmd.arg(&self.bash_path);
+                cmd.args([
+                    "--norc",
+                    "--noprofile",
+                    "-euo",
+                    "pipefail",
+                    "-c",
+                    &full_command,
+                ]);
+
+                match cmd
+                    .current_dir(workspace_dir)
+                    .env_clear()
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .kill_on_drop(true)
+                    .spawn()
+                {
+                    Ok(child) => break 'spawn child,
+                    Err(e) => {
+                        warn!(%e, "systemd-run scope failed, falling back to direct execution");
+                    }
+                }
             }
-            if let Some(tasks) = self.workflow_limits.tasks_max {
-                cmd.args(["-p", &format!("TasksMax={tasks}")]);
-            }
 
-            // Pass environment variables via --setenv.
-            for (k, v) in &env_vars {
-                cmd.arg("--setenv");
-                cmd.arg(format!("{k}={v}"));
-            }
-
-            cmd.arg("--");
-            cmd.arg(&self.bash_path);
-            cmd.args([
-                "--norc",
-                "--noprofile",
-                "-euo",
-                "pipefail",
-                "-c",
-                &full_command,
-            ]);
-
-            cmd.current_dir(workspace_dir)
-                .env_clear()
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .kill_on_drop(true)
-                .spawn()
-                .map_err(|e| EngineError::StepFailed {
-                    exit_code: -1,
-                    message: format!("failed to spawn systemd-run scope: {e}"),
-                })?
-        } else {
             Command::new(&self.bash_path)
                 .args(["-euo", "pipefail", "-c", &full_command])
                 .current_dir(workspace_dir)
