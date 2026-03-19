@@ -401,10 +401,14 @@ impl Engine for NixEngine {
 
         if !status.success() {
             let exit_code = status.exit_code.unwrap_or(status.code);
-            error!(%wid, step_idx, exit_code, name = step.name(), "step failed");
+            let reason = &status.reason;
+            error!(%wid, step_idx, exit_code, %reason, name = step.name(), "step failed");
             return Err(EngineError::StepFailed {
                 exit_code,
-                message: format!("step {:?} exited with code {exit_code}", step.name()),
+                message: format!(
+                    "step {:?} exited with code {exit_code}: {reason}",
+                    step.name()
+                ),
             });
         }
 

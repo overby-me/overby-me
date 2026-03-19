@@ -346,7 +346,9 @@ in {
             PrivateTmp = true;
             PrivateMounts = true;
             PrivateDevices = true;
-            PrivateUsers = true;
+            # PrivateUsers is omitted: hakoniwa needs CAP_SYS_ADMIN to create
+            # PID/IPC namespaces. DynamicUser + NoNewPrivileges already provide
+            # user isolation without PrivateUsers.
             ReadWritePaths = [
               "/var/lib/${stateDir}"
               "/var/log/${logsDir}"
