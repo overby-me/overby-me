@@ -40,13 +40,19 @@
     system76-scheduler.enable = true;
   };
   systemd = {
-    # swhkd runs as root to read input devices
+    # swhkd runs as root to read input devices; needs PKEXEC_UID and
+    # XDG_RUNTIME_DIR so it can find the swhks socket at /run/user/1000/swhkd.sock.
+    # ExecStartPre waits for the socket so swhkd doesn't grab input before swhks is ready.
     services.swhkd = {
       description = "Simple Wayland HotKey Daemon";
       after = ["graphical.target"];
       wantedBy = ["graphical.target"];
-      environment.PKEXEC_UID = "1000";
+      environment = {
+        PKEXEC_UID = "1000";
+        XDG_RUNTIME_DIR = "/run/user/1000";
+      };
       serviceConfig = {
+        ExecStartPre = "${pkgs.bash}/bin/bash -c 'for i in $(seq 1 30); do [ -S /run/user/1000/swhkd.sock ] && exit 0; sleep 1; done; exit 1'";
         ExecStart = "${pkgs.swhkd}/bin/swhkd -c /etc/swhkd/swhkdrc";
         Restart = "on-failure";
         RestartSec = 3;
