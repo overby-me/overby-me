@@ -414,6 +414,27 @@ in {
     lib.mkIf (enabledRunners != {}) {
       systemd.services = lib.mkMerge (lib.mapAttrsToList mkRunnerService enabledRunners);
 
+      # Create system users/groups for runners with static users.
+      users.users = lib.mkMerge (lib.mapAttrsToList (
+          name: runner:
+            lib.optionalAttrs (runner.user != null) {
+              ${runner.user} = {
+                isSystemUser = true;
+                group = runner.group or runner.user;
+                home = "/var/lib/tangled-spindle/${name}";
+              };
+            }
+        )
+        enabledRunners);
+
+      users.groups = lib.mkMerge (lib.mapAttrsToList (
+          _name: runner:
+            lib.optionalAttrs (runner.user != null) {
+              ${runner.group or runner.user} = {};
+            }
+        )
+        enabledRunners);
+
       # Runner users need trusted-user status so CI steps can configure
       # binary caches (e.g. cachix use) via the Nix daemon.
       nix.settings.trusted-users =

@@ -130,6 +130,8 @@
           owner = "did:plc:eukcx4amfqmhfrnkix7zwm34";
           tokenFile = "/run/agenix/spindle-token";
           nixPackage = pkgs.pkgsUnstable.nixVersions.latest;
+          user = "tangled-spindle";
+          group = "tangled-spindle";
           engine = {
             maxJobs = 2;
             queueSize = 100;
