@@ -18,5 +18,6 @@
     services
     catppuccin
     vibe
+    peon-ping
   ];
 }

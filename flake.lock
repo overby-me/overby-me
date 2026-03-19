@@ -1466,6 +1466,29 @@
         "type": "github"
       }
     },
+    "peon-ping": {
+      "inputs": {
+        "flake-utils": [
+          "flake-utils"
+        ],
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1773855570,
+        "narHash": "sha256-zpCbR1NOlPlUWqdJLxmF3PEN5BG84Vu9JGEqkhIeUCI=",
+        "owner": "PeonPing",
+        "repo": "peon-ping",
+        "rev": "73ff76ebab8893d7f2fb321ff48e2197b8fcb3f9",
+        "type": "github"
+      },
+      "original": {
+        "owner": "PeonPing",
+        "repo": "peon-ping",
+        "type": "github"
+      }
+    },
     "pre-commit-hooks": {
       "inputs": {
         "flake-compat": [
@@ -1579,6 +1602,7 @@
         "nixpkgs-unstable": "nixpkgs-unstable",
         "non-spatial-input": "non-spatial-input",
         "nxv": "nxv",
+        "peon-ping": "peon-ping",
         "ragenix": "ragenix",
         "rust-overlay": "rust-overlay_2",
         "spicetify-nix": "spicetify-nix",
