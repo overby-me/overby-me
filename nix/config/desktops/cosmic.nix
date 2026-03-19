@@ -45,6 +45,7 @@
       description = "Simple Wayland HotKey Daemon";
       after = ["graphical.target"];
       wantedBy = ["graphical.target"];
+      environment.PKEXEC_UID = "1000";
       serviceConfig = {
         ExecStart = "${pkgs.swhkd}/bin/swhkd -c /etc/swhkd/swhkdrc";
         Restart = "on-failure";
