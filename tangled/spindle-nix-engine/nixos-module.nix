@@ -362,7 +362,9 @@ in {
             ProtectControlGroups = true;
             ProtectClock = true;
             ProtectHostname = true;
-            ProtectProc = "invisible";
+            # ProtectProc is omitted: hakoniwa needs to mount procfs in the
+            # container's PID namespace. PID isolation between workflows is
+            # provided by hakoniwa's per-workflow PID namespace instead.
 
             # Privilege hardening
             NoNewPrivileges = true;
