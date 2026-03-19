@@ -348,16 +348,10 @@ in {
             # options ("mount too revealing") that prevent hakoniwa from mounting
             # procfs in its nested PID namespace.
 
-            # Kernel hardening
-            ProtectKernelTunables = true;
-            ProtectKernelModules = true;
-            ProtectKernelLogs = true;
-            ProtectControlGroups = true;
-            ProtectClock = true;
-            ProtectHostname = true;
-            # ProtectProc is omitted: hakoniwa needs to mount procfs in the
-            # container's PID namespace. PID isolation between workflows is
-            # provided by hakoniwa's per-workflow PID namespace instead.
+            # Kernel hardening options that create mount namespaces are omitted
+            # because they cause "mount too revealing" when hakoniwa tries to
+            # mount procfs in its PID namespace. Hakoniwa provides its own
+            # mount namespace isolation per workflow.
 
             # Privilege hardening
             NoNewPrivileges = true;
