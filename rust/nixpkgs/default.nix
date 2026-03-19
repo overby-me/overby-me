@@ -10,20 +10,10 @@
     inherit (final) lib;
     components = import ./components {pkgs = final;};
 
-    # Brush provides /bin/brush, but stdenv expects /bin/bash.
-    # Create a thin wrapper package with bash/sh symlinks.
-    brush-as-bash = final.runCommand "brush-as-bash-${final.brush.version}" {} ''
-      mkdir -p $out/bin
-      ln -s ${final.brush}/bin/brush $out/bin/bash
-      ln -s ${final.brush}/bin/brush $out/bin/sh
-    '';
-
     # Collect only components that have a replacement ready
     available = lib.filter (c: c.replacement != null) (lib.attrValues components);
 
-    # Build the replacement initialPath by swapping available components.
-    # The shell component is special-cased: we use brush-as-bash instead
-    # of the raw brush package so stdenv gets /bin/bash.
+    # Build the replacement initialPath by swapping available components
     replacedInitialPath =
       map (
         pkg: let
@@ -33,24 +23,27 @@
             then lib.head match
             else null;
         in
-          if component != null && component.name == "shell"
-          then brush-as-bash
-          else if component != null
+          if component != null
           then component.replacement
           else pkg
       )
       prev.stdenv.initialPath;
+
+    # Shell replacement: rust-bash provides /bin/bash and /bin/sh
+    shellPkg = let
+      shellMatch = lib.filter (c: c.name == "shell") available;
+    in
+      if shellMatch != []
+      then (lib.head shellMatch).replacement
+      else prev.bash;
   in {
     # Expose the component registry for introspection
     rust-nixpkgs-components = components;
 
-    # The brush-as-bash wrapper for use in other contexts
-    inherit brush-as-bash;
-
     # A stdenv with all available Rust replacements swapped in
     stdenvRs = prev.stdenv.override {
       initialPath = replacedInitialPath;
-      shell = "${brush-as-bash}/bin/bash";
+      shell = "${shellPkg}/bin/bash";
     };
 
     # mkDerivation using the Rust stdenv — use this to test-build packages
@@ -64,8 +57,21 @@
     rust-nixpkgs-test = {
       stdenv,
       lib,
+      rust-bash,
       uutils-coreutils-noprefix,
-      brush,
+      uutils-sed,
+      rust-grep,
+      rust-awk,
+      uutils-findutils,
+      uutils-diffutils,
+      rust-tar,
+      rust-gzip,
+      rust-bzip2,
+      rust-xz,
+      rust-make,
+      rust-patch,
+      rust-patchelf,
+      rust-strip,
     }:
       stdenv.mkDerivation {
         pname = "rust-nixpkgs-test";
@@ -73,34 +79,52 @@
 
         dontUnpack = true;
 
-        # Verify the available Rust replacements actually exist
         nativeBuildInputs = [
+          rust-bash
           uutils-coreutils-noprefix
-          brush
+          uutils-sed
+          rust-grep
+          rust-awk
+          uutils-findutils
+          uutils-diffutils
+          rust-tar
+          rust-gzip
+          rust-bzip2
+          rust-xz
+          rust-make
+          rust-patch
+          rust-patchelf
+          rust-strip
         ];
 
         buildPhase = ''
           echo "=== rust-nixpkgs component status ==="
           echo ""
-          echo "Available (2 components):"
-          echo "  ✅ shell (brush $(brush --version 2>&1 | head -1 || echo unknown))"
-          echo "  ✅ coreutils (uutils $(ls --version 2>&1 | head -1 || echo unknown))"
+          echo "All 15 components available:"
+          echo "  Phase 1: shell (rust-bash), coreutils (uutils)"
+          echo "  Phase 2: sed (uutils-sed), grep, awk, findutils (uutils), diffutils (uutils)"
+          echo "  Phase 3: tar, gzip, bzip2, xz"
+          echo "  Phase 4: make, patch"
+          echo "  Phase 5: patchelf, strip"
           echo ""
-          echo "Planned (13 components):"
-          echo "  ⏳ gnused"
-          echo "  ⏳ grep"
-          echo "  ⏳ awk"
-          echo "  ⏳ findutils"
-          echo "  ⏳ diffutils"
-          echo "  ⏳ tar"
-          echo "  ⏳ gzip"
-          echo "  ⏳ bzip2"
-          echo "  ⏳ xz"
-          echo "  ⏳ make"
-          echo "  ⏳ patch"
-          echo "  ⏳ patchelf"
-          echo "  ⏳ strip"
+          echo "Verifying binaries..."
+          bash --version | head -1
+          ls --version | head -1
+          sed --version | head -1
+          grep --version | head -1
+          awk --version | head -1
+          find --version | head -1
+          diff --version | head -1
+          tar --version | head -1
+          gzip --version | head -1
+          bzip2 --version 2>&1 | head -1
+          xz --version | head -1
+          make --version | head -1
+          patch --version | head -1
+          patchelf --version | head -1
+          strip --version | head -1
           echo ""
+          echo "All components verified."
         '';
 
         installPhase = ''

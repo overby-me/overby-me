@@ -9,37 +9,37 @@ The nixpkgs standard environment (`stdenv`) is the foundation that builds every 
 ### Architecture
 
 ```text
-┌─────────────────────────────────────────────────────┐
-│                   mkDerivation                       │
-│  (Phase 6: Rust binary replaces setup.sh phases)     │
-├─────────────────────────────────────────────────────┤
-│              stdenv.initialPath                       │
+┌──────────────────────────────────────────────────────┐
+│                    mkDerivation                       │
+│   (Phase 6: Rust binary replaces setup.sh phases)     │
+├──────────────────────────────────────────────────────┤
+│               stdenv.initialPath                      │
 │                                                       │
-│  ┌────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐  │
-│  │ shell  │ │coreutils │ │  make    │ │ tar+gz+  │  │
-│  │ (P1)   │ │  (P1)    │ │  (P4)   │ │ bz2+xz   │  │
-│  │ brush  │ │ uutils   │ │ make-rs │ │  (P3)    │  │
-│  └────────┘ └──────────┘ └──────────┘ └──────────┘  │
-│  ┌────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐  │
-│  │  sed   │ │  grep    │ │  awk    │ │diffutils │  │
-│  │ (P2)   │ │  (P2)    │ │  (P2)   │ │  (P2)    │  │
-│  └────────┘ └──────────┘ └──────────┘ └──────────┘  │
-│  ┌────────┐ ┌──────────┐ ┌──────────┐               │
-│  │  find  │ │ patch    │ │patchelf │               │
-│  │ xargs  │ │  (P4)    │ │ strip   │               │
-│  │ (P2)   │ │         │ │  (P5)   │               │
-│  └────────┘ └──────────┘ └──────────┘               │
-├─────────────────────────────────────────────────────┤
-│              Nix abstractions (rust-nixpkgs)            │
-│  components/*.nix │ stdenv.nix │ lib.nix │ tests     │
-└─────────────────────────────────────────────────────┘
+│  ┌─────────┐ ┌──────────┐ ┌────────┐ ┌──────────┐   │
+│  │  shell   │ │coreutils │ │  make  │ │ tar+gz+  │   │
+│  │  (P1)    │ │  (P1)    │ │  (P4)  │ │ bz2+xz   │   │
+│  │rust-bash │ │ uutils   │ │        │ │  (P3)    │   │
+│  └─────────┘ └──────────┘ └────────┘ └──────────┘   │
+│  ┌─────────┐ ┌──────────┐ ┌────────┐ ┌──────────┐   │
+│  │   sed    │ │  grep    │ │  awk   │ │diffutils │   │
+│  │  (P2)    │ │  (P2)    │ │  (P2)  │ │  (P2)    │   │
+│  └─────────┘ └──────────┘ └────────┘ └──────────┘   │
+│  ┌─────────┐ ┌──────────┐ ┌────────────┐            │
+│  │  find    │ │  patch   │ │  patchelf  │            │
+│  │ xargs    │ │  (P4)    │ │   strip    │            │
+│  │  (P2)    │ │          │ │   (P5)     │            │
+│  └─────────┘ └──────────┘ └────────────┘            │
+├──────────────────────────────────────────────────────┤
+│              Nix abstractions (rust-nixpkgs)          │
+│  components/*.nix │ stdenv.nix │ lib.nix │ tests      │
+└──────────────────────────────────────────────────────┘
 ```
 
 ### Component Inventory
 
 | Component | Original | Rust Replacement | Source | Phase | Status |
 |-----------|----------|-----------------|--------|-------|--------|
-| Shell | bash | [brush](https://github.com/reubeno/brush) | nixpkgs | 1 | ✅ Available |
+| Shell | bash | [rust-bash](../bash) | repo | 1 | ✅ Available |
 | Core utilities | coreutils | [uutils](https://github.com/uutils/coreutils) | nixpkgs | 1 | ✅ Available |
 | Stream editor | gnused | [uutils-sed](https://github.com/uutils/sed) | nixpkgs | 2 | ✅ Available |
 | Pattern grep | gnugrep | rust/grep | repo | 2 | ✅ Available |
@@ -76,7 +76,7 @@ The nixpkgs standard environment (`stdenv`) is the foundation that builds every 
 
 ### Design Decisions
 
-1. **Component files, not crate stubs.** Each `components/*.nix` file declares the replacement mapping. Actual Rust rewrites live at the monorepo root (e.g. `../make-rs/`) or come from nixpkgs (e.g. `pkgs.uutils-coreutils-noprefix`).
+1. **Component files, not crate stubs.** Each `components/*.nix` file declares the replacement mapping. Actual Rust rewrites live under `rust/` (e.g. `rust/make/`) or come from nixpkgs (e.g. `pkgs.uutils-coreutils-noprefix`).
 
 2. **Null means "not yet available."** Components with `replacement = null` are tracked in the registry for status reporting but silently skipped during stdenv assembly.
 
@@ -94,21 +94,21 @@ The nixpkgs standard environment (`stdenv`) is the foundation that builds every 
 
 | Tool | Replacement | Notes |
 |------|-------------|-------|
-| bash | brush (`pkgs.brush`) | Bash-compatible Rust shell; already tested as NixOS runtime shell in rust-nixos |
+| bash | rust-bash (`pkgs.rust-bash`) | Bash-compatible shell written in Rust; provides `/bin/bash` and `/bin/sh` |
 | coreutils | uutils (`pkgs.uutils-coreutils-noprefix`) | Cross-platform coreutils rewrite; noprefix variant matches GNU binary names |
 
 ### Tasks
 
-- [x] Declare shell component with brush replacement
+- [x] Declare shell component with rust-bash replacement
 - [x] Declare coreutils component with uutils replacement
 - [ ] Test: build a trivial derivation with the partially-oxidized stdenv
 - [ ] Test: build a real autotools package (e.g. hello) with the partially-oxidized stdenv
 - [ ] Document known incompatibilities and workarounds
-- [ ] Validate brush can execute stdenv's `setup.sh` phases without modification
+- [ ] Validate rust-bash can execute stdenv's `setup.sh` phases without modification
 
 ### Risks
 
-- **brush compatibility:** brush is still maturing; some bash-isms in `setup.sh` or configure scripts may fail. The rust-nixos wrapper handles signal setup for interactive use, but build-time usage may hit different edge cases.
+- **rust-bash compatibility:** rust-bash is still maturing; some bash-isms in `setup.sh` or configure scripts may fail. Build-time usage may hit edge cases not covered by interactive use.
 - **uutils coverage:** uutils implements most but not all GNU coreutils. Missing or subtly different behavior (e.g. `sort --version-sort`, `date` format strings) could break packages.
 
 ---
@@ -261,7 +261,7 @@ A `mkderivation-rs` binary would:
 ```nix
 stdenvRs = pkgs.stdenv.override {
   initialPath = [
-    brush                  # Phase 1
+    rust-bash              # Phase 1
     uutils-coreutils       # Phase 1
     sed-rs                 # Phase 2
     grep-rs                # Phase 2
@@ -275,7 +275,7 @@ stdenvRs = pkgs.stdenv.override {
     make-rs                # Phase 4
     patch-rs               # Phase 4
   ];
-  shell = "${brush}/bin/brush";
+  shell = "${rust-bash}/bin/bash";
 };
 ```
 
@@ -308,7 +308,7 @@ When combined with rust-nixos, this achieves a fully oxidized Linux system:
 - [ ] Compatibility database: track which nixpkgs packages build successfully
 - [ ] Performance dashboard: build time comparisons
 - [ ] Documentation: migration guide for package maintainers
-- [ ] Upstream patches to brush, uutils, and other community projects for issues found during integration
+- [ ] Upstream patches to uutils and other community projects for issues found during integration
 
 ---
 

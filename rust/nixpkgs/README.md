@@ -4,65 +4,33 @@ Rust replacements for the C toolchain that builds Nix packages.
 
 ## Overview
 
-`rust-nixpkgs` is the build-time counterpart to [rust-nixos](../nixos). Where rust-nixos replaces runtime system components (systemd, bash, coreutils) in a running NixOS system, rust-nixpkgs replaces the **build tools** — the stdenv toolchain that Nix uses to compile and package software.
+`rust-nixpkgs` is the build-time counterpart to [rust-nixos](../nixos). Where rust-nixos replaces runtime system components in a running NixOS system, rust-nixpkgs replaces the **build tools** — the stdenv toolchain that Nix uses to compile and package software.
 
 The nixpkgs standard environment (`stdenv`) is built on a stack of C-based GNU tools: bash runs the build scripts, coreutils provides filesystem primitives, make drives compilation, tar/gzip/xz handle source archives, sed/awk/grep do text processing, and patchelf/strip do binary fixup. Every package in nixpkgs is built by this toolchain.
 
-`rust-nixpkgs` provides Nix abstractions — a component registry and stdenv override mechanism — so that each C tool can be incrementally replaced with a Rust drop-in. Individual rewrites live as sibling subprojects at the monorepo root (e.g. `../make-rs`, `../sed-rs`) or come from existing Rust projects already in nixpkgs (e.g. uutils for coreutils, brush for bash).
-
-## Architecture
-
-```text
-┌──────────────────────────────────────────────────────────┐
-│                    rust-nixpkgs                             │
-│                                                          │
-│  components/          Nix declarations for each tool     │
-│    ├── shell.nix        bash → brush (available)         │
-│    ├── coreutils.nix    coreutils → uutils (available)   │
-│    ├── make.nix         gnumake → make-rs (planned)      │
-│    ├── sed.nix          gnused → sed-rs (planned)        │
-│    ├── ...              ...                              │
-│    └── default.nix      Registry loader                  │
-│                                                          │
-│  lib.nix              Helper functions                   │
-│  stdenv.nix           Rust stdenv assembler              │
-│  default.nix          Flakelight entry (overlay, pkgs)   │
-│  PLAN.md              Phased replacement roadmap         │
-└──────────┬──────────────────────────────────┬────────────┘
-           │                                  │
-           ▼                                  ▼
-   Existing Rust rewrites              Repo-root subprojects
-   (already in nixpkgs)               (created as needed)
-
-   • uutils-coreutils                 • make-rs/
-   • brush                            • sed-rs/
-   • ripgrep (not drop-in)            • tar-rs/
-                                      • patch-rs/
-                                      • patchelf-rs/
-                                      • ...
-```
+`rust-nixpkgs` provides Nix abstractions — a component registry and stdenv override mechanism — so that each C tool can be incrementally replaced with a Rust drop-in. Individual rewrites live as sibling subprojects under `rust/` (e.g. `rust/grep`, `rust/tar`) or come from existing Rust projects already in nixpkgs (e.g. uutils for coreutils).
 
 ## Components
 
-The component registry tracks every tool in the stdenv `initialPath` plus the binary fixup tools used by `mkDerivation`. Each component has a status:
+All 15 stdenv tools have Rust replacements available:
 
-| Component | Original | Rust Replacement | Phase | Status |
-|-----------|----------|-----------------|-------|--------|
-| Shell | bash | [brush](https://github.com/reubeno/brush) | 1 | ✅ Available |
-| Core utilities | coreutils | [uutils](https://github.com/uutils/coreutils) | 1 | ✅ Available |
-| Text search | gnugrep | grep-rs | 2 | ⏳ Planned |
-| Stream editor | gnused | sed-rs | 2 | ⏳ Planned |
-| Pattern processing | gawk | awk-rs | 2 | ⏳ Planned |
-| File comparison | diffutils | diffutils-rs | 2 | ⏳ Planned |
-| File search | findutils | findutils-rs | 2 | ⏳ Planned |
-| Tape archive | gnutar | tar-rs | 3 | ⏳ Planned |
-| Gzip compression | gzip | gzip-rs | 3 | ⏳ Planned |
-| Bzip2 compression | bzip2 | bzip2-rs | 3 | ⏳ Planned |
-| XZ compression | xz | xz-rs | 3 | ⏳ Planned |
-| Build driver | gnumake | make-rs | 4 | ⏳ Planned |
-| Patch application | gnupatch | patch-rs | 4 | ⏳ Planned |
-| ELF patching | patchelf | patchelf-rs | 5 | ⏳ Planned |
-| Symbol stripping | binutils strip | strip-rs | 5 | ⏳ Planned |
+| Component | Original | Rust Replacement | Source | Phase |
+|-----------|----------|-----------------|--------|-------|
+| Shell | bash | [rust-bash](../bash) | repo | 1 |
+| Core utilities | coreutils | [uutils](https://github.com/uutils/coreutils) | nixpkgs | 1 |
+| Stream editor | gnused | [uutils-sed](https://github.com/uutils/sed) | nixpkgs | 2 |
+| Text search | gnugrep | [rust-grep](../grep) | repo | 2 |
+| Pattern processing | gawk | [rust-awk](../awk) | repo | 2 |
+| File search | findutils | [uutils-findutils](https://github.com/uutils/findutils) | nixpkgs | 2 |
+| File comparison | diffutils | [uutils-diffutils](https://github.com/uutils/diffutils) | nixpkgs | 2 |
+| Tape archive | gnutar | [rust-tar](../tar) | repo | 3 |
+| Gzip compression | gzip | [rust-gzip](../gzip) | repo | 3 |
+| Bzip2 compression | bzip2 | [rust-bzip2](../bzip2) | repo | 3 |
+| XZ compression | xz | [rust-xz](../xz) | repo | 3 |
+| Build driver | gnumake | [rust-make](../make) | repo | 4 |
+| Patch application | gnupatch | [rust-patch](../patch) | repo | 4 |
+| ELF patching | patchelf | [rust-patchelf](../patchelf) | repo | 5 |
+| Symbol stripping | binutils strip | [rust-strip](../strip) | repo | 5 |
 
 ## How It Works
 
@@ -85,67 +53,28 @@ mkComponent {
 }
 ```
 
-Components with `replacement = null` are tracked for status reporting but skipped when assembling the stdenv. This lets us declare the full target map up front and fill in replacements incrementally.
+Components with `replacement = null` are tracked for status reporting but skipped when assembling the stdenv.
 
 ### Stdenv Override
 
-The `stdenv.nix` module reads the component registry and produces a modified stdenv where every C tool with a Rust replacement is swapped out of the `initialPath`:
+The overlay reads the component registry and produces a modified stdenv where every C tool with a Rust replacement is swapped out of the `initialPath`:
 
 ```nix
 # The overlay provides stdenvRs — a stdenv with Rust tools
 pkgs.stdenvRs.mkDerivation {
   pname = "hello";
-  # ... this package is built with uutils, brush, etc.
+  # ... this package is built with Rust tools
 }
 ```
 
 ### Drop-in Requirement
 
-Replacements must be **flag-compatible drop-ins** for the originals. This means:
+Replacements must be **flag-compatible drop-ins** for the originals:
 
 - Same binary names (`ls`, `grep`, `make`, not `rg`, `fd`, `just`)
 - Same CLI flags (GNU extensions included where configure scripts rely on them)
 - Same output format (scripts parse stdout of these tools)
 - Same exit codes
-
-Tools like `ripgrep`, `fd`, and `just` are excellent but are **not** drop-ins — they have different flags, output formats, and semantics. The goal is to replace the C implementations without changing any build scripts.
-
-## Adding a New Rewrite
-
-### Option A: Existing Rust Package from Nixpkgs
-
-If a drop-in Rust replacement already exists in nixpkgs:
-
-1. Edit the component file in `components/` (e.g. `components/coreutils.nix`)
-2. Set `replacement = pkgs.<package-name>;`
-3. Set `status = status.available;`
-4. Set `source = source.nixpkgs;`
-
-### Option B: New Repo-Root Subproject
-
-For a new Rust rewrite developed in this monorepo:
-
-1. Create the subproject at the repo root (e.g. `make-rs/`)
-2. Add a `default.nix` following the pattern in [rust-pkg-config](../pkg-config) or [rust-systemd](../systemd)
-3. Import it in the root `flake.nix`
-4. Update the component file to reference it:
-
-```nix
-# components/make.nix
-{ pkgs, lib, mkComponent, status, source, ... }:
-mkComponent {
-  name = "make";
-  original = pkgs.gnumake;
-  replacement = pkgs.make-rs;       # ← point to the new package
-  status = status.available;         # ← update status
-  source = source.repo;
-  phase = 4;
-  description = "Build system driver (GNU Make)";
-  notes = "Rust rewrite at ../make-rs";
-}
-```
-
-5. Add `rust-nixpkgs` scope to your commit: `feat(rust-nixpkgs): Wire in make-rs replacement`
 
 ## Usage
 
@@ -158,7 +87,7 @@ mkComponent {
 
 ```shell
 # Enter the dev shell
-cd rust-nixpkgs
+cd rust/nixpkgs
 direnv allow  # or: nix develop .#rust-nixpkgs
 
 # Show component status
@@ -174,45 +103,44 @@ just test
 just compare
 ```
 
-## Relationship to Other Projects
-
-| Project | Scope | Approach |
-|---------|-------|----------|
-| **rust-nixpkgs** | Build-time tools (stdenv) | Replace the toolchain that builds packages |
-| [rust-nixos](../nixos) | Runtime system (NixOS) | Replace components in the running OS |
-| [rust-systemd](../systemd) | Init system | Full systemd rewrite, used by rust-nixos |
-| [rust-pkg-config](../pkg-config) | Build dependency lookup | Drop-in pkg-config replacement |
-
-Together, these projects work toward a fully oxidized Nix ecosystem: packages are **built** with Rust tools (rust-nixpkgs), the resulting **system** runs Rust services (rust-nixos + rust-systemd), and the **build system** itself uses Rust utilities (rust-pkg-config).
-
 ## Project Structure
 
 ```text
-rust-nixpkgs/
+rust/nixpkgs/
 ├── default.nix          # Flakelight entry: devShell, overlay, packages
 ├── lib.nix              # Component registry helpers (mkComponent, mkRustStdenv)
 ├── stdenv.nix           # Rust stdenv assembler
 ├── components/
 │   ├── default.nix      # Registry loader (imports all component files)
-│   ├── shell.nix        # bash → brush
+│   ├── shell.nix        # bash → rust-bash
 │   ├── coreutils.nix    # coreutils → uutils
-│   ├── findutils.nix    # find/xargs → findutils-rs (planned)
-│   ├── diffutils.nix    # diff/cmp → diffutils-rs (planned)
-│   ├── sed.nix          # gnused → sed-rs (planned)
-│   ├── grep.nix         # gnugrep → grep-rs (planned)
-│   ├── awk.nix          # gawk → awk-rs (planned)
-│   ├── tar.nix          # gnutar → tar-rs (planned)
-│   ├── gzip.nix         # gzip → gzip-rs (planned)
-│   ├── bzip2.nix        # bzip2 → bzip2-rs (planned)
-│   ├── xz.nix           # xz → xz-rs (planned)
-│   ├── make.nix         # gnumake → make-rs (planned)
-│   ├── patch.nix        # gnupatch → patch-rs (planned)
-│   ├── patchelf.nix     # patchelf → patchelf-rs (planned)
-│   └── strip.nix        # binutils strip → strip-rs (planned)
+│   ├── sed.nix          # gnused → uutils-sed
+│   ├── grep.nix         # gnugrep → rust-grep
+│   ├── awk.nix          # gawk → rust-awk
+│   ├── findutils.nix    # findutils → uutils-findutils
+│   ├── diffutils.nix    # diffutils → uutils-diffutils
+│   ├── tar.nix          # gnutar → rust-tar
+│   ├── gzip.nix         # gzip → rust-gzip
+│   ├── bzip2.nix        # bzip2 → rust-bzip2
+│   ├── xz.nix           # xz → rust-xz
+│   ├── make.nix         # gnumake → rust-make
+│   ├── patch.nix        # gnupatch → rust-patch
+│   ├── patchelf.nix     # patchelf → rust-patchelf
+│   └── strip.nix        # binutils strip → rust-strip
 ├── PLAN.md              # Phased replacement roadmap
 ├── README.md            # This file
 └── justfile             # Build, test, and status commands
 ```
+
+## Related Projects
+
+| Project | Scope |
+|---------|-------|
+| [rust-nixos](../nixos) | Runtime system — swaps C tools in a running NixOS system |
+| [rust-systemd](../systemd) | Rust systemd replacement — PID 1, journald, networkd, etc. |
+| [rust-pkg-config](../pkg-config) | Rust pkg-config replacement for the build toolchain |
+
+Together, these projects work toward a fully oxidized Nix ecosystem: packages are **built** with Rust tools (rust-nixpkgs), the resulting **system** runs Rust services (rust-nixos + rust-systemd), and the **build system** itself uses Rust utilities (rust-pkg-config).
 
 ## License
 

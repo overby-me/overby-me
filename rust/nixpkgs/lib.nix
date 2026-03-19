@@ -13,8 +13,8 @@
 #     when assembling the stdenv — this lets us declare the full
 #     target map up front and fill in replacements incrementally.
 #   - Replacement packages must be flag-compatible drop-ins for the
-#     originals.  Wrappers (like the brush wrapper in rust-nixos) are
-#     acceptable.
+#     originals.  Wrappers are acceptable when needed for
+#     binary name compatibility.
 {lib}: let
   # Status values used in component declarations.
   #   available   — a working Rust replacement exists and is wired in
