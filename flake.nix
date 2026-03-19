@@ -221,6 +221,7 @@
         ./rust/cachix
         ./rust/direnv
         ./rust/grep
+        ./rust/make
         ./rust/gzip
         ./rust/h264toav1
         ./rust/patch
