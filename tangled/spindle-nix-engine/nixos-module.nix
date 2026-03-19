@@ -378,11 +378,12 @@ in {
             MemoryDenyWriteExecute = false;
 
             # Syscall filtering
+            # Note: @mount is allowed because hakoniwa needs mount/pivot_root
+            # for per-workflow container isolation.
             SystemCallFilter = [
               "~@clock"
               "~@cpu-emulation"
               "~@module"
-              "~@mount"
               "~@obsolete"
               "~@raw-io"
               "~@reboot"
