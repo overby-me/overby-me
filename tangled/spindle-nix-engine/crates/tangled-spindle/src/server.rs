@@ -78,6 +78,10 @@ pub async fn run_server(
         cfg.engine.workflow_timeout,
         cfg.engine.extra_nix_flags.clone(),
         cfg.dev,
+        spindle_engine::nix_engine::WorkflowLimits {
+            memory_max: cfg.engine.workflow_limits.memory_max.clone(),
+            tasks_max: cfg.engine.workflow_limits.tasks_max,
+        },
     ));
 
     // Create job queue.

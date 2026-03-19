@@ -35,6 +35,15 @@ struct WorkflowState {
     workspace_dir: PathBuf,
 }
 
+/// Per-workflow resource limits applied via systemd scopes.
+#[derive(Debug, Clone, Default)]
+pub struct WorkflowLimits {
+    /// Hard memory limit per workflow (e.g. `"4G"`).
+    pub memory_max: Option<String>,
+    /// Maximum tasks (processes/threads) per workflow.
+    pub tasks_max: Option<u32>,
+}
+
 /// The Nix engine: builds Nix closures from dependency specs and executes
 /// workflow steps as child processes.
 pub struct NixEngine {
@@ -52,6 +61,10 @@ pub struct NixEngine {
     states: Arc<Mutex<HashMap<String, WorkflowState>>>,
     /// Resolved path to the bash binary (found from PATH at construction time).
     bash_path: PathBuf,
+    /// Resolved path to `systemd-run` (if available).
+    systemd_run_path: Option<PathBuf>,
+    /// Per-workflow resource limits.
+    workflow_limits: WorkflowLimits,
 }
 
 impl NixEngine {
@@ -63,17 +76,26 @@ impl NixEngine {
     /// * `timeout` — Default workflow timeout.
     /// * `extra_nix_flags` — Extra flags passed to `nix build`.
     /// * `dev_mode` — Whether dev mode is enabled.
+    /// * `workflow_limits` — Per-workflow resource limits for systemd scopes.
     pub fn new(
         workspace_root: impl Into<PathBuf>,
         cache_dir: impl Into<PathBuf>,
         timeout: Duration,
         extra_nix_flags: Vec<String>,
         dev_mode: bool,
+        workflow_limits: WorkflowLimits,
     ) -> Self {
         // Resolve bash from the current process's PATH. On NixOS, /bin/bash
         // doesn't exist — bash lives in the Nix store and is only reachable
         // via PATH set by the systemd service.
         let bash_path = resolve_bash();
+        let systemd_run_path = resolve_from_path("systemd-run");
+
+        if let Some(ref path) = systemd_run_path {
+            info!(?path, "systemd-run found, workflow isolation enabled");
+        } else {
+            info!("systemd-run not found, workflow isolation disabled");
+        }
 
         Self {
             workspace_mgr: WorkspaceManager::new(workspace_root),
@@ -83,6 +105,8 @@ impl NixEngine {
             dev_mode,
             states: Arc::new(Mutex::new(HashMap::new())),
             bash_path,
+            systemd_run_path,
+            workflow_limits,
         }
     }
 }
@@ -294,20 +318,64 @@ impl Engine for NixEngine {
 
         info!(%wid, step_idx, name = step.name(), "executing step");
 
-        // Spawn the child process.
-        let mut child = Command::new(&self.bash_path)
-            .args(["-euo", "pipefail", "-c", &full_command])
-            .current_dir(workspace_dir)
-            .env_clear()
-            .envs(env_vars)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
-            .map_err(|e| EngineError::StepFailed {
-                exit_code: -1,
-                message: format!("failed to spawn step process: {e}"),
-            })?;
+        // Spawn the child process, optionally wrapped in a systemd scope for
+        // per-workflow isolation (own cgroup, PrivateTmp, resource limits).
+        let mut child = if let Some(ref systemd_run) = self.systemd_run_path {
+            let scope_name = format!("spindle-{}-{step_idx}", wid.to_string().replace('/', "-"));
+            let mut cmd = Command::new(systemd_run);
+            cmd.args(["--scope", "--pipe", "--wait", "--collect", "--quiet"]);
+            cmd.arg(format!("--unit={scope_name}"));
+            cmd.arg(format!("--working-directory={}", workspace_dir.display()));
+            cmd.args(["-p", "PrivateTmp=yes"]);
+
+            if let Some(ref mem) = self.workflow_limits.memory_max {
+                cmd.args(["-p", &format!("MemoryMax={mem}")]);
+            }
+            if let Some(tasks) = self.workflow_limits.tasks_max {
+                cmd.args(["-p", &format!("TasksMax={tasks}")]);
+            }
+
+            // Pass environment variables via --setenv.
+            for (k, v) in &env_vars {
+                cmd.arg("--setenv");
+                cmd.arg(format!("{k}={v}"));
+            }
+
+            cmd.arg("--");
+            cmd.arg(&self.bash_path);
+            cmd.args([
+                "--norc",
+                "--noprofile",
+                "-euo",
+                "pipefail",
+                "-c",
+                &full_command,
+            ]);
+
+            cmd.env_clear()
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .kill_on_drop(true)
+                .spawn()
+                .map_err(|e| EngineError::StepFailed {
+                    exit_code: -1,
+                    message: format!("failed to spawn systemd-run scope: {e}"),
+                })?
+        } else {
+            Command::new(&self.bash_path)
+                .args(["-euo", "pipefail", "-c", &full_command])
+                .current_dir(workspace_dir)
+                .env_clear()
+                .envs(env_vars)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .kill_on_drop(true)
+                .spawn()
+                .map_err(|e| EngineError::StepFailed {
+                    exit_code: -1,
+                    message: format!("failed to spawn step process: {e}"),
+                })?
+        };
 
         // Stream stdout and stderr to the logger.
         let stdout = child.stdout.take().unwrap();
@@ -414,6 +482,15 @@ fn resolve_bash() -> PathBuf {
     fallback
 }
 
+/// Resolve a binary by name from PATH. Returns `None` if not found.
+fn resolve_from_path(name: &str) -> Option<PathBuf> {
+    std::env::var("PATH").ok().and_then(|path| {
+        path.split(':')
+            .map(|dir| PathBuf::from(dir).join(name))
+            .find(|candidate| candidate.exists())
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -444,6 +521,7 @@ mod tests {
             Duration::from_secs(300),
             vec![],
             false,
+            WorkflowLimits::default(),
         );
 
         let twf = PipelineWorkflow {
@@ -477,6 +555,7 @@ mod tests {
             Duration::from_secs(300),
             vec![],
             false,
+            WorkflowLimits::default(),
         );
 
         let yaml = r#"
@@ -524,6 +603,7 @@ env:
             Duration::from_secs(300),
             vec![],
             false,
+            WorkflowLimits::default(),
         );
 
         let yaml = "steps:\n  - name: Hello\n    run: echo hello\n";
@@ -559,6 +639,7 @@ env:
             Duration::from_secs(300),
             vec![],
             false,
+            WorkflowLimits::default(),
         );
 
         let yaml = "steps:\n  - name: test\n    run: echo hi\n";
@@ -588,6 +669,7 @@ env:
             Duration::from_secs(300),
             vec![],
             false,
+            WorkflowLimits::default(),
         );
 
         let yaml = "steps: []\n";
@@ -622,6 +704,7 @@ env:
             Duration::from_secs(600),
             vec![],
             false,
+            WorkflowLimits::default(),
         );
         assert_eq!(engine.workflow_timeout(), Duration::from_secs(600));
     }

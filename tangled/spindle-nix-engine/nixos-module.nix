@@ -115,6 +115,21 @@
           default = [];
           description = "Extra flags passed to nix build.";
         };
+
+        workflowLimits = {
+          memoryMax = lib.mkOption {
+            type = lib.types.nullOr lib.types.str;
+            default = null;
+            example = "4G";
+            description = "Hard memory limit per workflow (systemd scope MemoryMax).";
+          };
+
+          tasksMax = lib.mkOption {
+            type = lib.types.nullOr lib.types.int;
+            default = 128;
+            description = "Maximum tasks (processes/threads) per workflow.";
+          };
+        };
       };
 
       secrets = {
@@ -241,6 +256,7 @@ in {
           pkgs.git
           pkgs.gnutar
           pkgs.gzip
+          pkgs.systemd
           runner.nixPackage
         ]
         ++ runner.extraPackages);
@@ -274,6 +290,12 @@ in {
         // lib.optionalAttrs (runner.engine.extraNixFlags != []) {
           SPINDLE_ENGINE_EXTRA_NIX_FLAGS = lib.concatStringsSep " " runner.engine.extraNixFlags;
         }
+        // lib.optionalAttrs (runner.engine.workflowLimits.memoryMax != null) {
+          SPINDLE_ENGINE_WORKFLOW_MEMORY_MAX = runner.engine.workflowLimits.memoryMax;
+        }
+        // lib.optionalAttrs (runner.engine.workflowLimits.tasksMax != null) {
+          SPINDLE_ENGINE_WORKFLOW_TASKS_MAX = toString runner.engine.workflowLimits.tasksMax;
+        }
         // runner.extraEnvironment;
 
       # Script to copy token file into state directory with correct permissions
@@ -303,6 +325,10 @@ in {
 
             # User isolation
             DynamicUser = runner.user == null;
+
+            # Allow the service to create sub-cgroups (systemd scopes) for
+            # per-workflow isolation via systemd-run --scope.
+            Delegate = true;
             User = lib.mkIf (runner.user != null) runner.user;
             Group = lib.mkIf (runner.group != null) runner.group;
 

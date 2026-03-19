@@ -135,6 +135,15 @@ pub struct SecretsConfig {
     pub openbao: OpenBaoConfig,
 }
 
+/// Per-workflow resource limits applied via systemd scopes.
+#[derive(Debug, Clone, Default)]
+pub struct WorkflowLimits {
+    /// Hard memory limit per workflow (e.g. `"4G"`).
+    pub memory_max: Option<String>,
+    /// Maximum tasks (processes/threads) per workflow.
+    pub tasks_max: Option<u32>,
+}
+
 /// Engine configuration.
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
@@ -151,6 +160,8 @@ pub struct EngineConfig {
     pub nixery_url: String,
     /// Extra flags to pass to `nix build`.
     pub extra_nix_flags: Vec<String>,
+    /// Per-workflow resource limits.
+    pub workflow_limits: WorkflowLimits,
 }
 
 /// Full server configuration.
@@ -358,6 +369,16 @@ fn load_engine_config() -> Result<EngineConfig, ConfigError> {
         _ => Vec::new(),
     };
 
+    let workflow_limits = WorkflowLimits {
+        memory_max: env::var("SPINDLE_ENGINE_WORKFLOW_MEMORY_MAX")
+            .ok()
+            .filter(|v| !v.is_empty()),
+        tasks_max: env::var("SPINDLE_ENGINE_WORKFLOW_TASKS_MAX")
+            .ok()
+            .filter(|v| !v.is_empty())
+            .and_then(|v| v.parse().ok()),
+    };
+
     Ok(EngineConfig {
         kind,
         max_jobs,
@@ -365,6 +386,7 @@ fn load_engine_config() -> Result<EngineConfig, ConfigError> {
         workflow_timeout,
         nixery_url,
         extra_nix_flags,
+        workflow_limits,
     })
 }
 
