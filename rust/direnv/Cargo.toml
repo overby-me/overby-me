@@ -1,5 +1,5 @@
 [package]
-name = "direnv-rs"
+name = "rust-direnv"
 version = "2.36.0"
 edition = "2024"
 description = "A Rust rewrite of direnv - unclutter your .profile"

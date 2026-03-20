@@ -1,5 +1,5 @@
 [package]
-name = "cachix"
+name = "rust-cachix"
 version = "0.1.0"
 edition = "2024"
 description = "CLI client for Cachix binary cache hosting service"

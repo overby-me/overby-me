@@ -99,22 +99,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "direnv-rs"
-version = "2.36.0"
-dependencies = [
- "base64",
- "filetime",
- "flate2",
- "regex",
- "serde",
- "serde_json",
- "sha2",
- "toml",
- "ureq",
- "which",
-]
-
-[[package]]
 name = "either"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -224,9 +208,9 @@ dependencies = [
 
 [[package]]
 name = "itoa"
-version = "1.0.17"
+version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92ecc6618181def0457392ccd0ee51198e065e016d1d527a7ac1b6dc7c1f09d2"
+checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "libc"
@@ -360,6 +344,22 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "rust-direnv"
+version = "2.36.0"
+dependencies = [
+ "base64",
+ "filetime",
+ "flate2",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "toml",
+ "ureq",
+ "which",
 ]
 
 [[package]]

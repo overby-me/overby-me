@@ -4,7 +4,7 @@
     rustPlatform,
   }:
     rustPlatform.buildRustPackage {
-      pname = "direnv-rs";
+      pname = "rust-direnv";
       version = "2.36.0";
 
       src = lib.fileset.toSource {
