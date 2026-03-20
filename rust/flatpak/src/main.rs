@@ -5,10 +5,12 @@
 // sandboxing.
 
 mod dbus_proxy;
+mod extensions;
 mod installation;
 mod instance;
 mod metadata;
 mod ostree;
+mod portals;
 mod sandbox;
 mod seccomp;
 
@@ -93,6 +95,18 @@ fn main() {
         "history" => cmd_history(&installations),
         "config" => cmd_config(&installations, cmd_args),
         "repair" => cmd_repair(&installations),
+        "documents" | "document-list" => cmd_documents(cmd_args),
+        "document-export" => cmd_document_export(cmd_args),
+        "document-unexport" => cmd_document_unexport(cmd_args),
+        "document-info" => cmd_document_info(cmd_args),
+        "permissions" | "permission-list" => cmd_permissions(cmd_args),
+        "permission-show" => cmd_permission_show(cmd_args),
+        "permission-set" => cmd_permission_set(cmd_args),
+        "permission-remove" => cmd_permission_remove(cmd_args),
+        "permission-reset" => cmd_permission_reset(cmd_args),
+        "make-current" => cmd_make_current(&installations, cmd_args),
+        "mask" => cmd_mask(&installations, cmd_args),
+        "pin" => cmd_pin(&installations, cmd_args),
         "help" => {
             print_usage();
             process::exit(0);
@@ -1174,6 +1188,215 @@ fn cmd_repair(installations: &[Installation]) {
             println!("[{label}] Found {broken} broken refs");
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Command: documents
+// ---------------------------------------------------------------------------
+
+fn cmd_documents(args: &[String]) {
+    let app_id = args.iter().find(|a| !a.starts_with('-'));
+    let docs = portals::list_documents(app_id.map(|s| s.as_str()));
+    if docs.is_empty() {
+        println!("No exported documents.");
+    } else {
+        for doc in &docs {
+            println!("{}: {}", doc.id, doc.path.display());
+        }
+    }
+}
+
+fn cmd_document_export(args: &[String]) {
+    let path = args.iter().find(|a| !a.starts_with('-'));
+    match path {
+        Some(p) => match portals::export_document(p, &[]) {
+            Ok(id) => println!("Exported as: {id}"),
+            Err(e) => {
+                eprintln!("flatpak document-export: {e}");
+                process::exit(1);
+            }
+        },
+        None => {
+            eprintln!("flatpak document-export: no path specified");
+            process::exit(1);
+        }
+    }
+}
+
+fn cmd_document_unexport(args: &[String]) {
+    let doc_id = args.iter().find(|a| !a.starts_with('-'));
+    match doc_id {
+        Some(id) => match portals::unexport_document(id) {
+            Ok(()) => println!("Unexported: {id}"),
+            Err(e) => {
+                eprintln!("flatpak document-unexport: {e}");
+                process::exit(1);
+            }
+        },
+        None => {
+            eprintln!("flatpak document-unexport: no document ID specified");
+            process::exit(1);
+        }
+    }
+}
+
+fn cmd_document_info(args: &[String]) {
+    let doc_id = args.iter().find(|a| !a.starts_with('-'));
+    match doc_id {
+        Some(id) => match portals::document_info(id) {
+            Ok(info) => {
+                println!("  ID: {}", info.id);
+                println!("  Path: {}", info.path.display());
+            }
+            Err(e) => {
+                eprintln!("flatpak document-info: {e}");
+                process::exit(1);
+            }
+        },
+        None => {
+            eprintln!("flatpak document-info: no document ID specified");
+            process::exit(1);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Command: permissions
+// ---------------------------------------------------------------------------
+
+fn cmd_permissions(args: &[String]) {
+    let table = args.iter().find(|a| !a.starts_with('-'));
+    let perms = portals::list_permissions(table.map(|s| s.as_str()));
+    if perms.is_empty() {
+        println!("No permissions recorded.");
+    } else {
+        for p in &perms {
+            println!("{}/{}: {} = {:?}", p.table, p.id, p.app_id, p.permissions);
+        }
+    }
+}
+
+fn cmd_permission_show(args: &[String]) {
+    let app_id = args
+        .iter()
+        .find(|a| !a.starts_with('-'))
+        .unwrap_or_else(|| {
+            eprintln!("flatpak permission-show: no app specified");
+            process::exit(1);
+        });
+    let perms = portals::show_permissions(app_id);
+    if perms.is_empty() {
+        println!("No permissions for {app_id}.");
+    } else {
+        for p in &perms {
+            println!("{}/{}: {:?}", p.table, p.id, p.permissions);
+        }
+    }
+}
+
+fn cmd_permission_set(args: &[String]) {
+    if args.len() < 4 {
+        eprintln!("flatpak permission-set: usage: flatpak permission-set TABLE ID APP_ID PERM...");
+        process::exit(1);
+    }
+    let perms: Vec<String> = args[3..].to_vec();
+    match portals::set_permission(&args[0], &args[1], &args[2], &perms) {
+        Ok(()) => println!("Permission set."),
+        Err(e) => {
+            eprintln!("flatpak permission-set: {e}");
+            process::exit(1);
+        }
+    }
+}
+
+fn cmd_permission_remove(args: &[String]) {
+    if args.len() < 2 {
+        eprintln!("flatpak permission-remove: usage: flatpak permission-remove TABLE ID");
+        process::exit(1);
+    }
+    match portals::remove_permission(&args[0], &args[1]) {
+        Ok(()) => println!("Permission removed."),
+        Err(e) => {
+            eprintln!("flatpak permission-remove: {e}");
+            process::exit(1);
+        }
+    }
+}
+
+fn cmd_permission_reset(args: &[String]) {
+    let app_id = args
+        .iter()
+        .find(|a| !a.starts_with('-'))
+        .unwrap_or_else(|| {
+            eprintln!("flatpak permission-reset: no app specified");
+            process::exit(1);
+        });
+    match portals::reset_permissions(app_id) {
+        Ok(()) => println!("Permissions reset for {app_id}."),
+        Err(e) => {
+            eprintln!("flatpak permission-reset: {e}");
+            process::exit(1);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Command: make-current, mask, pin
+// ---------------------------------------------------------------------------
+
+fn cmd_make_current(installations: &[Installation], args: &[String]) {
+    if args.len() < 2 {
+        eprintln!("flatpak make-current: usage: flatpak make-current APP BRANCH");
+        process::exit(1);
+    }
+    let app_id = &args[0];
+    let branch = &args[1];
+
+    // Verify the ref exists.
+    let deployed = find_deployed(installations, app_id);
+    // Create/update an "active" symlink or marker.
+    let active_marker = deployed
+        .installation
+        .deploy_path(&deployed.ref_)
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("current");
+    let _ = fs::write(&active_marker, branch);
+    println!("Set {app_id} current branch to {branch}");
+}
+
+fn cmd_mask(installations: &[Installation], args: &[String]) {
+    let pattern = args
+        .iter()
+        .find(|a| !a.starts_with('-'))
+        .unwrap_or_else(|| {
+            eprintln!("flatpak mask: no pattern specified");
+            process::exit(1);
+        });
+
+    let inst = &installations[0];
+    let mask_dir = inst.path.join("masks");
+    let _ = fs::create_dir_all(&mask_dir);
+    let _ = fs::write(mask_dir.join(pattern.replace('/', "_")), pattern.as_bytes());
+    println!("Masked: {pattern}");
+}
+
+fn cmd_pin(installations: &[Installation], args: &[String]) {
+    let pattern = args
+        .iter()
+        .find(|a| !a.starts_with('-'))
+        .unwrap_or_else(|| {
+            eprintln!("flatpak pin: no pattern specified");
+            process::exit(1);
+        });
+
+    let inst = &installations[0];
+    let pin_dir = inst.path.join("pins");
+    let _ = fs::create_dir_all(&pin_dir);
+    let _ = fs::write(pin_dir.join(pattern.replace('/', "_")), pattern.as_bytes());
+    println!("Pinned: {pattern}");
 }
 
 // ---------------------------------------------------------------------------

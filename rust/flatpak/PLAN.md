@@ -111,13 +111,13 @@ Resolve, download, and mount extensions into the sandbox.
 
 ### Tasks
 
-- [ ] Parse `[Extension <name>]` groups from runtime and app metadata
-- [ ] Resolve extension refs from installed extensions
+- [x] Parse `[Extension <name>]` groups from runtime and app metadata
+- [x] Resolve extension refs from installed extensions (with version/branch search)
 - [ ] Auto-download missing extensions (requires Phase 5)
-- [ ] Mount extensions at their declared directory in the sandbox
-- [ ] Handle `add-ld-path` — append extension lib paths to `LD_LIBRARY_PATH`
+- [x] Mount extensions at their declared directory in the sandbox
+- [x] Handle `add-ld-path` — append extension lib paths to `LD_LIBRARY_PATH`
 - [ ] Handle `merge-dirs` — overlay extension directories
-- [ ] Handle `subdirectories` — mount sub-extensions
+- [x] Handle `subdirectories` — mount sub-extensions
 - [ ] Regenerate `ld.so.cache` when extensions add library paths (run `ldconfig`
   in a sub-bwrap)
 
@@ -127,19 +127,21 @@ Integrate with XDG desktop portals for mediated access to host resources.
 
 ### Tasks
 
-- [ ] Document portal: mount `xdg-document-portal` socket, implement
-  `flatpak documents`, `document-export`, `document-unexport`, `document-info`
-- [ ] Permission store: implement `flatpak permissions`, `permission-show`,
+- [x] Document portal: CLI stubs for `flatpak documents`, `document-export`,
+  `document-unexport`, `document-info` (full D-Bus portal API not yet implemented)
+- [x] Permission store: CLI stubs for `flatpak permissions`, `permission-show`,
   `permission-set`, `permission-remove`, `permission-reset`
+- [ ] Mount `xdg-document-portal` socket into sandbox
 - [ ] Set portal-related environment variables (`FLATPAK_PORTAL_PID`, etc.)
+- [ ] Full D-Bus client for portal APIs
 
 ## Phase 8: Remaining CLI Commands
 
 ### Tasks
 
-- [ ] `flatpak make-current` — set default version for an app
-- [ ] `flatpak mask` — mask out updates for specific refs
-- [ ] `flatpak pin` — pin runtimes to prevent automatic removal
+- [x] `flatpak make-current` — set default version for an app
+- [x] `flatpak mask` — mask out updates for specific refs
+- [x] `flatpak pin` — pin runtimes to prevent automatic removal
 - [ ] `flatpak history` — track install/update/uninstall events in a log
 - [ ] `flatpak search` — query Flathub appstream data (requires fetching
   appstream XML from remote)

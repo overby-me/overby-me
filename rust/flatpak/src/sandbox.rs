@@ -9,6 +9,7 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::dbus_proxy::{self, RunningProxy};
+use crate::extensions;
 use crate::installation::{DeployedRef, Installation};
 use crate::metadata::ContextPermissions;
 use crate::seccomp;
@@ -172,6 +173,29 @@ pub fn build_sandbox(
     let app_files = deployed.installation.files_path(&deployed.ref_);
     if app_files.exists() {
         bwrap.args(&["--ro-bind", &app_files.to_string_lossy(), "/app"]);
+    }
+
+    // --- Mount extensions ---
+    if let Some(rt) = runtime_deployed {
+        let rt_ref = &rt.ref_;
+        let resolved = extensions::resolve_extensions(
+            &rt.metadata,
+            Some(&deployed.metadata),
+            &Installation::all(),
+            rt_ref,
+        );
+
+        if !resolved.is_empty() {
+            let (ext_args, ld_paths) = extensions::extension_mount_args(&resolved, false);
+            for arg in &ext_args {
+                bwrap.arg(arg);
+            }
+            // Extend LD_LIBRARY_PATH with extension library paths.
+            if !ld_paths.is_empty() {
+                let ld_path = ld_paths.join(":");
+                bwrap.setenv("LD_LIBRARY_PATH", &ld_path);
+            }
+        }
     }
 
     // --- /proc, /dev, /tmp ---
