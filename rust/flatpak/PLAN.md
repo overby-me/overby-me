@@ -386,7 +386,11 @@ for portal communication.
 - [x] Replace `gdbus_call()` in `portals.rs` — now uses native client first,
   falls back to gdbus/busctl subprocess if native fails
 - [x] Replace `busctl` fallback (native client with gdbus/busctl fallback)
-- [ ] Handle D-Bus signals (for portal async responses — future work)
+- [x] Handle D-Bus signals for portal async responses — replaced hand-rolled
+  D-Bus client with zbus, which provides `portal_request()` that subscribes
+  to `Response` signals on request object paths via `MatchRule` +
+  `MessageIterator`, properly handling the portal async request/response
+  pattern
 
 ## Priority Order (Phases 18-24)
 

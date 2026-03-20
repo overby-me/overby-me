@@ -11,12 +11,14 @@ path = "src/main.rs"
 
 [dependencies]
 libc = "0.2"
+serde = "1"
 miniz_oxide = "0.8"
 rustls = { version = "0.23", default-features = false, features = [
   "ring",
   "std",
 ] }
 webpki-roots = "0.26"
+zbus = { version = "5", features = ["blocking"] }
 
 [profile.release]
 lto = true

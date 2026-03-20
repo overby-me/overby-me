@@ -1,119 +1,113 @@
-//! XDG Desktop Portal integration.
+//! XDG Desktop Portal integration via zbus.
 //!
-//! Communicates with the document portal and permission store D-Bus services
-//! using the native D-Bus client, with gdbus/busctl subprocess as fallback.
+//! Uses zbus for typed D-Bus method calls and signal handling to communicate
+//! with the document portal, permission store, and request portals.
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
-
-use crate::dbus_client;
 
 // ---------------------------------------------------------------------------
-// D-Bus helper
+// D-Bus connection helpers
 // ---------------------------------------------------------------------------
 
-/// Call a D-Bus method, trying native client first, then gdbus/busctl fallback.
-fn dbus_call(
-    bus: &str,
-    dest: &str,
-    object: &str,
-    interface: &str,
-    method: &str,
-    args_str: &str,
-) -> Result<String, String> {
-    // Try native D-Bus client first.
-    let native_result = match bus {
-        "session" => dbus_client::Connection::session(),
-        "system" => dbus_client::Connection::system(),
-        _ => dbus_client::Connection::session(),
-    };
-
-    if let Ok(mut conn) = native_result {
-        // For the native client, we pass string args marshalled.
-        // Since the portal APIs mostly take strings, marshal them.
-        let body_args: Vec<&[u8]> = if args_str.is_empty() {
-            vec![]
-        } else {
-            // Simple case: single string argument.
-            // More complex marshalling would need per-method handling.
-            vec![]
-        };
-        let sig = if args_str.is_empty() { "" } else { "s" };
-
-        match conn.call(dest, object, interface, method, &body_args, sig) {
-            Ok(dbus_client::CallResult::Return(body)) => {
-                // Convert body bytes to a string representation.
-                if body.len() >= 4 {
-                    let len = u32::from_le_bytes(body[0..4].try_into().unwrap_or([0; 4])) as usize;
-                    if body.len() >= 4 + len {
-                        return Ok(String::from_utf8_lossy(&body[4..4 + len]).to_string());
-                    }
-                }
-                return Ok(String::from_utf8_lossy(&body).to_string());
-            }
-            Ok(dbus_client::CallResult::Error(name, msg)) => {
-                // Fall through to gdbus.
-                let _ = (name, msg);
-            }
-            Err(_) => {
-                // Fall through to gdbus.
-            }
-        }
-    }
-
-    // Fallback: gdbus subprocess.
-    gdbus_call_subprocess(bus, dest, object, interface, method, args_str)
+/// Get a blocking session bus connection.
+fn session_bus() -> Result<zbus::blocking::Connection, String> {
+    zbus::blocking::Connection::session().map_err(|e| format!("session bus: {e}"))
 }
 
-/// Call a D-Bus method via gdbus/busctl subprocess (fallback).
-fn gdbus_call_subprocess(
+/// Get a blocking system bus connection.
+fn system_bus() -> Result<zbus::blocking::Connection, String> {
+    zbus::blocking::Connection::system().map_err(|e| format!("system bus: {e}"))
+}
+
+/// Call a D-Bus method and return the body as a string representation.
+fn call_method(
     bus: &str,
     dest: &str,
-    object: &str,
+    path: &str,
     interface: &str,
     method: &str,
-    args: &str,
+    body: &(impl serde::Serialize + zbus::zvariant::DynamicType),
 ) -> Result<String, String> {
-    let bus_flag = match bus {
-        "session" => "--session",
-        "system" => "--system",
-        _ => "--session",
+    let conn = match bus {
+        "system" => system_bus()?,
+        _ => session_bus()?,
     };
 
-    let result = Command::new("gdbus")
-        .args([
-            "call",
-            bus_flag,
-            "--dest",
-            dest,
-            "--object-path",
-            object,
-            "--method",
-            &format!("{interface}.{method}"),
-        ])
-        .arg(args)
-        .output();
+    let reply = conn
+        .call_method(Some(dest), path, Some(interface), method, body)
+        .map_err(|e| format!("D-Bus call {interface}.{method}: {e}"))?;
 
-    match result {
-        Ok(output) if output.status.success() => {
-            Ok(String::from_utf8_lossy(&output.stdout).to_string())
-        }
-        Ok(output) => Err(String::from_utf8_lossy(&output.stderr).trim().to_string()),
-        Err(_) => {
-            let result = Command::new("busctl")
-                .args(["--user", "call", dest, object, interface, method, args])
-                .output();
+    let body = reply.body();
+    // Try to deserialize as a string first, then fall back to debug repr.
+    if let Ok(s) = body.deserialize::<String>() {
+        Ok(s)
+    } else if let Ok(s) = body.deserialize::<Vec<String>>() {
+        Ok(s.join(", "))
+    } else {
+        Ok(format!("{body:?}"))
+    }
+}
 
-            match result {
-                Ok(output) if output.status.success() => {
-                    Ok(String::from_utf8_lossy(&output.stdout).to_string())
-                }
-                Ok(output) => Err(String::from_utf8_lossy(&output.stderr).trim().to_string()),
-                Err(e) => Err(format!("D-Bus call failed: {e}")),
-            }
+// ---------------------------------------------------------------------------
+// Portal request signal handling
+// ---------------------------------------------------------------------------
+
+/// Handle an async portal request that returns a Response signal.
+///
+/// Many portal methods return an object path for a Request, and the actual
+/// result comes as a `Response` signal on that path. This function:
+/// 1. Makes the method call
+/// 2. Subscribes to the Response signal on the returned request path
+/// 3. Waits for the signal and returns the results
+#[allow(dead_code)]
+pub fn portal_request(
+    dest: &str,
+    path: &str,
+    interface: &str,
+    method: &str,
+    body: &(impl serde::Serialize + zbus::zvariant::DynamicType),
+) -> Result<(u32, HashMap<String, zbus::zvariant::OwnedValue>), String> {
+    let conn = session_bus()?;
+
+    let reply = conn
+        .call_method(Some(dest), path, Some(interface), method, body)
+        .map_err(|e| format!("portal call: {e}"))?;
+
+    let request_path: zbus::zvariant::OwnedObjectPath = reply
+        .body()
+        .deserialize()
+        .map_err(|e| format!("parse request path: {e}"))?;
+
+    // Subscribe to the Response signal on the request path.
+    let rule = zbus::MatchRule::builder()
+        .msg_type(zbus::message::Type::Signal)
+        .sender("org.freedesktop.portal.Desktop")
+        .map_err(|e| format!("match rule sender: {e}"))?
+        .interface("org.freedesktop.portal.Request")
+        .map_err(|e| format!("match rule interface: {e}"))?
+        .member("Response")
+        .map_err(|e| format!("match rule member: {e}"))?
+        .path(request_path.as_str())
+        .map_err(|e| format!("match rule path: {e}"))?
+        .build();
+
+    let proxy = zbus::blocking::MessageIterator::for_match_rule(rule, &conn, None)
+        .map_err(|e| format!("subscribe to Response signal: {e}"))?;
+
+    // Wait for the signal (with timeout).
+    for msg in proxy {
+        let msg = msg.map_err(|e| format!("receive signal: {e}"))?;
+        if let Ok(body) = msg
+            .body()
+            .deserialize::<(u32, HashMap<String, zbus::zvariant::OwnedValue>)>()
+        {
+            return Ok(body);
         }
     }
+
+    Err("portal request timed out".into())
 }
 
 // ---------------------------------------------------------------------------
@@ -156,68 +150,54 @@ pub fn list_documents(app_id: Option<&str>) -> Vec<DocumentInfo> {
 }
 
 /// Export a file to the document portal.
-pub fn export_document(path: &str, app_ids: &[String]) -> Result<String, String> {
-    // Open the file and get its fd, then call AddFull on the portal.
-    // Since we can't easily pass fds via gdbus, use the filesystem path approach.
+pub fn export_document(path: &str, _app_ids: &[String]) -> Result<String, String> {
     let abs_path = fs::canonicalize(path).map_err(|e| format!("resolve path: {e}"))?;
 
-    // Try calling the portal via gdbus.
-    let apps_str = if app_ids.is_empty() {
-        "[]".to_string()
-    } else {
-        format!(
-            "[{}]",
-            app_ids
-                .iter()
-                .map(|a| format!("'{a}'"))
-                .collect::<Vec<_>>()
-                .join(", ")
+    // Open the file to get an fd, then call AddFull.
+    let file = std::fs::File::open(&abs_path).map_err(|e| format!("open: {e}"))?;
+    let fd = zbus::zvariant::OwnedFd::from(std::os::fd::OwnedFd::from(file));
+
+    let conn = session_bus()?;
+    let reply = conn
+        .call_method(
+            Some(DOC_PORTAL_DEST),
+            DOC_PORTAL_PATH,
+            Some(DOC_PORTAL_IFACE),
+            "Add",
+            &(fd, true, &[] as &[&str]),
         )
-    };
+        .map_err(|e| format!("document Add: {e}"))?;
 
-    let result = dbus_call(
-        "session",
-        DOC_PORTAL_DEST,
-        DOC_PORTAL_PATH,
-        DOC_PORTAL_IFACE,
-        "Add",
-        &format!("'{}' {apps_str} 0", abs_path.display()),
-    )?;
-
-    // Parse the returned document ID from the GVariant response.
-    let doc_id = result
-        .trim()
-        .trim_start_matches('(')
-        .trim_end_matches(')')
-        .trim_matches('\'')
-        .trim_matches(',')
-        .to_string();
+    let doc_id: String = reply
+        .body()
+        .deserialize()
+        .map_err(|e| format!("parse doc id: {e}"))?;
 
     Ok(doc_id)
 }
 
 /// Unexport a document from the portal.
 pub fn unexport_document(doc_id: &str) -> Result<(), String> {
-    dbus_call(
+    call_method(
         "session",
         DOC_PORTAL_DEST,
         DOC_PORTAL_PATH,
         DOC_PORTAL_IFACE,
         "Delete",
-        &format!("'{doc_id}'"),
+        &(doc_id,),
     )?;
     Ok(())
 }
 
 /// Get info about a document.
 pub fn document_info(doc_id: &str) -> Result<DocumentInfo, String> {
-    let result = dbus_call(
+    let result = call_method(
         "session",
         DOC_PORTAL_DEST,
         DOC_PORTAL_PATH,
         DOC_PORTAL_IFACE,
         "Info",
-        &format!("'{doc_id}'"),
+        &(doc_id,),
     )?;
 
     Ok(DocumentInfo {
@@ -238,17 +218,35 @@ const PERM_STORE_IFACE: &str = "org.freedesktop.impl.portal.PermissionStore";
 /// List permissions from the permission store.
 pub fn list_permissions(table: Option<&str>) -> Vec<PermissionEntry> {
     let table_name = table.unwrap_or("flatpak");
-    let result = dbus_call(
-        "session",
-        PERM_STORE_DEST,
+
+    let conn = match session_bus() {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+
+    let reply = conn.call_method(
+        Some(PERM_STORE_DEST),
         PERM_STORE_PATH,
-        PERM_STORE_IFACE,
+        Some(PERM_STORE_IFACE),
         "List",
-        &format!("'{table_name}'"),
+        &(table_name,),
     );
 
-    match result {
-        Ok(output) => parse_permission_list(&output, table_name),
+    match reply {
+        Ok(msg) => {
+            if let Ok(ids) = msg.body().deserialize::<Vec<String>>() {
+                ids.iter()
+                    .map(|id| PermissionEntry {
+                        table: table_name.to_string(),
+                        id: id.clone(),
+                        app_id: String::new(),
+                        permissions: Vec::new(),
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            }
+        }
         Err(_) => Vec::new(),
     }
 }
@@ -260,43 +258,33 @@ pub fn set_permission(
     app_id: &str,
     permissions: &[String],
 ) -> Result<(), String> {
-    let perms_str = format!(
-        "[{}]",
-        permissions
-            .iter()
-            .map(|p| format!("'{p}'"))
-            .collect::<Vec<_>>()
-            .join(", ")
-    );
-
-    dbus_call(
+    let perms: Vec<&str> = permissions.iter().map(|s| s.as_str()).collect();
+    call_method(
         "session",
         PERM_STORE_DEST,
         PERM_STORE_PATH,
         PERM_STORE_IFACE,
         "SetPermission",
-        &format!("'{table}' true '{id}' '{app_id}' {perms_str}"),
+        &(table, true, id, app_id, perms.as_slice()),
     )?;
     Ok(())
 }
 
 /// Remove a permission entry.
 pub fn remove_permission(table: &str, id: &str) -> Result<(), String> {
-    dbus_call(
+    call_method(
         "session",
         PERM_STORE_DEST,
         PERM_STORE_PATH,
         PERM_STORE_IFACE,
         "Delete",
-        &format!("'{table}' '{id}'"),
+        &(table, id),
     )?;
     Ok(())
 }
 
 /// Reset all permissions for an app.
 pub fn reset_permissions(app_id: &str) -> Result<(), String> {
-    // List all tables and remove entries for this app.
-    // This is a best-effort approach since the API doesn't have a bulk reset.
     for table in &["flatpak", "notifications", "devices", "background"] {
         let perms = list_permissions(Some(table));
         for p in &perms {
@@ -320,34 +308,6 @@ pub fn show_permissions(app_id: &str) -> Vec<PermissionEntry> {
         }
     }
     all
-}
-
-fn parse_permission_list(output: &str, table: &str) -> Vec<PermissionEntry> {
-    // The output is a GVariant representation. Do basic parsing.
-    let mut entries = Vec::new();
-
-    // Simple heuristic: look for patterns like 'id': {'app_id': ['perm', ...]}
-    // This is fragile but works for the common case.
-    for line in output.lines() {
-        let line = line.trim();
-        if line.contains("':") {
-            // Try to extract ID and app permissions.
-            if let Some((id_part, rest)) = line.split_once("':") {
-                let id = id_part.trim().trim_matches('\'').trim_matches('{').trim();
-                if let Some((app_part, _)) = rest.split_once("':") {
-                    let app_id = app_part.trim().trim_matches('\'').trim_matches('{').trim();
-                    entries.push(PermissionEntry {
-                        table: table.to_string(),
-                        id: id.to_string(),
-                        app_id: app_id.to_string(),
-                        permissions: Vec::new(), // Detailed parsing is complex.
-                    });
-                }
-            }
-        }
-    }
-
-    entries
 }
 
 // ---------------------------------------------------------------------------

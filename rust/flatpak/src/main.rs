@@ -5,7 +5,6 @@
 // sandboxing.
 
 mod build;
-mod dbus_client;
 mod dbus_proxy;
 mod deltas;
 mod extensions;
