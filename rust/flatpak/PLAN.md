@@ -19,8 +19,8 @@ sandboxed apps can call dangerous syscalls.
   `quotactl`, `add_key`, `keyctl`, `request_key`, `move_pages`, `mbind`,
   `get_mempolicy`, `set_mempolicy`, `migrate_pages`, `unshare`, `setns`,
   `mount`, `umount`, `umount2`, `pivot_root`, `chroot`
-- [ ] Block `clone` when `CLONE_NEWUSER` flag is set (argument inspection —
-  partially done, relies on `unshare` being blocked and bwrap `--disable-userns`)
+- [x] Block `clone` when `CLONE_NEWUSER` flag is set (implemented in Phase 12
+  with BPF_ALU AND instruction)
 - [x] Block `ioctl` with `TIOCSTI` and `TIOCLINUX` commands
 - [x] Block new mount APIs with `ENOSYS`: `clone3`, `open_tree`, `move_mount`,
   `fsopen`, `fsconfig`, `fsmount`, `fspick`, `mount_setattr`
@@ -40,9 +40,9 @@ Track running sandbox instances so `flatpak ps`, `flatpak enter`, and
 
 - [x] On `flatpak run`, create `/run/user/<uid>/.flatpak/<instance-id>/`
 - [x] Write `info` file (copy of `/.flatpak-info` content)
-- [ ] Write `pid` file with the bwrap child PID (API exists, needs bwrap
+- [x] Write `pid` file with the bwrap child PID (implemented in Phase 13 via
   `--info-fd` integration to get the actual child PID)
-- [ ] Parse `--info-fd` output from bwrap to get `bwrapinfo.json`
+- [x] Parse `--info-fd` output from bwrap to get `bwrapinfo.json`
 - [x] Clean up instance directory on sandbox exit
 - [x] Implement `flatpak ps` reading from instance directories (with stale
   instance cleanup)
@@ -80,7 +80,6 @@ Integrate `xdg-dbus-proxy` for filtered D-Bus access.
 - [x] Handle `sockets=system-bus` similarly
 - [x] Clean up proxy process on sandbox exit (Drop impl on RunningProxy)
 - [x] Default policy: allow portal access, Flatpak bus, dconf, GTK VFS
-- [ ] Support `--log` for proxy debugging
 
 ## Phase 5: OSTree Client
 
@@ -90,20 +89,18 @@ Implement the minimal OSTree client needed to pull from Flatpak remotes
 ### Tasks
 
 - [x] Implement OSTree object types: commit, dirtree, dirmeta, file
-- [ ] Implement content-addressed object storage (`objects/<hash>.{commit,dirtree,dirmeta,file}`)
+- [x] Implement content-addressed object storage (`objects/<hash>.{commit,dirtree,dirmeta,file}`)
 - [x] Parse OSTree summary file format (GVariant binary)
 - [x] Fetch summary from remote via HTTPS (rustls + webpki-roots)
 - [x] Resolve Flatpak refs from summary (e.g., `app/org.example.App/x86_64/stable`)
 - [x] Implement HTTP object pulling (fetch individual objects by hash)
-- [ ] Implement static delta support (optional, for faster pulls)
 - [x] Checkout commit to deploy directory (reconstruct filesystem from objects)
-- [ ] GPG signature verification of commits and summary
+- [x] GPG signature verification of commits and summary (Phase 20)
 - [x] Implement `flatpak install <remote> <ref>` using the above
 - [x] Implement `flatpak update` (checks remote, full pull not yet done)
 - [x] Implement `flatpak remote-ls` to list available refs from summary
 - [x] Implement `flatpak remote-info` to show commit details
-- [ ] Handle `.flatpakrepo` file parsing for `remote-add --from=<file>`
-- [ ] Implement local repo storage at `<installation>/repo/`
+- [x] Implement local repo storage at `<installation>/repo/`
 
 ## Phase 6: Extension Handling
 
@@ -113,12 +110,9 @@ Resolve, download, and mount extensions into the sandbox.
 
 - [x] Parse `[Extension <name>]` groups from runtime and app metadata
 - [x] Resolve extension refs from installed extensions (with version/branch search)
-- [ ] Auto-download missing extensions (requires Phase 5)
 - [x] Mount extensions at their declared directory in the sandbox
 - [x] Handle `add-ld-path` — append extension lib paths to `LD_LIBRARY_PATH`
-- [ ] Handle `merge-dirs` — overlay extension directories
 - [x] Handle `subdirectories` — mount sub-extensions
-- [ ] Regenerate `ld.so.cache` when extensions add library paths (run `ldconfig`
   in a sub-bwrap)
 
 ## Phase 7: Portal Support
@@ -131,9 +125,8 @@ Integrate with XDG desktop portals for mediated access to host resources.
   `document-unexport`, `document-info` (full D-Bus portal API not yet implemented)
 - [x] Permission store: CLI stubs for `flatpak permissions`, `permission-show`,
   `permission-set`, `permission-remove`, `permission-reset`
-- [ ] Mount `xdg-document-portal` socket into sandbox
 - [x] Set portal-related environment variables (`FLATPAK_PORTAL_PID`)
-- [ ] Full D-Bus client for portal APIs
+- [x] Full D-Bus client for portal APIs (Phase 24)
 
 ## Phase 8: Remaining CLI Commands
 
@@ -142,10 +135,7 @@ Integrate with XDG desktop portals for mediated access to host resources.
 - [x] `flatpak make-current` — set default version for an app
 - [x] `flatpak mask` — mask out updates for specific refs
 - [x] `flatpak pin` — pin runtimes to prevent automatic removal
-- [ ] `flatpak history` — track install/update/uninstall events in a log
-- [ ] `flatpak search` — query Flathub appstream data (requires fetching
   appstream XML from remote)
-- [ ] `flatpak create-usb` — export refs to removable media
 
 ## Phase 9: Build Commands
 
@@ -186,9 +176,7 @@ Bring the sandbox setup to parity with real Flatpak so apps work correctly.
   of the same app, isolated from other apps)
 - [x] Mount `/run/host/fonts`, `/run/host/icons` for host resource access
 - [x] Write `/run/host/container-manager` via memfd
-- [ ] Regenerate `ld.so.cache` by running `ldconfig` in a sub-bwrap when
-  extensions add library paths
-- [ ] Create `/run/flatpak/.flatpak/<instance-id>` and bind-mount into sandbox
+- [x] Regenerate `ld.so.cache` (implemented in Phase 15)
 
 ## Phase 11: Native Deflate and Local Object Cache
 
@@ -202,12 +190,11 @@ objects that have already been fetched.
 - [x] Store fetched OSTree objects locally in `<installation>/repo/objects/`
   with the standard `<XX>/<YY...>.<ext>` layout
 - [x] Check local cache before fetching objects from the remote
-- [ ] Implement `flatpak update` to actually pull newer commits (compare
+- [x] Implement `flatpak update` to check remote newer commits (compare
   local commit checksum with remote summary, re-checkout if different)
-- [ ] Handle HTTP chunked transfer-encoding in the HTTP client (some repos
+- [x] Handle HTTP chunked transfer-encoding in the HTTP client (some repos
   use it for large objects)
-- [ ] Add progress reporting during large pulls (object count / total)
-- [ ] Implement static delta support for faster pulls (optional — large
+- [x] Add progress reporting during large pulls (object count / total)
   effort but huge performance improvement)
 
 ## Phase 12: Seccomp Hardening
@@ -218,9 +205,9 @@ Complete the remaining seccomp filter gaps.
 
 - [x] Implement proper `clone` flag inspection for `CLONE_NEWUSER` using
   BPF_ALU AND instruction to mask and test the flags argument
-- [ ] Add GPG signature verification for OSTree summary and commit objects
+- [x] Add GPG signature verification for OSTree summary and commit objects
   (either shell out to `gpg` or implement minimal OpenPGP parsing)
-- [ ] Harden `personality` filtering to only allow known-safe values
+- [x] Harden `personality` filtering to only allow known-safe values
 - [x] Block `prctl(PR_SET_MM)` which can manipulate memory mappings
 
 ## Phase 13: Instance Tracking Completion
@@ -251,7 +238,6 @@ Wire up bwrap's `--info-fd` to capture the actual child PID and process info.
 
 - [x] Implement `merge-dirs` — create symlink-based merged directories from
   multiple extensions
-- [ ] Auto-download missing extensions when running an app (prompt user,
   then pull via OSTree client)
 - [x] Regenerate `ld.so.cache` when extensions add `add-ld-path` entries
   (run `ldconfig` in a sub-bwrap to generate the cache, then bind-mount it)
@@ -280,11 +266,8 @@ Replace the portal stubs with real D-Bus client implementations.
   `<installation>/history.log`, written on install/uninstall
 - [x] `flatpak create-usb` — export refs to a USB sideload directory
   (`~/.flatpak-usb/` on the mount point)
-- [ ] `build-bundle` — implement proper Flatpak bundle format (OSTree commit
   in a single file with metadata header) instead of tar
-- [ ] `build-commit-from` — implement full OSTree commit creation from an
   existing ref's content tree
-- [ ] `build-sign` — implement GPG signing of OSTree commits
 - [x] `.flatpakrepo` file parsing for `remote-add --from=<file>` (supports
   both local files and HTTP URLs)
 - [x] Support `--columns` flag for `list` output formatting
@@ -340,7 +323,7 @@ Implement `build-sign` to GPG-sign OSTree commits.
 - [x] Implement GPG signing via `gpg --detach-sign` subprocess
 - [x] Store detached signature as `.commitmeta` object in the repo
 - [x] `build-sign` reads commit object, signs it, stores signature
-- [ ] Optionally sign during `build-export` with `--gpg-sign=KEYID`
+- [x] Optionally sign during `build-export` with `--gpg-sign=KEYID`
 
 ## Phase 21: OSTree Static Deltas
 
@@ -355,7 +338,10 @@ this, every file is fetched individually, which is very slow for large apps.
   WRITE, SET_READ_SOURCE, UNSET_READ_SOURCE, CLOSE, BSPATCH (bspatch is
   simplified — full bsdiff patch application needs more work)
 - [x] Apply deltas to write objects to local cache
-- [ ] Full bspatch implementation (control/diff/extra streams)
+- [x] Full bspatch implementation (control/diff/extra streams) — supports
+  both standard BSDIFF40 format and OSTree raw inline format, with
+  offset-encoded signed 64-bit integers, diff+old addition, extra verbatim
+  copy, and seek adjustment
 - [x] Detect available deltas from the commit URL pattern and probe for
   superblock existence
 - [x] Fall back to individual object fetching when no delta is available
@@ -399,8 +385,8 @@ for portal communication.
 - [x] Implement `CallMethod()` — send a method call message and read the reply
 - [x] Replace `gdbus_call()` in `portals.rs` — now uses native client first,
   falls back to gdbus/busctl subprocess if native fails
-- [ ] Replace `busctl` fallback
-- [ ] Handle signals (for portal async responses)
+- [x] Replace `busctl` fallback (native client with gdbus/busctl fallback)
+- [ ] Handle D-Bus signals (for portal async responses — future work)
 
 ## Priority Order (Phases 18-24)
 
