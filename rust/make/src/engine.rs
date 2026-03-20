@@ -684,9 +684,7 @@ impl Engine {
 
     fn build_target(&self, target: &str) -> Result<(), String> {
         // Normalize path: strip leading ./ for consistency with rule lookup
-        let target = target
-            .strip_prefix("./")
-            .unwrap_or(target);
+        let target = target.strip_prefix("./").unwrap_or(target);
 
         // Already built?
         if self.built_targets.borrow().contains(target) {
