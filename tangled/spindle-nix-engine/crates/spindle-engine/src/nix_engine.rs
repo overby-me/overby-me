@@ -237,6 +237,15 @@ impl Engine for NixEngine {
             }
         }
 
+        // DNS: on NixOS, /etc/resolv.conf -> /run/systemd/resolve/stub-resolv.conf
+        if Path::new("/run/systemd/resolve").exists() {
+            container.bindmount_ro("/run/systemd/resolve", "/run/systemd/resolve");
+        }
+        // Nix daemon socket for nix builds.
+        if Path::new("/nix/var/nix/daemon-socket").exists() {
+            container.bindmount_ro("/nix/var/nix/daemon-socket", "/nix/var/nix/daemon-socket");
+        }
+
         // Writable workspace, /dev, /tmp, /proc.
         container.tmpfsmount("/workspace");
         container.dir("/proc", 0o555);
