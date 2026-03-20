@@ -70,6 +70,7 @@
       rust-awk,
       uutils-findutils,
       rust-diffutils,
+      rust-file,
       rust-tar,
       rust-gzip,
       rust-bzip2,
@@ -93,6 +94,7 @@
           rust-awk
           uutils-findutils
           rust-diffutils
+          rust-file
           rust-tar
           rust-gzip
           rust-bzip2
@@ -156,6 +158,7 @@
       rust-awk,
       uutils-findutils,
       rust-diffutils,
+      rust-file,
       rust-tar,
       rust-gzip,
       rust-bzip2,
@@ -172,6 +175,7 @@
           rust-awk
           uutils-findutils
           rust-diffutils
+          rust-file
           rust-tar
           rust-gzip
           rust-bzip2
@@ -231,6 +235,7 @@
       rust-awk,
       uutils-findutils,
       rust-diffutils,
+      rust-file,
       rust-tar,
       rust-gzip,
       rust-bzip2,
@@ -249,6 +254,7 @@
           rust-awk
           uutils-findutils
           rust-diffutils
+          rust-file
           rust-tar
           rust-gzip
           rust-bzip2
@@ -295,6 +301,7 @@
       rust-awk,
       uutils-findutils,
       rust-diffutils,
+      rust-file,
       rust-tar,
       rust-gzip,
       rust-bzip2,
@@ -311,6 +318,7 @@
           rust-awk
           uutils-findutils
           rust-diffutils
+          rust-file
           rust-tar
           rust-gzip
           rust-bzip2
@@ -346,6 +354,7 @@
       rust-awk,
       uutils-findutils,
       rust-diffutils,
+      rust-file,
       rust-tar,
       rust-gzip,
       rust-bzip2,
@@ -364,6 +373,7 @@
           rust-awk
           uutils-findutils
           rust-diffutils
+          rust-file
           rust-tar
           rust-gzip
           rust-bzip2
@@ -407,6 +417,7 @@
       rust-awk,
       uutils-findutils,
       rust-diffutils,
+      rust-file,
       rust-tar,
       rust-gzip,
       rust-bzip2,
@@ -425,6 +436,7 @@
           rust-awk
           uutils-findutils
           rust-diffutils
+          rust-file
           rust-tar
           rust-gzip
           rust-bzip2

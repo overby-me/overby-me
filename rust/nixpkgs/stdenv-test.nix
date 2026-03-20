@@ -10,6 +10,7 @@
   rust-awk,
   uutils-findutils,
   rust-diffutils,
+  rust-file,
   rust-tar,
   rust-gzip,
   rust-bzip2,
@@ -27,6 +28,7 @@
     gawk = rust-awk;
     findutils = uutils-findutils;
     diffutils = rust-diffutils;
+    file = rust-file;
     gnutar = rust-tar;
     gzip = rust-gzip;
     bzip2 = rust-bzip2;

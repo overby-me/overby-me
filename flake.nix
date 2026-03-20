@@ -238,6 +238,7 @@
         ./rust/tar
         ./rust/xz
         ./rust/diffutils
+        ./rust/file
         ./rust/texinfo
         ./rust/help2man
         ./rust/curl
