@@ -165,14 +165,138 @@ Implement the `flatpak build-*` workflow for building Flatpak apps.
 - [x] `flatpak build-commit-from` — stub (requires full OSTree commit creation)
 - [x] `flatpak repo` — show repository information
 
-## Priority Order
+## Phase 10: Sandbox Fidelity
 
-1. **Seccomp** (Phase 1) — security critical, without it the sandbox is weak
-2. **Instance tracking** (Phase 2) — needed for ps/enter/kill and temp cleanup
-3. **Capabilities** (Phase 3) — small, completes sandbox feature parity
-4. **D-Bus proxy** (Phase 4) — most GUI apps need D-Bus access
-5. **OSTree client** (Phase 5) — enables remote install/update from Flathub
-6. **Extensions** (Phase 6) — needed to run most real-world apps
-7. **Portals** (Phase 7) — needed for proper desktop integration
-8. **Remaining CLI** (Phase 8) — polish and completeness
-9. **Build commands** (Phase 9) — for developers building Flatpak apps
+Bring the sandbox setup to parity with real Flatpak so apps work correctly.
+
+### Tasks
+
+- [ ] Bind-mount `/sys` subdirectories read-only (`/sys/block`, `/sys/bus`,
+  `/sys/class`, `/sys/dev`, `/sys/devices`)
+- [ ] Enable `--new-session` by default (prevents TIOCSTI terminal injection)
+- [ ] Use memfd + `--ro-bind-data` for `.flatpak-info` instead of temp files
+- [ ] Generate `/etc/passwd` and `/etc/group` via memfd + `--ro-bind-data`
+- [ ] Set up timezone symlink (`/etc/localtime` → `/usr/share/zoneinfo/<TZ>`)
+  and write `/etc/timezone`
+- [ ] Bind-mount host font directories into the sandbox
+  (`/usr/share/fonts`, `/usr/local/share/fonts`, `~/.local/share/fonts`,
+  `/etc/fonts`)
+- [ ] Bind-mount host icon theme directories
+- [ ] Set up per-app shared `/tmp` and `/dev/shm` directories (persistent
+  across instances of the same app, isolated from other apps)
+- [ ] Regenerate `ld.so.cache` by running `ldconfig` in a sub-bwrap when
+  extensions add library paths
+- [ ] Mount `/run/host/fonts`, `/run/host/icons` for host resource access
+- [ ] Create `/run/flatpak/.flatpak/<instance-id>` and bind-mount into sandbox
+
+## Phase 11: Native Deflate and Local Object Cache
+
+Remove the python3 dependency for decompression and avoid re-downloading
+objects that have already been fetched.
+
+### Tasks
+
+- [ ] Implement raw deflate decompression natively (either minimal pure-Rust
+  inflate or add `flate2`/`miniz_oxide` as a dependency)
+- [ ] Store fetched OSTree objects locally in `<installation>/repo/objects/`
+  with the standard `<XX>/<YY...>.<ext>` layout
+- [ ] Check local cache before fetching objects from the remote
+- [ ] Implement `flatpak update` to actually pull newer commits (compare
+  local commit checksum with remote summary, re-checkout if different)
+- [ ] Handle HTTP chunked transfer-encoding in the HTTP client (some repos
+  use it for large objects)
+- [ ] Add progress reporting during large pulls (object count / total)
+- [ ] Implement static delta support for faster pulls (optional — large
+  effort but huge performance improvement)
+
+## Phase 12: Seccomp Hardening
+
+Complete the remaining seccomp filter gaps.
+
+### Tasks
+
+- [ ] Implement proper `clone` flag inspection for `CLONE_NEWUSER` using
+  BPF_ALU (AND instruction) to mask and test the flags argument
+- [ ] Add GPG signature verification for OSTree summary and commit objects
+  (either shell out to `gpg` or implement minimal OpenPGP parsing)
+- [ ] Harden `personality` filtering to only allow known-safe values
+- [ ] Block `prctl(PR_SET_MM)` which can manipulate memory mappings
+
+## Phase 13: Instance Tracking Completion
+
+Wire up bwrap's `--info-fd` to capture the actual child PID and process info.
+
+### Tasks
+
+- [ ] Create a pipe and pass the read end via `--info-fd` to bwrap
+- [ ] Parse bwrap's JSON output (`{"child-pid": N}`) from the pipe
+- [ ] Write the actual child PID to the instance directory's `pid` file
+- [ ] Capture and write `bwrapinfo.json` to the instance directory
+- [ ] Use the real PID for `flatpak ps`, `flatpak kill`, `flatpak enter`
+
+## Phase 14: D-Bus Proxy Completion
+
+### Tasks
+
+- [ ] Proxy the accessibility bus (`AT_SPI_BUS_ADDRESS`)
+- [ ] Handle `sockets=inherit-wayland-socket` (pass through existing Wayland
+  socket from parent sandbox)
+- [ ] Wire up `--log` flag for proxy debugging
+- [ ] Support `[Accessibility Bus Policy]` from metadata
+
+## Phase 15: Extension Completion
+
+### Tasks
+
+- [ ] Implement `merge-dirs` — create overlay directories that merge content
+  from multiple extensions into a single mount point
+- [ ] Auto-download missing extensions when running an app (prompt user,
+  then pull via OSTree client)
+- [ ] Regenerate `ld.so.cache` when extensions add `add-ld-path` entries
+  (run `ldconfig` in a sub-bwrap to generate the cache, then bind-mount it)
+
+## Phase 16: Portal Implementation
+
+Replace the portal stubs with real D-Bus client implementations.
+
+### Tasks
+
+- [ ] Implement a minimal D-Bus client (authenticate, call methods, read
+  replies) — either pure Rust or use `dbus-send`/`gdbus` subprocess
+- [ ] Document portal: talk to `org.freedesktop.portal.Documents` for
+  `document-export`, `document-unexport`, `document-info`
+- [ ] Permission store: talk to `org.freedesktop.impl.portal.PermissionStore`
+  for `permission-show`, `permission-set`, `permission-remove`, `permission-reset`
+- [ ] Mount the document portal socket (`/run/user/<uid>/doc`) into the sandbox
+- [ ] Set `FLATPAK_PORTAL_PID` environment variable
+
+## Phase 17: Remaining CLI and Formats
+
+### Tasks
+
+- [ ] `flatpak search` — fetch and parse Flathub appstream XML/catalog data
+- [ ] `flatpak history` — implement an event log (install/update/uninstall
+  events with timestamps, stored in `<installation>/history.log`)
+- [ ] `flatpak create-usb` — export refs to a USB sideload directory
+- [ ] `build-bundle` — implement proper Flatpak bundle format (OSTree commit
+  in a single file with metadata header) instead of tar
+- [ ] `build-commit-from` — implement full OSTree commit creation from an
+  existing ref's content tree
+- [ ] `build-sign` — implement GPG signing of OSTree commits
+- [ ] `.flatpakrepo` file parsing for `remote-add --from=<file>`
+- [ ] Support `--columns` flag for `list`, `remote-ls`, `ps` output formatting
+- [ ] Support `--arch` flag for cross-architecture operations
+
+## Priority Order (Phases 10-17)
+
+1. **Sandbox fidelity** (Phase 10) — highest impact, apps fail without /sys,
+   fonts, timezone
+2. **Native deflate + cache** (Phase 11) — removes python3 dep, makes install
+   usable for real apps
+3. **Seccomp hardening** (Phase 12) — security improvement
+4. **Instance tracking** (Phase 13) — correctness for ps/kill/enter
+5. **D-Bus proxy completion** (Phase 14) — needed for a11y and edge cases
+6. **Extension completion** (Phase 15) — needed for apps using GL/codecs
+7. **Portal implementation** (Phase 16) — needed for file access and desktop
+   integration
+8. **Remaining CLI** (Phase 17) — polish and full compatibility
