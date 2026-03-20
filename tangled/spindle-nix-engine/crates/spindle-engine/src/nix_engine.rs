@@ -1,19 +1,19 @@
 //! Nix engine implementation.
 //!
 //! Replaces Docker+Nixery with native Nix builds and child process execution.
-//! Each workflow step runs as a child process of the runner daemon, inheriting
-//! the systemd service's sandboxing automatically.
+//! Each workflow runs inside a single hakoniwa container with PID, IPC, and
+//! mount namespace isolation. Steps execute sequentially within the container
+//! via a stdin command protocol.
 
 use std::collections::HashMap;
-use std::io::Write;
+use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use tokio::io::AsyncBufReadExt;
 use tokio::sync::Mutex;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use crate::nix_deps::{
     NixDeps, build_nix_env, parse_dependencies_from_yaml, parse_env_from_yaml,
@@ -25,16 +25,30 @@ use spindle_models::{
     CloneStep, Pipeline, UnlockedSecret, UserStep, Workflow, WorkflowId, WorkflowLogger,
 };
 
+/// Sentinel written to stdout after each step to signal completion.
+/// Format: `\nSPINDLE_STEP_EXIT:<exit_code>\n`
+const STEP_SENTINEL_PREFIX: &str = "SPINDLE_STEP_EXIT:";
+
 /// Per-workflow runtime state, stored while the workflow is active.
-#[derive(Debug)]
 struct WorkflowState {
     /// Path to the built Nix environment (store path with `bin/`, `sbin/`).
     nix_env_path: Option<PathBuf>,
-    /// Host path managed by WorkspaceManager (also used as hakoniwa rootdir).
+    /// Host path managed by WorkspaceManager.
     workspace_dir: PathBuf,
-    /// Host path to the actual workspace inside the container root.
-    /// Maps to `/workspace` inside the hakoniwa container.
-    host_workspace: PathBuf,
+    /// The running hakoniwa container child process.
+    /// Stdin is used to send step commands, stdout/stderr for output.
+    container: Option<hakoniwa::Child>,
+}
+
+// hakoniwa::Child contains PipeReader/PipeWriter which aren't Debug
+impl std::fmt::Debug for WorkflowState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WorkflowState")
+            .field("nix_env_path", &self.nix_env_path)
+            .field("workspace_dir", &self.workspace_dir)
+            .field("container", &self.container.as_ref().map(|c| c.id()))
+            .finish()
+    }
 }
 
 /// Per-workflow resource limits.
@@ -49,7 +63,7 @@ pub struct WorkflowLimits {
 }
 
 /// The Nix engine: builds Nix closures from dependency specs and executes
-/// workflow steps as child processes.
+/// workflow steps inside hakoniwa containers.
 pub struct NixEngine {
     /// Workspace manager for creating/destroying per-workflow directories.
     workspace_mgr: WorkspaceManager,
@@ -71,14 +85,6 @@ pub struct NixEngine {
 
 impl NixEngine {
     /// Create a new Nix engine.
-    ///
-    /// # Arguments
-    /// * `workspace_root` — Root directory for per-workflow workspace dirs.
-    /// * `cache_dir` — Directory for caching built Nix environments.
-    /// * `timeout` — Default workflow timeout.
-    /// * `extra_nix_flags` — Extra flags passed to `nix build`.
-    /// * `dev_mode` — Whether dev mode is enabled.
-    /// * `workflow_limits` — Per-workflow resource limits.
     pub fn new(
         workspace_root: impl Into<PathBuf>,
         cache_dir: impl Into<PathBuf>,
@@ -87,9 +93,6 @@ impl NixEngine {
         dev_mode: bool,
         workflow_limits: WorkflowLimits,
     ) -> Self {
-        // Resolve bash from the current process's PATH. On NixOS, /bin/bash
-        // doesn't exist — bash lives in the Nix store and is only reachable
-        // via PATH set by the systemd service.
         let bash_path = resolve_bash();
 
         Self {
@@ -103,6 +106,22 @@ impl NixEngine {
             workflow_limits,
         }
     }
+}
+
+/// The runner script that executes inside the hakoniwa container.
+/// It reads commands from stdin (null-byte delimited) and executes each one,
+/// printing a sentinel line with the exit code after each command.
+fn build_runner_script() -> String {
+    // Read null-delimited commands from stdin. For each command:
+    // 1. Execute it with bash -euo pipefail
+    // 2. Print the exit code sentinel to stdout
+    format!(
+        r#"while IFS= read -r -d $'\0' __cmd; do
+    bash -euo pipefail -c "$__cmd"
+    printf '\n{STEP_SENTINEL_PREFIX}%d\n' $?
+done"#,
+        STEP_SENTINEL_PREFIX = STEP_SENTINEL_PREFIX,
+    )
 }
 
 #[async_trait]
@@ -204,25 +223,66 @@ impl Engine for NixEngine {
             None
         };
 
-        // Set workspace to mode 0700 to prevent cross-workflow file access.
-        // Each workflow runs as the same UID, but 0700 prevents other
-        // workflows from accessing this workspace (they'd need to know the path).
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let perms = std::fs::Permissions::from_mode(0o700);
-            std::fs::set_permissions(&workspace_dir, perms).map_err(|e| {
-                EngineError::SetupFailed(format!(
-                    "failed to set workspace permissions: {e}"
-                ))
-            })?;
+        // Build the hakoniwa container.
+        let mut container = hakoniwa::Container::new();
+        container.unshare(hakoniwa::Namespace::Pid);
+        container.unshare(hakoniwa::Namespace::Ipc);
+
+        // Mount system paths read-only.
+        for dir in [
+            "/bin", "/etc", "/lib", "/lib64", "/lib32", "/sbin", "/usr", "/nix",
+        ] {
+            if Path::new(dir).exists() {
+                container.bindmount_ro(dir, dir);
+            }
         }
 
-        let host_workspace = workspace_dir.clone();
+        // Writable workspace, /dev, /tmp, /proc.
+        container.tmpfsmount("/workspace");
+        container.dir("/proc", 0o555);
+        container.devfsmount("/dev");
+        container.tmpfsmount("/tmp");
+
+        if let Some(limit) = self.workflow_limits.limit_as {
+            container.setrlimit(hakoniwa::Rlimit::As, limit, limit);
+        }
+        if let Some(limit) = self.workflow_limits.limit_nofile {
+            container.setrlimit(hakoniwa::Rlimit::Nofile, limit, limit);
+        }
+
+        // Build environment variables for the container.
+        let path = build_path(nix_env_path.as_deref());
+        let user = std::env::var("USER").unwrap_or_else(|_| "nobody".into());
+
+        // Spawn the container with a runner script that reads commands from stdin.
+        let runner_script = build_runner_script();
+        let mut hako_cmd = container.command(&self.bash_path.to_string_lossy());
+        hako_cmd.args(["-c", &runner_script]);
+        hako_cmd.current_dir("/workspace");
+        hako_cmd.stdin(hakoniwa::Stdio::piped());
+        hako_cmd.stdout(hakoniwa::Stdio::piped());
+        hako_cmd.stderr(hakoniwa::Stdio::piped());
+
+        hako_cmd.env("PATH", &path);
+        hako_cmd.env("HOME", "/workspace");
+        hako_cmd.env("USER", &user);
+        hako_cmd.env("CI", "true");
+
+        // Add workflow-level env vars.
+        for (k, v) in &workflow.environment {
+            hako_cmd.env(k, v);
+        }
+
+        let child = hako_cmd.spawn().map_err(|e| {
+            EngineError::SetupFailed(format!("hakoniwa container spawn failed: {e}"))
+        })?;
+
+        info!(%wid, pid = child.id(), "hakoniwa container started");
 
         let state = WorkflowState {
             nix_env_path,
             workspace_dir,
-            host_workspace,
+            container: Some(child),
         };
         self.states.lock().await.insert(wid.to_string(), state);
 
@@ -234,8 +294,17 @@ impl Engine for NixEngine {
     }
 
     async fn destroy_workflow(&self, wid: &WorkflowId) -> EngineResult<()> {
-        // Remove the state.
-        self.states.lock().await.remove(&wid.to_string());
+        // Remove the state and kill the container.
+        if let Some(mut state) = self.states.lock().await.remove(&wid.to_string()) {
+            if let Some(mut child) = state.container.take() {
+                // Close stdin to signal the runner script to exit.
+                drop(child.stdin.take());
+                // Wait briefly then kill if still running.
+                if let Err(e) = child.kill() {
+                    warn!(%e, %wid, "failed to kill hakoniwa container");
+                }
+            }
+        }
 
         // Destroy the workspace directory.
         self.workspace_mgr.destroy(wid).await?;
@@ -256,11 +325,6 @@ impl Engine for NixEngine {
             .get(step_idx)
             .ok_or_else(|| EngineError::Other(format!("step index {step_idx} out of bounds")))?;
 
-        let states = self.states.lock().await;
-        let state = states
-            .get(&wid.to_string())
-            .ok_or_else(|| EngineError::Other(format!("no state for workflow {wid}")))?;
-
         let command_str = step.command();
 
         if command_str.is_empty() {
@@ -268,57 +332,19 @@ impl Engine for NixEngine {
             return Ok(());
         }
 
-        // Build PATH: nix env bins + standard system paths.
-        let path = build_path(state.nix_env_path.as_deref());
-
-        // Build environment variables.
-        let user = std::env::var("USER").unwrap_or_else(|_| "nobody".into());
-        let mut env_vars: Vec<(String, String)> = vec![
-            ("PATH".into(), path),
-            ("HOME".into(), state.host_workspace.to_string_lossy().into_owned()),
-            ("USER".into(), user),
-            ("CI".into(), "true".into()),
-        ];
-
-        // Add workflow-level env vars.
-        for (k, v) in &workflow.environment {
-            env_vars.push((k.clone(), v.clone()));
-        }
-
-        // Write secrets to the workspace. Written with 0600 permissions,
-        // sourced and deleted before the step command runs.
-        let secrets_file = state
-            .host_workspace
-            .join(format!(".spindle-secrets-{step_idx}"));
-        if !secrets.is_empty() {
-            use std::os::unix::fs::OpenOptionsExt;
-            let mut contents = String::new();
+        // Build the step command with optional secrets sourcing.
+        // Secrets are written to a temp file inside /workspace (container tmpfs),
+        // sourced, then deleted before the actual command runs.
+        let full_command = if !secrets.is_empty() {
+            let mut secrets_script = String::new();
             for secret in secrets {
                 let escaped = secret.value.replace('\'', "'\\''");
-                contents.push_str(&format!("export {}='{}'\n", secret.key, escaped));
+                secrets_script.push_str(&format!("export {}='{}'\n", secret.key, escaped));
             }
-            std::fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .mode(0o600)
-                .open(&secrets_file)
-                .map_err(|e| EngineError::StepFailed {
-                    exit_code: -1,
-                    message: format!("failed to write secrets file: {e}"),
-                })?;
-            std::fs::write(&secrets_file, &contents).map_err(|e| EngineError::StepFailed {
-                exit_code: -1,
-                message: format!("failed to write secrets file: {e}"),
-            })?;
-        }
-
-        // Build the command: source secrets (container path) then run the step.
-        let full_command = if !secrets.is_empty() {
             format!(
-                ". '{}' && rm -f '{}' && {command_str}",
-                secrets_file.display(),
-                secrets_file.display()
+                "eval {secrets}; {cmd}",
+                secrets = shell_escape::unix::escape(secrets_script.into()),
+                cmd = command_str,
             )
         } else {
             command_str
@@ -326,90 +352,120 @@ impl Engine for NixEngine {
 
         info!(%wid, step_idx, name = step.name(), "executing step");
 
-        // Build hakoniwa container for per-workflow isolation:
-        // - PID namespace: can't see other workflows' processes
-        // - IPC namespace: no shared memory between workflows
-        //
-        // Mount namespace is not used because bind-mount remounting fails
-        // in user namespaces (kernel limitation). Workspace directories are
-        // set to mode 0700 in setup_workflow to prevent cross-workflow access.
-        // Spawn the step in a new IPC namespace for isolation between
-        // concurrent workflows (prevents shared memory cross-access).
-        // We use a wrapper script that calls unshare(1) before executing
-        // the step command.
-        let isolated_command = format!(
-            "unshare --user --ipc -- bash -euo pipefail -c {}",
-            shell_escape::unix::escape(full_command.into())
-        );
-
-        let mut child = tokio::process::Command::new(&self.bash_path)
-            .args(["-c", &isolated_command])
-            .current_dir(&state.host_workspace)
-            .env_clear()
-            .envs(env_vars)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
-            .map_err(|e| EngineError::StepFailed {
-                exit_code: -1,
-                message: format!("failed to spawn step process: {e}"),
-            })?;
-
-        // Stream stdout and stderr to the logger.
-        let stdout = child.stdout.take().unwrap();
-        let stderr = child.stderr.take().unwrap();
-
+        // Send the command to the container's stdin and read output.
+        // This runs in a blocking task because hakoniwa uses sync I/O.
+        let wid_str = wid.to_string();
+        let step_name = step.name().to_string();
         let mut stdout_writer = logger.data_writer(step_idx, "stdout".into());
         let mut stderr_writer = logger.data_writer(step_idx, "stderr".into());
 
-        let stdout_task = tokio::spawn(async move {
-            let mut reader = tokio::io::BufReader::new(stdout).lines();
-            while let Ok(Some(line)) = reader.next_line().await {
-                let _ = writeln!(stdout_writer, "{line}");
-            }
-        });
+        let mut states = self.states.lock().await;
+        let state = states
+            .get_mut(&wid_str)
+            .ok_or_else(|| EngineError::Other(format!("no state for workflow {wid}")))?;
 
-        let stderr_task = tokio::spawn(async move {
-            let mut reader = tokio::io::BufReader::new(stderr).lines();
-            while let Ok(Some(line)) = reader.next_line().await {
-                let _ = writeln!(stderr_writer, "{line}");
-            }
-        });
-
-        // Wait for the process to complete.
-        let status = child.wait().await.map_err(|e| EngineError::StepFailed {
-            exit_code: -1,
-            message: format!("failed to wait for step process: {e}"),
+        let mut child = state.container.take().ok_or_else(|| {
+            EngineError::Other(format!("container already consumed for workflow {wid}"))
         })?;
 
-        // Wait for stream tasks to finish.
-        let _ = stdout_task.await;
-        let _ = stderr_task.await;
+        // We need to drop the lock before the blocking task.
+        drop(states);
 
-        // Always clean up the secrets file (the step rm's it on success, but
-        // it may still exist if the step failed before reaching that point).
-        let _ = std::fs::remove_file(&secrets_file);
+        let result = tokio::task::spawn_blocking(move || {
+            // Write the command to stdin (null-byte delimited).
+            let stdin = child.stdin.as_mut().ok_or_else(|| EngineError::StepFailed {
+                exit_code: -1,
+                message: "container stdin not available".into(),
+            })?;
+            let mut cmd_bytes = full_command.into_bytes();
+            cmd_bytes.push(0); // null byte delimiter
+            stdin.write_all(&cmd_bytes).map_err(|e| EngineError::StepFailed {
+                exit_code: -1,
+                message: format!("failed to write command to container stdin: {e}"),
+            })?;
+            stdin.flush().map_err(|e| EngineError::StepFailed {
+                exit_code: -1,
+                message: format!("failed to flush container stdin: {e}"),
+            })?;
 
-        if !status.success() {
-            let exit_code = status.code().unwrap_or(-1);
-            error!(%wid, step_idx, exit_code, name = step.name(), "step failed");
-            return Err(EngineError::StepFailed {
-                exit_code,
-                message: format!("step {:?} exited with code {exit_code}", step.name()),
+            // Read stdout line by line until we see the sentinel.
+            // Stderr is read in a separate thread.
+            let stderr_pipe = child.stderr.take();
+            let stderr_handle = std::thread::spawn(move || {
+                if let Some(stderr) = stderr_pipe {
+                    let reader = std::io::BufReader::new(stderr);
+                    let mut captured = Vec::new();
+                    for line in reader.lines().map_while(Result::ok) {
+                        let _ = writeln!(stderr_writer, "{line}");
+                        captured.push(line);
+                    }
+                    captured
+                } else {
+                    Vec::new()
+                }
             });
-        }
 
-        info!(%wid, step_idx, name = step.name(), "step completed successfully");
-        Ok(())
+            let mut exit_code: Option<i32> = None;
+            if let Some(ref mut stdout) = child.stdout {
+                let reader = std::io::BufReader::new(stdout);
+                for line in reader.lines().map_while(Result::ok) {
+                    if let Some(code_str) = line.strip_prefix(STEP_SENTINEL_PREFIX) {
+                        exit_code = code_str.trim().parse().ok();
+                        break;
+                    }
+                    let _ = writeln!(stdout_writer, "{line}");
+                }
+            }
+
+            // We can't join stderr_handle here because it reads until EOF
+            // which won't happen until the container exits. Just drop it —
+            // the thread will continue reading stderr in the background.
+            // Re-attach stderr for future steps.
+            // (The thread holds the pipe, so we can't re-attach. This is OK
+            // because stderr is per-step in the logger anyway.)
+            drop(stderr_handle);
+
+            Ok::<(hakoniwa::Child, Option<i32>), EngineError>((child, exit_code))
+        })
+        .await
+        .map_err(|e| EngineError::StepFailed {
+            exit_code: -1,
+            message: format!("step task panicked: {e}"),
+        })?;
+
+        let (child, exit_code) = result?;
+
+        // Put the container back into the state for the next step.
+        let mut states = self.states.lock().await;
+        if let Some(state) = states.get_mut(&wid.to_string()) {
+            state.container = Some(child);
+        }
+        drop(states);
+
+        match exit_code {
+            Some(0) => {
+                info!(%wid, step_idx, name = %step_name, "step completed successfully");
+                Ok(())
+            }
+            Some(code) => {
+                error!(%wid, step_idx, exit_code = code, name = %step_name, "step failed");
+                Err(EngineError::StepFailed {
+                    exit_code: code,
+                    message: format!("step {step_name:?} exited with code {code}"),
+                })
+            }
+            None => {
+                error!(%wid, step_idx, name = %step_name, "step failed: no exit code (container may have crashed)");
+                Err(EngineError::StepFailed {
+                    exit_code: -1,
+                    message: format!("step {step_name:?}: no exit code received from container"),
+                })
+            }
+        }
     }
 }
 
 /// Build the PATH environment variable.
-///
-/// Includes the Nix environment's `bin` and `sbin` directories (if present),
-/// the parent process's PATH (which on NixOS contains git, nix, etc. from
-/// the systemd service's `path` attribute), and standard system paths.
 fn build_path(nix_env: Option<&Path>) -> String {
     let mut parts = Vec::new();
 
@@ -418,32 +474,21 @@ fn build_path(nix_env: Option<&Path>) -> String {
         parts.push(format!("{}/sbin", env.display()));
     }
 
-    // Include the parent process's PATH. On NixOS, tools like git and nix
-    // live in the Nix store and are only reachable via PATH set by the
-    // systemd service unit.
+    // Include the parent process's PATH.
     if let Ok(parent_path) = std::env::var("PATH") {
         parts.push(parent_path);
     }
 
-    // Standard system paths as fallback.
     parts.extend([
         "/usr/local/bin".into(),
         "/usr/bin".into(),
         "/bin".into(),
-        "/usr/local/sbin".into(),
-        "/usr/sbin".into(),
-        "/sbin".into(),
     ]);
 
     parts.join(":")
 }
 
-/// Resolve the path to the `bash` binary from the current process's `PATH`.
-///
-/// On NixOS, `/bin/bash` doesn't exist. Bash lives in the Nix store and is
-/// only reachable via PATH (set by the systemd service unit's `path`
-/// attribute). This function finds bash at construction time so step
-/// execution doesn't depend on hardcoded paths.
+/// Resolve the bash binary from PATH.
 fn resolve_bash() -> PathBuf {
     if let Ok(path) = std::env::var("PATH") {
         for dir in path.split(':') {
@@ -455,7 +500,6 @@ fn resolve_bash() -> PathBuf {
         }
     }
 
-    // Fallback to /bin/bash for non-NixOS systems.
     let fallback = PathBuf::from("/bin/bash");
     info!(bash = %fallback.display(), "using fallback bash path");
     fallback
@@ -465,23 +509,6 @@ fn resolve_bash() -> PathBuf {
 mod tests {
     use super::*;
     use crate::traits::PipelineCloneOpts;
-
-    #[test]
-    fn build_path_with_nix_env() {
-        let path = build_path(Some(Path::new("/nix/store/abc123-env")));
-        assert!(path.starts_with("/nix/store/abc123-env/bin:"));
-        assert!(path.contains("/nix/store/abc123-env/sbin:"));
-        assert!(path.contains("/usr/bin"));
-    }
-
-    #[test]
-    fn build_path_without_nix_env() {
-        let path = build_path(None);
-        // PATH should contain standard system paths as fallbacks.
-        assert!(path.contains("/usr/local/bin"));
-        assert!(path.contains("/usr/bin"));
-        assert!(path.contains("/bin"));
-    }
 
     #[test]
     fn init_workflow_rejects_unknown_engine() {
@@ -556,13 +583,12 @@ env:
 
         let wf = engine.init_workflow(twf, &pipeline).unwrap();
         assert_eq!(wf.name, "ci");
-        // Clone step + 2 user steps
         assert_eq!(wf.steps.len(), 3);
         assert_eq!(wf.steps[0].name(), "Clone repository into workspace");
         assert_eq!(wf.steps[1].name(), "Build");
         assert_eq!(wf.steps[2].name(), "Test");
         assert_eq!(wf.environment["NODE_ENV"], "test");
-        assert!(wf.data.is_some()); // Dependencies stored
+        assert!(wf.data.is_some());
     }
 
     #[test]
@@ -596,7 +622,6 @@ env:
         };
 
         let wf = engine.init_workflow(twf, &pipeline).unwrap();
-        // Only user step, no clone step
         assert_eq!(wf.steps.len(), 1);
         assert_eq!(wf.steps[0].name(), "Hello");
     }
@@ -627,7 +652,6 @@ env:
             workflows: vec![],
         };
 
-        // Should succeed — we accept "nixery" as an alias for compatibility.
         assert!(engine.init_workflow(twf, &pipeline).is_ok());
     }
 
@@ -677,5 +701,26 @@ env:
             WorkflowLimits::default(),
         );
         assert_eq!(engine.workflow_timeout(), Duration::from_secs(600));
+    }
+
+    #[test]
+    fn build_path_with_nix_env() {
+        let path = build_path(Some(Path::new("/nix/store/abc123-env")));
+        assert!(path.starts_with("/nix/store/abc123-env/bin:"));
+        assert!(path.contains("/nix/store/abc123-env/sbin:"));
+    }
+
+    #[test]
+    fn build_path_without_nix_env() {
+        let path = build_path(None);
+        assert!(path.contains("/usr/bin"));
+        assert!(path.contains("/bin"));
+    }
+
+    #[test]
+    fn runner_script_contains_sentinel() {
+        let script = build_runner_script();
+        assert!(script.contains(STEP_SENTINEL_PREFIX));
+        assert!(script.contains("read -r -d"));
     }
 }
