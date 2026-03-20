@@ -11,7 +11,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use tokio::io::AsyncBufReadExt;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info};
 
@@ -27,14 +26,14 @@ use spindle_models::{
 
 /// Per-workflow runtime state, stored while the workflow is active.
 #[derive(Debug)]
-#[allow(dead_code)]
 struct WorkflowState {
     /// Path to the built Nix environment (store path with `bin/`, `sbin/`).
     nix_env_path: Option<PathBuf>,
-    /// Path to the workspace directory.
+    /// Host path managed by WorkspaceManager (also used as hakoniwa rootdir).
     workspace_dir: PathBuf,
-    /// Persistent rootdir for hakoniwa containers (shared across steps).
-    container_root: PathBuf,
+    /// Host path to the actual workspace inside the container root.
+    /// Maps to `/workspace` inside the hakoniwa container.
+    host_workspace: PathBuf,
 }
 
 /// Per-workflow resource limits.
@@ -204,23 +203,23 @@ impl Engine for NixEngine {
             None
         };
 
-        // Store the state.
-        // Create a persistent rootdir for hakoniwa containers. This tmpdir
-        // persists across all steps in the workflow and is cleaned up on destroy.
-        let container_root = workspace_dir.join(".container-root");
-        tokio::fs::create_dir_all(&container_root)
+        // The workspace_dir (from WorkspaceManager) serves as hakoniwa's rootdir.
+        // Create /workspace inside it — this persists across steps and maps to
+        // /workspace inside each hakoniwa container invocation.
+        let host_workspace = workspace_dir.join("workspace");
+        tokio::fs::create_dir_all(&host_workspace)
             .await
             .map_err(|e| {
                 EngineError::SetupFailed(format!(
-                    "failed to create container root {}: {e}",
-                    container_root.display()
+                    "failed to create workspace {}: {e}",
+                    host_workspace.display()
                 ))
             })?;
 
         let state = WorkflowState {
             nix_env_path,
             workspace_dir,
-            container_root,
+            host_workspace,
         };
         self.states.lock().await.insert(wid.to_string(), state);
 
@@ -269,12 +268,13 @@ impl Engine for NixEngine {
         // Build PATH: nix env bins + standard system paths.
         let path = build_path(state.nix_env_path.as_deref());
 
-        // Build environment variables.
-        let workspace_dir = &state.workspace_dir;
+        // Build environment variables. Inside the container, /workspace is the
+        // working directory (maps to host_workspace on the host).
+        let container_workspace = "/workspace";
         let user = std::env::var("USER").unwrap_or_else(|_| "nobody".into());
         let mut env_vars: Vec<(String, String)> = vec![
             ("PATH".into(), path),
-            ("HOME".into(), workspace_dir.to_string_lossy().into_owned()),
+            ("HOME".into(), container_workspace.into()),
             ("USER".into(), user),
             ("CI".into(), "true".into()),
         ];
@@ -284,15 +284,18 @@ impl Engine for NixEngine {
             env_vars.push((k.clone(), v.clone()));
         }
 
-        // Write secrets to a temporary file that the step sources, rather than
-        // passing them as env vars (which are visible via /proc/*/environ to
-        // concurrent workflows running under the same UID).
-        let secrets_file = workspace_dir.join(format!(".spindle-secrets-{step_idx}"));
+        // Write secrets to the host workspace (visible at /workspace inside
+        // the container). Written with 0600 permissions, sourced and deleted
+        // before the step command runs.
+        let secrets_file_host = state
+            .host_workspace
+            .join(format!(".spindle-secrets-{step_idx}"));
+        let secrets_file_container =
+            PathBuf::from(container_workspace).join(format!(".spindle-secrets-{step_idx}"));
         if !secrets.is_empty() {
             use std::os::unix::fs::OpenOptionsExt;
             let mut contents = String::new();
             for secret in secrets {
-                // Shell-escape the value using single quotes with embedded quote handling.
                 let escaped = secret.value.replace('\'', "'\\''");
                 contents.push_str(&format!("export {}='{}'\n", secret.key, escaped));
             }
@@ -301,23 +304,23 @@ impl Engine for NixEngine {
                 .create(true)
                 .truncate(true)
                 .mode(0o600)
-                .open(&secrets_file)
+                .open(&secrets_file_host)
                 .map_err(|e| EngineError::StepFailed {
                     exit_code: -1,
                     message: format!("failed to write secrets file: {e}"),
                 })?;
-            std::fs::write(&secrets_file, &contents).map_err(|e| EngineError::StepFailed {
+            std::fs::write(&secrets_file_host, &contents).map_err(|e| EngineError::StepFailed {
                 exit_code: -1,
                 message: format!("failed to write secrets file: {e}"),
             })?;
         }
 
-        // Build the command: source the secrets file (if present) then run the step.
+        // Build the command: source secrets (container path) then run the step.
         let full_command = if !secrets.is_empty() {
             format!(
                 ". '{}' && rm -f '{}' && {command_str}",
-                secrets_file.display(),
-                secrets_file.display()
+                secrets_file_container.display(),
+                secrets_file_container.display()
             )
         } else {
             command_str
@@ -325,49 +328,96 @@ impl Engine for NixEngine {
 
         info!(%wid, step_idx, name = step.name(), "executing step");
 
-        // Spawn the child process directly. Per-workflow PID/IPC isolation via
-        // hakoniwa is planned but requires restructuring to run all steps in a
-        // single container (for workspace persistence across steps).
-        let mut child = tokio::process::Command::new(&self.bash_path)
-            .args(["-euo", "pipefail", "-c", &full_command])
-            .current_dir(workspace_dir)
-            .env_clear()
-            .envs(env_vars)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
-            .map_err(|e| EngineError::StepFailed {
-                exit_code: -1,
-                message: format!("failed to spawn step process: {e}"),
-            })?;
+        // Build hakoniwa container for per-workflow isolation:
+        // - PID namespace: can't see other workflows' processes
+        // - IPC namespace: no shared memory between workflows
+        // - Mount namespace (via rootdir): isolated filesystem view
+        //
+        // rootdir = workspace_dir (managed by WorkspaceManager). After
+        // pivot_root, /workspace is a plain dir in the rootdir (no bind
+        // mount needed), so files persist across steps.
+        let mut container = hakoniwa::Container::new();
+        container.unshare(hakoniwa::Namespace::Pid);
+        container.unshare(hakoniwa::Namespace::Ipc);
+        container.rootdir(&state.workspace_dir);
 
-        // Stream stdout and stderr to the logger.
-        let stdout = child.stdout.take().unwrap();
-        let stderr = child.stderr.take().unwrap();
+        // System paths read-only.
+        for dir in [
+            "/bin", "/etc", "/lib", "/lib64", "/lib32", "/sbin", "/usr", "/nix",
+        ] {
+            if std::path::Path::new(dir).exists() {
+                container.bindmount_ro(dir, dir);
+            }
+        }
+
+        // /workspace is a plain dir in rootdir — writable, no bind mount.
+        // /dev for device nodes, /tmp for temp files, /proc for PID namespace.
+        container.dir("/proc", 0o555);
+        container.devfsmount("/dev");
+        container.tmpfsmount("/tmp");
+
+        if let Some(limit) = self.workflow_limits.limit_as {
+            container.setrlimit(hakoniwa::Rlimit::As, limit, limit);
+        }
+        if let Some(limit) = self.workflow_limits.limit_nofile {
+            container.setrlimit(hakoniwa::Rlimit::Nofile, limit, limit);
+        }
+
+        let mut hako_cmd = container.command(&self.bash_path.to_string_lossy());
+        hako_cmd.args(["-euo", "pipefail", "-c", &full_command]);
+        hako_cmd.current_dir(container_workspace);
+        hako_cmd.stdout(hakoniwa::Stdio::piped());
+        hako_cmd.stderr(hakoniwa::Stdio::piped());
+
+        for (k, v) in &env_vars {
+            hako_cmd.env(k, v);
+        }
+
+        if let Some(limit) = self.workflow_limits.limit_walltime {
+            hako_cmd.wait_timeout(limit);
+        }
+
+        let mut child = hako_cmd.spawn().map_err(|e| EngineError::StepFailed {
+            exit_code: -1,
+            message: format!("hakoniwa spawn failed: {e}"),
+        })?;
+
+        // Stream stdout/stderr from hakoniwa's PipeReaders via blocking tasks.
+        let hako_stdout = child.stdout.take();
+        let hako_stderr = child.stderr.take();
 
         let mut stdout_writer = logger.data_writer(step_idx, "stdout".into());
         let mut stderr_writer = logger.data_writer(step_idx, "stderr".into());
 
-        let stdout_task = tokio::spawn(async move {
-            let mut reader = tokio::io::BufReader::new(stdout).lines();
-            while let Ok(Some(line)) = reader.next_line().await {
-                let _ = writeln!(stdout_writer, "{line}");
+        let stdout_task = tokio::task::spawn_blocking(move || {
+            if let Some(stdout) = hako_stdout {
+                let reader = std::io::BufReader::new(stdout);
+                for line in std::io::BufRead::lines(reader).map_while(Result::ok) {
+                    let _ = writeln!(stdout_writer, "{line}");
+                }
             }
         });
 
-        let stderr_task = tokio::spawn(async move {
-            let mut reader = tokio::io::BufReader::new(stderr).lines();
-            while let Ok(Some(line)) = reader.next_line().await {
-                let _ = writeln!(stderr_writer, "{line}");
+        let stderr_task = tokio::task::spawn_blocking(move || {
+            if let Some(stderr) = hako_stderr {
+                let reader = std::io::BufReader::new(stderr);
+                for line in std::io::BufRead::lines(reader).map_while(Result::ok) {
+                    let _ = writeln!(stderr_writer, "{line}");
+                }
             }
         });
 
         // Wait for the process to complete.
-        let status = child.wait().await.map_err(|e| EngineError::StepFailed {
-            exit_code: -1,
-            message: format!("failed to wait for step process: {e}"),
-        })?;
+        let status = tokio::task::spawn_blocking(move || child.wait())
+            .await
+            .map_err(|e| EngineError::StepFailed {
+                exit_code: -1,
+                message: format!("hakoniwa wait task panicked: {e}"),
+            })?
+            .map_err(|e| EngineError::StepFailed {
+                exit_code: -1,
+                message: format!("hakoniwa wait failed: {e}"),
+            })?;
 
         // Wait for stream tasks to finish.
         let _ = stdout_task.await;
@@ -375,14 +425,18 @@ impl Engine for NixEngine {
 
         // Always clean up the secrets file (the step rm's it on success, but
         // it may still exist if the step failed before reaching that point).
-        let _ = std::fs::remove_file(&secrets_file);
+        let _ = std::fs::remove_file(&secrets_file_host);
 
         if !status.success() {
-            let exit_code = status.code().unwrap_or(-1);
-            error!(%wid, step_idx, exit_code, name = step.name(), "step failed");
+            let exit_code = status.exit_code.unwrap_or(status.code);
+            let reason = &status.reason;
+            error!(%wid, step_idx, exit_code, %reason, name = step.name(), "step failed");
             return Err(EngineError::StepFailed {
                 exit_code,
-                message: format!("step {:?} exited with code {exit_code}", step.name()),
+                message: format!(
+                    "step {:?} exited with code {exit_code}: {reason}",
+                    step.name()
+                ),
             });
         }
 
