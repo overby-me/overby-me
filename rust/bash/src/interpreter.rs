@@ -385,7 +385,9 @@ impl Shell {
                         }
                     }
                     drop(pipe_r);
-                    if let Ok(nix::sys::wait::WaitStatus::Exited(_, code)) = nix::sys::wait::waitpid(child, None) {
+                    if let Ok(nix::sys::wait::WaitStatus::Exited(_, code)) =
+                        nix::sys::wait::waitpid(child, None)
+                    {
                         self.last_status = code;
                     }
                     let mut s = String::from_utf8_lossy(&output).to_string();
@@ -590,7 +592,12 @@ impl Shell {
             self.run_external(command_name, &expanded_words, &cmd.assignments)
         };
 
-        self.restore_redirections(saved_fds);
+        // For `exec` with no command args, don't restore redirections
+        // (they should persist in the current shell)
+        let is_exec_no_cmd = command_name == "exec" && args.is_empty();
+        if !is_exec_no_cmd {
+            self.restore_redirections(saved_fds);
+        }
 
         self.last_status = status;
         status
@@ -1252,6 +1259,7 @@ impl Shell {
         use std::os::unix::io::{AsRawFd, IntoRawFd};
 
         let mut saved = Vec::new();
+        let is_var_fd = |redir: &Redirection| matches!(&redir.fd, Some(RedirFd::Var(_)));
 
         for redir in redirections {
             let target_str = self.expand_word_single(&redir.target);
@@ -1259,8 +1267,10 @@ impl Shell {
             match &redir.kind {
                 RedirectKind::Output | RedirectKind::Clobber => {
                     let fd = self.resolve_redir_fd(&redir.fd, 1);
-                    let saved_fd = nix::unistd::dup(fd).map_err(|e| e.to_string())?;
-                    saved.push((fd, saved_fd));
+                    if !is_var_fd(redir) {
+                        let saved_fd = nix::unistd::dup(fd).map_err(|e| e.to_string())?;
+                        saved.push((fd, saved_fd));
+                    }
 
                     let file = std::fs::File::create(&target_str)
                         .map_err(|e| format!("{}: {}", target_str, e))?;
@@ -1270,8 +1280,10 @@ impl Shell {
                 }
                 RedirectKind::Append => {
                     let fd = self.resolve_redir_fd(&redir.fd, 1);
-                    let saved_fd = nix::unistd::dup(fd).map_err(|e| e.to_string())?;
-                    saved.push((fd, saved_fd));
+                    if !is_var_fd(redir) {
+                        let saved_fd = nix::unistd::dup(fd).map_err(|e| e.to_string())?;
+                        saved.push((fd, saved_fd));
+                    }
 
                     let file = std::fs::OpenOptions::new()
                         .create(true)
@@ -1284,8 +1296,10 @@ impl Shell {
                 }
                 RedirectKind::Input => {
                     let fd = self.resolve_redir_fd(&redir.fd, 0);
-                    let saved_fd = nix::unistd::dup(fd).map_err(|e| e.to_string())?;
-                    saved.push((fd, saved_fd));
+                    if !is_var_fd(redir) {
+                        let saved_fd = nix::unistd::dup(fd).map_err(|e| e.to_string())?;
+                        saved.push((fd, saved_fd));
+                    }
 
                     let file = std::fs::File::open(&target_str)
                         .map_err(|e| format!("{}: {}", target_str, e))?;
@@ -1358,13 +1372,17 @@ impl Shell {
             Some(RedirFd::Number(n)) => *n,
             Some(RedirFd::Var(name)) => {
                 // Auto-allocate fd: find unused fd >= 10
-                for candidate in 10..256 {
-                    if nix::unistd::dup(candidate).is_err() {
-                        self.vars.insert(name.clone(), candidate.to_string());
-                        return candidate;
-                    } else {
-                        // dup succeeded which means fd exists, close the dup
-                        // Actually we should try fcntl to check
+                for candidate in 10..256i32 {
+                    match nix::unistd::dup(candidate) {
+                        Ok(dup_fd) => {
+                            // fd is in use — close our dup, try next
+                            nix::unistd::close(dup_fd).ok();
+                        }
+                        Err(_) => {
+                            // fd is free — use it
+                            self.vars.insert(name.clone(), candidate.to_string());
+                            return candidate;
+                        }
                     }
                 }
                 default

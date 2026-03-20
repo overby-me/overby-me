@@ -206,6 +206,63 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
             let val = expand_arith(expr, ctx);
             out.push(Segment::Unquoted(val));
         }
+        WordPart::ProcessSub(kind, cmd) => {
+            #[cfg(unix)]
+            {
+                use std::os::unix::io::AsRawFd;
+                let (pipe_r, pipe_w) = nix::unistd::pipe().expect("pipe failed");
+                let r_fd = pipe_r.as_raw_fd();
+                let w_fd = pipe_w.as_raw_fd();
+                // Prevent OwnedFd from closing the fds we need
+                std::mem::forget(pipe_r);
+                std::mem::forget(pipe_w);
+
+                match unsafe { nix::unistd::fork() } {
+                    Ok(nix::unistd::ForkResult::Child) => {
+                        match kind {
+                            ProcessSubKind::Input => {
+                                nix::unistd::close(r_fd).ok();
+                                nix::unistd::dup2(w_fd, 1).ok();
+                                nix::unistd::close(w_fd).ok();
+                            }
+                            ProcessSubKind::Output => {
+                                nix::unistd::close(w_fd).ok();
+                                nix::unistd::dup2(r_fd, 0).ok();
+                                nix::unistd::close(r_fd).ok();
+                            }
+                        }
+                        use std::ffi::CString;
+                        let bash = CString::new("/proc/self/exe").unwrap();
+                        let c_flag = CString::new("-c").unwrap();
+                        let c_cmd = CString::new(cmd.as_str()).unwrap();
+                        nix::unistd::execvp(&bash, &[&bash, &c_flag, &c_cmd]).ok();
+                        std::process::exit(127);
+                    }
+                    Ok(nix::unistd::ForkResult::Parent { .. }) => {
+                        let fd = match kind {
+                            ProcessSubKind::Input => {
+                                nix::unistd::close(w_fd).ok();
+                                r_fd
+                            }
+                            ProcessSubKind::Output => {
+                                nix::unistd::close(r_fd).ok();
+                                w_fd
+                            }
+                        };
+                        out.push(Segment::Unquoted(format!("/dev/fd/{}", fd)));
+                    }
+                    Err(e) => {
+                        eprintln!("bash: process substitution: {}", e);
+                        out.push(Segment::Unquoted(String::new()));
+                    }
+                }
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = (kind, cmd);
+                out.push(Segment::Unquoted(String::new()));
+            }
+        }
     }
 }
 
@@ -294,6 +351,19 @@ fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
 }
 
 fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
+    // Handle indirect expansion with operators: ${!name+word}, ${!name-word}, etc.
+    if expr.name.starts_with('!') && !matches!(expr.op, ParamOp::None | ParamOp::Indirect) {
+        let real_name = &expr.name[1..];
+        // First resolve the indirect: get the value of real_name, use as variable name
+        let target = lookup_var(real_name, ctx);
+        // Now apply the operator to the target variable
+        let indirect_expr = ParamExpr {
+            name: target,
+            op: expr.op.clone(),
+        };
+        return expand_param(&indirect_expr, ctx, cmd_sub);
+    }
+
     let val = lookup_var(&expr.name, ctx);
 
     match &expr.op {

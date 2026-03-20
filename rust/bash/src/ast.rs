@@ -175,6 +175,16 @@ pub enum WordPart {
     CommandSub(String),
     BacktickSub(String),
     ArithSub(String),
+    /// `<(cmd)` or `>(cmd)` — process substitution
+    ProcessSub(ProcessSubKind, String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ProcessSubKind {
+    /// `<(cmd)` — provides input (read from)
+    Input,
+    /// `>(cmd)` — provides output (write to)
+    Output,
 }
 
 /// Parameter expansion: ${name op word}

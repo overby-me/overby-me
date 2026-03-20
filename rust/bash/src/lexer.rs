@@ -162,6 +162,10 @@ impl Lexer {
                 Token::RParen
             }
             '<' => {
+                // Check for process substitution <(cmd) — must come before consuming <
+                if self.peek_at(1) == Some('(') {
+                    return self.read_word();
+                }
                 self.advance();
                 match self.peek() {
                     Some('<') => {
@@ -190,6 +194,10 @@ impl Lexer {
                 }
             }
             '>' => {
+                // Check for process substitution >(cmd)
+                if self.peek_at(1) == Some('(') {
+                    return self.read_word();
+                }
                 self.advance();
                 match self.peek() {
                     Some('>') => {
@@ -465,6 +473,21 @@ fn parse_brace_param(chars: &[char], i: &mut usize) -> WordPart {
             return WordPart::Param(ParamExpr {
                 name,
                 op: ParamOp::NamePrefix(ch),
+            });
+        }
+        // Check for operator after indirect name: ${!name+word}, ${!name-word}, etc.
+        if *i < chars.len() && chars[*i] != '}' {
+            // There's an operator — parse it as indirect + operator
+            let op = read_param_op(chars, i, &name);
+            if *i < chars.len() && chars[*i] == '}' {
+                *i += 1;
+            }
+            // Wrap the result: we need indirect resolution first, then apply the op
+            // For now, represent as Indirect with the name containing the op info
+            // Actually, we need a proper representation. Let's use a special name prefix.
+            return WordPart::Param(ParamExpr {
+                name: format!("!{}", name),
+                op,
             });
         }
         if *i < chars.len() && chars[*i] == '}' {
@@ -829,13 +852,41 @@ impl Lexer {
                 // Word terminators
                 ' ' | '\t' | '\n' | ';' | '&' | '|' | '(' | ')' => break,
                 '<' | '>' => {
+                    // Check for process substitution: <(cmd) or >(cmd)
+                    if self.peek_at(1) == Some('(') {
+                        if !literal.is_empty() {
+                            parts.push(WordPart::Literal(std::mem::take(&mut literal)));
+                        }
+                        let kind = if ch == '<' {
+                            ProcessSubKind::Input
+                        } else {
+                            ProcessSubKind::Output
+                        };
+                        self.advance(); // consume < or >
+                        self.advance(); // consume (
+                        let mut depth = 1;
+                        let mut cmd = String::new();
+                        while let Some(c) = self.peek() {
+                            if c == '(' {
+                                depth += 1;
+                            } else if c == ')' {
+                                depth -= 1;
+                                if depth == 0 {
+                                    self.advance();
+                                    break;
+                                }
+                            }
+                            cmd.push(c);
+                            self.advance();
+                        }
+                        parts.push(WordPart::ProcessSub(kind, cmd));
+                        continue;
+                    }
                     // Check if this is an IO number
                     if !literal.is_empty()
                         && literal.chars().all(|c| c.is_ascii_digit())
                         && parts.is_empty()
                     {
-                        // This is an IO number followed by a redirect
-                        // Put the number back and let the caller handle it
                         break;
                     }
                     break;

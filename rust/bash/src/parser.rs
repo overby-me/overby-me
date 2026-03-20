@@ -892,26 +892,70 @@ impl Parser {
     }
 
     fn try_parse_redir_fd(&mut self) -> Option<RedirFd> {
-        if let Token::Word(parts) = &self.current
-            && parts.len() == 1
-            && let WordPart::Literal(s) = &parts[0]
-            && s.len() == 1
-            && s.chars().next().unwrap().is_ascii_digit()
-        {
-            // Check if next token is a redirect operator
-            match self.peek_next_operator() {
-                Some(true) => {
-                    let n: i32 = s.parse().unwrap();
-                    self.advance();
-                    return Some(RedirFd::Number(n));
+        // Extract info from current token without holding borrow
+        let token_info = if let Token::Word(parts) = &self.current {
+            if parts.len() == 1 {
+                if let WordPart::Literal(s) = &parts[0] {
+                    Some(s.clone())
+                } else {
+                    None
                 }
-                _ => return None,
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let s = token_info?;
+
+        // Check for {varname} before redirect operator
+        if s.starts_with('{') && s.ends_with('}') && s.len() > 2 {
+            let varname = s[1..s.len() - 1].to_string();
+            if varname.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                let saved_pos = self.lexer.save_position();
+                let saved_tok = self.current.clone();
+                self.advance();
+                if matches!(
+                    self.current,
+                    Token::Less
+                        | Token::Great
+                        | Token::DGreat
+                        | Token::LessAnd
+                        | Token::GreatAnd
+                        | Token::LessGreat
+                ) {
+                    return Some(RedirFd::Var(varname));
+                }
+                self.lexer.restore_position(saved_pos);
+                self.current = saved_tok;
             }
         }
-        None
-    }
 
-    fn peek_next_operator(&self) -> Option<bool> {
+        // Check for numeric fd — peek ahead to see if next token is a redirect
+        if s.len() == 1 && s.chars().next().unwrap().is_ascii_digit() {
+            let saved_pos = self.lexer.save_position();
+            let saved_tok = self.current.clone();
+            self.advance();
+            let is_redir = matches!(
+                self.current,
+                Token::Less
+                    | Token::Great
+                    | Token::DGreat
+                    | Token::LessAnd
+                    | Token::GreatAnd
+                    | Token::LessGreat
+                    | Token::Clobber
+            );
+            if is_redir {
+                let n: i32 = s.parse().unwrap();
+                return Some(RedirFd::Number(n));
+            }
+            // Not a redirect — backtrack
+            self.lexer.restore_position(saved_pos);
+            self.current = saved_tok;
+        }
+
         None
     }
 

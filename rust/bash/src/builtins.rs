@@ -51,7 +51,21 @@ pub fn builtins() -> HashMap<&'static str, BuiltinFn> {
     map.insert("complete", builtin_complete);
     map.insert("compgen", builtin_compgen);
     map.insert("times", builtin_times);
+    map.insert("break", builtin_break);
+    map.insert("continue", builtin_continue);
     map
+}
+
+fn builtin_break(shell: &mut Shell, args: &[String]) -> i32 {
+    let n: i32 = args.first().and_then(|s| s.parse().ok()).unwrap_or(1);
+    shell.breaking = n;
+    0
+}
+
+fn builtin_continue(shell: &mut Shell, args: &[String]) -> i32 {
+    let n: i32 = args.first().and_then(|s| s.parse().ok()).unwrap_or(1);
+    shell.continuing = n;
+    0
 }
 
 fn builtin_echo(shell: &mut Shell, args: &[String]) -> i32 {
@@ -424,7 +438,7 @@ fn builtin_readonly(shell: &mut Shell, args: &[String]) -> i32 {
 
 fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
     let mut flag_array = false;
-    let mut flag_readonly = false;
+    let mut _flag_readonly = false;
     let mut flag_nameref = false;
     let mut names = Vec::new();
     let mut i = 0;
@@ -435,7 +449,7 @@ fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
             for ch in arg[1..].chars() {
                 match ch {
                     'a' => flag_array = true,
-                    'r' => flag_readonly = true,
+                    'r' => _flag_readonly = true,
                     'n' => flag_nameref = true,
                     '-' => {
                         // local - : save/restore shell options on function return (stub)
@@ -462,16 +476,12 @@ fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
             } else {
                 shell.set_var(name, value.to_string());
             }
-            if flag_readonly {
-                shell.readonly_vars.insert(name.to_string());
-            }
+            // Note: local -r should be function-scoped readonly, not global.
+            // Skip global readonly to avoid breaking repeated function calls.
         } else if flag_nameref {
             shell.namerefs.entry(name_arg.clone()).or_default();
         } else if flag_array {
-            shell
-                .arrays
-                .entry(name_arg.clone())
-                .or_default();
+            shell.arrays.entry(name_arg.clone()).or_default();
         } else {
             shell.vars.entry(name_arg.clone()).or_default();
         }
@@ -539,7 +549,6 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 if shell.functions.contains_key(name.as_str()) || shell.func_names.contains(name) {
                     println!("declare -f {}", name);
                 } else {
-                    eprintln!("bash: declare: {}: not found", name);
                     return 1;
                 }
             }
@@ -645,10 +654,7 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             if flag_nameref {
                 shell.namerefs.entry(name.to_string()).or_default();
             } else if flag_array {
-                shell
-                    .arrays
-                    .entry(name.to_string())
-                    .or_default();
+                shell.arrays.entry(name.to_string()).or_default();
             } else {
                 shell.vars.entry(name.to_string()).or_default();
             }
