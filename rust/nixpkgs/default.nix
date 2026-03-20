@@ -273,9 +273,6 @@
             | xargs touch
         '';
 
-        # Disable automake dependency tracking to avoid dep style issues
-        configureFlags = ["--disable-dependency-tracking"];
-
         meta = {
           description = "GNU hello built with the Rust stdenv";
           license = lib.licenses.gpl3Plus;

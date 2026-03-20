@@ -41,7 +41,7 @@ The nixpkgs standard environment (`stdenv`) is the foundation that builds every 
 |-----------|----------|-----------------|--------|-------|--------|
 | Shell | bash | [rust-bash](../bash) | repo | 1 | ✅ Available |
 | Core utilities | coreutils | [uutils](https://github.com/uutils/coreutils) | nixpkgs | 1 | ✅ Available |
-| Stream editor | gnused | [uutils-sed](https://github.com/uutils/sed) | nixpkgs | 2 | ✅ Available |
+| Stream editor | gnused | [rust-sed](../sed) | repo | 2 | ✅ Available |
 | Pattern grep | gnugrep | rust/grep | repo | 2 | ✅ Available |
 | Awk | gawk | rust/awk | repo | 2 | ✅ Available |
 | File search | findutils | [uutils-findutils](https://github.com/uutils/findutils) | nixpkgs | 2 | ✅ Available |
@@ -102,23 +102,19 @@ The nixpkgs standard environment (`stdenv`) is the foundation that builds every 
 - [x] Declare shell component with rust-bash replacement
 - [x] Declare coreutils component with uutils replacement
 - [x] Test: build a trivial derivation with the partially-oxidized stdenv
-- [x] Test: build a real autotools package (e.g. hello) with the partially-oxidized stdenv (configure passes, build fails due to uutils-sed bug)
+- [x] Test: build a real autotools package (e.g. hello) with the partially-oxidized stdenv — **GNU hello builds and runs successfully**
 - [x] Document known incompatibilities and workarounds
 - [ ] Validate rust-bash can execute stdenv's `setup.sh` phases without modification
 
 ### Known Incompatibilities
 
-1. **rust-bash cannot execute stdenv's `setup.sh`** — Using rust-bash as the stdenv shell causes builder processes to be killed (signal 9). The `setup.sh` sourcing likely hits unimplemented bash features. For now, the standard bash is kept as the shell while Rust tools are swapped into `initialPath`.
+1. **rust-bash cannot execute stdenv's `setup.sh`** — Using rust-bash as the stdenv shell causes builder processes to be killed (signal 9). For now, the standard bash is kept as the shell while Rust tools are swapped into `initialPath`.
 
-2. **`allowedRequisites` must be disabled** — The stdenv has a strict allowlist of store paths (`allowedRequisites`). Rust replacement packages are built with the normal C stdenv, so their closures transitively reference the C originals (e.g. `rust-grep` depends on `coreutils`). We set `allowedRequisites = null` to bypass this. A fully bootstrapped Rust stdenv (Phase 7) would rebuild replacements with themselves.
+2. **`allowedRequisites` must be disabled** — Rust replacement packages are built with the normal C stdenv, so their closures transitively reference the C originals. We set `allowedRequisites = null` to bypass this. A fully bootstrapped Rust stdenv (Phase 7) would rebuild replacements with themselves.
 
-3. **uutils-diffutils is not a drop-in** — `uutils-diffutils` only provides a single `diffutils` binary, not the individual `diff`, `cmp`, `sdiff`, `diff3` commands that stdenv expects. It cannot serve as a replacement until it provides these individual commands or a multicall binary with symlinks.
+3. **uutils-diffutils is not a drop-in** — Only provides a single `diffutils` binary, not the individual `diff`, `cmp`, `sdiff`, `diff3` commands.
 
-4. **patchelf and strip are not in `initialPath`** — These tools are used by stdenv's fixup hooks but are not part of `initialPath`. They need to be overridden separately in the fixup hook configuration, not via `initialPath` replacement.
-
-5. **uutils-sed doesn't support `&` as substitute delimiter** — `s&pattern&replacement&` fails with "unterminated substitute replacement". Autoconf's `config.status` uses `&` as delimiter for substitutions containing `/` (e.g. `s&@INSTALL@&/usr/bin/install -c&`). This is an upstream uutils-sed bug — `&` is conflated with its role as a backreference in replacement text. Other delimiters (`/`, `|`, `#`, `,`, `%`) work fine.
-
-6. **rust-make `make --version` reports "nested variables... no"** — The autoconf `configure` test `checking whether make supports nested variables` returns `no` for rust-make. Some packages may behave differently or fail when nested variable expansion is unavailable.
+4. **patchelf and strip are not in `initialPath`** — Used by fixup hooks separately, not via `initialPath` replacement.
 
 ### Risks
 
@@ -137,7 +133,7 @@ The nixpkgs standard environment (`stdenv`) is the foundation that builds every 
 
 | Tool | Replacement | Source | Notes |
 |------|-------------|--------|-------|
-| gnused | uutils-sed | nixpkgs (packaged in nix/pkgs) | Full POSIX + GNU extensions, from [uutils/sed](https://github.com/uutils/sed) |
+| gnused | rust-sed | repo | Full GNU sed replacement — supports all delimiters (including &), BRE/ERE, in-place editing, hold space, N command, branch/label. Replaces uutils-sed which had critical `&` delimiter bug. |
 | gnugrep | rust/grep | repo | GNU-flag-compatible with BRE/ERE/PCRE, -w, -c, -l, -L, context |
 | gawk | rust/awk | repo | Lexer/parser/interpreter with POSIX awk + GNU extensions |
 | findutils | uutils-findutils | nixpkgs | From [uutils/findutils](https://github.com/uutils/findutils), runs GNU testsuite |
