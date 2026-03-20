@@ -387,5 +387,67 @@
           license = lib.licenses.gpl3Plus;
         };
       };
+
+    # Test building GNU coreutils — a large autotools package with 100+ programs.
+    rust-nixpkgs-coreutils-test = {
+      lib,
+      stdenv,
+      fetchurl,
+      uutils-coreutils-noprefix,
+      rust-sed,
+      rust-grep,
+      rust-awk,
+      uutils-findutils,
+      rust-tar,
+      rust-gzip,
+      rust-bzip2,
+      rust-xz,
+      rust-make,
+      rust-patch,
+      rust-texinfo,
+      rust-help2man,
+    }: let
+      rustStdenv = import ./stdenv-test.nix {
+        inherit
+          stdenv
+          uutils-coreutils-noprefix
+          rust-sed
+          rust-grep
+          rust-awk
+          uutils-findutils
+          rust-tar
+          rust-gzip
+          rust-bzip2
+          rust-xz
+          rust-make
+          rust-patch
+          ;
+      };
+    in
+      rustStdenv.mkDerivation {
+        pname = "rust-nixpkgs-coreutils-test";
+        version = "9.6";
+
+        nativeBuildInputs = [rust-texinfo rust-help2man];
+
+        src = fetchurl {
+          url = "mirror://gnu/coreutils/coreutils-9.6.tar.xz";
+          sha256 = "sha256-egEkMns5j9nrGmq95YM4mCFCLHRP+hBzSyT1V2ENMoM=";
+        };
+
+        postPatch = ''
+          find . -name '*.in' -o -name configure -o -name aclocal.m4 \
+            -o -name config.h.in -o -name Makefile.in -o -name config.in \
+            | xargs touch
+        '';
+
+        # Coreutils needs perl for some tests, skip them
+        doCheck = false;
+
+        meta = {
+          description = "GNU coreutils built with the Rust stdenv";
+          license = lib.licenses.gpl3Plus;
+        };
+      };
   };
 }
