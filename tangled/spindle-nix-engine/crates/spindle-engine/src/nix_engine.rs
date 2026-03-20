@@ -332,8 +332,11 @@ impl Engine for NixEngine {
         // Mount namespace is not used because bind-mount remounting fails
         // in user namespaces (kernel limitation). Workspace directories are
         // set to mode 0700 in setup_workflow to prevent cross-workflow access.
+        // IPC namespace isolation (no shared memory between workflows).
+        // PID namespace is not used because hakoniwa always creates a mount
+        // namespace with pivot_root for PID namespace, which breaks workspace
+        // access (workspace path doesn't exist after pivot_root).
         let mut container = hakoniwa::Container::new();
-        container.unshare(hakoniwa::Namespace::Pid);
         container.unshare(hakoniwa::Namespace::Ipc);
 
         if let Some(limit) = self.workflow_limits.limit_as {
