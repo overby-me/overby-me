@@ -304,13 +304,16 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
 
 /// Check if a ParamExpr is an array[@] expansion.
 fn is_array_at_expansion(expr: &ParamExpr, ctx: &ExpCtx) -> bool {
+    // Only split into separate words for plain array expansion (no operator)
+    if !matches!(&expr.op, ParamOp::None) {
+        return false;
+    }
     if let Some(bracket) = expr.name.find('[') {
         let idx_str = &expr.name[bracket + 1..expr.name.len() - 1];
         if idx_str == "@" {
             let base = &expr.name[..bracket];
             let resolved = ctx.resolve_nameref(base);
-            return ctx.arrays.contains_key(&resolved)
-                || matches!(&expr.op, ParamOp::None);
+            return ctx.arrays.contains_key(&resolved);
         }
     }
     false

@@ -455,20 +455,26 @@ fn parse_brace_param(chars: &[char], i: &mut usize) -> WordPart {
     if *i < chars.len() && chars[*i] == '!' {
         *i += 1;
         let name = read_param_name_with_subscript(chars, i);
+
+        // Check if name ends with [@] or [*] — this is ${!arr[@]} for array indices
+        if name.ends_with("[@]") || name.ends_with("[*]") {
+            let ch = if name.ends_with("[@]") { '@' } else { '*' };
+            let arr_name = name[..name.len() - 3].to_string();
+            if *i < chars.len() && chars[*i] == '}' {
+                *i += 1;
+            }
+            return WordPart::Param(ParamExpr {
+                name: arr_name,
+                op: ParamOp::ArrayIndices(ch),
+            });
+        }
+
         // ${!prefix*} or ${!prefix@} — names matching prefix
         if *i < chars.len() && (chars[*i] == '*' || chars[*i] == '@') {
             let ch = chars[*i];
             *i += 1;
             if *i < chars.len() && chars[*i] == '}' {
                 *i += 1;
-            }
-            // Check if name contains [ — then it's ${!arr[@]} for indices
-            if name.ends_with('[') {
-                let arr_name = name[..name.len() - 1].to_string();
-                return WordPart::Param(ParamExpr {
-                    name: arr_name,
-                    op: ParamOp::ArrayIndices(ch),
-                });
             }
             return WordPart::Param(ParamExpr {
                 name,
