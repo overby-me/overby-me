@@ -2,8 +2,6 @@
   packages.rust-flatpak = {
     lib,
     rustPlatform,
-    rust-bubblewrap,
-    makeWrapper,
   }:
     rustPlatform.buildRustPackage {
       pname = "rust-flatpak";
@@ -19,13 +17,6 @@
       };
 
       cargoLock.lockFile = ./Cargo.lock;
-
-      nativeBuildInputs = [makeWrapper];
-
-      postInstall = ''
-        wrapProgram $out/bin/flatpak \
-          --prefix PATH : ${lib.makeBinPath [rust-bubblewrap]}
-      '';
 
       meta = {
         description = "A Flatpak-compatible application sandboxing and distribution tool written in Rust";

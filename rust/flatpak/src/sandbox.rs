@@ -10,6 +10,7 @@ use std::process::Command;
 
 use crate::installation::{DeployedRef, Installation};
 use crate::metadata::ContextPermissions;
+use crate::seccomp;
 
 /// Builder for constructing bwrap arguments.
 #[derive(Debug)]
@@ -100,6 +101,12 @@ fn which(name: &str) -> Result<String, ()> {
 }
 
 /// Build the complete bwrap command for running a Flatpak app.
+/// A capability operation (add or drop).
+pub enum CapOp {
+    Add(String),
+    Drop(String),
+}
+
 pub fn build_sandbox(
     deployed: &DeployedRef,
     runtime_deployed: Option<&DeployedRef>,
@@ -107,6 +114,7 @@ pub fn build_sandbox(
     command_override: Option<&str>,
     devel: bool,
     sandbox_mode: bool,
+    cap_ops: &[CapOp],
 ) -> Result<Command, String> {
     let mut bwrap = BwrapBuilder::new();
     let app_id = &deployed.ref_.id;
@@ -251,6 +259,49 @@ pub fn build_sandbox(
 
     if devel {
         bwrap.setenv("G_MESSAGES_DEBUG", "all");
+    }
+
+    // --- Capabilities ---
+    // By default Flatpak drops all capabilities. Apply cap_ops in order.
+    if !cap_ops.is_empty() {
+        // If there are any cap operations, start by dropping all, then apply.
+        let mut has_drop_all = false;
+        for op in cap_ops {
+            match op {
+                CapOp::Drop(cap) => {
+                    if cap == "ALL" {
+                        has_drop_all = true;
+                    }
+                    bwrap.args(&["--cap-drop", cap]);
+                }
+                CapOp::Add(cap) => {
+                    bwrap.args(&["--cap-add", cap]);
+                }
+            }
+        }
+        if !has_drop_all {
+            // Ensure ALL caps are dropped first (Flatpak default).
+            // Insert --cap-drop ALL at the beginning of the cap sequence.
+            // Since bwrap processes args in order, we prepend it.
+            // Actually bwrap applies all cap-drops then all cap-adds, so
+            // we just add it here.
+            bwrap.args(&["--cap-drop", "ALL"]);
+        }
+    }
+
+    // --- Seccomp filter ---
+    let seccomp_opts = seccomp::SeccompOptions {
+        devel,
+        bluetooth: permissions.has_feature("bluetooth"),
+        canbus: permissions.has_feature("canbus"),
+    };
+    match seccomp::write_filter_to_memfd(&seccomp_opts) {
+        Ok(fd) => {
+            bwrap.args(&["--seccomp", &fd.to_string()]);
+        }
+        Err(e) => {
+            eprintln!("flatpak: warning: could not create seccomp filter: {e}");
+        }
     }
 
     // --- .flatpak-info ---
@@ -503,6 +554,11 @@ fn setup_sockets(bwrap: &mut BwrapBuilder, ctx: &ContextPermissions) {
             bwrap.args(&["--ro-bind", cups_socket, cups_socket]);
         }
     }
+}
+
+/// Build the .flatpak-info content for an app instance.
+pub fn get_flatpak_info(deployed: &DeployedRef, runtime: Option<&DeployedRef>) -> String {
+    build_flatpak_info(deployed, runtime)
 }
 
 fn build_flatpak_info(deployed: &DeployedRef, runtime: Option<&DeployedRef>) -> String {

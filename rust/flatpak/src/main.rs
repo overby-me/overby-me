@@ -5,8 +5,10 @@
 // sandboxing.
 
 mod installation;
+mod instance;
 mod metadata;
 mod sandbox;
+mod seccomp;
 
 use std::env;
 use std::fs;
@@ -82,6 +84,8 @@ fn main() {
         "remote-delete" => cmd_remote_delete(&installations, cmd_args),
         "remote-info" => cmd_remote_info(&installations, cmd_args),
         "ps" => cmd_ps(),
+        "kill" => cmd_kill(cmd_args),
+        "enter" => cmd_enter(cmd_args),
         "search" => cmd_search(cmd_args),
         "history" => cmd_history(&installations),
         "config" => cmd_config(&installations, cmd_args),
@@ -108,6 +112,7 @@ fn cmd_run(installations: &[Installation], args: &[String], verbose: bool) {
     let mut devel = false;
     let mut sandbox_mode = false;
     let mut extra_args: Vec<String> = Vec::new();
+    let mut cap_ops: Vec<sandbox::CapOp> = Vec::new();
     let mut past_separator = false;
 
     let mut i = 0;
@@ -127,6 +132,18 @@ fn cmd_run(installations: &[Installation], args: &[String], verbose: bool) {
             }
             "--devel" | "-d" => devel = true,
             "--sandbox" => sandbox_mode = true,
+            "--cap-add" => {
+                i += 1;
+                if i < args.len() {
+                    cap_ops.push(sandbox::CapOp::Add(args[i].clone()));
+                }
+            }
+            "--cap-drop" => {
+                i += 1;
+                if i < args.len() {
+                    cap_ops.push(sandbox::CapOp::Drop(args[i].clone()));
+                }
+            }
             s if s.starts_with('-') => {
                 // Pass through other options as extra args.
                 extra_args.push(args[i].clone());
@@ -186,6 +203,7 @@ fn cmd_run(installations: &[Installation], args: &[String], verbose: bool) {
         command_override.as_deref(),
         devel,
         sandbox_mode,
+        &cap_ops,
     )
     .unwrap_or_else(|e| {
         eprintln!("flatpak run: {e}");
@@ -196,10 +214,24 @@ fn cmd_run(installations: &[Installation], args: &[String], verbose: bool) {
         eprintln!("flatpak: executing bwrap");
     }
 
+    // Create instance tracking.
+    let instance_info = sandbox::get_flatpak_info(&deployed, runtime_deployed.as_ref());
+    let instance_id = instance::create_instance(&instance_info).ok();
+
     let status = cmd.status().unwrap_or_else(|e| {
         eprintln!("flatpak run: failed to execute bwrap: {e}");
+        if let Some(ref id) = instance_id {
+            instance::cleanup_instance(id);
+        }
+        instance::cleanup_temp_files();
         process::exit(1);
     });
+
+    // Clean up instance and temp files.
+    if let Some(ref id) = instance_id {
+        instance::cleanup_instance(id);
+    }
+    instance::cleanup_temp_files();
 
     process::exit(status.code().unwrap_or(1));
 }
@@ -757,32 +789,104 @@ fn cmd_remote_info(_installations: &[Installation], args: &[String]) {
 // ---------------------------------------------------------------------------
 
 fn cmd_ps() {
-    let uid = unsafe { libc::getuid() };
-    let instances_dir = format!("/run/user/{uid}/.flatpak");
-    if !Path::new(&instances_dir).exists() {
+    let instances = instance::list_instances();
+    if instances.is_empty() {
         return;
     }
 
     println!("{:<12} {:<40} Instance", "PID", "Application");
     println!("{}", "-".repeat(60));
 
-    if let Ok(entries) = fs::read_dir(&instances_dir) {
-        for entry in entries.flatten() {
-            let instance_id = entry.file_name().to_string_lossy().to_string();
-            let info_path = entry.path().join("info");
-            let pid_path = entry.path().join("pid");
-
-            let pid = fs::read_to_string(&pid_path)
-                .unwrap_or_default()
-                .trim()
-                .to_string();
-
-            if let Ok(meta) = metadata::Metadata::from_file(&info_path) {
-                let app_name = meta.app_name().unwrap_or("unknown");
-                println!("{:<12} {:<40} {}", pid, app_name, instance_id);
-            }
-        }
+    for inst in &instances {
+        let pid = inst.pid.map(|p| p.to_string()).unwrap_or_default();
+        let app = inst.app_id.as_deref().unwrap_or("unknown");
+        println!("{:<12} {:<40} {}", pid, app, inst.id);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Command: kill
+// ---------------------------------------------------------------------------
+
+fn cmd_kill(args: &[String]) {
+    let target = args
+        .iter()
+        .find(|a| !a.starts_with('-'))
+        .unwrap_or_else(|| {
+            eprintln!("flatpak kill: no application or instance specified");
+            process::exit(1);
+        });
+
+    // Try to find by app ID first, then by instance ID.
+    if let Some(inst) = instance::find_instance_by_app(target) {
+        if let Err(e) = instance::kill_instance(&inst.id, libc::SIGTERM) {
+            eprintln!("flatpak kill: {e}");
+            process::exit(1);
+        }
+        println!("Sent SIGTERM to {} (PID {})", target, inst.pid.unwrap_or(0));
+    } else if let Err(e) = instance::kill_instance(target, libc::SIGTERM) {
+        eprintln!("flatpak kill: {e}");
+        process::exit(1);
+    } else {
+        println!("Sent SIGTERM to instance {target}");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Command: enter
+// ---------------------------------------------------------------------------
+
+fn cmd_enter(args: &[String]) {
+    let target = args
+        .iter()
+        .find(|a| !a.starts_with('-'))
+        .unwrap_or_else(|| {
+            eprintln!("flatpak enter: no application or instance specified");
+            process::exit(1);
+        });
+
+    let inst = instance::find_instance_by_app(target).unwrap_or_else(|| {
+        // Try instance ID directly.
+        instance::list_instances()
+            .into_iter()
+            .find(|i| i.id == *target)
+            .unwrap_or_else(|| {
+                eprintln!("flatpak enter: no running instance for '{target}'");
+                process::exit(1);
+            })
+    });
+
+    let pid = inst.pid.unwrap_or_else(|| {
+        eprintln!("flatpak enter: instance has no PID");
+        process::exit(1);
+    });
+
+    // Remaining args after the target are the command to run.
+    let cmd_args: Vec<&String> = args
+        .iter()
+        .skip_while(|a| a.starts_with('-') || *a == target)
+        .collect();
+    let shell = if cmd_args.is_empty() {
+        vec!["sh".to_string()]
+    } else {
+        cmd_args.iter().map(|s| s.to_string()).collect()
+    };
+
+    // Use nsenter to join the sandbox namespaces.
+    let status = std::process::Command::new("nsenter")
+        .arg("--target")
+        .arg(pid.to_string())
+        .arg("--mount")
+        .arg("--pid")
+        .arg("--")
+        .args(&shell)
+        .status()
+        .unwrap_or_else(|e| {
+            eprintln!("flatpak enter: nsenter failed: {e}");
+            process::exit(1);
+        });
+
+    process::exit(status.code().unwrap_or(1));
 }
 
 // ---------------------------------------------------------------------------

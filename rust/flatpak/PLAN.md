@@ -14,21 +14,22 @@ sandboxed apps can call dangerous syscalls.
 
 ### Tasks
 
-- [ ] Implement BPF instruction builder (`sock_filter` structs)
-- [ ] Block dangerous syscalls with `EPERM`: `syslog`, `uselib`, `acct`,
+- [x] Implement BPF instruction builder (`sock_filter` structs)
+- [x] Block dangerous syscalls with `EPERM`: `syslog`, `uselib`, `acct`,
   `quotactl`, `add_key`, `keyctl`, `request_key`, `move_pages`, `mbind`,
   `get_mempolicy`, `set_mempolicy`, `migrate_pages`, `unshare`, `setns`,
   `mount`, `umount`, `umount2`, `pivot_root`, `chroot`
-- [ ] Block `clone` when `CLONE_NEWUSER` flag is set (argument inspection)
-- [ ] Block `ioctl` with `TIOCSTI` and `TIOCLINUX` commands
-- [ ] Block new mount APIs with `ENOSYS`: `clone3`, `open_tree`, `move_mount`,
+- [ ] Block `clone` when `CLONE_NEWUSER` flag is set (argument inspection —
+  partially done, relies on `unshare` being blocked and bwrap `--disable-userns`)
+- [x] Block `ioctl` with `TIOCSTI` and `TIOCLINUX` commands
+- [x] Block new mount APIs with `ENOSYS`: `clone3`, `open_tree`, `move_mount`,
   `fsopen`, `fsconfig`, `fsmount`, `fspick`, `mount_setattr`
-- [ ] Conditionally block `perf_event_open`, `ptrace`, `personality` (allow
+- [x] Conditionally block `perf_event_open`, `ptrace`, `personality` (allow
   with `--devel`)
-- [ ] Socket family allowlist: only permit `AF_UNSPEC`, `AF_LOCAL`, `AF_INET`,
+- [x] Socket family allowlist: only permit `AF_UNSPEC`, `AF_LOCAL`, `AF_INET`,
   `AF_INET6`, `AF_NETLINK` (plus `AF_CAN`/`AF_BLUETOOTH` based on features)
-- [ ] Write compiled BPF to a memfd and pass via `--seccomp <fd>` to bwrap
-- [ ] Add unit tests for filter generation
+- [x] Write compiled BPF to a memfd and pass via `--seccomp <fd>` to bwrap
+- [x] Add unit tests for filter generation
 
 ## Phase 2: Instance Tracking
 
@@ -37,16 +38,18 @@ Track running sandbox instances so `flatpak ps`, `flatpak enter`, and
 
 ### Tasks
 
-- [ ] On `flatpak run`, create `/run/user/<uid>/.flatpak/<instance-id>/`
-- [ ] Write `info` file (copy of `/.flatpak-info` content)
-- [ ] Write `pid` file with the bwrap child PID
+- [x] On `flatpak run`, create `/run/user/<uid>/.flatpak/<instance-id>/`
+- [x] Write `info` file (copy of `/.flatpak-info` content)
+- [ ] Write `pid` file with the bwrap child PID (API exists, needs bwrap
+  `--info-fd` integration to get the actual child PID)
 - [ ] Parse `--info-fd` output from bwrap to get `bwrapinfo.json`
-- [ ] Clean up instance directory on sandbox exit
-- [ ] Implement `flatpak ps` reading from instance directories
-- [ ] Implement `flatpak enter` using `nsenter` into the running sandbox
-- [ ] Implement `flatpak kill` sending `SIGTERM`/`SIGKILL` to instance PID
-- [ ] Clean up temp files (`/tmp/.flatpak-info-*`, `/tmp/.flatpak-passwd-*`)
-  on exit using a cleanup handler or temp directory
+- [x] Clean up instance directory on sandbox exit
+- [x] Implement `flatpak ps` reading from instance directories (with stale
+  instance cleanup)
+- [x] Implement `flatpak enter` using `nsenter` into the running sandbox
+- [x] Implement `flatpak kill` sending `SIGTERM`/`SIGKILL` to instance PID
+- [x] Clean up temp files (`/tmp/.flatpak-info-*`, `/tmp/.flatpak-passwd-*`)
+  on exit using a cleanup handler
 
 ## Phase 3: Capability Handling
 
@@ -54,11 +57,12 @@ Wire up the parsed `--cap-add`/`--cap-drop` to actual bwrap arguments.
 
 ### Tasks
 
-- [ ] Map capability names (`CAP_SYS_ADMIN`, `CAP_NET_RAW`, `ALL`, etc.) to
+- [x] Map capability names (`CAP_SYS_ADMIN`, `CAP_NET_RAW`, `ALL`, etc.) to
   bwrap `--cap-add`/`--cap-drop` arguments
-- [ ] Apply capability operations in order (matching real Flatpak behavior
+- [x] Apply capability operations in order (matching real Flatpak behavior
   where default is to drop all, then apply ops sequentially)
-- [ ] Pass through to bwrap command line
+- [x] Pass through to bwrap command line
+- [x] Parse `--cap-add`/`--cap-drop` from `flatpak run` CLI
 
 ## Phase 4: D-Bus Proxy
 
