@@ -338,7 +338,7 @@ impl Engine for NixEngine {
         // We use a wrapper script that calls unshare(1) before executing
         // the step command.
         let isolated_command = format!(
-            "unshare --ipc -- bash -euo pipefail -c {}",
+            "unshare --user --ipc -- bash -euo pipefail -c {}",
             shell_escape::unix::escape(full_command.into())
         );
 
