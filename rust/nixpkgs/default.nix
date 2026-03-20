@@ -276,18 +276,20 @@
         # Force rebuild by changing env
         RUST_STDENV_TEST = "2";
 
-        # Skip default buildPhase, run make directly to debug
         buildPhase = ''
           runHook preBuild
-          echo "=== without SHELL ==="
-          make lib/basename-lgpl.o 2>&1 | head -3
-          ls -la lib/basename-lgpl.o 2>&1 || echo "does not exist"
-          rm -f lib/basename-lgpl.o
-          echo "=== with SHELL ==="
-          make SHELL=$SHELL lib/basename-lgpl.o 2>&1 | head -3
-          ls -la lib/basename-lgpl.o 2>&1 || echo "does not exist"
-          echo "=== full build ==="
-          make
+          echo "=== .deps check ==="
+          ls lib/.deps/basename-lgpl.Po 2>&1
+          cat lib/.deps/basename-lgpl.Po 2>&1
+          echo "=== .c file ==="
+          ls -la lib/basename-lgpl.c 2>&1
+          echo "=== include expand ==="
+          grep 'DEPDIR' Makefile | head -2
+          echo "=== test with -B ==="
+          make -B lib/basename-lgpl.o 2>&1 | head -3
+          ls -la lib/basename-lgpl.o 2>&1 || echo "still does not exist"
+          echo "=== end ==="
+          make SHELL=$SHELL
           runHook postBuild
         '';
 
