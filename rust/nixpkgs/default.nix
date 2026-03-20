@@ -277,12 +277,13 @@
         RUST_STDENV_TEST = "2";
 
         preBuild = ''
-          echo "=== grep .c.o ==="
-          grep -n "^\.c\.o" Makefile || echo "NOT FOUND"
-          echo "=== grep SUFFIXES ==="
-          grep -n "^\.SUFFIXES" Makefile || echo "NOT FOUND"
-          echo "=== wc Makefile ==="
-          wc -l Makefile
+          echo "=== make -n lib/basename-lgpl.o ==="
+          make -n lib/basename-lgpl.o 2>&1
+          echo "EXIT: $?"
+          echo "=== make -n all-am 2>&1 | head -5 ==="
+          make -n all-am 2>&1 | head -5
+          echo "=== make -d lib/basename-lgpl.o 2>&1 | head -20 ==="
+          make -d lib/basename-lgpl.o 2>&1 | head -20 || true
           echo "=== end ==="
         '';
 
