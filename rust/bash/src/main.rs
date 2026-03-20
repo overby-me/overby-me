@@ -29,6 +29,10 @@ fn run() -> i32 {
 
     while i < args.len() {
         match args[i].as_str() {
+            "--version" => {
+                println!("bash (rust-bash) {}", env!("CARGO_PKG_VERSION"));
+                return 0;
+            }
             "-c" => {
                 i += 1;
                 if i < args.len() {

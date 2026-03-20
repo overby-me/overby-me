@@ -14,38 +14,38 @@ struct Options {
     patterns: Vec<String>,
     files: Vec<PathBuf>,
     // Matching control
-    extended_regexp: bool,    // -E
-    fixed_strings: bool,     // -F
-    basic_regexp: bool,      // -G (default)
-    perl_regexp: bool,       // -P
-    ignore_case: bool,       // -i
-    invert_match: bool,      // -v
-    word_regexp: bool,       // -w
-    line_regexp: bool,       // -x
+    extended_regexp: bool, // -E
+    fixed_strings: bool,   // -F
+    basic_regexp: bool,    // -G (default)
+    perl_regexp: bool,     // -P
+    ignore_case: bool,     // -i
+    invert_match: bool,    // -v
+    word_regexp: bool,     // -w
+    line_regexp: bool,     // -x
     // Output control
-    count: bool,             // -c
-    files_with_matches: bool, // -l
+    count: bool,               // -c
+    files_with_matches: bool,  // -l
     files_without_match: bool, // -L
-    max_count: Option<usize>, // -m
-    only_matching: bool,     // -o
-    quiet: bool,             // -q
-    line_number: bool,       // -n
-    with_filename: bool,     // -H
-    no_filename: bool,       // -h
-    byte_offset: bool,       // -b
-    null_separator: bool,    // -Z
+    max_count: Option<usize>,  // -m
+    only_matching: bool,       // -o
+    quiet: bool,               // -q
+    line_number: bool,         // -n
+    with_filename: bool,       // -H
+    no_filename: bool,         // -h
+    byte_offset: bool,         // -b
+    null_separator: bool,      // -Z
     // Context
-    after_context: usize,    // -A
-    before_context: usize,   // -B
-    context: usize,          // -C
+    after_context: usize,  // -A
+    before_context: usize, // -B
+    context: usize,        // -C
     // File/directory
-    recursive: bool,         // -r/-R
+    recursive: bool, // -r/-R
     include_glob: Vec<String>,
     exclude_glob: Vec<String>,
     // Misc
-    label: String,           // --label
+    label: String, // --label
     color: ColorMode,
-    null_data: bool,         // -z
+    null_data: bool, // -z
 }
 
 #[derive(Clone, PartialEq)]
@@ -110,6 +110,11 @@ fn parse_args() -> Options {
                 i += 1;
             }
             break;
+        }
+
+        if arg == "--version" || arg == "-V" {
+            println!("grep (rust-grep) {}", env!("CARGO_PKG_VERSION"));
+            std::process::exit(0);
         }
 
         if let Some(long) = arg.strip_prefix("--") {
@@ -426,11 +431,7 @@ impl Matcher {
                     } else {
                         text.to_string()
                     };
-                    let needle = if *ic {
-                        p.to_lowercase()
-                    } else {
-                        p.to_string()
-                    };
+                    let needle = if *ic { p.to_lowercase() } else { p.to_string() };
                     let mut start = 0;
                     while let Some(pos) = haystack[start..].find(&needle) {
                         let abs_start = start + pos;
@@ -608,15 +609,16 @@ fn grep_reader<R: BufRead>(
             let matches = matcher.is_match(line) != opts.invert_match;
 
             if matches {
-                if let Some(max) = opts.max_count {
-                    if match_count >= max {
-                        break;
-                    }
+                if let Some(max) = opts.max_count
+                    && match_count >= max
+                {
+                    break;
                 }
                 match_count += 1;
 
                 // Print before context
                 let ctx_start = line_idx.saturating_sub(opts.before_context);
+                #[allow(clippy::needless_range_loop)]
                 for ctx_idx in ctx_start..line_idx {
                     if last_printed.is_some_and(|lp| ctx_idx <= lp) {
                         continue;
@@ -624,7 +626,14 @@ fn grep_reader<R: BufRead>(
                     if last_printed.is_some_and(|lp| ctx_idx > lp + 1) {
                         let _ = writeln!(out, "--");
                     }
-                    print_context_line(&mut out, &lines[ctx_idx], ctx_idx + 1, filename, show_filename, opts);
+                    print_context_line(
+                        &mut out,
+                        &lines[ctx_idx],
+                        ctx_idx + 1,
+                        filename,
+                        show_filename,
+                        opts,
+                    );
                     last_printed = Some(ctx_idx);
                 }
 
@@ -667,10 +676,10 @@ fn grep_reader<R: BufRead>(
         let matches = matcher.is_match(&line) != opts.invert_match;
 
         if matches {
-            if let Some(max) = opts.max_count {
-                if match_count >= max {
-                    break;
-                }
+            if let Some(max) = opts.max_count
+                && match_count >= max
+            {
+                break;
             }
             match_count += 1;
 
@@ -737,10 +746,10 @@ fn print_context_line<W: Write>(
 
 fn matches_glob(name: &str, pattern: &str) -> bool {
     // Simple glob matching for --include/--exclude
-    if pattern.starts_with('*') {
-        name.ends_with(&pattern[1..])
-    } else if pattern.ends_with('*') {
-        name.starts_with(&pattern[..pattern.len() - 1])
+    if let Some(suffix) = pattern.strip_prefix('*') {
+        name.ends_with(suffix)
+    } else if let Some(prefix) = pattern.strip_suffix('*') {
+        name.starts_with(prefix)
     } else {
         name == pattern
     }
@@ -887,13 +896,8 @@ fn main() {
                 } else {
                     let _ = writeln!(out, "{count}");
                 }
-            } else if opts.files_with_matches && matched {
-                if opts.null_separator {
-                    let _ = write!(out, "{filename}\0");
-                } else {
-                    let _ = writeln!(out, "{filename}");
-                }
-            } else if opts.files_without_match && !matched {
+            } else if (opts.files_with_matches && matched) || (opts.files_without_match && !matched)
+            {
                 if opts.null_separator {
                     let _ = write!(out, "{filename}\0");
                 } else {

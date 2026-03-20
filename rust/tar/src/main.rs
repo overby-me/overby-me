@@ -42,7 +42,7 @@ fn detect_from_magic(buf: &[u8]) -> Compression {
         Compression::Gzip
     } else if buf.len() >= 3 && &buf[..3] == b"BZh" {
         Compression::Bzip2
-    } else if buf.len() >= 6 && &buf[..6] == &[0xFD, b'7', b'z', b'X', b'Z', 0x00] {
+    } else if buf.len() >= 6 && buf[..6] == [0xFD, b'7', b'z', b'X', b'Z', 0x00] {
         Compression::Xz
     } else {
         Compression::None
@@ -140,10 +140,10 @@ fn is_excluded(path: &str, excludes: &[String]) -> bool {
             return true;
         }
         // Also check basename
-        if let Some(name) = Path::new(path).file_name().and_then(|n| n.to_str()) {
-            if matches_exclude(name, exc) {
-                return true;
-            }
+        if let Some(name) = Path::new(path).file_name().and_then(|n| n.to_str())
+            && matches_exclude(name, exc)
+        {
+            return true;
         }
     }
     false
@@ -205,6 +205,10 @@ fn parse_args() -> Args {
 
     while let Some(arg) = queue.pop_front() {
         match arg.as_str() {
+            "--version" | "-V" => {
+                println!("tar (rust-tar) {}", env!("CARGO_PKG_VERSION"));
+                process::exit(0);
+            }
             "-c" | "--create" => args.create = true,
             "-x" | "--extract" | "--get" => args.extract = true,
             "-t" | "--list" => args.list = true,
@@ -352,7 +356,7 @@ fn do_create(args: &Args) -> io::Result<()> {
 
         if src_path.is_dir() {
             for entry in WalkDir::new(src).follow_links(false) {
-                let entry = entry.map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                let entry = entry.map_err(io::Error::other)?;
                 entries.push(entry.into_path());
             }
         } else {
@@ -450,35 +454,33 @@ fn set_owner_group(header: &mut Header, args: &Args) {
 fn do_extract_or_list(args: &Args) -> io::Result<()> {
     let explicit_compression = args.compression;
 
-    let (reader, detected_compression): (Box<dyn Read>, Compression) =
-        match args.file.as_deref() {
-            Some("-") | None => {
-                // stdin – need to buffer for magic detection
-                let mut buf = [0u8; 6];
-                let mut stdin = io::stdin().lock();
-                let n = stdin.read(&mut buf)?;
-                let magic_comp = detect_from_magic(&buf[..n]);
-                let chain: Box<dyn Read> = Box::new(io::Cursor::new(buf[..n].to_vec()).chain(stdin));
-                (chain, magic_comp)
-            }
-            Some(path) => {
-                let file = File::open(path)?;
-                let mut buf = [0u8; 6];
-                let mut reader = BufReader::new(file);
-                let n = reader.read(&mut buf)?;
-                let magic_comp = detect_from_magic(&buf[..n]);
-                let ext_comp = detect_from_extension(path);
-                let chain: Box<dyn Read> =
-                    Box::new(io::Cursor::new(buf[..n].to_vec()).chain(reader));
-                // Prefer magic bytes, fall back to extension
-                let comp = if magic_comp != Compression::None {
-                    magic_comp
-                } else {
-                    ext_comp
-                };
-                (chain, comp)
-            }
-        };
+    let (reader, detected_compression): (Box<dyn Read>, Compression) = match args.file.as_deref() {
+        Some("-") | None => {
+            // stdin – need to buffer for magic detection
+            let mut buf = [0u8; 6];
+            let mut stdin = io::stdin().lock();
+            let n = stdin.read(&mut buf)?;
+            let magic_comp = detect_from_magic(&buf[..n]);
+            let chain: Box<dyn Read> = Box::new(io::Cursor::new(buf[..n].to_vec()).chain(stdin));
+            (chain, magic_comp)
+        }
+        Some(path) => {
+            let file = File::open(path)?;
+            let mut buf = [0u8; 6];
+            let mut reader = BufReader::new(file);
+            let n = reader.read(&mut buf)?;
+            let magic_comp = detect_from_magic(&buf[..n]);
+            let ext_comp = detect_from_extension(path);
+            let chain: Box<dyn Read> = Box::new(io::Cursor::new(buf[..n].to_vec()).chain(reader));
+            // Prefer magic bytes, fall back to extension
+            let comp = if magic_comp != Compression::None {
+                magic_comp
+            } else {
+                ext_comp
+            };
+            (chain, comp)
+        }
+    };
 
     let compression = explicit_compression.unwrap_or(detected_compression);
 

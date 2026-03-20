@@ -19,6 +19,8 @@ ue = "ue"
 flate = "flate"
 # Bash test operator -ot (older than)
 ot = "ot"
+# BRE = Basic Regular Expression (regex standard term)
+bre = "bre"
 
 
 [default]

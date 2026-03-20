@@ -92,6 +92,11 @@ fn parse_args() -> Options {
     while i < args.len() {
         let arg = &args[i];
 
+        if arg == "--version" || arg == "-V" {
+            println!("patch (rust-patch) {}", env!("CARGO_PKG_VERSION"));
+            std::process::exit(0);
+        }
+
         if arg == "--" {
             i += 1;
             if i < args.len() && opts.positional_file.is_none() {
@@ -101,31 +106,31 @@ fn parse_args() -> Options {
             continue;
         }
 
-        if arg.starts_with("--strip=") {
-            opts.strip = arg["--strip=".len()..].parse().ok();
+        if let Some(val) = arg.strip_prefix("--strip=") {
+            opts.strip = val.parse().ok();
         } else if arg == "--strip" || arg == "-p" {
             i += 1;
             if i < args.len() {
                 opts.strip = args[i].parse().ok();
             }
-        } else if arg.starts_with("-p") {
-            opts.strip = arg[2..].parse().ok();
-        } else if arg.starts_with("--directory=") {
-            opts.directory = Some(arg["--directory=".len()..].to_string());
+        } else if let Some(val) = arg.strip_prefix("-p") {
+            opts.strip = val.parse().ok();
+        } else if let Some(val) = arg.strip_prefix("--directory=") {
+            opts.directory = Some(val.to_string());
         } else if arg == "--directory" || arg == "-d" {
             i += 1;
             if i < args.len() {
                 opts.directory = Some(args[i].clone());
             }
-        } else if arg.starts_with("--input=") {
-            opts.input = Some(arg["--input=".len()..].to_string());
+        } else if let Some(val) = arg.strip_prefix("--input=") {
+            opts.input = Some(val.to_string());
         } else if arg == "--input" || arg == "-i" {
             i += 1;
             if i < args.len() {
                 opts.input = Some(args[i].clone());
             }
-        } else if arg.starts_with("--output=") {
-            opts.output = Some(arg["--output=".len()..].to_string());
+        } else if let Some(val) = arg.strip_prefix("--output=") {
+            opts.output = Some(val.to_string());
         } else if arg == "--output" || arg == "-o" {
             i += 1;
             if i < args.len() {
@@ -141,15 +146,15 @@ fn parse_args() -> Options {
             opts.verbose = true;
         } else if arg == "-N" || arg == "--forward" {
             opts.forward = true;
-        } else if arg.starts_with("--fuzz=") {
-            opts.fuzz = arg["--fuzz=".len()..].parse().unwrap_or(2);
+        } else if let Some(val) = arg.strip_prefix("--fuzz=") {
+            opts.fuzz = val.parse().unwrap_or(2);
         } else if arg == "--fuzz" || arg == "-F" {
             i += 1;
             if i < args.len() {
                 opts.fuzz = args[i].parse().unwrap_or(2);
             }
-        } else if arg.starts_with("-F") {
-            opts.fuzz = arg[2..].parse().unwrap_or(2);
+        } else if let Some(val) = arg.strip_prefix("-F") {
+            opts.fuzz = val.parse().unwrap_or(2);
         } else if arg == "-b" || arg == "--backup" {
             opts.backup = true;
         } else if arg == "--no-backup-if-mismatch" {
@@ -250,8 +255,7 @@ fn parse_normal_command(line: &str) -> Option<(usize, usize, char, usize, usize)
 }
 
 fn detect_format(lines: &[&str], start: usize) -> DiffFormat {
-    for i in start..lines.len() {
-        let line = lines[i];
+    for line in &lines[start..] {
         if line.starts_with("@@") {
             return DiffFormat::Unified;
         }
@@ -322,10 +326,7 @@ fn parse_unified_patch(lines: &[&str], start: usize) -> Option<(FilePatch, usize
     let mut i = start;
 
     // Skip preamble (diff --git, index, etc.)
-    while i < lines.len()
-        && !lines[i].starts_with("--- ")
-        && !lines[i].starts_with("@@")
-    {
+    while i < lines.len() && !lines[i].starts_with("--- ") && !lines[i].starts_with("@@") {
         i += 1;
     }
     if i >= lines.len() {
@@ -452,12 +453,12 @@ fn parse_context_patch(lines: &[&str], start: usize) -> Option<(FilePatch, usize
         let mut old_lines: Vec<(char, String)> = Vec::new();
         while i < lines.len() && !lines[i].starts_with("--- ") {
             let line = lines[i];
-            if line.starts_with("! ") {
-                old_lines.push(('!', line[2..].to_string()));
-            } else if line.starts_with("- ") {
-                old_lines.push(('-', line[2..].to_string()));
-            } else if line.starts_with("  ") {
-                old_lines.push((' ', line[2..].to_string()));
+            if let Some(rest) = line.strip_prefix("! ") {
+                old_lines.push(('!', rest.to_string()));
+            } else if let Some(rest) = line.strip_prefix("- ") {
+                old_lines.push(('-', rest.to_string()));
+            } else if let Some(rest) = line.strip_prefix("  ") {
+                old_lines.push((' ', rest.to_string()));
             } else if line == "  " || line == " " {
                 old_lines.push((' ', String::new()));
             }
@@ -482,12 +483,12 @@ fn parse_context_patch(lines: &[&str], start: usize) -> Option<(FilePatch, usize
             && !lines[i].starts_with("*** ")
         {
             let line = lines[i];
-            if line.starts_with("! ") {
-                new_lines.push(('!', line[2..].to_string()));
-            } else if line.starts_with("+ ") {
-                new_lines.push(('+', line[2..].to_string()));
-            } else if line.starts_with("  ") {
-                new_lines.push((' ', line[2..].to_string()));
+            if let Some(rest) = line.strip_prefix("! ") {
+                new_lines.push(('!', rest.to_string()));
+            } else if let Some(rest) = line.strip_prefix("+ ") {
+                new_lines.push(('+', rest.to_string()));
+            } else if let Some(rest) = line.strip_prefix("  ") {
+                new_lines.push((' ', rest.to_string()));
             } else if line == "  " || line == " " {
                 new_lines.push((' ', String::new()));
             } else {
@@ -783,11 +784,7 @@ fn apply_hunk(
 
                     result.extend_from_slice(&file_lines[fi..]);
 
-                    let applied_offset = if actual_start >= target_start {
-                        actual_start - target_start
-                    } else {
-                        target_start - actual_start
-                    };
+                    let applied_offset = actual_start.abs_diff(target_start);
                     return Some((result, fuzz_level, applied_offset));
                 }
             }
@@ -900,10 +897,7 @@ fn apply_file_patch(patch: &FilePatch, opts: &Options) -> i32 {
     let target_display = target.display().to_string();
 
     if !opts.silent {
-        eprintln!(
-            "patching file {}",
-            target_display
-        );
+        eprintln!("patching file {}", target_display);
     }
 
     // Read existing file content (or empty for new files)
@@ -956,8 +950,7 @@ fn apply_file_patch(patch: &FilePatch, opts: &Options) -> i32 {
             None => {
                 if opts.forward {
                     // Check if already applied
-                    let reverse_result =
-                        apply_hunk(&file_lines, hunk, opts.fuzz, !opts.reverse);
+                    let reverse_result = apply_hunk(&file_lines, hunk, opts.fuzz, !opts.reverse);
                     if reverse_result.is_some() {
                         if !opts.silent {
                             eprintln!(
@@ -1019,10 +1012,10 @@ fn apply_file_patch(patch: &FilePatch, opts: &Options) -> i32 {
             let _ = fs::remove_file(&output_path);
         } else {
             // Ensure parent directory exists for new files
-            if let Some(parent) = output_path.parent() {
-                if !parent.exists() {
-                    let _ = fs::create_dir_all(parent);
-                }
+            if let Some(parent) = output_path.parent()
+                && !parent.exists()
+            {
+                let _ = fs::create_dir_all(parent);
             }
 
             fs::write(&output_path, output_content).unwrap_or_else(|e| {
