@@ -228,23 +228,31 @@ impl Engine for NixEngine {
         container.unshare(hakoniwa::Namespace::Pid);
         container.unshare(hakoniwa::Namespace::Ipc);
 
-        // Mount system paths read-only.
+        // Mount system paths read-only (/etc excluded — handled separately for DNS).
         for dir in [
-            "/bin", "/etc", "/lib", "/lib64", "/lib32", "/sbin", "/usr", "/nix",
+            "/bin", "/lib", "/lib64", "/lib32", "/sbin", "/usr", "/nix",
         ] {
             if Path::new(dir).exists() {
                 container.bindmount_ro(dir, dir);
             }
         }
 
-        // DNS: on NixOS, /etc/resolv.conf -> /run/systemd/resolve/stub-resolv.conf
-        if Path::new("/run/systemd/resolve").exists() {
-            container.bindmount_ro("/run/systemd/resolve", "/run/systemd/resolve");
+        // /etc: write resolv.conf directly (the host's may be a symlink to /run
+        // which can't be bind-mounted in a user namespace). Also write a minimal
+        // passwd/group so tools that look up users work.
+        container.dir("/etc", 0o755);
+        if let Ok(contents) = std::fs::read_to_string("/etc/resolv.conf") {
+            container.file("/etc/resolv.conf", &contents);
         }
-        // Nix daemon socket for nix builds.
-        if Path::new("/nix/var/nix/daemon-socket").exists() {
-            container.bindmount_ro("/nix/var/nix/daemon-socket", "/nix/var/nix/daemon-socket");
+        if let Ok(contents) = std::fs::read_to_string("/etc/ssl/certs/ca-certificates.crt") {
+            container.dir("/etc/ssl", 0o755);
+            container.dir("/etc/ssl/certs", 0o755);
+            container.file("/etc/ssl/certs/ca-certificates.crt", &contents);
         }
+        // Minimal passwd/group for the container user.
+        let user = std::env::var("USER").unwrap_or_else(|_| "nobody".into());
+        container.file("/etc/passwd", &format!("{user}:x:0:0::/workspace:/bin/bash\n"));
+        container.file("/etc/group", &format!("{user}:x:0:\n"));
 
         // Writable workspace, /dev, /tmp, /proc.
         container.tmpfsmount("/workspace");
