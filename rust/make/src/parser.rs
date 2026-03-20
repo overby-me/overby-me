@@ -2,6 +2,17 @@
 
 use crate::ast::*;
 
+/// Strip a Makefile comment (# and everything after, unless preceded by \)
+fn strip_makefile_comment(s: &str) -> &str {
+    let bytes = s.as_bytes();
+    for i in 0..bytes.len() {
+        if bytes[i] == b'#' && (i == 0 || bytes[i - 1] != b'\\') {
+            return &s[..i];
+        }
+    }
+    s
+}
+
 pub struct Parser {
     lines: Vec<String>,
     pos: usize,
@@ -102,6 +113,8 @@ impl Parser {
         // Include
         if let Some(rest) = trimmed.strip_prefix("include ") {
             self.advance();
+            // Strip comments (# and everything after)
+            let rest = strip_makefile_comment(rest);
             let files: Vec<String> = rest.split_whitespace().map(|s| s.to_string()).collect();
             return Ok(Some(Directive::Include(files, false)));
         }
@@ -110,6 +123,7 @@ impl Parser {
             .or_else(|| trimmed.strip_prefix("sinclude "))
         {
             self.advance();
+            let rest = strip_makefile_comment(rest);
             let files: Vec<String> = rest.split_whitespace().map(|s| s.to_string()).collect();
             return Ok(Some(Directive::Include(files, true)));
         }
