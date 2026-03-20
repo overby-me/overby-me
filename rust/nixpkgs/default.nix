@@ -273,28 +273,8 @@
             | xargs touch
         '';
 
-        postConfigure = ''
-          # Create .deps dummy files
-          for d in lib lib/unistr lib/uniwidth src doc; do
-            mkdir -p "$d/.deps"
-          done
-          grep '^include' Makefile | while IFS= read -r line; do
-            f=''${line#include }
-            f=''${f%% #*}
-            f=''${f/'$(DEPDIR)'/.deps}
-            if [ ! -f "$f" ]; then
-              mkdir -p "$(dirname "$f")"
-              echo "# dummy" > "$f"
-            fi
-          done
-          # Print the .c.o recipe exactly
-          echo "=== EXACT .c.o block ==="
-          awk '/^\.c\.o:/{found=1} found{print; if(/^[^\t#]/ && !/^\.c\.o:/){exit}}' Makefile
-          echo "=== END ==="
-        '';
-
-        # Force rebuild by changing env
-        RUST_STDENV_TEST = "2";
+        # Disable automake dependency tracking to avoid dep style issues
+        configureFlags = ["--disable-dependency-tracking"];
 
         meta = {
           description = "GNU hello built with the Rust stdenv";
