@@ -1,0 +1,16 @@
+[package]
+name = "rust-diffutils"
+version = "0.1.0"
+edition = "2024"
+description = "GNU diffutils-compatible file comparison tools written in Rust"
+license = "MIT"
+
+[[bin]]
+name = "diff"
+path = "src/main.rs"
+
+[dependencies]
+
+[profile.release]
+lto = true
+strip = true

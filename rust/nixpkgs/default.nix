@@ -69,7 +69,7 @@
       rust-grep,
       rust-awk,
       uutils-findutils,
-      uutils-diffutils,
+      rust-diffutils,
       rust-tar,
       rust-gzip,
       rust-bzip2,
@@ -92,7 +92,7 @@
           rust-grep
           rust-awk
           uutils-findutils
-          uutils-diffutils
+          rust-diffutils
           rust-tar
           rust-gzip
           rust-bzip2
@@ -155,6 +155,7 @@
       rust-grep,
       rust-awk,
       uutils-findutils,
+      rust-diffutils,
       rust-tar,
       rust-gzip,
       rust-bzip2,
@@ -170,6 +171,7 @@
           rust-grep
           rust-awk
           uutils-findutils
+          rust-diffutils
           rust-tar
           rust-gzip
           rust-bzip2
@@ -228,6 +230,7 @@
       rust-grep,
       rust-awk,
       uutils-findutils,
+      rust-diffutils,
       rust-tar,
       rust-gzip,
       rust-bzip2,
@@ -245,6 +248,7 @@
           rust-grep
           rust-awk
           uutils-findutils
+          rust-diffutils
           rust-tar
           rust-gzip
           rust-bzip2
@@ -290,6 +294,7 @@
       rust-grep,
       rust-awk,
       uutils-findutils,
+      rust-diffutils,
       rust-tar,
       rust-gzip,
       rust-bzip2,
@@ -305,6 +310,7 @@
           rust-grep
           rust-awk
           uutils-findutils
+          rust-diffutils
           rust-tar
           rust-gzip
           rust-bzip2
@@ -339,6 +345,7 @@
       rust-grep,
       rust-awk,
       uutils-findutils,
+      rust-diffutils,
       rust-tar,
       rust-gzip,
       rust-bzip2,
@@ -356,6 +363,7 @@
           rust-grep
           rust-awk
           uutils-findutils
+          rust-diffutils
           rust-tar
           rust-gzip
           rust-bzip2
@@ -398,6 +406,7 @@
       rust-grep,
       rust-awk,
       uutils-findutils,
+      rust-diffutils,
       rust-tar,
       rust-gzip,
       rust-bzip2,
@@ -415,6 +424,7 @@
           rust-grep
           rust-awk
           uutils-findutils
+          rust-diffutils
           rust-tar
           rust-gzip
           rust-bzip2

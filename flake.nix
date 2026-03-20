@@ -237,6 +237,7 @@
         ./rust/strip
         ./rust/tar
         ./rust/xz
+        ./rust/diffutils
         ./rust/texinfo
         ./rust/help2man
         ./rust/curl

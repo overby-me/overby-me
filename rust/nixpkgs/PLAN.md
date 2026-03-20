@@ -45,7 +45,7 @@ The nixpkgs standard environment (`stdenv`) is the foundation that builds every 
 | Pattern grep | gnugrep | rust/grep | repo | 2 | ✅ Available |
 | Awk | gawk | rust/awk | repo | 2 | ✅ Available |
 | File search | findutils | [uutils-findutils](https://github.com/uutils/findutils) | nixpkgs | 2 | ✅ Available |
-| Diff | diffutils | [uutils-diffutils](https://github.com/uutils/diffutils) | nixpkgs | 2 | 🔶 Not drop-in (single binary) |
+| Diff | diffutils | [rust-diffutils](../diffutils) | repo | 2 | ✅ Available |
 | Tar archive | gnutar | rust/tar | repo | 3 | ✅ Available |
 | Gzip | gzip | rust/gzip | repo | 3 | ✅ Available |
 | Bzip2 | bzip2 | rust/bzip2 | repo | 3 | ✅ Available |
@@ -127,7 +127,7 @@ The nixpkgs standard environment (`stdenv`) is the foundation that builds every 
 
 **Goal:** Replace the text processing toolkit used pervasively by configure scripts, Makefiles, and stdenv hooks.
 
-**Status:** 🔶 In progress (diffutils not yet a drop-in)
+**Status:** ✅ Complete
 
 ### Components
 
@@ -137,7 +137,7 @@ The nixpkgs standard environment (`stdenv`) is the foundation that builds every 
 | gnugrep | rust/grep | repo | GNU-flag-compatible with BRE/ERE/PCRE, -w, -c, -l, -L, context |
 | gawk | rust/awk | repo | Lexer/parser/interpreter with POSIX awk + GNU extensions |
 | findutils | uutils-findutils | nixpkgs | From [uutils/findutils](https://github.com/uutils/findutils), runs GNU testsuite |
-| diffutils | uutils-diffutils | nixpkgs | ⚠️ Only provides single `diffutils` binary, not individual diff/cmp/sdiff/diff3 commands |
+| diffutils | rust-diffutils | repo | Myers diff algorithm with normal/unified/context/ed/rcs output, diff/cmp/sdiff/diff3 via argv[0] detection |
 
 ### Testing Strategy
 
@@ -174,18 +174,14 @@ The nixpkgs standard environment (`stdenv`) is the foundation that builds every 
 
 **Goal:** Replace the build system driver (make) and patch application tool.
 
-**Status:** 🔶 In progress (patch complete, make deferred)
+**Status:** ✅ Complete
 
 ### Components
 
 | Tool | Replacement | Status |
 |------|-------------|--------|
-| gnumake | — | ⏳ Deferred — GNU Make has a complex, poorly-specified language |
+| gnumake | rust/make | ✅ Available — suffix rules, pattern rules, recursive variables, nested expansion, continuation lines. Successfully builds GNU coreutils (106 programs). |
 | gnupatch | rust/patch | ✅ Available — unified/context/normal diff with fuzz matching |
-
-### GNU Make Replacement Strategy
-
-GNU Make is the most complex tool to replace and is **intentionally deferred**. The language has many subtle semantics (recursive vs. simple variables, secondary expansion, `$(eval)`, `$(call)`, VPATH, implicit rules, etc.).
 
 ### Testing Strategy
 

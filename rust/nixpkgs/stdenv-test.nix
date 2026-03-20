@@ -9,6 +9,7 @@
   rust-grep,
   rust-awk,
   uutils-findutils,
+  rust-diffutils,
   rust-tar,
   rust-gzip,
   rust-bzip2,
@@ -18,14 +19,14 @@
 }: let
   # Map of original pname → replacement package.
   # bash/shell is NOT replaced — rust-bash can't yet execute setup.sh.
-  # patchelf and strip are not in initialPath.
-  # diffutils is excluded — uutils-diffutils lacks individual commands.
+  # patchelf and strip are not in initialPath (used by fixup hooks).
   replacements = {
     coreutils = uutils-coreutils-noprefix;
     gnused = rust-sed;
     gnugrep = rust-grep;
     gawk = rust-awk;
     findutils = uutils-findutils;
+    diffutils = rust-diffutils;
     gnutar = rust-tar;
     gzip = rust-gzip;
     bzip2 = rust-bzip2;
