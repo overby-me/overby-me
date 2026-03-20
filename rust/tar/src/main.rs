@@ -150,6 +150,116 @@ fn is_excluded(path: &str, excludes: &[String]) -> bool {
 }
 
 // ---------------------------------------------------------------------------
+// Mode manipulation (for --mode=CHANGES)
+// ---------------------------------------------------------------------------
+
+/// Apply a symbolic mode change (like chmod) to a mode value.
+/// Supports: +rwx, -rwx, =rwx, and combinations like u+w,go-x.
+/// For simplicity, supports the subset used by nixpkgs (primarily +w).
+#[cfg(unix)]
+fn apply_mode_change(current: u32, changes: &str) -> u32 {
+    let mut mode = current;
+    for part in changes.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+
+        // Parse who: u, g, o, a (default = a)
+        let mut who_u = false;
+        let mut who_g = false;
+        let mut who_o = false;
+        let mut chars = part.chars().peekable();
+
+        while let Some(&c) = chars.peek() {
+            match c {
+                'u' => {
+                    who_u = true;
+                    chars.next();
+                }
+                'g' => {
+                    who_g = true;
+                    chars.next();
+                }
+                'o' => {
+                    who_o = true;
+                    chars.next();
+                }
+                'a' => {
+                    who_u = true;
+                    who_g = true;
+                    who_o = true;
+                    chars.next();
+                }
+                _ => break,
+            }
+        }
+
+        // Default to all if no who specified
+        if !who_u && !who_g && !who_o {
+            who_u = true;
+            who_g = true;
+            who_o = true;
+        }
+
+        // Parse operator: +, -, =
+        let op = match chars.next() {
+            Some(c @ ('+' | '-' | '=')) => c,
+            _ => continue,
+        };
+
+        // Parse permissions: r, w, x
+        let mut bits: u32 = 0;
+        for c in chars {
+            match c {
+                'r' => bits |= 4,
+                'w' => bits |= 2,
+                'x' => bits |= 1,
+                's' | 't' | 'X' => {} // Ignore setuid/setgid/sticky/conditional
+                _ => break,
+            }
+        }
+
+        // Build the mask
+        let mut mask: u32 = 0;
+        if who_u {
+            mask |= bits << 6;
+        }
+        if who_g {
+            mask |= bits << 3;
+        }
+        if who_o {
+            mask |= bits;
+        }
+
+        match op {
+            '+' => mode |= mask,
+            '-' => mode &= !mask,
+            '=' => {
+                let clear = (if who_u { 0o700 } else { 0 })
+                    | (if who_g { 0o070 } else { 0 })
+                    | (if who_o { 0o007 } else { 0 });
+                mode = (mode & !clear) | mask;
+            }
+            _ => {}
+        }
+    }
+    mode
+}
+
+#[cfg(unix)]
+fn apply_mode_to_path(path: &std::path::Path, mode_str: &str) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let metadata = fs::metadata(path)?;
+    let current = metadata.permissions().mode();
+    let new_mode = apply_mode_change(current, mode_str);
+    if new_mode != current {
+        fs::set_permissions(path, fs::Permissions::from_mode(new_mode))?;
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Argument parsing
 // ---------------------------------------------------------------------------
 
@@ -171,6 +281,7 @@ struct Args {
     no_same_owner: bool,
     no_same_permissions: bool,
     preserve_permissions: bool,
+    mode_override: Option<String>,
     paths: Vec<String>,
 }
 
@@ -207,6 +318,28 @@ fn parse_args() -> Args {
         match arg.as_str() {
             "--version" | "-V" => {
                 println!("tar (rust-tar) {}", env!("CARGO_PKG_VERSION"));
+                process::exit(0);
+            }
+            "--help" => {
+                println!("tar (rust-tar) {}", env!("CARGO_PKG_VERSION"));
+                println!("Usage: tar [OPTION...] [FILE]...");
+                println!("  -c, --create       create a new archive");
+                println!("  -x, --extract      extract files from an archive");
+                println!("  -t, --list         list archive contents");
+                println!("  -f FILE            use archive file FILE");
+                println!("  -C DIR             change to directory DIR");
+                println!("  -v, --verbose      verbose output");
+                println!("  -z, --gzip         gzip compression");
+                println!("  -j, --bzip2        bzip2 compression");
+                println!("  -J, --xz           xz compression");
+                println!("  -p, --preserve-permissions");
+                println!("  --strip-components=N");
+                println!("  --transform=EXPR   sed-like path transform");
+                println!("  --exclude=PATTERN  exclude matching files");
+                println!("  --mode=CHANGES     apply mode CHANGES to extracted files");
+                println!("  --warning=KEYWORD  suppress warning (e.g. no-timestamp)");
+                println!("  --no-same-owner    don't preserve file ownership");
+                println!("  --no-same-permissions");
                 process::exit(0);
             }
             "-c" | "--create" => args.create = true,
@@ -258,6 +391,19 @@ fn parse_args() -> Args {
                     args.group = Some(val.to_string());
                 } else if let Some(val) = other.strip_prefix("--sort=") {
                     args.sort_name = val == "name";
+                } else if let Some(val) = other.strip_prefix("--mode=") {
+                    args.mode_override = Some(val.to_string());
+                } else if other.strip_prefix("--warning=").is_some() {
+                    // Silently accept --warning=KEYWORD (e.g. no-timestamp)
+                } else if other == "--no-recursion"
+                    || other == "--anchored"
+                    || other == "--wildcards"
+                    || other == "--no-wildcards"
+                    || other == "--null"
+                    || other == "--numeric-owner"
+                    || other == "--totals"
+                {
+                    // Silently accept common GNU tar options
                 } else if other.starts_with('-') && !other.starts_with("--") && other.len() > 1 {
                     // Potentially bundled short options like -xvf
                     let chars: Vec<char> = other[1..].chars().collect();
@@ -560,10 +706,20 @@ fn do_extract_or_list(args: &Args) -> io::Result<()> {
             EntryType::Directory => {
                 fs::create_dir_all(&dest)?;
                 #[cfg(unix)]
-                if args.preserve_permissions && !args.no_same_permissions {
+                {
                     use std::os::unix::fs::PermissionsExt;
                     if let Ok(mode) = entry.header().mode() {
-                        fs::set_permissions(&dest, fs::Permissions::from_mode(mode))?;
+                        // Always apply mode from archive. GNU tar does this
+                        // by default (masked by umask unless -p is used).
+                        let effective = if args.preserve_permissions && !args.no_same_permissions {
+                            mode
+                        } else {
+                            mode & !0o022 // Apply typical umask
+                        };
+                        fs::set_permissions(&dest, fs::Permissions::from_mode(effective))?;
+                    }
+                    if let Some(ref mode_str) = args.mode_override {
+                        let _ = apply_mode_to_path(&dest, mode_str);
                     }
                 }
             }
@@ -574,10 +730,18 @@ fn do_extract_or_list(args: &Args) -> io::Result<()> {
                 let mut file = File::create(&dest)?;
                 io::copy(&mut entry, &mut file)?;
                 #[cfg(unix)]
-                if args.preserve_permissions && !args.no_same_permissions {
+                {
                     use std::os::unix::fs::PermissionsExt;
                     if let Ok(mode) = entry.header().mode() {
-                        fs::set_permissions(&dest, fs::Permissions::from_mode(mode))?;
+                        let effective = if args.preserve_permissions && !args.no_same_permissions {
+                            mode
+                        } else {
+                            mode & !0o022
+                        };
+                        fs::set_permissions(&dest, fs::Permissions::from_mode(effective))?;
+                    }
+                    if let Some(ref mode_str) = args.mode_override {
+                        let _ = apply_mode_to_path(&dest, mode_str);
                     }
                 }
             }

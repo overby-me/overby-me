@@ -102,7 +102,7 @@ The nixpkgs standard environment (`stdenv`) is the foundation that builds every 
 - [x] Declare shell component with rust-bash replacement
 - [x] Declare coreutils component with uutils replacement
 - [x] Test: build a trivial derivation with the partially-oxidized stdenv
-- [ ] Test: build a real autotools package (e.g. hello) with the partially-oxidized stdenv
+- [x] Test: build a real autotools package (e.g. hello) with the partially-oxidized stdenv (configure passes, build fails due to uutils-sed bug)
 - [x] Document known incompatibilities and workarounds
 - [ ] Validate rust-bash can execute stdenv's `setup.sh` phases without modification
 
@@ -115,6 +115,10 @@ The nixpkgs standard environment (`stdenv`) is the foundation that builds every 
 3. **uutils-diffutils is not a drop-in** — `uutils-diffutils` only provides a single `diffutils` binary, not the individual `diff`, `cmp`, `sdiff`, `diff3` commands that stdenv expects. It cannot serve as a replacement until it provides these individual commands or a multicall binary with symlinks.
 
 4. **patchelf and strip are not in `initialPath`** — These tools are used by stdenv's fixup hooks but are not part of `initialPath`. They need to be overridden separately in the fixup hook configuration, not via `initialPath` replacement.
+
+5. **uutils-sed fails on autoconf-generated `config.status` substitutions** — When building GNU hello, `config.status` invokes sed with complex substitution commands that produce `unterminated substitute replacement` errors. This corrupts the generated Makefile. This is a uutils-sed compatibility issue.
+
+6. **rust-make `make --version` reports "nested variables... no"** — The autoconf `configure` test `checking whether make supports nested variables` returns `no` for rust-make. Some packages may behave differently or fail when nested variable expansion is unavailable.
 
 ### Risks
 

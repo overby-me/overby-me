@@ -451,11 +451,27 @@ fn build_matcher(opts: &Options) -> Matcher {
         return Matcher::Fixed(opts.patterns.clone(), opts.ignore_case);
     }
 
+    // For BRE mode, convert each individual pattern before combining.
+    // This is necessary because the combination uses ERE syntax ((?:...) and |)
+    // which would be mangled by the BRE-to-ERE converter.
+    let is_bre = opts.basic_regexp && !opts.extended_regexp && !opts.perl_regexp;
+    let converted_patterns: Vec<String> = opts
+        .patterns
+        .iter()
+        .map(|p| {
+            if is_bre {
+                convert_bre_to_ere(p)
+            } else {
+                p.clone()
+            }
+        })
+        .collect();
+
     // Build combined pattern
-    let combined = if opts.patterns.len() == 1 {
-        opts.patterns[0].clone()
+    let combined = if converted_patterns.len() == 1 {
+        converted_patterns[0].clone()
     } else {
-        opts.patterns
+        converted_patterns
             .iter()
             .map(|p| format!("(?:{p})"))
             .collect::<Vec<_>>()
@@ -485,27 +501,17 @@ fn build_matcher(opts: &Options) -> Matcher {
             }
         }
     } else {
-        // For BRE mode, do minimal conversion (GNU grep BRE uses \( \) \{ \} etc.)
-        if opts.basic_regexp && !opts.extended_regexp {
-            // BRE: escape groups and alternation require backslash
-            // Convert BRE to ERE-compatible regex:
-            // \( → (, \) → ), \{ → {, \} → }, \| → |, \+ → +, \? → ?
-            // bare ( ) { } | + ? are literal in BRE
-            let bre_to_ere = convert_bre_to_ere(&pattern);
-            match Regex::new(&bre_to_ere) {
-                Ok(re) => Matcher::Regex(re),
-                Err(e) => {
+        // BRE conversion already applied per-pattern above, so use the
+        // combined ERE pattern directly.
+        match Regex::new(&pattern) {
+            Ok(re) => Matcher::Regex(re),
+            Err(e) => {
+                if is_bre {
                     eprintln!("grep: invalid BRE pattern: {e}");
-                    process::exit(2);
-                }
-            }
-        } else {
-            match Regex::new(&pattern) {
-                Ok(re) => Matcher::Regex(re),
-                Err(e) => {
+                } else {
                     eprintln!("grep: invalid regex: {e}");
-                    process::exit(2);
                 }
+                process::exit(2);
             }
         }
     }

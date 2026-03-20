@@ -162,34 +162,21 @@
       rust-make,
       rust-patch,
     }: let
-      # Map of original pname → replacement package.
-      # Note: bash/shell is NOT replaced here — rust-bash can't yet
-      # execute nixpkgs setup.sh fully. This tests the tools only.
-      # patchelf and strip are not in initialPath (they're used by
-      # fixup hooks separately), so they're not mapped here.
-      replacements = {
-        coreutils = uutils-coreutils-noprefix;
-        gnused = uutils-sed;
-        gnugrep = rust-grep;
-        gawk = rust-awk;
-        findutils = uutils-findutils;
-        # diffutils: uutils-diffutils only provides a single binary,
-        # not the individual diff/cmp/sdiff/diff3 commands stdenv needs
-        gnutar = rust-tar;
-        gzip = rust-gzip;
-        bzip2 = rust-bzip2;
-        xz = rust-xz;
-        gnumake = rust-make;
-        patch = rust-patch;
-      };
-      replacedInitialPath =
-        map (
-          pkg: replacements.${pkg.pname or ""} or pkg
-        )
-        stdenv.initialPath;
-      rustStdenv = stdenv.override {
-        initialPath = replacedInitialPath;
-        allowedRequisites = null;
+      rustStdenv = import ./stdenv-test.nix {
+        inherit
+          stdenv
+          uutils-coreutils-noprefix
+          uutils-sed
+          rust-grep
+          rust-awk
+          uutils-findutils
+          rust-tar
+          rust-gzip
+          rust-bzip2
+          rust-xz
+          rust-make
+          rust-patch
+          ;
       };
     in
       rustStdenv.mkDerivation {
@@ -227,6 +214,56 @@
         meta = {
           description = "Test building with the Rust stdenv";
           license = lib.licenses.mit;
+        };
+      };
+
+    # Test building GNU hello (a real autotools package) with the Rust stdenv.
+    # This exercises configure scripts, make, install, and fixup phases.
+    rust-nixpkgs-hello-test = {
+      lib,
+      stdenv,
+      fetchurl,
+      uutils-coreutils-noprefix,
+      uutils-sed,
+      rust-grep,
+      rust-awk,
+      uutils-findutils,
+      rust-tar,
+      rust-gzip,
+      rust-bzip2,
+      rust-xz,
+      rust-make,
+      rust-patch,
+    }: let
+      rustStdenv = import ./stdenv-test.nix {
+        inherit
+          stdenv
+          uutils-coreutils-noprefix
+          uutils-sed
+          rust-grep
+          rust-awk
+          uutils-findutils
+          rust-tar
+          rust-gzip
+          rust-bzip2
+          rust-xz
+          rust-make
+          rust-patch
+          ;
+      };
+    in
+      rustStdenv.mkDerivation {
+        pname = "rust-nixpkgs-hello-test";
+        version = "2.12.1";
+
+        src = fetchurl {
+          url = "mirror://gnu/hello/hello-2.12.1.tar.gz";
+          sha256 = "sha256-jZkUKv2SV28wsM18tCqNxoCZmLxdYH2Idh9RLibH2yA=";
+        };
+
+        meta = {
+          description = "GNU hello built with the Rust stdenv";
+          license = lib.licenses.gpl3Plus;
         };
       };
   };
