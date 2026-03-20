@@ -276,10 +276,17 @@
         # Ensure .deps directories exist with dummy files
         # (config.status depfiles command may fail with rust-make)
         postConfigure = ''
-          grep '^include.*DEPDIR' Makefile | sed 's/include //;s/ #.*//' | while read f; do
-            f=$(echo "$f" | sed "s/\$(DEPDIR)/.deps/g")
-            mkdir -p "$(dirname "$f")"
-            [ -f "$f" ] || echo "# dummy" > "$f"
+          for d in lib lib/unistr lib/uniwidth src doc; do
+            mkdir -p "$d/.deps"
+          done
+          grep '^include' Makefile | while IFS= read -r line; do
+            f=''${line#include }
+            f=''${f%% #*}
+            f=''${f/'$(DEPDIR)'/.deps}
+            if [ ! -f "$f" ]; then
+              mkdir -p "$(dirname "$f")"
+              echo "# dummy" > "$f"
+            fi
           done
         '';
 
