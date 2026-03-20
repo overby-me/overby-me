@@ -238,6 +238,7 @@
         ./rust/xz
         ./rust/curl
         ./rust/bubblewrap
+        ./rust/flatpak
         ./ironclaw/matrix
         ./ironclaw/bluesky
         ./ironclaw/signal
