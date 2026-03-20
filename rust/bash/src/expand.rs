@@ -339,6 +339,18 @@ fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
     match name {
         "?" => ctx.last_status.to_string(),
         "$" => std::process::id().to_string(),
+        "RANDOM" => {
+            // Simple pseudo-random using time and pid
+            let t = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            ((t ^ (std::process::id() as u128 * 2654435761)) % 32768).to_string()
+        }
+        "SECONDS" => {
+            // TODO: track shell start time for accurate SECONDS
+            "0".to_string()
+        }
         "#" => {
             let count = if ctx.positional.is_empty() {
                 0
@@ -956,9 +968,7 @@ fn word_split(segments: &[Segment], ifs: &str) -> Vec<String> {
 
     // Check if there are any SplitHere markers or unquoted segments
     let has_split = segments.iter().any(|s| matches!(s, Segment::SplitHere));
-    let all_quoted = segments
-        .iter()
-        .all(|s| matches!(s, Segment::Quoted(_)));
+    let all_quoted = segments.iter().all(|s| matches!(s, Segment::Quoted(_)));
     if all_quoted && !has_split {
         let s: String = segments
             .iter()

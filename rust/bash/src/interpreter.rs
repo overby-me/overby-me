@@ -152,10 +152,10 @@ impl Shell {
 
     /// Declare a local variable — saves the old value for restoration on function exit.
     pub fn declare_local(&mut self, name: &str) {
-        if let Some(scope) = self.local_scopes.last_mut() {
-            if !scope.contains_key(name) {
-                scope.insert(name.to_string(), self.vars.get(name).cloned());
-            }
+        if let Some(scope) = self.local_scopes.last_mut()
+            && !scope.contains_key(name)
+        {
+            scope.insert(name.to_string(), self.vars.get(name).cloned());
         }
     }
 
