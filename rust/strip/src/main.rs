@@ -1,6 +1,6 @@
-use object::read::elf::{Rel as _, Rela as _};
-use object::read::elf::{ElfFile, FileHeader, SectionHeader as _};
 use object::read::Object;
+use object::read::elf::{ElfFile, FileHeader, SectionHeader as _};
+use object::read::elf::{Rel as _, Rela as _};
 use object::{ObjectSection, ObjectSymbol};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -12,9 +12,9 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StripMode {
-    StripAll,
-    StripDebug,
-    StripUnneeded,
+    All,
+    Debug,
+    Unneeded,
 }
 
 #[derive(Debug)]
@@ -61,7 +61,7 @@ fn print_version() {
 
 fn parse_args() -> Args {
     let mut args = Args {
-        mode: StripMode::StripAll,
+        mode: StripMode::All,
         preserve_dates: false,
         output_file: None,
         remove_sections: Vec::new(),
@@ -88,15 +88,15 @@ fn parse_args() -> Args {
                 process::exit(0);
             }
             "-s" | "--strip-all" => {
-                args.mode = StripMode::StripAll;
+                args.mode = StripMode::All;
                 mode_set = true;
             }
             "-g" | "-S" | "--strip-debug" => {
-                args.mode = StripMode::StripDebug;
+                args.mode = StripMode::Debug;
                 mode_set = true;
             }
             "--strip-unneeded" => {
-                args.mode = StripMode::StripUnneeded;
+                args.mode = StripMode::Unneeded;
                 mode_set = true;
             }
             "-p" | "--preserve-dates" => {
@@ -162,11 +162,11 @@ fn parse_args() -> Args {
                 while j < chars.len() {
                     match chars[j] {
                         's' => {
-                            args.mode = StripMode::StripAll;
+                            args.mode = StripMode::All;
                             mode_set = true;
                         }
                         'g' | 'S' => {
-                            args.mode = StripMode::StripDebug;
+                            args.mode = StripMode::Debug;
                             mode_set = true;
                         }
                         'p' => args.preserve_dates = true,
@@ -247,7 +247,7 @@ fn parse_args() -> Args {
     }
 
     if !mode_set && args.remove_sections.is_empty() && args.strip_symbols.is_empty() {
-        args.mode = StripMode::StripAll;
+        args.mode = StripMode::All;
     }
 
     if args.files.is_empty() {
@@ -279,8 +279,8 @@ fn should_remove_section(name: &str, mode: StripMode, remove_sections: &[String]
     }
 
     match mode {
-        StripMode::StripDebug | StripMode::StripUnneeded => is_debug_section(name),
-        StripMode::StripAll => is_debug_section(name) || name == ".symtab" || name == ".strtab",
+        StripMode::Debug | StripMode::Unneeded => is_debug_section(name),
+        StripMode::All => is_debug_section(name) || name == ".symtab" || name == ".strtab",
     }
 }
 
@@ -311,9 +311,9 @@ fn should_keep_symbol(
     }
 
     match mode {
-        StripMode::StripAll => false,
-        StripMode::StripDebug => sym.kind() != object::SymbolKind::File,
-        StripMode::StripUnneeded => sym.is_global() || reloc_symbols.contains(&sym.index()),
+        StripMode::All => false,
+        StripMode::Debug => sym.kind() != object::SymbolKind::File,
+        StripMode::Unneeded => sym.is_global() || reloc_symbols.contains(&sym.index()),
     }
 }
 
@@ -322,9 +322,7 @@ fn collect_reloc_symbols(data: &[u8]) -> HashSet<object::SymbolIndex> {
 
     if let Ok(elf) = ElfFile::<object::elf::FileHeader64<object::Endianness>>::parse(data) {
         collect_reloc_symbols_from_elf(&elf, &mut indices);
-    } else if let Ok(elf) =
-        ElfFile::<object::elf::FileHeader32<object::Endianness>>::parse(data)
-    {
+    } else if let Ok(elf) = ElfFile::<object::elf::FileHeader32<object::Endianness>>::parse(data) {
         collect_reloc_symbols_from_elf(&elf, &mut indices);
     }
 
@@ -374,7 +372,7 @@ fn strip_file(path: &Path, args: &Args) -> Result<(), Box<dyn std::error::Error>
 
     let obj = object::File::parse(&*data)?;
 
-    let reloc_symbols = if args.mode == StripMode::StripUnneeded {
+    let reloc_symbols = if args.mode == StripMode::Unneeded {
         collect_reloc_symbols(&data)
     } else {
         HashSet::new()
@@ -385,10 +383,10 @@ fn strip_file(path: &Path, args: &Args) -> Result<(), Box<dyn std::error::Error>
     let output_path = args.output_file.as_deref().unwrap_or(path);
     fs::write(output_path, &out)?;
 
-    if let Some((atime, mtime)) = timestamps {
-        if let (Some(_atime), Some(mtime)) = (atime, mtime) {
-            set_file_times(output_path, mtime)?;
-        }
+    if let Some((atime, mtime)) = timestamps
+        && let (Some(_atime), Some(mtime)) = (atime, mtime)
+    {
+        set_file_times(output_path, mtime)?;
     }
 
     if args.verbose {
@@ -460,7 +458,7 @@ fn rewrite_elf(
     }
 
     // Copy symbols unless strip-all with no explicit keep list
-    if args.mode != StripMode::StripAll || !args.keep_symbols.is_empty() {
+    if args.mode != StripMode::All || !args.keep_symbols.is_empty() {
         for symbol in obj.symbols() {
             if symbol.index().0 == 0 {
                 continue;

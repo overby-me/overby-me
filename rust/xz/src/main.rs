@@ -223,16 +223,14 @@ fn output_path_compress(input: &Path, format: Format) -> PathBuf {
 
 fn output_path_decompress(input: &Path) -> Option<PathBuf> {
     let name = input.to_str()?;
-    if name.ends_with(".xz") {
-        Some(PathBuf::from(&name[..name.len() - 3]))
-    } else if name.ends_with(".lzma") {
-        Some(PathBuf::from(&name[..name.len() - 5]))
-    } else if name.ends_with(".txz") {
-        Some(PathBuf::from(format!("{}.tar", &name[..name.len() - 4])))
-    } else if name.ends_with(".tlz") {
-        Some(PathBuf::from(format!("{}.tar", &name[..name.len() - 4])))
+    if let Some(stripped) = name.strip_suffix(".xz") {
+        Some(PathBuf::from(stripped))
+    } else if let Some(stripped) = name.strip_suffix(".lzma") {
+        Some(PathBuf::from(stripped))
     } else {
-        None
+        name.strip_suffix(".txz")
+            .or_else(|| name.strip_suffix(".tlz"))
+            .map(|stripped| PathBuf::from(format!("{stripped}.tar")))
     }
 }
 
@@ -248,9 +246,7 @@ fn process_file(path: &str, opts: &Options) -> io::Result<()> {
 
     match opts.mode {
         Mode::Compress => {
-            let has_suffix = compressed_suffixes()
-                .iter()
-                .any(|s| path.ends_with(s));
+            let has_suffix = compressed_suffixes().iter().any(|s| path.ends_with(s));
             if has_suffix && !opts.force {
                 if !opts.quiet {
                     eprintln!("xz: {path}: already has a compressed suffix, skipping");
@@ -267,7 +263,10 @@ fn process_file(path: &str, opts: &Options) -> io::Result<()> {
                 if output_path.exists() && !opts.force {
                     return Err(io::Error::new(
                         io::ErrorKind::AlreadyExists,
-                        format!("{}: already exists; use -f to overwrite", output_path.display()),
+                        format!(
+                            "{}: already exists; use -f to overwrite",
+                            output_path.display()
+                        ),
                     ));
                 }
                 let input = File::open(input_path)?;
@@ -288,9 +287,7 @@ fn process_file(path: &str, opts: &Options) -> io::Result<()> {
                 Some(p) => p,
                 None => {
                     if !opts.quiet {
-                        eprintln!(
-                            "xz: {path}: unknown suffix -- ignored"
-                        );
+                        eprintln!("xz: {path}: unknown suffix -- ignored");
                     }
                     return Ok(());
                 }
@@ -303,7 +300,10 @@ fn process_file(path: &str, opts: &Options) -> io::Result<()> {
                 if output_path.exists() && !opts.force {
                     return Err(io::Error::new(
                         io::ErrorKind::AlreadyExists,
-                        format!("{}: already exists; use -f to overwrite", output_path.display()),
+                        format!(
+                            "{}: already exists; use -f to overwrite",
+                            output_path.display()
+                        ),
                     ));
                 }
                 let input = File::open(input_path)?;

@@ -21,6 +21,8 @@ flate = "flate"
 ot = "ot"
 # BRE = Basic Regular Expression (regex standard term)
 bre = "bre"
+# Rela = ELF relocation entry type (SHT_RELA, Elf64_Rela)
+rela = "rela"
 
 
 [default]

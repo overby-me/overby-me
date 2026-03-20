@@ -1,6 +1,6 @@
+use goblin::elf::Elf;
 use goblin::elf::dynamic::{DT_NEEDED, DT_RPATH, DT_RUNPATH, DT_SONAME, DT_STRSZ, DT_STRTAB};
 use goblin::elf::program_header::PT_INTERP;
-use goblin::elf::Elf;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -304,7 +304,7 @@ fn dynstr_info(elf: &Elf, _data: &[u8]) -> (usize, usize) {
 
     if let Some(dynamic) = &elf.dynamic {
         for dyn_entry in &dynamic.dyns {
-            match dyn_entry.d_tag as u64 {
+            match dyn_entry.d_tag {
                 DT_STRTAB => strtab_addr = Some(dyn_entry.d_val),
                 DT_STRSZ => strsz = Some(dyn_entry.d_val),
                 _ => {}
@@ -332,10 +332,11 @@ fn dynstr_info(elf: &Elf, _data: &[u8]) -> (usize, usize) {
 /// Convert a virtual address to a file offset using program headers.
 fn vaddr_to_offset(elf: &Elf, vaddr: u64) -> Option<usize> {
     for phdr in &elf.program_headers {
-        if phdr.p_type == goblin::elf::program_header::PT_LOAD {
-            if vaddr >= phdr.p_vaddr && vaddr < phdr.p_vaddr + phdr.p_memsz {
-                return Some((vaddr - phdr.p_vaddr + phdr.p_offset) as usize);
-            }
+        if phdr.p_type == goblin::elf::program_header::PT_LOAD
+            && vaddr >= phdr.p_vaddr
+            && vaddr < phdr.p_vaddr + phdr.p_memsz
+        {
+            return Some((vaddr - phdr.p_vaddr + phdr.p_offset) as usize);
         }
     }
     None
@@ -352,7 +353,12 @@ fn read_str_at(data: &[u8], offset: usize) -> &str {
 }
 
 /// Find the file offset of a string within the dynamic string table, given its value.
-fn _find_dynstr_offset(data: &[u8], strtab_offset: usize, strtab_size: usize, needle: &str) -> Option<usize> {
+fn _find_dynstr_offset(
+    data: &[u8],
+    strtab_offset: usize,
+    strtab_size: usize,
+    needle: &str,
+) -> Option<usize> {
     let strtab = &data[strtab_offset..strtab_offset + strtab_size];
     let needle_bytes = needle.as_bytes();
     // Search for null-terminated match
@@ -410,7 +416,7 @@ fn available_space_at(data: &[u8], offset: usize, strtab_end: usize) -> usize {
 
 // --- Modify operations ---
 
-fn set_interpreter(elf: &Elf, data: &mut Vec<u8>, new_interp: &str) {
+fn set_interpreter(elf: &Elf, data: &mut [u8], new_interp: &str) {
     let interp_phdr = elf
         .program_headers
         .iter()
@@ -441,7 +447,7 @@ fn set_interpreter(elf: &Elf, data: &mut Vec<u8>, new_interp: &str) {
     }
 }
 
-fn set_rpath(elf: &Elf, data: &mut Vec<u8>, new_rpath: &str) {
+fn set_rpath(elf: &Elf, data: &mut [u8], new_rpath: &str) {
     let (strtab_offset, strtab_size) = dynstr_info(elf, data);
     let strtab_end = strtab_offset + strtab_size;
 
@@ -449,7 +455,7 @@ fn set_rpath(elf: &Elf, data: &mut Vec<u8>, new_rpath: &str) {
         // Try DT_RUNPATH first, then DT_RPATH
         for tag in &[DT_RUNPATH, DT_RPATH] {
             for dyn_entry in &dynamic.dyns {
-                if dyn_entry.d_tag as u64 == *tag {
+                if dyn_entry.d_tag == *tag {
                     let str_offset = strtab_offset + dyn_entry.d_val as usize;
                     let space = available_space_at(data, str_offset, strtab_end);
                     write_str_inplace(data, str_offset, space, new_rpath);
@@ -463,7 +469,7 @@ fn set_rpath(elf: &Elf, data: &mut Vec<u8>, new_rpath: &str) {
     process::exit(1);
 }
 
-fn shrink_rpath(elf: &Elf, data: &mut Vec<u8>, _file: &Path) {
+fn shrink_rpath(elf: &Elf, data: &mut [u8], _file: &Path) {
     let (strtab_offset, strtab_size) = dynstr_info(elf, data);
     let strtab_end = strtab_offset + strtab_size;
 
@@ -473,7 +479,7 @@ fn shrink_rpath(elf: &Elf, data: &mut Vec<u8>, _file: &Path) {
     if let Some(dynamic) = &elf.dynamic {
         for tag in &[DT_RUNPATH, DT_RPATH] {
             for dyn_entry in &dynamic.dyns {
-                if dyn_entry.d_tag as u64 == *tag {
+                if dyn_entry.d_tag == *tag {
                     let str_offset = strtab_offset + dyn_entry.d_val as usize;
                     let old_rpath = read_str_at(data, str_offset).to_string();
                     let space = available_space_at(data, str_offset, strtab_end);
@@ -505,14 +511,14 @@ fn shrink_rpath(elf: &Elf, data: &mut Vec<u8>, _file: &Path) {
     // No rpath to shrink is not an error
 }
 
-fn remove_rpath(elf: &Elf, data: &mut Vec<u8>) {
+fn remove_rpath(elf: &Elf, data: &mut [u8]) {
     let (strtab_offset, strtab_size) = dynstr_info(elf, data);
     let strtab_end = strtab_offset + strtab_size;
 
     if let Some(dynamic) = &elf.dynamic {
         for tag in &[DT_RUNPATH, DT_RPATH] {
             for dyn_entry in &dynamic.dyns {
-                if dyn_entry.d_tag as u64 == *tag {
+                if dyn_entry.d_tag == *tag {
                     let str_offset = strtab_offset + dyn_entry.d_val as usize;
                     let space = available_space_at(data, str_offset, strtab_end);
                     // Zero out the string
@@ -523,13 +529,13 @@ fn remove_rpath(elf: &Elf, data: &mut Vec<u8>) {
     }
 }
 
-fn set_soname(elf: &Elf, data: &mut Vec<u8>, new_soname: &str) {
+fn set_soname(elf: &Elf, data: &mut [u8], new_soname: &str) {
     let (strtab_offset, strtab_size) = dynstr_info(elf, data);
     let strtab_end = strtab_offset + strtab_size;
 
     if let Some(dynamic) = &elf.dynamic {
         for dyn_entry in &dynamic.dyns {
-            if dyn_entry.d_tag as u64 == DT_SONAME {
+            if dyn_entry.d_tag == DT_SONAME {
                 let str_offset = strtab_offset + dyn_entry.d_val as usize;
                 let space = available_space_at(data, str_offset, strtab_end);
                 write_str_inplace(data, str_offset, space, new_soname);
@@ -542,7 +548,7 @@ fn set_soname(elf: &Elf, data: &mut Vec<u8>, new_soname: &str) {
     process::exit(1);
 }
 
-fn add_needed(_elf: &Elf, _data: &mut Vec<u8>, lib: &str) {
+fn add_needed(_elf: &Elf, _data: &mut [u8], lib: &str) {
     // Adding a DT_NEEDED entry requires adding a new dynamic entry and potentially
     // growing the string table. This is a complex operation that requires rewriting
     // sections. For now, report it as unsupported.
@@ -550,7 +556,7 @@ fn add_needed(_elf: &Elf, _data: &mut Vec<u8>, lib: &str) {
     process::exit(1);
 }
 
-fn remove_needed(elf: &Elf, data: &mut Vec<u8>, lib: &str) {
+fn remove_needed(elf: &Elf, data: &mut [u8], lib: &str) {
     // To "remove" a DT_NEEDED, we can overwrite the dynamic entry's tag with DT_NULL.
     // This is a simplistic approach but works for the common case.
     let is_64 = elf.is_64;
@@ -573,7 +579,7 @@ fn remove_needed(elf: &Elf, data: &mut Vec<u8>, lib: &str) {
         let entry_size = if is_64 { 16usize } else { 8usize };
 
         for (idx, dyn_entry) in dynamic.dyns.iter().enumerate() {
-            if dyn_entry.d_tag as u64 == DT_NEEDED {
+            if dyn_entry.d_tag == DT_NEEDED {
                 let str_off = strtab_offset + dyn_entry.d_val as usize;
                 let name = read_str_at(data, str_off);
                 if name == lib {
@@ -583,28 +589,22 @@ fn remove_needed(elf: &Elf, data: &mut Vec<u8>, lib: &str) {
                         let tag_bytes = 0u64.to_le_bytes();
                         let val_bytes = 0u64.to_le_bytes();
                         if is_le {
-                            data[entry_offset..entry_offset + 8]
-                                .copy_from_slice(&tag_bytes);
-                            data[entry_offset + 8..entry_offset + 16]
-                                .copy_from_slice(&val_bytes);
+                            data[entry_offset..entry_offset + 8].copy_from_slice(&tag_bytes);
+                            data[entry_offset + 8..entry_offset + 16].copy_from_slice(&val_bytes);
                         } else {
                             data[entry_offset..entry_offset + 8]
                                 .copy_from_slice(&0u64.to_be_bytes());
                             data[entry_offset + 8..entry_offset + 16]
                                 .copy_from_slice(&0u64.to_be_bytes());
                         }
+                    } else if is_le {
+                        data[entry_offset..entry_offset + 4].copy_from_slice(&0u32.to_le_bytes());
+                        data[entry_offset + 4..entry_offset + 8]
+                            .copy_from_slice(&0u32.to_le_bytes());
                     } else {
-                        if is_le {
-                            data[entry_offset..entry_offset + 4]
-                                .copy_from_slice(&0u32.to_le_bytes());
-                            data[entry_offset + 4..entry_offset + 8]
-                                .copy_from_slice(&0u32.to_le_bytes());
-                        } else {
-                            data[entry_offset..entry_offset + 4]
-                                .copy_from_slice(&0u32.to_be_bytes());
-                            data[entry_offset + 4..entry_offset + 8]
-                                .copy_from_slice(&0u32.to_be_bytes());
-                        }
+                        data[entry_offset..entry_offset + 4].copy_from_slice(&0u32.to_be_bytes());
+                        data[entry_offset + 4..entry_offset + 8]
+                            .copy_from_slice(&0u32.to_be_bytes());
                     }
                     return;
                 }
@@ -616,13 +616,13 @@ fn remove_needed(elf: &Elf, data: &mut Vec<u8>, lib: &str) {
     process::exit(1);
 }
 
-fn replace_needed(elf: &Elf, data: &mut Vec<u8>, old: &str, new: &str) {
+fn replace_needed(elf: &Elf, data: &mut [u8], old: &str, new: &str) {
     let (strtab_offset, strtab_size) = dynstr_info(elf, data);
     let strtab_end = strtab_offset + strtab_size;
 
     if let Some(dynamic) = &elf.dynamic {
         for dyn_entry in &dynamic.dyns {
-            if dyn_entry.d_tag as u64 == DT_NEEDED {
+            if dyn_entry.d_tag == DT_NEEDED {
                 let str_offset = strtab_offset + dyn_entry.d_val as usize;
                 let name = read_str_at(data, str_offset).to_string();
                 if name == old {

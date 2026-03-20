@@ -1,5 +1,5 @@
-use bzip2::read::{BzDecoder, BzEncoder};
 use bzip2::Compression;
+use bzip2::read::{BzDecoder, BzEncoder};
 use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};

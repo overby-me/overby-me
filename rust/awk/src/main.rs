@@ -294,12 +294,10 @@ impl Lexer {
                 }
                 '"' => Token::StringLit(self.read_string()),
                 '/' if self.can_be_regex() => Token::Regex(self.read_regex()),
-                '0'..='9' | '.' if ch.is_ascii_digit() || {
-                    ch == '.'
-                        && self
-                            .peek_at(1)
-                            .is_some_and(|c| c.is_ascii_digit())
-                } =>
+                '0'..='9' | '.'
+                    if ch.is_ascii_digit() || {
+                        ch == '.' && self.peek_at(1).is_some_and(|c| c.is_ascii_digit())
+                    } =>
                 {
                     Token::Number(self.read_number())
                 }
@@ -583,7 +581,12 @@ enum Stmt {
     If(Expr, Box<Stmt>, Option<Box<Stmt>>),
     While(Expr, Box<Stmt>),
     DoWhile(Box<Stmt>, Expr),
-    For(Option<Box<Stmt>>, Option<Expr>, Option<Box<Stmt>>, Box<Stmt>),
+    For(
+        Option<Box<Stmt>>,
+        Option<Expr>,
+        Option<Box<Stmt>>,
+        Box<Stmt>,
+    ),
     ForIn(String, String, Box<Stmt>),
     Block(Vec<Stmt>),
     Next,
@@ -1134,21 +1137,17 @@ impl Parser {
         let mut left = self.parse_addition();
         // Concatenation by juxtaposition: if the next token can start an expression
         // but is not an operator, it's concatenation
-        loop {
-            match self.peek() {
-                Token::Number(_)
-                | Token::StringLit(_)
-                | Token::Ident(_)
-                | Token::Dollar
-                | Token::LParen
-                | Token::Not
-                | Token::Increment
-                | Token::Decrement => {
-                    let right = self.parse_addition();
-                    left = Expr::Concat(Box::new(left), Box::new(right));
-                }
-                _ => break,
-            }
+        while let Token::Number(_)
+        | Token::StringLit(_)
+        | Token::Ident(_)
+        | Token::Dollar
+        | Token::LParen
+        | Token::Not
+        | Token::Increment
+        | Token::Decrement = self.peek()
+        {
+            let right = self.parse_addition();
+            left = Expr::Concat(Box::new(left), Box::new(right));
         }
         left
     }
@@ -1565,7 +1564,11 @@ impl Interpreter {
     }
 
     fn set_record(&mut self, line: &str) {
-        let fs = self.globals.get("FS").map(|v| v.to_string_val()).unwrap_or(" ".to_string());
+        let fs = self
+            .globals
+            .get("FS")
+            .map(|v| v.to_string_val())
+            .unwrap_or(" ".to_string());
         self.fields = vec![line.to_string()];
         let parts: Vec<String> = if fs == " " {
             line.split_whitespace().map(|s| s.to_string()).collect()
@@ -1623,7 +1626,11 @@ impl Interpreter {
         match name {
             "NR" => Value::Num(self.nr as f64),
             "FNR" => Value::Num(self.fnr as f64),
-            _ => self.globals.get(name).cloned().unwrap_or(Value::Uninitialized),
+            _ => self
+                .globals
+                .get(name)
+                .cloned()
+                .unwrap_or(Value::Uninitialized),
         }
     }
 
@@ -1685,15 +1692,12 @@ impl Interpreter {
 
         // Run BEGIN blocks
         for rule in &program.rules {
-            if matches!(rule.pattern, Some(Pattern::Begin)) {
-                match self.exec_stmts(&rule.action) {
-                    ControlFlow::Exit(code) => {
-                        self.exit_code = code;
-                        self.run_end_blocks(program);
-                        return;
-                    }
-                    _ => {}
-                }
+            if matches!(rule.pattern, Some(Pattern::Begin))
+                && let ControlFlow::Exit(code) = self.exec_stmts(&rule.action)
+            {
+                self.exit_code = code;
+                self.run_end_blocks(program);
+                return;
             }
         }
 
@@ -1724,14 +1728,11 @@ impl Interpreter {
 
     fn run_end_blocks(&mut self, program: &Program) {
         for rule in &program.rules {
-            if matches!(rule.pattern, Some(Pattern::End)) {
-                match self.exec_stmts(&rule.action) {
-                    ControlFlow::Exit(code) => {
-                        self.exit_code = code;
-                        return;
-                    }
-                    _ => {}
-                }
+            if matches!(rule.pattern, Some(Pattern::End))
+                && let ControlFlow::Exit(code) = self.exec_stmts(&rule.action)
+            {
+                self.exit_code = code;
+                return;
             }
         }
     }
@@ -1748,7 +1749,11 @@ impl Interpreter {
 
         if rs == "\n" || rs.len() == 1 {
             // Line-by-line reading
-            let sep = if rs == "\n" { '\n' } else { rs.chars().next().unwrap_or('\n') };
+            let sep = if rs == "\n" {
+                '\n'
+            } else {
+                rs.chars().next().unwrap_or('\n')
+            };
             let mut buf = String::new();
             loop {
                 buf.clear();
@@ -1770,12 +1775,9 @@ impl Interpreter {
                             .insert("FNR".to_string(), Value::Num(self.fnr as f64));
                         self.set_record(&buf);
 
-                        match self.process_rules(program) {
-                            ControlFlow::Exit(code) => {
-                                self.exit_code = code;
-                                return;
-                            }
-                            _ => {}
+                        if let ControlFlow::Exit(code) = self.process_rules(program) {
+                            self.exit_code = code;
+                            return;
                         }
                     }
                     Err(_) => break,
@@ -1800,12 +1802,9 @@ impl Interpreter {
                     .insert("FNR".to_string(), Value::Num(self.fnr as f64));
                 self.set_record(para);
 
-                match self.process_rules(program) {
-                    ControlFlow::Exit(code) => {
-                        self.exit_code = code;
-                        return;
-                    }
-                    _ => {}
+                if let ControlFlow::Exit(code) = self.process_rules(program) {
+                    self.exit_code = code;
+                    return;
                 }
             }
         } else {
@@ -1829,12 +1828,9 @@ impl Interpreter {
                     .insert("FNR".to_string(), Value::Num(self.fnr as f64));
                 self.set_record(rec);
 
-                match self.process_rules(program) {
-                    ControlFlow::Exit(code) => {
-                        self.exit_code = code;
-                        return;
-                    }
-                    _ => {}
+                if let ControlFlow::Exit(code) = self.process_rules(program) {
+                    self.exit_code = code;
+                    return;
                 }
             }
         }
@@ -2029,7 +2025,11 @@ impl Interpreter {
                 return ControlFlow::Return(val);
             }
             Stmt::Getline(var, file, source) => {
-                self.eval_getline(var.as_ref().map(|e| e.as_ref()), file.as_ref().map(|e| e.as_ref()), source);
+                self.eval_getline(
+                    var.as_ref().map(|e| e.as_ref()),
+                    file.as_ref().map(|e| e.as_ref()),
+                    source,
+                );
             }
         }
         ControlFlow::None
@@ -2269,103 +2269,101 @@ impl Interpreter {
                 let key = self.array_key(&vals);
                 self.get_array(name, &key)
             }
-            Expr::Binop(left, op, right) => {
-                match op {
-                    BinOp::And => {
-                        let lv = self.eval_expr(left);
-                        if !lv.to_bool() {
-                            return Value::Num(0.0);
-                        }
-                        let rv = self.eval_expr(right);
-                        Value::Num(if rv.to_bool() { 1.0 } else { 0.0 })
+            Expr::Binop(left, op, right) => match op {
+                BinOp::And => {
+                    let lv = self.eval_expr(left);
+                    if !lv.to_bool() {
+                        return Value::Num(0.0);
                     }
-                    BinOp::Or => {
-                        let lv = self.eval_expr(left);
-                        if lv.to_bool() {
-                            return Value::Num(1.0);
-                        }
-                        let rv = self.eval_expr(right);
-                        Value::Num(if rv.to_bool() { 1.0 } else { 0.0 })
+                    let rv = self.eval_expr(right);
+                    Value::Num(if rv.to_bool() { 1.0 } else { 0.0 })
+                }
+                BinOp::Or => {
+                    let lv = self.eval_expr(left);
+                    if lv.to_bool() {
+                        return Value::Num(1.0);
                     }
-                    _ => {
-                        let lv = self.eval_expr(left);
-                        let rv = self.eval_expr(right);
-                        match op {
-                            BinOp::Add => Value::Num(lv.to_num() + rv.to_num()),
-                            BinOp::Sub => Value::Num(lv.to_num() - rv.to_num()),
-                            BinOp::Mul => Value::Num(lv.to_num() * rv.to_num()),
-                            BinOp::Div => {
-                                let d = rv.to_num();
-                                if d == 0.0 {
-                                    eprintln!("awk: division by zero");
-                                    Value::Num(0.0)
-                                } else {
-                                    Value::Num(lv.to_num() / d)
-                                }
+                    let rv = self.eval_expr(right);
+                    Value::Num(if rv.to_bool() { 1.0 } else { 0.0 })
+                }
+                _ => {
+                    let lv = self.eval_expr(left);
+                    let rv = self.eval_expr(right);
+                    match op {
+                        BinOp::Add => Value::Num(lv.to_num() + rv.to_num()),
+                        BinOp::Sub => Value::Num(lv.to_num() - rv.to_num()),
+                        BinOp::Mul => Value::Num(lv.to_num() * rv.to_num()),
+                        BinOp::Div => {
+                            let d = rv.to_num();
+                            if d == 0.0 {
+                                eprintln!("awk: division by zero");
+                                Value::Num(0.0)
+                            } else {
+                                Value::Num(lv.to_num() / d)
                             }
-                            BinOp::Mod => {
-                                let d = rv.to_num();
-                                if d == 0.0 {
-                                    eprintln!("awk: division by zero");
-                                    Value::Num(0.0)
-                                } else {
-                                    Value::Num(lv.to_num() % d)
-                                }
-                            }
-                            BinOp::Pow => Value::Num(lv.to_num().powf(rv.to_num())),
-                            BinOp::Eq => {
-                                let ord = compare_values(&lv, &rv);
-                                Value::Num(if ord == std::cmp::Ordering::Equal {
-                                    1.0
-                                } else {
-                                    0.0
-                                })
-                            }
-                            BinOp::Ne => {
-                                let ord = compare_values(&lv, &rv);
-                                Value::Num(if ord != std::cmp::Ordering::Equal {
-                                    1.0
-                                } else {
-                                    0.0
-                                })
-                            }
-                            BinOp::Lt => {
-                                let ord = compare_values(&lv, &rv);
-                                Value::Num(if ord == std::cmp::Ordering::Less {
-                                    1.0
-                                } else {
-                                    0.0
-                                })
-                            }
-                            BinOp::Gt => {
-                                let ord = compare_values(&lv, &rv);
-                                Value::Num(if ord == std::cmp::Ordering::Greater {
-                                    1.0
-                                } else {
-                                    0.0
-                                })
-                            }
-                            BinOp::Le => {
-                                let ord = compare_values(&lv, &rv);
-                                Value::Num(if ord != std::cmp::Ordering::Greater {
-                                    1.0
-                                } else {
-                                    0.0
-                                })
-                            }
-                            BinOp::Ge => {
-                                let ord = compare_values(&lv, &rv);
-                                Value::Num(if ord != std::cmp::Ordering::Less {
-                                    1.0
-                                } else {
-                                    0.0
-                                })
-                            }
-                            BinOp::And | BinOp::Or => unreachable!(),
                         }
+                        BinOp::Mod => {
+                            let d = rv.to_num();
+                            if d == 0.0 {
+                                eprintln!("awk: division by zero");
+                                Value::Num(0.0)
+                            } else {
+                                Value::Num(lv.to_num() % d)
+                            }
+                        }
+                        BinOp::Pow => Value::Num(lv.to_num().powf(rv.to_num())),
+                        BinOp::Eq => {
+                            let ord = compare_values(&lv, &rv);
+                            Value::Num(if ord == std::cmp::Ordering::Equal {
+                                1.0
+                            } else {
+                                0.0
+                            })
+                        }
+                        BinOp::Ne => {
+                            let ord = compare_values(&lv, &rv);
+                            Value::Num(if ord != std::cmp::Ordering::Equal {
+                                1.0
+                            } else {
+                                0.0
+                            })
+                        }
+                        BinOp::Lt => {
+                            let ord = compare_values(&lv, &rv);
+                            Value::Num(if ord == std::cmp::Ordering::Less {
+                                1.0
+                            } else {
+                                0.0
+                            })
+                        }
+                        BinOp::Gt => {
+                            let ord = compare_values(&lv, &rv);
+                            Value::Num(if ord == std::cmp::Ordering::Greater {
+                                1.0
+                            } else {
+                                0.0
+                            })
+                        }
+                        BinOp::Le => {
+                            let ord = compare_values(&lv, &rv);
+                            Value::Num(if ord != std::cmp::Ordering::Greater {
+                                1.0
+                            } else {
+                                0.0
+                            })
+                        }
+                        BinOp::Ge => {
+                            let ord = compare_values(&lv, &rv);
+                            Value::Num(if ord != std::cmp::Ordering::Less {
+                                1.0
+                            } else {
+                                0.0
+                            })
+                        }
+                        BinOp::And | BinOp::Or => unreachable!(),
                     }
                 }
-            }
+            },
             Expr::Unop(op, operand) => match op {
                 UnOp::Neg => {
                     let v = self.eval_expr(operand);
@@ -2470,25 +2468,21 @@ impl Interpreter {
             }
             Expr::In(expr, array) => {
                 let key = self.eval_expr(expr).to_string_val();
-                let exists = self
-                    .arrays
-                    .get(array)
-                    .is_some_and(|a| a.contains_key(&key));
+                let exists = self.arrays.get(array).is_some_and(|a| a.contains_key(&key));
                 Value::Num(if exists { 1.0 } else { 0.0 })
             }
             Expr::MultiIn(indices, array) => {
                 let vals: Vec<Value> = indices.iter().map(|i| self.eval_expr(i)).collect();
                 let key = self.array_key(&vals);
-                let exists = self
-                    .arrays
-                    .get(array)
-                    .is_some_and(|a| a.contains_key(&key));
+                let exists = self.arrays.get(array).is_some_and(|a| a.contains_key(&key));
                 Value::Num(if exists { 1.0 } else { 0.0 })
             }
             Expr::FuncCall(name, args) => self.call_function(name, args),
-            Expr::Getline(var, file, source) => {
-                self.eval_getline(var.as_ref().map(|e| e.as_ref()), file.as_ref().map(|e| e.as_ref()), source)
-            }
+            Expr::Getline(var, file, source) => self.eval_getline(
+                var.as_ref().map(|e| e.as_ref()),
+                file.as_ref().map(|e| e.as_ref()),
+                source,
+            ),
             Expr::Sprintf(args) => {
                 let vals: Vec<Value> = args.iter().map(|a| self.eval_expr(a)).collect();
                 Value::Str(self.sprintf_impl(&vals))
@@ -2514,10 +2508,10 @@ impl Interpreter {
                     return Value::Num(self.get_field(0).len() as f64);
                 }
                 // Check if argument is an array name
-                if let Some(Expr::Var(arr_name)) = args.first() {
-                    if self.arrays.contains_key(arr_name) {
-                        return Value::Num(self.arrays[arr_name].len() as f64);
-                    }
+                if let Some(Expr::Var(arr_name)) = args.first()
+                    && self.arrays.contains_key(arr_name)
+                {
+                    return Value::Num(self.arrays[arr_name].len() as f64);
                 }
                 let v = self.eval_expr(&args[0]);
                 Value::Num(v.to_string_val().len() as f64)
@@ -3000,14 +2994,14 @@ impl Interpreter {
                 let formatted = match conv {
                     'd' | 'i' => {
                         let n = val.to_num() as i64;
-                        let s = if plus_sign && n >= 0 {
+
+                        if plus_sign && n >= 0 {
                             format!("+{n}")
                         } else if space_sign && n >= 0 {
                             format!(" {n}")
                         } else {
                             format!("{n}")
-                        };
-                        s
+                        }
                     }
                     'o' => format!("{:o}", val.to_num() as u64),
                     'x' => format!("{:x}", val.to_num() as u64),
@@ -3059,11 +3053,7 @@ impl Interpreter {
                     }
                     'g' | 'G' => {
                         let n = val.to_num();
-                        let p = if has_precision {
-                            prec_num.max(1)
-                        } else {
-                            6
-                        };
+                        let p = if has_precision { prec_num.max(1) } else { 6 };
                         format_g(n, p, conv == 'G')
                     }
                     _ => format!("%{conv}"),
@@ -3077,9 +3067,7 @@ impl Interpreter {
                         for _ in 0..pad {
                             result.push(' ');
                         }
-                    } else if zero_pad
-                        && matches!(conv, 'd' | 'i' | 'f' | 'e' | 'E' | 'g' | 'G')
-                    {
+                    } else if zero_pad && matches!(conv, 'd' | 'i' | 'f' | 'e' | 'E' | 'g' | 'G') {
                         // Put sign before zeros
                         if formatted.starts_with('-') || formatted.starts_with('+') {
                             result.push(formatted.chars().next().unwrap());
@@ -3229,10 +3217,7 @@ fn main() {
     while i < args.len() {
         match args[i].as_str() {
             "--version" | "-V" => {
-                println!(
-                    "awk (rust-awk) {}",
-                    env!("CARGO_PKG_VERSION")
-                );
+                println!("awk (rust-awk) {}", env!("CARGO_PKG_VERSION"));
                 std::process::exit(0);
             }
             "-F" => {
@@ -3246,12 +3231,12 @@ fn main() {
             }
             "-v" => {
                 i += 1;
-                if i < args.len() {
-                    if let Some(eq_pos) = args[i].find('=') {
-                        let name = args[i][..eq_pos].to_string();
-                        let val = args[i][eq_pos + 1..].to_string();
-                        var_assignments.push((name, val));
-                    }
+                if i < args.len()
+                    && let Some(eq_pos) = args[i].find('=')
+                {
+                    let name = args[i][..eq_pos].to_string();
+                    let val = args[i][eq_pos + 1..].to_string();
+                    var_assignments.push((name, val));
                 }
             }
             s if s.starts_with("-v") => {
@@ -3287,7 +3272,11 @@ fn main() {
                 }
                 break;
             }
-            s if s.starts_with('-') && s.len() > 1 && program_text.is_empty() && input_files.is_empty() => {
+            s if s.starts_with('-')
+                && s.len() > 1
+                && program_text.is_empty()
+                && input_files.is_empty() =>
+            {
                 // Unknown flag, skip
                 eprintln!("awk: unknown option: {s}");
             }

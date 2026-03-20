@@ -333,9 +333,7 @@ fn compress_file(path: &Path, opts: &Options) -> i32 {
     };
 
     let original_size = metadata.len();
-    let file_name = path
-        .file_name()
-        .map(|s| s.to_string_lossy().to_string());
+    let file_name = path.file_name().map(|s| s.to_string_lossy().to_string());
 
     if opts.to_stdout {
         let stdout = io::stdout();
@@ -375,11 +373,11 @@ fn compress_file(path: &Path, opts: &Options) -> i32 {
             let _ = fs::set_permissions(&out_path, meta.permissions());
         }
 
-        if !opts.keep {
-            if let Err(e) = fs::remove_file(path) {
-                eprintln!("gzip: {}: {e}", path.display());
-                return 1;
-            }
+        if !opts.keep
+            && let Err(e) = fs::remove_file(path)
+        {
+            eprintln!("gzip: {}: {e}", path.display());
+            return 1;
         }
 
         if opts.verbose {
@@ -455,18 +453,15 @@ fn decompress_file(path: &Path, opts: &Options) -> i32 {
             let _ = fs::set_permissions(&out_path, meta.permissions());
         }
 
-        if !opts.keep {
-            if let Err(e) = fs::remove_file(path) {
-                eprintln!("gzip: {path_str}: {e}");
-                return 1;
-            }
+        if !opts.keep
+            && let Err(e) = fs::remove_file(path)
+        {
+            eprintln!("gzip: {path_str}: {e}");
+            return 1;
         }
 
         if opts.verbose {
-            eprintln!(
-                "{path_str}: -- replaced with {}",
-                out_path.display()
-            );
+            eprintln!("{path_str}: -- replaced with {}", out_path.display());
         }
     }
 
@@ -531,9 +526,7 @@ fn list_file(path: &Path, opts: &Options) -> i32 {
     if !opts.quiet {
         println!("  compressed  uncompressed  ratio  uncompressed_name");
     }
-    println!(
-        "  {compressed_size:>10}  {uncompressed_size:>12}  {ratio:>5.1}%  {out_name}"
-    );
+    println!("  {compressed_size:>10}  {uncompressed_size:>12}  {ratio:>5.1}%  {out_name}");
 
     0
 }
@@ -573,8 +566,7 @@ fn decompress_stream<R: Read, W: Write>(reader: R, mut writer: W) -> io::Result<
 fn strip_gz_suffix(path: &Path) -> Option<String> {
     let s = path.to_string_lossy();
     for suffix in &[".gz", ".tgz", ".z", ".Z", "-gz", "-z", "_z"] {
-        if s.ends_with(suffix) {
-            let stem = &s[..s.len() - suffix.len()];
+        if let Some(stem) = s.strip_suffix(suffix) {
             let result = if *suffix == ".tgz" {
                 format!("{stem}.tar")
             } else {
