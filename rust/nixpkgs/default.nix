@@ -273,9 +273,8 @@
             | xargs touch
         '';
 
-        # Ensure .deps directories exist with dummy files
-        # (config.status depfiles command may fail with rust-make)
         postConfigure = ''
+          # Create .deps dummy files
           for d in lib lib/unistr lib/uniwidth src doc; do
             mkdir -p "$d/.deps"
           done
@@ -288,6 +287,10 @@
               echo "# dummy" > "$f"
             fi
           done
+          # Print the .c.o recipe exactly
+          echo "=== EXACT .c.o block ==="
+          awk '/^\.c\.o:/{found=1} found{print; if(/^[^\t#]/ && !/^\.c\.o:/){exit}}' Makefile
+          echo "=== END ==="
         '';
 
         # Force rebuild by changing env
