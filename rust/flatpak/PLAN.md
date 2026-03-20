@@ -294,16 +294,125 @@ Replace the portal stubs with real D-Bus client implementations.
 - [x] `FLATPAK_PORTAL_PID` set when document portal is available
 - [x] D-Bus proxy `--log` support via `FLATPAK_DBUS_PROXY_LOG` env var
 
-## Priority Order (Phases 10-17)
+## Phase 18: Proper Flatpak Bundle Format
 
-1. **Sandbox fidelity** (Phase 10) — highest impact, apps fail without /sys,
-   fonts, timezone
-2. **Native deflate + cache** (Phase 11) — removes python3 dep, makes install
-   usable for real apps
-3. **Seccomp hardening** (Phase 12) — security improvement
-4. **Instance tracking** (Phase 13) — correctness for ps/kill/enter
-5. **D-Bus proxy completion** (Phase 14) — needed for a11y and edge cases
-6. **Extension completion** (Phase 15) — needed for apps using GL/codecs
-7. **Portal implementation** (Phase 16) — needed for file access and desktop
-   integration
-8. **Remaining CLI** (Phase 17) — polish and full compatibility
+Replace the tar-based bundle with the real Flatpak bundle format (an OSTree
+commit packed into a single file with a metadata header).
+
+### Tasks
+
+- [ ] Implement OSTree commit object serialization (the reverse of parsing):
+  build `(a{sv}aya(say)sstayay)` GVariant from a directory tree
+- [ ] Implement dirtree and dirmeta object serialization
+- [ ] Implement content object (`.filez`) creation: GVariant header + raw
+  deflate compressed content
+- [ ] Compute SHA256 checksums for all objects
+- [ ] Pack commit + all referenced objects into the Flatpak bundle format:
+  a GVariant file containing the commit, metadata, and a map of object
+  checksums to object data
+- [ ] Update `build-bundle` to produce proper bundles
+- [ ] Update `build-import-bundle` to parse proper bundles
+
+## Phase 19: Full OSTree Commit Creation
+
+Implement `build-commit-from` and `build-export` using real OSTree commit
+objects instead of simple file copies.
+
+### Tasks
+
+- [ ] Implement `hash_object()` — compute the OSTree checksum for a file,
+  dirtree, dirmeta, or commit object
+- [ ] Implement `write_object()` — serialize and store an object in the
+  local repo
+- [ ] Implement `create_dirtree()` — recursively walk a directory, create
+  file/dirtree/dirmeta objects, return the root dirtree + dirmeta checksums
+- [ ] Implement `create_commit()` — wrap a root tree in a commit object
+  with subject, timestamp, and parent commit
+- [ ] Update `build-export` to create real OSTree commits
+- [ ] Implement `build-commit-from` — read an existing commit's tree and
+  create a new commit pointing to the same (or modified) tree
+
+## Phase 20: GPG Commit Signing
+
+Implement `build-sign` to GPG-sign OSTree commits.
+
+### Tasks
+
+- [ ] Implement OSTree commit metadata signature format (detached GPG
+  signature stored as a `.commitmeta` object)
+- [ ] Shell out to `gpg --detach-sign` to produce the signature
+- [ ] Store the signature in the repo's `objects/` directory
+- [ ] Update `build-sign` to sign an existing commit
+- [ ] Optionally sign during `build-export` with `--gpg-sign=KEYID`
+
+## Phase 21: OSTree Static Deltas
+
+Implement static delta support for much faster pulls from remotes. Without
+this, every file is fetched individually, which is very slow for large apps.
+
+### Tasks
+
+- [ ] Parse the delta superblock format (GVariant at
+  `<repo>/deltas/<from>-<to>/superblock`)
+- [ ] Parse delta part files (`<repo>/deltas/<from>-<to>/<partN>`)
+- [ ] Implement the delta instruction set: copy, open, write, set-read-source,
+  unset-read-source, close, bspatch
+- [ ] Apply deltas to reconstruct objects without fetching them individually
+- [ ] Detect available deltas from the summary file's `ostree.static-deltas`
+  metadata
+- [ ] Fall back to individual object fetching when no delta is available
+
+## Phase 22: HTTP Client Improvements
+
+### Tasks
+
+- [ ] Handle HTTP chunked transfer-encoding (parse chunk headers, reassemble
+  body) — some OSTree repos and CDNs use chunked encoding for large objects
+- [ ] Add progress reporting during large pulls: track number of objects
+  fetched vs. total, bytes downloaded, and print a progress bar to stderr
+- [ ] Support HTTP redirects (3xx) in the OSTree fetcher (currently only
+  the curl rewrite handles redirects)
+- [ ] Connection reuse / keep-alive for fetching many objects from the same
+  host (currently opens a new TCP+TLS connection per object)
+- [ ] Parallel object fetching (fetch N objects concurrently using threads)
+
+## Phase 23: Auto-Download Missing Extensions
+
+### Tasks
+
+- [ ] When `flatpak run` encounters a missing extension (resolved by
+  `extensions.rs` but not found on disk), prompt the user to install it
+- [ ] Search configured remotes for the extension ref
+- [ ] Pull and install the extension via the OSTree client
+- [ ] Re-resolve extensions after installation and continue with the run
+
+## Phase 24: Native D-Bus Wire Protocol Client
+
+Replace `gdbus`/`busctl` subprocess calls with a native Rust D-Bus client
+for portal communication.
+
+### Tasks
+
+- [ ] Implement D-Bus wire protocol message serialization/deserialization
+  (header fields, body marshalling for basic types: string, uint32, variant,
+  array, dict)
+- [ ] Implement Unix socket connection and SASL `EXTERNAL` authentication
+- [ ] Implement `Hello()` call to get a unique bus name
+- [ ] Implement `CallMethod()` — send a method call message and read the reply
+- [ ] Replace `gdbus_call()` in `portals.rs` with the native client
+- [ ] Replace `busctl` fallback
+- [ ] Handle signals (for portal async responses)
+
+## Priority Order (Phases 18-24)
+
+1. **Static deltas** (Phase 21) — without this, installing real apps from
+   Flathub is impractically slow (thousands of individual HTTP requests)
+2. **HTTP improvements** (Phase 22) — connection reuse and parallel fetching
+   make non-delta pulls viable
+3. **Auto-download extensions** (Phase 23) — needed for running most real
+   apps (GL drivers, codecs)
+4. **OSTree commit creation** (Phase 19) — needed for a working build-export
+5. **Proper bundle format** (Phase 18) — interoperability with real Flatpak
+6. **GPG signing** (Phase 20) — needed for publishing repos
+7. **Native D-Bus client** (Phase 24) — removes gdbus/busctl dependency,
+   enables async portal interactions
