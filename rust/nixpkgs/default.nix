@@ -112,7 +112,7 @@
           ls --version | head -1
           sed --version | head -1
           grep --version | head -1
-          awk 'BEGIN { print "awk ok" }'
+          awk --version | head -1
           find --version | head -1
           diff --version | head -1
           tar --version | head -1

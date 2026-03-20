@@ -3228,6 +3228,13 @@ fn main() {
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
+            "--version" | "-V" => {
+                println!(
+                    "awk (rust-awk) {}",
+                    env!("CARGO_PKG_VERSION")
+                );
+                std::process::exit(0);
+            }
             "-F" => {
                 i += 1;
                 if i < args.len() {
