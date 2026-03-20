@@ -247,6 +247,11 @@ impl Engine for NixEngine {
             container.dir("/etc/ssl/certs", 0o755);
             container.file("/etc/ssl/certs/ca-certificates.crt", &contents);
         }
+        // Nix config (experimental features, substituters, etc.).
+        if let Ok(contents) = std::fs::read_to_string("/etc/nix/nix.conf") {
+            container.dir("/etc/nix", 0o755);
+            container.file("/etc/nix/nix.conf", &contents);
+        }
         // Minimal passwd/group for the container user.
         let user = std::env::var("USER").unwrap_or_else(|_| "nobody".into());
         container.file(
