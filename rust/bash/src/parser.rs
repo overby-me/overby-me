@@ -94,6 +94,8 @@ impl Parser {
                 || self.is_keyword("do")
                 || self.current == Token::RParen
                 || self.current == Token::DSemi
+                || self.current == Token::SemiAmp
+                || self.current == Token::DSemiAmp
             {
                 break;
             }
@@ -219,6 +221,7 @@ impl Parser {
             || self.is_keyword("while")
             || self.is_keyword("until")
             || self.is_keyword("case")
+            || self.is_keyword("[[")
             || self.current == Token::LParen
         {
             let compound = self.parse_compound_command()?;
@@ -235,6 +238,26 @@ impl Parser {
         if self.is_keyword("{") {
             self.parse_brace_group()
         } else if self.current == Token::LParen {
+            // Check for (( — arithmetic command or C-style for
+            let saved_pos = self.lexer.save_position();
+            let saved_tok = self.current.clone();
+            self.advance(); // consume first (
+            if self.current == Token::LParen {
+                // (( expression )) — don't consume second ( as token;
+                // instead, use raw lexer to read until ))
+                // Backtrack the lexer to just after the first ( (before second ()
+                // The second ( is the current token, so lexer position is after it.
+                // We need to read from including the content after the second (.
+                // Actually, the lexer already read past the second ( to produce the
+                // LParen token. So we read_until_double_paren from the current lexer pos.
+                let expr = self.read_arith_command()?;
+                // Sync the parser's current token
+                self.current = self.lexer.next_token();
+                return Ok(CompoundCommand::Arithmetic(expr));
+            }
+            // Not ((, backtrack to regular subshell
+            self.lexer.restore_position(saved_pos);
+            self.current = saved_tok;
             self.parse_subshell()
         } else if self.is_keyword("if") {
             self.parse_if()
@@ -246,9 +269,18 @@ impl Parser {
             self.parse_until()
         } else if self.is_keyword("case") {
             self.parse_case()
+        } else if self.is_keyword("[[") {
+            self.parse_conditional()
         } else {
             Err(format!("expected compound command, got {:?}", self.current))
         }
+    }
+
+    /// Read the body of `(( expr ))` — collect until matching `))`.
+    fn read_arith_command(&mut self) -> Result<String, String> {
+        // We've already consumed `((`; now read raw chars until `))`.
+        let expr = self.lexer.read_until_double_paren()?;
+        Ok(expr)
     }
 
     fn parse_brace_group(&mut self) -> Result<CompoundCommand, String> {
@@ -307,6 +339,21 @@ impl Parser {
 
     fn parse_for(&mut self) -> Result<CompoundCommand, String> {
         self.expect_keyword("for")?;
+
+        // Check for C-style: for (( init; cond; step ))
+        if self.current == Token::LParen {
+            let saved_pos = self.lexer.save_position();
+            let saved_tok = self.current.clone();
+            self.advance(); // consume first (
+            if self.current == Token::LParen {
+                // Don't consume second ( as token — use raw lexer
+                // Lexer position is right after the second ( was read
+                return self.parse_arith_for();
+            }
+            self.lexer.restore_position(saved_pos);
+            self.current = saved_tok;
+        }
+
         let var = self
             .word_text()
             .ok_or_else(|| "expected variable name after 'for'".to_string())?;
@@ -345,6 +392,29 @@ impl Parser {
         self.expect_keyword("done")?;
 
         Ok(CompoundCommand::For(ForClause { var, words, body }))
+    }
+
+    /// Parse `for (( init; cond; step )) do body done` — already consumed `((`
+    fn parse_arith_for(&mut self) -> Result<CompoundCommand, String> {
+        let init = self.lexer.read_until_char(';')?;
+        let cond = self.lexer.read_until_char(';')?;
+        let step = self.lexer.read_until_double_paren()?;
+        // Sync parser — skip ; or newline before 'do'
+        self.current = self.lexer.next_token();
+        if matches!(self.current, Token::Semi | Token::Newline) {
+            self.current = self.lexer.next_token();
+        }
+        self.skip_newlines();
+        self.expect_keyword("do")?;
+        self.skip_newlines();
+        let body = self.parse_program()?;
+        self.expect_keyword("done")?;
+        Ok(CompoundCommand::ArithFor(ArithForClause {
+            init,
+            cond,
+            step,
+            body,
+        }))
     }
 
     fn parse_while(&mut self) -> Result<CompoundCommand, String> {
@@ -405,16 +475,120 @@ impl Parser {
             self.skip_newlines();
             let body = self.parse_program()?;
 
-            if self.current == Token::DSemi {
+            let terminator = if self.current == Token::DSemi {
                 self.advance();
-            }
+                CaseTerminator::Break
+            } else if self.current == Token::SemiAmp {
+                self.advance();
+                CaseTerminator::FallThrough
+            } else if self.current == Token::DSemiAmp {
+                self.advance();
+                CaseTerminator::TestNext
+            } else {
+                CaseTerminator::Break
+            };
             self.skip_newlines();
 
-            items.push(CaseItem { patterns, body });
+            items.push(CaseItem {
+                patterns,
+                body,
+                terminator,
+            });
         }
 
         self.expect_keyword("esac")?;
         Ok(CompoundCommand::Case(CaseClause { word, items }))
+    }
+
+    /// Parse `[[ expression ]]`
+    fn parse_conditional(&mut self) -> Result<CompoundCommand, String> {
+        self.expect_keyword("[[")?;
+        let expr = self.parse_cond_or()?;
+        self.expect_keyword("]]")?;
+        Ok(CompoundCommand::Conditional(expr))
+    }
+
+    fn parse_cond_or(&mut self) -> Result<CondExpr, String> {
+        let mut left = self.parse_cond_and()?;
+        while self.current == Token::OrIf {
+            self.advance();
+            self.skip_newlines();
+            let right = self.parse_cond_and()?;
+            left = CondExpr::Or(Box::new(left), Box::new(right));
+        }
+        Ok(left)
+    }
+
+    fn parse_cond_and(&mut self) -> Result<CondExpr, String> {
+        let mut left = self.parse_cond_primary()?;
+        while self.current == Token::AndIf {
+            self.advance();
+            self.skip_newlines();
+            let right = self.parse_cond_primary()?;
+            left = CondExpr::And(Box::new(left), Box::new(right));
+        }
+        Ok(left)
+    }
+
+    fn parse_cond_primary(&mut self) -> Result<CondExpr, String> {
+        // Handle ! (negation)
+        if self.is_keyword("!") {
+            self.advance();
+            let expr = self.parse_cond_primary()?;
+            return Ok(CondExpr::Not(Box::new(expr)));
+        }
+
+        // Handle ( expr )
+        if self.current == Token::LParen {
+            self.advance();
+            let expr = self.parse_cond_or()?;
+            if !self.eat(&Token::RParen) {
+                return Err("expected ')' in conditional".to_string());
+            }
+            return Ok(expr);
+        }
+
+        // Check for unary operators: -n, -z, -e, -f, -d, etc.
+        if let Some(text) = self.word_text()
+            && is_cond_unary_op(&text)
+        {
+            let op = text;
+            self.advance();
+            let operand = self
+                .take_word()
+                .ok_or_else(|| format!("expected operand after '{}'", op))?;
+            return Ok(CondExpr::Unary(op, operand));
+        }
+
+        // Must be a word — check for binary operator after it
+        let left = self
+            .take_word()
+            .ok_or_else(|| "expected expression in [[ ]]".to_string())?;
+
+        // Check for ]]
+        if self.is_keyword("]]") || self.current == Token::Eof {
+            return Ok(CondExpr::Word(left));
+        }
+
+        // Check for && or || (handled by caller)
+        if matches!(self.current, Token::AndIf | Token::OrIf) {
+            return Ok(CondExpr::Word(left));
+        }
+
+        // Check for binary operator
+        if let Some(text) = self.word_text()
+            && is_cond_binary_op(&text)
+        {
+            let op = text;
+            self.advance();
+            let right = self
+                .take_word()
+                .ok_or_else(|| format!("expected operand after '{}'", op))?;
+            return Ok(CondExpr::Binary(left, op, right));
+        }
+
+        // Just a word
+        Ok(CondExpr::Word(left))
     }
 
     fn parse_compound_list(&mut self) -> Result<Program, String> {
@@ -464,6 +638,35 @@ impl Parser {
                 continue;
             }
 
+            // Check for inline array assignment: if we see word ending with = followed by (
+            // This handles `declare -a arr=(one two three)` etc.
+            if self.current == Token::LParen && !words.is_empty() {
+                // Check if last word ends with =
+                let last_ends_with_eq = {
+                    let last: &Word = &words[words.len() - 1];
+                    if let Some(WordPart::Literal(s)) = last.last() {
+                        s.ends_with('=') || s.ends_with("+=")
+                    } else {
+                        false
+                    }
+                };
+                if last_ends_with_eq {
+                    self.advance(); // consume (
+                    let elements = self.parse_array_elements();
+                    // Synthesize the array content as a single quoted part
+                    // so word splitting doesn't break it apart
+                    let arr_str = elements
+                        .iter()
+                        .map(|e| word_to_string(&e.value))
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    let last = words.last_mut().unwrap();
+                    // Use SingleQuoted to prevent word splitting of the array content
+                    last.push(WordPart::SingleQuoted(format!("({})", arr_str)));
+                    continue;
+                }
+            }
+
             // Check for word
             if let Token::Word(_) = &self.current {
                 // Don't consume keywords that end compound commands
@@ -488,57 +691,164 @@ impl Parser {
     }
 
     fn try_parse_assignment(&mut self) -> Option<Assignment> {
-        if let Token::Word(parts) = &self.current
-            && !parts.is_empty()
-            && let WordPart::Literal(s) = &parts[0]
-        {
-            // Check for name= or name+= pattern
-            if let Some(eq_pos) = s.find('=') {
-                let before_eq = &s[..eq_pos];
-                let (name, append) = if let Some(stripped) = before_eq.strip_suffix('+') {
-                    (stripped, true)
-                } else {
-                    (before_eq, false)
-                };
-
-                // Validate name
-                if !name.is_empty()
-                    && name.chars().all(|c| c.is_alphanumeric() || c == '_')
-                    && !name.chars().next().unwrap().is_ascii_digit()
-                {
-                    let name = name.to_string();
-                    let after_eq = &s[eq_pos + 1..];
-
-                    // Build the value word
-                    let mut value_parts = Vec::new();
-                    if !after_eq.is_empty() {
-                        value_parts.push(WordPart::Literal(after_eq.to_string()));
-                    }
-                    // Add remaining parts of the token
-                    for part in &parts[1..] {
-                        value_parts.push(part.clone());
-                    }
-
-                    self.advance();
-                    let value = if value_parts.is_empty() {
-                        None
+        // Extract all info from the current token without holding a borrow
+        let info = if let Token::Word(parts) = &self.current {
+            if parts.is_empty() {
+                return None;
+            }
+            if let WordPart::Literal(s) = &parts[0] {
+                if let Some(eq_pos) = s.find('=') {
+                    let before_eq = &s[..eq_pos];
+                    let (name_str, append) = if let Some(stripped) = before_eq.strip_suffix('+') {
+                        (stripped, true)
                     } else {
-                        Some(value_parts)
+                        (before_eq, false)
                     };
+                    let base_name = if let Some(bracket) = name_str.find('[') {
+                        &name_str[..bracket]
+                    } else {
+                        name_str
+                    };
+                    if !base_name.is_empty()
+                        && base_name.chars().all(|c| c.is_alphanumeric() || c == '_')
+                        && !base_name.chars().next().unwrap().is_ascii_digit()
+                    {
+                        let full_name = name_str.to_string();
+                        let after_eq = s[eq_pos + 1..].to_string();
+                        let num_parts = parts.len();
+                        // Build value parts eagerly
+                        let mut value_parts = Vec::new();
+                        if !after_eq.is_empty() {
+                            value_parts.push(WordPart::Literal(after_eq.clone()));
+                        }
+                        for part in &parts[1..] {
+                            value_parts.push(part.clone());
+                        }
+                        Some((full_name, append, after_eq, num_parts, value_parts))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
-                    return Some(Assignment {
-                        name,
-                        value,
-                        append,
+        let (full_name, append, after_eq, num_parts, value_parts) = info?;
+
+        // Case 1: "name=(" all in one token
+        if after_eq == "(" && num_parts == 1 {
+            self.advance();
+            let elements = self.parse_array_elements();
+            return Some(Assignment {
+                name: full_name,
+                value: AssignValue::Array(elements),
+                append,
+            });
+        }
+
+        // Case 2: "name=" as one token, then LParen as next token
+        if after_eq.is_empty() && num_parts == 1 {
+            let saved_pos = self.lexer.save_position();
+            let saved_tok = self.current.clone();
+            self.advance();
+            if self.current == Token::LParen {
+                self.advance();
+                let elements = self.parse_array_elements();
+                return Some(Assignment {
+                    name: full_name,
+                    value: AssignValue::Array(elements),
+                    append,
+                });
+            }
+            // Not an array — backtrack
+            self.lexer.restore_position(saved_pos);
+            self.current = saved_tok;
+        }
+
+        // Scalar assignment
+        self.advance();
+        let value = if value_parts.is_empty() {
+            AssignValue::None
+        } else {
+            AssignValue::Scalar(value_parts)
+        };
+
+        Some(Assignment {
+            name: full_name,
+            value,
+            append,
+        })
+    }
+
+    /// Parse array elements: `word1 [n]=word2 word3 ...` until `)`
+    fn parse_array_elements(&mut self) -> Vec<ArrayElement> {
+        let mut elements = Vec::new();
+        self.skip_newlines();
+
+        while self.current != Token::RParen && self.current != Token::Eof {
+            // Check for [index]=value syntax by extracting info first
+            let indexed_info = if let Token::Word(parts) = &self.current {
+                if let Some(WordPart::Literal(s)) = parts.first() {
+                    if s.starts_with('[') {
+                        if let Some(close) = s.find("]=") {
+                            let idx_str = s[1..close].to_string();
+                            let after = s[close + 2..].to_string();
+                            let rest_parts: Vec<WordPart> = parts[1..].to_vec();
+                            Some((idx_str, after, rest_parts))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            if let Some((idx_str, after, rest_parts)) = indexed_info {
+                self.advance();
+                let mut value_parts = Vec::new();
+                if !after.is_empty() {
+                    value_parts.push(WordPart::Literal(after));
+                }
+                value_parts.extend(rest_parts);
+                elements.push(ArrayElement {
+                    index: Some(vec![WordPart::Literal(idx_str)]),
+                    value: value_parts,
+                });
+                self.skip_newlines();
+                continue;
+            }
+
+            if let Token::Word(_) = &self.current {
+                if let Some(w) = self.take_word() {
+                    elements.push(ArrayElement {
+                        index: None,
+                        value: w,
                     });
                 }
+            } else {
+                break;
             }
+            self.skip_newlines();
         }
-        None
+
+        // Consume the closing )
+        self.eat(&Token::RParen);
+        elements
     }
 
     fn try_parse_redirection(&mut self) -> Result<Option<Redirection>, String> {
-        let fd = self.try_parse_io_number();
+        // Check for {varname}> style redirections
+        let fd = self.try_parse_redir_fd();
 
         let kind = match &self.current {
             Token::Less => Some(RedirectKind::Input),
@@ -554,7 +864,6 @@ impl Parser {
             _ => {
                 if fd.is_some() {
                     // We consumed an IO number but there's no redirect operator.
-                    // This shouldn't happen with our lexer design, but handle it.
                 }
                 None
             }
@@ -582,7 +891,7 @@ impl Parser {
         }
     }
 
-    fn try_parse_io_number(&mut self) -> Option<i32> {
+    fn try_parse_redir_fd(&mut self) -> Option<RedirFd> {
         if let Token::Word(parts) = &self.current
             && parts.len() == 1
             && let WordPart::Literal(s) = &parts[0]
@@ -594,7 +903,7 @@ impl Parser {
                 Some(true) => {
                     let n: i32 = s.parse().unwrap();
                     self.advance();
-                    return Some(n);
+                    return Some(RedirFd::Number(n));
                 }
                 _ => return None,
             }
@@ -603,12 +912,6 @@ impl Parser {
     }
 
     fn peek_next_operator(&self) -> Option<bool> {
-        // We need to check if the very next character after the current word
-        // is a redirect operator. This is a simplification - in a real shell,
-        // the IO_NUMBER token is recognized by the lexer when a digit immediately
-        // precedes <, >, etc. with no whitespace.
-        // For now, we don't handle this perfectly - just return None to avoid
-        // consuming numbers that aren't IO numbers.
         None
     }
 
@@ -650,5 +953,56 @@ fn is_compound_end(s: &str) -> bool {
     matches!(
         s,
         "}" | "fi" | "done" | "esac" | "then" | "else" | "elif" | "do" | ")" | "]]"
+    )
+}
+
+fn is_cond_unary_op(s: &str) -> bool {
+    matches!(
+        s,
+        "-n" | "-z"
+            | "-e"
+            | "-f"
+            | "-d"
+            | "-r"
+            | "-w"
+            | "-x"
+            | "-s"
+            | "-L"
+            | "-h"
+            | "-a"
+            | "-b"
+            | "-c"
+            | "-g"
+            | "-k"
+            | "-p"
+            | "-t"
+            | "-u"
+            | "-G"
+            | "-N"
+            | "-O"
+            | "-S"
+            | "-o"
+            | "-v"
+            | "-R"
+    )
+}
+
+fn is_cond_binary_op(s: &str) -> bool {
+    matches!(
+        s,
+        "=" | "=="
+            | "!="
+            | "<"
+            | ">"
+            | "-eq"
+            | "-ne"
+            | "-lt"
+            | "-le"
+            | "-gt"
+            | "-ge"
+            | "-nt"
+            | "-ot"
+            | "-ef"
+            | "=~"
     )
 }

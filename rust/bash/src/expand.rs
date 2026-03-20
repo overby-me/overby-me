@@ -12,15 +12,29 @@ pub enum Segment {
 }
 
 /// Expand a word into a list of strings (after word splitting and globbing).
+#[allow(clippy::too_many_arguments)]
 pub fn expand_word(
     word: &Word,
     vars: &HashMap<String, String>,
+    arrays: &HashMap<String, Vec<String>>,
+    namerefs: &HashMap<String, String>,
     positional: &[String],
     last_status: i32,
+    last_bg_pid: i32,
+    opt_flags: &str,
     ifs: &str,
     cmd_sub: CmdSubFn,
 ) -> Vec<String> {
-    let segments = expand_word_to_segments(word, vars, positional, last_status, cmd_sub);
+    let ctx = ExpCtx {
+        vars,
+        arrays,
+        namerefs,
+        positional,
+        last_status,
+        last_bg_pid,
+        opt_flags,
+    };
+    let segments = expand_word_to_segments(word, &ctx, cmd_sub);
     let fields = word_split(&segments, ifs);
     let mut result = Vec::new();
     for field in fields {
@@ -39,14 +53,28 @@ pub fn expand_word(
 }
 
 /// Expand a word to a single string (no word splitting or globbing).
+#[allow(clippy::too_many_arguments)]
 pub fn expand_word_nosplit(
     word: &Word,
     vars: &HashMap<String, String>,
+    arrays: &HashMap<String, Vec<String>>,
+    namerefs: &HashMap<String, String>,
     positional: &[String],
     last_status: i32,
+    last_bg_pid: i32,
+    opt_flags: &str,
     cmd_sub: CmdSubFn,
 ) -> String {
-    let segments = expand_word_to_segments(word, vars, positional, last_status, cmd_sub);
+    let ctx = ExpCtx {
+        vars,
+        arrays,
+        namerefs,
+        positional,
+        last_status,
+        last_bg_pid,
+        opt_flags,
+    };
+    let segments = expand_word_to_segments(word, &ctx, cmd_sub);
     segments
         .iter()
         .map(|s| match s {
@@ -55,28 +83,40 @@ pub fn expand_word_nosplit(
         .collect()
 }
 
-fn expand_word_to_segments(
-    word: &Word,
-    vars: &HashMap<String, String>,
-    positional: &[String],
+struct ExpCtx<'a> {
+    vars: &'a HashMap<String, String>,
+    arrays: &'a HashMap<String, Vec<String>>,
+    namerefs: &'a HashMap<String, String>,
+    positional: &'a [String],
     last_status: i32,
-    cmd_sub: CmdSubFn,
-) -> Vec<Segment> {
+    last_bg_pid: i32,
+    opt_flags: &'a str,
+}
+
+impl ExpCtx<'_> {
+    fn resolve_nameref(&self, name: &str) -> String {
+        let mut resolved = name.to_string();
+        let mut seen = std::collections::HashSet::new();
+        while let Some(target) = self.namerefs.get(&resolved) {
+            if seen.contains(target) {
+                break;
+            }
+            seen.insert(target.clone());
+            resolved = target.clone();
+        }
+        resolved
+    }
+}
+
+fn expand_word_to_segments(word: &Word, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> Vec<Segment> {
     let mut segments = Vec::new();
     for part in word {
-        expand_part(part, vars, positional, last_status, &mut segments, cmd_sub);
+        expand_part(part, ctx, &mut segments, cmd_sub);
     }
     segments
 }
 
-fn expand_part(
-    part: &WordPart,
-    vars: &HashMap<String, String>,
-    positional: &[String],
-    last_status: i32,
-    out: &mut Vec<Segment>,
-    cmd_sub: CmdSubFn,
-) {
+fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: CmdSubFn) {
     match part {
         WordPart::Literal(s) => {
             out.push(Segment::Unquoted(s.clone()));
@@ -90,10 +130,10 @@ fn expand_part(
                 match p {
                     WordPart::Literal(t) => s.push_str(t),
                     WordPart::Variable(name) => {
-                        s.push_str(&lookup_var(name, vars, positional, last_status));
+                        s.push_str(&lookup_var(name, ctx));
                     }
                     WordPart::Param(expr) => {
-                        s.push_str(&expand_param(expr, vars, positional, last_status, cmd_sub));
+                        s.push_str(&expand_param(expr, ctx, cmd_sub));
                     }
                     WordPart::CommandSub(cmd) => {
                         s.push_str(&cmd_sub(cmd));
@@ -102,11 +142,11 @@ fn expand_part(
                         s.push_str(&cmd_sub(cmd));
                     }
                     WordPart::ArithSub(expr) => {
-                        s.push_str(&expand_arith(expr, vars, positional, last_status));
+                        s.push_str(&expand_arith(expr, ctx));
                     }
                     _ => {
                         let mut inner = Vec::new();
-                        expand_part(p, vars, positional, last_status, &mut inner, cmd_sub);
+                        expand_part(p, ctx, &mut inner, cmd_sub);
                         for seg in inner {
                             match seg {
                                 Segment::Quoted(t) | Segment::Unquoted(t) => s.push_str(&t),
@@ -119,9 +159,11 @@ fn expand_part(
         }
         WordPart::Tilde(user) => {
             let expanded = if user.is_empty() {
-                vars.get("HOME").cloned().unwrap_or_else(|| "~".to_string())
+                ctx.vars
+                    .get("HOME")
+                    .cloned()
+                    .unwrap_or_else(|| "~".to_string())
             } else {
-                // Look up user's home directory
                 #[cfg(unix)]
                 {
                     use std::ffi::CString;
@@ -145,11 +187,11 @@ fn expand_part(
             out.push(Segment::Unquoted(expanded));
         }
         WordPart::Variable(name) => {
-            let val = lookup_var(name, vars, positional, last_status);
+            let val = lookup_var(name, ctx);
             out.push(Segment::Unquoted(val));
         }
         WordPart::Param(expr) => {
-            let val = expand_param(expr, vars, positional, last_status, cmd_sub);
+            let val = expand_param(expr, ctx, cmd_sub);
             out.push(Segment::Unquoted(val));
         }
         WordPart::CommandSub(cmd) => {
@@ -161,91 +203,187 @@ fn expand_part(
             out.push(Segment::Unquoted(val));
         }
         WordPart::ArithSub(expr) => {
-            let val = expand_arith(expr, vars, positional, last_status);
+            let val = expand_arith(expr, ctx);
             out.push(Segment::Unquoted(val));
         }
     }
 }
 
-fn lookup_var(
-    name: &str,
-    vars: &HashMap<String, String>,
-    positional: &[String],
-    last_status: i32,
-) -> String {
+fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
     match name {
-        "?" => last_status.to_string(),
+        "?" => ctx.last_status.to_string(),
         "$" => std::process::id().to_string(),
         "#" => {
-            let count = if positional.is_empty() {
+            let count = if ctx.positional.is_empty() {
                 0
             } else {
-                positional.len() - 1
+                ctx.positional.len() - 1
             };
             count.to_string()
         }
-        "0" => positional.first().cloned().unwrap_or_default(),
+        "0" => ctx.positional.first().cloned().unwrap_or_default(),
         "@" | "*" => {
-            if positional.len() > 1 {
-                positional[1..].join(" ")
+            if ctx.positional.len() > 1 {
+                ctx.positional[1..].join(" ")
             } else {
                 String::new()
             }
         }
-        "-" => String::new(), // TODO: current shell flags
-        "!" => String::new(), // TODO: last background PID
+        "-" => ctx.opt_flags.to_string(),
+        "!" => {
+            if ctx.last_bg_pid > 0 {
+                ctx.last_bg_pid.to_string()
+            } else {
+                String::new()
+            }
+        }
         _ => {
+            // Check for array subscript: name[idx]
+            if let Some(bracket) = name.find('[') {
+                let base = &name[..bracket];
+                let idx_str = &name[bracket + 1..name.len() - 1];
+                let resolved = ctx.resolve_nameref(base);
+
+                return match idx_str {
+                    "@" | "*" => {
+                        if let Some(arr) = ctx.arrays.get(&resolved) {
+                            arr.join(" ")
+                        } else if let Some(val) = ctx.vars.get(&resolved) {
+                            val.clone()
+                        } else {
+                            String::new()
+                        }
+                    }
+                    _ => {
+                        // Numeric index
+                        let idx: usize = idx_str.parse().unwrap_or(0);
+                        if let Some(arr) = ctx.arrays.get(&resolved) {
+                            arr.get(idx).cloned().unwrap_or_default()
+                        } else if idx == 0 {
+                            ctx.vars.get(&resolved).cloned().unwrap_or_default()
+                        } else {
+                            String::new()
+                        }
+                    }
+                };
+            }
+
             // Check positional parameters
             if let Ok(n) = name.parse::<usize>() {
-                if n < positional.len() {
-                    return positional[n].clone();
+                if n < ctx.positional.len() {
+                    return ctx.positional[n].clone();
                 }
                 return String::new();
             }
+
+            // Resolve namerefs
+            let resolved = ctx.resolve_nameref(name);
+
             // Check variables, then environment
-            vars.get(name)
+            ctx.vars
+                .get(&resolved)
                 .cloned()
-                .or_else(|| std::env::var(name).ok())
+                .or_else(|| {
+                    // If it's also an array, return element 0
+                    ctx.arrays.get(&resolved).and_then(|a| a.first().cloned())
+                })
+                .or_else(|| std::env::var(&resolved).ok())
                 .unwrap_or_default()
         }
     }
 }
 
-fn expand_param(
-    expr: &ParamExpr,
-    vars: &HashMap<String, String>,
-    positional: &[String],
-    last_status: i32,
-    cmd_sub: CmdSubFn,
-) -> String {
-    let val = lookup_var(&expr.name, vars, positional, last_status);
+fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
+    let val = lookup_var(&expr.name, ctx);
 
     match &expr.op {
         ParamOp::None => val,
-        ParamOp::Length => val.len().to_string(),
+        ParamOp::Length => {
+            // ${#arr[@]} — array length
+            if let Some(bracket) = expr.name.find('[') {
+                let base = &expr.name[..bracket];
+                let idx_str = &expr.name[bracket + 1..expr.name.len() - 1];
+                let resolved = ctx.resolve_nameref(base);
+                if (idx_str == "@" || idx_str == "*")
+                    && let Some(arr) = ctx.arrays.get(&resolved)
+                {
+                    return arr.len().to_string();
+                }
+            }
+            val.len().to_string()
+        }
+        ParamOp::Indirect => {
+            // ${!var} — indirect expansion
+            let target = lookup_var(&expr.name, ctx);
+            if target.is_empty() {
+                String::new()
+            } else {
+                lookup_var(&target, ctx)
+            }
+        }
+        ParamOp::NamePrefix(_ch) => {
+            // ${!prefix@} or ${!prefix*} — variable names matching prefix
+            let prefix = &expr.name;
+            let mut names: Vec<&String> = ctx
+                .vars
+                .keys()
+                .filter(|k| k.starts_with(prefix.as_str()))
+                .collect();
+            names.sort();
+            // TODO: when ch == '*', join with first char of IFS instead of space
+            let sep = " ";
+            names
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join(sep)
+        }
+        ParamOp::ArrayIndices(_ch) => {
+            // ${!arr[@]} or ${!arr[*]} — array indices
+            let resolved = ctx.resolve_nameref(&expr.name);
+            if let Some(arr) = ctx.arrays.get(&resolved) {
+                let indices: Vec<String> = (0..arr.len())
+                    .filter(|&i| !arr[i].is_empty() || i == 0)
+                    .map(|i| i.to_string())
+                    .collect();
+                // TODO: when ch == '*', join with first char of IFS instead of space
+                let sep = " ";
+                indices.join(sep)
+            } else {
+                // Scalar variable — index 0
+                if ctx.vars.contains_key(&resolved) {
+                    "0".to_string()
+                } else {
+                    String::new()
+                }
+            }
+        }
         ParamOp::Default(colon, word) => {
             let empty = if *colon { val.is_empty() } else { false };
-            let unset = vars.get(&expr.name).is_none() && std::env::var(&expr.name).is_err();
+            let resolved = ctx.resolve_nameref(&expr.name);
+            let unset = !ctx.vars.contains_key(&resolved) && std::env::var(&resolved).is_err();
             if unset || empty {
-                expand_word_nosplit(word, vars, positional, last_status, cmd_sub)
+                expand_word_nosplit_ctx(word, ctx, cmd_sub)
             } else {
                 val
             }
         }
         ParamOp::Assign(colon, word) => {
             let empty = if *colon { val.is_empty() } else { false };
-            let unset = vars.get(&expr.name).is_none() && std::env::var(&expr.name).is_err();
+            let resolved = ctx.resolve_nameref(&expr.name);
+            let unset = !ctx.vars.contains_key(&resolved) && std::env::var(&resolved).is_err();
             if unset || empty {
-                expand_word_nosplit(word, vars, positional, last_status, cmd_sub)
+                expand_word_nosplit_ctx(word, ctx, cmd_sub)
             } else {
                 val
             }
         }
         ParamOp::Error(colon, word) => {
             let empty = if *colon { val.is_empty() } else { false };
-            let unset = vars.get(&expr.name).is_none() && std::env::var(&expr.name).is_err();
+            let resolved = ctx.resolve_nameref(&expr.name);
+            let unset = !ctx.vars.contains_key(&resolved) && std::env::var(&resolved).is_err();
             if unset || empty {
-                let msg = expand_word_nosplit(word, vars, positional, last_status, cmd_sub);
+                let msg = expand_word_nosplit_ctx(word, ctx, cmd_sub);
                 eprintln!(
                     "bash: {}: {}",
                     expr.name,
@@ -261,38 +399,58 @@ fn expand_param(
         }
         ParamOp::Alt(colon, word) => {
             let empty = if *colon { val.is_empty() } else { false };
-            let unset = vars.get(&expr.name).is_none() && std::env::var(&expr.name).is_err();
+            let resolved = ctx.resolve_nameref(&expr.name);
+            let unset = !ctx.vars.contains_key(&resolved) && std::env::var(&resolved).is_err();
             if unset || empty {
                 String::new()
             } else {
-                expand_word_nosplit(word, vars, positional, last_status, cmd_sub)
+                expand_word_nosplit_ctx(word, ctx, cmd_sub)
             }
         }
         ParamOp::TrimSmallLeft(pattern) => {
-            let pat = expand_word_nosplit(pattern, vars, positional, last_status, cmd_sub);
+            let pat = expand_word_nosplit_ctx(pattern, ctx, cmd_sub);
             trim_pattern(&val, &pat, TrimMode::SmallLeft)
         }
         ParamOp::TrimLargeLeft(pattern) => {
-            let pat = expand_word_nosplit(pattern, vars, positional, last_status, cmd_sub);
+            let pat = expand_word_nosplit_ctx(pattern, ctx, cmd_sub);
             trim_pattern(&val, &pat, TrimMode::LargeLeft)
         }
         ParamOp::TrimSmallRight(pattern) => {
-            let pat = expand_word_nosplit(pattern, vars, positional, last_status, cmd_sub);
+            let pat = expand_word_nosplit_ctx(pattern, ctx, cmd_sub);
             trim_pattern(&val, &pat, TrimMode::SmallRight)
         }
         ParamOp::TrimLargeRight(pattern) => {
-            let pat = expand_word_nosplit(pattern, vars, positional, last_status, cmd_sub);
+            let pat = expand_word_nosplit_ctx(pattern, ctx, cmd_sub);
             trim_pattern(&val, &pat, TrimMode::LargeRight)
         }
-        ParamOp::Replace(pattern, replacement) => {
-            let pat = expand_word_nosplit(pattern, vars, positional, last_status, cmd_sub);
-            let rep = expand_word_nosplit(replacement, vars, positional, last_status, cmd_sub);
-            pattern_replace(&val, &pat, &rep, false)
-        }
-        ParamOp::ReplaceAll(pattern, replacement) => {
-            let pat = expand_word_nosplit(pattern, vars, positional, last_status, cmd_sub);
-            let rep = expand_word_nosplit(replacement, vars, positional, last_status, cmd_sub);
-            pattern_replace(&val, &pat, &rep, true)
+        ParamOp::Replace(pattern, replacement)
+        | ParamOp::ReplaceAll(pattern, replacement)
+        | ParamOp::ReplacePrefix(pattern, replacement)
+        | ParamOp::ReplaceSuffix(pattern, replacement) => {
+            let pat = expand_word_nosplit_ctx(pattern, ctx, cmd_sub);
+            let rep = expand_word_nosplit_ctx(replacement, ctx, cmd_sub);
+            match &expr.op {
+                ParamOp::ReplaceAll(..) => pattern_replace(&val, &pat, &rep, true),
+                ParamOp::ReplacePrefix(..) => {
+                    // Replace only if pattern matches at start
+                    for i in 0..=val.len() {
+                        if shell_pattern_match(&val[..i], &pat) {
+                            return format!("{}{}", rep, &val[i..]);
+                        }
+                    }
+                    val
+                }
+                ParamOp::ReplaceSuffix(..) => {
+                    // Replace only if pattern matches at end
+                    for i in (0..=val.len()).rev() {
+                        if shell_pattern_match(&val[i..], &pat) {
+                            return format!("{}{}", &val[..i], rep);
+                        }
+                    }
+                    val
+                }
+                _ => pattern_replace(&val, &pat, &rep, false),
+            }
         }
         ParamOp::Substring(offset_str, length_str) => {
             let offset: i64 = offset_str.trim().parse().unwrap_or(0);
@@ -313,21 +471,49 @@ fn expand_param(
                 val[start..].to_string()
             }
         }
+        ParamOp::UpperFirst(_) => {
+            let mut chars = val.chars();
+            match chars.next() {
+                None => String::new(),
+                Some(c) => c.to_uppercase().to_string() + chars.as_str(),
+            }
+        }
+        ParamOp::UpperAll(_) => val.to_uppercase(),
+        ParamOp::LowerFirst(_) => {
+            let mut chars = val.chars();
+            match chars.next() {
+                None => String::new(),
+                Some(c) => c.to_lowercase().to_string() + chars.as_str(),
+            }
+        }
+        ParamOp::LowerAll(_) => val.to_lowercase(),
     }
 }
 
-fn expand_arith(
+fn expand_word_nosplit_ctx(word: &Word, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
+    let segments = expand_word_to_segments(word, ctx, cmd_sub);
+    segments
+        .iter()
+        .map(|s| match s {
+            Segment::Quoted(t) | Segment::Unquoted(t) => t.as_str(),
+        })
+        .collect()
+}
+
+fn expand_arith(expr: &str, ctx: &ExpCtx) -> String {
+    let result = eval_arith_full(expr, ctx.vars, ctx.arrays, ctx.positional, ctx.last_status);
+    result.to_string()
+}
+
+pub fn eval_arith_full(
     expr: &str,
     vars: &HashMap<String, String>,
+    _arrays: &HashMap<String, Vec<String>>,
     positional: &[String],
     last_status: i32,
-) -> String {
-    // Simple arithmetic evaluator
+) -> i64 {
     let resolved = resolve_arith_vars(expr, vars, positional, last_status);
-    match eval_arith(&resolved) {
-        Ok(n) => n.to_string(),
-        Err(_) => "0".to_string(),
-    }
+    eval_arith(&resolved).unwrap_or(0)
 }
 
 fn resolve_arith_vars(
@@ -347,7 +533,16 @@ fn resolve_arith_vars(
                 name.push(chars[i]);
                 i += 1;
             }
-            let val = lookup_var(&name, vars, positional, last_status);
+            let ctx_dummy = ExpCtx {
+                vars,
+                arrays: &HashMap::new(),
+                namerefs: &HashMap::new(),
+                positional,
+                last_status,
+                last_bg_pid: 0,
+                opt_flags: "",
+            };
+            let val = lookup_var(&name, &ctx_dummy);
             let val = if val.is_empty() { "0".to_string() } else { val };
             result.push_str(&val);
         } else if chars[i].is_alphabetic() || chars[i] == '_' {
@@ -356,11 +551,33 @@ fn resolve_arith_vars(
                 name.push(chars[i]);
                 i += 1;
             }
+            // Check for assignment operators: =, +=, -=, *=, /=, %=, ++, --
+            let rest: String = chars[i..].iter().collect();
+            if rest.starts_with("++") {
+                let val: i64 = vars.get(&name).and_then(|v| v.parse().ok()).unwrap_or(0);
+                result.push_str(&val.to_string());
+                // Note: can't actually modify vars here since we don't have &mut
+                // The interpreter's eval_arith_expr handles this
+                i += 2;
+                continue;
+            }
+            if rest.starts_with("--") {
+                let val: i64 = vars.get(&name).and_then(|v| v.parse().ok()).unwrap_or(0);
+                result.push_str(&val.to_string());
+                i += 2;
+                continue;
+            }
             let val = vars
                 .get(&name)
                 .cloned()
                 .or_else(|| std::env::var(&name).ok())
                 .unwrap_or_else(|| "0".to_string());
+            // If val is not a number, try to resolve it again (for variable indirection in arith)
+            let val = if val.parse::<i64>().is_err() && !val.is_empty() {
+                val.parse::<i64>().map(|n| n.to_string()).unwrap_or(val)
+            } else {
+                val
+            };
             result.push_str(&val);
         } else {
             result.push(chars[i]);
@@ -374,6 +591,13 @@ fn eval_arith(expr: &str) -> Result<i64, String> {
     let expr = expr.trim();
     if expr.is_empty() {
         return Ok(0);
+    }
+
+    // Handle comma operator (evaluate both, return right)
+    if let Some(pos) = rfind_op(expr, ",") {
+        let _left = eval_arith(&expr[..pos])?;
+        let right = eval_arith(&expr[pos + 1..])?;
+        return Ok(right);
     }
 
     // Handle ternary operator
@@ -419,7 +643,7 @@ fn eval_arith(expr: &str) -> Result<i64, String> {
         }
     }
 
-    // Addition and subtraction (right-to-left scan for lowest precedence)
+    // Addition and subtraction
     {
         let mut depth = 0i32;
         let chars: Vec<char> = expr.chars().collect();
@@ -430,7 +654,6 @@ fn eval_arith(expr: &str) -> Result<i64, String> {
                 ')' => depth += 1,
                 '(' => depth -= 1,
                 '+' | '-' if depth == 0 && i > 0 => {
-                    // Make sure this isn't part of **, ++ etc.
                     let prev = chars[i - 1];
                     if !matches!(
                         prev,
@@ -461,7 +684,6 @@ fn eval_arith(expr: &str) -> Result<i64, String> {
                 ')' => depth += 1,
                 '(' => depth -= 1,
                 '*' | '/' | '%' if depth == 0 => {
-                    // Make sure * isn't part of **
                     if chars[i] == '*' && i + 1 < chars.len() && chars[i + 1] == '*' {
                         continue;
                     }
@@ -592,7 +814,6 @@ fn word_split(segments: &[Segment], ifs: &str) -> Vec<String> {
         return vec![];
     }
 
-    // If everything is quoted, no splitting
     let all_quoted = segments.iter().all(|s| matches!(s, Segment::Quoted(_)));
     if all_quoted {
         let s: String = segments
@@ -638,7 +859,6 @@ fn word_split(segments: &[Segment], ifs: &str) -> Vec<String> {
 }
 
 fn glob_expand(field: &str) -> Vec<String> {
-    // Check if field contains unquoted glob characters
     if field.contains('*') || field.contains('?') || field.contains('[') {
         match glob::glob(field) {
             Ok(paths) => {
@@ -668,7 +888,6 @@ enum TrimMode {
 }
 
 fn trim_pattern(value: &str, pattern: &str, mode: TrimMode) -> String {
-    // Convert shell glob pattern to a simple matcher
     match mode {
         TrimMode::SmallLeft => {
             for i in 0..=value.len() {
@@ -716,7 +935,6 @@ fn pattern_replace(value: &str, pattern: &str, replacement: &str, all: bool) -> 
 
     while i < chars.len() {
         let mut found = false;
-        // Try matching at position i with increasing lengths
         for j in (i + 1..=chars.len()).rev() {
             let substr: String = chars[i..j].iter().collect();
             if shell_pattern_match(&substr, pattern) {
@@ -724,7 +942,6 @@ fn pattern_replace(value: &str, pattern: &str, replacement: &str, all: bool) -> 
                 i = j;
                 found = true;
                 if !all {
-                    // Append the rest and return
                     let rest: String = chars[i..].iter().collect();
                     result.push_str(&rest);
                     return result;
@@ -754,7 +971,6 @@ fn pattern_match_impl(text: &[char], ti: usize, pattern: &[char], pi: usize) -> 
         match pattern[pi] {
             '*' => {
                 pi += 1;
-                // Skip consecutive *
                 while pi < pattern.len() && pattern[pi] == '*' {
                     pi += 1;
                 }
@@ -800,7 +1016,7 @@ fn pattern_match_impl(text: &[char], ti: usize, pattern: &[char], pi: usize) -> 
                     }
                 }
                 if pi < pattern.len() {
-                    pi += 1; // skip ]
+                    pi += 1;
                 }
                 if matched == negate {
                     return false;

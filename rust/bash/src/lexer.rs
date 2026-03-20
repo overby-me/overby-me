@@ -10,6 +10,10 @@ pub enum Token {
     Semi,
     Amp,
     DSemi,
+    /// `;&` — case fallthrough
+    SemiAmp,
+    /// `;;&` — case test-next
+    DSemiAmp,
     LParen,
     RParen,
     Less,
@@ -136,7 +140,15 @@ impl Lexer {
                 self.advance();
                 if self.peek() == Some(';') {
                     self.advance();
-                    Token::DSemi
+                    if self.peek() == Some('&') {
+                        self.advance();
+                        Token::DSemiAmp
+                    } else {
+                        Token::DSemi
+                    }
+                } else if self.peek() == Some('&') {
+                    self.advance();
+                    Token::SemiAmp
                 } else {
                     Token::Semi
                 }
@@ -431,6 +443,39 @@ fn parse_dollar(chars: &[char], i: &mut usize) -> WordPart {
 }
 
 fn parse_brace_param(chars: &[char], i: &mut usize) -> WordPart {
+    // ${!name} — indirect expansion / name prefix / array indices
+    if *i < chars.len() && chars[*i] == '!' {
+        *i += 1;
+        let name = read_param_name_with_subscript(chars, i);
+        // ${!prefix*} or ${!prefix@} — names matching prefix
+        if *i < chars.len() && (chars[*i] == '*' || chars[*i] == '@') {
+            let ch = chars[*i];
+            *i += 1;
+            if *i < chars.len() && chars[*i] == '}' {
+                *i += 1;
+            }
+            // Check if name contains [ — then it's ${!arr[@]} for indices
+            if name.ends_with('[') {
+                let arr_name = name[..name.len() - 1].to_string();
+                return WordPart::Param(ParamExpr {
+                    name: arr_name,
+                    op: ParamOp::ArrayIndices(ch),
+                });
+            }
+            return WordPart::Param(ParamExpr {
+                name,
+                op: ParamOp::NamePrefix(ch),
+            });
+        }
+        if *i < chars.len() && chars[*i] == '}' {
+            *i += 1;
+        }
+        return WordPart::Param(ParamExpr {
+            name,
+            op: ParamOp::Indirect,
+        });
+    }
+
     // ${#name} - length
     if *i < chars.len() && chars[*i] == '#' {
         let next = if *i + 1 < chars.len() {
@@ -440,7 +485,7 @@ fn parse_brace_param(chars: &[char], i: &mut usize) -> WordPart {
         };
         if next != '}' {
             *i += 1;
-            let name = read_param_name(chars, i);
+            let name = read_param_name_with_subscript(chars, i);
             if *i < chars.len() && chars[*i] == '}' {
                 *i += 1;
             }
@@ -451,7 +496,7 @@ fn parse_brace_param(chars: &[char], i: &mut usize) -> WordPart {
         }
     }
 
-    let name = read_param_name(chars, i);
+    let name = read_param_name_with_subscript(chars, i);
 
     if *i >= chars.len() || chars[*i] == '}' {
         if *i < chars.len() {
@@ -468,6 +513,32 @@ fn parse_brace_param(chars: &[char], i: &mut usize) -> WordPart {
         *i += 1;
     }
     WordPart::Param(ParamExpr { name, op })
+}
+
+/// Read a parameter name, including array subscript like `arr[0]` or `arr[@]`.
+fn read_param_name_with_subscript(chars: &[char], i: &mut usize) -> String {
+    let mut name = read_param_name(chars, i);
+    // Check for array subscript [...]
+    if *i < chars.len() && chars[*i] == '[' {
+        name.push('[');
+        *i += 1;
+        let mut depth = 1;
+        while *i < chars.len() && depth > 0 {
+            if chars[*i] == '[' {
+                depth += 1;
+            } else if chars[*i] == ']' {
+                depth -= 1;
+                if depth == 0 {
+                    name.push(']');
+                    *i += 1;
+                    break;
+                }
+            }
+            name.push(chars[*i]);
+            *i += 1;
+        }
+    }
+    name
 }
 
 fn read_param_name(chars: &[char], i: &mut usize) -> String {
@@ -591,10 +662,25 @@ fn read_param_op(chars: &[char], i: &mut usize, _name: &str) -> ParamOp {
         }
         '/' => {
             *i += 1;
-            let replace_all = *i < chars.len() && chars[*i] == '/';
-            if replace_all {
-                *i += 1;
-            }
+            let mode = if *i < chars.len() {
+                match chars[*i] {
+                    '/' => {
+                        *i += 1;
+                        'a'
+                    } // replace all
+                    '#' => {
+                        *i += 1;
+                        'p'
+                    } // replace prefix
+                    '%' => {
+                        *i += 1;
+                        's'
+                    } // replace suffix
+                    _ => 'f', // replace first
+                }
+            } else {
+                'f'
+            };
             let pattern = read_param_word_until(chars, i, '/');
             let replacement = if *i < chars.len() && chars[*i] == '/' {
                 *i += 1;
@@ -602,10 +688,33 @@ fn read_param_op(chars: &[char], i: &mut usize, _name: &str) -> ParamOp {
             } else {
                 vec![]
             };
-            if replace_all {
-                ParamOp::ReplaceAll(pattern, replacement)
+            match mode {
+                'a' => ParamOp::ReplaceAll(pattern, replacement),
+                'p' => ParamOp::ReplacePrefix(pattern, replacement),
+                's' => ParamOp::ReplaceSuffix(pattern, replacement),
+                _ => ParamOp::Replace(pattern, replacement),
+            }
+        }
+        '^' => {
+            *i += 1;
+            if *i < chars.len() && chars[*i] == '^' {
+                *i += 1;
+                let pattern = read_param_word(chars, i);
+                ParamOp::UpperAll(pattern)
             } else {
-                ParamOp::Replace(pattern, replacement)
+                let pattern = read_param_word(chars, i);
+                ParamOp::UpperFirst(pattern)
+            }
+        }
+        ',' => {
+            *i += 1;
+            if *i < chars.len() && chars[*i] == ',' {
+                *i += 1;
+                let pattern = read_param_word(chars, i);
+                ParamOp::LowerAll(pattern)
+            } else {
+                let pattern = read_param_word(chars, i);
+                ParamOp::LowerFirst(pattern)
             }
         }
         _ => ParamOp::None,
@@ -957,6 +1066,56 @@ impl Lexer {
         } else {
             Token::Word(parts)
         }
+    }
+
+    /// Read raw text until `))` is found (for arithmetic commands).
+    /// The `((` has already been consumed by the parser.
+    pub fn read_until_double_paren(&mut self) -> Result<String, String> {
+        let mut expr = String::new();
+        let mut depth = 1; // We're inside one level of ((
+        while self.pos < self.input.len() {
+            let ch = self.input[self.pos];
+            if ch == '(' && self.peek_at(1) == Some('(') {
+                depth += 1;
+                expr.push('(');
+                expr.push('(');
+                self.pos += 2;
+            } else if ch == ')' && self.peek_at(1) == Some(')') {
+                depth -= 1;
+                if depth == 0 {
+                    self.pos += 2;
+                    return Ok(expr.trim().to_string());
+                }
+                expr.push(')');
+                expr.push(')');
+                self.pos += 2;
+            } else {
+                expr.push(ch);
+                self.pos += 1;
+            }
+        }
+        Err("unexpected EOF looking for ))".to_string())
+    }
+
+    /// Read raw text until the given character is found (for C-style for loops).
+    pub fn read_until_char(&mut self, target: char) -> Result<String, String> {
+        let mut s = String::new();
+        let mut depth = 0i32;
+        while self.pos < self.input.len() {
+            let ch = self.input[self.pos];
+            if ch == '(' {
+                depth += 1;
+            } else if ch == ')' {
+                depth -= 1;
+            }
+            if ch == target && depth == 0 {
+                self.pos += 1; // consume the delimiter
+                return Ok(s.trim().to_string());
+            }
+            s.push(ch);
+            self.pos += 1;
+        }
+        Err(format!("unexpected EOF looking for '{}'", target))
     }
 
     /// Get the next heredoc body (called by the parser when processing heredoc redirections).

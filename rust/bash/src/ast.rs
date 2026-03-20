@@ -46,12 +46,31 @@ pub struct SimpleCommand {
     pub redirections: Vec<Redirection>,
 }
 
-/// A variable assignment (name=value or name+=value).
+/// A variable assignment (name=value, name+=value, or name=(array values)).
 #[derive(Debug, Clone)]
 pub struct Assignment {
     pub name: String,
-    pub value: Option<Word>,
+    pub value: AssignValue,
     pub append: bool,
+}
+
+/// The right-hand side of an assignment.
+#[derive(Debug, Clone)]
+pub enum AssignValue {
+    /// No value: `declare name`
+    None,
+    /// Scalar: `name=word`
+    Scalar(Word),
+    /// Array: `name=(word1 word2 ...)`
+    Array(Vec<ArrayElement>),
+}
+
+/// An element in an array literal.
+#[derive(Debug, Clone)]
+pub struct ArrayElement {
+    /// Optional explicit index: `[n]=word`
+    pub index: Option<Word>,
+    pub value: Word,
 }
 
 /// Compound commands: control flow and grouping.
@@ -61,9 +80,14 @@ pub enum CompoundCommand {
     Subshell(Program),
     If(IfClause),
     For(ForClause),
+    ArithFor(ArithForClause),
     While(WhileClause),
     Until(WhileClause),
     Case(CaseClause),
+    /// `[[ expression ]]`
+    Conditional(CondExpr),
+    /// `(( expression ))`
+    Arithmetic(String),
 }
 
 #[derive(Debug, Clone)]
@@ -78,6 +102,15 @@ pub struct IfClause {
 pub struct ForClause {
     pub var: String,
     pub words: Option<Vec<Word>>,
+    pub body: Program,
+}
+
+/// C-style for loop: `for (( init; cond; step )) do body done`
+#[derive(Debug, Clone)]
+pub struct ArithForClause {
+    pub init: String,
+    pub cond: String,
+    pub step: String,
     pub body: Program,
 }
 
@@ -97,6 +130,35 @@ pub struct CaseClause {
 pub struct CaseItem {
     pub patterns: Vec<Word>,
     pub body: Program,
+    pub terminator: CaseTerminator,
+}
+
+/// How a case item terminates.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CaseTerminator {
+    /// `;;` — stop matching
+    Break,
+    /// `;&` — fall through to next body unconditionally
+    FallThrough,
+    /// `;;&` — continue testing next patterns
+    TestNext,
+}
+
+/// Conditional expression for `[[ ]]`.
+#[derive(Debug, Clone)]
+pub enum CondExpr {
+    /// `-n str`, `-z str`, `-e file`, etc.
+    Unary(String, Word),
+    /// `str1 == str2`, `str1 =~ regex`, `-eq`, etc.
+    Binary(Word, String, Word),
+    /// Negation: `! expr`
+    Not(Box<CondExpr>),
+    /// `expr1 && expr2`
+    And(Box<CondExpr>, Box<CondExpr>),
+    /// `expr1 || expr2`
+    Or(Box<CondExpr>, Box<CondExpr>),
+    /// A single word (true if non-empty)
+    Word(Word),
 }
 
 /// A word is a sequence of parts that get concatenated after expansion.
@@ -126,6 +188,12 @@ pub struct ParamExpr {
 pub enum ParamOp {
     None,
     Length,
+    /// `${!prefix}` — indirect expansion
+    Indirect,
+    /// `${!prefix*}` or `${!prefix@}` — names matching prefix
+    NamePrefix(char),
+    /// `${!arr[@]}` or `${!arr[*]}` — array indices
+    ArrayIndices(char),
     Default(bool, Word),
     Assign(bool, Word),
     Error(bool, Word),
@@ -136,15 +204,32 @@ pub enum ParamOp {
     TrimLargeRight(Word),
     Replace(Word, Word),
     ReplaceAll(Word, Word),
+    ReplacePrefix(Word, Word),
+    ReplaceSuffix(Word, Word),
     Substring(String, Option<String>),
+    /// `${var^pattern}` / `${var^^pattern}` — uppercase
+    UpperFirst(Word),
+    UpperAll(Word),
+    /// `${var,pattern}` / `${var,,pattern}` — lowercase
+    LowerFirst(Word),
+    LowerAll(Word),
 }
 
 /// I/O redirection.
 #[derive(Debug, Clone)]
 pub struct Redirection {
-    pub fd: Option<i32>,
+    pub fd: Option<RedirFd>,
     pub kind: RedirectKind,
     pub target: Word,
+}
+
+/// File descriptor for redirections — either a number or {varname} for auto-allocation.
+#[derive(Debug, Clone)]
+pub enum RedirFd {
+    Number(i32),
+    /// `{varname}` — allocate a new fd and store in varname
+    #[allow(dead_code)]
+    Var(String),
 }
 
 #[derive(Debug, Clone)]
@@ -159,6 +244,12 @@ pub enum RedirectKind {
     #[allow(dead_code)]
     HereDoc(bool),
     HereString,
+    /// `<(cmd)` — process substitution (read)
+    #[allow(dead_code)]
+    ProcessSubIn,
+    /// `>(cmd)` — process substitution (write)
+    #[allow(dead_code)]
+    ProcessSubOut,
 }
 
 /// Get the literal text of a word (without expansion).

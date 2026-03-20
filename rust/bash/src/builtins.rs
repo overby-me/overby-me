@@ -50,6 +50,7 @@ pub fn builtins() -> HashMap<&'static str, BuiltinFn> {
     map.insert("popd", builtin_popd);
     map.insert("complete", builtin_complete);
     map.insert("compgen", builtin_compgen);
+    map.insert("times", builtin_times);
     map
 }
 
@@ -221,6 +222,11 @@ fn builtin_printf(_shell: &mut Shell, args: &[String]) -> i32 {
                     print!("{:o}", n);
                     arg_idx += 1;
                 }
+                Some('q') => {
+                    let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("");
+                    print!("{}", shell_escape(arg));
+                    arg_idx += 1;
+                }
                 Some('%') => print!("%"),
                 Some(c) => print!("%{}", c),
                 None => print!("%"),
@@ -230,6 +236,45 @@ fn builtin_printf(_shell: &mut Shell, args: &[String]) -> i32 {
         }
     }
     0
+}
+
+/// Shell-escape a string for use with %q in printf.
+fn shell_escape(s: &str) -> String {
+    if s.is_empty() {
+        return "''".to_string();
+    }
+    // Check if the string needs quoting
+    let needs_quoting = s
+        .chars()
+        .any(|c| !c.is_ascii_alphanumeric() && c != '_' && c != '/' && c != '.' && c != '-');
+    if !needs_quoting {
+        return s.to_string();
+    }
+    // Use $'...' quoting for strings with special characters
+    let mut result = String::from("$'");
+    for ch in s.chars() {
+        match ch {
+            '\'' => result.push_str("\\'"),
+            '\\' => result.push_str("\\\\"),
+            '\n' => result.push_str("\\n"),
+            '\t' => result.push_str("\\t"),
+            '\r' => result.push_str("\\r"),
+            '\x07' => result.push_str("\\a"),
+            '\x08' => result.push_str("\\b"),
+            '\x0c' => result.push_str("\\f"),
+            '\x0b' => result.push_str("\\v"),
+            '\x1b' => result.push_str("\\E"),
+            c if c.is_ascii_graphic() || c == ' ' => result.push(c),
+            c => {
+                let bytes = c.to_string();
+                for b in bytes.as_bytes() {
+                    result.push_str(&format!("\\x{:02x}", b));
+                }
+            }
+        }
+    }
+    result.push('\'');
+    result
 }
 
 fn builtin_cd(shell: &mut Shell, args: &[String]) -> i32 {
@@ -344,6 +389,8 @@ fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
         } else {
             shell.vars.remove(name);
             shell.exports.remove(name);
+            shell.arrays.remove(name);
+            shell.namerefs.remove(name);
             unsafe { std::env::remove_var(name) };
         }
     }
@@ -376,43 +423,300 @@ fn builtin_readonly(shell: &mut Shell, args: &[String]) -> i32 {
 }
 
 fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
-    // In a function context, declare variables as local.
-    // For now, just set them like regular variables.
-    for arg in args {
-        if arg.starts_with('-') {
-            continue;
-        }
-        if let Some(eq_pos) = arg.find('=') {
-            let name = &arg[..eq_pos];
-            let value = &arg[eq_pos + 1..];
-            shell.vars.insert(name.to_string(), value.to_string());
+    let mut flag_array = false;
+    let mut flag_readonly = false;
+    let mut flag_nameref = false;
+    let mut names = Vec::new();
+    let mut i = 0;
+
+    while i < args.len() {
+        let arg = &args[i];
+        if arg.starts_with('-') && arg.len() > 1 {
+            for ch in arg[1..].chars() {
+                match ch {
+                    'a' => flag_array = true,
+                    'r' => flag_readonly = true,
+                    'n' => flag_nameref = true,
+                    '-' => {
+                        // local - : save/restore shell options on function return (stub)
+                    }
+                    _ => {}
+                }
+            }
         } else {
-            shell.vars.entry(arg.clone()).or_default();
+            names.push(arg.clone());
+        }
+        i += 1;
+    }
+
+    for name_arg in &names {
+        if let Some(eq_pos) = name_arg.find('=') {
+            let name = &name_arg[..eq_pos];
+            let value = &name_arg[eq_pos + 1..];
+            if flag_nameref {
+                shell.namerefs.insert(name.to_string(), value.to_string());
+            } else if flag_array {
+                // Parse (val1 val2 ...) syntax
+                let arr = parse_array_literal(value);
+                shell.arrays.insert(name.to_string(), arr);
+            } else {
+                shell.set_var(name, value.to_string());
+            }
+            if flag_readonly {
+                shell.readonly_vars.insert(name.to_string());
+            }
+        } else if flag_nameref {
+            shell.namerefs.entry(name_arg.clone()).or_default();
+        } else if flag_array {
+            shell
+                .arrays
+                .entry(name_arg.clone())
+                .or_default();
+        } else {
+            shell.vars.entry(name_arg.clone()).or_default();
         }
     }
     0
 }
 
 fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
-    // Simplified declare
+    let mut flag_array = false;
+    let mut flag_assoc = false; // -A stub
+    let mut flag_print = false;
+    let mut flag_functions = false;
+    let mut flag_nameref = false;
+    let mut flag_readonly = false;
+    let mut flag_export = false;
+    let mut flag_integer = false;
+    let mut flag_global = false; // -g stub
     let mut names = Vec::new();
-    for arg in args {
-        if arg.starts_with('-') || arg.starts_with('+') {
-            continue;
+    let mut i = 0;
+
+    while i < args.len() {
+        let arg = &args[i];
+        if arg.starts_with('-') && arg.len() > 1 && !arg.contains('=') {
+            for ch in arg[1..].chars() {
+                match ch {
+                    'a' => flag_array = true,
+                    'A' => flag_assoc = true,
+                    'p' => flag_print = true,
+                    'F' => flag_functions = true,
+                    'n' => flag_nameref = true,
+                    'r' => flag_readonly = true,
+                    'x' => flag_export = true,
+                    'i' => flag_integer = true,
+                    'g' => flag_global = true,
+                    _ => {}
+                }
+            }
+        } else if arg.starts_with('+') && arg.len() > 1 {
+            // +<flag> unsets attribute — skip flags but don't treat as name
+        } else {
+            names.push(arg.clone());
         }
-        names.push(arg);
+        i += 1;
     }
 
-    for arg in names {
-        if let Some(eq_pos) = arg.find('=') {
-            let name = &arg[..eq_pos];
-            let value = &arg[eq_pos + 1..];
-            shell.vars.insert(name.to_string(), value.to_string());
+    let _ = flag_assoc; // stub
+    let _ = flag_global; // stub
+
+    // declare -F: list function names
+    if flag_functions {
+        if names.is_empty() {
+            for name in &shell.func_names {
+                println!("declare -f {}", name);
+            }
+            // Also list functions from the functions map
+            let mut fnames: Vec<&String> = shell.functions.keys().collect();
+            fnames.sort();
+            for name in fnames {
+                if !shell.func_names.contains(name) {
+                    println!("declare -f {}", name);
+                }
+            }
         } else {
-            shell.vars.entry(arg.clone()).or_default();
+            for name in &names {
+                if shell.functions.contains_key(name.as_str()) || shell.func_names.contains(name) {
+                    println!("declare -f {}", name);
+                } else {
+                    eprintln!("bash: declare: {}: not found", name);
+                    return 1;
+                }
+            }
+        }
+        return 0;
+    }
+
+    // declare -p: print variable info
+    if flag_print {
+        if names.is_empty() {
+            // Print all variables
+            let mut var_names: Vec<&String> = shell.vars.keys().collect();
+            var_names.sort();
+            for name in var_names {
+                let value = shell.vars.get(name).cloned().unwrap_or_default();
+                if shell.namerefs.contains_key(name) {
+                    println!("declare -n {}=\"{}\"", name, shell.namerefs[name]);
+                } else if shell.arrays.contains_key(name) {
+                    let arr = &shell.arrays[name];
+                    let elements: Vec<String> = arr
+                        .iter()
+                        .enumerate()
+                        .map(|(i, v)| format!("[{}]=\"{}\"", i, v))
+                        .collect();
+                    println!("declare -a {}=({})", name, elements.join(" "));
+                } else {
+                    println!("declare -- {}=\"{}\"", name, value);
+                }
+            }
+            // Also print arrays not in vars
+            let mut arr_names: Vec<&String> = shell.arrays.keys().collect();
+            arr_names.sort();
+            for name in arr_names {
+                if !shell.vars.contains_key(name) {
+                    let arr = &shell.arrays[name];
+                    let elements: Vec<String> = arr
+                        .iter()
+                        .enumerate()
+                        .map(|(i, v)| format!("[{}]=\"{}\"", i, v))
+                        .collect();
+                    println!("declare -a {}=({})", name, elements.join(" "));
+                }
+            }
+            // Print namerefs not in vars
+            let mut nref_names: Vec<&String> = shell.namerefs.keys().collect();
+            nref_names.sort();
+            for name in nref_names {
+                if !shell.vars.contains_key(name) {
+                    println!("declare -n {}=\"{}\"", name, shell.namerefs[name]);
+                }
+            }
+        } else {
+            for name in &names {
+                if let Some(target) = shell.namerefs.get(name) {
+                    println!("declare -n {}=\"{}\"", name, target);
+                } else if let Some(arr) = shell.arrays.get(name) {
+                    let elements: Vec<String> = arr
+                        .iter()
+                        .enumerate()
+                        .map(|(i, v)| format!("[{}]=\"{}\"", i, v))
+                        .collect();
+                    println!("declare -a {}=({})", name, elements.join(" "));
+                } else if let Some(value) = shell.vars.get(name) {
+                    println!("declare -- {}=\"{}\"", name, value);
+                } else {
+                    eprintln!("bash: declare: {}: not found", name);
+                    return 1;
+                }
+            }
+        }
+        return 0;
+    }
+
+    // Normal declare: set variables
+    for name_arg in &names {
+        if let Some(eq_pos) = name_arg.find('=') {
+            let name = &name_arg[..eq_pos];
+            let value = &name_arg[eq_pos + 1..];
+
+            if flag_nameref {
+                shell.namerefs.insert(name.to_string(), value.to_string());
+            } else if flag_array {
+                let arr = parse_array_literal(value);
+                shell.arrays.insert(name.to_string(), arr);
+            } else if flag_integer {
+                // Evaluate as arithmetic
+                let n = shell.eval_arith_expr(value);
+                shell.set_var(name, n.to_string());
+            } else {
+                shell.set_var(name, value.to_string());
+            }
+
+            if flag_readonly {
+                shell.readonly_vars.insert(name.to_string());
+            }
+            if flag_export {
+                let val = shell.get_var(name).cloned().unwrap_or_default();
+                shell.exports.insert(name.to_string(), val.clone());
+                unsafe { std::env::set_var(name, &val) };
+            }
+        } else {
+            let name = name_arg.as_str();
+            if flag_nameref {
+                shell.namerefs.entry(name.to_string()).or_default();
+            } else if flag_array {
+                shell
+                    .arrays
+                    .entry(name.to_string())
+                    .or_default();
+            } else {
+                shell.vars.entry(name.to_string()).or_default();
+            }
+
+            if flag_readonly {
+                shell.readonly_vars.insert(name.to_string());
+            }
+            if flag_export {
+                let val = shell.get_var(name).cloned().unwrap_or_default();
+                shell.exports.insert(name.to_string(), val.clone());
+                unsafe { std::env::set_var(name, &val) };
+            }
         }
     }
     0
+}
+
+/// Parse a bash array literal like `(val1 val2 val3)` into a Vec.
+fn parse_array_literal(s: &str) -> Vec<String> {
+    let trimmed = s.trim();
+    let inner = if trimmed.starts_with('(') && trimmed.ends_with(')') {
+        &trimmed[1..trimmed.len() - 1]
+    } else {
+        trimmed
+    };
+
+    if inner.trim().is_empty() {
+        return Vec::new();
+    }
+
+    // Simple word splitting, respecting quotes
+    let mut elements = Vec::new();
+    let mut current = String::new();
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    let mut escape_next = false;
+
+    for ch in inner.chars() {
+        if escape_next {
+            current.push(ch);
+            escape_next = false;
+            continue;
+        }
+        if ch == '\\' && !in_single_quote {
+            escape_next = true;
+            continue;
+        }
+        if ch == '\'' && !in_double_quote {
+            in_single_quote = !in_single_quote;
+            continue;
+        }
+        if ch == '"' && !in_single_quote {
+            in_double_quote = !in_double_quote;
+            continue;
+        }
+        if ch.is_whitespace() && !in_single_quote && !in_double_quote {
+            if !current.is_empty() {
+                elements.push(current.clone());
+                current.clear();
+            }
+            continue;
+        }
+        current.push(ch);
+    }
+    if !current.is_empty() {
+        elements.push(current);
+    }
+    elements
 }
 
 fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
@@ -740,21 +1044,49 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
     let mut prompt = String::new();
     let mut raw = false;
     let mut var_names = Vec::new();
+    let mut array_name: Option<String> = None;
+    let mut delim: Option<char> = None;
+    let mut nchars: Option<usize> = None;
+    let mut fd: Option<i32> = None;
     let mut i = 0;
 
     while i < args.len() {
         match args[i].as_str() {
             "-r" => raw = true,
+            "-s" | "-e" => {}
             "-p" => {
                 i += 1;
                 if i < args.len() {
                     prompt = args[i].clone();
                 }
             }
-            "-n" | "-N" | "-d" | "-t" | "-u" => {
-                i += 1; // Skip argument
+            "-d" => {
+                i += 1;
+                if i < args.len() {
+                    delim = args[i].chars().next();
+                }
             }
-            "-s" | "-a" | "-e" => {}
+            "-a" => {
+                i += 1;
+                if i < args.len() {
+                    array_name = Some(args[i].clone());
+                }
+            }
+            "-n" | "-N" => {
+                i += 1;
+                if i < args.len() {
+                    nchars = args[i].parse().ok();
+                }
+            }
+            "-t" => {
+                i += 1; // Skip timeout argument
+            }
+            "-u" => {
+                i += 1;
+                if i < args.len() {
+                    fd = args[i].parse().ok();
+                }
+            }
             arg if !arg.starts_with('-') => {
                 var_names.push(arg.to_string());
             }
@@ -763,7 +1095,7 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
         i += 1;
     }
 
-    if var_names.is_empty() {
+    if var_names.is_empty() && array_name.is_none() {
         var_names.push("REPLY".to_string());
     }
 
@@ -772,10 +1104,112 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
     }
 
     let mut line = String::new();
-    match std::io::stdin().read_line(&mut line) {
-        Ok(0) => return 1, // EOF
-        Err(_) => return 1,
-        _ => {}
+
+    // Read input based on options
+    if let Some(n) = nchars {
+        // Read exactly n characters
+        use std::io::Read as _;
+        let mut buf = vec![0u8; n];
+        let reader: Box<dyn std::io::Read> = if let Some(fd_num) = fd {
+            #[cfg(unix)]
+            {
+                use std::os::unix::io::FromRawFd;
+                Box::new(unsafe { std::fs::File::from_raw_fd(fd_num) })
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = fd_num;
+                Box::new(std::io::stdin())
+            }
+        } else {
+            Box::new(std::io::stdin())
+        };
+        let mut reader = reader;
+        match reader.read(&mut buf) {
+            Ok(0) => return 1,
+            Ok(bytes_read) => {
+                line = String::from_utf8_lossy(&buf[..bytes_read]).to_string();
+            }
+            Err(_) => return 1,
+        }
+        // Prevent the File from being dropped and closing the fd if it came from -u
+        if fd.is_some() {
+            #[cfg(unix)]
+            {
+                // Leak the reader to prevent closing the fd
+                let _ = Box::into_raw(Box::new(reader));
+            }
+        }
+    } else if let Some(delim_char) = delim {
+        // Read until delimiter
+        use std::io::Read as _;
+        let reader: Box<dyn std::io::Read> = if let Some(fd_num) = fd {
+            #[cfg(unix)]
+            {
+                use std::os::unix::io::FromRawFd;
+                Box::new(unsafe { std::fs::File::from_raw_fd(fd_num) })
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = fd_num;
+                Box::new(std::io::stdin())
+            }
+        } else {
+            Box::new(std::io::stdin())
+        };
+        let mut reader = reader;
+        let mut buf = [0u8; 1];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(_) => {
+                    let ch = buf[0] as char;
+                    if ch == delim_char {
+                        break;
+                    }
+                    line.push(ch);
+                }
+                Err(_) => break,
+            }
+        }
+        if fd.is_some() {
+            #[cfg(unix)]
+            {
+                let _ = Box::into_raw(Box::new(reader));
+            }
+        }
+    } else if let Some(fd_num) = fd {
+        // Read a line from a specific file descriptor
+        #[cfg(unix)]
+        {
+            use std::io::BufRead;
+            use std::os::unix::io::FromRawFd;
+            let file = unsafe { std::fs::File::from_raw_fd(fd_num) };
+            let mut reader = std::io::BufReader::new(file);
+            match reader.read_line(&mut line) {
+                Ok(0) => return 1,
+                Err(_) => return 1,
+                _ => {}
+            }
+            // Prevent closing the fd
+            let inner = reader.into_inner();
+            std::mem::forget(inner);
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = fd_num;
+            match std::io::stdin().read_line(&mut line) {
+                Ok(0) => return 1,
+                Err(_) => return 1,
+                _ => {}
+            }
+        }
+    } else {
+        match std::io::stdin().read_line(&mut line) {
+            Ok(0) => return 1, // EOF
+            Err(_) => return 1,
+            _ => {}
+        }
     }
 
     // Remove trailing newline
@@ -797,15 +1231,26 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
         .cloned()
         .unwrap_or_else(|| " \t\n".to_string());
 
+    // Handle -a: read into array
+    if let Some(arr_name) = array_name {
+        let fields: Vec<String> = line
+            .split(|c: char| ifs.contains(c))
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect();
+        shell.arrays.insert(arr_name, fields);
+        return 0;
+    }
+
     if var_names.len() == 1 {
-        shell.vars.insert(var_names[0].clone(), line);
+        shell.set_var(&var_names[0], line);
     } else {
         let fields: Vec<&str> = line
             .splitn(var_names.len(), |c: char| ifs.contains(c))
             .collect();
         for (j, name) in var_names.iter().enumerate() {
             let value = fields.get(j).unwrap_or(&"").trim().to_string();
-            shell.vars.insert(name.clone(), value);
+            shell.set_var(name, value);
         }
     }
 
@@ -894,22 +1339,55 @@ fn builtin_source(shell: &mut Shell, args: &[String]) -> i32 {
     }
 }
 
-fn builtin_type(_shell: &mut Shell, args: &[String]) -> i32 {
-    let builtins = builtins();
+fn builtin_type(shell: &mut Shell, args: &[String]) -> i32 {
+    let builtin_map = builtins();
     let mut status = 0;
+    let mut flag_t = false;
+    let mut flag_p = false;
+    let mut names = Vec::new();
 
     for arg in args {
-        if arg == "-t" || arg == "-a" || arg == "-p" || arg == "-f" || arg == "-P" {
-            continue;
+        match arg.as_str() {
+            "-t" => flag_t = true,
+            "-p" => flag_p = true,
+            "-a" | "-f" | "-P" => {}
+            _ => names.push(arg.as_str()),
         }
+    }
 
-        if builtins.contains_key(arg.as_str()) {
-            println!("{} is a shell builtin", arg);
-        } else if let Some(path) = find_in_path_opt(arg) {
-            println!("{} is {}", arg, path);
+    for name in names {
+        if flag_t {
+            // Print type word only
+            if shell.functions.contains_key(name) {
+                println!("function");
+            } else if builtin_map.contains_key(name) {
+                println!("builtin");
+            } else if find_in_path_opt(name).is_some() {
+                println!("file");
+            }
+            // If not found, print nothing and set status
+            else {
+                status = 1;
+            }
+        } else if flag_p {
+            // Print path only for external commands
+            if let Some(path) = find_in_path_opt(name) {
+                println!("{}", path);
+            } else {
+                status = 1;
+            }
         } else {
-            eprintln!("bash: type: {}: not found", arg);
-            status = 1;
+            // Default behavior
+            if shell.functions.contains_key(name) {
+                println!("{} is a function", name);
+            } else if builtin_map.contains_key(name) {
+                println!("{} is a shell builtin", name);
+            } else if let Some(path) = find_in_path_opt(name) {
+                println!("{} is {}", name, path);
+            } else {
+                eprintln!("bash: type: {}: not found", name);
+                status = 1;
+            }
         }
     }
     status
@@ -931,9 +1409,9 @@ fn builtin_command(_shell: &mut Shell, args: &[String]) -> i32 {
     }
 
     if show_type {
-        let builtins = builtins();
+        let builtin_map = builtins();
         for name in &cmd_args {
-            if builtins.contains_key(name.as_str()) {
+            if builtin_map.contains_key(name.as_str()) {
                 println!("{}", name);
             } else if let Some(path) = find_in_path_opt(name) {
                 println!("{}", path);
@@ -980,8 +1458,67 @@ fn builtin_hash(_shell: &mut Shell, _args: &[String]) -> i32 {
     0 // No-op for now
 }
 
-fn builtin_trap(_shell: &mut Shell, _args: &[String]) -> i32 {
-    // TODO: Implement signal trapping
+fn builtin_trap(shell: &mut Shell, args: &[String]) -> i32 {
+    if args.is_empty() {
+        // Print current traps
+        for (signal, handler) in &shell.traps {
+            println!("trap -- '{}' {}", handler, signal);
+        }
+        return 0;
+    }
+
+    if args.len() == 1 {
+        // trap '' or trap - : list traps or reset
+        if args[0] == "-l" {
+            // List signal names
+            println!("EXIT HUP INT QUIT TERM");
+            return 0;
+        }
+        if args[0] == "-p" {
+            for (signal, handler) in &shell.traps {
+                println!("trap -- '{}' {}", handler, signal);
+            }
+            return 0;
+        }
+    }
+
+    // trap [-p] 'handler' signal [signal...]
+    let mut handler_idx = 0;
+    let mut sig_start = 1;
+
+    // Skip -p flag if present
+    if args.first().map(|s| s.as_str()) == Some("-p") {
+        if args.len() < 2 {
+            for (signal, handler) in &shell.traps {
+                println!("trap -- '{}' {}", handler, signal);
+            }
+            return 0;
+        }
+        handler_idx = 1;
+        sig_start = 2;
+    }
+
+    if args.len() < sig_start + 1 {
+        // Just a handler with no signals - might be a single signal to reset
+        // If the first arg looks like a signal name, reset it
+        if handler_idx == 0 && args.len() == 1 {
+            return 0;
+        }
+    }
+
+    let handler = &args[handler_idx];
+
+    for sig in &args[sig_start..] {
+        let signal = sig.to_uppercase();
+        let signal = signal.strip_prefix("SIG").unwrap_or(&signal).to_string();
+
+        if handler == "-" || handler.is_empty() {
+            // Reset trap
+            shell.traps.remove(&signal);
+        } else {
+            shell.traps.insert(signal, handler.clone());
+        }
+    }
     0
 }
 
@@ -1147,9 +1684,19 @@ fn builtin_getopts(shell: &mut Shell, args: &[String]) -> i32 {
     0
 }
 
-fn builtin_let(_shell: &mut Shell, _args: &[String]) -> i32 {
-    // TODO: Arithmetic evaluation
-    0
+fn builtin_let(shell: &mut Shell, args: &[String]) -> i32 {
+    if args.is_empty() {
+        eprintln!("bash: let: expression expected");
+        return 1;
+    }
+
+    let mut result = 0i64;
+    for expr in args {
+        result = shell.eval_arith_expr(expr);
+    }
+
+    // let returns 1 if the last expression evaluates to 0, 0 otherwise
+    if result == 0 { 1 } else { 0 }
 }
 
 fn builtin_mapfile(shell: &mut Shell, args: &[String]) -> i32 {
@@ -1168,7 +1715,10 @@ fn builtin_mapfile(shell: &mut Shell, args: &[String]) -> i32 {
         }
     }
 
-    // Store as indexed values
+    // Store as array
+    shell.arrays.insert(varname.clone(), lines.clone());
+
+    // Also store as indexed values for compatibility
     for (i, line) in lines.iter().enumerate() {
         shell
             .vars
@@ -1227,6 +1777,20 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
                     shell.shopt_extglob = false;
                 }
             }
+            "inherit_errexit" => {
+                if set {
+                    shell.shopt_inherit_errexit = true;
+                } else if unset {
+                    shell.shopt_inherit_errexit = false;
+                }
+            }
+            "nocasematch" => {
+                if set {
+                    shell.shopt_nocasematch = true;
+                } else if unset {
+                    shell.shopt_nocasematch = false;
+                }
+            }
             _ => {}
         }
     }
@@ -1278,6 +1842,43 @@ fn builtin_complete(_shell: &mut Shell, _args: &[String]) -> i32 {
 
 fn builtin_compgen(_shell: &mut Shell, _args: &[String]) -> i32 {
     0 // No-op
+}
+
+fn builtin_times(_shell: &mut Shell, _args: &[String]) -> i32 {
+    #[cfg(unix)]
+    {
+        let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
+        // Get resource usage for this process
+        unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut usage) };
+        println!(
+            "{}m{}.{:03}s {}m{}.{:03}s",
+            usage.ru_utime.tv_sec / 60,
+            usage.ru_utime.tv_sec % 60,
+            usage.ru_utime.tv_usec / 1000,
+            usage.ru_stime.tv_sec / 60,
+            usage.ru_stime.tv_sec % 60,
+            usage.ru_stime.tv_usec / 1000,
+        );
+        // Get resource usage for children
+        let mut child_usage: libc::rusage = unsafe { std::mem::zeroed() };
+        unsafe { libc::getrusage(libc::RUSAGE_CHILDREN, &mut child_usage) };
+        println!(
+            "{}m{}.{:03}s {}m{}.{:03}s",
+            child_usage.ru_utime.tv_sec / 60,
+            child_usage.ru_utime.tv_sec % 60,
+            child_usage.ru_utime.tv_usec / 1000,
+            child_usage.ru_stime.tv_sec / 60,
+            child_usage.ru_stime.tv_sec % 60,
+            child_usage.ru_stime.tv_usec / 1000,
+        );
+        0
+    }
+    #[cfg(not(unix))]
+    {
+        println!("0m0.000s 0m0.000s");
+        println!("0m0.000s 0m0.000s");
+        0
+    }
 }
 
 pub fn find_executable(name: &str) -> String {
