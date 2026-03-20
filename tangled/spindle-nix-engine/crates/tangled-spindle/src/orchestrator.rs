@@ -289,12 +289,20 @@ pub fn process_pipeline_event(ctx: Arc<OrchestratorContext>, event: PipelineEven
             )
             .await;
 
-            if result.is_err() {
-                error!(
-                    pipeline = %pipeline_id_for_log,
-                    timeout = ?pipeline_timeout,
-                    "pipeline execution timed out, releasing queue slot"
-                );
+            match result {
+                Ok(handles) => {
+                    // Pipeline completed within timeout. Handles already joined inside.
+                    drop(handles);
+                }
+                Err(_) => {
+                    error!(
+                        pipeline = %pipeline_id_for_log,
+                        timeout = ?pipeline_timeout,
+                        "pipeline execution timed out, releasing queue slot"
+                    );
+                    // Note: spawned workflow tasks are aborted inside
+                    // execute_pipeline via the AbortOnDrop wrapper.
+                }
             }
         })
     }));
@@ -322,14 +330,32 @@ pub fn process_pipeline_event(ctx: Arc<OrchestratorContext>, event: PipelineEven
     }
 }
 
+/// A set of JoinHandles that aborts all tasks when dropped.
+///
+/// This ensures that when a pipeline-level timeout fires and drops the future,
+/// all spawned workflow tasks are actually cancelled instead of running forever.
+struct AbortOnDrop(Vec<tokio::task::JoinHandle<()>>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        for handle in &self.0 {
+            handle.abort();
+        }
+    }
+}
+
 /// Execute all workflows in a pipeline concurrently.
+///
+/// Spawns workflow tasks and waits for all of them. The `AbortOnDrop` guard
+/// lives as a local variable — if the outer timeout drops this future, the
+/// guard's `Drop` impl aborts all spawned workflow tasks.
 async fn execute_pipeline(
     ctx: Arc<OrchestratorContext>,
     pipeline_id: PipelineId,
     repo_path: &str,
     workflows: Vec<(WorkflowId, spindle_models::Workflow)>,
     pipeline_env: Option<std::collections::HashMap<String, String>>,
-) {
+) -> AbortOnDrop {
     info!(
         pipeline = %pipeline_id,
         workflow_count = workflows.len(),
@@ -349,7 +375,6 @@ async fn execute_pipeline(
     let mut handles = Vec::new();
 
     for (wid, mut workflow) in workflows {
-        // Merge pipeline env vars into the workflow's environment.
         if let Some(ref env) = pipeline_env {
             for (k, v) in env {
                 workflow
@@ -367,14 +392,37 @@ async fn execute_pipeline(
         }));
     }
 
-    // Wait for all workflows to complete.
+    // Grab abort handles BEFORE awaiting, so we can abort on cancellation.
+    let abort_handles: Vec<tokio::task::AbortHandle> =
+        handles.iter().map(|h| h.abort_handle()).collect();
+
+    // Guard that aborts all tasks if this future is dropped (e.g. timeout).
+    struct AbortGuard(Vec<tokio::task::AbortHandle>);
+    impl Drop for AbortGuard {
+        fn drop(&mut self) {
+            for h in &self.0 {
+                h.abort();
+            }
+        }
+    }
+    let _guard = AbortGuard(abort_handles);
+
+    // Now await all handles. If the outer timeout drops this future,
+    // _guard's Drop fires and aborts all workflow tasks.
     for handle in handles {
-        if let Err(e) = handle.await {
-            error!(%e, pipeline = %pipeline_id, "workflow task panicked");
+        match handle.await {
+            Ok(()) => {}
+            Err(e) if e.is_cancelled() => {
+                warn!(pipeline = %pipeline_id, "workflow task was cancelled");
+            }
+            Err(e) => {
+                error!(%e, pipeline = %pipeline_id, "workflow task panicked");
+            }
         }
     }
 
     info!(pipeline = %pipeline_id, "pipeline execution complete");
+    AbortOnDrop(Vec::new())
 }
 
 /// Execute a single workflow: setup → run steps → destroy.
