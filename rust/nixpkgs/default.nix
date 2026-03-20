@@ -273,6 +273,9 @@
             | xargs touch
         '';
 
+        # Force rebuild by changing env
+        RUST_STDENV_TEST = "1";
+
         meta = {
           description = "GNU hello built with the Rust stdenv";
           license = lib.licenses.gpl3Plus;
