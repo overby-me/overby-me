@@ -894,26 +894,29 @@ impl Engine {
         for line in recipe {
             let mut silent = self.silent;
             let mut ignore_error = false;
-            let mut line = line.as_str();
 
-            // Process line prefixes
+            // Expand variables first, then process prefixes
+            let expanded_raw = expand::expand_with_auto(line, self, &auto_vars);
+            let mut expanded_str = expanded_raw.as_str();
+
+            // Process line prefixes (@, -, +) after expansion
             loop {
-                line = line.trim_start();
-                if let Some(rest) = line.strip_prefix('@') {
+                expanded_str = expanded_str.trim_start();
+                if let Some(rest) = expanded_str.strip_prefix('@') {
                     silent = true;
-                    line = rest;
-                } else if let Some(rest) = line.strip_prefix('-') {
+                    expanded_str = rest;
+                } else if let Some(rest) = expanded_str.strip_prefix('-') {
                     ignore_error = true;
-                    line = rest;
-                } else if let Some(rest) = line.strip_prefix('+') {
+                    expanded_str = rest;
+                } else if let Some(rest) = expanded_str.strip_prefix('+') {
                     // Force execution even in dry-run mode
-                    line = rest;
+                    expanded_str = rest;
                 } else {
                     break;
                 }
             }
 
-            let expanded = expand::expand_with_auto(line, self, &auto_vars);
+            let expanded = expanded_str.to_string();
 
             if expanded.trim().is_empty() {
                 continue;
