@@ -49,7 +49,7 @@ impl Default for SubstFlags {
 #[derive(Debug, Clone)]
 enum Command {
     Substitute {
-        pattern: Regex,
+        pattern: Option<Regex>, // None means reuse last regex
         replacement: String,
         flags: SubstFlags,
     },
@@ -287,6 +287,7 @@ impl<'a> Parser<'a> {
     fn parse_regex_delimited(&mut self, delim: u8) -> Result<String, String> {
         let mut pattern = String::new();
         let mut escaped = false;
+        let mut in_bracket = false;
         loop {
             let ch = self.advance().ok_or("unterminated regex")?;
             if escaped {
@@ -299,7 +300,23 @@ impl<'a> Parser<'a> {
                 escaped = false;
             } else if ch == b'\\' {
                 escaped = true;
-            } else if ch == delim {
+            } else if ch == b'[' && !in_bracket {
+                in_bracket = true;
+                pattern.push('[');
+                // Handle [^ and [] and [^] at start of character class
+                if self.peek() == Some(b'^') {
+                    pattern.push('^');
+                    self.advance();
+                }
+                // ] right after [ or [^ is literal
+                if self.peek() == Some(b']') {
+                    pattern.push(']');
+                    self.advance();
+                }
+            } else if ch == b']' && in_bracket {
+                in_bracket = false;
+                pattern.push(']');
+            } else if ch == delim && !in_bracket {
                 break;
             } else {
                 pattern.push(ch as char);
@@ -451,11 +468,9 @@ impl<'a> Parser<'a> {
         }
 
         let re = if pattern_str.is_empty() {
-            // Empty pattern means "reuse last regex" — we'll handle at runtime
-            // For now use a placeholder that won't match
-            Regex::new("(?:)").unwrap()
+            None // Reuse last regex at runtime
         } else {
-            Regex::new(&re_pattern).map_err(|e| format!("invalid regex in s command: {e}"))?
+            Some(Regex::new(&re_pattern).map_err(|e| format!("invalid regex in s command: {e}"))?)
         };
 
         Ok(Command::Substitute {
@@ -470,9 +485,21 @@ impl<'a> Parser<'a> {
         let mut escaped = false;
         loop {
             match self.peek() {
-                None | Some(b'\n') => {
+                None => {
                     // Unterminated — treat as if delimiter at end
                     break;
+                }
+                Some(b'\n') => {
+                    if escaped {
+                        // \ followed by newline: literal newline in replacement
+                        // (GNU sed continuation)
+                        self.advance();
+                        result.push('\n');
+                        escaped = false;
+                    } else {
+                        // Unterminated — treat as if delimiter at end
+                        break;
+                    }
                 }
                 Some(ch) => {
                     self.advance();
@@ -679,6 +706,48 @@ fn bre_to_ere(bre: &str) -> String {
     let chars: Vec<char> = bre.chars().collect();
     let mut i = 0;
     while i < chars.len() {
+        // Pass through character classes unchanged — inside [...], all chars are literal
+        if chars[i] == '[' {
+            result.push('[');
+            i += 1;
+            // Handle negation and ] as first char
+            if i < chars.len() && chars[i] == '^' {
+                result.push('^');
+                i += 1;
+            }
+            if i < chars.len() && chars[i] == ']' {
+                result.push(']');
+                i += 1;
+            }
+            // Copy until closing ]
+            while i < chars.len() && chars[i] != ']' {
+                // Handle POSIX classes like [:alpha:]
+                if chars[i] == '[' && i + 1 < chars.len() && chars[i + 1] == ':' {
+                    result.push('[');
+                    result.push(':');
+                    i += 2;
+                    while i < chars.len() {
+                        if chars[i] == ':' && i + 1 < chars.len() && chars[i + 1] == ']' {
+                            result.push(':');
+                            result.push(']');
+                            i += 2;
+                            break;
+                        }
+                        result.push(chars[i]);
+                        i += 1;
+                    }
+                } else {
+                    result.push(chars[i]);
+                    i += 1;
+                }
+            }
+            if i < chars.len() {
+                result.push(']');
+                i += 1;
+            }
+            continue;
+        }
+
         if chars[i] == '\\' && i + 1 < chars.len() {
             match chars[i + 1] {
                 '(' => {
@@ -775,6 +844,8 @@ struct Engine {
     quit: bool,
     exit_code: i32,
     suppress_default_print: bool,
+    input_lines: Vec<String>,
+    input_index: usize,
 }
 
 impl Engine {
@@ -793,16 +864,21 @@ impl Engine {
             quit: false,
             exit_code: 0,
             suppress_default_print: false,
+            input_lines: Vec::new(),
+            input_index: 0,
         }
     }
 
     fn run<R: BufRead, W: Write>(&mut self, reader: R, writer: &mut W) -> io::Result<i32> {
-        let lines: Vec<String> = reader.lines().collect::<io::Result<Vec<_>>>()?;
-        let total = lines.len();
+        self.input_lines = reader.lines().collect::<io::Result<Vec<_>>>()?;
+        self.input_index = 0;
+        let total = self.input_lines.len();
 
-        for (idx, line) in lines.into_iter().enumerate() {
-            self.line_number = idx + 1;
-            self.last_line = idx + 1 == total;
+        while self.input_index < total {
+            let line = self.input_lines[self.input_index].clone();
+            self.input_index += 1;
+            self.line_number = self.input_index;
+            self.last_line = self.input_index == total;
             self.pattern_space = line;
             self.sub_happened = false;
             self.append_queue.clear();
@@ -895,7 +971,7 @@ impl Engine {
         }
     }
 
-    fn address_matches(&self, addr: &AddressRange) -> bool {
+    fn address_matches(&mut self, addr: &AddressRange) -> bool {
         match addr {
             AddressRange::None => true,
             AddressRange::Single(a) => self.addr_matches_single(a),
@@ -909,11 +985,17 @@ impl Engine {
         }
     }
 
-    fn addr_matches_single(&self, addr: &Address) -> bool {
+    fn addr_matches_single(&mut self, addr: &Address) -> bool {
         match addr {
             Address::Line(n) => self.line_number == *n,
             Address::Last => self.last_line,
-            Address::Regex(re) => re.is_match(&self.pattern_space),
+            Address::Regex(re) => {
+                let matched = re.is_match(&self.pattern_space);
+                if matched {
+                    self.last_regex = Some(re.clone());
+                }
+                matched
+            }
             Address::Step(first, step) => {
                 if *step == 0 {
                     self.line_number == *first
@@ -926,7 +1008,7 @@ impl Engine {
         }
     }
 
-    fn in_range(&self, _start: &Address, _end: &Address) -> bool {
+    fn in_range(&mut self, _start: &Address, _end: &Address) -> bool {
         // For a full implementation, range state would be tracked per-command
         // This simplified version just checks both endpoints
         false
@@ -965,15 +1047,18 @@ impl Engine {
                 replacement,
                 flags,
             } => {
-                let re = if pattern.as_str() == "(?:)" {
-                    // Empty pattern — reuse last
-                    match &self.last_regex {
-                        Some(re) => re.clone(),
-                        None => return Flow::Continue,
+                let re = match pattern {
+                    None => {
+                        // Empty pattern — reuse last
+                        match &self.last_regex {
+                            Some(re) => re.clone(),
+                            None => return Flow::Continue,
+                        }
                     }
-                } else {
-                    self.last_regex = Some(pattern.clone());
-                    pattern.clone()
+                    Some(re) => {
+                        self.last_regex = Some(re.clone());
+                        re.clone()
+                    }
                 };
 
                 let result = self.do_substitute(&re, replacement, flags);
@@ -1080,19 +1165,38 @@ impl Engine {
             }
 
             Command::Next => {
-                // Print current pattern space if not quiet, then read next line
-                // In our line-by-line model, this just ends the current cycle
+                // Print current, read next line into pattern space
                 if !self.quiet {
                     self.write_pattern_space();
                 }
-                Flow::EndOfCycle
+                if self.input_index < self.input_lines.len() {
+                    self.pattern_space = self.input_lines[self.input_index].clone();
+                    self.input_index += 1;
+                    self.line_number = self.input_index;
+                    self.last_line = self.input_index == self.input_lines.len();
+                    Flow::Continue
+                } else {
+                    Flow::Quit
+                }
             }
 
             Command::NextAppend => {
                 // Append next line to pattern space with embedded newline
-                // In our model, we can't easily do this. For now, just continue.
-                self.pattern_space.push('\n');
-                Flow::Continue
+                if self.input_index < self.input_lines.len() {
+                    let next_line = self.input_lines[self.input_index].clone();
+                    self.input_index += 1;
+                    self.line_number = self.input_index;
+                    self.last_line = self.input_index == self.input_lines.len();
+                    self.pattern_space.push('\n');
+                    self.pattern_space.push_str(&next_line);
+                    Flow::Continue
+                } else {
+                    // No more input — default print and exit
+                    if !self.quiet {
+                        self.write_pattern_space();
+                    }
+                    Flow::Quit
+                }
             }
 
             Command::HoldReplace => {
@@ -1547,11 +1651,19 @@ fn main() {
     // Combine all expressions
     let script = opts.expressions.join("\n");
 
+    // Debug: log failing scripts
+    if std::env::var("SED_DEBUG").is_ok() {
+        eprintln!("sed debug: script = {:?}", script);
+    }
+
     // Parse
     let mut parser = Parser::new(&script, opts.extended);
     let commands = match parser.parse_all() {
         Ok(cmds) => cmds,
         Err(e) => {
+            if std::env::var("SED_DEBUG").is_ok() {
+                eprintln!("sed debug: parse error for script: {:?}", script);
+            }
             eprintln!("sed: {e}");
             process::exit(2);
         }
