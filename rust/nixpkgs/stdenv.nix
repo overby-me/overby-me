@@ -4,7 +4,7 @@
 # are replaced with Rust equivalents. Components are wired in from
 # the component registry (components/*.nix) — each component can be
 # backed by an existing Rust rewrite (e.g. uutils), a repo-root
-# subproject (e.g. ../make-rs), or left as the original C tool.
+# subproject (e.g. ../make), or left as the original C tool.
 #
 # Usage from an overlay:
 #   let mkRustStdenv = import ./stdenv.nix; in

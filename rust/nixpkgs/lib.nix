@@ -28,7 +28,7 @@
 
   # Source values describing where the replacement comes from.
   #   nixpkgs   — already packaged in nixpkgs (e.g. uutils, ripgrep)
-  #   repo      — a sibling subproject at the monorepo root (e.g. ../make-rs)
+  #   repo      — a sibling subproject at the monorepo root (e.g. ../make)
   #   upstream  — an upstream Rust project not yet in nixpkgs
   #   internal  — will be developed inside rust-nixpkgs/crates
   source = {

@@ -1,13 +1,13 @@
-# h264toav1-rs
+# h264toav1
 
 A CLI tool for transcoding H.264 (AVC) and H.265 (HEVC) video to AV1, built entirely in Rust.
 
-Uses [`h264-decode`](../h264-decoder-rs) and [`h265-decode`](../h265-decoder-rs) for decoding and [rav1e](https://github.com/xiph/rav1e) for AV1 encoding. Output is written as an [IVF](https://wiki.multimedia.cx/index.php/IVF) container.
+Uses [`h264-decode`](../h264-decoder) and [`h265-decode`](../h265-decoder) for decoding and [rav1e](https://github.com/xiph/rav1e) for AV1 encoding. Output is written as an [IVF](https://wiki.multimedia.cx/index.php/IVF) container.
 
 ## Project structure
 
 ```text
-h264toav1-rs/
+h264toav1/
 ├── Cargo.toml          # Package manifest
 ├── src/
 │   ├── main.rs         # CLI entry point, decode/encode pipeline
@@ -171,10 +171,10 @@ just transcode-hq input.264 output.ivf
 
 ```bash
 # Enter the devShell
-direnv allow  # or: nix develop .#h264toav1-rs
+direnv allow  # or: nix develop .#h264toav1
 
 # Build the package
-nix build .#h264toav1-rs
+nix build .#h264toav1
 ```
 
 ## License

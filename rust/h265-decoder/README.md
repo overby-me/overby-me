@@ -1,4 +1,4 @@
-# h265-decoder-rs
+# h265-decoder
 
 A pure Rust H.265/HEVC decoder library.
 
@@ -7,7 +7,7 @@ Parses H.265 Annex B bytestreams and decodes frames to YUV 4:2:0 planar (or conv
 ## Project structure
 
 ```text
-h265-decoder-rs/
+h265-decoder/
 ├── Cargo.toml                          # Workspace manifest
 ├── crates/
 │   └── h265-decode/
@@ -195,15 +195,15 @@ cargo fmt
 
 ```bash
 # Enter the devShell
-direnv allow  # or: nix develop .#h265-decoder-rs
+direnv allow  # or: nix develop .#h265-decoder
 
 # Build the package
-nix build .#h265-decoder-rs
+nix build .#h265-decoder
 ```
 
-## Comparison with h264-decoder-rs
+## Comparison with h264-decoder
 
-| Feature | h264-decoder-rs | h265-decoder-rs |
+| Feature | h264-decoder | h265-decoder |
 |---------|----------------|----------------|
 | NAL header | 1 byte | 2 bytes |
 | Parameter sets | SPS + PPS | VPS + SPS + PPS |

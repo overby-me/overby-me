@@ -1,4 +1,4 @@
-# h264-decoder-rs
+# h264-decoder
 
 A pure Rust H.264 (AVC) decoder library and CLI tool.
 
@@ -7,7 +7,7 @@ Parses H.264 Annex B bytestreams using the [`h264-reader`](https://crates.io/cra
 ## Project structure
 
 ```text
-h264-decoder-rs/
+h264-decoder/
 ├── Cargo.toml                  # Workspace root
 ├── crates/
 │   ├── h264-decode/            # Core decoder library
@@ -254,10 +254,10 @@ just doc
 
 ```bash
 # Enter the devShell
-direnv allow  # or: nix develop .#h264-decoder-rs
+direnv allow  # or: nix develop .#h264-decoder
 
 # Build the package
-nix build .#h264-decoder-rs
+nix build .#h264-decoder
 ```
 
 ## Current status

@@ -54,7 +54,7 @@ The nixpkgs standard environment (`stdenv`) is the foundation that builds every 
 | Patch | gnupatch | rust/patch | repo | 4 | ✅ Available |
 | ELF patcher | patchelf | rust/patchelf | repo | 5 | ✅ Available |
 | Symbol strip | binutils (strip) | rust/strip | repo | 5 | ✅ Available |
-| Build phases | setup.sh | mkderivation-rs (future) | repo | 6 | ⏳ Planned |
+| Build phases | setup.sh | rust-mkderivation (future) | repo | 6 | ⏳ Planned |
 
 ---
 
@@ -180,7 +180,7 @@ GNU Make is the most complex tool to replace and is **intentionally deferred**. 
 ### Testing Strategy
 
 - Patch application testing on the full set of nixpkgs patches
-- Differential testing on Makefile corpora from nixpkgs packages (when make-rs is attempted)
+- Differential testing on Makefile corpora from nixpkgs packages (when rust-make is attempted)
 
 ---
 
@@ -223,7 +223,7 @@ Today, `mkDerivation` works by:
 
 ### Rust Replacement Design
 
-A `mkderivation-rs` binary would:
+A `rust-mkderivation` binary would:
 
 1. Read build configuration from environment variables (same as today)
 2. Execute each phase as a structured step (not a bash function)
@@ -242,7 +242,7 @@ A `mkderivation-rs` binary would:
 
 ### Deliverables
 
-- [ ] `mkderivation-rs` binary at repo root (or `crates/mkderivation` within this project)
+- [ ] `rust-mkderivation` binary at repo root (or `crates/mkderivation` within this project)
 - [ ] Phase executor with all standard phases
 - [ ] Hook system (setup-hooks, pre/post phase hooks)
 - [ ] Nix `mkDerivationRs` function that uses the Rust builder
@@ -263,17 +263,17 @@ stdenvRs = pkgs.stdenv.override {
   initialPath = [
     rust-bash              # Phase 1
     uutils-coreutils       # Phase 1
-    sed-rs                 # Phase 2
-    grep-rs                # Phase 2
-    awk-rs                 # Phase 2
-    findutils-rs           # Phase 2
-    diffutils-rs           # Phase 2
-    tar-rs                 # Phase 3
-    gzip-rs                # Phase 3
-    bzip2-rs               # Phase 3
-    xz-rs                  # Phase 3
-    make-rs                # Phase 4
-    patch-rs               # Phase 4
+    rust-sed               # Phase 2
+    rust-grep              # Phase 2
+    rust-awk               # Phase 2
+    rust-findutils         # Phase 2
+    rust-diffutils         # Phase 2
+    rust-tar               # Phase 3
+    rust-gzip              # Phase 3
+    rust-bzip2             # Phase 3
+    rust-xz                # Phase 3
+    rust-make              # Phase 4
+    rust-patch             # Phase 4
   ];
   shell = "${rust-bash}/bin/bash";
 };
