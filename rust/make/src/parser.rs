@@ -384,6 +384,9 @@ impl Parser {
                             combined.push('\n');
                             combined.push_str(next_stripped);
                             self.advance();
+                        } else if next.trim_start().starts_with('#') {
+                            // Skip comment lines between continuation lines
+                            self.advance();
                         } else {
                             break;
                         }
@@ -394,6 +397,10 @@ impl Parser {
                 recipe.push(combined);
             } else if line.is_empty() {
                 // Empty lines within a recipe are allowed
+                self.advance();
+            } else if line.trim_start().starts_with('#') {
+                // Comment lines within a recipe block are skipped
+                // (e.g., automake's #\t commented-out recipe alternatives)
                 self.advance();
             } else {
                 break;
