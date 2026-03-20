@@ -780,9 +780,10 @@ fn ensure_dir(path: &str) {
     // Create all parent directories.
     let p = Path::new(path);
     if let Some(parent) = p.parent()
-        && !parent.exists() {
-            let _ = fs::create_dir_all(parent);
-        }
+        && !parent.exists()
+    {
+        let _ = fs::create_dir_all(parent);
+    }
     let _ = sys::mkdir(path, 0o755);
 }
 
@@ -842,8 +843,7 @@ fn setup_newroot(base: &str, ops: &[SetupOp]) {
                 }
 
                 // Remount for nosuid/nodev and optionally readonly.
-                let mut remount_flags: u64 =
-                    libc::MS_BIND | libc::MS_REMOUNT | libc::MS_REC;
+                let mut remount_flags: u64 = libc::MS_BIND | libc::MS_REMOUNT | libc::MS_REC;
                 if !dev {
                     remount_flags |= libc::MS_NOSUID | libc::MS_NODEV;
                 }
@@ -863,10 +863,8 @@ fn setup_newroot(base: &str, ops: &[SetupOp]) {
                     die_fmt(format_args!("bind-fd mount fd={fd} -> {target}: {e}"));
                 }
                 if *readonly {
-                    let ro_flags = libc::MS_BIND
-                        | libc::MS_REMOUNT
-                        | libc::MS_REC
-                        | libc::MS_RDONLY;
+                    let ro_flags =
+                        libc::MS_BIND | libc::MS_REMOUNT | libc::MS_REC | libc::MS_RDONLY;
                     let _ = sys::mount(None, &target, None, ro_flags, None);
                 }
             }
@@ -1046,8 +1044,7 @@ fn setup_newroot(base: &str, ops: &[SetupOp]) {
                     die_fmt(format_args!("bind-data mount {target}: {e}"));
                 }
                 if *readonly {
-                    let ro_flags =
-                        libc::MS_BIND | libc::MS_REMOUNT | libc::MS_RDONLY;
+                    let ro_flags = libc::MS_BIND | libc::MS_REMOUNT | libc::MS_RDONLY;
                     let _ = sys::mount(None, &target, None, ro_flags, None);
                 }
             }
@@ -1119,9 +1116,10 @@ fn run_sandbox(opts: &Options) -> ! {
 
     // Join existing user namespace if specified.
     if let Some(fd) = opts.userns_fd
-        && let Err(e) = sys::setns(fd, libc::CLONE_NEWUSER) {
-            die_fmt(format_args!("setns userns: {e}"));
-        }
+        && let Err(e) = sys::setns(fd, libc::CLONE_NEWUSER)
+    {
+        die_fmt(format_args!("setns userns: {e}"));
+    }
 
     // Create pipe for parent-child synchronization.
     let (child_read, parent_write) =
@@ -1218,25 +1216,22 @@ fn run_sandbox(opts: &Options) -> ! {
     sys::close(child_read);
 
     // Set up loopback if we have a new network namespace.
-    if opts.unshare_net && !opts.share_net
-        && let Err(e) = sys::setup_loopback() {
-            eprintln!("bwrap: warning: failed to set up loopback: {e}");
-        }
+    if opts.unshare_net
+        && !opts.share_net
+        && let Err(e) = sys::setup_loopback()
+    {
+        eprintln!("bwrap: warning: failed to set up loopback: {e}");
+    }
 
     // Set hostname if requested.
     if let Some(ref hostname) = opts.sandbox_hostname
-        && let Err(e) = sys::sethostname(hostname) {
-            die_fmt(format_args!("sethostname: {e}"));
-        }
+        && let Err(e) = sys::sethostname(hostname)
+    {
+        die_fmt(format_args!("sethostname: {e}"));
+    }
 
     // Prevent mount propagation to the host.
-    if let Err(e) = sys::mount(
-        None,
-        "/",
-        None,
-        libc::MS_SLAVE | libc::MS_REC,
-        None,
-    ) {
+    if let Err(e) = sys::mount(None, "/", None, libc::MS_SLAVE | libc::MS_REC, None) {
         die_fmt(format_args!("make / slave: {e}"));
     }
 
@@ -1282,9 +1277,10 @@ fn run_sandbox(opts: &Options) -> ! {
 
     // Join second user namespace if specified.
     if let Some(fd) = opts.userns2_fd
-        && let Err(e) = sys::setns(fd, libc::CLONE_NEWUSER) {
-            die_fmt(format_args!("setns userns2: {e}"));
-        }
+        && let Err(e) = sys::setns(fd, libc::CLONE_NEWUSER)
+    {
+        die_fmt(format_args!("setns userns2: {e}"));
+    }
 
     // Apply environment operations.
     // SAFETY: We are single-threaded at this point (post-fork child process).
@@ -1312,15 +1308,17 @@ fn run_sandbox(opts: &Options) -> ! {
 
     // Change directory.
     if let Some(ref dir) = opts.chdir
-        && let Err(e) = sys::chdir(dir) {
-            die_fmt(format_args!("chdir {dir}: {e}"));
-        }
+        && let Err(e) = sys::chdir(dir)
+    {
+        die_fmt(format_args!("chdir {dir}: {e}"));
+    }
 
     // New session.
     if opts.new_session
-        && let Err(e) = sys::setsid() {
-            die_fmt(format_args!("setsid: {e}"));
-        }
+        && let Err(e) = sys::setsid()
+    {
+        die_fmt(format_args!("setsid: {e}"));
+    }
 
     // If we have a PID namespace and the user didn't request --as-pid-1,
     // fork an intermediate pid-1 reaper process.
