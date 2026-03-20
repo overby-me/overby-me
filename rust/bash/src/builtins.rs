@@ -467,23 +467,24 @@ fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
         if let Some(eq_pos) = name_arg.find('=') {
             let name = &name_arg[..eq_pos];
             let value = &name_arg[eq_pos + 1..];
+            shell.declare_local(name);
             if flag_nameref {
                 shell.namerefs.insert(name.to_string(), value.to_string());
             } else if flag_array {
-                // Parse (val1 val2 ...) syntax
                 let arr = parse_array_literal(value);
                 shell.arrays.insert(name.to_string(), arr);
             } else {
                 shell.set_var(name, value.to_string());
             }
-            // Note: local -r should be function-scoped readonly, not global.
-            // Skip global readonly to avoid breaking repeated function calls.
-        } else if flag_nameref {
-            shell.namerefs.entry(name_arg.clone()).or_default();
-        } else if flag_array {
-            shell.arrays.entry(name_arg.clone()).or_default();
         } else {
-            shell.vars.entry(name_arg.clone()).or_default();
+            shell.declare_local(name_arg);
+            if flag_nameref {
+                shell.namerefs.entry(name_arg.clone()).or_default();
+            } else if flag_array {
+                shell.arrays.entry(name_arg.clone()).or_default();
+            } else {
+                shell.vars.entry(name_arg.clone()).or_default();
+            }
         }
     }
     0

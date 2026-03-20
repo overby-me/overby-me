@@ -21,6 +21,9 @@ pub struct Shell {
     pub func_names: Vec<String>,
     pub traps: HashMap<String, String>,
     pub namerefs: HashMap<String, String>,
+    /// Stack of local variable scopes. Each scope maps variable names to their
+    /// saved values (None if the variable didn't exist before).
+    pub local_scopes: Vec<HashMap<String, Option<String>>>,
 
     // Shell options (set)
     pub opt_errexit: bool,
@@ -96,6 +99,7 @@ impl Shell {
             func_names: Vec::new(),
             traps: HashMap::new(),
             namerefs: HashMap::new(),
+            local_scopes: Vec::new(),
             opt_errexit: false,
             opt_nounset: false,
             opt_xtrace: false,
@@ -144,6 +148,15 @@ impl Shell {
             unsafe { std::env::set_var(&resolved, &value) };
         }
         self.vars.insert(resolved, value);
+    }
+
+    /// Declare a local variable — saves the old value for restoration on function exit.
+    pub fn declare_local(&mut self, name: &str) {
+        if let Some(scope) = self.local_scopes.last_mut() {
+            if !scope.contains_key(name) {
+                scope.insert(name.to_string(), self.vars.get(name).cloned());
+            }
+        }
     }
 
     /// Get an array, resolving namerefs.
@@ -682,10 +695,36 @@ impl Shell {
         self.positional = vec![prog];
         self.positional.extend_from_slice(args);
         self.func_names.push(name.to_string());
+        self.local_scopes.push(HashMap::new());
+        self.arrays.insert(
+            "FUNCNAME".to_string(),
+            self.func_names.iter().rev().cloned().collect(),
+        );
 
         let status = self.run_compound_command(body);
 
+        // Restore local variables
+        if let Some(scope) = self.local_scopes.pop() {
+            for (var_name, old_value) in scope {
+                match old_value {
+                    Some(val) => {
+                        self.vars.insert(var_name, val);
+                    }
+                    None => {
+                        self.vars.remove(&var_name);
+                    }
+                }
+            }
+        }
         self.func_names.pop();
+        if self.func_names.is_empty() {
+            self.arrays.remove("FUNCNAME");
+        } else {
+            self.arrays.insert(
+                "FUNCNAME".to_string(),
+                self.func_names.iter().rev().cloned().collect(),
+            );
+        }
         self.positional = saved_positional;
         self.returning = false;
         status
