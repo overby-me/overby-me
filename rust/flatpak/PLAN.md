@@ -153,15 +153,17 @@ Implement the `flatpak build-*` workflow for building Flatpak apps.
 
 ### Tasks
 
-- [ ] `flatpak build-init` — initialize a build directory with runtime/SDK
-- [ ] `flatpak build` — run a command inside the build sandbox
-- [ ] `flatpak build-finish` — finalize metadata and exports
-- [ ] `flatpak build-export` — export build to an OSTree repository
-- [ ] `flatpak build-bundle` / `build-import-bundle` — single-file bundles
-- [ ] `flatpak build-sign` — GPG sign commits
-- [ ] `flatpak build-update-repo` — regenerate summary file
-- [ ] `flatpak build-commit-from` — create new commit from existing ref
-- [ ] `flatpak repo` — show repository information
+- [x] `flatpak build-init` — initialize a build directory with runtime/SDK
+- [x] `flatpak build` — run a command inside the build sandbox (with SDK
+  mounted as /usr, writable /app, network access for package downloads)
+- [x] `flatpak build-finish` — finalize metadata, permissions, and exports
+  (desktop files, icons, appdata, D-Bus services)
+- [x] `flatpak build-export` — export build to a local repository
+- [x] `flatpak build-bundle` / `build-import-bundle` — tar-based bundles
+- [x] `flatpak build-sign` — stub (GPG signing not yet implemented)
+- [x] `flatpak build-update-repo` — regenerate summary file
+- [x] `flatpak build-commit-from` — stub (requires full OSTree commit creation)
+- [x] `flatpak repo` — show repository information
 
 ## Priority Order
 

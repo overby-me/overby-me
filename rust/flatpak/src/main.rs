@@ -4,6 +4,7 @@
 // managing sandboxed applications. Uses bwrap (rust-bubblewrap) for
 // sandboxing.
 
+mod build;
 mod dbus_proxy;
 mod extensions;
 mod installation;
@@ -107,6 +108,16 @@ fn main() {
         "make-current" => cmd_make_current(&installations, cmd_args),
         "mask" => cmd_mask(&installations, cmd_args),
         "pin" => cmd_pin(&installations, cmd_args),
+        "build-init" => cmd_build_init(cmd_args),
+        "build" => cmd_build(&installations, cmd_args),
+        "build-finish" => cmd_build_finish(cmd_args),
+        "build-export" => cmd_build_export(cmd_args),
+        "build-bundle" => cmd_build_bundle(cmd_args),
+        "build-import-bundle" => cmd_build_import_bundle(&installations, cmd_args),
+        "build-sign" => cmd_build_sign(cmd_args),
+        "build-update-repo" => cmd_build_update_repo(cmd_args),
+        "build-commit-from" => cmd_build_commit_from(cmd_args),
+        "repo" => cmd_repo(cmd_args),
         "help" => {
             print_usage();
             process::exit(0);
@@ -1397,6 +1408,317 @@ fn cmd_pin(installations: &[Installation], args: &[String]) {
     let _ = fs::create_dir_all(&pin_dir);
     let _ = fs::write(pin_dir.join(pattern.replace('/', "_")), pattern.as_bytes());
     println!("Pinned: {pattern}");
+}
+
+// ---------------------------------------------------------------------------
+// Command: build-*
+// ---------------------------------------------------------------------------
+
+fn cmd_build_init(args: &[String]) {
+    let mut dir: Option<String> = None;
+    let mut sdk: Option<String> = None;
+    let mut runtime: Option<String> = None;
+    let mut runtime_version = "stable".to_string();
+    let mut app_id: Option<String> = None;
+    let mut extension_tag: Option<String> = None;
+
+    let mut positionals = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--extension-tag" => {
+                i += 1;
+                if i < args.len() {
+                    extension_tag = Some(args[i].clone());
+                }
+            }
+            s if s.starts_with('-') => {}
+            _ => positionals.push(args[i].clone()),
+        }
+        i += 1;
+    }
+
+    // positionals: DIR APP_ID SDK RUNTIME [BRANCH]
+    if positionals.len() >= 4 {
+        dir = Some(positionals[0].clone());
+        app_id = Some(positionals[1].clone());
+        sdk = Some(positionals[2].clone());
+        runtime = Some(positionals[3].clone());
+        if positionals.len() >= 5 {
+            runtime_version = positionals[4].clone();
+        }
+    }
+
+    let dir = dir.unwrap_or_else(|| {
+        eprintln!("flatpak build-init: usage: flatpak build-init DIR APP_ID SDK RUNTIME [BRANCH]");
+        process::exit(1);
+    });
+
+    build::build_init(
+        Path::new(&dir),
+        sdk.as_deref().unwrap_or("org.freedesktop.Sdk"),
+        runtime.as_deref().unwrap_or("org.freedesktop.Platform"),
+        &runtime_version,
+        app_id.as_deref().unwrap_or("org.example.App"),
+        extension_tag.as_deref(),
+    )
+    .unwrap_or_else(|e| {
+        eprintln!("flatpak build-init: {e}");
+        process::exit(1);
+    });
+
+    println!("Initialized build directory: {dir}");
+}
+
+fn cmd_build(installations: &[Installation], args: &[String]) {
+    let mut dir: Option<String> = None;
+    let mut command = Vec::new();
+    let mut runtime_env = false;
+    let mut past_dir = false;
+
+    for arg in args {
+        match arg.as_str() {
+            "--runtime" => runtime_env = true,
+            s if s.starts_with('-') && !past_dir => {}
+            _ => {
+                if dir.is_none() {
+                    dir = Some(arg.clone());
+                    past_dir = true;
+                } else {
+                    command.push(arg.clone());
+                }
+            }
+        }
+    }
+
+    let dir = dir.unwrap_or_else(|| {
+        eprintln!("flatpak build: usage: flatpak build DIR COMMAND [ARGS...]");
+        process::exit(1);
+    });
+
+    if command.is_empty() {
+        eprintln!("flatpak build: no command specified");
+        process::exit(1);
+    }
+
+    let exit_code = build::build_run(Path::new(&dir), &command, runtime_env, installations)
+        .unwrap_or_else(|e| {
+            eprintln!("flatpak build: {e}");
+            process::exit(1);
+        });
+
+    process::exit(exit_code);
+}
+
+fn cmd_build_finish(args: &[String]) {
+    let mut dir: Option<String> = None;
+    let mut command: Option<String> = None;
+    let mut permissions: Vec<(String, String)> = Vec::new();
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--command" => {
+                i += 1;
+                if i < args.len() {
+                    command = Some(args[i].clone());
+                }
+            }
+            "--share" => {
+                i += 1;
+                if i < args.len() {
+                    permissions.push(("shared".into(), args[i].clone()));
+                }
+            }
+            "--socket" => {
+                i += 1;
+                if i < args.len() {
+                    permissions.push(("sockets".into(), args[i].clone()));
+                }
+            }
+            "--filesystem" => {
+                i += 1;
+                if i < args.len() {
+                    permissions.push(("filesystems".into(), args[i].clone()));
+                }
+            }
+            "--device" => {
+                i += 1;
+                if i < args.len() {
+                    permissions.push(("devices".into(), args[i].clone()));
+                }
+            }
+            s if !s.starts_with('-') => {
+                if dir.is_none() {
+                    dir = Some(s.to_string());
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+
+    let dir = dir.unwrap_or_else(|| {
+        eprintln!("flatpak build-finish: usage: flatpak build-finish DIR [--command CMD] [--share ...] [--socket ...]");
+        process::exit(1);
+    });
+
+    build::build_finish(Path::new(&dir), command.as_deref(), &permissions).unwrap_or_else(|e| {
+        eprintln!("flatpak build-finish: {e}");
+        process::exit(1);
+    });
+
+    println!("Build finished: {dir}");
+}
+
+fn cmd_build_export(args: &[String]) {
+    let mut repo: Option<String> = None;
+    let mut dir: Option<String> = None;
+    let mut branch: Option<String> = None;
+    let mut subject: Option<String> = None;
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-b" | "--branch" => {
+                i += 1;
+                if i < args.len() {
+                    branch = Some(args[i].clone());
+                }
+            }
+            "-s" | "--subject" => {
+                i += 1;
+                if i < args.len() {
+                    subject = Some(args[i].clone());
+                }
+            }
+            s if !s.starts_with('-') => {
+                if repo.is_none() {
+                    repo = Some(s.to_string());
+                } else if dir.is_none() {
+                    dir = Some(s.to_string());
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+
+    let repo = repo.unwrap_or_else(|| {
+        eprintln!("flatpak build-export: usage: flatpak build-export REPO DIR [-b BRANCH]");
+        process::exit(1);
+    });
+    let dir = dir.unwrap_or_else(|| {
+        eprintln!("flatpak build-export: no build directory specified");
+        process::exit(1);
+    });
+
+    build::build_export(
+        Path::new(&repo),
+        Path::new(&dir),
+        branch.as_deref(),
+        subject.as_deref(),
+    )
+    .unwrap_or_else(|e| {
+        eprintln!("flatpak build-export: {e}");
+        process::exit(1);
+    });
+}
+
+fn cmd_build_bundle(args: &[String]) {
+    let positionals: Vec<&String> = args.iter().filter(|a| !a.starts_with('-')).collect();
+    if positionals.len() < 3 {
+        eprintln!("flatpak build-bundle: usage: flatpak build-bundle REPO FILE REF");
+        process::exit(1);
+    }
+
+    build::build_bundle(
+        Path::new(positionals[0]),
+        Path::new(positionals[1]),
+        positionals[2],
+    )
+    .unwrap_or_else(|e| {
+        eprintln!("flatpak build-bundle: {e}");
+        process::exit(1);
+    });
+}
+
+fn cmd_build_import_bundle(installations: &[Installation], args: &[String]) {
+    let file = args
+        .iter()
+        .find(|a| !a.starts_with('-'))
+        .unwrap_or_else(|| {
+            eprintln!("flatpak build-import-bundle: usage: flatpak build-import-bundle FILE");
+            process::exit(1);
+        });
+
+    build::build_import_bundle(installations, Path::new(file)).unwrap_or_else(|e| {
+        eprintln!("flatpak build-import-bundle: {e}");
+        process::exit(1);
+    });
+}
+
+fn cmd_build_sign(args: &[String]) {
+    let positionals: Vec<&String> = args.iter().filter(|a| !a.starts_with('-')).collect();
+    if positionals.len() < 2 {
+        eprintln!("flatpak build-sign: usage: flatpak build-sign REPO REF --gpg-sign=KEYID");
+        process::exit(1);
+    }
+    let key_id = args
+        .iter()
+        .find_map(|a| a.strip_prefix("--gpg-sign="))
+        .unwrap_or("default");
+
+    build::build_sign(Path::new(positionals[0]), positionals[1], key_id).unwrap_or_else(|e| {
+        eprintln!("flatpak build-sign: {e}");
+        process::exit(1);
+    });
+}
+
+fn cmd_build_update_repo(args: &[String]) {
+    let repo = args
+        .iter()
+        .find(|a| !a.starts_with('-'))
+        .unwrap_or_else(|| {
+            eprintln!("flatpak build-update-repo: usage: flatpak build-update-repo REPO");
+            process::exit(1);
+        });
+
+    build::build_update_repo(Path::new(repo)).unwrap_or_else(|e| {
+        eprintln!("flatpak build-update-repo: {e}");
+        process::exit(1);
+    });
+}
+
+fn cmd_build_commit_from(args: &[String]) {
+    let positionals: Vec<&String> = args.iter().filter(|a| !a.starts_with('-')).collect();
+    if positionals.len() < 3 {
+        eprintln!(
+            "flatpak build-commit-from: usage: flatpak build-commit-from REPO SRC_REF DEST_REF"
+        );
+        process::exit(1);
+    }
+
+    build::build_commit_from(Path::new(positionals[0]), positionals[1], positionals[2])
+        .unwrap_or_else(|e| {
+            eprintln!("flatpak build-commit-from: {e}");
+            process::exit(1);
+        });
+}
+
+fn cmd_repo(args: &[String]) {
+    let repo = args
+        .iter()
+        .find(|a| !a.starts_with('-'))
+        .unwrap_or_else(|| {
+            eprintln!("flatpak repo: usage: flatpak repo REPO");
+            process::exit(1);
+        });
+
+    build::repo_info(Path::new(repo)).unwrap_or_else(|e| {
+        eprintln!("flatpak repo: {e}");
+        process::exit(1);
+    });
 }
 
 // ---------------------------------------------------------------------------
