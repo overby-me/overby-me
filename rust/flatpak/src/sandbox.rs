@@ -182,10 +182,30 @@ pub fn build_sandbox(
     // --- Mount extensions ---
     if let Some(rt) = runtime_deployed {
         let rt_ref = &rt.ref_;
+        let all_installations = Installation::all();
+
+        // Auto-install missing extensions.
+        let missing = extensions::find_missing_extensions(
+            &rt.metadata,
+            Some(&deployed.metadata),
+            &all_installations,
+            rt_ref,
+        );
+        if !missing.is_empty() {
+            eprintln!(
+                "flatpak: {} missing extensions, attempting auto-install...",
+                missing.len()
+            );
+            let installed = extensions::auto_install_missing(&missing, &all_installations);
+            if !installed.is_empty() {
+                eprintln!("flatpak: installed {} extensions", installed.len());
+            }
+        }
+
         let resolved = extensions::resolve_extensions(
             &rt.metadata,
             Some(&deployed.metadata),
-            &Installation::all(),
+            &all_installations,
             rt_ref,
         );
 

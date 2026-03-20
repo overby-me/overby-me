@@ -324,9 +324,10 @@ fn cmd_list(installations: &[Installation], args: &[String]) {
         for deployed in inst.list_refs() {
             let is_app = deployed.ref_.kind == RefKind::App;
             if let Some(arch) = arch_filter
-                && deployed.ref_.arch != arch {
-                    continue;
-                }
+                && deployed.ref_.arch != arch
+            {
+                continue;
+            }
             if show_all || (show_app && is_app) || (show_runtime && !is_app) {
                 let inst_name = if inst.is_user { "user" } else { "system" };
                 if columns {

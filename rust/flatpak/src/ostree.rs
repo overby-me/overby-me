@@ -549,18 +549,136 @@ pub fn fetch_url(url: &str) -> Result<Vec<u8>, String> {
     }
 }
 
-fn fetch_http(addr: &str, request: &str) -> Result<Vec<u8>, String> {
-    let mut stream = TcpStream::connect(addr).map_err(|e| format!("connect {addr}: {e}"))?;
+fn do_http_request(stream: &mut dyn ReadWrite, request: &str) -> Result<Vec<u8>, String> {
     stream
         .write_all(request.as_bytes())
         .map_err(|e| format!("write: {e}"))?;
+    stream.flush().map_err(|e| format!("flush: {e}"))?;
 
-    let mut response = Vec::new();
-    stream
-        .read_to_end(&mut response)
-        .map_err(|e| format!("read: {e}"))?;
+    // Read headers.
+    let mut header_buf = Vec::with_capacity(4096);
+    let mut b = [0u8; 1];
+    loop {
+        if stream.read(&mut b).map_err(|e| format!("read: {e}"))? == 0 {
+            break;
+        }
+        header_buf.push(b[0]);
+        if header_buf.len() >= 4 && &header_buf[header_buf.len() - 4..] == b"\r\n\r\n" {
+            break;
+        }
+        if header_buf.len() > 65536 {
+            return Err("HTTP headers too large".into());
+        }
+    }
 
-    extract_body(&response)
+    let header = String::from_utf8_lossy(&header_buf);
+    let status_line = header.lines().next().unwrap_or("");
+    let status_code: u16 = status_line
+        .split_whitespace()
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+
+    // Handle redirects.
+    if (301..=308).contains(&status_code) {
+        for line in header.lines() {
+            if let Some(loc) = line
+                .strip_prefix("Location: ")
+                .or_else(|| line.strip_prefix("location: "))
+            {
+                return fetch_url(loc.trim());
+            }
+        }
+        return Err(format!("HTTP {status_code} redirect without Location"));
+    }
+
+    if status_code != 200 {
+        return Err(format!("HTTP {status_code}: {status_line}"));
+    }
+
+    // Parse Content-Length and Transfer-Encoding.
+    let header_lower = header.to_lowercase();
+    let is_chunked = header_lower.contains("transfer-encoding: chunked");
+    let content_length: Option<usize> = header_lower
+        .lines()
+        .find(|l| l.starts_with("content-length:"))
+        .and_then(|l| l.split(':').nth(1)?.trim().parse().ok());
+
+    // Read body.
+    if is_chunked {
+        read_chunked_body(stream)
+    } else if let Some(len) = content_length {
+        let mut body = vec![0u8; len];
+        let mut read = 0;
+        while read < len {
+            let n = stream
+                .read(&mut body[read..])
+                .map_err(|e| format!("read body: {e}"))?;
+            if n == 0 {
+                break;
+            }
+            read += n;
+        }
+        body.truncate(read);
+        Ok(body)
+    } else {
+        let mut body = Vec::new();
+        let _ = stream.read_to_end(&mut body);
+        Ok(body)
+    }
+}
+
+/// Read a chunked transfer-encoded body.
+fn read_chunked_body(stream: &mut dyn ReadWrite) -> Result<Vec<u8>, String> {
+    let mut body = Vec::new();
+    loop {
+        // Read chunk size line.
+        let mut size_line = Vec::new();
+        let mut b = [0u8; 1];
+        loop {
+            if stream
+                .read(&mut b)
+                .map_err(|e| format!("read chunk: {e}"))?
+                == 0
+            {
+                return Ok(body);
+            }
+            size_line.push(b[0]);
+            if size_line.len() >= 2 && size_line.ends_with(b"\r\n") {
+                break;
+            }
+        }
+        let size_str = String::from_utf8_lossy(&size_line);
+        let size_str = size_str.trim().split(';').next().unwrap_or("0");
+        let size = usize::from_str_radix(size_str.trim(), 16).unwrap_or(0);
+        if size == 0 {
+            break;
+        }
+        let mut chunk = vec![0u8; size];
+        let mut read = 0;
+        while read < size {
+            let n = stream
+                .read(&mut chunk[read..])
+                .map_err(|e| format!("read chunk data: {e}"))?;
+            if n == 0 {
+                break;
+            }
+            read += n;
+        }
+        body.extend_from_slice(&chunk[..read]);
+        // Read trailing CRLF.
+        let mut crlf = [0u8; 2];
+        let _ = stream.read_exact(&mut crlf);
+    }
+    Ok(body)
+}
+
+trait ReadWrite: Read + Write {}
+impl<T: Read + Write> ReadWrite for T {}
+
+fn fetch_http(addr: &str, request: &str) -> Result<Vec<u8>, String> {
+    let mut stream = TcpStream::connect(addr).map_err(|e| format!("connect {addr}: {e}"))?;
+    do_http_request(&mut stream, request)
 }
 
 fn fetch_https(host: &str, addr: &str, request: &str) -> Result<Vec<u8>, String> {
@@ -581,43 +699,13 @@ fn fetch_https(host: &str, addr: &str, request: &str) -> Result<Vec<u8>, String>
     let tcp = TcpStream::connect(addr).map_err(|e| format!("connect: {e}"))?;
     let mut tls = rustls::StreamOwned::new(conn, tcp);
 
-    tls.write_all(request.as_bytes())
-        .map_err(|e| format!("tls write: {e}"))?;
-    tls.flush().map_err(|e| format!("tls flush: {e}"))?;
-
-    let mut response = Vec::new();
-    tls.read_to_end(&mut response)
-        .map_err(|e| format!("tls read: {e}"))?;
-
-    extract_body(&response)
+    do_http_request(&mut tls, request)
 }
 
 fn rustls_root_store() -> rustls::RootCertStore {
     let mut store = rustls::RootCertStore::empty();
     store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
     store
-}
-
-fn extract_body(response: &[u8]) -> Result<Vec<u8>, String> {
-    // Find the end of HTTP headers.
-    let header_end = response
-        .windows(4)
-        .position(|w| w == b"\r\n\r\n")
-        .ok_or("no HTTP header boundary")?;
-
-    let header = std::str::from_utf8(&response[..header_end]).unwrap_or("");
-    let status_line = header.lines().next().unwrap_or("");
-    let status_code: u16 = status_line
-        .split_whitespace()
-        .nth(1)
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
-
-    if status_code != 200 {
-        return Err(format!("HTTP {status_code}: {status_line}"));
-    }
-
-    Ok(response[header_end + 4..].to_vec())
 }
 
 // ---------------------------------------------------------------------------
@@ -720,12 +808,66 @@ pub fn fetch_file(repo_url: &str, checksum: &str, dest: &Path) -> Result<(), Str
 }
 
 /// Recursively checkout a dirtree to a local directory.
+/// Progress counter for checkout operations.
+pub struct CheckoutProgress {
+    pub files_fetched: std::sync::atomic::AtomicUsize,
+    pub files_cached: std::sync::atomic::AtomicUsize,
+    pub bytes_downloaded: std::sync::atomic::AtomicUsize,
+}
+
+impl CheckoutProgress {
+    pub fn new() -> Self {
+        Self {
+            files_fetched: std::sync::atomic::AtomicUsize::new(0),
+            files_cached: std::sync::atomic::AtomicUsize::new(0),
+            bytes_downloaded: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+
+    pub fn print_status(&self) {
+        let fetched = self
+            .files_fetched
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let cached = self.files_cached.load(std::sync::atomic::Ordering::Relaxed);
+        let bytes = self
+            .bytes_downloaded
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let total = fetched + cached;
+        let mb = bytes as f64 / (1024.0 * 1024.0);
+        eprint!("\r  {total} objects ({fetched} fetched, {cached} cached, {mb:.1} MB)");
+    }
+}
+
 pub fn checkout_tree(
     repo_url: &str,
     dirtree_checksum: &str,
     dirmeta_checksum: &str,
     dest: &Path,
     verbose: bool,
+) -> Result<(), String> {
+    let progress = Arc::new(CheckoutProgress::new());
+    checkout_tree_inner(
+        repo_url,
+        dirtree_checksum,
+        dirmeta_checksum,
+        dest,
+        verbose,
+        &progress,
+    )?;
+    if verbose {
+        progress.print_status();
+        eprintln!(); // newline after progress
+    }
+    Ok(())
+}
+
+fn checkout_tree_inner(
+    repo_url: &str,
+    dirtree_checksum: &str,
+    dirmeta_checksum: &str,
+    dest: &Path,
+    verbose: bool,
+    progress: &Arc<CheckoutProgress>,
 ) -> Result<(), String> {
     let _ = fs::create_dir_all(dest);
 
@@ -736,24 +878,77 @@ pub fn checkout_tree(
 
     let tree = fetch_dirtree(repo_url, dirtree_checksum)?;
 
-    // Checkout files.
-    for file in &tree.files {
-        let file_path = dest.join(&file.name);
-        if verbose {
-            eprintln!("  {}", file_path.display());
+    // Checkout files — use threads for parallel fetching when there are many.
+    if tree.files.len() > 4 {
+        // Parallel fetching with a thread pool.
+        let errors: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+        std::thread::scope(|s| {
+            for file in &tree.files {
+                let file_path = dest.join(&file.name);
+                let checksum = file.checksum.clone();
+                let url = repo_url.to_string();
+                let progress = Arc::clone(progress);
+                let errors = &errors;
+
+                s.spawn(move || {
+                    let was_cached = cache_get(&checksum, "filez").is_some();
+                    match fetch_file(&url, &checksum, &file_path) {
+                        Ok(()) => {
+                            if was_cached {
+                                progress
+                                    .files_cached
+                                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            } else {
+                                progress
+                                    .files_fetched
+                                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            }
+                        }
+                        Err(e) => {
+                            errors.lock().unwrap().push(e);
+                        }
+                    }
+                });
+            }
+        });
+
+        let errs = errors.into_inner().unwrap();
+        if !errs.is_empty() {
+            return Err(errs.join("; "));
         }
-        fetch_file(repo_url, &file.checksum, &file_path)?;
+
+        if verbose {
+            progress.print_status();
+        }
+    } else {
+        // Sequential for small directories.
+        for file in &tree.files {
+            let file_path = dest.join(&file.name);
+            let was_cached = cache_get(&file.checksum, "filez").is_some();
+            fetch_file(repo_url, &file.checksum, &file_path)?;
+            if was_cached {
+                progress
+                    .files_cached
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            } else {
+                progress
+                    .files_fetched
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
     }
 
     // Recurse into subdirectories.
     for dir in &tree.dirs {
         let dir_path = dest.join(&dir.name);
-        checkout_tree(
+        checkout_tree_inner(
             repo_url,
             &dir.dirtree_checksum,
             &dir.dirmeta_checksum,
             &dir_path,
             verbose,
+            progress,
         )?;
     }
 
@@ -810,6 +1005,267 @@ pub fn pull_ref(
 #[allow(dead_code)]
 pub fn list_remote_refs(repo_url: &str) -> Result<Vec<SummaryRef>, String> {
     fetch_summary(repo_url)
+}
+
+// ---------------------------------------------------------------------------
+// OSTree commit creation
+// ---------------------------------------------------------------------------
+
+use std::os::unix::fs::MetadataExt;
+
+/// Compute SHA256 hash of data and return as hex string.
+fn sha256_hex(data: &[u8]) -> String {
+    // Minimal SHA256 implementation. We use a subprocess since we don't have
+    // a SHA256 crate. On Linux, sha256sum is always available.
+    let mut child = std::process::Command::new("sha256sum")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("sha256sum not found");
+
+    if let Some(ref mut stdin) = child.stdin {
+        let _ = stdin.write_all(data);
+    }
+    drop(child.stdin.take());
+
+    let output = child.wait_with_output().expect("sha256sum failed");
+    let hex = String::from_utf8_lossy(&output.stdout);
+    hex.split_whitespace().next().unwrap_or("").to_string()
+}
+
+/// Create a dirmeta object from directory metadata.
+/// Format: (uuua(ayay)) — uid, gid, mode (all BE), xattrs.
+pub fn create_dirmeta(uid: u32, gid: u32, mode: u32) -> Vec<u8> {
+    let mut data = Vec::new();
+    data.extend_from_slice(&uid.to_be_bytes());
+    data.extend_from_slice(&gid.to_be_bytes());
+    data.extend_from_slice(&mode.to_be_bytes());
+    // Empty xattrs array: just a zero-length array of (ayay).
+    data
+}
+
+/// Create a file content object for storage.
+/// Returns (checksum, serialized_data) — the data is the uncompressed stream
+/// format used for checksumming, NOT the .filez archive format.
+fn create_file_object(file_path: &Path) -> Result<(String, Vec<u8>), String> {
+    let meta = fs::metadata(file_path).map_err(|e| format!("stat {}: {e}", file_path.display()))?;
+    let mode = meta.mode();
+    let uid = meta.uid();
+    let gid = meta.gid();
+
+    let symlink_target = if meta.file_type().is_symlink() {
+        fs::read_link(file_path)
+            .map_err(|e| format!("readlink: {e}"))?
+            .to_string_lossy()
+            .to_string()
+    } else {
+        String::new()
+    };
+
+    // Build the header: (uuuusa(ayay)) — note: no leading `t` for checksum format.
+    let mut header = Vec::new();
+    header.extend_from_slice(&uid.to_be_bytes());
+    header.extend_from_slice(&gid.to_be_bytes());
+    header.extend_from_slice(&mode.to_be_bytes());
+    header.extend_from_slice(&0u32.to_be_bytes()); // rdev
+    header.extend_from_slice(symlink_target.as_bytes());
+    header.push(0); // NUL terminator
+    // Empty xattrs.
+
+    // Build the stream: [4-byte BE header_size][4-byte padding][header][content]
+    let header_size = header.len() as u32;
+    let mut stream = Vec::new();
+    stream.extend_from_slice(&header_size.to_be_bytes());
+    stream.extend_from_slice(&[0u8; 4]); // padding
+    stream.extend_from_slice(&header);
+
+    if !meta.file_type().is_symlink() {
+        let content = fs::read(file_path).map_err(|e| format!("read: {e}"))?;
+        stream.extend_from_slice(&content);
+    }
+
+    let checksum = sha256_hex(&stream);
+    Ok((checksum, stream))
+}
+
+/// Recursively create a dirtree object from a directory.
+/// Returns (dirtree_checksum, dirmeta_checksum).
+pub fn create_dirtree_from_dir(dir: &Path, repo_path: &Path) -> Result<(String, String), String> {
+    let meta = fs::metadata(dir).map_err(|e| format!("stat {}: {e}", dir.display()))?;
+    let dirmeta_data = create_dirmeta(meta.uid(), meta.gid(), meta.mode());
+    let dirmeta_checksum = sha256_hex(&dirmeta_data);
+    store_object(repo_path, &dirmeta_checksum, "dirmeta", &dirmeta_data);
+
+    let mut files: Vec<(String, String)> = Vec::new(); // (name, checksum)
+    let mut dirs: Vec<(String, String, String)> = Vec::new(); // (name, dirtree_cksum, dirmeta_cksum)
+
+    let mut entries: Vec<_> = fs::read_dir(dir)
+        .map_err(|e| format!("readdir {}: {e}", dir.display()))?
+        .filter_map(|e| e.ok())
+        .collect();
+    entries.sort_by_key(|e| e.file_name());
+
+    for entry in &entries {
+        let name = entry.file_name().to_string_lossy().to_string();
+        let path = entry.path();
+        let ftype = entry.file_type().map_err(|e| format!("filetype: {e}"))?;
+
+        if ftype.is_dir() {
+            let (sub_dirtree, sub_dirmeta) = create_dirtree_from_dir(&path, repo_path)?;
+            dirs.push((name, sub_dirtree, sub_dirmeta));
+        } else {
+            let (checksum, _data) = create_file_object(&path)?;
+            // Store the file object as .filez (compressed).
+            let content = fs::read(&path).unwrap_or_default();
+            let compressed = miniz_oxide::deflate::compress_to_vec(&content, 6);
+
+            // Build .filez archive: [4-byte BE header_size][4-byte pad][header][compressed]
+            let file_meta = fs::metadata(&path).unwrap();
+            let symlink = if ftype.is_symlink() {
+                fs::read_link(&path)
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string()
+            } else {
+                String::new()
+            };
+            let mut filez_header = Vec::new();
+            filez_header.extend_from_slice(&(content.len() as u64).to_be_bytes());
+            filez_header.extend_from_slice(&file_meta.uid().to_be_bytes());
+            filez_header.extend_from_slice(&file_meta.gid().to_be_bytes());
+            filez_header.extend_from_slice(&file_meta.mode().to_be_bytes());
+            filez_header.extend_from_slice(&0u32.to_be_bytes()); // rdev
+            filez_header.extend_from_slice(symlink.as_bytes());
+            filez_header.push(0);
+
+            let mut filez = Vec::new();
+            filez.extend_from_slice(&(filez_header.len() as u32).to_be_bytes());
+            filez.extend_from_slice(&[0u8; 4]);
+            filez.extend_from_slice(&filez_header);
+            filez.extend_from_slice(&compressed);
+
+            store_object(repo_path, &checksum, "filez", &filez);
+            files.push((name, checksum));
+        }
+    }
+
+    // Serialize the dirtree: (a(say)a(sayay))
+    let dirtree_data = serialize_dirtree(&files, &dirs);
+    let dirtree_checksum = sha256_hex(&dirtree_data);
+    store_object(repo_path, &dirtree_checksum, "dirtree", &dirtree_data);
+
+    Ok((dirtree_checksum, dirmeta_checksum))
+}
+
+/// Serialize a dirtree object.
+fn serialize_dirtree(files: &[(String, String)], dirs: &[(String, String, String)]) -> Vec<u8> {
+    // This is a simplified serialization. A full GVariant serializer would
+    // handle alignment and framing offsets properly. For now, produce a
+    // byte sequence that our parser can round-trip.
+    let mut data = Vec::new();
+
+    // Files array placeholder — simplified binary format.
+    for (name, checksum) in files {
+        data.extend_from_slice(name.as_bytes());
+        data.push(0); // NUL
+        // 32-byte raw checksum.
+        for i in (0..64).step_by(2) {
+            let byte = u8::from_str_radix(&checksum[i..i + 2], 16).unwrap_or(0);
+            data.push(byte);
+        }
+    }
+
+    // Separator — in real GVariant this would be framing offsets.
+    // For our simplified format, the dirtree data is mainly used for
+    // checksumming and local storage.
+
+    for (name, dt_cksum, dm_cksum) in dirs {
+        data.extend_from_slice(name.as_bytes());
+        data.push(0);
+        for i in (0..64).step_by(2) {
+            let byte = u8::from_str_radix(&dt_cksum[i..i + 2], 16).unwrap_or(0);
+            data.push(byte);
+        }
+        for i in (0..64).step_by(2) {
+            let byte = u8::from_str_radix(&dm_cksum[i..i + 2], 16).unwrap_or(0);
+            data.push(byte);
+        }
+    }
+
+    data
+}
+
+/// Create a commit object.
+/// Returns the commit checksum.
+pub fn create_commit(
+    repo_path: &Path,
+    root_dirtree: &str,
+    root_dirmeta: &str,
+    subject: &str,
+    parent: Option<&str>,
+) -> Result<String, String> {
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    // Simplified commit serialization.
+    let mut data = Vec::new();
+
+    // Empty metadata a{sv}.
+    // Empty parent ay.
+    if let Some(p) = parent {
+        for i in (0..64).step_by(2) {
+            let byte = u8::from_str_radix(&p[i..i + 2], 16).unwrap_or(0);
+            data.push(byte);
+        }
+    }
+
+    // Empty related objects a(say).
+    // Subject string.
+    data.extend_from_slice(subject.as_bytes());
+    data.push(0);
+    // Empty body string.
+    data.push(0);
+    // Timestamp (BE u64).
+    data.extend_from_slice(&timestamp.to_be_bytes());
+    // Root dirtree checksum.
+    for i in (0..64).step_by(2) {
+        let byte = u8::from_str_radix(&root_dirtree[i..i + 2], 16).unwrap_or(0);
+        data.push(byte);
+    }
+    // Root dirmeta checksum.
+    for i in (0..64).step_by(2) {
+        let byte = u8::from_str_radix(&root_dirmeta[i..i + 2], 16).unwrap_or(0);
+        data.push(byte);
+    }
+
+    let checksum = sha256_hex(&data);
+    store_object(repo_path, &checksum, "commit", &data);
+
+    // Write ref.
+    let refs_dir = repo_path.join("refs");
+    let _ = fs::create_dir_all(&refs_dir);
+
+    Ok(checksum)
+}
+
+/// Store an object in the local repo.
+fn store_object(repo_path: &Path, checksum: &str, ext: &str, data: &[u8]) {
+    let obj_dir = repo_path.join("objects").join(&checksum[..2]);
+    let _ = fs::create_dir_all(&obj_dir);
+    let path = obj_dir.join(format!("{}.{ext}", &checksum[2..]));
+    let _ = fs::write(&path, data);
+}
+
+/// Write a ref to the repo.
+pub fn write_ref(repo_path: &Path, ref_name: &str, commit_checksum: &str) {
+    let ref_path = repo_path.join("refs").join("heads").join(ref_name);
+    if let Some(parent) = ref_path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::write(&ref_path, format!("{commit_checksum}\n"));
 }
 
 // ---------------------------------------------------------------------------

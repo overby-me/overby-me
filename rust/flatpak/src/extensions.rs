@@ -5,8 +5,9 @@
 
 use std::path::PathBuf;
 
-use crate::installation::{Installation, Ref, RefKind};
+use crate::installation::{self, Installation, Ref, RefKind};
 use crate::metadata::Metadata;
+use crate::ostree;
 
 /// A resolved extension ready to mount.
 #[derive(Debug, Clone)]
@@ -269,6 +270,105 @@ pub fn extension_mount_args(
 ///
 /// Runs ldconfig inside a minimal bwrap sandbox to generate the cache,
 /// then returns the path to the generated cache file for bind-mounting.
+/// Try to auto-install missing extensions from configured remotes.
+///
+/// Returns the list of successfully installed extension IDs.
+pub fn auto_install_missing(decls: &[Ref], installations: &[Installation]) -> Vec<String> {
+    let mut installed = Vec::new();
+
+    let inst = &installations[0]; // Install to first (user) installation.
+    let remotes = installation::load_remotes(inst);
+
+    for ext_ref in decls {
+        let ref_str = ext_ref.format_ref();
+        eprintln!("  Looking for {ref_str} on remotes...");
+
+        for remote in &remotes {
+            match ostree::fetch_summary(&remote.url) {
+                Ok(refs) => {
+                    if refs.iter().any(|r| r.name == ref_str) {
+                        eprintln!("  Found on {}. Installing...", remote.name);
+                        let deploy_path = inst.deploy_path(ext_ref);
+                        let _ = std::fs::create_dir_all(&deploy_path);
+
+                        match ostree::pull_ref(&remote.url, &ref_str, &deploy_path, false) {
+                            Ok(_) => {
+                                // Create minimal metadata.
+                                let meta_path = deploy_path.join("metadata");
+                                if !meta_path.exists() {
+                                    let content = format!("[Runtime]\nname={}\n", ext_ref.id);
+                                    let _ = std::fs::write(&meta_path, content);
+                                }
+                                eprintln!("  Installed {}", ext_ref.id);
+                                installed.push(ext_ref.id.clone());
+                                break;
+                            }
+                            Err(e) => {
+                                eprintln!("  Failed to pull from {}: {e}", remote.name);
+                                let _ = std::fs::remove_dir_all(&deploy_path);
+                            }
+                        }
+                    }
+                }
+                Err(_) => continue,
+            }
+        }
+    }
+
+    installed
+}
+
+/// Find missing extensions and return their refs.
+pub fn find_missing_extensions(
+    runtime_metadata: &Metadata,
+    app_metadata: Option<&Metadata>,
+    installations: &[Installation],
+    runtime_ref: &Ref,
+) -> Vec<Ref> {
+    let mut missing = Vec::new();
+    let mut decls = parse_extensions(runtime_metadata);
+    if let Some(app_meta) = app_metadata {
+        decls.extend(parse_extensions(app_meta));
+    }
+
+    for decl in &decls {
+        if decl.no_autodownload {
+            continue;
+        }
+        let branches = extension_branches(decl, runtime_ref);
+        let mut found = false;
+
+        for inst in installations {
+            for branch in &branches {
+                let ext_ref = Ref {
+                    kind: RefKind::Runtime,
+                    id: decl.name.clone(),
+                    arch: runtime_ref.arch.clone(),
+                    branch: branch.clone(),
+                };
+                if inst.files_path(&ext_ref).exists() {
+                    found = true;
+                    break;
+                }
+            }
+            if found {
+                break;
+            }
+        }
+
+        if !found {
+            missing.push(Ref {
+                kind: RefKind::Runtime,
+                id: decl.name.clone(),
+                arch: runtime_ref.arch.clone(),
+                branch: branches.first().cloned().unwrap_or_else(|| "stable".into()),
+            });
+        }
+    }
+
+    missing
+}
+
 pub fn regenerate_ld_cache(
     runtime_files: &std::path::Path,
     ld_paths: &[String],

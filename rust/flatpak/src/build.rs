@@ -314,7 +314,38 @@ pub fn build_export(
 
     let ref_str = ref_.format_ref();
     let subject = subject.unwrap_or("Export");
-    eprintln!("Exported {ref_str}: {subject}");
+
+    // Create OSTree objects for the export.
+    let ostree_repo = repo_path.join("repo");
+    let _ = fs::create_dir_all(&ostree_repo);
+    if src_files.exists() {
+        match crate::ostree::create_dirtree_from_dir(&src_files, &ostree_repo) {
+            Ok((dirtree_cksum, dirmeta_cksum)) => {
+                match crate::ostree::create_commit(
+                    &ostree_repo,
+                    &dirtree_cksum,
+                    &dirmeta_cksum,
+                    subject,
+                    None,
+                ) {
+                    Ok(commit_cksum) => {
+                        crate::ostree::write_ref(&ostree_repo, &ref_str, &commit_cksum);
+                        eprintln!("Exported {ref_str}: {subject} (commit {commit_cksum})");
+                    }
+                    Err(e) => {
+                        eprintln!("warning: OSTree commit creation failed: {e}");
+                        eprintln!("Exported {ref_str}: {subject} (file copy only)");
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("warning: OSTree tree creation failed: {e}");
+                eprintln!("Exported {ref_str}: {subject} (file copy only)");
+            }
+        }
+    } else {
+        eprintln!("Exported {ref_str}: {subject}");
+    }
 
     Ok(ref_str)
 }
@@ -457,14 +488,120 @@ pub fn build_update_repo(repo_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Create a new commit from an existing ref (stub).
-pub fn build_commit_from(_repo_path: &Path, _src_ref: &str, _dest_ref: &str) -> Result<(), String> {
-    Err("build-commit-from: not yet implemented (requires full OSTree commit creation)".into())
+/// Create a new commit from an existing ref's content.
+pub fn build_commit_from(repo_path: &Path, src_ref: &str, dest_ref: &str) -> Result<(), String> {
+    // Find the source ref's files.
+    let src_parsed = Ref::parse(src_ref).ok_or("could not parse source ref")?;
+    let src_files = repo_path
+        .join(src_parsed.kind_dir())
+        .join(&src_parsed.id)
+        .join(&src_parsed.arch)
+        .join(&src_parsed.branch)
+        .join("active")
+        .join("files");
+
+    if !src_files.exists() {
+        return Err(format!("source ref {src_ref} not found"));
+    }
+
+    let ostree_repo = repo_path.join("repo");
+    let _ = fs::create_dir_all(&ostree_repo);
+
+    let (dirtree_cksum, dirmeta_cksum) =
+        crate::ostree::create_dirtree_from_dir(&src_files, &ostree_repo)?;
+    let commit_cksum = crate::ostree::create_commit(
+        &ostree_repo,
+        &dirtree_cksum,
+        &dirmeta_cksum,
+        &format!("Commit from {src_ref}"),
+        None,
+    )?;
+    crate::ostree::write_ref(&ostree_repo, dest_ref, &commit_cksum);
+
+    // Also copy the deployment for the new ref.
+    let dest_parsed = Ref::parse(dest_ref).ok_or("could not parse dest ref")?;
+    let dest_dir = repo_path
+        .join(dest_parsed.kind_dir())
+        .join(&dest_parsed.id)
+        .join(&dest_parsed.arch)
+        .join(&dest_parsed.branch)
+        .join("active");
+    let _ = fs::create_dir_all(&dest_dir);
+    let src_deploy = repo_path
+        .join(src_parsed.kind_dir())
+        .join(&src_parsed.id)
+        .join(&src_parsed.arch)
+        .join(&src_parsed.branch)
+        .join("active");
+    copy_dir_recursive(&src_deploy, &dest_dir);
+
+    eprintln!("Created {dest_ref} from {src_ref} (commit {commit_cksum})");
+    Ok(())
 }
 
-/// Sign a ref in a repository (stub).
-pub fn build_sign(_repo_path: &Path, _ref_name: &str, _key_id: &str) -> Result<(), String> {
-    Err("build-sign: GPG signing not yet implemented".into())
+/// Sign a ref in a repository using GPG.
+pub fn build_sign(repo_path: &Path, ref_name: &str, key_id: &str) -> Result<(), String> {
+    // Find the commit checksum for this ref.
+    let ostree_repo = repo_path.join("repo");
+    let ref_path = ostree_repo.join("refs").join("heads").join(ref_name);
+
+    let commit_checksum = if ref_path.exists() {
+        fs::read_to_string(&ref_path)
+            .map_err(|e| format!("read ref: {e}"))?
+            .trim()
+            .to_string()
+    } else {
+        return Err(format!("ref {ref_name} not found in repo"));
+    };
+
+    // Read the commit object.
+    let commit_path = ostree_repo
+        .join("objects")
+        .join(&commit_checksum[..2])
+        .join(format!("{}.commit", &commit_checksum[2..]));
+
+    if !commit_path.exists() {
+        return Err(format!("commit object {} not found", commit_checksum));
+    }
+
+    let commit_data = fs::read(&commit_path).map_err(|e| format!("read commit: {e}"))?;
+
+    // Sign with GPG.
+    let sig_path = format!("/tmp/.flatpak-sign-{}", std::process::id());
+    let data_path = format!("/tmp/.flatpak-signdata-{}", std::process::id());
+    let _ = fs::write(&data_path, &commit_data);
+
+    let status = Command::new("gpg")
+        .args([
+            "--detach-sign",
+            "--armor",
+            "-u",
+            key_id,
+            "-o",
+            &sig_path,
+            &data_path,
+        ])
+        .status()
+        .map_err(|e| format!("gpg: {e}"))?;
+
+    let _ = fs::remove_file(&data_path);
+
+    if !status.success() {
+        let _ = fs::remove_file(&sig_path);
+        return Err("GPG signing failed".into());
+    }
+
+    // Store the signature as a .commitmeta object.
+    let sig_data = fs::read(&sig_path).map_err(|e| format!("read signature: {e}"))?;
+    let _ = fs::remove_file(&sig_path);
+
+    let sig_obj_dir = ostree_repo.join("objects").join(&commit_checksum[..2]);
+    let sig_obj_path = sig_obj_dir.join(format!("{}.commitmeta", &commit_checksum[2..]));
+    let _ = fs::create_dir_all(&sig_obj_dir);
+    fs::write(&sig_obj_path, &sig_data).map_err(|e| format!("write signature: {e}"))?;
+
+    eprintln!("Signed {ref_name} (commit {commit_checksum}) with key {key_id}");
+    Ok(())
 }
 
 /// Show repository information.
