@@ -68,7 +68,7 @@ pkgs.testers.nixosTest {
     )
     assert "ProtectSystem=strict" in unit, f"ProtectSystem should be strict: {unit}"
     assert "DynamicUser=yes" in unit, f"DynamicUser should be yes: {unit}"
-    assert "ProtectHome=yes" in unit, f"ProtectHome should be yes: {unit}"
+    assert "ProtectHome=read-only" in unit, f"ProtectHome should be read-only: {unit}"
     assert "NoNewPrivileges=yes" in unit, f"NoNewPrivileges should be yes: {unit}"
     assert "PrivateTmp=yes" in unit, f"PrivateTmp should be yes: {unit}"
 
