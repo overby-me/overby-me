@@ -575,11 +575,25 @@ impl Parser {
             return Ok(CondExpr::Word(left));
         }
 
-        // Check for binary operator
+        // Check for binary operator (as word token)
         if let Some(text) = self.word_text()
             && is_cond_binary_op(&text)
         {
             let op = text;
+            self.advance();
+            let right = self
+                .take_word()
+                .ok_or_else(|| format!("expected operand after '{}'", op))?;
+            return Ok(CondExpr::Binary(left, op, right));
+        }
+
+        // Check for < and > which are Token::Less/Token::Great inside [[ ]]
+        if matches!(self.current, Token::Less | Token::Great) {
+            let op = if self.current == Token::Less {
+                "<".to_string()
+            } else {
+                ">".to_string()
+            };
             self.advance();
             let right = self
                 .take_word()
