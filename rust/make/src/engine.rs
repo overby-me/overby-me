@@ -248,13 +248,21 @@ impl Engine {
 
     /// Lookup a variable, expanding if recursive.
     pub fn lookup_var(&self, name: &str) -> String {
+        self.lookup_var_with_auto(name, &HashMap::new())
+    }
+
+    pub fn lookup_var_with_auto(
+        &self,
+        name: &str,
+        auto_vars: &HashMap<&str, String>,
+    ) -> String {
         let vars = self.vars.borrow();
         if let Some(var) = vars.get(name) {
             let value = var.value.clone();
             let flavor = var.flavor;
             drop(vars);
             match flavor {
-                VarFlavor::Recursive => expand::expand(&value, self),
+                VarFlavor::Recursive => expand::expand_with_auto(&value, self, auto_vars),
                 VarFlavor::Simple => value,
                 VarFlavor::Undefined => String::new(),
             }

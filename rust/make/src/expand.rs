@@ -108,7 +108,7 @@ fn expand_expr(expr: &str, engine: &Engine, auto_vars: &HashMap<&str, String>) -
             let val = if let Some(v) = auto_vars.get(varname) {
                 v.clone()
             } else {
-                engine.lookup_var(varname)
+                engine.lookup_var_with_auto(varname, auto_vars)
             };
             return substitute_ref(&val, from, to);
         }
@@ -129,7 +129,7 @@ fn expand_expr(expr: &str, engine: &Engine, auto_vars: &HashMap<&str, String>) -
     if let Some(val) = auto_vars.get(varname) {
         val.clone()
     } else {
-        engine.lookup_var(varname)
+        engine.lookup_var_with_auto(varname, auto_vars)
     }
 }
 
