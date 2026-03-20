@@ -279,13 +279,15 @@
         # Skip default buildPhase, run make directly to debug
         buildPhase = ''
           runHook preBuild
-          # Build BUILT_SOURCES first (same as default all target prereqs)
-          make SHELL=$SHELL lib/basename-lgpl.o 2>&1 || true
-          echo "=== check .o ==="
+          echo "=== without SHELL ==="
+          make lib/basename-lgpl.o 2>&1 | head -3
           ls -la lib/basename-lgpl.o 2>&1 || echo "does not exist"
-          echo "=== end ==="
-          # Now do the real build
-          make SHELL=$SHELL
+          rm -f lib/basename-lgpl.o
+          echo "=== with SHELL ==="
+          make SHELL=$SHELL lib/basename-lgpl.o 2>&1 | head -3
+          ls -la lib/basename-lgpl.o 2>&1 || echo "does not exist"
+          echo "=== full build ==="
+          make
           runHook postBuild
         '';
 
