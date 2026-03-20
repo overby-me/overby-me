@@ -193,6 +193,22 @@ impl Engine {
         self.set_var_default("ARFLAGS", "rv");
     }
 
+    /// Check if a target name is an old-style suffix rule (e.g., ".c.o").
+    /// Returns (source_suffix, target_suffix) if it is.
+    fn parse_suffix_rule(&self, target: &str) -> Option<(String, String)> {
+        let suffixes = self.suffixes.borrow();
+        // Try all possible splits: .src.dst
+        for dst in suffixes.iter() {
+            if target.ends_with(dst.as_str()) && target.len() > dst.len() {
+                let src = &target[..target.len() - dst.len()];
+                if suffixes.iter().any(|s| s == src) {
+                    return Some((src.to_string(), dst.to_string()));
+                }
+            }
+        }
+        None
+    }
+
     fn set_var_default(&self, name: &str, value: &str) {
         let vars = self.vars.borrow();
         if !vars.contains_key(name) {
@@ -505,6 +521,20 @@ impl Engine {
             }
         }
 
+        // Old-style suffix rules: .c.o: → %.o: %.c
+        // A target like ".XY" where .X and .Y are known suffixes
+        if targets.len() == 1 && prereqs.is_empty() && targets[0].starts_with('.') {
+            let target = &targets[0];
+            if let Some((src_suffix, dst_suffix)) = self.parse_suffix_rule(target) {
+                self.pattern_rules.borrow_mut().push(PatternRuleEntry {
+                    target_pattern: format!("%{dst_suffix}"),
+                    prereq_patterns: vec![format!("%{src_suffix}")],
+                    recipe: rule.recipe.clone(),
+                });
+                return;
+            }
+        }
+
         // Pattern rule
         if let Some(pattern) = &rule.pattern {
             for target_pat in &targets {
@@ -653,6 +683,11 @@ impl Engine {
     }
 
     fn build_target(&self, target: &str) -> Result<(), String> {
+        // Normalize path: strip leading ./ for consistency with rule lookup
+        let target = target
+            .strip_prefix("./")
+            .unwrap_or(target);
+
         // Already built?
         if self.built_targets.borrow().contains(target) {
             return Ok(());
@@ -676,6 +711,8 @@ impl Engine {
         let mut all_order_only: Vec<String> = Vec::new();
         let mut recipe: Vec<String> = Vec::new();
         let mut stem = String::new();
+        // Track pattern-implied prerequisites for $< resolution
+        let mut implied_prereqs: Vec<String> = Vec::new();
 
         for rule in &rules {
             all_prereqs.extend(rule.prerequisites.iter().map(|p| expand::expand(p, self)));
@@ -689,6 +726,7 @@ impl Engine {
             stem = pat_stem.clone();
             for pp in &pat_rule.prereq_patterns {
                 let prereq = pp.replace('%', &stem);
+                implied_prereqs.push(prereq.clone());
                 all_prereqs.push(prereq);
             }
             if recipe.is_empty() {
@@ -761,7 +799,7 @@ impl Engine {
                     .ok();
             }
         } else {
-            self.execute_recipe(target, &recipe, &all_prereqs, &stem)?;
+            self.execute_recipe(target, &recipe, &all_prereqs, &implied_prereqs, &stem)?;
         }
 
         self.built_targets.borrow_mut().insert(target.to_string());
@@ -791,12 +829,21 @@ impl Engine {
         target: &str,
         recipe: &[String],
         prereqs: &[String],
+        implied_prereqs: &[String],
         stem: &str,
     ) -> Result<(), String> {
         // Set up automatic variables
         let mut auto_vars: HashMap<&str, String> = HashMap::new();
         auto_vars.insert("@", target.to_string());
-        auto_vars.insert("<", prereqs.first().cloned().unwrap_or_default());
+        // $< is the first prerequisite. When a pattern/suffix rule provides
+        // the recipe, $< should be the implied source (e.g., the .c file),
+        // not an explicit order-only prerequisite like .dirstamp.
+        let first_prereq = if !implied_prereqs.is_empty() {
+            implied_prereqs.first().cloned().unwrap_or_default()
+        } else {
+            prereqs.first().cloned().unwrap_or_default()
+        };
+        auto_vars.insert("<", first_prereq);
         auto_vars.insert("^", dedup_join(prereqs));
         auto_vars.insert("+", prereqs.join(" "));
         auto_vars.insert("*", stem.to_string());
