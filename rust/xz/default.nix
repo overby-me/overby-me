@@ -19,7 +19,7 @@
 
       cargoLock.lockFile = ./Cargo.lock;
 
-      nativeBuildInputs = [ xz ];
+      nativeBuildInputs = [xz];
 
       postInstall = ''
         ln -s $out/bin/xz $out/bin/unxz

@@ -2,7 +2,6 @@
   devShells.tangled-spindle-nix-engine = pkgs: {
     packages = with pkgs; [
       just
-      nix
     ];
   };
 

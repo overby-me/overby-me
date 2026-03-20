@@ -10,4 +10,4 @@ steps:
   - name: "Run git hooks"
     command: |
       printf '{"PWD":"%s"}' "$PWD" > .env
-      nix develop .#default --override-input env path:$(realpath $PWD/.env) --command pre-commit run --all-files
+      nix develop .#default --override-input env path:$(realpath $PWD/.env) --command prek run --all-files
