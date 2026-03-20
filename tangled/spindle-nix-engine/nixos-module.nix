@@ -264,6 +264,7 @@ in {
           pkgs.git
           pkgs.gnutar
           pkgs.gzip
+          pkgs.util-linux
           runner.nixPackage
         ]
         ++ runner.extraPackages);
