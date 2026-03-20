@@ -116,7 +116,7 @@ The nixpkgs standard environment (`stdenv`) is the foundation that builds every 
 
 4. **patchelf and strip are not in `initialPath`** — These tools are used by stdenv's fixup hooks but are not part of `initialPath`. They need to be overridden separately in the fixup hook configuration, not via `initialPath` replacement.
 
-5. **uutils-sed fails on autoconf-generated `config.status` substitutions** — When building GNU hello, `config.status` invokes sed with complex substitution commands that produce `unterminated substitute replacement` errors. This corrupts the generated Makefile. This is a uutils-sed compatibility issue.
+5. **uutils-sed doesn't support `&` as substitute delimiter** — `s&pattern&replacement&` fails with "unterminated substitute replacement". Autoconf's `config.status` uses `&` as delimiter for substitutions containing `/` (e.g. `s&@INSTALL@&/usr/bin/install -c&`). This is an upstream uutils-sed bug — `&` is conflated with its role as a backreference in replacement text. Other delimiters (`/`, `|`, `#`, `,`, `%`) work fine.
 
 6. **rust-make `make --version` reports "nested variables... no"** — The autoconf `configure` test `checking whether make supports nested variables` returns `no` for rust-make. Some packages may behave differently or fail when nested variable expansion is unavailable.
 

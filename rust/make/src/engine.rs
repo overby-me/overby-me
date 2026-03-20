@@ -606,6 +606,17 @@ impl Engine {
         }
     }
 
+    /// Load a Makefile from a string (used for stdin input via `-f -`).
+    pub fn load_string(&self, content: &str) {
+        let mut parser = crate::parser::Parser::new(content);
+        match parser.parse() {
+            Ok(directives) => self.load_makefile(&directives),
+            Err(e) => {
+                eprintln!("make: stdin: {e}");
+            }
+        }
+    }
+
     /// Build the specified targets.
     pub fn build(&self, targets: &[String]) -> i32 {
         let targets = if targets.is_empty() {

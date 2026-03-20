@@ -156,7 +156,18 @@ fn run() -> i32 {
         return 2;
     };
 
-    engine.load_file(&makefile_path, false);
+    if makefile_path == "-" {
+        // Read from stdin
+        use std::io::Read;
+        let mut content = String::new();
+        if let Err(e) = std::io::stdin().read_to_string(&mut content) {
+            eprintln!("make: stdin: {e}");
+            return 2;
+        }
+        engine.load_string(&content);
+    } else {
+        engine.load_file(&makefile_path, false);
+    }
 
     engine.build(&targets)
 }
