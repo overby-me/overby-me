@@ -278,5 +278,114 @@
           license = lib.licenses.gpl3Plus;
         };
       };
+
+    # Test building zlib — a critical C library used by nearly everything.
+    # Uses a simple configure + make (not autotools).
+    rust-nixpkgs-zlib-test = {
+      lib,
+      stdenv,
+      fetchurl,
+      uutils-coreutils-noprefix,
+      rust-sed,
+      rust-grep,
+      rust-awk,
+      uutils-findutils,
+      rust-tar,
+      rust-gzip,
+      rust-bzip2,
+      rust-xz,
+      rust-make,
+      rust-patch,
+    }: let
+      rustStdenv = import ./stdenv-test.nix {
+        inherit
+          stdenv
+          uutils-coreutils-noprefix
+          rust-sed
+          rust-grep
+          rust-awk
+          uutils-findutils
+          rust-tar
+          rust-gzip
+          rust-bzip2
+          rust-xz
+          rust-make
+          rust-patch
+          ;
+      };
+    in
+      rustStdenv.mkDerivation {
+        pname = "rust-nixpkgs-zlib-test";
+        version = "1.3.1";
+
+        src = fetchurl {
+          url = "https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz";
+          sha256 = "sha256-mpOyt9/ax3zrpaVYpYDnRmfdb+3kWFuR7vtg8Dty3yM=";
+        };
+
+        meta = {
+          description = "zlib built with the Rust stdenv";
+          license = lib.licenses.zlib;
+        };
+      };
+
+    # Test building GNU patch — an autotools C package.
+    rust-nixpkgs-gnupatch-test = {
+      lib,
+      stdenv,
+      fetchurl,
+      uutils-coreutils-noprefix,
+      rust-sed,
+      rust-grep,
+      rust-awk,
+      uutils-findutils,
+      rust-tar,
+      rust-gzip,
+      rust-bzip2,
+      rust-xz,
+      rust-make,
+      rust-patch,
+      rust-texinfo,
+      rust-help2man,
+    }: let
+      rustStdenv = import ./stdenv-test.nix {
+        inherit
+          stdenv
+          uutils-coreutils-noprefix
+          rust-sed
+          rust-grep
+          rust-awk
+          uutils-findutils
+          rust-tar
+          rust-gzip
+          rust-bzip2
+          rust-xz
+          rust-make
+          rust-patch
+          ;
+      };
+    in
+      rustStdenv.mkDerivation {
+        pname = "rust-nixpkgs-gnupatch-test";
+        version = "2.8";
+
+        nativeBuildInputs = [rust-texinfo rust-help2man];
+
+        src = fetchurl {
+          url = "mirror://gnu/patch/patch-2.8.tar.xz";
+          sha256 = "sha256-+Hzuae7CtPy/YKOWsDCtaqNBXxkqpffuhMrV4R9/WuM=";
+        };
+
+        postPatch = ''
+          find . -name '*.in' -o -name configure -o -name aclocal.m4 \
+            -o -name config.h.in -o -name Makefile.in -o -name config.in \
+            | xargs touch
+        '';
+
+        meta = {
+          description = "GNU patch built with the Rust stdenv";
+          license = lib.licenses.gpl3Plus;
+        };
+      };
   };
 }
