@@ -5,6 +5,7 @@
 //! and permission enforcement.
 
 use std::env;
+use std::os::unix::io::RawFd;
 use std::path::Path;
 use std::process::Command;
 
@@ -113,6 +114,8 @@ pub enum CapOp {
 pub struct SandboxSetup {
     pub command: Command,
     pub _proxies: Vec<RunningProxy>,
+    /// Read end of the --info-fd pipe (write end passed to bwrap).
+    pub info_pipe_read: Option<RawFd>,
 }
 
 /// Build the complete bwrap command for running a Flatpak app.
@@ -151,6 +154,7 @@ pub fn build_sandbox(
     bwrap.arg("--disable-userns");
     bwrap.arg("--unshare-pid");
     bwrap.arg("--die-with-parent");
+    bwrap.arg("--new-session"); // Prevent TIOCSTI terminal injection.
 
     if !permissions.has_shared("network") {
         bwrap.arg("--unshare-net");
@@ -204,8 +208,46 @@ pub fn build_sandbox(
 
     setup_devices(&mut bwrap, &permissions);
 
-    bwrap.args(&["--dir", "/tmp"]);
+    // --- Per-app shared /tmp and /dev/shm ---
+    let app_tmp = Installation::ensure_app_data_dirs(app_id)
+        .parent()
+        .unwrap()
+        .join(".tmp");
+    let _ = std::fs::create_dir_all(&app_tmp);
+    bwrap.args(&["--bind", &app_tmp.to_string_lossy(), "/tmp"]);
     bwrap.args(&["--dir", "/var/tmp"]);
+
+    // --- /sys (read-only) ---
+    for sys_dir in &["block", "bus", "class", "dev", "devices"] {
+        let path = format!("/sys/{sys_dir}");
+        if Path::new(&path).exists() {
+            bwrap.args(&["--ro-bind", &path, &path]);
+        }
+    }
+
+    // --- Timezone ---
+    setup_timezone(&mut bwrap);
+
+    // --- Host fonts ---
+    for font_dir in &["/usr/share/fonts", "/usr/local/share/fonts", "/etc/fonts"] {
+        if Path::new(font_dir).exists() {
+            let dest = format!("/run/host{font_dir}");
+            bwrap.args(&["--ro-bind", font_dir, &dest]);
+        }
+    }
+    let home = env::var("HOME").unwrap_or_else(|_| "/home/user".into());
+    let user_fonts = format!("{home}/.local/share/fonts");
+    if Path::new(&user_fonts).exists() {
+        bwrap.args(&["--ro-bind", &user_fonts, "/run/host/user-fonts"]);
+    }
+
+    // --- Host icons ---
+    for icon_dir in &["/usr/share/icons", "/usr/share/pixmaps"] {
+        if Path::new(icon_dir).exists() {
+            let dest = format!("/run/host{icon_dir}");
+            bwrap.args(&["--ro-bind", icon_dir, &dest]);
+        }
+    }
 
     // --- Usr-merged symlinks ---
     for name in &["bin", "sbin", "lib", "lib32", "lib64"] {
@@ -404,12 +446,28 @@ pub fn build_sandbox(
         }
     }
 
-    // --- .flatpak-info ---
+    // --- .flatpak-info via memfd ---
     let info_content = build_flatpak_info(deployed, runtime_deployed);
-    // Write to a temp file and bind-mount it.
-    let info_path = format!("/tmp/.flatpak-info-{}", std::process::id());
-    let _ = std::fs::write(&info_path, &info_content);
-    bwrap.args(&["--ro-bind", &info_path, "/.flatpak-info"]);
+    match write_memfd("flatpak-info", info_content.as_bytes()) {
+        Ok(fd) => {
+            bwrap.args(&["--ro-bind-data", &fd.to_string(), "/.flatpak-info"]);
+        }
+        Err(_) => {
+            // Fallback to temp file.
+            let info_path = format!("/tmp/.flatpak-info-{}", std::process::id());
+            let _ = std::fs::write(&info_path, &info_content);
+            bwrap.args(&["--ro-bind", &info_path, "/.flatpak-info"]);
+        }
+    }
+
+    // --- /run/host/container-manager ---
+    if let Ok(fd) = write_memfd("container-manager", b"flatpak\n") {
+        bwrap.args(&[
+            "--ro-bind-data",
+            &fd.to_string(),
+            "/run/host/container-manager",
+        ]);
+    }
 
     // --- Determine command ---
     let cmd_name = command_override
@@ -419,11 +477,28 @@ pub fn build_sandbox(
     let mut command = vec![cmd_name.to_string()];
     command.extend_from_slice(extra_args);
 
+    // --- Info pipe for capturing child PID ---
+    let info_pipe_read = create_info_pipe(&mut bwrap);
+
     let bwrap_path = find_bwrap();
     Ok(SandboxSetup {
         command: bwrap.build(&bwrap_path, &command),
         _proxies: proxies,
+        info_pipe_read,
     })
+}
+
+/// Create a pipe and add --info-fd to the bwrap args.
+/// Returns the read end of the pipe.
+fn create_info_pipe(bwrap: &mut BwrapBuilder) -> Option<RawFd> {
+    let mut fds = [0i32; 2];
+    let ret = unsafe { libc::pipe2(fds.as_mut_ptr(), 0) }; // No CLOEXEC on write end.
+    if ret < 0 {
+        return None;
+    }
+    let (read_fd, write_fd) = (fds[0], fds[1]);
+    bwrap.args(&["--info-fd", &write_fd.to_string()]);
+    Some(read_fd)
 }
 
 fn setup_devices(bwrap: &mut BwrapBuilder, ctx: &ContextPermissions) {
@@ -512,13 +587,23 @@ fn setup_etc(bwrap: &mut BwrapBuilder, runtime: Option<&DeployedRef>) {
     );
     let group = format!("{user}:x:{gid}:\nnfsnobody:x:65534:\n");
 
-    let passwd_path = format!("/tmp/.flatpak-passwd-{}", std::process::id());
-    let group_path = format!("/tmp/.flatpak-group-{}", std::process::id());
-    let _ = std::fs::write(&passwd_path, &passwd);
-    let _ = std::fs::write(&group_path, &group);
-
-    bwrap.args(&["--ro-bind", &passwd_path, "/etc/passwd"]);
-    bwrap.args(&["--ro-bind", &group_path, "/etc/group"]);
+    // Use memfd for /etc/passwd and /etc/group to avoid temp files.
+    match write_memfd("passwd", passwd.as_bytes()) {
+        Ok(fd) => bwrap.args(&["--ro-bind-data", &fd.to_string(), "/etc/passwd"]),
+        Err(_) => {
+            let path = format!("/tmp/.flatpak-passwd-{}", std::process::id());
+            let _ = std::fs::write(&path, &passwd);
+            bwrap.args(&["--ro-bind", &path, "/etc/passwd"])
+        }
+    };
+    match write_memfd("group", group.as_bytes()) {
+        Ok(fd) => bwrap.args(&["--ro-bind-data", &fd.to_string(), "/etc/group"]),
+        Err(_) => {
+            let path = format!("/tmp/.flatpak-group-{}", std::process::id());
+            let _ = std::fs::write(&path, &group);
+            bwrap.args(&["--ro-bind", &path, "/etc/group"])
+        }
+    };
 }
 
 fn setup_filesystem_exports(bwrap: &mut BwrapBuilder, ctx: &ContextPermissions) {
@@ -657,6 +742,56 @@ fn setup_sockets(bwrap: &mut BwrapBuilder, ctx: &ContextPermissions) {
             bwrap.args(&["--ro-bind", cups_socket, cups_socket]);
         }
     }
+}
+
+/// Write data to a memfd and return the file descriptor.
+fn write_memfd(name: &str, data: &[u8]) -> Result<i32, String> {
+    let c_name = std::ffi::CString::new(name).map_err(|e| e.to_string())?;
+    let fd = unsafe { libc::memfd_create(c_name.as_ptr(), libc::MFD_CLOEXEC) };
+    if fd < 0 {
+        return Err("memfd_create failed".into());
+    }
+    let written = unsafe { libc::write(fd, data.as_ptr() as *const libc::c_void, data.len()) };
+    if written < 0 || written as usize != data.len() {
+        unsafe { libc::close(fd) };
+        return Err("write to memfd failed".into());
+    }
+    unsafe { libc::lseek(fd, 0, libc::SEEK_SET) };
+    Ok(fd)
+}
+
+/// Set up timezone in the sandbox.
+fn setup_timezone(bwrap: &mut BwrapBuilder) {
+    // Bind the host zoneinfo database.
+    if Path::new("/usr/share/zoneinfo").exists() {
+        bwrap.args(&["--ro-bind", "/usr/share/zoneinfo", "/usr/share/zoneinfo"]);
+    }
+
+    // Determine the current timezone.
+    let tz = std::fs::read_to_string("/etc/timezone")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .or_else(|| {
+            // Try reading the /etc/localtime symlink target.
+            std::fs::read_link("/etc/localtime").ok().and_then(|p| {
+                p.to_string_lossy()
+                    .strip_prefix("/usr/share/zoneinfo/")
+                    .map(String::from)
+            })
+        })
+        .unwrap_or_else(|| "UTC".to_string());
+
+    // Create /etc/localtime as a symlink to the zoneinfo file.
+    let tz_path = format!("/usr/share/zoneinfo/{tz}");
+    bwrap.args(&["--symlink", &tz_path, "/etc/localtime"]);
+
+    // Write /etc/timezone.
+    let tz_content = format!("{tz}\n");
+    if let Ok(fd) = write_memfd("timezone", tz_content.as_bytes()) {
+        bwrap.args(&["--ro-bind-data", &fd.to_string(), "/etc/timezone"]);
+    }
+
+    bwrap.setenv("TZ", &tz);
 }
 
 /// Build the .flatpak-info content for an app instance.

@@ -23,12 +23,14 @@ struct SockFilter {
 
 // BPF instruction classes and fields.
 const BPF_LD: u16 = 0x00;
+const BPF_ALU: u16 = 0x04;
 const BPF_JMP: u16 = 0x05;
 const BPF_RET: u16 = 0x06;
 const BPF_W: u16 = 0x00;
 const BPF_ABS: u16 = 0x20;
 const BPF_JEQ: u16 = 0x10;
 const BPF_JGE: u16 = 0x30;
+const BPF_AND: u16 = 0x50;
 const BPF_K: u16 = 0x00;
 
 // Seccomp return values.
@@ -124,7 +126,11 @@ mod nr {
     pub const CLONE: u32 = 56;
     pub const IOCTL: u32 = 16;
     pub const SOCKET: u32 = 41;
+    pub const PRCTL: u32 = 157;
 }
+
+// prctl operations to block.
+const PR_SET_MM: u32 = 35;
 
 // ioctl commands to block.
 const TIOCSTI: u32 = 0x5412;
@@ -271,23 +277,21 @@ fn build_filter(opts: &SeccompOptions) -> Vec<SockFilter> {
     }
 
     // --- clone: block CLONE_NEWUSER flag ---
-    // Jump to clone check.
-    f.push(bpf_jeq(nr::CLONE, 0, 5));
-    // Load clone flags (arg0, low 32 bits).
-    f.push(bpf_load(SECCOMP_DATA_ARG0));
-    // Test if CLONE_NEWUSER is set: load, AND with mask, compare.
-    // BPF doesn't have AND, so we use: if arg0 >= CLONE_NEWUSER, check further.
-    // Simpler approach: use JGE to see if the bit range is set.
-    // Actually, the standard BPF approach for flag checking is more complex.
-    // Use a simpler heuristic: block if the high bits indicate CLONE_NEWUSER.
-    f.push(bpf_jump(BPF_JMP | BPF_JEQ | BPF_K, 0, 0, 1)); // placeholder
-    // For now, just reload and continue. Full flag inspection requires
-    // BPF_ALU which makes the filter much more complex. Real Flatpak uses
-    // libseccomp which handles this. We'll block CLONE_NEWUSER via the
-    // simpler approach of blocking `unshare` (already done above) and
-    // relying on bwrap's --disable-userns.
-    f.push(bpf_load(SECCOMP_DATA_NR)); // reload
-    f.push(bpf_ret(SECCOMP_RET_ALLOW)); // allow clone (unshare already blocked)
+    // If syscall is clone, load flags (arg0), AND with CLONE_NEWUSER mask,
+    // if result is non-zero (flag is set), block with EPERM.
+    f.push(bpf_jeq(nr::CLONE, 0, 5)); // if not clone, skip 5 instructions
+    f.push(bpf_load(SECCOMP_DATA_ARG0)); // load clone flags
+    f.push(bpf_stmt(BPF_ALU | BPF_AND | BPF_K, CLONE_NEWUSER)); // AND with CLONE_NEWUSER
+    f.push(bpf_jeq(0, 1, 0)); // if result == 0 (flag not set), skip block
+    f.push(bpf_ret(SECCOMP_RET_ERRNO | EPERM)); // block: CLONE_NEWUSER is set
+    f.push(bpf_load(SECCOMP_DATA_NR)); // reload syscall number
+
+    // --- prctl: block PR_SET_MM ---
+    f.push(bpf_jeq(nr::PRCTL, 0, 4)); // if not prctl, skip
+    f.push(bpf_load(SECCOMP_DATA_ARG0)); // load prctl operation
+    f.push(bpf_jeq(PR_SET_MM, 0, 1)); // if not PR_SET_MM, skip
+    f.push(bpf_ret(SECCOMP_RET_ERRNO | EPERM)); // block PR_SET_MM
+    f.push(bpf_load(SECCOMP_DATA_NR)); // reload syscall number
 
     // --- ioctl: block TIOCSTI and TIOCLINUX ---
     f.push(bpf_jeq(nr::IOCTL, 0, 5));

@@ -508,34 +508,8 @@ pub fn decompress_filez_content(data: &[u8], content_offset: usize) -> Result<Ve
 }
 
 fn decompress_raw_deflate(compressed: &[u8]) -> Result<Vec<u8>, String> {
-    // Try using zlib directly via FFI. If that fails, try spawning a helper.
-    // Since we can't easily link zlib without adding it as a dep, use a
-    // subprocess approach.
-    let mut child = std::process::Command::new("python3")
-        .args([
-            "-c",
-            "import sys,zlib;sys.stdout.buffer.write(zlib.decompress(sys.stdin.buffer.read(),-15))",
-        ])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .map_err(|e| format!("spawn python3 for decompression: {e}"))?;
-
-    if let Some(ref mut stdin) = child.stdin {
-        let _ = stdin.write_all(compressed);
-    }
-    drop(child.stdin.take());
-
-    let output = child
-        .wait_with_output()
-        .map_err(|e| format!("decompression failed: {e}"))?;
-
-    if !output.status.success() {
-        return Err("decompression failed".into());
-    }
-
-    Ok(output.stdout)
+    miniz_oxide::inflate::decompress_to_vec(compressed)
+        .map_err(|e| format!("deflate decompression failed: {e:?}"))
 }
 
 // ---------------------------------------------------------------------------
@@ -650,6 +624,52 @@ fn extract_body(response: &[u8]) -> Result<Vec<u8>, String> {
 // High-level operations
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Local object cache
+// ---------------------------------------------------------------------------
+
+/// Get the default cache directory for OSTree objects.
+fn cache_dir() -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/root".into());
+    std::path::PathBuf::from(format!("{home}/.local/share/flatpak/repo/objects"))
+}
+
+/// Try to read an object from the local cache.
+fn cache_get(checksum: &str, ext: &str) -> Option<Vec<u8>> {
+    let dir = cache_dir();
+    let path = dir
+        .join(&checksum[..2])
+        .join(format!("{}.{ext}", &checksum[2..]));
+    fs::read(&path).ok()
+}
+
+/// Store an object in the local cache.
+fn cache_put(checksum: &str, ext: &str, data: &[u8]) {
+    let dir = cache_dir();
+    let obj_dir = dir.join(&checksum[..2]);
+    let _ = fs::create_dir_all(&obj_dir);
+    let path = obj_dir.join(format!("{}.{ext}", &checksum[2..]));
+    let _ = fs::write(&path, data);
+}
+
+/// Fetch an object, checking cache first.
+fn fetch_object(repo_url: &str, checksum: &str, ext: &str) -> Result<Vec<u8>, String> {
+    // Check local cache.
+    if let Some(data) = cache_get(checksum, ext) {
+        return Ok(data);
+    }
+    // Fetch from remote.
+    let url = object_url(repo_url, checksum, ext);
+    let data = fetch_url(&url)?;
+    // Store in cache.
+    cache_put(checksum, ext, &data);
+    Ok(data)
+}
+
+// ---------------------------------------------------------------------------
+// High-level operations
+// ---------------------------------------------------------------------------
+
 /// Fetch and parse the summary from a remote.
 pub fn fetch_summary(repo_url: &str) -> Result<Vec<SummaryRef>, String> {
     let url = format!("{}/summary", repo_url.trim_end_matches('/'));
@@ -659,29 +679,25 @@ pub fn fetch_summary(repo_url: &str) -> Result<Vec<SummaryRef>, String> {
 
 /// Fetch a commit object.
 pub fn fetch_commit(repo_url: &str, checksum: &str) -> Result<Commit, String> {
-    let url = object_url(repo_url, checksum, "commit");
-    let data = fetch_url(&url)?;
+    let data = fetch_object(repo_url, checksum, "commit")?;
     parse_commit(&data)
 }
 
 /// Fetch a dirtree object.
 pub fn fetch_dirtree(repo_url: &str, checksum: &str) -> Result<Dirtree, String> {
-    let url = object_url(repo_url, checksum, "dirtree");
-    let data = fetch_url(&url)?;
+    let data = fetch_object(repo_url, checksum, "dirtree")?;
     parse_dirtree(&data)
 }
 
 /// Fetch a dirmeta object.
 pub fn fetch_dirmeta(repo_url: &str, checksum: &str) -> Result<Dirmeta, String> {
-    let url = object_url(repo_url, checksum, "dirmeta");
-    let data = fetch_url(&url)?;
+    let data = fetch_object(repo_url, checksum, "dirmeta")?;
     parse_dirmeta(&data)
 }
 
 /// Fetch and extract a file object to a local path.
 pub fn fetch_file(repo_url: &str, checksum: &str, dest: &Path) -> Result<(), String> {
-    let url = object_url(repo_url, checksum, "filez");
-    let data = fetch_url(&url)?;
+    let data = fetch_object(repo_url, checksum, "filez")?;
 
     let (header, content_offset) = parse_filez_header(&data)?;
 

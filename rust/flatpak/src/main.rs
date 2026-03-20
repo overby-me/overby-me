@@ -248,8 +248,45 @@ fn cmd_run(installations: &[Installation], args: &[String], verbose: bool) {
         eprintln!("flatpak: executing bwrap");
     }
 
-    let status = setup.command.status().unwrap_or_else(|e| {
+    // Spawn bwrap (not wait) so we can read the info pipe.
+    let mut child = setup.command.spawn().unwrap_or_else(|e| {
         eprintln!("flatpak run: failed to execute bwrap: {e}");
+        instance::cleanup_instance(&instance_id);
+        instance::cleanup_temp_files();
+        process::exit(1);
+    });
+
+    // Read child PID from the info pipe.
+    if let Some(read_fd) = setup.info_pipe_read {
+        let mut buf = [0u8; 256];
+        let n = unsafe { libc::read(read_fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
+        unsafe { libc::close(read_fd) };
+        if n > 0 {
+            let info_str = String::from_utf8_lossy(&buf[..n as usize]);
+            // Parse {"child-pid": N}
+            if let Some(pid_str) = info_str
+                .split("\"child-pid\":")
+                .nth(1)
+                .and_then(|s| s.trim().strip_suffix('}'))
+                .or_else(|| {
+                    info_str
+                        .split("\"child-pid\":")
+                        .nth(1)
+                        .and_then(|s| s.split('}').next())
+                })
+                && let Ok(pid) = pid_str.trim().parse::<u32>() {
+                    let _ = instance::write_pid(&instance_id, pid);
+                    if verbose {
+                        eprintln!("flatpak: sandbox PID {pid}");
+                    }
+                }
+            // Also save bwrapinfo.
+            let _ = instance::write_bwrap_info(&instance_id, &info_str);
+        }
+    }
+
+    let status = child.wait().unwrap_or_else(|e| {
+        eprintln!("flatpak run: wait failed: {e}");
         instance::cleanup_instance(&instance_id);
         instance::cleanup_temp_files();
         process::exit(1);

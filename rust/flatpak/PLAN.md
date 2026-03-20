@@ -171,22 +171,23 @@ Bring the sandbox setup to parity with real Flatpak so apps work correctly.
 
 ### Tasks
 
-- [ ] Bind-mount `/sys` subdirectories read-only (`/sys/block`, `/sys/bus`,
+- [x] Bind-mount `/sys` subdirectories read-only (`/sys/block`, `/sys/bus`,
   `/sys/class`, `/sys/dev`, `/sys/devices`)
-- [ ] Enable `--new-session` by default (prevents TIOCSTI terminal injection)
-- [ ] Use memfd + `--ro-bind-data` for `.flatpak-info` instead of temp files
-- [ ] Generate `/etc/passwd` and `/etc/group` via memfd + `--ro-bind-data`
-- [ ] Set up timezone symlink (`/etc/localtime` → `/usr/share/zoneinfo/<TZ>`)
+- [x] Enable `--new-session` by default (prevents TIOCSTI terminal injection)
+- [x] Use memfd + `--ro-bind-data` for `.flatpak-info` instead of temp files
+- [x] Generate `/etc/passwd` and `/etc/group` via memfd + `--ro-bind-data`
+- [x] Set up timezone symlink (`/etc/localtime` → `/usr/share/zoneinfo/<TZ>`)
   and write `/etc/timezone`
-- [ ] Bind-mount host font directories into the sandbox
+- [x] Bind-mount host font directories into the sandbox
   (`/usr/share/fonts`, `/usr/local/share/fonts`, `~/.local/share/fonts`,
   `/etc/fonts`)
-- [ ] Bind-mount host icon theme directories
-- [ ] Set up per-app shared `/tmp` and `/dev/shm` directories (persistent
-  across instances of the same app, isolated from other apps)
+- [x] Bind-mount host icon theme directories
+- [x] Set up per-app shared `/tmp` directories (persistent across instances
+  of the same app, isolated from other apps)
+- [x] Mount `/run/host/fonts`, `/run/host/icons` for host resource access
+- [x] Write `/run/host/container-manager` via memfd
 - [ ] Regenerate `ld.so.cache` by running `ldconfig` in a sub-bwrap when
   extensions add library paths
-- [ ] Mount `/run/host/fonts`, `/run/host/icons` for host resource access
 - [ ] Create `/run/flatpak/.flatpak/<instance-id>` and bind-mount into sandbox
 
 ## Phase 11: Native Deflate and Local Object Cache
@@ -196,11 +197,11 @@ objects that have already been fetched.
 
 ### Tasks
 
-- [ ] Implement raw deflate decompression natively (either minimal pure-Rust
-  inflate or add `flate2`/`miniz_oxide` as a dependency)
-- [ ] Store fetched OSTree objects locally in `<installation>/repo/objects/`
+- [x] Implement raw deflate decompression natively via `miniz_oxide` (no
+  more python3 dependency)
+- [x] Store fetched OSTree objects locally in `<installation>/repo/objects/`
   with the standard `<XX>/<YY...>.<ext>` layout
-- [ ] Check local cache before fetching objects from the remote
+- [x] Check local cache before fetching objects from the remote
 - [ ] Implement `flatpak update` to actually pull newer commits (compare
   local commit checksum with remote summary, re-checkout if different)
 - [ ] Handle HTTP chunked transfer-encoding in the HTTP client (some repos
@@ -215,12 +216,12 @@ Complete the remaining seccomp filter gaps.
 
 ### Tasks
 
-- [ ] Implement proper `clone` flag inspection for `CLONE_NEWUSER` using
-  BPF_ALU (AND instruction) to mask and test the flags argument
+- [x] Implement proper `clone` flag inspection for `CLONE_NEWUSER` using
+  BPF_ALU AND instruction to mask and test the flags argument
 - [ ] Add GPG signature verification for OSTree summary and commit objects
   (either shell out to `gpg` or implement minimal OpenPGP parsing)
 - [ ] Harden `personality` filtering to only allow known-safe values
-- [ ] Block `prctl(PR_SET_MM)` which can manipulate memory mappings
+- [x] Block `prctl(PR_SET_MM)` which can manipulate memory mappings
 
 ## Phase 13: Instance Tracking Completion
 
@@ -228,11 +229,11 @@ Wire up bwrap's `--info-fd` to capture the actual child PID and process info.
 
 ### Tasks
 
-- [ ] Create a pipe and pass the read end via `--info-fd` to bwrap
-- [ ] Parse bwrap's JSON output (`{"child-pid": N}`) from the pipe
-- [ ] Write the actual child PID to the instance directory's `pid` file
-- [ ] Capture and write `bwrapinfo.json` to the instance directory
-- [ ] Use the real PID for `flatpak ps`, `flatpak kill`, `flatpak enter`
+- [x] Create a pipe and pass the write end via `--info-fd` to bwrap
+- [x] Parse bwrap's JSON output (`{"child-pid": N}`) from the pipe
+- [x] Write the actual child PID to the instance directory's `pid` file
+- [x] Capture and write `bwrapinfo.json` to the instance directory
+- [x] Use the real PID for `flatpak ps`, `flatpak kill`, `flatpak enter`
 
 ## Phase 14: D-Bus Proxy Completion
 
