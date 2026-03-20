@@ -274,12 +274,13 @@ fn cmd_run(installations: &[Installation], args: &[String], verbose: bool) {
                         .nth(1)
                         .and_then(|s| s.split('}').next())
                 })
-                && let Ok(pid) = pid_str.trim().parse::<u32>() {
-                    let _ = instance::write_pid(&instance_id, pid);
-                    if verbose {
-                        eprintln!("flatpak: sandbox PID {pid}");
-                    }
+                && let Ok(pid) = pid_str.trim().parse::<u32>()
+            {
+                let _ = instance::write_pid(&instance_id, pid);
+                if verbose {
+                    eprintln!("flatpak: sandbox PID {pid}");
                 }
+            }
             // Also save bwrapinfo.
             let _ = instance::write_bwrap_info(&instance_id, &info_str);
         }
@@ -550,6 +551,7 @@ fn install_from_remote(installations: &[Installation], remote_name: &str, ref_na
         "Installation complete: {} ({}/{})",
         parsed_ref.id, parsed_ref.arch, parsed_ref.branch
     );
+    log_history(installations, "install", &parsed_ref.format_ref());
 }
 
 fn install_from_dir(installations: &[Installation], source: &Path, ref_override: Option<&str>) {
@@ -885,22 +887,74 @@ fn cmd_remote_add(installations: &[Installation], args: &[String]) {
     let mut name: Option<String> = None;
     let mut url: Option<String> = None;
     let mut title: Option<String> = None;
+    let mut from_file: Option<String> = None;
 
-    for arg in args {
-        match arg.as_str() {
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
             s if s.starts_with("--title=") => {
                 title = Some(s.strip_prefix("--title=").unwrap().to_string());
             }
+            "--from" => {
+                // The next positional arg is the .flatpakrepo file path/URL.
+                from_file = Some("next-positional".to_string());
+            }
+            s if s.starts_with("--if-not-exists") => {}
             s if s.starts_with('-') => {}
             _ => {
-                if name.is_none() {
-                    name = Some(arg.clone());
+                if from_file.as_deref() == Some("next-positional") {
+                    from_file = Some(args[i].clone());
+                } else if name.is_none() {
+                    name = Some(args[i].clone());
                 } else if url.is_none() {
-                    url = Some(arg.clone());
+                    url = Some(args[i].clone());
                 }
             }
         }
+        i += 1;
     }
+
+    // Handle .flatpakrepo file.
+    if let Some(ref file_path) = from_file
+        && file_path != "next-positional" {
+            let content = if file_path.starts_with("http://") || file_path.starts_with("https://") {
+                match ostree::fetch_url(file_path) {
+                    Ok(data) => String::from_utf8_lossy(&data).to_string(),
+                    Err(e) => {
+                        eprintln!("flatpak remote-add: fetch {file_path}: {e}");
+                        process::exit(1);
+                    }
+                }
+            } else {
+                fs::read_to_string(file_path).unwrap_or_else(|e| {
+                    eprintln!("flatpak remote-add: read {file_path}: {e}");
+                    process::exit(1);
+                })
+            };
+
+            if let Ok(meta) = metadata::Metadata::parse(&content) {
+                let repo_group = meta
+                    .groups
+                    .get("Flatpak Repo")
+                    .or_else(|| meta.groups.get("Flatpak Remote"));
+                if let Some(group) = repo_group {
+                    if url.is_none() {
+                        url = group.get("Url").or_else(|| group.get("url")).cloned();
+                    }
+                    if title.is_none() {
+                        title = group.get("Title").or_else(|| group.get("title")).cloned();
+                    }
+                    if name.is_none() {
+                        // Derive name from the filename.
+                        let fname = Path::new(file_path)
+                            .file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("remote");
+                        name = Some(fname.to_string());
+                    }
+                }
+            }
+        }
 
     let name = name.unwrap_or_else(|| {
         eprintln!("flatpak remote-add: no name specified");
@@ -1172,22 +1226,81 @@ fn cmd_enter(args: &[String]) {
 // ---------------------------------------------------------------------------
 
 fn cmd_search(args: &[String]) {
-    let query = args.join(" ");
+    let query = args
+        .iter()
+        .filter(|a| !a.starts_with('-'))
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(" ");
     if query.is_empty() {
         eprintln!("flatpak search: no search term specified");
         process::exit(1);
     }
-    eprintln!("flatpak search: remote search not yet implemented");
-    eprintln!("Use 'flatpak remote-ls <remote>' to list available refs");
-    process::exit(1);
+
+    let query_lower = query.to_lowercase();
+    let mut found = false;
+
+    for inst in Installation::all() {
+        let remotes = installation::load_remotes(&inst);
+        for remote in &remotes {
+            match ostree::fetch_summary(&remote.url) {
+                Ok(refs) => {
+                    for r in &refs {
+                        if r.name.to_lowercase().contains(&query_lower)
+                            && r.name.starts_with("app/")
+                            && let Some(parsed) = Ref::parse(&r.name) {
+                                println!(
+                                    "{:<50} {:<12} {:<10} {}",
+                                    parsed.id, parsed.branch, parsed.arch, remote.name
+                                );
+                                found = true;
+                            }
+                    }
+                }
+                Err(_) => continue,
+            }
+        }
+    }
+
+    if !found {
+        eprintln!("No matches found for '{query}'");
+        process::exit(1);
+    }
 }
 
 // ---------------------------------------------------------------------------
-// Command: history (stub)
+// Command: history
 // ---------------------------------------------------------------------------
 
-fn cmd_history(_installations: &[Installation]) {
-    println!("No history recorded.");
+fn cmd_history(installations: &[Installation]) {
+    let inst = &installations[0];
+    let log_path = inst.path.join("history.log");
+    if let Ok(content) = fs::read_to_string(&log_path) {
+        if content.trim().is_empty() {
+            println!("No history recorded.");
+        } else {
+            print!("{content}");
+        }
+    } else {
+        println!("No history recorded.");
+    }
+}
+
+/// Append an entry to the history log.
+fn log_history(installations: &[Installation], action: &str, ref_str: &str) {
+    let inst = &installations[0];
+    let log_path = inst.path.join("history.log");
+    let _ = fs::create_dir_all(&inst.path);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let line = format!("{now}\t{action}\t{ref_str}\n");
+    let _ = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .and_then(|mut f| std::io::Write::write_all(&mut f, line.as_bytes()));
 }
 
 // ---------------------------------------------------------------------------

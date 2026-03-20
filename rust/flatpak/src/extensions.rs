@@ -196,6 +196,25 @@ pub fn extension_mount_args(
 
     let base = if is_app { "/app" } else { "/usr" };
 
+    // Collect merge-dirs: group extensions by their merge target directory.
+    let mut merge_groups: std::collections::HashMap<String, Vec<&ResolvedExtension>> =
+        std::collections::HashMap::new();
+
+    for ext in extensions {
+        if let Some(ref merge_dirs) = ext.merge_dirs {
+            for merge_dir in merge_dirs
+                .split(';')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+            {
+                merge_groups
+                    .entry(merge_dir.to_string())
+                    .or_default()
+                    .push(ext);
+            }
+        }
+    }
+
     for ext in extensions {
         let dest = format!("{base}/{}", ext.directory);
         let src = ext.files_path.to_string_lossy();
@@ -211,5 +230,89 @@ pub fn extension_mount_args(
         }
     }
 
+    // For merge-dirs, create temporary merged directories and bind-mount them.
+    // This creates a tmpfs-backed directory containing symlinks to each
+    // extension's files for the specified subdirectories.
+    for (merge_dir, exts) in &merge_groups {
+        let merged_tmp = format!(
+            "/tmp/.flatpak-merge-{}-{}",
+            merge_dir.replace('/', "_"),
+            std::process::id()
+        );
+        let _ = std::fs::create_dir_all(&merged_tmp);
+
+        for ext in exts {
+            let src_dir = ext.files_path.join(merge_dir);
+            if src_dir.exists()
+                && let Ok(entries) = std::fs::read_dir(&src_dir) {
+                    for entry in entries.flatten() {
+                        let name = entry.file_name();
+                        let dest_link = PathBuf::from(&merged_tmp).join(&name);
+                        if !dest_link.exists() {
+                            let _ = std::os::unix::fs::symlink(entry.path(), &dest_link);
+                        }
+                    }
+                }
+        }
+
+        let dest = format!("{base}/{merge_dir}");
+        args.push("--ro-bind".to_string());
+        args.push(merged_tmp);
+        args.push(dest);
+    }
+
     (args, ld_paths)
+}
+
+/// Regenerate ld.so.cache for extensions that add library paths.
+///
+/// Runs ldconfig inside a minimal bwrap sandbox to generate the cache,
+/// then returns the path to the generated cache file for bind-mounting.
+pub fn regenerate_ld_cache(
+    runtime_files: &std::path::Path,
+    ld_paths: &[String],
+) -> Option<PathBuf> {
+    if ld_paths.is_empty() {
+        return None;
+    }
+
+    let ldconfig = runtime_files.join("bin/ldconfig");
+    if !ldconfig.exists() {
+        // Try /usr/sbin/ldconfig.
+        let alt = runtime_files.join("sbin/ldconfig");
+        if !alt.exists() {
+            return None;
+        }
+    }
+
+    let cache_dir = PathBuf::from(format!("/tmp/.flatpak-ldcache-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&cache_dir);
+    let cache_file = cache_dir.join("ld.so.cache");
+
+    // Write an ld.so.conf with the extension paths.
+    let conf_file = cache_dir.join("ld.so.conf");
+    let conf_content = ld_paths.join("\n") + "\n";
+    let _ = std::fs::write(&conf_file, conf_content);
+
+    // Run ldconfig via bwrap.
+    let bwrap = crate::sandbox::find_bwrap();
+    let status = std::process::Command::new(&bwrap)
+        .args(["--ro-bind", &runtime_files.to_string_lossy(), "/usr"])
+        .args(["--symlink", "usr/lib", "/lib"])
+        .args(["--symlink", "usr/lib64", "/lib64"])
+        .args(["--bind", &cache_dir.to_string_lossy(), "/tmp/ldcache"])
+        .args(["--proc", "/proc"])
+        .args(["--dev", "/dev"])
+        .arg("--")
+        .arg("/usr/sbin/ldconfig")
+        .args(["-f", "/tmp/ldcache/ld.so.conf"])
+        .args(["-C", "/tmp/ldcache/ld.so.cache"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+
+    match status {
+        Ok(s) if s.success() && cache_file.exists() => Some(cache_file),
+        _ => None,
+    }
 }

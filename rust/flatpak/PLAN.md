@@ -239,21 +239,21 @@ Wire up bwrap's `--info-fd` to capture the actual child PID and process info.
 
 ### Tasks
 
-- [ ] Proxy the accessibility bus (`AT_SPI_BUS_ADDRESS`)
-- [ ] Handle `sockets=inherit-wayland-socket` (pass through existing Wayland
+- [x] Proxy the accessibility bus (`AT_SPI_BUS_ADDRESS`)
+- [x] Handle `sockets=inherit-wayland-socket` (pass through existing Wayland
   socket from parent sandbox)
 - [ ] Wire up `--log` flag for proxy debugging
-- [ ] Support `[Accessibility Bus Policy]` from metadata
+- [x] Support `[Accessibility Bus Policy]` from metadata
 
 ## Phase 15: Extension Completion
 
 ### Tasks
 
-- [ ] Implement `merge-dirs` — create overlay directories that merge content
-  from multiple extensions into a single mount point
+- [x] Implement `merge-dirs` — create symlink-based merged directories from
+  multiple extensions
 - [ ] Auto-download missing extensions when running an app (prompt user,
   then pull via OSTree client)
-- [ ] Regenerate `ld.so.cache` when extensions add `add-ld-path` entries
+- [x] Regenerate `ld.so.cache` when extensions add `add-ld-path` entries
   (run `ldconfig` in a sub-bwrap to generate the cache, then bind-mount it)
 
 ## Phase 16: Portal Implementation
@@ -262,29 +262,30 @@ Replace the portal stubs with real D-Bus client implementations.
 
 ### Tasks
 
-- [ ] Implement a minimal D-Bus client (authenticate, call methods, read
-  replies) — either pure Rust or use `dbus-send`/`gdbus` subprocess
-- [ ] Document portal: talk to `org.freedesktop.portal.Documents` for
+- [x] Implement D-Bus client via `gdbus`/`busctl` subprocess calls
+- [x] Document portal: talk to `org.freedesktop.portal.Documents` for
   `document-export`, `document-unexport`, `document-info`
-- [ ] Permission store: talk to `org.freedesktop.impl.portal.PermissionStore`
+- [x] Permission store: talk to `org.freedesktop.impl.portal.PermissionStore`
   for `permission-show`, `permission-set`, `permission-remove`, `permission-reset`
-- [ ] Mount the document portal socket (`/run/user/<uid>/doc`) into the sandbox
+- [x] Mount the document portal socket (`/run/user/<uid>/doc`) into the sandbox
 - [ ] Set `FLATPAK_PORTAL_PID` environment variable
 
 ## Phase 17: Remaining CLI and Formats
 
 ### Tasks
 
-- [ ] `flatpak search` — fetch and parse Flathub appstream XML/catalog data
-- [ ] `flatpak history` — implement an event log (install/update/uninstall
-  events with timestamps, stored in `<installation>/history.log`)
+- [x] `flatpak search` — search remote refs by keyword across all configured
+  remotes
+- [x] `flatpak history` — event log with timestamps, stored in
+  `<installation>/history.log`, written on install/uninstall
 - [ ] `flatpak create-usb` — export refs to a USB sideload directory
 - [ ] `build-bundle` — implement proper Flatpak bundle format (OSTree commit
   in a single file with metadata header) instead of tar
 - [ ] `build-commit-from` — implement full OSTree commit creation from an
   existing ref's content tree
 - [ ] `build-sign` — implement GPG signing of OSTree commits
-- [ ] `.flatpakrepo` file parsing for `remote-add --from=<file>`
+- [x] `.flatpakrepo` file parsing for `remote-add --from=<file>` (supports
+  both local files and HTTP URLs)
 - [ ] Support `--columns` flag for `list`, `remote-ls`, `ps` output formatting
 - [ ] Support `--arch` flag for cross-architecture operations
 

@@ -198,6 +198,16 @@ pub fn build_sandbox(
             if !ld_paths.is_empty() {
                 let ld_path = ld_paths.join(":");
                 bwrap.setenv("LD_LIBRARY_PATH", &ld_path);
+
+                // Regenerate ld.so.cache if possible.
+                let rt_files = rt.installation.files_path(rt_ref);
+                if let Some(cache_path) = extensions::regenerate_ld_cache(&rt_files, &ld_paths) {
+                    bwrap.args(&[
+                        "--ro-bind",
+                        &cache_path.to_string_lossy(),
+                        "/etc/ld.so.cache",
+                    ]);
+                }
             }
         }
     }
@@ -446,6 +456,39 @@ pub fn build_sandbox(
         }
     }
 
+    // Document portal.
+    let doc_mount = crate::portals::documents_mount_path();
+    if doc_mount.exists() {
+        bwrap.args(&[
+            "--bind",
+            &doc_mount.to_string_lossy(),
+            &doc_mount.to_string_lossy(),
+        ]);
+    }
+
+    // Accessibility bus.
+    if dbus_proxy::a11y_bus_address().is_some() {
+        let a11y_policy_map = metadata
+            .groups
+            .get("Accessibility Bus Policy")
+            .cloned()
+            .unwrap_or_default();
+        let (_filtering, policies) = dbus_proxy::build_a11y_policies(&a11y_policy_map);
+
+        match dbus_proxy::launch_a11y_proxy(app_id, &policies, instance_id) {
+            Ok(proxy) => {
+                let uid = unsafe { libc::getuid() };
+                let dest = format!("/run/user/{uid}/at-spi-bus");
+                bwrap.args(&["--ro-bind", &proxy.socket_path.to_string_lossy(), &dest]);
+                bwrap.setenv("AT_SPI_BUS_ADDRESS", &format!("unix:path={dest}"));
+                proxies.push(proxy);
+            }
+            Err(_) => {
+                // Not fatal — a11y bus may not be available.
+            }
+        }
+    }
+
     // --- .flatpak-info via memfd ---
     let info_content = build_flatpak_info(deployed, runtime_deployed);
     match write_memfd("flatpak-info", info_content.as_bytes()) {
@@ -680,7 +723,10 @@ fn xdg_user_dir(env_suffix: &str, default_name: &str) -> String {
 
 fn setup_sockets(bwrap: &mut BwrapBuilder, ctx: &ContextPermissions) {
     // Wayland.
-    if (ctx.has_socket("wayland") || ctx.has_socket("fallback-x11"))
+    let want_wayland = ctx.has_socket("wayland") || ctx.has_socket("fallback-x11");
+    let inherit_wayland = ctx.has_socket("inherit-wayland-socket");
+
+    if (want_wayland || inherit_wayland)
         && let Ok(display) = env::var("WAYLAND_DISPLAY")
     {
         let uid = unsafe { libc::getuid() };

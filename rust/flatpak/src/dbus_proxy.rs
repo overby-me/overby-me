@@ -346,3 +346,82 @@ pub fn system_bus_socket_path() -> Option<PathBuf> {
         system_bus_address().and_then(|a| socket_path_from_address(&a).map(PathBuf::from))
     }
 }
+
+// ---------------------------------------------------------------------------
+// Accessibility bus
+// ---------------------------------------------------------------------------
+
+/// Get the accessibility bus address from the environment.
+pub fn a11y_bus_address() -> Option<String> {
+    env::var("AT_SPI_BUS_ADDRESS")
+        .ok()
+        .filter(|s| !s.is_empty())
+}
+
+/// Launch an accessibility bus proxy.
+pub fn launch_a11y_proxy(
+    app_id: &str,
+    a11y_policies: &HashMap<String, BusPolicy>,
+    instance_id: &str,
+) -> Result<RunningProxy, String> {
+    let proxy_bin = find_dbus_proxy().ok_or("xdg-dbus-proxy not found on PATH")?;
+    let bus_addr = a11y_bus_address().ok_or("accessibility bus not available")?;
+
+    let uid = unsafe { libc::getuid() };
+    let temp_dir = PathBuf::from(format!("/run/user/{uid}/.dbus-proxy-a11y-{instance_id}"));
+    fs::create_dir_all(&temp_dir).map_err(|e| format!("create a11y proxy dir: {e}"))?;
+
+    let proxy_socket = temp_dir.join("a11y-bus");
+
+    let mut cmd = Command::new(&proxy_bin);
+    cmd.arg(&bus_addr);
+    cmd.arg(&proxy_socket);
+
+    if !a11y_policies.is_empty() {
+        cmd.arg("--filter");
+        for (name, policy) in a11y_policies {
+            if *policy == BusPolicy::None {
+                continue;
+            }
+            cmd.arg(format!("{}={}", policy.as_flag(), name));
+        }
+        cmd.arg(format!("--own={app_id}"));
+    }
+
+    let child = cmd
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::inherit())
+        .spawn()
+        .map_err(|e| format!("spawn xdg-dbus-proxy (a11y): {e}"))?;
+
+    wait_for_socket(&proxy_socket, 50)?;
+
+    Ok(RunningProxy {
+        child,
+        socket_path: proxy_socket,
+        temp_dir,
+    })
+}
+
+/// Build accessibility bus proxy configuration.
+pub fn build_a11y_policies(
+    a11y_bus_policy: &HashMap<String, String>,
+) -> (bool, HashMap<String, BusPolicy>) {
+    let mut policies = HashMap::new();
+
+    // Default: allow the a11y registryd and AT-SPI.
+    policies.insert("org.a11y.Bus".to_string(), BusPolicy::Talk);
+    policies.insert("org.a11y.atspi.*".to_string(), BusPolicy::Talk);
+
+    for (name, level) in a11y_bus_policy {
+        let policy = BusPolicy::from_str(level);
+        if policy == BusPolicy::None {
+            policies.remove(name);
+        } else {
+            policies.insert(name.clone(), policy);
+        }
+    }
+
+    (true, policies)
+}
