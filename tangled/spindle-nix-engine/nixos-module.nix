@@ -205,7 +205,7 @@
 
         tasksMax = lib.mkOption {
           type = lib.types.nullOr (lib.types.either lib.types.int lib.types.str);
-          default = 512;
+          default = 4096;
           description = "Maximum number of tasks (processes/threads) the service can spawn.";
         };
       };
