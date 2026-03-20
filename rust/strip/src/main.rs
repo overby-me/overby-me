@@ -56,7 +56,7 @@ Options:
 }
 
 fn print_version() {
-    eprintln!("rust-strip {VERSION}");
+    eprintln!("strip (rust-strip) {VERSION}");
 }
 
 fn parse_args() -> Args {

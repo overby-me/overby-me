@@ -251,11 +251,7 @@ impl Engine {
         self.lookup_var_with_auto(name, &HashMap::new())
     }
 
-    pub fn lookup_var_with_auto(
-        &self,
-        name: &str,
-        auto_vars: &HashMap<&str, String>,
-    ) -> String {
+    pub fn lookup_var_with_auto(&self, name: &str, auto_vars: &HashMap<&str, String>) -> String {
         let vars = self.vars.borrow();
         if let Some(var) = vars.get(name) {
             let value = var.value.clone();

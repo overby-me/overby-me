@@ -74,7 +74,7 @@ fn parse_args() -> Config {
             "-8" => config.level = 8,
             "-9" | "--best" => config.level = 9,
             "--version" | "-V" => {
-                eprintln!("rust-bzip2 0.1.0");
+                eprintln!("bzip2 (rust-bzip2) {}", env!("CARGO_PKG_VERSION"));
                 process::exit(0);
             }
             "-h" | "--help" => {

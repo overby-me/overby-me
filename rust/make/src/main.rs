@@ -68,8 +68,7 @@ fn run() -> i32 {
                 // TODO: print database
             }
             "-v" | "--version" => {
-                println!("GNU Make 0.1.0-rust (compatible)");
-                println!("This is rust-make, a GNU Make-compatible build system.");
+                println!("make (rust-make) {}", env!("CARGO_PKG_VERSION"));
                 return 0;
             }
             "-h" | "--help" => {

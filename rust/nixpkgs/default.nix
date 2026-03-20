@@ -206,8 +206,6 @@
           echo "Xz: $(xz --version | head -1)"
           echo "Make: $(make --version | head -1)"
           echo "Patch: $(patch --version | head -1)"
-          echo "Patchelf: $(patchelf --version | head -1)"
-          echo "Strip: $(strip --version | head -1)"
           echo ""
           echo "Rust stdenv test passed."
         '';

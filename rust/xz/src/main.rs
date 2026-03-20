@@ -6,7 +6,7 @@ use std::process;
 
 use xz2::read::{XzDecoder, XzEncoder};
 
-const VERSION: &str = "rust-xz 0.1.0";
+const VERSION: &str = concat!("xz (rust-xz) ", env!("CARGO_PKG_VERSION"));
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Mode {
