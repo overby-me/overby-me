@@ -140,7 +140,7 @@
           resourceLimits = {
             memoryHigh = "16G";
             memoryMax = "20G";
-            tasksMax = 512;
+            tasksMax = 4096;
           };
         };
 
