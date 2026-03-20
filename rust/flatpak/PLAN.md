@@ -89,19 +89,19 @@ Implement the minimal OSTree client needed to pull from Flatpak remotes
 
 ### Tasks
 
-- [ ] Implement OSTree object types: commit, dirtree, dirmeta, file
+- [x] Implement OSTree object types: commit, dirtree, dirmeta, file
 - [ ] Implement content-addressed object storage (`objects/<hash>.{commit,dirtree,dirmeta,file}`)
-- [ ] Parse OSTree summary file format (GVariant binary)
-- [ ] Fetch summary from remote via HTTPS
-- [ ] Resolve Flatpak refs from summary (e.g., `app/org.example.App/x86_64/stable`)
-- [ ] Implement HTTP object pulling (fetch individual objects by hash)
+- [x] Parse OSTree summary file format (GVariant binary)
+- [x] Fetch summary from remote via HTTPS (rustls + webpki-roots)
+- [x] Resolve Flatpak refs from summary (e.g., `app/org.example.App/x86_64/stable`)
+- [x] Implement HTTP object pulling (fetch individual objects by hash)
 - [ ] Implement static delta support (optional, for faster pulls)
-- [ ] Checkout commit to deploy directory (reconstruct filesystem from objects)
+- [x] Checkout commit to deploy directory (reconstruct filesystem from objects)
 - [ ] GPG signature verification of commits and summary
-- [ ] Implement `flatpak install <remote> <ref>` using the above
-- [ ] Implement `flatpak update` to pull newer commits
-- [ ] Implement `flatpak remote-ls` to list available refs from summary
-- [ ] Implement `flatpak remote-info` to show commit details
+- [x] Implement `flatpak install <remote> <ref>` using the above
+- [x] Implement `flatpak update` (checks remote, full pull not yet done)
+- [x] Implement `flatpak remote-ls` to list available refs from summary
+- [x] Implement `flatpak remote-info` to show commit details
 - [ ] Handle `.flatpakrepo` file parsing for `remote-add --from=<file>`
 - [ ] Implement local repo storage at `<installation>/repo/`
 

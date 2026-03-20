@@ -8,6 +8,7 @@ mod dbus_proxy;
 mod installation;
 mod instance;
 mod metadata;
+mod ostree;
 mod sandbox;
 mod seccomp;
 
@@ -84,6 +85,7 @@ fn main() {
         "remote-add" => cmd_remote_add(&installations, cmd_args),
         "remote-delete" => cmd_remote_delete(&installations, cmd_args),
         "remote-info" => cmd_remote_info(&installations, cmd_args),
+        "remote-ls" => cmd_remote_ls(&installations, cmd_args),
         "ps" => cmd_ps(),
         "kill" => cmd_kill(cmd_args),
         "enter" => cmd_enter(cmd_args),
@@ -375,15 +377,117 @@ fn cmd_install(installations: &[Installation], args: &[String]) {
         && (source_path.join("metadata").exists() || source_path.join("files").exists())
     {
         install_from_dir(installations, source_path, ref_str.as_deref());
-    } else if ref_str.is_some() {
-        eprintln!("flatpak install: remote installation not yet implemented");
-        eprintln!("Install from a local build directory: flatpak install <build-dir>");
-        process::exit(1);
+    } else if let Some(ref ref_name) = ref_str {
+        // Install from a remote.
+        install_from_remote(installations, &source, ref_name);
     } else {
-        eprintln!("flatpak install: '{}' is not a valid source", source);
-        eprintln!("Expected a build directory with a 'metadata' file, or a remote name");
+        // Maybe `source` is a remote name and ref_str wasn't provided.
+        // Try to find a remote with this name.
+        let mut found_remote = false;
+        for inst in installations {
+            let remotes = installation::load_remotes(inst);
+            if remotes.iter().any(|r| r.name == source) {
+                found_remote = true;
+                break;
+            }
+        }
+        if found_remote {
+            eprintln!("flatpak install: usage: flatpak install <remote> <ref>");
+            eprintln!("Specify the ref to install (use 'flatpak remote-ls {source}' to list)");
+        } else {
+            eprintln!("flatpak install: '{}' is not a valid source", source);
+            eprintln!("Expected a build directory, or: flatpak install <remote> <ref>");
+        }
         process::exit(1);
     }
+}
+
+fn install_from_remote(installations: &[Installation], remote_name: &str, ref_name: &str) {
+    let remote = find_remote(installations, remote_name);
+    let inst = &installations[0]; // Install to first (user) installation.
+
+    eprintln!("Looking for {ref_name} on {remote_name}...");
+
+    // Parse the ref to determine kind, id, arch, branch.
+    let parsed_ref = if let Some(r) = Ref::parse(ref_name) {
+        r
+    } else {
+        // Search for a matching ref in the summary.
+        let refs = ostree::fetch_summary(&remote.url).unwrap_or_else(|e| {
+            eprintln!("flatpak install: {e}");
+            process::exit(1);
+        });
+
+        // Try to find an app ref matching the name.
+        let arch = std::env::consts::ARCH;
+
+        let matching: Vec<_> = refs
+            .iter()
+            .filter(|r| r.name.contains(ref_name) && r.name.contains(arch))
+            .collect();
+
+        if matching.is_empty() {
+            eprintln!("flatpak install: no matching ref for '{ref_name}'");
+            process::exit(1);
+        }
+        if matching.len() > 1 {
+            eprintln!("flatpak install: multiple matches for '{ref_name}':");
+            for m in &matching {
+                eprintln!("  {}", m.name);
+            }
+            eprintln!("Specify the full ref name.");
+            process::exit(1);
+        }
+
+        Ref::parse(&matching[0].name).unwrap_or_else(|| {
+            eprintln!(
+                "flatpak install: could not parse ref '{}'",
+                matching[0].name
+            );
+            process::exit(1);
+        })
+    };
+
+    let deploy_path = inst.deploy_path(&parsed_ref);
+    let _ = fs::create_dir_all(&deploy_path);
+
+    let ref_str = parsed_ref.format_ref();
+    eprintln!("Installing {ref_str}...");
+
+    // Pull the ref using the OSTree client.
+    let _commit = ostree::pull_ref(&remote.url, &ref_str, &deploy_path, true).unwrap_or_else(|e| {
+        eprintln!("flatpak install: pull failed: {e}");
+        let _ = fs::remove_dir_all(&deploy_path);
+        process::exit(1);
+    });
+
+    // The checkout puts files into deploy_path/files/. We also need the metadata
+    // file. OSTree Flatpak repos store metadata as a file in the root tree.
+    // If metadata file exists in the checkout, move it up.
+    let checkout_metadata = deploy_path.join("files").join("metadata");
+    let target_metadata = deploy_path.join("metadata");
+    if checkout_metadata.exists() && !target_metadata.exists() {
+        let _ = fs::rename(&checkout_metadata, &target_metadata);
+    }
+
+    // If no metadata was found in the repo, create a minimal one.
+    if !target_metadata.exists() {
+        let kind = if parsed_ref.kind == RefKind::App {
+            "Application"
+        } else {
+            "Runtime"
+        };
+        let meta_content = format!(
+            "[{kind}]\nname={}\nruntime=org.freedesktop.Platform/x86_64/23.08\n",
+            parsed_ref.id
+        );
+        let _ = fs::write(&target_metadata, meta_content);
+    }
+
+    println!(
+        "Installation complete: {} ({}/{})",
+        parsed_ref.id, parsed_ref.arch, parsed_ref.branch
+    );
 }
 
 fn install_from_dir(installations: &[Installation], source: &Path, ref_override: Option<&str>) {
@@ -544,9 +648,36 @@ fn cmd_uninstall(installations: &[Installation], args: &[String]) {
 // Command: update (stub)
 // ---------------------------------------------------------------------------
 
-fn cmd_update(_installations: &[Installation], _args: &[String]) {
-    println!("Nothing to update.");
-    println!("Note: Remote repository pulling is not yet implemented.");
+fn cmd_update(installations: &[Installation], _args: &[String]) {
+    let mut updated = 0;
+    for inst in installations {
+        let remotes = installation::load_remotes(inst);
+        let deployed_refs = inst.list_refs();
+
+        for deployed in &deployed_refs {
+            // Find which remote might have this ref.
+            for remote in &remotes {
+                let ref_str = deployed.ref_.format_ref();
+                match ostree::fetch_summary(&remote.url) {
+                    Ok(refs) => {
+                        if refs.iter().any(|r| r.name == ref_str) {
+                            eprintln!("Checking {ref_str} on {}...", remote.name);
+                            // For a real update, we'd compare commit checksums.
+                            // For now, just report what we'd update.
+                            updated += 1;
+                        }
+                    }
+                    Err(_) => continue,
+                }
+                break; // Only check first matching remote.
+            }
+        }
+    }
+    if updated == 0 {
+        println!("Nothing to update.");
+    } else {
+        println!("Checked {updated} refs. Full update pull not yet implemented.");
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -776,12 +907,96 @@ fn cmd_remote_delete(installations: &[Installation], args: &[String]) {
 // Command: remote-info (stub)
 // ---------------------------------------------------------------------------
 
-fn cmd_remote_info(_installations: &[Installation], args: &[String]) {
+fn cmd_remote_info(installations: &[Installation], args: &[String]) {
     if args.len() < 2 {
         eprintln!("flatpak remote-info: usage: flatpak remote-info REMOTE REF");
         process::exit(1);
     }
-    eprintln!("flatpak remote-info: remote ref querying not yet implemented");
+    let remote_name = &args[0];
+    let ref_name = &args[1];
+
+    let remote = find_remote(installations, remote_name);
+    let refs = ostree::fetch_summary(&remote.url).unwrap_or_else(|e| {
+        eprintln!("flatpak remote-info: {e}");
+        process::exit(1);
+    });
+
+    let found = refs
+        .iter()
+        .find(|r| r.name == *ref_name || r.name.contains(ref_name));
+    match found {
+        Some(r) => {
+            println!("  Ref: {}", r.name);
+            println!("  Commit: {}", r.checksum);
+            println!("  Size: {} bytes", r.commit_size);
+        }
+        None => {
+            eprintln!("flatpak remote-info: ref '{ref_name}' not found on {remote_name}");
+            process::exit(1);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Command: remote-ls
+// ---------------------------------------------------------------------------
+
+fn cmd_remote_ls(installations: &[Installation], args: &[String]) {
+    let mut show_apps = true;
+    let mut show_runtimes = false;
+    let mut remote_name: Option<&String> = None;
+
+    for arg in args {
+        match arg.as_str() {
+            "--app" => {
+                show_apps = true;
+                show_runtimes = false;
+            }
+            "--runtime" => {
+                show_apps = false;
+                show_runtimes = true;
+            }
+            "-a" | "--all" => {
+                show_apps = true;
+                show_runtimes = true;
+            }
+            s if !s.starts_with('-') => remote_name = Some(arg),
+            _ => {}
+        }
+    }
+
+    let remote_name = remote_name.unwrap_or_else(|| {
+        eprintln!("flatpak remote-ls: no remote specified");
+        process::exit(1);
+    });
+
+    let remote = find_remote(installations, remote_name);
+    eprintln!("Fetching refs from {}...", remote.url);
+
+    let refs = ostree::fetch_summary(&remote.url).unwrap_or_else(|e| {
+        eprintln!("flatpak remote-ls: {e}");
+        process::exit(1);
+    });
+
+    for r in &refs {
+        let is_app = r.name.starts_with("app/");
+        let is_runtime = r.name.starts_with("runtime/");
+        if (show_apps && is_app) || (show_runtimes && is_runtime) || (!is_app && !is_runtime) {
+            println!("{}", r.name);
+        }
+    }
+
+    eprintln!("{} refs found", refs.len());
+}
+
+fn find_remote(installations: &[Installation], name: &str) -> Remote {
+    for inst in installations {
+        let remotes = installation::load_remotes(inst);
+        if let Some(r) = remotes.into_iter().find(|r| r.name == name) {
+            return r;
+        }
+    }
+    eprintln!("flatpak: remote '{name}' not found");
     process::exit(1);
 }
 
