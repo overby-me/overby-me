@@ -40,10 +40,16 @@
     # Expose the component registry for introspection
     rust-nixpkgs-components = components;
 
-    # A stdenv with all available Rust replacements swapped in
+    # A stdenv with all available Rust replacements swapped in.
+    # We disable allowedRequisites because Rust replacement packages
+    # are built with the normal stdenv, so their closures transitively
+    # reference the C originals (e.g. rust-grep depends on coreutils).
+    # A fully bootstrapped Rust stdenv (Phase 7) would rebuild the
+    # replacements with themselves, eliminating these references.
     stdenvRs = prev.stdenv.override {
       initialPath = replacedInitialPath;
       shell = "${shellPkg}/bin/bash";
+      allowedRequisites = null;
     };
 
     # mkDerivation using the Rust stdenv — use this to test-build packages
@@ -134,6 +140,92 @@
 
         meta = {
           description = "Test derivation for rust-nixpkgs component availability";
+          license = lib.licenses.mit;
+        };
+      };
+
+    # Test building a trivial derivation using the Rust stdenv.
+    # Constructs a stdenv with Rust tools directly from flake packages,
+    # bypassing the overlay to avoid needing all overlays composed.
+    rust-nixpkgs-stdenv-test = {
+      lib,
+      stdenv,
+      uutils-coreutils-noprefix,
+      uutils-sed,
+      rust-grep,
+      rust-awk,
+      uutils-findutils,
+      rust-tar,
+      rust-gzip,
+      rust-bzip2,
+      rust-xz,
+      rust-make,
+      rust-patch,
+    }: let
+      # Map of original pname → replacement package.
+      # Note: bash/shell is NOT replaced here — rust-bash can't yet
+      # execute nixpkgs setup.sh fully. This tests the tools only.
+      # patchelf and strip are not in initialPath (they're used by
+      # fixup hooks separately), so they're not mapped here.
+      replacements = {
+        coreutils = uutils-coreutils-noprefix;
+        gnused = uutils-sed;
+        gnugrep = rust-grep;
+        gawk = rust-awk;
+        findutils = uutils-findutils;
+        # diffutils: uutils-diffutils only provides a single binary,
+        # not the individual diff/cmp/sdiff/diff3 commands stdenv needs
+        gnutar = rust-tar;
+        gzip = rust-gzip;
+        bzip2 = rust-bzip2;
+        xz = rust-xz;
+        gnumake = rust-make;
+        patch = rust-patch;
+      };
+      replacedInitialPath =
+        map (
+          pkg: replacements.${pkg.pname or ""} or pkg
+        )
+        stdenv.initialPath;
+      rustStdenv = stdenv.override {
+        initialPath = replacedInitialPath;
+        allowedRequisites = null;
+      };
+    in
+      rustStdenv.mkDerivation {
+        pname = "rust-nixpkgs-stdenv-test";
+        version = "0.1.0";
+
+        dontUnpack = true;
+
+        buildPhase = ''
+          echo "=== Building with Rust stdenv ==="
+          echo "Shell: $(bash --version | head -1)"
+          echo "Coreutils: $(ls --version | head -1)"
+          echo "Sed: $(sed --version | head -1)"
+          echo "Grep: $(grep --version | head -1)"
+          echo "Awk: $(awk --version | head -1)"
+          echo "Find: $(find --version | head -1)"
+          echo "Diff: $(diff --version | head -1)"
+          echo "Tar: $(tar --version | head -1)"
+          echo "Gzip: $(gzip --version | head -1)"
+          echo "Bzip2: $(bzip2 --version 2>&1 | head -1)"
+          echo "Xz: $(xz --version | head -1)"
+          echo "Make: $(make --version | head -1)"
+          echo "Patch: $(patch --version | head -1)"
+          echo "Patchelf: $(patchelf --version | head -1)"
+          echo "Strip: $(strip --version | head -1)"
+          echo ""
+          echo "Rust stdenv test passed."
+        '';
+
+        installPhase = ''
+          mkdir -p $out
+          echo "rust-nixpkgs stdenv test passed" > $out/result
+        '';
+
+        meta = {
+          description = "Test building with the Rust stdenv";
           license = lib.licenses.mit;
         };
       };

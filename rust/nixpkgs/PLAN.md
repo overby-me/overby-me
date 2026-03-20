@@ -45,12 +45,12 @@ The nixpkgs standard environment (`stdenv`) is the foundation that builds every 
 | Pattern grep | gnugrep | rust/grep | repo | 2 | ✅ Available |
 | Awk | gawk | rust/awk | repo | 2 | ✅ Available |
 | File search | findutils | [uutils-findutils](https://github.com/uutils/findutils) | nixpkgs | 2 | ✅ Available |
-| Diff | diffutils | [uutils-diffutils](https://github.com/uutils/diffutils) | nixpkgs | 2 | ✅ Available |
+| Diff | diffutils | [uutils-diffutils](https://github.com/uutils/diffutils) | nixpkgs | 2 | 🔶 Not drop-in (single binary) |
 | Tar archive | gnutar | rust/tar | repo | 3 | ✅ Available |
 | Gzip | gzip | rust/gzip | repo | 3 | ✅ Available |
 | Bzip2 | bzip2 | rust/bzip2 | repo | 3 | ✅ Available |
 | XZ/LZMA | xz | rust/xz | repo | 3 | ✅ Available |
-| Build driver | gnumake | — | — | 4 | ⏳ Planned |
+| Build driver | gnumake | rust/make | repo | 4 | ✅ Available |
 | Patch | gnupatch | rust/patch | repo | 4 | ✅ Available |
 | ELF patcher | patchelf | rust/patchelf | repo | 5 | ✅ Available |
 | Symbol strip | binutils (strip) | rust/strip | repo | 5 | ✅ Available |
@@ -101,10 +101,20 @@ The nixpkgs standard environment (`stdenv`) is the foundation that builds every 
 
 - [x] Declare shell component with rust-bash replacement
 - [x] Declare coreutils component with uutils replacement
-- [ ] Test: build a trivial derivation with the partially-oxidized stdenv
+- [x] Test: build a trivial derivation with the partially-oxidized stdenv
 - [ ] Test: build a real autotools package (e.g. hello) with the partially-oxidized stdenv
-- [ ] Document known incompatibilities and workarounds
+- [x] Document known incompatibilities and workarounds
 - [ ] Validate rust-bash can execute stdenv's `setup.sh` phases without modification
+
+### Known Incompatibilities
+
+1. **rust-bash cannot execute stdenv's `setup.sh`** — Using rust-bash as the stdenv shell causes builder processes to be killed (signal 9). The `setup.sh` sourcing likely hits unimplemented bash features. For now, the standard bash is kept as the shell while Rust tools are swapped into `initialPath`.
+
+2. **`allowedRequisites` must be disabled** — The stdenv has a strict allowlist of store paths (`allowedRequisites`). Rust replacement packages are built with the normal C stdenv, so their closures transitively reference the C originals (e.g. `rust-grep` depends on `coreutils`). We set `allowedRequisites = null` to bypass this. A fully bootstrapped Rust stdenv (Phase 7) would rebuild replacements with themselves.
+
+3. **uutils-diffutils is not a drop-in** — `uutils-diffutils` only provides a single `diffutils` binary, not the individual `diff`, `cmp`, `sdiff`, `diff3` commands that stdenv expects. It cannot serve as a replacement until it provides these individual commands or a multicall binary with symlinks.
+
+4. **patchelf and strip are not in `initialPath`** — These tools are used by stdenv's fixup hooks but are not part of `initialPath`. They need to be overridden separately in the fixup hook configuration, not via `initialPath` replacement.
 
 ### Risks
 
@@ -117,7 +127,7 @@ The nixpkgs standard environment (`stdenv`) is the foundation that builds every 
 
 **Goal:** Replace the text processing toolkit used pervasively by configure scripts, Makefiles, and stdenv hooks.
 
-**Status:** ✅ Complete
+**Status:** 🔶 In progress (diffutils not yet a drop-in)
 
 ### Components
 
@@ -127,7 +137,7 @@ The nixpkgs standard environment (`stdenv`) is the foundation that builds every 
 | gnugrep | rust/grep | repo | GNU-flag-compatible with BRE/ERE/PCRE, -w, -c, -l, -L, context |
 | gawk | rust/awk | repo | Lexer/parser/interpreter with POSIX awk + GNU extensions |
 | findutils | uutils-findutils | nixpkgs | From [uutils/findutils](https://github.com/uutils/findutils), runs GNU testsuite |
-| diffutils | uutils-diffutils | nixpkgs | From [uutils/diffutils](https://github.com/uutils/diffutils), diff/cmp/sdiff/diff3 |
+| diffutils | uutils-diffutils | nixpkgs | ⚠️ Only provides single `diffutils` binary, not individual diff/cmp/sdiff/diff3 commands |
 
 ### Testing Strategy
 

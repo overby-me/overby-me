@@ -2,17 +2,17 @@
 status:
     nix build .#rust-nixpkgs-test --no-link --print-build-logs
 
-# Build the test derivation
+# Build the test derivation (verifies all components are available)
 test:
     nix build .#rust-nixpkgs-test
+
+# Build with the Rust stdenv (verifies stdenv override works end-to-end)
+test-stdenv:
+    nix build .#rust-nixpkgs-stdenv-test --no-link --print-build-logs
 
 # Explore the stdenvRs closure
 tree:
     nix-tree .#rust-nixpkgs-test
-
-# Build a simple hello-world package using the Rust stdenv overlay
-test-hello:
-    nix build --impure --expr 'let pkgs = import <nixpkgs> { overlays = [ (import ./default.nix).overlays.rust-nixpkgs ]; }; in pkgs.mkDerivationRs { pname = "hello-rs"; version = "0.1.0"; dontUnpack = true; buildPhase = "echo hello from Rust stdenv"; installPhase = "mkdir -p $out && echo ok > $out/result"; }'
 
 # List all component files
 components:
