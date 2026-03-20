@@ -273,25 +273,18 @@
             | xargs touch
         '';
 
+        # Ensure .deps directories exist with dummy files
+        # (config.status depfiles command may fail with rust-make)
+        postConfigure = ''
+          grep '^include.*DEPDIR' Makefile | sed 's/include //;s/ #.*//' | while read f; do
+            f=$(echo "$f" | sed "s/\$(DEPDIR)/.deps/g")
+            mkdir -p "$(dirname "$f")"
+            [ -f "$f" ] || echo "# dummy" > "$f"
+          done
+        '';
+
         # Force rebuild by changing env
         RUST_STDENV_TEST = "2";
-
-        buildPhase = ''
-          runHook preBuild
-          echo "=== .deps check ==="
-          ls lib/.deps/basename-lgpl.Po 2>&1
-          cat lib/.deps/basename-lgpl.Po 2>&1
-          echo "=== .c file ==="
-          ls -la lib/basename-lgpl.c 2>&1
-          echo "=== include expand ==="
-          grep 'DEPDIR' Makefile | head -2
-          echo "=== test with -B ==="
-          make -B lib/basename-lgpl.o 2>&1 | head -3
-          ls -la lib/basename-lgpl.o 2>&1 || echo "still does not exist"
-          echo "=== end ==="
-          make SHELL=$SHELL
-          runHook postBuild
-        '';
 
         meta = {
           description = "GNU hello built with the Rust stdenv";
