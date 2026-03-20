@@ -261,6 +261,12 @@
           sha256 = "sha256-jZkUKv2SV28wsM18tCqNxoCZmLxdYH2Idh9RLibH2yA=";
         };
 
+        # Prevent autotools re-running by ensuring generated files
+        # are newer than their inputs (standard autotools timestamp fix)
+        postPatch = ''
+          touch aclocal.m4 configure Makefile.in config.h.in
+        '';
+
         meta = {
           description = "GNU hello built with the Rust stdenv";
           license = lib.licenses.gpl3Plus;
