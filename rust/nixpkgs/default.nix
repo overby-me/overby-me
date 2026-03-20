@@ -276,15 +276,17 @@
         # Force rebuild by changing env
         RUST_STDENV_TEST = "2";
 
-        preBuild = ''
-          echo "=== make -n lib/basename-lgpl.o ==="
-          make -n lib/basename-lgpl.o 2>&1
-          echo "EXIT: $?"
-          echo "=== make -n all-am 2>&1 | head -5 ==="
-          make -n all-am 2>&1 | head -5
-          echo "=== make -d lib/basename-lgpl.o 2>&1 | head -20 ==="
-          make -d lib/basename-lgpl.o 2>&1 | head -20 || true
+        # Skip default buildPhase, run make directly to debug
+        buildPhase = ''
+          runHook preBuild
+          # Build BUILT_SOURCES first (same as default all target prereqs)
+          make SHELL=$SHELL lib/basename-lgpl.o 2>&1 || true
+          echo "=== check .o ==="
+          ls -la lib/basename-lgpl.o 2>&1 || echo "does not exist"
           echo "=== end ==="
+          # Now do the real build
+          make SHELL=$SHELL
+          runHook postBuild
         '';
 
         meta = {
