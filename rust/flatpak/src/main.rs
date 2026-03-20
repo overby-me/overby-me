@@ -5,8 +5,10 @@
 // sandboxing.
 
 mod build;
+mod dbus_client;
 mod dbus_proxy;
 mod extensions;
+mod gvariant;
 mod installation;
 mod instance;
 mod metadata;

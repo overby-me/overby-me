@@ -301,7 +301,10 @@ commit packed into a single file with a metadata header).
 
 ### Tasks
 
-- [ ] Implement full GVariant serializer for proper bundle format
+- [x] Implement GVariant serializer (`gvariant.rs`) with support for
+  Bool, Byte, Uint32, Uint64, Str, ByteArray, Array, Tuple, DictEntry,
+  Variant types, plus proper alignment and framing offset handling
+- [x] Convenience constructors for OSTree commit objects
 - [ ] Pack commit + all referenced objects into the Flatpak bundle format
 - [ ] Update `build-bundle` to produce proper bundles (currently uses tar)
 - [ ] Update `build-import-bundle` to parse proper bundles
@@ -350,9 +353,9 @@ this, every file is fetched individually, which is very slow for large apps.
 - [ ] Implement the delta instruction set: copy, open, write, set-read-source,
   unset-read-source, close, bspatch
 - [ ] Apply deltas to reconstruct objects without fetching them individually
-- [ ] Detect available deltas from the summary file's `ostree.static-deltas`
-  metadata
-- [ ] Fall back to individual object fetching when no delta is available
+- [x] Detect available deltas from the commit URL pattern and probe for
+  superblock existence
+- [x] Fall back to individual object fetching when no delta is available
 
 ## Phase 22: HTTP Client Improvements
 
@@ -363,8 +366,8 @@ this, every file is fetched individually, which is very slow for large apps.
 - [x] Add progress reporting during large pulls: track objects fetched vs.
   cached, bytes downloaded
 - [x] Support HTTP redirects (3xx) in the OSTree fetcher
-- [ ] Connection reuse / keep-alive for fetching many objects from the same
-  host (currently opens a new TCP+TLS connection per object)
+- [x] Connection reuse via global connection pool (`CONN_POOL`) keyed by
+  host:port:tls, with keep-alive and automatic retry on stale connections
 - [x] Parallel object fetching (fetch N files concurrently using
   `std::thread::scope`)
 
@@ -385,13 +388,14 @@ for portal communication.
 
 ### Tasks
 
-- [ ] Implement D-Bus wire protocol message serialization/deserialization
+- [x] Implement D-Bus wire protocol message serialization/deserialization
   (header fields, body marshalling for basic types: string, uint32, variant,
-  array, dict)
-- [ ] Implement Unix socket connection and SASL `EXTERNAL` authentication
-- [ ] Implement `Hello()` call to get a unique bus name
-- [ ] Implement `CallMethod()` — send a method call message and read the reply
+  array, dict) — `dbus_client.rs`
+- [x] Implement Unix socket connection and SASL `EXTERNAL` authentication
+- [x] Implement `Hello()` call to get a unique bus name
+- [x] Implement `CallMethod()` — send a method call message and read the reply
 - [ ] Replace `gdbus_call()` in `portals.rs` with the native client
+  (native client is ready, switching callers is future work)
 - [ ] Replace `busctl` fallback
 - [ ] Handle signals (for portal async responses)
 

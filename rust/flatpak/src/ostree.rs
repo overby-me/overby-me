@@ -6,12 +6,13 @@
 //! 3. Fetch commit, dirtree, dirmeta, and file objects
 //! 4. Checkout a commit to a local directory
 
+use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 // ---------------------------------------------------------------------------
 // Object types and checksums
@@ -513,12 +514,66 @@ fn decompress_raw_deflate(compressed: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 // ---------------------------------------------------------------------------
-// HTTP fetching (reuses the simple HTTP client approach)
+// HTTP connection pool and fetching
 // ---------------------------------------------------------------------------
 
-/// Fetch a URL and return the response body.
-pub fn fetch_url(url: &str) -> Result<Vec<u8>, String> {
-    // Parse URL.
+/// Global connection pool for reusing HTTP/TLS connections.
+/// Keyed by (host:port, is_tls).
+static CONN_POOL: std::sync::LazyLock<Mutex<HashMap<String, Vec<Box<dyn ReadWrite + Send>>>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Take a connection from the pool, or create a new one.
+fn get_connection(
+    host: &str,
+    port: u16,
+    is_tls: bool,
+) -> Result<Box<dyn ReadWrite + Send>, String> {
+    let key = format!("{host}:{port}:{is_tls}");
+
+    // Try to reuse a pooled connection.
+    if let Ok(mut pool) = CONN_POOL.lock()
+        && let Some(conns) = pool.get_mut(&key)
+            && let Some(conn) = conns.pop() {
+                return Ok(conn);
+            }
+
+    // Create a new connection.
+    let addr = format!("{host}:{port}");
+    if is_tls {
+        let root_store = rustls_root_store();
+        let config = Arc::new(
+            rustls::ClientConfig::builder()
+                .with_root_certificates(root_store)
+                .with_no_client_auth(),
+        );
+        let server_name = rustls::pki_types::ServerName::try_from(host)
+            .map_err(|e| format!("bad server name: {e}"))?
+            .to_owned();
+        let conn =
+            rustls::ClientConnection::new(config, server_name).map_err(|e| format!("tls: {e}"))?;
+        let tcp = TcpStream::connect(&addr).map_err(|e| format!("connect: {e}"))?;
+        let tls = rustls::StreamOwned::new(conn, tcp);
+        Ok(Box::new(tls))
+    } else {
+        let tcp = TcpStream::connect(&addr).map_err(|e| format!("connect {addr}: {e}"))?;
+        Ok(Box::new(tcp))
+    }
+}
+
+/// Return a connection to the pool for reuse.
+fn return_connection(host: &str, port: u16, is_tls: bool, conn: Box<dyn ReadWrite + Send>) {
+    let key = format!("{host}:{port}:{is_tls}");
+    if let Ok(mut pool) = CONN_POOL.lock() {
+        let conns = pool.entry(key).or_default();
+        if conns.len() < 4 {
+            // Keep at most 4 idle connections per host.
+            conns.push(conn);
+        }
+    }
+}
+
+/// Parse a URL into (scheme, host, port, path).
+fn parse_url_parts(url: &str) -> Result<(String, String, u16, String), String> {
     let url_str = if !url.contains("://") {
         format!("https://{url}")
     } else {
@@ -533,19 +588,43 @@ pub fn fetch_url(url: &str) -> Result<Vec<u8>, String> {
         .map(|i| (&rest[..i], &rest[i..]))
         .unwrap_or((rest, "/"));
     let (host, port) = match authority.rsplit_once(':') {
-        Some((h, p)) => (h, p.parse::<u16>().unwrap_or(443)),
-        None => (authority, if scheme == "https" { 443 } else { 80 }),
+        Some((h, p)) => (h.to_string(), p.parse::<u16>().unwrap_or(443)),
+        None => (
+            authority.to_string(),
+            if scheme == "https" { 443 } else { 80 },
+        ),
     };
 
-    let addr = format!("{host}:{port}");
+    Ok((scheme.to_string(), host, port, path.to_string()))
+}
+
+/// Fetch a URL and return the response body.
+pub fn fetch_url(url: &str) -> Result<Vec<u8>, String> {
+    let (scheme, host, port, path) = parse_url_parts(url)?;
+    let is_tls = scheme == "https";
+
     let request = format!(
-        "GET {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: rust-flatpak/0.1.0\r\nConnection: close\r\nAccept: */*\r\n\r\n"
+        "GET {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: rust-flatpak/0.1.0\r\nConnection: keep-alive\r\nAccept: */*\r\n\r\n"
     );
 
-    if scheme == "https" {
-        fetch_https(host, &addr, &request)
-    } else {
-        fetch_http(&addr, &request)
+    let mut conn = get_connection(&host, port, is_tls)?;
+
+    match do_http_request(&mut *conn, &request) {
+        Ok(body) => {
+            // Return connection to pool for reuse.
+            return_connection(&host, port, is_tls, conn);
+            Ok(body)
+        }
+        Err(_) => {
+            // Connection may be broken. Try once more with a fresh connection.
+            drop(conn);
+            let mut conn = get_connection(&host, port, is_tls)?;
+            let result = do_http_request(&mut *conn, &request);
+            if result.is_ok() {
+                return_connection(&host, port, is_tls, conn);
+            }
+            result
+        }
     }
 }
 
@@ -675,32 +754,6 @@ fn read_chunked_body(stream: &mut dyn ReadWrite) -> Result<Vec<u8>, String> {
 
 trait ReadWrite: Read + Write {}
 impl<T: Read + Write> ReadWrite for T {}
-
-fn fetch_http(addr: &str, request: &str) -> Result<Vec<u8>, String> {
-    let mut stream = TcpStream::connect(addr).map_err(|e| format!("connect {addr}: {e}"))?;
-    do_http_request(&mut stream, request)
-}
-
-fn fetch_https(host: &str, addr: &str, request: &str) -> Result<Vec<u8>, String> {
-    let root_store = rustls_root_store();
-    let config = Arc::new(
-        rustls::ClientConfig::builder()
-            .with_root_certificates(root_store)
-            .with_no_client_auth(),
-    );
-
-    let server_name = rustls::pki_types::ServerName::try_from(host)
-        .map_err(|e| format!("bad server name: {e}"))?
-        .to_owned();
-
-    let conn =
-        rustls::ClientConnection::new(config, server_name).map_err(|e| format!("tls: {e}"))?;
-
-    let tcp = TcpStream::connect(addr).map_err(|e| format!("connect: {e}"))?;
-    let mut tls = rustls::StreamOwned::new(conn, tcp);
-
-    do_http_request(&mut tls, request)
-}
 
 fn rustls_root_store() -> rustls::RootCertStore {
     let mut store = rustls::RootCertStore::empty();
@@ -990,15 +1043,56 @@ pub fn pull_ref(
         eprintln!("Checking out to {}...", files_dir.display());
     }
 
-    checkout_tree(
-        repo_url,
-        &commit.root_dirtree,
-        &commit.root_dirmeta,
-        &files_dir,
-        verbose,
-    )?;
+    // Try to use a static delta if available (much faster than individual objects).
+    let delta_used = try_static_delta(repo_url, &summary_ref.checksum, &files_dir, verbose);
+    if !delta_used {
+        // Fall back to individual object fetching.
+        checkout_tree(
+            repo_url,
+            &commit.root_dirtree,
+            &commit.root_dirmeta,
+            &files_dir,
+            verbose,
+        )?;
+    }
 
     Ok(summary_ref.checksum.clone())
+}
+
+/// Try to fetch and apply a static delta for the given commit.
+/// Returns true if a delta was successfully applied, false to fall back.
+fn try_static_delta(repo_url: &str, commit: &str, _dest: &Path, verbose: bool) -> bool {
+    // Static deltas are stored at:
+    //   <repo>/deltas/<from_prefix>/<from_rest>-<to_prefix>/<to_rest>/superblock
+    // For an initial pull (no previous commit), the "from" is empty, encoded as
+    //   <repo>/deltas/<to[0..2]>/<to[2..]>/superblock
+    let delta_url = format!(
+        "{}/deltas/{}/{}/superblock",
+        repo_url.trim_end_matches('/'),
+        &commit[..2],
+        &commit[2..]
+    );
+
+    match fetch_url(&delta_url) {
+        Ok(superblock) => {
+            if verbose {
+                eprintln!(
+                    "  Found static delta ({} bytes), but delta application not yet implemented",
+                    superblock.len()
+                );
+                eprintln!("  Falling back to individual object fetching");
+            }
+            // TODO: Parse superblock GVariant, fetch delta parts, apply instructions.
+            // The delta instruction set includes: open, write, set-read-source,
+            // unset-read-source, close, copy, bspatch.
+            // This requires a substantial implementation effort.
+            false
+        }
+        Err(_) => {
+            // No delta available.
+            false
+        }
+    }
 }
 
 /// List refs available on a remote.
