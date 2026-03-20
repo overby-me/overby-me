@@ -263,7 +263,7 @@ stdenvRs = pkgs.stdenv.override {
   initialPath = [
     rust-bash              # Phase 1
     uutils-coreutils       # Phase 1
-    rust-sed               # Phase 2
+    uutils-sed             # Phase 2 (from uutils project)
     rust-grep              # Phase 2
     rust-awk               # Phase 2
     rust-findutils         # Phase 2
@@ -339,7 +339,7 @@ When creating a new Rust rewrite (e.g. `rust/sed`):
    mkComponent {
      name = "gnused";
      original = pkgs.gnused;
-     replacement = pkgs.rust-sed;  # ← point to the new package
+     replacement = pkgs.uutils-sed;  # ← from the uutils project
      status = status.available;     # ← update status
      source = source.repo;
      phase = 2;
