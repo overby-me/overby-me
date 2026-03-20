@@ -1,0 +1,23 @@
+[package]
+name = "rust-curl"
+version = "0.1.0"
+edition = "2024"
+description = "A curl-compatible HTTP client written in Rust"
+license = "MIT"
+
+[[bin]]
+name = "curl"
+path = "src/main.rs"
+
+[dependencies]
+rustls = { version = "0.23", default-features = false, features = [
+  "ring",
+  "std",
+] }
+rustls-native-certs = "0.8"
+rustls-pemfile = "2"
+webpki-roots = "0.26"
+
+[profile.release]
+lto = true
+strip = true

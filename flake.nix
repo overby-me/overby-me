@@ -236,6 +236,7 @@
         ./rust/strip
         ./rust/tar
         ./rust/xz
+        ./rust/curl
         ./ironclaw/matrix
         ./ironclaw/bluesky
         ./ironclaw/signal
