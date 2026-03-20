@@ -111,13 +111,13 @@ impl NixEngine {
 /// The runner script that executes inside the hakoniwa container.
 /// It reads commands from stdin (null-byte delimited) and executes each one,
 /// printing a sentinel line with the exit code after each command.
+/// Stderr is redirected to stdout so all output goes through one pipe —
+/// this avoids the issue of a background stderr reader consuming output
+/// across step boundaries.
 fn build_runner_script() -> String {
-    // Read null-delimited commands from stdin. For each command:
-    // 1. Execute it with bash -euo pipefail
-    // 2. Print the exit code sentinel to stdout
     format!(
         r#"while IFS= read -r -d $'\0' __cmd; do
-    bash -euo pipefail -c "$__cmd"
+    bash -euo pipefail -c "$__cmd" 2>&1
     printf '\n{STEP_SENTINEL_PREFIX}%d\n' $?
 done"#,
         STEP_SENTINEL_PREFIX = STEP_SENTINEL_PREFIX,
@@ -229,9 +229,7 @@ impl Engine for NixEngine {
         container.unshare(hakoniwa::Namespace::Ipc);
 
         // Mount system paths read-only (/etc excluded — handled separately for DNS).
-        for dir in [
-            "/bin", "/lib", "/lib64", "/lib32", "/sbin", "/usr", "/nix",
-        ] {
+        for dir in ["/bin", "/lib", "/lib64", "/lib32", "/sbin", "/usr", "/nix"] {
             if Path::new(dir).exists() {
                 container.bindmount_ro(dir, dir);
             }
@@ -251,7 +249,10 @@ impl Engine for NixEngine {
         }
         // Minimal passwd/group for the container user.
         let user = std::env::var("USER").unwrap_or_else(|_| "nobody".into());
-        container.file("/etc/passwd", &format!("{user}:x:0:0::/workspace:/bin/bash\n"));
+        container.file(
+            "/etc/passwd",
+            &format!("{user}:x:0:0::/workspace:/bin/bash\n"),
+        );
         container.file("/etc/group", &format!("{user}:x:0:\n"));
 
         // Writable workspace, /dev, /tmp, /proc.
@@ -312,14 +313,13 @@ impl Engine for NixEngine {
 
     async fn destroy_workflow(&self, wid: &WorkflowId) -> EngineResult<()> {
         // Remove the state and kill the container.
-        if let Some(mut state) = self.states.lock().await.remove(&wid.to_string()) {
-            if let Some(mut child) = state.container.take() {
-                // Close stdin to signal the runner script to exit.
-                drop(child.stdin.take());
-                // Wait briefly then kill if still running.
-                if let Err(e) = child.kill() {
-                    warn!(%e, %wid, "failed to kill hakoniwa container");
-                }
+        if let Some(mut state) = self.states.lock().await.remove(&wid.to_string())
+            && let Some(mut child) = state.container.take()
+        {
+            // Close stdin to signal the runner script to exit.
+            drop(child.stdin.take());
+            if let Err(e) = child.kill() {
+                warn!(%e, %wid, "failed to kill hakoniwa container");
             }
         }
 
@@ -371,10 +371,11 @@ impl Engine for NixEngine {
 
         // Send the command to the container's stdin and read output.
         // This runs in a blocking task because hakoniwa uses sync I/O.
+        // Stderr is redirected to stdout in the runner script, so all output
+        // comes through the stdout pipe with sentinel markers.
         let wid_str = wid.to_string();
         let step_name = step.name().to_string();
-        let mut stdout_writer = logger.data_writer(step_idx, "stdout".into());
-        let mut stderr_writer = logger.data_writer(step_idx, "stderr".into());
+        let mut output_writer = logger.data_writer(step_idx, "stdout".into());
 
         let mut states = self.states.lock().await;
         let state = states
@@ -385,43 +386,33 @@ impl Engine for NixEngine {
             EngineError::Other(format!("container already consumed for workflow {wid}"))
         })?;
 
-        // We need to drop the lock before the blocking task.
+        // Drop the lock before the blocking task.
         drop(states);
 
         let result = tokio::task::spawn_blocking(move || {
             // Write the command to stdin (null-byte delimited).
-            let stdin = child.stdin.as_mut().ok_or_else(|| EngineError::StepFailed {
-                exit_code: -1,
-                message: "container stdin not available".into(),
-            })?;
+            let stdin = child
+                .stdin
+                .as_mut()
+                .ok_or_else(|| EngineError::StepFailed {
+                    exit_code: -1,
+                    message: "container stdin not available".into(),
+                })?;
             let mut cmd_bytes = full_command.into_bytes();
             cmd_bytes.push(0); // null byte delimiter
-            stdin.write_all(&cmd_bytes).map_err(|e| EngineError::StepFailed {
-                exit_code: -1,
-                message: format!("failed to write command to container stdin: {e}"),
-            })?;
+            stdin
+                .write_all(&cmd_bytes)
+                .map_err(|e| EngineError::StepFailed {
+                    exit_code: -1,
+                    message: format!("failed to write command to container stdin: {e}"),
+                })?;
             stdin.flush().map_err(|e| EngineError::StepFailed {
                 exit_code: -1,
                 message: format!("failed to flush container stdin: {e}"),
             })?;
 
             // Read stdout line by line until we see the sentinel.
-            // Stderr is read in a separate thread.
-            let stderr_pipe = child.stderr.take();
-            let stderr_handle = std::thread::spawn(move || {
-                if let Some(stderr) = stderr_pipe {
-                    let reader = std::io::BufReader::new(stderr);
-                    let mut captured = Vec::new();
-                    for line in reader.lines().map_while(Result::ok) {
-                        let _ = writeln!(stderr_writer, "{line}");
-                        captured.push(line);
-                    }
-                    captured
-                } else {
-                    Vec::new()
-                }
-            });
-
+            // Stderr is merged into stdout by the runner script (2>&1).
             let mut exit_code: Option<i32> = None;
             if let Some(ref mut stdout) = child.stdout {
                 let reader = std::io::BufReader::new(stdout);
@@ -430,17 +421,9 @@ impl Engine for NixEngine {
                         exit_code = code_str.trim().parse().ok();
                         break;
                     }
-                    let _ = writeln!(stdout_writer, "{line}");
+                    let _ = writeln!(output_writer, "{line}");
                 }
             }
-
-            // We can't join stderr_handle here because it reads until EOF
-            // which won't happen until the container exits. Just drop it —
-            // the thread will continue reading stderr in the background.
-            // Re-attach stderr for future steps.
-            // (The thread holds the pipe, so we can't re-attach. This is OK
-            // because stderr is per-step in the logger anyway.)
-            drop(stderr_handle);
 
             Ok::<(hakoniwa::Child, Option<i32>), EngineError>((child, exit_code))
         })
@@ -496,11 +479,7 @@ fn build_path(nix_env: Option<&Path>) -> String {
         parts.push(parent_path);
     }
 
-    parts.extend([
-        "/usr/local/bin".into(),
-        "/usr/bin".into(),
-        "/bin".into(),
-    ]);
+    parts.extend(["/usr/local/bin".into(), "/usr/bin".into(), "/bin".into()]);
 
     parts.join(":")
 }
