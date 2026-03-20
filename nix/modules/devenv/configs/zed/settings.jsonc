@@ -24,6 +24,10 @@
 	},
 	"hidden_files": ["**/.*", "**/*.lock"],
 
+	"notifications": {
+		"enabled": false
+	},
+
 	"jupyter": {
 		"kernel_selections": {
 			"python": "python3",
