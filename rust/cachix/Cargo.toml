@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2024"
 description = "CLI client for Cachix binary cache hosting service"
 
+[[bin]]
+name = "cachix"
+path = "src/main.rs"
+
 [dependencies]
 # CLI
 clap = { version = "4", features = ["derive", "env"] }
