@@ -5,7 +5,7 @@
 {
   stdenv,
   uutils-coreutils-noprefix,
-  uutils-sed,
+  rust-sed,
   rust-grep,
   rust-awk,
   uutils-findutils,
@@ -22,7 +22,7 @@
   # diffutils is excluded — uutils-diffutils lacks individual commands.
   replacements = {
     coreutils = uutils-coreutils-noprefix;
-    gnused = uutils-sed;
+    gnused = rust-sed;
     gnugrep = rust-grep;
     gawk = rust-awk;
     findutils = uutils-findutils;

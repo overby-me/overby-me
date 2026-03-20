@@ -1,0 +1,17 @@
+[package]
+name = "rust-sed"
+version = "0.1.0"
+edition = "2024"
+description = "A GNU sed-compatible stream editor written in Rust"
+license = "MIT"
+
+[[bin]]
+name = "sed"
+path = "src/main.rs"
+
+[dependencies]
+regex = "1"
+
+[profile.release]
+lto = true
+strip = true

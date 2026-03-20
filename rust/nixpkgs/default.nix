@@ -65,7 +65,7 @@
       lib,
       rust-bash,
       uutils-coreutils-noprefix,
-      uutils-sed,
+      rust-sed,
       rust-grep,
       rust-awk,
       uutils-findutils,
@@ -88,7 +88,7 @@
         nativeBuildInputs = [
           rust-bash
           uutils-coreutils-noprefix
-          uutils-sed
+          rust-sed
           rust-grep
           rust-awk
           uutils-findutils
@@ -151,7 +151,7 @@
       lib,
       stdenv,
       uutils-coreutils-noprefix,
-      uutils-sed,
+      rust-sed,
       rust-grep,
       rust-awk,
       uutils-findutils,
@@ -166,7 +166,7 @@
         inherit
           stdenv
           uutils-coreutils-noprefix
-          uutils-sed
+          rust-sed
           rust-grep
           rust-awk
           uutils-findutils
@@ -224,7 +224,7 @@
       stdenv,
       fetchurl,
       uutils-coreutils-noprefix,
-      uutils-sed,
+      rust-sed,
       rust-grep,
       rust-awk,
       uutils-findutils,
@@ -239,7 +239,7 @@
         inherit
           stdenv
           uutils-coreutils-noprefix
-          uutils-sed
+          rust-sed
           rust-grep
           rust-awk
           uutils-findutils
