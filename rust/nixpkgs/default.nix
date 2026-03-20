@@ -277,8 +277,11 @@
         RUST_STDENV_TEST = "2";
 
         preBuild = ''
-          echo "PATH entries with make:"
-          echo $PATH | tr ':' '\n' | while read d; do [ -x "$d/make" ] && echo "  $d/make: $($d/make --version 2>&1 | head -1)"; done
+          echo "=== .c.o rule in Makefile ==="
+          sed -n '/^\.c\.o:/,/^[^\t#]/p' Makefile
+          echo "=== direct test ==="
+          make -n lib/basename-lgpl.o 2>&1
+          echo "=== end ==="
         '';
 
         meta = {
