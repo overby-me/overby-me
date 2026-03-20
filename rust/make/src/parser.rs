@@ -349,7 +349,10 @@ impl Parser {
             None
         };
 
-        // Read recipe lines
+        // Read recipe lines.
+        // Lines ending with \ are joined with the next line (continuation).
+        // The backslash-newline is preserved in the recipe text since the
+        // shell handles continuation, not make.
         let mut recipe = Vec::new();
         if let Some(inline) = inline_recipe
             && !inline.is_empty()
@@ -358,8 +361,23 @@ impl Parser {
         }
         while let Some(line) = self.peek() {
             if let Some(stripped) = line.strip_prefix('\t') {
-                recipe.push(stripped.to_string());
+                let mut combined = stripped.to_string();
                 self.advance();
+                // Join continuation lines: if line ends with \, append next line
+                while combined.ends_with('\\') {
+                    if let Some(next) = self.peek() {
+                        if let Some(next_stripped) = next.strip_prefix('\t') {
+                            combined.push('\n');
+                            combined.push_str(next_stripped);
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+                recipe.push(combined);
             } else if line.is_empty() {
                 // Empty lines within a recipe are allowed
                 self.advance();

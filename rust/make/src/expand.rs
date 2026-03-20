@@ -65,9 +65,6 @@ pub fn expand_with_auto(s: &str, engine: &Engine, auto_vars: &HashMap<&str, Stri
                     // Don't advance - let the outer loop handle this char
                 }
             }
-        } else if chars[i] == '#' {
-            // Comment in expansion context - stop
-            break;
         } else {
             result.push(chars[i]);
             i += 1;

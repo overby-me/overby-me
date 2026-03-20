@@ -237,6 +237,8 @@
         ./rust/strip
         ./rust/tar
         ./rust/xz
+        ./rust/texinfo
+        ./rust/help2man
         ./rust/curl
         ./rust/bubblewrap
         ./rust/flatpak

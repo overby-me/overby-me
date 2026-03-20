@@ -234,6 +234,8 @@
       rust-xz,
       rust-make,
       rust-patch,
+      rust-texinfo,
+      rust-help2man,
     }: let
       rustStdenv = import ./stdenv-test.nix {
         inherit
@@ -256,6 +258,8 @@
         pname = "rust-nixpkgs-hello-test";
         version = "2.12.1";
 
+        nativeBuildInputs = [rust-texinfo rust-help2man];
+
         src = fetchurl {
           url = "mirror://gnu/hello/hello-2.12.1.tar.gz";
           sha256 = "sha256-jZkUKv2SV28wsM18tCqNxoCZmLxdYH2Idh9RLibH2yA=";
@@ -264,7 +268,9 @@
         # Prevent autotools re-running by ensuring generated files
         # are newer than their inputs (standard autotools timestamp fix)
         postPatch = ''
-          touch aclocal.m4 configure Makefile.in config.h.in
+          find . -name '*.in' -o -name configure -o -name aclocal.m4 \
+            -o -name config.h.in -o -name Makefile.in -o -name config.in \
+            | xargs touch
         '';
 
         meta = {

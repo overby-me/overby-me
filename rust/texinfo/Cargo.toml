@@ -1,0 +1,16 @@
+[package]
+name = "rust-texinfo"
+version = "0.1.0"
+edition = "2024"
+description = "A GNU makeinfo-compatible Texinfo processor written in Rust"
+license = "MIT"
+
+[[bin]]
+name = "makeinfo"
+path = "src/main.rs"
+
+[dependencies]
+
+[profile.release]
+lto = true
+strip = true
