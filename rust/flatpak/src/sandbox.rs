@@ -8,6 +8,7 @@ use std::env;
 use std::path::Path;
 use std::process::Command;
 
+use crate::dbus_proxy::{self, RunningProxy};
 use crate::installation::{DeployedRef, Installation};
 use crate::metadata::ContextPermissions;
 use crate::seccomp;
@@ -100,13 +101,21 @@ fn which(name: &str) -> Result<String, ()> {
     Err(())
 }
 
-/// Build the complete bwrap command for running a Flatpak app.
 /// A capability operation (add or drop).
 pub enum CapOp {
     Add(String),
     Drop(String),
 }
 
+/// Result of building a sandbox: the bwrap command plus any proxy processes
+/// that must stay alive during sandbox execution.
+pub struct SandboxSetup {
+    pub command: Command,
+    pub _proxies: Vec<RunningProxy>,
+}
+
+/// Build the complete bwrap command for running a Flatpak app.
+#[allow(clippy::too_many_arguments)]
 pub fn build_sandbox(
     deployed: &DeployedRef,
     runtime_deployed: Option<&DeployedRef>,
@@ -115,7 +124,8 @@ pub fn build_sandbox(
     devel: bool,
     sandbox_mode: bool,
     cap_ops: &[CapOp],
-) -> Result<Command, String> {
+    instance_id: &str,
+) -> Result<SandboxSetup, String> {
     let mut bwrap = BwrapBuilder::new();
     let app_id = &deployed.ref_.id;
     let metadata = &deployed.metadata;
@@ -304,6 +314,72 @@ pub fn build_sandbox(
         }
     }
 
+    // --- D-Bus proxy ---
+    let mut proxies: Vec<RunningProxy> = Vec::new();
+
+    let has_session_socket = permissions.has_socket("session-bus");
+    let has_system_socket = permissions.has_socket("system-bus");
+
+    // Session bus.
+    if has_session_socket {
+        // Direct, unfiltered session bus access.
+        if let Some(socket) = dbus_proxy::session_bus_socket_path() {
+            let uid = unsafe { libc::getuid() };
+            let dest = format!("/run/user/{uid}/bus");
+            bwrap.args(&["--ro-bind", &socket.to_string_lossy(), &dest]);
+            bwrap.setenv("DBUS_SESSION_BUS_ADDRESS", &format!("unix:path={dest}"));
+        }
+    } else {
+        // Filtered session bus via proxy.
+        let session_policies = metadata.session_bus_policy();
+        let (filtering, policies) = dbus_proxy::build_session_policies(&session_policies, false);
+
+        if filtering {
+            match dbus_proxy::launch_session_proxy(app_id, &policies, instance_id) {
+                Ok(proxy) => {
+                    let uid = unsafe { libc::getuid() };
+                    let dest = format!("/run/user/{uid}/bus");
+                    bwrap.args(&["--ro-bind", &proxy.socket_path.to_string_lossy(), &dest]);
+                    bwrap.setenv("DBUS_SESSION_BUS_ADDRESS", &format!("unix:path={dest}"));
+                    proxies.push(proxy);
+                }
+                Err(e) => {
+                    eprintln!("flatpak: warning: session bus proxy failed: {e}");
+                }
+            }
+        }
+    }
+
+    // System bus.
+    if has_system_socket {
+        if let Some(socket) = dbus_proxy::system_bus_socket_path() {
+            bwrap.args(&[
+                "--ro-bind",
+                &socket.to_string_lossy(),
+                "/run/dbus/system_bus_socket",
+            ]);
+        }
+    } else {
+        let system_policies = metadata.system_bus_policy();
+        let (filtering, policies) = dbus_proxy::build_system_policies(&system_policies, false);
+
+        if filtering {
+            match dbus_proxy::launch_system_proxy(app_id, &policies, instance_id) {
+                Ok(proxy) => {
+                    bwrap.args(&[
+                        "--ro-bind",
+                        &proxy.socket_path.to_string_lossy(),
+                        "/run/dbus/system_bus_socket",
+                    ]);
+                    proxies.push(proxy);
+                }
+                Err(e) => {
+                    eprintln!("flatpak: warning: system bus proxy failed: {e}");
+                }
+            }
+        }
+    }
+
     // --- .flatpak-info ---
     let info_content = build_flatpak_info(deployed, runtime_deployed);
     // Write to a temp file and bind-mount it.
@@ -320,7 +396,10 @@ pub fn build_sandbox(
     command.extend_from_slice(extra_args);
 
     let bwrap_path = find_bwrap();
-    Ok(bwrap.build(&bwrap_path, &command))
+    Ok(SandboxSetup {
+        command: bwrap.build(&bwrap_path, &command),
+        _proxies: proxies,
+    })
 }
 
 fn setup_devices(bwrap: &mut BwrapBuilder, ctx: &ContextPermissions) {

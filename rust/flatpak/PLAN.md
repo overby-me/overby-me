@@ -70,15 +70,16 @@ Integrate `xdg-dbus-proxy` for filtered D-Bus access.
 
 ### Tasks
 
-- [ ] Find `xdg-dbus-proxy` binary on `PATH`
-- [ ] Parse `[Session Bus Policy]` and `[System Bus Policy]` from metadata
-- [ ] Build proxy filter arguments from policy (own/talk/see/none per bus name)
-- [ ] Launch proxy process before the main sandbox
-- [ ] Create proxy socket in a temp directory
-- [ ] Bind-mount proxy socket into the sandbox at the expected D-Bus path
-- [ ] Handle `sockets=session-bus` (direct, unfiltered access) vs. filtered
-- [ ] Handle `sockets=system-bus` similarly
-- [ ] Clean up proxy process on sandbox exit
+- [x] Find `xdg-dbus-proxy` binary on `PATH`
+- [x] Parse `[Session Bus Policy]` and `[System Bus Policy]` from metadata
+- [x] Build proxy filter arguments from policy (own/talk/see/none per bus name)
+- [x] Launch proxy process before the main sandbox
+- [x] Create proxy socket in a temp directory
+- [x] Bind-mount proxy socket into the sandbox at the expected D-Bus path
+- [x] Handle `sockets=session-bus` (direct, unfiltered access) vs. filtered
+- [x] Handle `sockets=system-bus` similarly
+- [x] Clean up proxy process on sandbox exit (Drop impl on RunningProxy)
+- [x] Default policy: allow portal access, Flatpak bus, dconf, GTK VFS
 - [ ] Support `--log` for proxy debugging
 
 ## Phase 5: OSTree Client

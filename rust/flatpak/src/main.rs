@@ -4,6 +4,7 @@
 // managing sandboxed applications. Uses bwrap (rust-bubblewrap) for
 // sandboxing.
 
+mod dbus_proxy;
 mod installation;
 mod instance;
 mod metadata;
@@ -196,7 +197,11 @@ fn cmd_run(installations: &[Installation], args: &[String], verbose: bool) {
         }
     }
 
-    let mut cmd = sandbox::build_sandbox(
+    // Create instance tracking first (needed for proxy instance IDs).
+    let instance_info = sandbox::get_flatpak_info(&deployed, runtime_deployed.as_ref());
+    let instance_id = instance::create_instance(&instance_info).unwrap_or_default();
+
+    let mut setup = sandbox::build_sandbox(
         &deployed,
         runtime_deployed.as_ref(),
         &extra_args,
@@ -204,9 +209,11 @@ fn cmd_run(installations: &[Installation], args: &[String], verbose: bool) {
         devel,
         sandbox_mode,
         &cap_ops,
+        &instance_id,
     )
     .unwrap_or_else(|e| {
         eprintln!("flatpak run: {e}");
+        instance::cleanup_instance(&instance_id);
         process::exit(1);
     });
 
@@ -214,23 +221,17 @@ fn cmd_run(installations: &[Installation], args: &[String], verbose: bool) {
         eprintln!("flatpak: executing bwrap");
     }
 
-    // Create instance tracking.
-    let instance_info = sandbox::get_flatpak_info(&deployed, runtime_deployed.as_ref());
-    let instance_id = instance::create_instance(&instance_info).ok();
-
-    let status = cmd.status().unwrap_or_else(|e| {
+    let status = setup.command.status().unwrap_or_else(|e| {
         eprintln!("flatpak run: failed to execute bwrap: {e}");
-        if let Some(ref id) = instance_id {
-            instance::cleanup_instance(id);
-        }
+        instance::cleanup_instance(&instance_id);
         instance::cleanup_temp_files();
         process::exit(1);
     });
 
-    // Clean up instance and temp files.
-    if let Some(ref id) = instance_id {
-        instance::cleanup_instance(id);
-    }
+    // Clean up instance, proxies, and temp files.
+    // Proxies are cleaned up when `setup` is dropped.
+    drop(setup);
+    instance::cleanup_instance(&instance_id);
     instance::cleanup_temp_files();
 
     process::exit(status.code().unwrap_or(1));
