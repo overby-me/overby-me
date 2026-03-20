@@ -9,6 +9,8 @@ pub type CmdSubFn<'a> = &'a mut dyn FnMut(&str) -> String;
 pub enum Segment {
     Quoted(String),
     Unquoted(String),
+    /// A field separator — forces a word split here (for "$@" and "${arr[@]}")
+    SplitHere,
 }
 
 /// Expand a word into a list of strings (after word splitting and globbing).
@@ -79,6 +81,7 @@ pub fn expand_word_nosplit(
         .iter()
         .map(|s| match s {
             Segment::Quoted(t) | Segment::Unquoted(t) => t.as_str(),
+            Segment::SplitHere => " ",
         })
         .collect()
 }
@@ -129,8 +132,35 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
             for p in parts {
                 match p {
                     WordPart::Literal(t) => s.push_str(t),
+                    WordPart::Variable(name) if name == "@" => {
+                        // "$@" — each positional parameter becomes a separate field
+                        if ctx.positional.len() > 1 {
+                            if !s.is_empty() {
+                                out.push(Segment::Quoted(std::mem::take(&mut s)));
+                            }
+                            for (i, arg) in ctx.positional[1..].iter().enumerate() {
+                                if i > 0 {
+                                    out.push(Segment::SplitHere);
+                                }
+                                out.push(Segment::Quoted(arg.clone()));
+                            }
+                        }
+                    }
                     WordPart::Variable(name) => {
                         s.push_str(&lookup_var(name, ctx));
+                    }
+                    WordPart::Param(expr) if is_array_at_expansion(expr, ctx) => {
+                        // "${arr[@]}" — each element becomes a separate field
+                        let elements = get_array_elements(expr, ctx);
+                        if !s.is_empty() {
+                            out.push(Segment::Quoted(std::mem::take(&mut s)));
+                        }
+                        for (i, elem) in elements.iter().enumerate() {
+                            if i > 0 {
+                                out.push(Segment::SplitHere);
+                            }
+                            out.push(Segment::Quoted(elem.clone()));
+                        }
                     }
                     WordPart::Param(expr) => {
                         s.push_str(&expand_param(expr, ctx, cmd_sub));
@@ -150,12 +180,18 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                         for seg in inner {
                             match seg {
                                 Segment::Quoted(t) | Segment::Unquoted(t) => s.push_str(&t),
+                                Segment::SplitHere => {
+                                    out.push(Segment::Quoted(std::mem::take(&mut s)));
+                                    out.push(Segment::SplitHere);
+                                }
                             }
                         }
                     }
                 }
             }
-            out.push(Segment::Quoted(s));
+            if !s.is_empty() {
+                out.push(Segment::Quoted(s));
+            }
         }
         WordPart::Tilde(user) => {
             let expanded = if user.is_empty() {
@@ -264,6 +300,36 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
             }
         }
     }
+}
+
+/// Check if a ParamExpr is an array[@] expansion.
+fn is_array_at_expansion(expr: &ParamExpr, ctx: &ExpCtx) -> bool {
+    if let Some(bracket) = expr.name.find('[') {
+        let idx_str = &expr.name[bracket + 1..expr.name.len() - 1];
+        if idx_str == "@" {
+            let base = &expr.name[..bracket];
+            let resolved = ctx.resolve_nameref(base);
+            return ctx.arrays.contains_key(&resolved)
+                || matches!(&expr.op, ParamOp::None);
+        }
+    }
+    false
+}
+
+/// Get array elements for an array[@] expansion.
+fn get_array_elements(expr: &ParamExpr, ctx: &ExpCtx) -> Vec<String> {
+    if let Some(bracket) = expr.name.find('[') {
+        let base = &expr.name[..bracket];
+        let resolved = ctx.resolve_nameref(base);
+        if let Some(arr) = ctx.arrays.get(&resolved) {
+            return arr.clone();
+        }
+        // Fall back to scalar as single element
+        if let Some(val) = ctx.vars.get(&resolved) {
+            return vec![val.clone()];
+        }
+    }
+    vec![]
 }
 
 fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
@@ -566,6 +632,7 @@ fn expand_word_nosplit_ctx(word: &Word, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> Stri
         .iter()
         .map(|s| match s {
             Segment::Quoted(t) | Segment::Unquoted(t) => t.as_str(),
+            Segment::SplitHere => " ",
         })
         .collect()
 }
@@ -884,12 +951,17 @@ fn word_split(segments: &[Segment], ifs: &str) -> Vec<String> {
         return vec![];
     }
 
-    let all_quoted = segments.iter().all(|s| matches!(s, Segment::Quoted(_)));
-    if all_quoted {
+    // Check if there are any SplitHere markers or unquoted segments
+    let has_split = segments.iter().any(|s| matches!(s, Segment::SplitHere));
+    let all_quoted = segments
+        .iter()
+        .all(|s| matches!(s, Segment::Quoted(_)));
+    if all_quoted && !has_split {
         let s: String = segments
             .iter()
             .map(|seg| match seg {
                 Segment::Quoted(t) | Segment::Unquoted(t) => t.as_str(),
+                Segment::SplitHere => "",
             })
             .collect();
         return vec![s];
@@ -901,6 +973,11 @@ fn word_split(segments: &[Segment], ifs: &str) -> Vec<String> {
 
     for segment in segments {
         match segment {
+            Segment::SplitHere => {
+                // Force a field break here (for "$@" and "${arr[@]}")
+                fields.push(std::mem::take(&mut current));
+                in_field = false;
+            }
             Segment::Quoted(s) => {
                 current.push_str(s);
                 in_field = true;
