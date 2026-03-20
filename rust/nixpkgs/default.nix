@@ -277,10 +277,12 @@
         RUST_STDENV_TEST = "2";
 
         preBuild = ''
-          echo "=== .c.o rule in Makefile ==="
-          sed -n '/^\.c\.o:/,/^[^\t#]/p' Makefile
-          echo "=== direct test ==="
-          make -n lib/basename-lgpl.o 2>&1
+          echo "=== grep .c.o ==="
+          grep -n "^\.c\.o" Makefile || echo "NOT FOUND"
+          echo "=== grep SUFFIXES ==="
+          grep -n "^\.SUFFIXES" Makefile || echo "NOT FOUND"
+          echo "=== wc Makefile ==="
+          wc -l Makefile
           echo "=== end ==="
         '';
 
