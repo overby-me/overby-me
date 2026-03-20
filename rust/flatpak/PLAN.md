@@ -1,0 +1,169 @@
+# rust-flatpak Implementation Plan
+
+## Current State
+
+Working CLI with real Flatpak installation reading, metadata parsing, permission
+merging, bwrap sandbox construction, local install/uninstall, remote management,
+and permission overrides. Can list, inspect, and override real Flatpak apps
+installed on the system.
+
+## Phase 1: Seccomp Filter Generation
+
+Generate the BPF seccomp filter that real Flatpak always applies. Without this,
+sandboxed apps can call dangerous syscalls.
+
+### Tasks
+
+- [ ] Implement BPF instruction builder (`sock_filter` structs)
+- [ ] Block dangerous syscalls with `EPERM`: `syslog`, `uselib`, `acct`,
+  `quotactl`, `add_key`, `keyctl`, `request_key`, `move_pages`, `mbind`,
+  `get_mempolicy`, `set_mempolicy`, `migrate_pages`, `unshare`, `setns`,
+  `mount`, `umount`, `umount2`, `pivot_root`, `chroot`
+- [ ] Block `clone` when `CLONE_NEWUSER` flag is set (argument inspection)
+- [ ] Block `ioctl` with `TIOCSTI` and `TIOCLINUX` commands
+- [ ] Block new mount APIs with `ENOSYS`: `clone3`, `open_tree`, `move_mount`,
+  `fsopen`, `fsconfig`, `fsmount`, `fspick`, `mount_setattr`
+- [ ] Conditionally block `perf_event_open`, `ptrace`, `personality` (allow
+  with `--devel`)
+- [ ] Socket family allowlist: only permit `AF_UNSPEC`, `AF_LOCAL`, `AF_INET`,
+  `AF_INET6`, `AF_NETLINK` (plus `AF_CAN`/`AF_BLUETOOTH` based on features)
+- [ ] Write compiled BPF to a memfd and pass via `--seccomp <fd>` to bwrap
+- [ ] Add unit tests for filter generation
+
+## Phase 2: Instance Tracking
+
+Track running sandbox instances so `flatpak ps`, `flatpak enter`, and
+`flatpak kill` work.
+
+### Tasks
+
+- [ ] On `flatpak run`, create `/run/user/<uid>/.flatpak/<instance-id>/`
+- [ ] Write `info` file (copy of `/.flatpak-info` content)
+- [ ] Write `pid` file with the bwrap child PID
+- [ ] Parse `--info-fd` output from bwrap to get `bwrapinfo.json`
+- [ ] Clean up instance directory on sandbox exit
+- [ ] Implement `flatpak ps` reading from instance directories
+- [ ] Implement `flatpak enter` using `nsenter` into the running sandbox
+- [ ] Implement `flatpak kill` sending `SIGTERM`/`SIGKILL` to instance PID
+- [ ] Clean up temp files (`/tmp/.flatpak-info-*`, `/tmp/.flatpak-passwd-*`)
+  on exit using a cleanup handler or temp directory
+
+## Phase 3: Capability Handling
+
+Wire up the parsed `--cap-add`/`--cap-drop` to actual bwrap arguments.
+
+### Tasks
+
+- [ ] Map capability names (`CAP_SYS_ADMIN`, `CAP_NET_RAW`, `ALL`, etc.) to
+  bwrap `--cap-add`/`--cap-drop` arguments
+- [ ] Apply capability operations in order (matching real Flatpak behavior
+  where default is to drop all, then apply ops sequentially)
+- [ ] Pass through to bwrap command line
+
+## Phase 4: D-Bus Proxy
+
+Integrate `xdg-dbus-proxy` for filtered D-Bus access.
+
+### Tasks
+
+- [ ] Find `xdg-dbus-proxy` binary on `PATH`
+- [ ] Parse `[Session Bus Policy]` and `[System Bus Policy]` from metadata
+- [ ] Build proxy filter arguments from policy (own/talk/see/none per bus name)
+- [ ] Launch proxy process before the main sandbox
+- [ ] Create proxy socket in a temp directory
+- [ ] Bind-mount proxy socket into the sandbox at the expected D-Bus path
+- [ ] Handle `sockets=session-bus` (direct, unfiltered access) vs. filtered
+- [ ] Handle `sockets=system-bus` similarly
+- [ ] Clean up proxy process on sandbox exit
+- [ ] Support `--log` for proxy debugging
+
+## Phase 5: OSTree Client
+
+Implement the minimal OSTree client needed to pull from Flatpak remotes
+(Flathub). This is the largest piece of work.
+
+### Tasks
+
+- [ ] Implement OSTree object types: commit, dirtree, dirmeta, file
+- [ ] Implement content-addressed object storage (`objects/<hash>.{commit,dirtree,dirmeta,file}`)
+- [ ] Parse OSTree summary file format (GVariant binary)
+- [ ] Fetch summary from remote via HTTPS
+- [ ] Resolve Flatpak refs from summary (e.g., `app/org.example.App/x86_64/stable`)
+- [ ] Implement HTTP object pulling (fetch individual objects by hash)
+- [ ] Implement static delta support (optional, for faster pulls)
+- [ ] Checkout commit to deploy directory (reconstruct filesystem from objects)
+- [ ] GPG signature verification of commits and summary
+- [ ] Implement `flatpak install <remote> <ref>` using the above
+- [ ] Implement `flatpak update` to pull newer commits
+- [ ] Implement `flatpak remote-ls` to list available refs from summary
+- [ ] Implement `flatpak remote-info` to show commit details
+- [ ] Handle `.flatpakrepo` file parsing for `remote-add --from=<file>`
+- [ ] Implement local repo storage at `<installation>/repo/`
+
+## Phase 6: Extension Handling
+
+Resolve, download, and mount extensions into the sandbox.
+
+### Tasks
+
+- [ ] Parse `[Extension <name>]` groups from runtime and app metadata
+- [ ] Resolve extension refs from installed extensions
+- [ ] Auto-download missing extensions (requires Phase 5)
+- [ ] Mount extensions at their declared directory in the sandbox
+- [ ] Handle `add-ld-path` — append extension lib paths to `LD_LIBRARY_PATH`
+- [ ] Handle `merge-dirs` — overlay extension directories
+- [ ] Handle `subdirectories` — mount sub-extensions
+- [ ] Regenerate `ld.so.cache` when extensions add library paths (run `ldconfig`
+  in a sub-bwrap)
+
+## Phase 7: Portal Support
+
+Integrate with XDG desktop portals for mediated access to host resources.
+
+### Tasks
+
+- [ ] Document portal: mount `xdg-document-portal` socket, implement
+  `flatpak documents`, `document-export`, `document-unexport`, `document-info`
+- [ ] Permission store: implement `flatpak permissions`, `permission-show`,
+  `permission-set`, `permission-remove`, `permission-reset`
+- [ ] Set portal-related environment variables (`FLATPAK_PORTAL_PID`, etc.)
+
+## Phase 8: Remaining CLI Commands
+
+### Tasks
+
+- [ ] `flatpak make-current` — set default version for an app
+- [ ] `flatpak mask` — mask out updates for specific refs
+- [ ] `flatpak pin` — pin runtimes to prevent automatic removal
+- [ ] `flatpak history` — track install/update/uninstall events in a log
+- [ ] `flatpak search` — query Flathub appstream data (requires fetching
+  appstream XML from remote)
+- [ ] `flatpak create-usb` — export refs to removable media
+
+## Phase 9: Build Commands
+
+Implement the `flatpak build-*` workflow for building Flatpak apps.
+
+### Tasks
+
+- [ ] `flatpak build-init` — initialize a build directory with runtime/SDK
+- [ ] `flatpak build` — run a command inside the build sandbox
+- [ ] `flatpak build-finish` — finalize metadata and exports
+- [ ] `flatpak build-export` — export build to an OSTree repository
+- [ ] `flatpak build-bundle` / `build-import-bundle` — single-file bundles
+- [ ] `flatpak build-sign` — GPG sign commits
+- [ ] `flatpak build-update-repo` — regenerate summary file
+- [ ] `flatpak build-commit-from` — create new commit from existing ref
+- [ ] `flatpak repo` — show repository information
+
+## Priority Order
+
+1. **Seccomp** (Phase 1) — security critical, without it the sandbox is weak
+2. **Instance tracking** (Phase 2) — needed for ps/enter/kill and temp cleanup
+3. **Capabilities** (Phase 3) — small, completes sandbox feature parity
+4. **D-Bus proxy** (Phase 4) — most GUI apps need D-Bus access
+5. **OSTree client** (Phase 5) — enables remote install/update from Flathub
+6. **Extensions** (Phase 6) — needed to run most real-world apps
+7. **Portals** (Phase 7) — needed for proper desktop integration
+8. **Remaining CLI** (Phase 8) — polish and completeness
+9. **Build commands** (Phase 9) — for developers building Flatpak apps
