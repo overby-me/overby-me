@@ -42,6 +42,16 @@ pub async fn run_server(
 ) -> Result<(), ServerError> {
     let shutdown = CancellationToken::new();
 
+    // Cancel any workflows orphaned by a previous crash/restart.
+    match db.cancel_orphaned_workflows() {
+        Ok(0) => {}
+        Ok(n) => info!(
+            count = n,
+            "cancelled orphaned workflows from previous session"
+        ),
+        Err(e) => warn!(%e, "failed to cancel orphaned workflows"),
+    }
+
     // Initialize secrets manager.
     let secrets: Arc<dyn spindle_secrets::Manager + Send + Sync> = match cfg.secrets.provider {
         SecretsProvider::Sqlite => {

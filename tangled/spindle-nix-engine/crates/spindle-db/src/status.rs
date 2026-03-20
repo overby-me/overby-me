@@ -129,6 +129,21 @@ pub fn status_cancelled(conn: &Connection, workflow_id: &str) -> rusqlite::Resul
     Ok(())
 }
 
+/// Cancel all orphaned workflows that are still in `pending` or `running` state.
+///
+/// These are leftovers from a previous process that crashed or was restarted
+/// before the workflows could reach a terminal state. Returns the number of
+/// rows updated.
+pub fn cancel_orphaned(conn: &Connection) -> rusqlite::Result<usize> {
+    let updated = conn.execute(
+        "UPDATE workflow_status \
+         SET status = 'cancelled', finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
+         WHERE status IN ('pending', 'running')",
+        [],
+    )?;
+    Ok(updated)
+}
+
 // ---------------------------------------------------------------------------
 // Query operations
 // ---------------------------------------------------------------------------

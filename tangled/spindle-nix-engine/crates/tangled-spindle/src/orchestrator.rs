@@ -269,16 +269,33 @@ pub fn process_pipeline_event(ctx: Arc<OrchestratorContext>, event: PipelineEven
     let job_pipeline_id = pipeline_id.clone();
     let job_repo_path = format!("{}/{}", repo_did, repo_name);
 
+    // Compute a pipeline-level timeout as a hard ceiling to guarantee the queue
+    // semaphore permit is always released. This is set to the workflow timeout
+    // plus generous headroom for setup, cleanup, and destroy_workflow timeouts.
+    let pipeline_timeout = ctx.engine.workflow_timeout() + std::time::Duration::from_secs(120);
+
     let result = ctx.queue.submit(Box::new(move || {
         Box::pin(async move {
-            execute_pipeline(
-                job_ctx,
-                job_pipeline_id,
-                &job_repo_path,
-                workflow_entries,
-                pipeline_env,
+            let pipeline_id_for_log = job_pipeline_id.clone();
+            let result = tokio::time::timeout(
+                pipeline_timeout,
+                execute_pipeline(
+                    job_ctx,
+                    job_pipeline_id,
+                    &job_repo_path,
+                    workflow_entries,
+                    pipeline_env,
+                ),
             )
             .await;
+
+            if result.is_err() {
+                error!(
+                    pipeline = %pipeline_id_for_log,
+                    timeout = ?pipeline_timeout,
+                    "pipeline execution timed out, releasing queue slot"
+                );
+            }
         })
     }));
 
@@ -459,9 +476,17 @@ async fn execute_workflow(
         }
     }
 
-    // Always destroy the workflow environment.
-    if let Err(e) = ctx.engine.destroy_workflow(&wid).await {
-        warn!(%e, workflow_id = %wid_str, "failed to destroy workflow environment");
+    // Always destroy the workflow environment, with a timeout to prevent blocking
+    // the queue forever if cleanup hangs.
+    let destroy_timeout = std::time::Duration::from_secs(60);
+    match tokio::time::timeout(destroy_timeout, ctx.engine.destroy_workflow(&wid)).await {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => {
+            warn!(%e, workflow_id = %wid_str, "failed to destroy workflow environment");
+        }
+        Err(_) => {
+            error!(workflow_id = %wid_str, "destroy_workflow timed out after 60s, abandoning cleanup");
+        }
     }
 
     // Close the logger.

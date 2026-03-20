@@ -368,6 +368,13 @@ impl Database {
         Ok(status::status_cancelled(&*self.conn()?, workflow_id)?)
     }
 
+    /// Cancel all orphaned workflows still in `pending` or `running` state.
+    ///
+    /// Should be called on startup to clean up leftovers from a previous crash.
+    pub fn cancel_orphaned_workflows(&self) -> Result<usize, DbError> {
+        Ok(status::cancel_orphaned(&*self.conn()?)?)
+    }
+
     /// Get the status record for a workflow.
     pub fn get_status(
         &self,
