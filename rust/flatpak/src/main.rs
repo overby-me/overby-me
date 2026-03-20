@@ -118,6 +118,7 @@ fn main() {
         "build-update-repo" => cmd_build_update_repo(cmd_args),
         "build-commit-from" => cmd_build_commit_from(cmd_args),
         "repo" => cmd_repo(cmd_args),
+        "create-usb" => cmd_create_usb(&installations, cmd_args),
         "help" => {
             print_usage();
             process::exit(0);
@@ -310,7 +311,8 @@ fn cmd_list(installations: &[Installation], args: &[String]) {
     let show_runtime = args.contains(&"--runtime".to_string());
     let show_app = args.contains(&"--app".to_string()) || !show_runtime;
     let show_all = !args.contains(&"--app".to_string()) && !args.contains(&"--runtime".to_string());
-    let columns = args.contains(&"--columns=all".to_string());
+    let columns = args.iter().any(|a| a.starts_with("--columns"));
+    let arch_filter: Option<&str> = args.iter().find_map(|a| a.strip_prefix("--arch="));
 
     println!(
         "{:<40} {:<12} {:<12} Installation",
@@ -321,7 +323,11 @@ fn cmd_list(installations: &[Installation], args: &[String]) {
     for inst in installations {
         for deployed in inst.list_refs() {
             let is_app = deployed.ref_.kind == RefKind::App;
-            if (show_all) || (show_app && is_app) || (show_runtime && !is_app) {
+            if let Some(arch) = arch_filter
+                && deployed.ref_.arch != arch {
+                    continue;
+                }
+            if show_all || (show_app && is_app) || (show_runtime && !is_app) {
                 let inst_name = if inst.is_user { "user" } else { "system" };
                 if columns {
                     println!(
@@ -916,45 +922,46 @@ fn cmd_remote_add(installations: &[Installation], args: &[String]) {
 
     // Handle .flatpakrepo file.
     if let Some(ref file_path) = from_file
-        && file_path != "next-positional" {
-            let content = if file_path.starts_with("http://") || file_path.starts_with("https://") {
-                match ostree::fetch_url(file_path) {
-                    Ok(data) => String::from_utf8_lossy(&data).to_string(),
-                    Err(e) => {
-                        eprintln!("flatpak remote-add: fetch {file_path}: {e}");
-                        process::exit(1);
-                    }
-                }
-            } else {
-                fs::read_to_string(file_path).unwrap_or_else(|e| {
-                    eprintln!("flatpak remote-add: read {file_path}: {e}");
+        && file_path != "next-positional"
+    {
+        let content = if file_path.starts_with("http://") || file_path.starts_with("https://") {
+            match ostree::fetch_url(file_path) {
+                Ok(data) => String::from_utf8_lossy(&data).to_string(),
+                Err(e) => {
+                    eprintln!("flatpak remote-add: fetch {file_path}: {e}");
                     process::exit(1);
-                })
-            };
+                }
+            }
+        } else {
+            fs::read_to_string(file_path).unwrap_or_else(|e| {
+                eprintln!("flatpak remote-add: read {file_path}: {e}");
+                process::exit(1);
+            })
+        };
 
-            if let Ok(meta) = metadata::Metadata::parse(&content) {
-                let repo_group = meta
-                    .groups
-                    .get("Flatpak Repo")
-                    .or_else(|| meta.groups.get("Flatpak Remote"));
-                if let Some(group) = repo_group {
-                    if url.is_none() {
-                        url = group.get("Url").or_else(|| group.get("url")).cloned();
-                    }
-                    if title.is_none() {
-                        title = group.get("Title").or_else(|| group.get("title")).cloned();
-                    }
-                    if name.is_none() {
-                        // Derive name from the filename.
-                        let fname = Path::new(file_path)
-                            .file_stem()
-                            .and_then(|s| s.to_str())
-                            .unwrap_or("remote");
-                        name = Some(fname.to_string());
-                    }
+        if let Ok(meta) = metadata::Metadata::parse(&content) {
+            let repo_group = meta
+                .groups
+                .get("Flatpak Repo")
+                .or_else(|| meta.groups.get("Flatpak Remote"));
+            if let Some(group) = repo_group {
+                if url.is_none() {
+                    url = group.get("Url").or_else(|| group.get("url")).cloned();
+                }
+                if title.is_none() {
+                    title = group.get("Title").or_else(|| group.get("title")).cloned();
+                }
+                if name.is_none() {
+                    // Derive name from the filename.
+                    let fname = Path::new(file_path)
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("remote");
+                    name = Some(fname.to_string());
                 }
             }
         }
+    }
 
     let name = name.unwrap_or_else(|| {
         eprintln!("flatpak remote-add: no name specified");
@@ -1248,13 +1255,14 @@ fn cmd_search(args: &[String]) {
                     for r in &refs {
                         if r.name.to_lowercase().contains(&query_lower)
                             && r.name.starts_with("app/")
-                            && let Some(parsed) = Ref::parse(&r.name) {
-                                println!(
-                                    "{:<50} {:<12} {:<10} {}",
-                                    parsed.id, parsed.branch, parsed.arch, remote.name
-                                );
-                                found = true;
-                            }
+                            && let Some(parsed) = Ref::parse(&r.name)
+                        {
+                            println!(
+                                "{:<50} {:<12} {:<10} {}",
+                                parsed.id, parsed.branch, parsed.arch, remote.name
+                            );
+                            found = true;
+                        }
                     }
                 }
                 Err(_) => continue,
@@ -1869,6 +1877,80 @@ fn cmd_repo(args: &[String]) {
         eprintln!("flatpak repo: {e}");
         process::exit(1);
     });
+}
+
+// ---------------------------------------------------------------------------
+// Command: create-usb
+// ---------------------------------------------------------------------------
+
+fn cmd_create_usb(installations: &[Installation], args: &[String]) {
+    let mut mount_point: Option<String> = None;
+    let mut refs_to_export: Vec<String> = Vec::new();
+
+    for arg in args {
+        match arg.as_str() {
+            s if s.starts_with('-') => {}
+            _ => {
+                if mount_point.is_none() {
+                    mount_point = Some(arg.clone());
+                } else {
+                    refs_to_export.push(arg.clone());
+                }
+            }
+        }
+    }
+
+    let mount_point = mount_point.unwrap_or_else(|| {
+        eprintln!("flatpak create-usb: usage: flatpak create-usb MOUNT_POINT REF [REF...]");
+        process::exit(1);
+    });
+
+    if refs_to_export.is_empty() {
+        eprintln!("flatpak create-usb: no refs specified");
+        process::exit(1);
+    }
+
+    let usb_repo = Path::new(&mount_point).join(".flatpak-usb");
+    let _ = fs::create_dir_all(&usb_repo);
+
+    for ref_str in &refs_to_export {
+        let deployed = find_deployed(installations, ref_str);
+        let ref_ = &deployed.ref_;
+        let deploy_path = deployed.installation.deploy_path(ref_);
+
+        // Export to the USB repo.
+        let dest_dir = usb_repo
+            .join(ref_.kind_dir())
+            .join(&ref_.id)
+            .join(&ref_.arch)
+            .join(&ref_.branch)
+            .join("active");
+        let _ = fs::create_dir_all(&dest_dir);
+
+        // Copy metadata.
+        let src_meta = deploy_path.join("metadata");
+        if src_meta.exists() {
+            let _ = fs::copy(&src_meta, dest_dir.join("metadata"));
+        }
+
+        // Copy files.
+        let src_files = deployed.installation.files_path(ref_);
+        let dest_files = dest_dir.join("files");
+        if src_files.exists() {
+            copy_dir_recursive(&src_files, &dest_files);
+        }
+
+        // Copy export.
+        let src_export = deploy_path.join("export");
+        let dest_export = dest_dir.join("export");
+        if src_export.exists() {
+            copy_dir_recursive(&src_export, &dest_export);
+        }
+
+        eprintln!("Exported {} to USB", ref_.format_ref());
+    }
+
+    println!("Created USB sideload repo at {}", usb_repo.display());
 }
 
 // ---------------------------------------------------------------------------

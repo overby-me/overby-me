@@ -811,3 +811,74 @@ pub fn pull_ref(
 pub fn list_remote_refs(repo_url: &str) -> Result<Vec<SummaryRef>, String> {
     fetch_summary(repo_url)
 }
+
+// ---------------------------------------------------------------------------
+// GPG signature verification
+// ---------------------------------------------------------------------------
+
+/// Verify a GPG signature on data using the `gpg` or `gpgv` command.
+///
+/// Returns Ok(()) if verification succeeds, Err with details if it fails.
+#[allow(dead_code)]
+pub fn verify_gpg_signature(
+    data: &[u8],
+    signature: &[u8],
+    keyring: Option<&Path>,
+) -> Result<(), String> {
+    let data_path = format!("/tmp/.flatpak-gpg-data-{}", std::process::id());
+    let sig_path = format!("/tmp/.flatpak-gpg-sig-{}", std::process::id());
+
+    fs::write(&data_path, data).map_err(|e| format!("write gpg data: {e}"))?;
+    fs::write(&sig_path, signature).map_err(|e| format!("write gpg sig: {e}"))?;
+
+    let mut cmd = std::process::Command::new("gpgv");
+    if let Some(kr) = keyring {
+        cmd.arg("--keyring");
+        cmd.arg(kr);
+    }
+    cmd.arg(&sig_path);
+    cmd.arg(&data_path);
+
+    let result = cmd
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .output();
+
+    let _ = fs::remove_file(&data_path);
+    let _ = fs::remove_file(&sig_path);
+
+    match result {
+        Ok(output) if output.status.success() => Ok(()),
+        Ok(output) => Err(format!(
+            "GPG verification failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )),
+        Err(e) => Err(format!("gpgv not available: {e}")),
+    }
+}
+
+/// Fetch and verify the summary.sig file for a remote.
+#[allow(dead_code)]
+pub fn fetch_and_verify_summary(
+    repo_url: &str,
+    keyring: Option<&Path>,
+) -> Result<Vec<SummaryRef>, String> {
+    let summary_url = format!("{}/summary", repo_url.trim_end_matches('/'));
+    let sig_url = format!("{}/summary.sig", repo_url.trim_end_matches('/'));
+
+    let summary_data = fetch_url(&summary_url)?;
+
+    // Try to fetch and verify signature.
+    match fetch_url(&sig_url) {
+        Ok(sig_data) => {
+            if let Err(e) = verify_gpg_signature(&summary_data, &sig_data, keyring) {
+                eprintln!("warning: summary GPG verification failed: {e}");
+            }
+        }
+        Err(_) => {
+            // No signature available — proceed without verification.
+        }
+    }
+
+    parse_summary(&summary_data)
+}

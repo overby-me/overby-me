@@ -128,6 +128,11 @@ fn socket_path_from_address(addr: &str) -> Option<String> {
 /// Launch a D-Bus proxy for the session bus.
 ///
 /// Returns the running proxy and the socket path to bind-mount into the sandbox.
+/// Check if proxy logging is enabled via FLATPAK_DBUS_PROXY_LOG env var.
+fn proxy_logging_enabled() -> bool {
+    env::var("FLATPAK_DBUS_PROXY_LOG").is_ok()
+}
+
 pub fn launch_session_proxy(
     app_id: &str,
     policies: &HashMap<String, BusPolicy>,
@@ -143,6 +148,9 @@ pub fn launch_session_proxy(
     let proxy_socket = temp_dir.join("session-bus");
 
     let mut cmd = Command::new(&proxy_bin);
+    if proxy_logging_enabled() {
+        cmd.arg("--log");
+    }
     cmd.arg(&bus_addr);
     cmd.arg(&proxy_socket);
 
@@ -195,6 +203,9 @@ pub fn launch_system_proxy(
     let proxy_socket = temp_dir.join("system-bus");
 
     let mut cmd = Command::new(&proxy_bin);
+    if proxy_logging_enabled() {
+        cmd.arg("--log");
+    }
     cmd.arg(&bus_addr);
     cmd.arg(&proxy_socket);
 
@@ -374,6 +385,9 @@ pub fn launch_a11y_proxy(
     let proxy_socket = temp_dir.join("a11y-bus");
 
     let mut cmd = Command::new(&proxy_bin);
+    if proxy_logging_enabled() {
+        cmd.arg("--log");
+    }
     cmd.arg(&bus_addr);
     cmd.arg(&proxy_socket);
 

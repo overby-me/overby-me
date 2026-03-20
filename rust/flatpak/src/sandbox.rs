@@ -464,6 +464,11 @@ pub fn build_sandbox(
             &doc_mount.to_string_lossy(),
             &doc_mount.to_string_lossy(),
         ]);
+
+        // Try to discover the portal PID for FLATPAK_PORTAL_PID.
+        if let Some(pid) = discover_portal_pid() {
+            bwrap.setenv("FLATPAK_PORTAL_PID", &pid.to_string());
+        }
     }
 
     // Accessibility bus.
@@ -807,6 +812,21 @@ fn write_memfd(name: &str, data: &[u8]) -> Result<i32, String> {
 }
 
 /// Set up timezone in the sandbox.
+/// Try to discover the document portal's PID.
+fn discover_portal_pid() -> Option<u32> {
+    // The portal runs as xdg-document-portal. Try to find its PID via pidof.
+    let output = std::process::Command::new("pidof")
+        .arg("xdg-document-portal")
+        .output()
+        .ok()?;
+    if output.status.success() {
+        let pid_str = String::from_utf8_lossy(&output.stdout);
+        pid_str.split_whitespace().next()?.parse().ok()
+    } else {
+        None
+    }
+}
+
 fn setup_timezone(bwrap: &mut BwrapBuilder) {
     // Bind the host zoneinfo database.
     if Path::new("/usr/share/zoneinfo").exists() {

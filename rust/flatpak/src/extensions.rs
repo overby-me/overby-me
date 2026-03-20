@@ -244,15 +244,16 @@ pub fn extension_mount_args(
         for ext in exts {
             let src_dir = ext.files_path.join(merge_dir);
             if src_dir.exists()
-                && let Ok(entries) = std::fs::read_dir(&src_dir) {
-                    for entry in entries.flatten() {
-                        let name = entry.file_name();
-                        let dest_link = PathBuf::from(&merged_tmp).join(&name);
-                        if !dest_link.exists() {
-                            let _ = std::os::unix::fs::symlink(entry.path(), &dest_link);
-                        }
+                && let Ok(entries) = std::fs::read_dir(&src_dir)
+            {
+                for entry in entries.flatten() {
+                    let name = entry.file_name();
+                    let dest_link = PathBuf::from(&merged_tmp).join(&name);
+                    if !dest_link.exists() {
+                        let _ = std::os::unix::fs::symlink(entry.path(), &dest_link);
                     }
                 }
+            }
         }
 
         let dest = format!("{base}/{merge_dir}");

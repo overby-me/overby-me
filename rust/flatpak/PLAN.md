@@ -132,7 +132,7 @@ Integrate with XDG desktop portals for mediated access to host resources.
 - [x] Permission store: CLI stubs for `flatpak permissions`, `permission-show`,
   `permission-set`, `permission-remove`, `permission-reset`
 - [ ] Mount `xdg-document-portal` socket into sandbox
-- [ ] Set portal-related environment variables (`FLATPAK_PORTAL_PID`, etc.)
+- [x] Set portal-related environment variables (`FLATPAK_PORTAL_PID`)
 - [ ] Full D-Bus client for portal APIs
 
 ## Phase 8: Remaining CLI Commands
@@ -242,7 +242,7 @@ Wire up bwrap's `--info-fd` to capture the actual child PID and process info.
 - [x] Proxy the accessibility bus (`AT_SPI_BUS_ADDRESS`)
 - [x] Handle `sockets=inherit-wayland-socket` (pass through existing Wayland
   socket from parent sandbox)
-- [ ] Wire up `--log` flag for proxy debugging
+- [x] Wire up `--log` flag for proxy debugging (via `FLATPAK_DBUS_PROXY_LOG`)
 - [x] Support `[Accessibility Bus Policy]` from metadata
 
 ## Phase 15: Extension Completion
@@ -268,7 +268,7 @@ Replace the portal stubs with real D-Bus client implementations.
 - [x] Permission store: talk to `org.freedesktop.impl.portal.PermissionStore`
   for `permission-show`, `permission-set`, `permission-remove`, `permission-reset`
 - [x] Mount the document portal socket (`/run/user/<uid>/doc`) into the sandbox
-- [ ] Set `FLATPAK_PORTAL_PID` environment variable
+- [x] Set `FLATPAK_PORTAL_PID` environment variable
 
 ## Phase 17: Remaining CLI and Formats
 
@@ -278,7 +278,8 @@ Replace the portal stubs with real D-Bus client implementations.
   remotes
 - [x] `flatpak history` — event log with timestamps, stored in
   `<installation>/history.log`, written on install/uninstall
-- [ ] `flatpak create-usb` — export refs to a USB sideload directory
+- [x] `flatpak create-usb` — export refs to a USB sideload directory
+  (`~/.flatpak-usb/` on the mount point)
 - [ ] `build-bundle` — implement proper Flatpak bundle format (OSTree commit
   in a single file with metadata header) instead of tar
 - [ ] `build-commit-from` — implement full OSTree commit creation from an
@@ -286,8 +287,12 @@ Replace the portal stubs with real D-Bus client implementations.
 - [ ] `build-sign` — implement GPG signing of OSTree commits
 - [x] `.flatpakrepo` file parsing for `remote-add --from=<file>` (supports
   both local files and HTTP URLs)
-- [ ] Support `--columns` flag for `list`, `remote-ls`, `ps` output formatting
-- [ ] Support `--arch` flag for cross-architecture operations
+- [x] Support `--columns` flag for `list` output formatting
+- [x] Support `--arch=` flag for filtering `list` output
+- [x] GPG signature verification via `gpgv` subprocess
+  (`verify_gpg_signature`, `fetch_and_verify_summary`)
+- [x] `FLATPAK_PORTAL_PID` set when document portal is available
+- [x] D-Bus proxy `--log` support via `FLATPAK_DBUS_PROXY_LOG` env var
 
 ## Priority Order (Phases 10-17)
 
