@@ -1,0 +1,17 @@
+[package]
+name = "rust-bubblewrap"
+version = "0.1.0"
+edition = "2024"
+description = "A bubblewrap-compatible unprivileged sandboxing tool written in Rust"
+license = "MIT"
+
+[[bin]]
+name = "bwrap"
+path = "src/main.rs"
+
+[dependencies]
+libc = "0.2"
+
+[profile.release]
+lto = true
+strip = true
