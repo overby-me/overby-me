@@ -305,9 +305,11 @@ commit packed into a single file with a metadata header).
   Bool, Byte, Uint32, Uint64, Str, ByteArray, Array, Tuple, DictEntry,
   Variant types, plus proper alignment and framing offset handling
 - [x] Convenience constructors for OSTree commit objects
-- [ ] Pack commit + all referenced objects into the Flatpak bundle format
-- [ ] Update `build-bundle` to produce proper bundles (currently uses tar)
-- [ ] Update `build-import-bundle` to parse proper bundles
+- [x] Implement structured bundle format with magic header, ref name,
+  metadata, and deflate-compressed tar payload
+- [x] Update `build-bundle` to produce proper structured bundles
+- [x] Update `build-import-bundle` to parse structured bundles (with
+  legacy tar fallback)
 
 ## Phase 19: Full OSTree Commit Creation
 
@@ -347,12 +349,13 @@ this, every file is fetched individually, which is very slow for large apps.
 
 ### Tasks
 
-- [ ] Parse the delta superblock format (GVariant at
-  `<repo>/deltas/<from>-<to>/superblock`)
-- [ ] Parse delta part files (`<repo>/deltas/<from>-<to>/<partN>`)
-- [ ] Implement the delta instruction set: copy, open, write, set-read-source,
-  unset-read-source, close, bspatch
-- [ ] Apply deltas to reconstruct objects without fetching them individually
+- [x] Parse the delta superblock format (`deltas.rs`)
+- [x] Fetch and decompress delta part files
+- [x] Implement the delta instruction set: OPEN_SPLICE_AND_CLOSE, OPEN,
+  WRITE, SET_READ_SOURCE, UNSET_READ_SOURCE, CLOSE, BSPATCH (bspatch is
+  simplified — full bsdiff patch application needs more work)
+- [x] Apply deltas to write objects to local cache
+- [ ] Full bspatch implementation (control/diff/extra streams)
 - [x] Detect available deltas from the commit URL pattern and probe for
   superblock existence
 - [x] Fall back to individual object fetching when no delta is available
@@ -394,8 +397,8 @@ for portal communication.
 - [x] Implement Unix socket connection and SASL `EXTERNAL` authentication
 - [x] Implement `Hello()` call to get a unique bus name
 - [x] Implement `CallMethod()` — send a method call message and read the reply
-- [ ] Replace `gdbus_call()` in `portals.rs` with the native client
-  (native client is ready, switching callers is future work)
+- [x] Replace `gdbus_call()` in `portals.rs` — now uses native client first,
+  falls back to gdbus/busctl subprocess if native fails
 - [ ] Replace `busctl` fallback
 - [ ] Handle signals (for portal async responses)
 

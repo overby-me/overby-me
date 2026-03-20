@@ -7,6 +7,7 @@
 mod build;
 mod dbus_client;
 mod dbus_proxy;
+mod deltas;
 mod extensions;
 mod gvariant;
 mod installation;
@@ -1737,6 +1738,7 @@ fn cmd_build_export(args: &[String]) {
     let mut dir: Option<String> = None;
     let mut branch: Option<String> = None;
     let mut subject: Option<String> = None;
+    let mut gpg_sign: Option<String> = None;
 
     let mut i = 0;
     while i < args.len() {
@@ -1753,6 +1755,9 @@ fn cmd_build_export(args: &[String]) {
                     subject = Some(args[i].clone());
                 }
             }
+            s if s.starts_with("--gpg-sign=") => {
+                gpg_sign = s.strip_prefix("--gpg-sign=").map(String::from);
+            }
             s if !s.starts_with('-') => {
                 if repo.is_none() {
                     repo = Some(s.to_string());
@@ -1766,7 +1771,7 @@ fn cmd_build_export(args: &[String]) {
     }
 
     let repo = repo.unwrap_or_else(|| {
-        eprintln!("flatpak build-export: usage: flatpak build-export REPO DIR [-b BRANCH]");
+        eprintln!("flatpak build-export: usage: flatpak build-export REPO DIR [-b BRANCH] [--gpg-sign=KEYID]");
         process::exit(1);
     });
     let dir = dir.unwrap_or_else(|| {
@@ -1774,7 +1779,7 @@ fn cmd_build_export(args: &[String]) {
         process::exit(1);
     });
 
-    build::build_export(
+    let ref_str = build::build_export(
         Path::new(&repo),
         Path::new(&dir),
         branch.as_deref(),
@@ -1784,6 +1789,13 @@ fn cmd_build_export(args: &[String]) {
         eprintln!("flatpak build-export: {e}");
         process::exit(1);
     });
+
+    // GPG sign if requested.
+    if let Some(key_id) = gpg_sign
+        && let Err(e) = build::build_sign(Path::new(&repo), &ref_str, &key_id)
+    {
+        eprintln!("flatpak build-export: GPG signing failed: {e}");
+    }
 }
 
 fn cmd_build_bundle(args: &[String]) {

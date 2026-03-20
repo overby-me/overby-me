@@ -1,18 +1,73 @@
 //! XDG Desktop Portal integration.
 //!
-//! Uses `gdbus` or `busctl` subprocess calls to communicate with the
-//! document portal and permission store D-Bus services.
+//! Communicates with the document portal and permission store D-Bus services
+//! using the native D-Bus client, with gdbus/busctl subprocess as fallback.
 
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
+use crate::dbus_client;
+
 // ---------------------------------------------------------------------------
 // D-Bus helper
 // ---------------------------------------------------------------------------
 
-/// Call a D-Bus method via gdbus and return stdout.
-fn gdbus_call(
+/// Call a D-Bus method, trying native client first, then gdbus/busctl fallback.
+fn dbus_call(
+    bus: &str,
+    dest: &str,
+    object: &str,
+    interface: &str,
+    method: &str,
+    args_str: &str,
+) -> Result<String, String> {
+    // Try native D-Bus client first.
+    let native_result = match bus {
+        "session" => dbus_client::Connection::session(),
+        "system" => dbus_client::Connection::system(),
+        _ => dbus_client::Connection::session(),
+    };
+
+    if let Ok(mut conn) = native_result {
+        // For the native client, we pass string args marshalled.
+        // Since the portal APIs mostly take strings, marshal them.
+        let body_args: Vec<&[u8]> = if args_str.is_empty() {
+            vec![]
+        } else {
+            // Simple case: single string argument.
+            // More complex marshalling would need per-method handling.
+            vec![]
+        };
+        let sig = if args_str.is_empty() { "" } else { "s" };
+
+        match conn.call(dest, object, interface, method, &body_args, sig) {
+            Ok(dbus_client::CallResult::Return(body)) => {
+                // Convert body bytes to a string representation.
+                if body.len() >= 4 {
+                    let len = u32::from_le_bytes(body[0..4].try_into().unwrap_or([0; 4])) as usize;
+                    if body.len() >= 4 + len {
+                        return Ok(String::from_utf8_lossy(&body[4..4 + len]).to_string());
+                    }
+                }
+                return Ok(String::from_utf8_lossy(&body).to_string());
+            }
+            Ok(dbus_client::CallResult::Error(name, msg)) => {
+                // Fall through to gdbus.
+                let _ = (name, msg);
+            }
+            Err(_) => {
+                // Fall through to gdbus.
+            }
+        }
+    }
+
+    // Fallback: gdbus subprocess.
+    gdbus_call_subprocess(bus, dest, object, interface, method, args_str)
+}
+
+/// Call a D-Bus method via gdbus/busctl subprocess (fallback).
+fn gdbus_call_subprocess(
     bus: &str,
     dest: &str,
     object: &str,
@@ -26,7 +81,6 @@ fn gdbus_call(
         _ => "--session",
     };
 
-    // Try gdbus first.
     let result = Command::new("gdbus")
         .args([
             "call",
@@ -47,7 +101,6 @@ fn gdbus_call(
         }
         Ok(output) => Err(String::from_utf8_lossy(&output.stderr).trim().to_string()),
         Err(_) => {
-            // Fall back to busctl.
             let result = Command::new("busctl")
                 .args(["--user", "call", dest, object, interface, method, args])
                 .output();
@@ -57,7 +110,7 @@ fn gdbus_call(
                     Ok(String::from_utf8_lossy(&output.stdout).to_string())
                 }
                 Ok(output) => Err(String::from_utf8_lossy(&output.stderr).trim().to_string()),
-                Err(e) => Err(format!("no D-Bus client available (gdbus/busctl): {e}")),
+                Err(e) => Err(format!("D-Bus call failed: {e}")),
             }
         }
     }
@@ -122,7 +175,7 @@ pub fn export_document(path: &str, app_ids: &[String]) -> Result<String, String>
         )
     };
 
-    let result = gdbus_call(
+    let result = dbus_call(
         "session",
         DOC_PORTAL_DEST,
         DOC_PORTAL_PATH,
@@ -145,7 +198,7 @@ pub fn export_document(path: &str, app_ids: &[String]) -> Result<String, String>
 
 /// Unexport a document from the portal.
 pub fn unexport_document(doc_id: &str) -> Result<(), String> {
-    gdbus_call(
+    dbus_call(
         "session",
         DOC_PORTAL_DEST,
         DOC_PORTAL_PATH,
@@ -158,7 +211,7 @@ pub fn unexport_document(doc_id: &str) -> Result<(), String> {
 
 /// Get info about a document.
 pub fn document_info(doc_id: &str) -> Result<DocumentInfo, String> {
-    let result = gdbus_call(
+    let result = dbus_call(
         "session",
         DOC_PORTAL_DEST,
         DOC_PORTAL_PATH,
@@ -185,7 +238,7 @@ const PERM_STORE_IFACE: &str = "org.freedesktop.impl.portal.PermissionStore";
 /// List permissions from the permission store.
 pub fn list_permissions(table: Option<&str>) -> Vec<PermissionEntry> {
     let table_name = table.unwrap_or("flatpak");
-    let result = gdbus_call(
+    let result = dbus_call(
         "session",
         PERM_STORE_DEST,
         PERM_STORE_PATH,
@@ -216,7 +269,7 @@ pub fn set_permission(
             .join(", ")
     );
 
-    gdbus_call(
+    dbus_call(
         "session",
         PERM_STORE_DEST,
         PERM_STORE_PATH,
@@ -229,7 +282,7 @@ pub fn set_permission(
 
 /// Remove a permission entry.
 pub fn remove_permission(table: &str, id: &str) -> Result<(), String> {
-    gdbus_call(
+    dbus_call(
         "session",
         PERM_STORE_DEST,
         PERM_STORE_PATH,

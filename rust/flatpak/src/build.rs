@@ -351,6 +351,22 @@ pub fn build_export(
 }
 
 /// Create a single-file bundle from a ref in a repository.
+/// Flatpak bundle magic bytes.
+const BUNDLE_MAGIC: &[u8; 8] = b"flatbndl";
+/// Bundle format version.
+const BUNDLE_VERSION: u32 = 1;
+
+/// Create a single-file bundle from a ref in a repository.
+///
+/// Bundle format:
+/// - 8 bytes: magic "flatbndl"
+/// - 4 bytes: LE version (1)
+/// - 4 bytes: LE ref name length
+/// - N bytes: ref name (UTF-8)
+/// - 4 bytes: LE metadata length
+/// - N bytes: metadata content (INI format)
+/// - 4 bytes: LE compressed payload length
+/// - N bytes: deflate-compressed tar of the files/ directory
 pub fn build_bundle(repo_path: &Path, bundle_path: &Path, ref_name: &str) -> Result<(), String> {
     let ref_ = Ref::parse(ref_name).ok_or("could not parse ref")?;
     let deploy_path = repo_path
@@ -364,27 +380,47 @@ pub fn build_bundle(repo_path: &Path, bundle_path: &Path, ref_name: &str) -> Res
         return Err(format!("ref {ref_name} not found in repo"));
     }
 
-    // Create a simple tar-like bundle: a directory with metadata and files.
-    // For a real implementation, this would be a proper Flatpak bundle format.
-    // For now, use a tar archive.
-    let status = Command::new("tar")
-        .args([
-            "czf",
-            &bundle_path.to_string_lossy(),
-            "-C",
-            &deploy_path.to_string_lossy(),
-            ".",
-        ])
-        .status()
+    // Read metadata.
+    let metadata = fs::read_to_string(deploy_path.join("metadata")).unwrap_or_default();
+
+    // Create tar of files/ directory.
+    let tar_output = Command::new("tar")
+        .args(["cf", "-", "-C", &deploy_path.to_string_lossy(), "."])
+        .output()
         .map_err(|e| format!("tar: {e}"))?;
 
-    if !status.success() {
+    if !tar_output.status.success() {
         return Err("tar failed".into());
     }
 
+    // Compress the tar payload.
+    let compressed = miniz_oxide::deflate::compress_to_vec(&tar_output.stdout, 6);
+
+    // Build the bundle file.
+    let mut bundle = Vec::new();
+    bundle.extend_from_slice(BUNDLE_MAGIC);
+    bundle.extend_from_slice(&BUNDLE_VERSION.to_le_bytes());
+
+    // Ref name.
+    let ref_bytes = ref_name.as_bytes();
+    bundle.extend_from_slice(&(ref_bytes.len() as u32).to_le_bytes());
+    bundle.extend_from_slice(ref_bytes);
+
+    // Metadata.
+    let meta_bytes = metadata.as_bytes();
+    bundle.extend_from_slice(&(meta_bytes.len() as u32).to_le_bytes());
+    bundle.extend_from_slice(meta_bytes);
+
+    // Compressed payload.
+    bundle.extend_from_slice(&(compressed.len() as u32).to_le_bytes());
+    bundle.extend_from_slice(&compressed);
+
+    fs::write(bundle_path, &bundle).map_err(|e| format!("write bundle: {e}"))?;
+
     eprintln!(
-        "Created bundle: {} from {}",
+        "Created bundle: {} ({:.1} MB) from {}",
         bundle_path.display(),
+        bundle.len() as f64 / (1024.0 * 1024.0),
         ref_name
     );
     Ok(())
@@ -397,50 +433,54 @@ pub fn build_import_bundle(
 ) -> Result<String, String> {
     let inst = &installations[0];
 
-    // Extract to a temp dir first to read metadata.
-    let temp_dir = PathBuf::from(format!("/tmp/.flatpak-import-{}", std::process::id()));
-    let _ = fs::create_dir_all(&temp_dir);
+    let bundle_data = fs::read(bundle_path).map_err(|e| format!("read bundle: {e}"))?;
 
-    let status = Command::new("tar")
-        .args([
-            "xzf",
-            &bundle_path.to_string_lossy(),
-            "-C",
-            &temp_dir.to_string_lossy(),
-        ])
-        .status()
-        .map_err(|e| format!("tar: {e}"))?;
-
-    if !status.success() {
-        let _ = fs::remove_dir_all(&temp_dir);
-        return Err("failed to extract bundle".into());
-    }
-
-    let metadata = Metadata::from_file(&temp_dir.join("metadata"))?;
-    let app_name = metadata
-        .app_name()
-        .ok_or("no name in metadata")?
-        .to_string();
-    let kind = if metadata.is_app() {
-        RefKind::App
+    // Try parsing as our structured bundle format.
+    let (ref_name, metadata_str, payload) = if bundle_data.starts_with(BUNDLE_MAGIC) {
+        parse_bundle(&bundle_data)?
     } else {
-        RefKind::Runtime
+        // Fall back to old tar-based format.
+        return import_tar_bundle(inst, bundle_path);
     };
-    let arch = std::env::consts::ARCH;
 
-    let ref_ = Ref {
-        kind,
-        id: app_name.clone(),
-        arch: arch.to_string(),
-        branch: "stable".to_string(),
-    };
+    // Parse metadata.
+    let metadata = Metadata::parse(&metadata_str)?;
+    let ref_ = Ref::parse(&ref_name).ok_or("could not parse ref from bundle")?;
 
     let deploy_path = inst.deploy_path(&ref_);
     let _ = fs::create_dir_all(&deploy_path);
 
-    // Move extracted files to deploy path.
-    copy_dir_recursive(&temp_dir, &deploy_path);
+    // Write metadata.
+    let _ = fs::write(deploy_path.join("metadata"), &metadata_str);
+
+    // Decompress and extract payload.
+    let tar_data = miniz_oxide::inflate::decompress_to_vec(&payload)
+        .map_err(|e| format!("decompress bundle: {e:?}"))?;
+
+    let temp_dir = PathBuf::from(format!("/tmp/.flatpak-import-{}", std::process::id()));
+    let _ = fs::create_dir_all(&temp_dir);
+
+    // Write tar and extract.
+    let tar_path = temp_dir.join("payload.tar");
+    fs::write(&tar_path, &tar_data).map_err(|e| format!("write tar: {e}"))?;
+
+    let status = Command::new("tar")
+        .args([
+            "xf",
+            &tar_path.to_string_lossy(),
+            "-C",
+            &deploy_path.to_string_lossy(),
+        ])
+        .status()
+        .map_err(|e| format!("tar extract: {e}"))?;
+
     let _ = fs::remove_dir_all(&temp_dir);
+
+    if !status.success() {
+        return Err("tar extraction failed".into());
+    }
+
+    let _app_name = metadata.app_name().unwrap_or(&ref_.id).to_string();
 
     let ref_str = ref_.format_ref();
     eprintln!("Imported: {ref_str}");
@@ -659,6 +699,99 @@ pub fn repo_info(repo_path: &Path) -> Result<(), String> {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Parse a structured bundle file.
+fn parse_bundle(data: &[u8]) -> Result<(String, String, Vec<u8>), String> {
+    let mut pos = 8; // skip magic
+
+    if data.len() < 16 {
+        return Err("bundle too short".into());
+    }
+
+    let _version = u32::from_le_bytes(data[pos..pos + 4].try_into().unwrap());
+    pos += 4;
+
+    // Ref name.
+    let ref_len = u32::from_le_bytes(data[pos..pos + 4].try_into().unwrap()) as usize;
+    pos += 4;
+    if pos + ref_len > data.len() {
+        return Err("bundle truncated (ref)".into());
+    }
+    let ref_name = String::from_utf8_lossy(&data[pos..pos + ref_len]).to_string();
+    pos += ref_len;
+
+    // Metadata.
+    if pos + 4 > data.len() {
+        return Err("bundle truncated (meta len)".into());
+    }
+    let meta_len = u32::from_le_bytes(data[pos..pos + 4].try_into().unwrap()) as usize;
+    pos += 4;
+    if pos + meta_len > data.len() {
+        return Err("bundle truncated (meta)".into());
+    }
+    let metadata = String::from_utf8_lossy(&data[pos..pos + meta_len]).to_string();
+    pos += meta_len;
+
+    // Compressed payload.
+    if pos + 4 > data.len() {
+        return Err("bundle truncated (payload len)".into());
+    }
+    let payload_len = u32::from_le_bytes(data[pos..pos + 4].try_into().unwrap()) as usize;
+    pos += 4;
+    if pos + payload_len > data.len() {
+        return Err("bundle truncated (payload)".into());
+    }
+    let payload = data[pos..pos + payload_len].to_vec();
+
+    Ok((ref_name, metadata, payload))
+}
+
+/// Import a legacy tar-based bundle.
+fn import_tar_bundle(inst: &Installation, bundle_path: &Path) -> Result<String, String> {
+    let temp_dir = PathBuf::from(format!("/tmp/.flatpak-import-{}", std::process::id()));
+    let _ = fs::create_dir_all(&temp_dir);
+
+    let status = Command::new("tar")
+        .args([
+            "xzf",
+            &bundle_path.to_string_lossy(),
+            "-C",
+            &temp_dir.to_string_lossy(),
+        ])
+        .status()
+        .map_err(|e| format!("tar: {e}"))?;
+
+    if !status.success() {
+        let _ = fs::remove_dir_all(&temp_dir);
+        return Err("failed to extract bundle".into());
+    }
+
+    let metadata = Metadata::from_file(&temp_dir.join("metadata"))?;
+    let app_name = metadata
+        .app_name()
+        .ok_or("no name in metadata")?
+        .to_string();
+    let kind = if metadata.is_app() {
+        RefKind::App
+    } else {
+        RefKind::Runtime
+    };
+    let arch = std::env::consts::ARCH;
+    let ref_ = Ref {
+        kind,
+        id: app_name.clone(),
+        arch: arch.to_string(),
+        branch: "stable".to_string(),
+    };
+    let deploy_path = inst.deploy_path(&ref_);
+    let _ = fs::create_dir_all(&deploy_path);
+    copy_dir_recursive(&temp_dir, &deploy_path);
+    let _ = fs::remove_dir_all(&temp_dir);
+
+    let ref_str = ref_.format_ref();
+    eprintln!("Imported: {ref_str}");
+    Ok(ref_str)
+}
 
 fn copy_dir_contents(src: &Path, dest: &Path) {
     if let Ok(entries) = fs::read_dir(src) {

@@ -519,6 +519,7 @@ fn decompress_raw_deflate(compressed: &[u8]) -> Result<Vec<u8>, String> {
 
 /// Global connection pool for reusing HTTP/TLS connections.
 /// Keyed by (host:port, is_tls).
+#[allow(clippy::type_complexity)]
 static CONN_POOL: std::sync::LazyLock<Mutex<HashMap<String, Vec<Box<dyn ReadWrite + Send>>>>> =
     std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
@@ -533,9 +534,10 @@ fn get_connection(
     // Try to reuse a pooled connection.
     if let Ok(mut pool) = CONN_POOL.lock()
         && let Some(conns) = pool.get_mut(&key)
-            && let Some(conn) = conns.pop() {
-                return Ok(conn);
-            }
+        && let Some(conn) = conns.pop()
+    {
+        return Ok(conn);
+    }
 
     // Create a new connection.
     let addr = format!("{host}:{port}");
@@ -1062,34 +1064,22 @@ pub fn pull_ref(
 /// Try to fetch and apply a static delta for the given commit.
 /// Returns true if a delta was successfully applied, false to fall back.
 fn try_static_delta(repo_url: &str, commit: &str, _dest: &Path, verbose: bool) -> bool {
-    // Static deltas are stored at:
-    //   <repo>/deltas/<from_prefix>/<from_rest>-<to_prefix>/<to_rest>/superblock
-    // For an initial pull (no previous commit), the "from" is empty, encoded as
-    //   <repo>/deltas/<to[0..2]>/<to[2..]>/superblock
-    let delta_url = format!(
-        "{}/deltas/{}/{}/superblock",
-        repo_url.trim_end_matches('/'),
-        &commit[..2],
-        &commit[2..]
-    );
+    let cache = cache_dir();
+    let _ = std::fs::create_dir_all(&cache);
 
-    match fetch_url(&delta_url) {
-        Ok(superblock) => {
+    match crate::deltas::apply_delta(repo_url, commit, &cache) {
+        Ok(n) => {
             if verbose {
-                eprintln!(
-                    "  Found static delta ({} bytes), but delta application not yet implemented",
-                    superblock.len()
-                );
-                eprintln!("  Falling back to individual object fetching");
+                eprintln!("  Applied static delta: {n} objects");
             }
-            // TODO: Parse superblock GVariant, fetch delta parts, apply instructions.
-            // The delta instruction set includes: open, write, set-read-source,
-            // unset-read-source, close, copy, bspatch.
-            // This requires a substantial implementation effort.
-            false
+            // TODO: checkout the objects from cache to dest.
+            // For now, the delta writes objects to the cache, but we still
+            // need the tree checkout to reconstruct the directory. The objects
+            // are now cached, so the subsequent checkout_tree will hit cache.
+            false // Still fall back to checkout_tree, but objects are cached now.
         }
         Err(_) => {
-            // No delta available.
+            // No delta available or failed to apply.
             false
         }
     }

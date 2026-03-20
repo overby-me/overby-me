@@ -270,18 +270,19 @@ fn build_method_call(
     }
 
     // Fixed header: endianness, type, flags, version, body_len, serial, fields_len.
-    let mut msg = Vec::new();
-    msg.push(LITTLE_ENDIAN_FLAG);
-    msg.push(METHOD_CALL);
-    msg.push(0); // flags
-    msg.push(PROTOCOL_VERSION);
+    let mut msg = vec![
+        LITTLE_ENDIAN_FLAG,
+        METHOD_CALL,
+        0, // flags
+        PROTOCOL_VERSION,
+    ];
     msg.extend_from_slice(&(body.len() as u32).to_le_bytes());
     msg.extend_from_slice(&serial.to_le_bytes());
     msg.extend_from_slice(&(fields.len() as u32).to_le_bytes());
     msg.extend_from_slice(&fields);
 
     // Align body to 8 bytes.
-    while msg.len() % 8 != 0 {
+    while !msg.len().is_multiple_of(8) {
         msg.push(0);
     }
 
