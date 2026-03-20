@@ -274,7 +274,12 @@
         '';
 
         # Force rebuild by changing env
-        RUST_STDENV_TEST = "1";
+        RUST_STDENV_TEST = "2";
+
+        preBuild = ''
+          echo "PATH entries with make:"
+          echo $PATH | tr ':' '\n' | while read d; do [ -x "$d/make" ] && echo "  $d/make: $($d/make --version 2>&1 | head -1)"; done
+        '';
 
         meta = {
           description = "GNU hello built with the Rust stdenv";
