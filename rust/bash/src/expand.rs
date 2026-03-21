@@ -40,8 +40,11 @@ pub fn expand_word(
     let fields = word_split(&segments, ifs);
     let mut result = Vec::new();
     for field in fields {
-        let globbed = glob_expand(&field);
-        result.extend(globbed);
+        let braced = brace_expand(&field);
+        for b in braced {
+            let globbed = glob_expand(&b);
+            result.extend(globbed);
+        }
     }
     if result.is_empty() && !word.is_empty() {
         let all_quoted = word
@@ -1016,6 +1019,150 @@ fn word_split(segments: &[Segment], ifs: &str) -> Vec<String> {
     }
 
     fields
+}
+
+/// Brace expansion: {a,b,c} → ["a", "b", "c"], pre{a,b}post → ["preapost", "prebpost"]
+/// Also handles sequences: {1..5} → ["1", "2", "3", "4", "5"]
+fn brace_expand(s: &str) -> Vec<String> {
+    // Find the first unquoted { with matching }
+    let chars: Vec<char> = s.chars().collect();
+    let mut depth = 0;
+    let mut brace_start = None;
+    let mut has_comma = false;
+    let mut has_dotdot = false;
+
+    for (i, &ch) in chars.iter().enumerate() {
+        match ch {
+            '{' if depth == 0 => {
+                brace_start = Some(i);
+                depth = 1;
+            }
+            '{' => depth += 1,
+            '}' if depth == 1 => {
+                if let Some(start) = brace_start {
+                    let inner = &s[start + 1..i];
+                    if inner.contains(',') {
+                        has_comma = true;
+                    }
+                    if inner.contains("..") {
+                        has_dotdot = true;
+                    }
+                    if has_comma || has_dotdot {
+                        let prefix = &s[..start];
+                        let suffix = &s[i + 1..];
+
+                        if has_comma {
+                            // Split on commas (respecting nested braces)
+                            let alternatives = split_brace_alternatives(inner);
+                            let mut result = Vec::new();
+                            for alt in &alternatives {
+                                let expanded =
+                                    brace_expand(&format!("{}{}{}", prefix, alt, suffix));
+                                result.extend(expanded);
+                            }
+                            return result;
+                        } else if has_dotdot {
+                            // Sequence: {start..end} or {start..end..step}
+                            let parts: Vec<&str> = inner.split("..").collect();
+                            if parts.len() >= 2 {
+                                let mut result = Vec::new();
+                                if let (Ok(start_n), Ok(end_n)) =
+                                    (parts[0].parse::<i64>(), parts[1].parse::<i64>())
+                                {
+                                    let step: i64 = if parts.len() >= 3 {
+                                        parts[2].parse().unwrap_or(1)
+                                    } else {
+                                        1
+                                    };
+                                    let step = if step == 0 { 1 } else { step.abs() };
+                                    if start_n <= end_n {
+                                        let mut n = start_n;
+                                        while n <= end_n {
+                                            result.extend(brace_expand(&format!(
+                                                "{}{}{}",
+                                                prefix, n, suffix
+                                            )));
+                                            n += step;
+                                        }
+                                    } else {
+                                        let mut n = start_n;
+                                        while n >= end_n {
+                                            result.extend(brace_expand(&format!(
+                                                "{}{}{}",
+                                                prefix, n, suffix
+                                            )));
+                                            n -= step;
+                                        }
+                                    }
+                                } else if parts[0].len() == 1 && parts[1].len() == 1 {
+                                    // Character range: {a..z}
+                                    let start_c = parts[0].chars().next().unwrap();
+                                    let end_c = parts[1].chars().next().unwrap();
+                                    if start_c <= end_c {
+                                        for c in start_c..=end_c {
+                                            result.extend(brace_expand(&format!(
+                                                "{}{}{}",
+                                                prefix, c, suffix
+                                            )));
+                                        }
+                                    } else {
+                                        let mut c = start_c;
+                                        while c >= end_c {
+                                            result.extend(brace_expand(&format!(
+                                                "{}{}{}",
+                                                prefix, c, suffix
+                                            )));
+                                            if c == '\0' {
+                                                break;
+                                            }
+                                            c = (c as u8 - 1) as char;
+                                        }
+                                    }
+                                }
+                                if !result.is_empty() {
+                                    return result;
+                                }
+                            }
+                        }
+                    }
+                }
+                depth = 0;
+                brace_start = None;
+                has_comma = false;
+                has_dotdot = false;
+            }
+            '}' => depth -= 1,
+            ',' if depth == 1 => has_comma = true,
+            _ => {}
+        }
+    }
+
+    vec![s.to_string()]
+}
+
+fn split_brace_alternatives(s: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut current = String::new();
+    let mut depth = 0;
+
+    for ch in s.chars() {
+        match ch {
+            '{' => {
+                depth += 1;
+                current.push(ch);
+            }
+            '}' => {
+                depth -= 1;
+                current.push(ch);
+            }
+            ',' if depth == 0 => {
+                result.push(std::mem::take(&mut current));
+            }
+            _ => current.push(ch),
+        }
+    }
+    result.push(current);
+    result
 }
 
 fn glob_expand(field: &str) -> Vec<String> {
