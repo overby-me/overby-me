@@ -88,7 +88,7 @@ The nixpkgs standard environment (`stdenv`) is the foundation that builds every 
 
 **Goal:** Wire in Rust tools that already exist and are packaged in nixpkgs.
 
-**Status:** 🔶 In progress
+**Status:** ✅ Complete
 
 ### Components
 
@@ -96,6 +96,18 @@ The nixpkgs standard environment (`stdenv`) is the foundation that builds every 
 |------|-------------|-------|
 | bash | rust-bash (`pkgs.rust-bash`) | Bash-compatible shell written in Rust; provides `/bin/bash` and `/bin/sh` |
 | coreutils | uutils (`pkgs.uutils-coreutils-noprefix`) | Cross-platform coreutils rewrite; noprefix variant matches GNU binary names |
+
+### Build Tests (all passing)
+
+| Package | Version | Build System | Notes |
+|---------|---------|-------------|-------|
+| GNU hello | 2.12.1 | autotools | Trivial autotools package |
+| zlib | 1.3.1 | configure+make | Critical C library |
+| GNU patch | 2.8 | autotools | Patch application tool |
+| GNU coreutils | 9.6 | autotools | 106 programs |
+| GNU grep | 3.11 | autotools | Regex search tool |
+| GNU sed | 4.9 | autotools | Stream editor |
+| GNU diffutils | 3.10 | autotools | diff/cmp/sdiff/diff3 |
 
 ### Tasks
 

@@ -14,6 +14,20 @@ test-stdenv:
 tree:
     nix-tree .#rust-nixpkgs-test
 
+# Run all package build tests
+test-all:
+    #!/usr/bin/env bash
+    set -e
+    tests=(rust-nixpkgs-test rust-nixpkgs-stdenv-test rust-nixpkgs-hello-test rust-nixpkgs-zlib-test rust-nixpkgs-gnupatch-test rust-nixpkgs-coreutils-test rust-nixpkgs-gnugrep-test rust-nixpkgs-gnused-test rust-nixpkgs-gnudiffutils-test)
+    for test in "${tests[@]}"; do
+        echo -n "$test: "
+        if nix build ".#$test" --no-link 2>/dev/null; then
+            echo "PASS"
+        else
+            echo "FAIL"
+        fi
+    done
+
 # List all component files
 components:
     @echo "=== Component Registry ==="
