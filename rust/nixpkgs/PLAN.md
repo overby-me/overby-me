@@ -108,6 +108,7 @@ The nixpkgs standard environment (`stdenv`) is the foundation that builds every 
 | GNU grep | 3.11 | autotools | Regex search tool |
 | GNU sed | 4.9 | autotools | Stream editor |
 | GNU diffutils | 3.10 | autotools | diff/cmp/sdiff/diff3 |
+| GNU make | 4.4.1 | autotools | Built with rust-make (self-referential!) |
 
 ### Tasks
 
