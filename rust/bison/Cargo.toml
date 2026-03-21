@@ -1,0 +1,18 @@
+[package]
+name = "rust-bison"
+version = "0.1.0"
+edition = "2024"
+description = "A POSIX yacc/bison-compatible parser generator written in Rust"
+license = "MIT"
+
+[[bin]]
+name = "bison"
+path = "src/main.rs"
+
+[[bin]]
+name = "yacc"
+path = "src/main.rs"
+
+[profile.release]
+lto = true
+strip = true

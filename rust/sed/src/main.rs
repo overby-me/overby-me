@@ -324,6 +324,7 @@ impl<'a> Parser<'a> {
             bre_to_ere(pattern)
         };
 
+        let pat = fix_posix_char_class(&pat);
         Regex::new(&pat).map_err(|e| format!("invalid regex: {e}"))
     }
 
@@ -455,7 +456,10 @@ impl<'a> Parser<'a> {
         let re = if pattern_str.is_empty() {
             None // Reuse last regex at runtime
         } else {
-            Some(Regex::new(&re_pattern).map_err(|e| format!("invalid regex in s command: {e}"))?)
+            Some(
+                Regex::new(&fix_posix_char_class(&re_pattern))
+                    .map_err(|e| format!("invalid regex in s command: {e}"))?,
+            )
         };
 
         Ok(Command::Substitute {
@@ -678,6 +682,67 @@ impl<'a> Parser<'a> {
 // ---------------------------------------------------------------------------
 // BRE to ERE conversion
 // ---------------------------------------------------------------------------
+
+/// Fix POSIX character class patterns that Rust's regex crate can't handle.
+/// In POSIX, `[]...]` means a class containing `]` — the `]` right after `[` or `[^`
+/// is a literal. Rust regex doesn't support this, so we transform it.
+fn fix_posix_char_class(pattern: &str) -> String {
+    let mut result = String::with_capacity(pattern.len() + 8);
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut i = 0;
+
+    while i < chars.len() {
+        if chars[i] == '[' {
+            result.push('[');
+            i += 1;
+            // Check for negation
+            if i < chars.len() && chars[i] == '^' {
+                result.push('^');
+                i += 1;
+            }
+            // If next char is ], it's a literal ] in POSIX.
+            // We collect the rest of the class first, then append \] at the end
+            // so Rust regex doesn't confuse it with the class-closing ].
+            let mut has_leading_close = false;
+            if i < chars.len() && chars[i] == ']' {
+                has_leading_close = true;
+                i += 1;
+            }
+            // Collect rest of character class, escaping bare [ for Rust regex
+            let mut class_content = String::new();
+            while i < chars.len() && chars[i] != ']' {
+                if chars[i] == '\\' && i + 1 < chars.len() {
+                    class_content.push(chars[i]);
+                    class_content.push(chars[i + 1]);
+                    i += 2;
+                } else if chars[i] == '[' && !(i + 1 < chars.len() && chars[i + 1] == ':') {
+                    // Bare [ that's not a POSIX class like [:alpha:]
+                    class_content.push_str("\\[");
+                    i += 1;
+                } else {
+                    class_content.push(chars[i]);
+                    i += 1;
+                }
+            }
+            result.push_str(&class_content);
+            if has_leading_close {
+                result.push_str("\\]");
+            }
+            if i < chars.len() {
+                result.push(']');
+                i += 1;
+            }
+        } else if chars[i] == '\\' && i + 1 < chars.len() {
+            result.push(chars[i]);
+            result.push(chars[i + 1]);
+            i += 2;
+        } else {
+            result.push(chars[i]);
+            i += 1;
+        }
+    }
+    result
+}
 
 fn bre_to_ere(bre: &str) -> String {
     let mut result = String::with_capacity(bre.len());

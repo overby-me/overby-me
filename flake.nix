@@ -224,6 +224,7 @@
 
         ./rust/awk
         ./rust/bash
+        ./rust/bison
         ./rust/bzip2
         ./rust/cachix
         ./rust/direnv
