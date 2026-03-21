@@ -445,7 +445,33 @@ impl Shell {
         }
     }
 
+    /// Apply ${var:=default} assignments from a word's param expansions.
+    fn apply_assign_defaults(&mut self, word: &Word) {
+        for part in word {
+            match part {
+                WordPart::Param(expr) => {
+                    if let ParamOp::Assign(colon, default_word) = &expr.op {
+                        let resolved = self.resolve_nameref(&expr.name);
+                        let val = self.vars.get(&resolved).cloned().unwrap_or_default();
+                        let empty = if *colon { val.is_empty() } else { false };
+                        let unset = !self.vars.contains_key(&resolved);
+                        if unset || empty {
+                            let default_val = self.expand_word_single(default_word);
+                            self.set_var(&expr.name, default_val);
+                        }
+                    }
+                }
+                WordPart::DoubleQuoted(parts) => {
+                    // Recurse into double-quoted parts
+                    self.apply_assign_defaults(parts);
+                }
+                _ => {}
+            }
+        }
+    }
+
     pub fn expand_word_fields(&mut self, word: &Word, ifs: &str) -> Vec<String> {
+        self.apply_assign_defaults(word);
         let vars = self.vars.clone();
         let arrays = self.arrays.clone();
         let namerefs = self.namerefs.clone();
@@ -469,6 +495,7 @@ impl Shell {
     }
 
     pub fn expand_word_single(&mut self, word: &Word) -> String {
+        self.apply_assign_defaults(word);
         let vars = self.vars.clone();
         let arrays = self.arrays.clone();
         let namerefs = self.namerefs.clone();

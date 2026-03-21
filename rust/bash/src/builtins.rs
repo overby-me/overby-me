@@ -212,16 +212,59 @@ fn builtin_printf(_shell: &mut Shell, args: &[String]) -> i32 {
                 None => print!("\\"),
             }
         } else if ch == '%' {
+            // Parse optional flags, width, precision
+            let mut flags = String::new();
+            let mut width_str = String::new();
+            while let Some(&c) = chars.peek() {
+                if matches!(c, '-' | '+' | ' ' | '0' | '#') {
+                    flags.push(c);
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+            while let Some(&c) = chars.peek() {
+                if c.is_ascii_digit() {
+                    width_str.push(c);
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+            // Skip precision for now
+            if chars.peek() == Some(&'.') {
+                chars.next();
+                while let Some(&c) = chars.peek() {
+                    if c.is_ascii_digit() {
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+            }
+            let w: usize = width_str.parse().unwrap_or(0);
+            let left = flags.contains('-');
+            let zero_pad = flags.contains('0');
             match chars.next() {
                 Some('s') => {
                     let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("");
-                    print!("{}", arg);
+                    if w > 0 {
+                        if left { print!("{:<w$}", arg); } else { print!("{:>w$}", arg); }
+                    } else {
+                        print!("{}", arg);
+                    }
                     arg_idx += 1;
                 }
                 Some('d') | Some('i') => {
                     let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
                     let n: i64 = arg.parse().unwrap_or(0);
-                    print!("{}", n);
+                    if w > 0 {
+                        if left { print!("{:<w$}", n); }
+                        else if zero_pad { print!("{:0>w$}", n); }
+                        else { print!("{:>w$}", n); }
+                    } else {
+                        print!("{}", n);
+                    }
                     arg_idx += 1;
                 }
                 Some('x') => {
@@ -242,7 +285,7 @@ fn builtin_printf(_shell: &mut Shell, args: &[String]) -> i32 {
                     arg_idx += 1;
                 }
                 Some('%') => print!("%"),
-                Some(c) => print!("%{}", c),
+                Some(c) => print!("%{}{}{}", flags, width_str, c),
                 None => print!("%"),
             }
         } else {
