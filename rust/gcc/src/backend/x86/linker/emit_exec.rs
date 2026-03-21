@@ -24,6 +24,7 @@ pub(super) fn emit_executable(
     use_runpath: bool,
     is_static: bool,
     ifunc_symbols: &[String],
+    interp_override: Option<&str>,
 ) -> Result<(), String> {
     let mut dynstr = DynStrTab::new();
     for lib in needed_sonames {
@@ -376,11 +377,19 @@ pub(super) fn emit_executable(
     let phdr_total_size = phdr_count * 56;
 
     // === Layout ===
+    let interp_bytes: Vec<u8> = if let Some(path) = interp_override {
+        let mut v = path.as_bytes().to_vec();
+        v.push(0); // null terminator
+        v
+    } else {
+        INTERP.to_vec()
+    };
+
     let mut offset = 64 + phdr_total_size;
     let interp_offset = offset;
     let interp_addr = BASE_ADDR + offset;
     if !is_static {
-        offset += INTERP.len() as u64;
+        offset += interp_bytes.len() as u64;
     }
 
     offset = (offset + 7) & !7;
@@ -788,8 +797,8 @@ pub(super) fn emit_executable(
             PF_R,
             interp_offset,
             interp_addr,
-            INTERP.len() as u64,
-            INTERP.len() as u64,
+            interp_bytes.len() as u64,
+            interp_bytes.len() as u64,
             1,
         );
         ph += 56;
@@ -882,7 +891,7 @@ pub(super) fn emit_executable(
     // Dynamic linking sections (skipped for static executables)
     if !is_static {
         // .interp
-        write_bytes(&mut out, interp_offset as usize, INTERP);
+        write_bytes(&mut out, interp_offset as usize, &interp_bytes);
 
         // .gnu.hash - proper hash table so dynamic linker can find copy-reloc symbols
         let gh = gnu_hash_offset as usize;

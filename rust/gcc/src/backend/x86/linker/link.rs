@@ -261,6 +261,7 @@ pub fn link_builtin(
         use_runpath,
         is_static,
         &ifunc_symbols,
+        parsed_args.dynamic_linker.as_deref(),
     )
 }
 

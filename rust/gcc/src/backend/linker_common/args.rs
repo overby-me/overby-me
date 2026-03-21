@@ -30,6 +30,8 @@ pub struct LinkerArgs {
     pub gc_sections: bool,
     /// Whether `-static` was passed.
     pub is_static: bool,
+    /// Override for the dynamic linker path (from `-Wl,-dynamic-linker=`).
+    pub dynamic_linker: Option<String>,
 }
 
 /// Parse user linker arguments into a structured `LinkerArgs`.
@@ -116,6 +118,16 @@ pub fn parse_linker_args(user_args: &[String]) -> LinkerArgs {
                     result.gc_sections = false;
                 } else if part == "-static" {
                     result.is_static = true;
+                } else if let Some(interp) = part
+                    .strip_prefix("-dynamic-linker=")
+                    .or_else(|| part.strip_prefix("--dynamic-linker="))
+                {
+                    result.dynamic_linker = Some(interp.to_string());
+                } else if part == "-dynamic-linker" || part == "--dynamic-linker" {
+                    if j + 1 < parts.len() {
+                        j += 1;
+                        result.dynamic_linker = Some(parts[j].to_string());
+                    }
                 }
                 // TODO: --whole-archive / --no-whole-archive are positional flags
                 // that need per-file tracking; currently handled in link_shared's
