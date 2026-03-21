@@ -1246,6 +1246,214 @@
         };
       };
 
+    # Test building GNU readline — line editing library, autotools, exercises termcap/ncurses.
+    rust-nixpkgs-readline-test = {
+      lib,
+      stdenv,
+      fetchurl,
+      ncurses,
+      uutils-coreutils-noprefix,
+      rust-sed,
+      rust-grep,
+      rust-awk,
+      uutils-findutils,
+      rust-diffutils,
+      rust-file,
+      rust-tar,
+      rust-gzip,
+      rust-bzip2,
+      rust-xz,
+      rust-make,
+      rust-patch,
+      rust-texinfo,
+    }: let
+      rustStdenv = import ./stdenv-test.nix {
+        inherit
+          stdenv
+          uutils-coreutils-noprefix
+          rust-sed
+          rust-grep
+          rust-awk
+          uutils-findutils
+          rust-diffutils
+          rust-file
+          rust-tar
+          rust-gzip
+          rust-bzip2
+          rust-xz
+          rust-make
+          rust-patch
+          ;
+      };
+    in
+      rustStdenv.mkDerivation {
+        pname = "rust-nixpkgs-readline-test";
+        version = "8.2";
+
+        nativeBuildInputs = [rust-texinfo];
+        buildInputs = [ncurses];
+
+        src = fetchurl {
+          url = "mirror://gnu/readline/readline-8.2.tar.gz";
+          sha256 = "sha256-P+txcfFqhO6CyhijbXub4QmlLAT0kqBTMx19EJUAfDU=";
+        };
+
+        configureFlags = ["--disable-shared"];
+
+        postPatch = ''
+          find . -name '*.in' -o -name configure -o -name aclocal.m4 \
+            -o -name config.h.in -o -name Makefile.in -o -name config.in \
+            | xargs touch
+        '';
+
+        doCheck = false;
+
+        meta = {
+          description = "GNU readline built with the Rust stdenv";
+          license = lib.licenses.gpl3Plus;
+        };
+      };
+
+    # Test building libffi — foreign function interface, autotools+special build system.
+    # Note: libffi's Makefile uses complex conditionals that rust-make can't handle,
+    # so we add gnumake as a nativeBuildInput to override rust-make for the build.
+    rust-nixpkgs-libffi-test = {
+      lib,
+      stdenv,
+      fetchurl,
+      gnumake,
+      uutils-coreutils-noprefix,
+      rust-sed,
+      rust-grep,
+      rust-awk,
+      uutils-findutils,
+      rust-diffutils,
+      rust-file,
+      rust-tar,
+      rust-gzip,
+      rust-bzip2,
+      rust-xz,
+      rust-make,
+      rust-patch,
+      rust-texinfo,
+    }: let
+      rustStdenv = import ./stdenv-test.nix {
+        inherit
+          stdenv
+          uutils-coreutils-noprefix
+          rust-sed
+          rust-grep
+          rust-awk
+          uutils-findutils
+          rust-diffutils
+          rust-file
+          rust-tar
+          rust-gzip
+          rust-bzip2
+          rust-xz
+          rust-make
+          rust-patch
+          ;
+      };
+    in
+      rustStdenv.mkDerivation {
+        pname = "rust-nixpkgs-libffi-test";
+        version = "3.4.6";
+
+        nativeBuildInputs = [rust-texinfo gnumake];
+
+        src = fetchurl {
+          url = "https://github.com/libffi/libffi/releases/download/v3.4.6/libffi-3.4.6.tar.gz";
+          sha256 = "sha256-sN6p3yPIY6elDoJUQPPr/6vWXfFJcQjl1Dd0eEOJWk4=";
+        };
+
+        # libffi creates a subdirectory build layout via config.status buildir.
+        # We need to configure from within the build subdirectory to avoid the
+        # broken wrapper Makefile generation.
+        postPatch = ''
+          find . -name '*.in' -o -name configure -o -name aclocal.m4 \
+            -o -name config.h.in -o -name Makefile.in -o -name config.in \
+            | xargs touch
+        '';
+
+        preConfigure = ''
+          mkdir -p x86_64-pc-linux-gnu
+          cd x86_64-pc-linux-gnu
+          configureScript=../configure
+        '';
+
+        doCheck = false;
+
+        meta = {
+          description = "libffi built with the Rust stdenv";
+          license = lib.licenses.mit;
+        };
+      };
+
+    # Test building PCRE2 — regex library, autotools.
+    rust-nixpkgs-pcre2-test = {
+      lib,
+      stdenv,
+      fetchurl,
+      uutils-coreutils-noprefix,
+      rust-sed,
+      rust-grep,
+      rust-awk,
+      uutils-findutils,
+      rust-diffutils,
+      rust-file,
+      rust-tar,
+      rust-gzip,
+      rust-bzip2,
+      rust-xz,
+      rust-make,
+      rust-patch,
+      rust-texinfo,
+    }: let
+      rustStdenv = import ./stdenv-test.nix {
+        inherit
+          stdenv
+          uutils-coreutils-noprefix
+          rust-sed
+          rust-grep
+          rust-awk
+          uutils-findutils
+          rust-diffutils
+          rust-file
+          rust-tar
+          rust-gzip
+          rust-bzip2
+          rust-xz
+          rust-make
+          rust-patch
+          ;
+      };
+    in
+      rustStdenv.mkDerivation {
+        pname = "rust-nixpkgs-pcre2-test";
+        version = "10.44";
+
+        nativeBuildInputs = [rust-texinfo];
+
+        src = fetchurl {
+          url = "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.44/pcre2-10.44.tar.bz2";
+          sha256 = "sha256-008C4RPPcZOh6/J3DTrFJwiNSF1OBH7RDl0hfG713pY=";
+        };
+
+        postPatch = ''
+          find . -name '*.in' -o -name configure -o -name aclocal.m4 \
+            -o -name config.h.in -o -name Makefile.in -o -name config.in \
+            | xargs touch
+        '';
+
+        doCheck = false;
+
+        meta = {
+          description = "PCRE2 built with the Rust stdenv";
+          license = lib.licenses.bsd3;
+        };
+      };
+
     # Test that rust-gcc can compile a simple C program via the nixpkgs wrapper.
     rust-nixpkgs-gcc-test = {
       lib,
