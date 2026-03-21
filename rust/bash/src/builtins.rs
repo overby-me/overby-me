@@ -708,10 +708,7 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             if flag_nameref {
                 shell.namerefs.entry(name.to_string()).or_default();
             } else if flag_assoc {
-                shell
-                    .assoc_arrays
-                    .entry(name.to_string())
-                    .or_default();
+                shell.assoc_arrays.entry(name.to_string()).or_default();
             } else if flag_array {
                 shell.arrays.entry(name.to_string()).or_default();
             } else {
@@ -742,30 +739,30 @@ fn parse_assoc_literal(s: &str) -> HashMap<String, String> {
     let mut map = HashMap::new();
     let mut rest = inner.trim();
     while !rest.is_empty() {
-        if rest.starts_with('[') {
-            if let Some(close) = rest.find("]=") {
-                let key = &rest[1..close];
-                let after = &rest[close + 2..];
-                let (value, remaining) = if after.starts_with('"') {
-                    if let Some(end) = after[1..].find('"') {
-                        (&after[1..end + 1], after[end + 2..].trim_start())
-                    } else {
-                        (after, "")
-                    }
-                } else if after.starts_with('\'') {
-                    if let Some(end) = after[1..].find('\'') {
-                        (&after[1..end + 1], after[end + 2..].trim_start())
-                    } else {
-                        (after, "")
-                    }
+        if rest.starts_with('[')
+            && let Some(close) = rest.find("]=")
+        {
+            let key = &rest[1..close];
+            let after = &rest[close + 2..];
+            let (value, remaining) = if let Some(stripped) = after.strip_prefix('"') {
+                if let Some(end) = stripped.find('"') {
+                    (&stripped[..end], stripped[end + 1..].trim_start())
                 } else {
-                    let end = after.find(char::is_whitespace).unwrap_or(after.len());
-                    (&after[..end], after[end..].trim_start())
-                };
-                map.insert(key.to_string(), value.to_string());
-                rest = remaining;
-                continue;
-            }
+                    (after, "")
+                }
+            } else if let Some(stripped) = after.strip_prefix('\'') {
+                if let Some(end) = stripped.find('\'') {
+                    (&stripped[..end], stripped[end + 1..].trim_start())
+                } else {
+                    (after, "")
+                }
+            } else {
+                let end = after.find(char::is_whitespace).unwrap_or(after.len());
+                (&after[..end], after[end..].trim_start())
+            };
+            map.insert(key.to_string(), value.to_string());
+            rest = remaining;
+            continue;
         }
         // Skip unknown content
         let end = rest.find(char::is_whitespace).unwrap_or(rest.len());

@@ -117,6 +117,26 @@ impl ExpCtx<'_> {
         }
         resolved
     }
+
+    /// Check whether a parameter name is "set" (exists), considering
+    /// positional parameters, special variables, shell variables, and env.
+    fn is_param_set(&self, name: &str) -> bool {
+        // Special variables are always "set"
+        match name {
+            "#" | "?" | "-" | "$" | "!" | "0" | "@" | "*" => return true,
+            _ => {}
+        }
+        // Positional parameters ($1, $2, ...)
+        if let Ok(n) = name.parse::<usize>() {
+            return n < self.positional.len();
+        }
+        // Shell variables, arrays, or environment
+        let resolved = self.resolve_nameref(name);
+        self.vars.contains_key(&resolved)
+            || self.arrays.contains_key(&resolved)
+            || self.assoc_arrays.contains_key(&resolved)
+            || std::env::var(&resolved).is_ok()
+    }
 }
 
 fn expand_word_to_segments(word: &Word, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> Vec<Segment> {
@@ -525,8 +545,7 @@ fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
         }
         ParamOp::Default(colon, word) => {
             let empty = if *colon { val.is_empty() } else { false };
-            let resolved = ctx.resolve_nameref(&expr.name);
-            let unset = !ctx.vars.contains_key(&resolved) && std::env::var(&resolved).is_err();
+            let unset = !ctx.is_param_set(&expr.name);
             if unset || empty {
                 expand_word_nosplit_ctx(word, ctx, cmd_sub)
             } else {
@@ -535,8 +554,7 @@ fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
         }
         ParamOp::Assign(colon, word) => {
             let empty = if *colon { val.is_empty() } else { false };
-            let resolved = ctx.resolve_nameref(&expr.name);
-            let unset = !ctx.vars.contains_key(&resolved) && std::env::var(&resolved).is_err();
+            let unset = !ctx.is_param_set(&expr.name);
             if unset || empty {
                 expand_word_nosplit_ctx(word, ctx, cmd_sub)
             } else {
@@ -545,8 +563,7 @@ fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
         }
         ParamOp::Error(colon, word) => {
             let empty = if *colon { val.is_empty() } else { false };
-            let resolved = ctx.resolve_nameref(&expr.name);
-            let unset = !ctx.vars.contains_key(&resolved) && std::env::var(&resolved).is_err();
+            let unset = !ctx.is_param_set(&expr.name);
             if unset || empty {
                 let msg = expand_word_nosplit_ctx(word, ctx, cmd_sub);
                 eprintln!(
@@ -564,8 +581,7 @@ fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
         }
         ParamOp::Alt(colon, word) => {
             let empty = if *colon { val.is_empty() } else { false };
-            let resolved = ctx.resolve_nameref(&expr.name);
-            let unset = !ctx.vars.contains_key(&resolved) && std::env::var(&resolved).is_err();
+            let unset = !ctx.is_param_set(&expr.name);
             if unset || empty {
                 String::new()
             } else {

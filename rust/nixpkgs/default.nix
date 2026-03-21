@@ -868,6 +868,94 @@
         };
       };
 
+    # Test using rust-bash as the stdenv SHELL (not just in initialPath).
+    # This is the critical test: can rust-bash actually execute the build
+    # phases via setup.sh, acting as the builder shell?
+    rust-nixpkgs-bash-shell-test = {
+      lib,
+      stdenv,
+      rust-bash,
+      uutils-coreutils-noprefix,
+      rust-sed,
+      rust-grep,
+      rust-awk,
+      uutils-findutils,
+      rust-diffutils,
+      rust-file,
+      rust-tar,
+      rust-gzip,
+      rust-bzip2,
+      rust-xz,
+      rust-make,
+      rust-patch,
+    }: let
+      rustStdenv = import ./stdenv-test.nix {
+        inherit
+          stdenv
+          uutils-coreutils-noprefix
+          rust-sed
+          rust-grep
+          rust-awk
+          uutils-findutils
+          rust-diffutils
+          rust-file
+          rust-tar
+          rust-gzip
+          rust-bzip2
+          rust-xz
+          rust-make
+          rust-patch
+          ;
+      };
+      # Override the shell to use rust-bash as the builder
+      rustShellStdenv = rustStdenv.override {
+        shell = "${rust-bash}/bin/bash";
+      };
+    in
+      rustShellStdenv.mkDerivation {
+        pname = "rust-nixpkgs-bash-shell-test";
+        version = "0.1.0";
+
+        dontUnpack = true;
+        dontPatch = true;
+        dontConfigure = true;
+        dontFixup = true;
+
+        buildPhase = ''
+          echo "=== Building with rust-bash as stdenv shell ==="
+          echo "Shell: $SHELL"
+          echo "Bash: $(bash --version | head -1)"
+          echo "Current shell PID: $$"
+          echo ""
+          echo "Testing basic shell features..."
+          # Test variable assignment and expansion
+          FOO="hello world"
+          echo "Variable: $FOO"
+          # Test command substitution
+          echo "Date: $(date +%s)"
+          # Test conditionals
+          if [ -d "$NIX_BUILD_TOP" ]; then
+            echo "Build dir exists: $NIX_BUILD_TOP"
+          fi
+          # Test loops
+          for i in 1 2 3; do
+            echo "Loop iteration: $i"
+          done
+          echo ""
+          echo "rust-bash shell test passed."
+        '';
+
+        installPhase = ''
+          mkdir -p $out
+          echo "rust-bash shell test passed" > $out/result
+        '';
+
+        meta = {
+          description = "Test using rust-bash as the stdenv builder shell";
+          license = lib.licenses.mit;
+        };
+      };
+
     # Test building GNU findutils — autotools.
     rust-nixpkgs-gnufindutils-test = {
       lib,

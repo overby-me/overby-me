@@ -19,7 +19,9 @@
   rust-patch,
 }: let
   # Map of original pname → replacement package.
-  # bash/shell is NOT replaced — rust-bash can't yet execute setup.sh.
+  # bash/shell is NOT replaced here — see rust-nixpkgs-bash-shell-test for
+  # the shell override test. rust-bash can source setup.sh (63 functions)
+  # but has issues with patchPhase/fixupPhase (namerefs, local -, etc.).
   # patchelf and strip are not in initialPath (used by fixup hooks).
   replacements = {
     coreutils = uutils-coreutils-noprefix;
