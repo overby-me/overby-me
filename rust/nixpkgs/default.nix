@@ -1077,6 +1077,23 @@
           find . -name '*.info' -o -name '*.info-*' | xargs touch 2>/dev/null || true
         '';
 
+        # rust-make doesn't handle .in: suffix rules, so pre-generate the scripts
+        preBuild = ''
+          for f in gunzip gzexe zcat zcmp zdiff zegrep zfgrep zforce zgrep zless zmore znew; do
+            if [ -f "$f.in" ]; then
+              sed \
+                -e "s|/bin/sh|$SHELL|g" \
+                -e "s|@GREP@|grep|g" \
+                -e "s|'gzip'|gzip|g" \
+                -e "s|'zdiff'|zdiff|g" \
+                -e "s|'zgrep'|zgrep|g" \
+                -e "s|@VERSION@|1.14|g" \
+                "$f.in" > "$f"
+              chmod a+rx "$f"
+            fi
+          done
+        '';
+
         makeFlags = ["MAKEINFO=true"];
 
         doCheck = false;
