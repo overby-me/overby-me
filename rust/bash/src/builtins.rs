@@ -729,6 +729,11 @@ fn parse_array_literal(s: &str) -> Vec<String> {
         return Vec::new();
     }
 
+    // Check for \x01 separator (from parser's inline array handling)
+    if inner.contains('\x01') {
+        return inner.split('\x01').map(|s| s.to_string()).collect();
+    }
+
     // Simple word splitting, respecting quotes
     let mut elements = Vec::new();
     let mut current = String::new();

@@ -667,16 +667,20 @@ impl Parser {
                 if last_ends_with_eq {
                     self.advance(); // consume (
                     let elements = self.parse_array_elements();
-                    // Synthesize the array content as a single quoted part
-                    // so word splitting doesn't break it apart
-                    let arr_str = elements
-                        .iter()
-                        .map(|e| word_to_string(&e.value))
-                        .collect::<Vec<_>>()
-                        .join(" ");
+                    // For array assignments in command args (declare/local),
+                    // expand each element individually and join with \x01 separator.
+                    // This preserves the structure for the builtin to split.
                     let last = words.last_mut().unwrap();
-                    // Use SingleQuoted to prevent word splitting of the array content
-                    last.push(WordPart::SingleQuoted(format!("({})", arr_str)));
+                    last.push(WordPart::Literal("(".to_string()));
+                    for (i, elem) in elements.iter().enumerate() {
+                        if i > 0 {
+                            last.push(WordPart::Literal("\x01".to_string()));
+                        }
+                        for part in &elem.value {
+                            last.push(part.clone());
+                        }
+                    }
+                    last.push(WordPart::Literal(")".to_string()));
                     continue;
                 }
             }
