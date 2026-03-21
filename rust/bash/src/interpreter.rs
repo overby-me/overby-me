@@ -9,6 +9,7 @@ pub struct Shell {
     pub exports: HashMap<String, String>,
     pub readonly_vars: HashSet<String>,
     pub arrays: HashMap<String, Vec<String>>,
+    pub assoc_arrays: HashMap<String, HashMap<String, String>>,
     pub functions: HashMap<String, CompoundCommand>,
     pub positional: Vec<String>,
     pub last_status: i32,
@@ -87,6 +88,7 @@ impl Shell {
             exports,
             readonly_vars: HashSet::new(),
             arrays: HashMap::new(),
+            assoc_arrays: HashMap::new(),
             functions: HashMap::new(),
             positional: vec!["bash".to_string()],
             last_status: 0,
@@ -474,6 +476,7 @@ impl Shell {
         self.apply_assign_defaults(word);
         let vars = self.vars.clone();
         let arrays = self.arrays.clone();
+        let assoc_arrays = self.assoc_arrays.clone();
         let namerefs = self.namerefs.clone();
         let positional = self.positional.clone();
         let last_status = self.last_status;
@@ -484,6 +487,7 @@ impl Shell {
             word,
             &vars,
             &arrays,
+            &assoc_arrays,
             &namerefs,
             &positional,
             last_status,
@@ -498,6 +502,7 @@ impl Shell {
         self.apply_assign_defaults(word);
         let vars = self.vars.clone();
         let arrays = self.arrays.clone();
+        let assoc_arrays = self.assoc_arrays.clone();
         let namerefs = self.namerefs.clone();
         let positional = self.positional.clone();
         let last_status = self.last_status;
@@ -508,6 +513,7 @@ impl Shell {
             word,
             &vars,
             &arrays,
+            &assoc_arrays,
             &namerefs,
             &positional,
             last_status,
@@ -661,17 +667,25 @@ impl Shell {
                         self.set_var(&assign.name, format!("{}{}", existing, value));
                     }
                 } else {
-                    // Check for arr[n]=value
+                    // Check for arr[n]=value or map[key]=value
                     if let Some(bracket) = assign.name.find('[') {
                         let base = &assign.name[..bracket];
                         let idx_str = &assign.name[bracket + 1..assign.name.len() - 1];
                         let resolved = self.resolve_nameref(base);
-                        let idx: usize = self.eval_arith_expr(idx_str).max(0) as usize;
-                        let arr = self.arrays.entry(resolved).or_default();
-                        while arr.len() <= idx {
-                            arr.push(String::new());
+                        // Check if it's an associative array
+                        if self.assoc_arrays.contains_key(&resolved) {
+                            self.assoc_arrays
+                                .entry(resolved)
+                                .or_default()
+                                .insert(idx_str.to_string(), value);
+                        } else {
+                            let idx: usize = self.eval_arith_expr(idx_str).max(0) as usize;
+                            let arr = self.arrays.entry(resolved).or_default();
+                            while arr.len() <= idx {
+                                arr.push(String::new());
+                            }
+                            arr[idx] = value;
                         }
-                        arr[idx] = value;
                     } else {
                         self.set_var(&assign.name, value);
                     }

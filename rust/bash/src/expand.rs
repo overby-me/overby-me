@@ -19,6 +19,7 @@ pub fn expand_word(
     word: &Word,
     vars: &HashMap<String, String>,
     arrays: &HashMap<String, Vec<String>>,
+    assoc_arrays: &HashMap<String, HashMap<String, String>>,
     namerefs: &HashMap<String, String>,
     positional: &[String],
     last_status: i32,
@@ -30,6 +31,7 @@ pub fn expand_word(
     let ctx = ExpCtx {
         vars,
         arrays,
+        assoc_arrays,
         namerefs,
         positional,
         last_status,
@@ -63,6 +65,7 @@ pub fn expand_word_nosplit(
     word: &Word,
     vars: &HashMap<String, String>,
     arrays: &HashMap<String, Vec<String>>,
+    assoc_arrays: &HashMap<String, HashMap<String, String>>,
     namerefs: &HashMap<String, String>,
     positional: &[String],
     last_status: i32,
@@ -73,6 +76,7 @@ pub fn expand_word_nosplit(
     let ctx = ExpCtx {
         vars,
         arrays,
+        assoc_arrays,
         namerefs,
         positional,
         last_status,
@@ -92,6 +96,7 @@ pub fn expand_word_nosplit(
 struct ExpCtx<'a> {
     vars: &'a HashMap<String, String>,
     arrays: &'a HashMap<String, Vec<String>>,
+    assoc_arrays: &'a HashMap<String, HashMap<String, String>>,
     namerefs: &'a HashMap<String, String>,
     positional: &'a [String],
     last_status: i32,
@@ -389,6 +394,8 @@ fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
                     "@" | "*" => {
                         if let Some(arr) = ctx.arrays.get(&resolved) {
                             arr.join(" ")
+                        } else if let Some(assoc) = ctx.assoc_arrays.get(&resolved) {
+                            assoc.values().cloned().collect::<Vec<_>>().join(" ")
                         } else if let Some(val) = ctx.vars.get(&resolved) {
                             val.clone()
                         } else {
@@ -396,7 +403,11 @@ fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
                         }
                     }
                     _ => {
-                        // Numeric index
+                        // Check associative array first (string key)
+                        if let Some(assoc) = ctx.assoc_arrays.get(&resolved) {
+                            return assoc.get(idx_str).cloned().unwrap_or_default();
+                        }
+                        // Numeric index for indexed arrays
                         let idx: usize = idx_str.parse().unwrap_or(0);
                         if let Some(arr) = ctx.arrays.get(&resolved) {
                             arr.get(idx).cloned().unwrap_or_default()
@@ -691,6 +702,7 @@ fn resolve_arith_vars(
             let ctx_dummy = ExpCtx {
                 vars,
                 arrays: &HashMap::new(),
+                assoc_arrays: &HashMap::new(),
                 namerefs: &HashMap::new(),
                 positional,
                 last_status,

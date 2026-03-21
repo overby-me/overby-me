@@ -579,7 +579,6 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
         i += 1;
     }
 
-    let _ = flag_assoc; // stub
     let _ = flag_global; // stub
 
     // declare -F: list function names
@@ -682,6 +681,9 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
 
             if flag_nameref {
                 shell.namerefs.insert(name.to_string(), value.to_string());
+            } else if flag_assoc {
+                let map = parse_assoc_literal(value);
+                shell.assoc_arrays.insert(name.to_string(), map);
             } else if flag_array {
                 let arr = parse_array_literal(value);
                 shell.arrays.insert(name.to_string(), arr);
@@ -705,6 +707,11 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             let name = name_arg.as_str();
             if flag_nameref {
                 shell.namerefs.entry(name.to_string()).or_default();
+            } else if flag_assoc {
+                shell
+                    .assoc_arrays
+                    .entry(name.to_string())
+                    .or_default();
             } else if flag_array {
                 shell.arrays.entry(name.to_string()).or_default();
             } else {
@@ -722,6 +729,49 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
         }
     }
     0
+}
+
+/// Parse an associative array literal: `([key1]=val1 [key2]=val2 ...)`
+fn parse_assoc_literal(s: &str) -> HashMap<String, String> {
+    let trimmed = s.trim();
+    let inner = if trimmed.starts_with('(') && trimmed.ends_with(')') {
+        &trimmed[1..trimmed.len() - 1]
+    } else {
+        trimmed
+    };
+    let mut map = HashMap::new();
+    let mut rest = inner.trim();
+    while !rest.is_empty() {
+        if rest.starts_with('[') {
+            if let Some(close) = rest.find("]=") {
+                let key = &rest[1..close];
+                let after = &rest[close + 2..];
+                let (value, remaining) = if after.starts_with('"') {
+                    if let Some(end) = after[1..].find('"') {
+                        (&after[1..end + 1], after[end + 2..].trim_start())
+                    } else {
+                        (after, "")
+                    }
+                } else if after.starts_with('\'') {
+                    if let Some(end) = after[1..].find('\'') {
+                        (&after[1..end + 1], after[end + 2..].trim_start())
+                    } else {
+                        (after, "")
+                    }
+                } else {
+                    let end = after.find(char::is_whitespace).unwrap_or(after.len());
+                    (&after[..end], after[end..].trim_start())
+                };
+                map.insert(key.to_string(), value.to_string());
+                rest = remaining;
+                continue;
+            }
+        }
+        // Skip unknown content
+        let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+        rest = rest[end..].trim_start();
+    }
+    map
 }
 
 /// Parse a bash array literal like `(val1 val2 val3)` into a Vec.
