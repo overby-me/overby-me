@@ -1381,10 +1381,50 @@ fn builtin_exec(shell: &mut Shell, args: &[String]) -> i32 {
         return 0;
     }
 
-    let program = &args[0];
-    let cmd_args: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    // Parse exec flags: -a NAME (set argv[0]), -c (clear env), -l (login shell)
+    let mut argv0_override: Option<String> = None;
+    let mut clear_env = false;
+    let mut cmd_start = 0;
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-a" => {
+                i += 1;
+                if i < args.len() {
+                    argv0_override = Some(args[i].clone());
+                }
+            }
+            "-c" => clear_env = true,
+            "-l" => {
+                // Login shell — prefix argv[0] with -
+                // Will be applied below
+            }
+            _ => {
+                cmd_start = i;
+                break;
+            }
+        }
+        i += 1;
+        cmd_start = i;
+    }
+
+    if cmd_start >= args.len() {
+        return 0;
+    }
+
+    let program = &args[cmd_start];
+    let mut cmd_args: Vec<String> = args[cmd_start..].to_vec();
+    if let Some(ref a0) = argv0_override {
+        cmd_args[0] = a0.clone();
+    }
 
     // Set up environment
+    if clear_env {
+        for (key, _) in std::env::vars() {
+            unsafe { std::env::remove_var(&key) };
+        }
+    }
     for (key, value) in &shell.exports {
         unsafe { std::env::set_var(key, value) };
     }
@@ -1400,7 +1440,6 @@ fn builtin_exec(shell: &mut Shell, args: &[String]) -> i32 {
             .map(|a| CString::new(a.as_bytes()).unwrap())
             .collect();
 
-        // exec replaces the current process
         nix::unistd::execvp(&c_prog, &c_args).ok();
         eprintln!(
             "bash: exec: {}: {}",

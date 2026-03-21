@@ -581,9 +581,14 @@ impl Parser {
         {
             let op = text;
             self.advance();
-            let right = self
-                .take_word()
-                .ok_or_else(|| format!("expected operand after '{}'", op))?;
+            // For =~ (regex match), read the pattern as raw text since it can
+            // contain ( ) | and other chars that are normally special tokens.
+            let right = if op == "=~" {
+                self.read_cond_regex_pattern()?
+            } else {
+                self.take_word()
+                    .ok_or_else(|| format!("expected operand after '{}'", op))?
+            };
             return Ok(CondExpr::Binary(left, op, right));
         }
 
@@ -603,6 +608,46 @@ impl Parser {
 
         // Just a word
         Ok(CondExpr::Word(left))
+    }
+
+    /// Read a regex pattern for `[[ x =~ pattern ]]`.
+    /// Regex patterns can contain ( ) | which are normally special tokens,
+    /// so we read raw text from the lexer until we hit ]], &&, or ||.
+    fn read_cond_regex_pattern(&mut self) -> Result<Word, String> {
+        let mut text = String::new();
+        // Consume tokens and raw text until ]], &&, ||
+        loop {
+            if self.is_keyword("]]") || self.current == Token::Eof {
+                break;
+            }
+            if matches!(self.current, Token::AndIf | Token::OrIf) {
+                break;
+            }
+            match &self.current {
+                Token::Word(parts) => {
+                    text.push_str(&word_to_string(parts));
+                    self.advance();
+                }
+                Token::LParen => {
+                    text.push('(');
+                    self.advance();
+                }
+                Token::RParen => {
+                    text.push(')');
+                    self.advance();
+                }
+                Token::Pipe => {
+                    text.push('|');
+                    self.advance();
+                }
+                _ => break,
+            }
+        }
+        let trimmed = text.trim().to_string();
+        if trimmed.is_empty() {
+            return Err("expected regex pattern after =~".to_string());
+        }
+        Ok(vec![WordPart::Literal(trimmed)])
     }
 
     fn parse_compound_list(&mut self) -> Result<Program, String> {
