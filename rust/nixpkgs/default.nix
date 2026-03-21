@@ -800,6 +800,74 @@
         };
       };
 
+    # Test building GNU bc — a calculator, different autotools patterns.
+    # Exercises flex/yacc-generated parsers and ed-style line editing.
+    rust-nixpkgs-bc-test = {
+      lib,
+      stdenv,
+      fetchurl,
+      uutils-coreutils-noprefix,
+      rust-sed,
+      rust-grep,
+      rust-awk,
+      uutils-findutils,
+      rust-diffutils,
+      rust-file,
+      rust-tar,
+      rust-gzip,
+      rust-bzip2,
+      rust-xz,
+      rust-make,
+      rust-patch,
+      rust-texinfo,
+      rust-bison,
+      flex,
+      ed,
+    }: let
+      rustStdenv = import ./stdenv-test.nix {
+        inherit
+          stdenv
+          uutils-coreutils-noprefix
+          rust-sed
+          rust-grep
+          rust-awk
+          uutils-findutils
+          rust-diffutils
+          rust-file
+          rust-tar
+          rust-gzip
+          rust-bzip2
+          rust-xz
+          rust-make
+          rust-patch
+          ;
+      };
+    in
+      rustStdenv.mkDerivation {
+        pname = "rust-nixpkgs-bc-test";
+        version = "1.07.1";
+
+        nativeBuildInputs = [rust-texinfo rust-bison flex ed];
+
+        src = fetchurl {
+          url = "mirror://gnu/bc/bc-1.07.1.tar.gz";
+          sha256 = "sha256-Yq38qJsKHAFkws3KWcohDB1Ew//Eba+ZMc9JQmZMsCo=";
+        };
+
+        postPatch = ''
+          find . -name '*.in' -o -name configure -o -name aclocal.m4 \
+            -o -name config.h.in -o -name Makefile.in -o -name config.in \
+            | xargs touch
+        '';
+
+        doCheck = false;
+
+        meta = {
+          description = "GNU bc (calculator) built with the Rust stdenv";
+          license = lib.licenses.gpl3Plus;
+        };
+      };
+
     # Test building GNU findutils — autotools.
     rust-nixpkgs-gnufindutils-test = {
       lib,
