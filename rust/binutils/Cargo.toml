@@ -1,0 +1,17 @@
+[package]
+name = "rust-binutils"
+version = "0.1.0"
+edition = "2024"
+description = "GNU binutils-compatible binary utilities written in Rust"
+license = "MIT"
+
+[[bin]]
+name = "rust-binutils"
+path = "src/main.rs"
+
+[dependencies]
+object = { version = "0.36", features = ["read", "write", "elf"] }
+
+[profile.release]
+lto = true
+strip = true

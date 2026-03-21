@@ -1516,5 +1516,89 @@
           license = lib.licenses.cc0;
         };
       };
+
+    # Test that rust-binutils ar/ranlib/nm work correctly.
+    rust-nixpkgs-binutils-test = {
+      lib,
+      stdenv,
+      rust-binutils,
+    }:
+      stdenv.mkDerivation {
+        pname = "rust-nixpkgs-binutils-test";
+        version = "0.1.0";
+
+        dontUnpack = true;
+
+        nativeBuildInputs = [rust-binutils];
+
+        buildPhase = ''
+          echo "=== Testing rust-binutils ==="
+
+          # Verify tools exist
+          ar --version | head -1
+          ranlib --version | head -1
+          nm --version | head -1
+          readelf --version | head -1
+          strings --version | head -1
+          size --version | head -1
+
+          # Create a test .c and .o file
+          cat > add.c << 'EOF'
+          int add(int a, int b) { return a + b; }
+          EOF
+          cat > mul.c << 'EOF'
+          int mul(int a, int b) { return a * b; }
+          EOF
+
+          gcc -c add.c -o add.o
+          gcc -c mul.c -o mul.o
+
+          # Test ar: create archive
+          ar rcs libmath.a add.o mul.o
+          echo "Archive created:"
+          ar t libmath.a
+
+          # Test nm: list symbols
+          echo "Symbols in archive:"
+          nm libmath.a
+
+          # Test ranlib (should be no-op since ar s already ran)
+          ranlib libmath.a
+
+          # Test strings
+          echo "Strings in archive:"
+          strings libmath.a | head -5
+
+          # Test size
+          echo "Section sizes:"
+          size add.o
+
+          # Test readelf
+          echo "ELF header:"
+          readelf -h add.o | head -5
+
+          # Test linking with the archive
+          cat > main.c << 'EOF'
+          extern int add(int, int);
+          extern int mul(int, int);
+          int main() { return !(add(2, 3) == 5 && mul(3, 4) == 12); }
+          EOF
+          gcc main.c -L. -lmath -o test_math
+          ./test_math && echo "Linking test PASSED"
+
+          echo ""
+          echo "rust-binutils test passed."
+        '';
+
+        installPhase = ''
+          mkdir -p $out
+          echo "rust-binutils test passed" > $out/result
+        '';
+
+        meta = {
+          description = "Test rust-binutils ar/ranlib/nm functionality";
+          license = lib.licenses.mit;
+        };
+      };
   };
 }

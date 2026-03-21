@@ -23,6 +23,8 @@ ot = "ot"
 bre = "bre"
 # Rela = ELF relocation entry type (SHT_RELA, Elf64_Rela)
 rela = "rela"
+# Siz = ELF readelf output abbreviation (FileSiz, MemSiz)
+Siz = "Siz"
 
 
 [default]

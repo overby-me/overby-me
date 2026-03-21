@@ -224,6 +224,7 @@
 
         ./rust/awk
         ./rust/bash
+        ./rust/binutils
         ./rust/bison
         ./rust/bzip2
         ./rust/gcc

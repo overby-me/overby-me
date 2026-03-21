@@ -33,6 +33,7 @@
     patch = ./patch.nix;
     patchelf = ./patchelf.nix;
     strip = ./strip.nix;
+    binutils = ./binutils.nix;
     gcc = ./gcc.nix;
   };
 
