@@ -115,6 +115,9 @@ The nixpkgs standard environment (`stdenv`) is the foundation that builds every 
 | GNU tar | 1.35 | autotools | Built with rust-tar (self-referential!) |
 | GNU gzip | 1.14 | autotools | Built with rust-gzip (self-referential!) |
 | XZ Utils | 5.6.4 | autotools | Built with rust-xz (self-referential!) |
+| GNU readline | 8.2 | autotools | Line editing library (static) |
+| libffi | 3.4.6 | autotools | Foreign function interface |
+| PCRE2 | 10.44 | autotools | Regex library |
 
 ### Tasks
 
