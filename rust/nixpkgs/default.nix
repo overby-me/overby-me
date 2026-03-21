@@ -956,6 +956,201 @@
         };
       };
 
+    # Test building GNU tar — self-referential: builds tar using rust-tar!
+    rust-nixpkgs-gnutar-test = {
+      lib,
+      stdenv,
+      fetchurl,
+      uutils-coreutils-noprefix,
+      rust-sed,
+      rust-grep,
+      rust-awk,
+      uutils-findutils,
+      rust-diffutils,
+      rust-file,
+      rust-tar,
+      rust-gzip,
+      rust-bzip2,
+      rust-xz,
+      rust-make,
+      rust-patch,
+      rust-texinfo,
+    }: let
+      rustStdenv = import ./stdenv-test.nix {
+        inherit
+          stdenv
+          uutils-coreutils-noprefix
+          rust-sed
+          rust-grep
+          rust-awk
+          uutils-findutils
+          rust-diffutils
+          rust-file
+          rust-tar
+          rust-gzip
+          rust-bzip2
+          rust-xz
+          rust-make
+          rust-patch
+          ;
+      };
+    in
+      rustStdenv.mkDerivation {
+        pname = "rust-nixpkgs-gnutar-test";
+        version = "1.35";
+
+        nativeBuildInputs = [rust-texinfo];
+
+        src = fetchurl {
+          url = "mirror://gnu/tar/tar-1.35.tar.xz";
+          sha256 = "sha256-TWL/NzQux67XSFNTI5MMfPlKz3HDWRiCsmp+pQ8+3BY=";
+        };
+
+        postPatch = ''
+          find . -name '*.in' -o -name configure -o -name aclocal.m4 \
+            -o -name config.h.in -o -name Makefile.in -o -name config.in \
+            | xargs touch
+        '';
+
+        doCheck = false;
+
+        meta = {
+          description = "GNU tar built with the Rust stdenv (using rust-tar!)";
+          license = lib.licenses.gpl3Plus;
+        };
+      };
+
+    # Test building GNU gzip — self-referential: builds gzip using rust-gzip!
+    rust-nixpkgs-gnugzip-test = {
+      lib,
+      stdenv,
+      fetchurl,
+      uutils-coreutils-noprefix,
+      rust-sed,
+      rust-grep,
+      rust-awk,
+      uutils-findutils,
+      rust-diffutils,
+      rust-file,
+      rust-tar,
+      rust-gzip,
+      rust-bzip2,
+      rust-xz,
+      rust-make,
+      rust-patch,
+      rust-texinfo,
+    }: let
+      rustStdenv = import ./stdenv-test.nix {
+        inherit
+          stdenv
+          uutils-coreutils-noprefix
+          rust-sed
+          rust-grep
+          rust-awk
+          uutils-findutils
+          rust-diffutils
+          rust-file
+          rust-tar
+          rust-gzip
+          rust-bzip2
+          rust-xz
+          rust-make
+          rust-patch
+          ;
+      };
+    in
+      rustStdenv.mkDerivation {
+        pname = "rust-nixpkgs-gnugzip-test";
+        version = "1.14";
+
+        nativeBuildInputs = [rust-texinfo];
+
+        src = fetchurl {
+          url = "mirror://gnu/gzip/gzip-1.14.tar.xz";
+          sha256 = "sha256-Aae4gb0iC/32Ffl7hxj4C9/T9q3ThbmT3Pbv0U6MCsY=";
+        };
+
+        postPatch = ''
+          find . -name '*.in' -o -name configure -o -name aclocal.m4 \
+            -o -name config.h.in -o -name Makefile.in -o -name config.in \
+            | xargs touch
+          find . -name '*.info' -o -name '*.info-*' | xargs touch 2>/dev/null || true
+        '';
+
+        makeFlags = ["MAKEINFO=true"];
+
+        doCheck = false;
+
+        meta = {
+          description = "GNU gzip built with the Rust stdenv (using rust-gzip!)";
+          license = lib.licenses.gpl3Plus;
+        };
+      };
+
+    # Test building XZ Utils — self-referential: builds xz using rust-xz!
+    rust-nixpkgs-xz-test = {
+      lib,
+      stdenv,
+      fetchurl,
+      uutils-coreutils-noprefix,
+      rust-sed,
+      rust-grep,
+      rust-awk,
+      uutils-findutils,
+      rust-diffutils,
+      rust-file,
+      rust-tar,
+      rust-gzip,
+      rust-bzip2,
+      rust-xz,
+      rust-make,
+      rust-patch,
+      rust-texinfo,
+    }: let
+      rustStdenv = import ./stdenv-test.nix {
+        inherit
+          stdenv
+          uutils-coreutils-noprefix
+          rust-sed
+          rust-grep
+          rust-awk
+          uutils-findutils
+          rust-diffutils
+          rust-file
+          rust-tar
+          rust-gzip
+          rust-bzip2
+          rust-xz
+          rust-make
+          rust-patch
+          ;
+      };
+    in
+      rustStdenv.mkDerivation {
+        pname = "rust-nixpkgs-xz-test";
+        version = "5.6.4";
+
+        nativeBuildInputs = [rust-texinfo];
+
+        src = fetchurl {
+          url = "https://github.com/tukaani-project/xz/releases/download/v5.6.4/xz-5.6.4.tar.xz";
+          sha256 = "sha256-gpzP5512l0j3VX56RCmmTQaFjifh42LiXQGre5MdnJU=";
+        };
+
+        postPatch = ''
+          find . -name '*.in' -o -name configure -o -name aclocal.m4 \
+            -o -name config.h.in -o -name Makefile.in -o -name config.in \
+            | xargs touch
+        '';
+
+        doCheck = false;
+
+        meta = {
+          description = "XZ Utils built with the Rust stdenv (using rust-xz!)";
+          license = lib.licenses.gpl3Plus;
+        };
+      };
+
     # Test building GNU findutils — autotools.
     rust-nixpkgs-gnufindutils-test = {
       lib,
