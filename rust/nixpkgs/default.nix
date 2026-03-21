@@ -469,5 +469,201 @@
           license = lib.licenses.gpl3Plus;
         };
       };
+    # Test building GNU grep — autotools with regex library.
+    rust-nixpkgs-gnugrep-test = {
+      lib,
+      stdenv,
+      fetchurl,
+      uutils-coreutils-noprefix,
+      rust-sed,
+      rust-grep,
+      rust-awk,
+      uutils-findutils,
+      rust-diffutils,
+      rust-file,
+      rust-tar,
+      rust-gzip,
+      rust-bzip2,
+      rust-xz,
+      rust-make,
+      rust-patch,
+      rust-texinfo,
+    }: let
+      rustStdenv = import ./stdenv-test.nix {
+        inherit
+          stdenv
+          uutils-coreutils-noprefix
+          rust-sed
+          rust-grep
+          rust-awk
+          uutils-findutils
+          rust-diffutils
+          rust-file
+          rust-tar
+          rust-gzip
+          rust-bzip2
+          rust-xz
+          rust-make
+          rust-patch
+          ;
+      };
+    in
+      rustStdenv.mkDerivation {
+        pname = "rust-nixpkgs-gnugrep-test";
+        version = "3.11";
+
+        nativeBuildInputs = [rust-texinfo];
+
+        src = fetchurl {
+          url = "mirror://gnu/grep/grep-3.11.tar.xz";
+          sha256 = "sha256-HbKu3eidDepCsW2VKPiUyNFdrk4ZC1muzHj1qVEnbqs=";
+        };
+
+        postPatch = ''
+          find . -name '*.in' -o -name configure -o -name aclocal.m4 \
+            -o -name config.h.in -o -name Makefile.in -o -name config.in \
+            | xargs touch
+        '';
+
+        doCheck = false;
+
+        meta = {
+          description = "GNU grep built with the Rust stdenv";
+          license = lib.licenses.gpl3Plus;
+        };
+      };
+
+    # Test building GNU sed — autotools, exercises sed replacement compatibility.
+    rust-nixpkgs-gnused-test = {
+      lib,
+      stdenv,
+      fetchurl,
+      uutils-coreutils-noprefix,
+      rust-sed,
+      rust-grep,
+      rust-awk,
+      uutils-findutils,
+      rust-diffutils,
+      rust-file,
+      rust-tar,
+      rust-gzip,
+      rust-bzip2,
+      rust-xz,
+      rust-make,
+      rust-patch,
+      rust-texinfo,
+    }: let
+      rustStdenv = import ./stdenv-test.nix {
+        inherit
+          stdenv
+          uutils-coreutils-noprefix
+          rust-sed
+          rust-grep
+          rust-awk
+          uutils-findutils
+          rust-diffutils
+          rust-file
+          rust-tar
+          rust-gzip
+          rust-bzip2
+          rust-xz
+          rust-make
+          rust-patch
+          ;
+      };
+    in
+      rustStdenv.mkDerivation {
+        pname = "rust-nixpkgs-gnused-test";
+        version = "4.9";
+
+        nativeBuildInputs = [rust-texinfo];
+
+        src = fetchurl {
+          url = "mirror://gnu/sed/sed-4.9.tar.xz";
+          sha256 = "sha256-biJrcy4c1zlGStaGK9Ghq6QteYKSLaelNRljHSSXUYE=";
+        };
+
+        postPatch = ''
+          find . -name '*.in' -o -name configure -o -name aclocal.m4 \
+            -o -name config.h.in -o -name Makefile.in -o -name config.in \
+            | xargs touch
+        '';
+
+        doCheck = false;
+
+        meta = {
+          description = "GNU sed built with the Rust stdenv";
+          license = lib.licenses.gpl3Plus;
+        };
+      };
+
+    # Test building GNU diffutils — exercises diff/cmp/sdiff compatibility.
+    rust-nixpkgs-gnudiffutils-test = {
+      lib,
+      stdenv,
+      fetchurl,
+      uutils-coreutils-noprefix,
+      rust-sed,
+      rust-grep,
+      rust-awk,
+      uutils-findutils,
+      rust-diffutils,
+      rust-file,
+      rust-tar,
+      rust-gzip,
+      rust-bzip2,
+      rust-xz,
+      rust-make,
+      rust-patch,
+      rust-texinfo,
+      rust-help2man,
+    }: let
+      rustStdenv = import ./stdenv-test.nix {
+        inherit
+          stdenv
+          uutils-coreutils-noprefix
+          rust-sed
+          rust-grep
+          rust-awk
+          uutils-findutils
+          rust-diffutils
+          rust-file
+          rust-tar
+          rust-gzip
+          rust-bzip2
+          rust-xz
+          rust-make
+          rust-patch
+          ;
+      };
+    in
+      rustStdenv.mkDerivation {
+        pname = "rust-nixpkgs-gnudiffutils-test";
+        version = "3.10";
+
+        nativeBuildInputs = [rust-texinfo rust-help2man];
+
+        src = fetchurl {
+          url = "mirror://gnu/diffutils/diffutils-3.10.tar.xz";
+          sha256 = "sha256-kOXpPMck5OvhLt6A3xY0Bjx6hVaSaFkZv+YLVWyb0J4=";
+        };
+
+        postPatch = ''
+          find . -name '*.in' -o -name configure -o -name aclocal.m4 \
+            -o -name config.h.in -o -name Makefile.in -o -name config.in \
+            | xargs touch
+          # Touch man pages to prevent regeneration (avoids perl help2man)
+          find . -name '*.1' | xargs touch
+        '';
+
+        makeFlags = ["HELP2MAN=true"];
+
+        doCheck = false;
+
+        meta = {
+          description = "GNU diffutils built with the Rust stdenv";
+          license = lib.licenses.gpl3Plus;
+        };
+      };
   };
 }
