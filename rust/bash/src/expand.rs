@@ -295,6 +295,10 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                                 nix::unistd::close(r_fd).ok();
                             }
                         }
+                        // Export all shell variables so child process inherits them
+                        for (k, v) in ctx.vars {
+                            unsafe { std::env::set_var(k, v) };
+                        }
                         use std::ffi::CString;
                         let bash = CString::new("/proc/self/exe").unwrap();
                         let c_flag = CString::new("-c").unwrap();

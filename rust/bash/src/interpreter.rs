@@ -1358,11 +1358,21 @@ impl Shell {
                         saved.push((fd, saved_fd));
                     }
 
-                    let file = std::fs::File::create(&target_str)
-                        .map_err(|e| format!("{}: {}", target_str, e))?;
-                    let raw_fd = file.into_raw_fd();
-                    nix::unistd::dup2(raw_fd, fd).map_err(|e| e.to_string())?;
-                    nix::unistd::close(raw_fd).ok();
+                    // For /dev/fd/N targets (from process substitution), dup directly
+                    let raw_fd = if let Some(src_fd) = target_str
+                        .strip_prefix("/dev/fd/")
+                        .and_then(|s| s.parse::<i32>().ok())
+                    {
+                        src_fd
+                    } else {
+                        std::fs::File::create(&target_str)
+                            .map_err(|e| format!("{}: {}", target_str, e))?
+                            .into_raw_fd()
+                    };
+                    if raw_fd != fd {
+                        nix::unistd::dup2(raw_fd, fd).map_err(|e| e.to_string())?;
+                        nix::unistd::close(raw_fd).ok();
+                    }
                 }
                 RedirectKind::Append => {
                     let fd = self.resolve_redir_fd(&redir.fd, 1);
