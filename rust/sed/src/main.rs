@@ -25,25 +25,13 @@ enum AddressRange {
 // Sed commands
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct SubstFlags {
     global: bool,
     nth: Option<usize>, // replace Nth occurrence
     print: bool,
     write_file: Option<String>,
     case_insensitive: bool,
-}
-
-impl Default for SubstFlags {
-    fn default() -> Self {
-        SubstFlags {
-            global: false,
-            nth: None,
-            print: false,
-            write_file: None,
-            case_insensitive: false,
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -101,7 +89,7 @@ struct Options {
     extended: bool,           // -E / -r
     expressions: Vec<String>,
     files: Vec<String>,
-    posix: bool,     // --posix
+    posix: bool,      // --posix
     unbuffered: bool, // -u
     null_data: bool,  // -z
     separate: bool,   // -s
@@ -440,10 +428,7 @@ impl<'a> Parser<'a> {
                 Ok(Command::WriteFirstLine(file))
             }
             b'\n' | b';' => Ok(Command::Noop),
-            _ => Err(format!(
-                "unknown command: '{}'",
-                char::from(ch)
-            )),
+            _ => Err(format!("unknown command: '{}'", char::from(ch))),
         }
     }
 
@@ -605,11 +590,11 @@ impl<'a> Parser<'a> {
     }
 
     fn try_parse_exit_code(&mut self) -> Option<i32> {
-        if let Some(ch) = self.peek() {
-            if ch.is_ascii_digit() {
-                let n = self.parse_number().ok()?;
-                return Some(n as i32);
-            }
+        if let Some(ch) = self.peek()
+            && ch.is_ascii_digit()
+        {
+            let n = self.parse_number().ok()?;
+            return Some(n as i32);
         }
         None
     }
@@ -647,10 +632,7 @@ impl<'a> Parser<'a> {
                 }
                 Some(ch) => {
                     self.advance();
-                    if ch == b'\\' && self.peek() == Some(b'n') {
-                        self.advance();
-                        text.push('\n');
-                    } else if ch == b'\\' && self.peek() == Some(b'\n') {
+                    if ch == b'\\' && matches!(self.peek(), Some(b'n') | Some(b'\n')) {
                         self.advance();
                         text.push('\n');
                     } else {
@@ -677,11 +659,7 @@ impl<'a> Parser<'a> {
 
     fn try_parse_label(&mut self) -> Option<String> {
         let label = self.parse_label();
-        if label.is_empty() {
-            None
-        } else {
-            Some(label)
-        }
+        if label.is_empty() { None } else { Some(label) }
     }
 
     fn parse_filename(&mut self) -> String {
@@ -838,7 +816,7 @@ struct Engine {
     line_number: usize,
     last_line: bool,
     last_regex: Option<Regex>,
-    sub_happened: bool,     // for t/T commands
+    sub_happened: bool, // for t/T commands
     output: Vec<u8>,
     append_queue: Vec<String>,
     quit: bool,
@@ -901,8 +879,7 @@ impl Engine {
 
             // Flush append queue
             for text in self.append_queue.clone() {
-                self.output
-                    .extend_from_slice(text.as_bytes());
+                self.output.extend_from_slice(text.as_bytes());
                 if !text.ends_with('\n') {
                     self.output.push(b'\n');
                 }
@@ -915,8 +892,7 @@ impl Engine {
     }
 
     fn write_pattern_space(&mut self) {
-        self.output
-            .extend_from_slice(self.pattern_space.as_bytes());
+        self.output.extend_from_slice(self.pattern_space.as_bytes());
         self.output.push(b'\n');
     }
 
@@ -946,7 +922,7 @@ impl Engine {
                         continue;
                     }
                     Flow::Branch(label) => {
-                        if let Some(target) = self.find_label(commands, &label) {
+                        if let Some(target) = Self::find_label(commands, &label) {
                             i = target + 1;
                             continue;
                         }
@@ -978,9 +954,7 @@ impl Engine {
             AddressRange::Range(a, b) => {
                 // Simplified range: match if within range
                 // A proper implementation would track range state per command
-                self.addr_matches_single(a)
-                    || self.addr_matches_single(b)
-                    || self.in_range(a, b)
+                self.addr_matches_single(a) || self.addr_matches_single(b) || self.in_range(a, b)
             }
         }
     }
@@ -1000,9 +974,9 @@ impl Engine {
                 if *step == 0 {
                     self.line_number == *first
                 } else if *first == 0 {
-                    self.line_number % step == 0
+                    self.line_number.is_multiple_of(*step)
                 } else {
-                    self.line_number >= *first && (self.line_number - *first) % step == 0
+                    self.line_number >= *first && (self.line_number - *first).is_multiple_of(*step)
                 }
             }
         }
@@ -1014,16 +988,16 @@ impl Engine {
         false
     }
 
-    fn find_label(&self, commands: &[SedCommand], label: &str) -> Option<usize> {
+    fn find_label(commands: &[SedCommand], label: &str) -> Option<usize> {
         for (i, cmd) in commands.iter().enumerate() {
-            if let Command::Label(l) = &cmd.command {
-                if l == label {
-                    return Some(i);
-                }
+            if let Command::Label(l) = &cmd.command
+                && l == label
+            {
+                return Some(i);
             }
             if let Command::Block(ref inner) = cmd.command {
                 // Search inside blocks too
-                if let Some(_) = self.find_label(inner, label) {
+                if Self::find_label(inner, label).is_some() {
                     // Can't return inner index directly — labels in blocks
                     // are found but branching crosses block boundaries in GNU sed
                     return Some(i);
@@ -1265,10 +1239,10 @@ impl Engine {
             }
 
             Command::ReadLine(file) => {
-                if let Ok(content) = std::fs::read_to_string(file) {
-                    if let Some(line) = content.lines().next() {
-                        self.append_queue.push(line.to_string());
-                    }
+                if let Ok(content) = std::fs::read_to_string(file)
+                    && let Some(line) = content.lines().next()
+                {
+                    self.append_queue.push(line.to_string());
                 }
                 Flow::Continue
             }
@@ -1626,8 +1600,8 @@ fn parse_options() -> Options {
                 process::exit(2);
             }
             _ => {
-                // First non-option is script if no -e was given
-                if opts.expressions.is_empty() {
+                // First non-option is script if no -e was given AND not in-place mode
+                if opts.expressions.is_empty() && opts.in_place.is_none() {
                     opts.expressions.push(args[i].clone());
                 } else {
                     opts.files.push(args[i].clone());

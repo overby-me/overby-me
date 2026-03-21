@@ -18,7 +18,7 @@ tree:
 test-all:
     #!/usr/bin/env bash
     set -e
-    tests=(rust-nixpkgs-test rust-nixpkgs-stdenv-test rust-nixpkgs-hello-test rust-nixpkgs-zlib-test rust-nixpkgs-gnupatch-test rust-nixpkgs-coreutils-test rust-nixpkgs-gnugrep-test rust-nixpkgs-gnused-test rust-nixpkgs-gnudiffutils-test)
+    tests=(rust-nixpkgs-test rust-nixpkgs-stdenv-test rust-nixpkgs-hello-test rust-nixpkgs-zlib-test rust-nixpkgs-gnupatch-test rust-nixpkgs-coreutils-test rust-nixpkgs-gnugrep-test rust-nixpkgs-gnused-test rust-nixpkgs-gnudiffutils-test rust-nixpkgs-gnumake-test rust-nixpkgs-gnuawk-test rust-nixpkgs-gnufindutils-test)
     for test in "${tests[@]}"; do
         echo -n "$test: "
         if nix build ".#$test" --no-link 2>/dev/null; then

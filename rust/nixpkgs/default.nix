@@ -665,5 +665,197 @@
           license = lib.licenses.gpl3Plus;
         };
       };
+
+    # Test building GNU make — builds make with rust-make (self-referential!).
+    rust-nixpkgs-gnumake-test = {
+      lib,
+      stdenv,
+      fetchurl,
+      uutils-coreutils-noprefix,
+      rust-sed,
+      rust-grep,
+      rust-awk,
+      uutils-findutils,
+      rust-diffutils,
+      rust-file,
+      rust-tar,
+      rust-gzip,
+      rust-bzip2,
+      rust-xz,
+      rust-make,
+      rust-patch,
+      rust-texinfo,
+    }: let
+      rustStdenv = import ./stdenv-test.nix {
+        inherit
+          stdenv
+          uutils-coreutils-noprefix
+          rust-sed
+          rust-grep
+          rust-awk
+          uutils-findutils
+          rust-diffutils
+          rust-file
+          rust-tar
+          rust-gzip
+          rust-bzip2
+          rust-xz
+          rust-make
+          rust-patch
+          ;
+      };
+    in
+      rustStdenv.mkDerivation {
+        pname = "rust-nixpkgs-gnumake-test";
+        version = "4.4.1";
+
+        nativeBuildInputs = [rust-texinfo];
+
+        src = fetchurl {
+          url = "mirror://gnu/make/make-4.4.1.tar.gz";
+          sha256 = "sha256-3Rb7HWe/q3mnL16DkHNcSePo5wtJRaFasfgd23hlj7M=";
+        };
+
+        postPatch = ''
+          find . -name '*.in' -o -name configure -o -name aclocal.m4 \
+            -o -name config.h.in -o -name Makefile.in -o -name config.in \
+            | xargs touch
+        '';
+
+        doCheck = false;
+
+        meta = {
+          description = "GNU make built with the Rust stdenv (using rust-make!)";
+          license = lib.licenses.gpl3Plus;
+        };
+      };
+
+    # Test building GNU gawk — autotools with complex configure.
+    rust-nixpkgs-gnuawk-test = {
+      lib,
+      stdenv,
+      fetchurl,
+      uutils-coreutils-noprefix,
+      rust-sed,
+      rust-grep,
+      rust-awk,
+      uutils-findutils,
+      rust-diffutils,
+      rust-file,
+      rust-tar,
+      rust-gzip,
+      rust-bzip2,
+      rust-xz,
+      rust-make,
+      rust-patch,
+      rust-texinfo,
+    }: let
+      rustStdenv = import ./stdenv-test.nix {
+        inherit
+          stdenv
+          uutils-coreutils-noprefix
+          rust-sed
+          rust-grep
+          rust-awk
+          uutils-findutils
+          rust-diffutils
+          rust-file
+          rust-tar
+          rust-gzip
+          rust-bzip2
+          rust-xz
+          rust-make
+          rust-patch
+          ;
+      };
+    in
+      rustStdenv.mkDerivation {
+        pname = "rust-nixpkgs-gnuawk-test";
+        version = "5.3.1";
+
+        nativeBuildInputs = [rust-texinfo];
+
+        src = fetchurl {
+          url = "mirror://gnu/gawk/gawk-5.3.1.tar.xz";
+          sha256 = "sha256-aU23ZIEqYjZCPU/0DOt7bExEEwG3KtUCu1wn4AzVb3g=";
+        };
+
+        postPatch = ''
+          find . -name '*.in' -o -name configure -o -name aclocal.m4 \
+            -o -name config.h.in -o -name Makefile.in -o -name config.in \
+            | xargs touch
+        '';
+
+        doCheck = false;
+
+        meta = {
+          description = "GNU awk built with the Rust stdenv";
+          license = lib.licenses.gpl3Plus;
+        };
+      };
+
+    # Test building GNU findutils — autotools.
+    rust-nixpkgs-gnufindutils-test = {
+      lib,
+      stdenv,
+      fetchurl,
+      uutils-coreutils-noprefix,
+      rust-sed,
+      rust-grep,
+      rust-awk,
+      uutils-findutils,
+      rust-diffutils,
+      rust-file,
+      rust-tar,
+      rust-gzip,
+      rust-bzip2,
+      rust-xz,
+      rust-make,
+      rust-patch,
+      rust-texinfo,
+    }: let
+      rustStdenv = import ./stdenv-test.nix {
+        inherit
+          stdenv
+          uutils-coreutils-noprefix
+          rust-sed
+          rust-grep
+          rust-awk
+          uutils-findutils
+          rust-diffutils
+          rust-file
+          rust-tar
+          rust-gzip
+          rust-bzip2
+          rust-xz
+          rust-make
+          rust-patch
+          ;
+      };
+    in
+      rustStdenv.mkDerivation {
+        pname = "rust-nixpkgs-gnufindutils-test";
+        version = "4.10.0";
+
+        nativeBuildInputs = [rust-texinfo];
+
+        src = fetchurl {
+          url = "mirror://gnu/findutils/findutils-4.10.0.tar.xz";
+          sha256 = "sha256-E4fgtn/yR9Kr3pmPkN+/cMFJE5Glnd/suK5ph4nwpPU=";
+        };
+
+        postPatch = ''
+          find . -name '*.in' -o -name configure -o -name aclocal.m4 \
+            -o -name config.h.in -o -name Makefile.in -o -name config.in \
+            | xargs touch
+        '';
+
+        doCheck = false;
+
+        meta = {
+          description = "GNU findutils built with the Rust stdenv";
+          license = lib.licenses.gpl3Plus;
+        };
+      };
   };
 }
