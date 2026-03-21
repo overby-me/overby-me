@@ -492,11 +492,12 @@ fn call_function(
                 auto_vars,
             );
             let shell = engine.lookup_var_or("SHELL", "/bin/sh");
-            match std::process::Command::new(&shell)
-                .arg("-c")
-                .arg(&cmd)
-                .output()
-            {
+            let shell_flags = engine.lookup_var_or(".SHELLFLAGS", "-c");
+            let mut shell_cmd = std::process::Command::new(&shell);
+            for flag in shell_flags.split_whitespace() {
+                shell_cmd.arg(flag);
+            }
+            match shell_cmd.arg(&cmd).output() {
                 Ok(output) => {
                     let s = String::from_utf8_lossy(&output.stdout)
                         .replace('\n', " ")

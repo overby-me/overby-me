@@ -437,8 +437,12 @@ impl Engine {
             AssignOp::Shell => {
                 let cmd = expand::expand(&assign.value, self);
                 let shell = self.lookup_var_or("SHELL", "/bin/sh");
-                let output = std::process::Command::new(&shell)
-                    .arg("-c")
+                let shell_flags = self.lookup_var_or(".SHELLFLAGS", "-c");
+                let mut shell_cmd = std::process::Command::new(&shell);
+                for flag in shell_flags.split_whitespace() {
+                    shell_cmd.arg(flag);
+                }
+                let output = shell_cmd
                     .arg(&cmd)
                     .output()
                     .map(|o| {
@@ -934,7 +938,12 @@ impl Engine {
 
             // Export variables
             let mut cmd = std::process::Command::new(&shell);
-            cmd.arg(&shell_flags).arg(&expanded);
+            // Split .SHELLFLAGS on whitespace like GNU make does,
+            // so that e.g. "-e -c" becomes two separate arguments.
+            for flag in shell_flags.split_whitespace() {
+                cmd.arg(flag);
+            }
+            cmd.arg(&expanded);
 
             if *self.export_all.borrow() {
                 for (name, var) in self.vars.borrow().iter() {
