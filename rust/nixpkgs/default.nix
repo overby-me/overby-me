@@ -1454,6 +1454,210 @@
         };
       };
 
+    # Test building GNU m4 — macro processor, used by autoconf. Autotools build.
+    rust-nixpkgs-m4-test = {
+      lib,
+      stdenv,
+      fetchurl,
+      uutils-coreutils-noprefix,
+      rust-sed,
+      rust-grep,
+      rust-awk,
+      uutils-findutils,
+      rust-diffutils,
+      rust-file,
+      rust-tar,
+      rust-gzip,
+      rust-bzip2,
+      rust-xz,
+      rust-make,
+      rust-patch,
+      rust-texinfo,
+    }: let
+      rustStdenv = import ./stdenv-test.nix {
+        inherit
+          stdenv
+          uutils-coreutils-noprefix
+          rust-sed
+          rust-grep
+          rust-awk
+          uutils-findutils
+          rust-diffutils
+          rust-file
+          rust-tar
+          rust-gzip
+          rust-bzip2
+          rust-xz
+          rust-make
+          rust-patch
+          ;
+      };
+    in
+      rustStdenv.mkDerivation {
+        pname = "rust-nixpkgs-m4-test";
+        version = "1.4.19";
+
+        nativeBuildInputs = [rust-texinfo];
+
+        src = fetchurl {
+          url = "mirror://gnu/m4/m4-1.4.19.tar.xz";
+          sha256 = "sha256-Y67eXG0zttmxNRHNC+LKwEby5w/QoHqpVzoEqCeDr5Y=";
+        };
+
+        postPatch = ''
+          find . -name '*.in' -o -name configure -o -name aclocal.m4 \
+            -o -name config.h.in -o -name Makefile.in -o -name config.in \
+            | xargs touch
+          # Disable po (translations) to avoid needing gettext/msgfmt
+          sed 's/^SUBDIRS = \(.*\) po \(.*\)/SUBDIRS = \1 \2/' Makefile.in > Makefile.in.tmp
+          mv Makefile.in.tmp Makefile.in
+        '';
+
+        doCheck = false;
+
+        meta = {
+          description = "GNU m4 built with the Rust stdenv";
+          license = lib.licenses.gpl3Plus;
+        };
+      };
+
+    # Test building GNU libtool — shared library support. Autotools build.
+    rust-nixpkgs-libtool-test = {
+      lib,
+      stdenv,
+      fetchurl,
+      m4,
+      uutils-coreutils-noprefix,
+      rust-sed,
+      rust-grep,
+      rust-awk,
+      uutils-findutils,
+      rust-diffutils,
+      rust-file,
+      rust-tar,
+      rust-gzip,
+      rust-bzip2,
+      rust-xz,
+      rust-make,
+      rust-patch,
+      rust-texinfo,
+    }: let
+      rustStdenv = import ./stdenv-test.nix {
+        inherit
+          stdenv
+          uutils-coreutils-noprefix
+          rust-sed
+          rust-grep
+          rust-awk
+          uutils-findutils
+          rust-diffutils
+          rust-file
+          rust-tar
+          rust-gzip
+          rust-bzip2
+          rust-xz
+          rust-make
+          rust-patch
+          ;
+      };
+    in
+      rustStdenv.mkDerivation {
+        pname = "rust-nixpkgs-libtool-test";
+        version = "2.5.4";
+
+        nativeBuildInputs = [rust-texinfo m4];
+
+        src = fetchurl {
+          url = "mirror://gnu/libtool/libtool-2.5.4.tar.xz";
+          sha256 = "sha256-+B9YYGZrC8fYS63e+mDRy5+m/OsjmMw7rKavqmAmZnU=";
+        };
+
+        postPatch = ''
+          find . -name '*.in' -o -name configure -o -name aclocal.m4 \
+            -o -name config.h.in -o -name Makefile.in -o -name config.in \
+            | xargs touch
+        '';
+
+        doCheck = false;
+
+        meta = {
+          description = "GNU libtool built with the Rust stdenv";
+          license = lib.licenses.gpl3Plus;
+        };
+      };
+
+    # Test building bzip2 — compression library. Simple Makefile build (not autotools).
+    rust-nixpkgs-bzip2-test = {
+      lib,
+      stdenv,
+      fetchurl,
+      uutils-coreutils-noprefix,
+      rust-sed,
+      rust-grep,
+      rust-awk,
+      uutils-findutils,
+      rust-diffutils,
+      rust-file,
+      rust-tar,
+      rust-gzip,
+      rust-bzip2,
+      rust-xz,
+      rust-make,
+      rust-patch,
+    }: let
+      rustStdenv = import ./stdenv-test.nix {
+        inherit
+          stdenv
+          uutils-coreutils-noprefix
+          rust-sed
+          rust-grep
+          rust-awk
+          uutils-findutils
+          rust-diffutils
+          rust-file
+          rust-tar
+          rust-gzip
+          rust-bzip2
+          rust-xz
+          rust-make
+          rust-patch
+          ;
+      };
+    in
+      rustStdenv.mkDerivation {
+        pname = "rust-nixpkgs-bzip2-test";
+        version = "1.0.8";
+
+        src = fetchurl {
+          url = "https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz";
+          sha256 = "sha256-q1oDF27hBtPw+pDjgdpHjdrkBZGBU8yiSOaCzQxKImk=";
+        };
+
+        # bzip2 uses a plain Makefile, not autotools
+        dontConfigure = true;
+
+        makeFlags = [
+          "CC=${stdenv.cc.targetPrefix}cc"
+        ];
+
+        installPhase = ''
+          mkdir -p $out/bin $out/lib $out/include $out/man/man1
+          cp -v bzip2 bzip2recover $out/bin/
+          ln -s bzip2 $out/bin/bunzip2
+          ln -s bzip2 $out/bin/bzcat
+          cp -v libbz2.a $out/lib/
+          cp -v bzlib.h $out/include/
+          cp -v bzip2.1 $out/man/man1/
+        '';
+
+        doCheck = false;
+
+        meta = {
+          description = "bzip2 built with the Rust stdenv";
+          license = lib.licenses.bsdOriginal;
+        };
+      };
+
     # Test that rust-gcc can compile a simple C program via the nixpkgs wrapper.
     rust-nixpkgs-gcc-test = {
       lib,
