@@ -26,9 +26,13 @@
         ln -s $out/bin/gcc $out/bin/cc
         ln -s $out/bin/gcc $out/bin/x86_64-unknown-linux-gnu-gcc
 
-        # Install compiler built-in headers
-        mkdir -p $out/lib/gcc/include
-        cp -r ${./include}/* $out/lib/gcc/include/
+        # Install compiler built-in headers in GCC-standard location
+        # The cc-wrapper uses -B and -isystem to find these
+        mkdir -p $out/lib/gcc/x86_64-unknown-linux-gnu/14.2.0/include
+        cp -r ${./include}/* $out/lib/gcc/x86_64-unknown-linux-gnu/14.2.0/include/
+
+        # Also create a lib output for the cc-wrapper to reference
+        mkdir -p $out/lib
       '';
 
       meta = {

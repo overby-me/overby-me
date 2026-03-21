@@ -33,6 +33,7 @@
     patch = ./patch.nix;
     patchelf = ./patchelf.nix;
     strip = ./strip.nix;
+    gcc = ./gcc.nix;
   };
 
   importComponent = _name: path:
