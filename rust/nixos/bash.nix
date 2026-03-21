@@ -17,10 +17,10 @@
     '';
 in {
   system.replaceDependencies.replacements = [
-    {
-      original = pkgs.bashNonInteractive;
-      replacement = mkRustBash "bash-${rustBash.version}";
-    }
+    # Only replace interactive bash for now.
+    # bashNonInteractive is used by stage-1 init and NixOS activation scripts
+    # which exercise bash edge cases (eval with device numbers, complex here-docs)
+    # that rust-bash doesn't fully handle yet.
     {
       original = pkgs.bashInteractive;
       replacement = mkRustBash "bash-interactive-${rustBash.version}";
