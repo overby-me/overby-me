@@ -1010,7 +1010,10 @@
           find . -name '*.in' -o -name configure -o -name aclocal.m4 \
             -o -name config.h.in -o -name Makefile.in -o -name config.in \
             | xargs touch
+          find . -name '*.info' -o -name '*.info-*' | xargs touch 2>/dev/null || true
         '';
+
+        makeFlags = ["MAKEINFO=true"];
 
         doCheck = false;
 
