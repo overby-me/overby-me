@@ -178,7 +178,12 @@ impl Shell {
     pub fn run_string(&mut self, input: &str) -> i32 {
         let mut parser = Parser::new(input);
         match parser.parse_program() {
-            Ok(program) => self.run_program(&program),
+            Ok(program) => {
+                if self.opt_noexec {
+                    return 0;
+                }
+                self.run_program(&program)
+            }
             Err(e) => {
                 eprintln!("bash: syntax error: {}", e);
                 2

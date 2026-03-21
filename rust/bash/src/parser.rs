@@ -1059,7 +1059,7 @@ fn is_reserved_word(s: &str) -> bool {
 fn is_compound_end(s: &str) -> bool {
     matches!(
         s,
-        "}" | "fi" | "done" | "esac" | "then" | "else" | "elif" | "do" | ")" | "]]"
+        "}" | "fi" | "done" | "esac" | "then" | "else" | "elif" | "do" | "]]"
     )
 }
 

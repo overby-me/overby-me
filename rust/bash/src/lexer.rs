@@ -70,12 +70,13 @@ impl Lexer {
         self.input.get(self.pos + offset).copied()
     }
 
-    pub fn save_position(&self) -> usize {
-        self.pos
+    pub fn save_position(&self) -> (usize, usize) {
+        (self.pos, self.pending_heredocs.len())
     }
 
-    pub fn restore_position(&mut self, pos: usize) {
-        self.pos = pos;
+    pub fn restore_position(&mut self, saved: (usize, usize)) {
+        self.pos = saved.0;
+        self.pending_heredocs.truncate(saved.1);
     }
 
     fn skip_whitespace(&mut self) {
