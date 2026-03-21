@@ -169,6 +169,7 @@ impl Parser {
         // Check for function definition: name () compound_command
         if let Some(name) = self.word_text()
             && !is_reserved_word(&name)
+            && !name.contains('=')
         {
             // Look ahead for () - save full state for backtrack
             let saved_lexer_pos = self.lexer.save_position();
