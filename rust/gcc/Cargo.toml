@@ -1,0 +1,35 @@
+[package]
+name = "rust-gcc"
+version = "0.1.0"
+edition = "2021"
+description = "A GCC-compatible C compiler written in Rust"
+license = "CC0-1.0"
+autobins = false
+
+[[bin]]
+name = "gcc"
+path = "src/main.rs"
+
+[[bin]]
+name = "gcc-x86"
+path = "src/bin/gcc_x86.rs"
+
+[[bin]]
+name = "gcc-arm"
+path = "src/bin/gcc_arm.rs"
+
+[[bin]]
+name = "gcc-riscv"
+path = "src/bin/gcc_riscv.rs"
+
+[[bin]]
+name = "gcc-i686"
+path = "src/bin/gcc_i686.rs"
+
+[features]
+# Allow system GCC as a linker fallback.
+gcc_linker = []
+# Allow system GCC as an assembler fallback.
+gcc_assembler = []
+# Allow system GCC passthrough for -m16 mode (16-bit real-mode boot code).
+gcc_m16 = []

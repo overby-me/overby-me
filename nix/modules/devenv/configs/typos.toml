@@ -47,5 +47,8 @@ extend-exclude = [
   "web/wiki/core/i18n/locales/da/translation.json",
   "web/wiki-dioxus/src/i18n.rs",
   "nix/config/secrets/*.age",
+  # Upstream compiler code with assembly mnemonics and domain-specific abbreviations
+  "rust/gcc/src/",
+  "rust/gcc/include/",
 ]
 ignore-hidden = false

@@ -226,6 +226,7 @@
         ./rust/bash
         ./rust/bison
         ./rust/bzip2
+        ./rust/gcc
         ./rust/cachix
         ./rust/direnv
         ./rust/grep
