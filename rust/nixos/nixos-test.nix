@@ -27,6 +27,8 @@ in
         done
       '';
     in {
+      imports = [./bash.nix];
+
       system.stateVersion = "25.11";
 
       # Use rust-systemd as the systemd package
@@ -88,7 +90,7 @@ in
     };
 
     testScript = ''
-      machine.wait_for_unit("multi-user.target")
+      machine.wait_for_unit("multi-user.target", timeout=120)
 
       # Test journald
       machine.wait_for_unit("systemd-journald.service")
