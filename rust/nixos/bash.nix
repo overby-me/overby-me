@@ -1,92 +1,29 @@
-{pkgs, ...}: {
-  system.replaceDependencies.replacements = let
-    mkBrushBash = name:
-      pkgs.runCommand name {nativeBuildInputs = [pkgs.stdenv.cc];} ''
-        mkdir -p $out/bin
-        cat > wrapper.c << 'EOF'
-        #include <signal.h>
-        #include <stdlib.h>
-        #include <string.h>
-        #include <unistd.h>
+# bash → rust-bash replacement
+#
+# rust-bash is a Bash-compatible shell written in Rust that directly handles
+# standard bash flags (-e, -u, -c, -o pipefail, etc.), [[ ]], arrays, (( )),
+# nameref, process substitution, and can source nixpkgs setup.sh.
+# No C wrapper needed — it's a drop-in replacement.
+{pkgs, ...}: let
+  # rust-bash already provides /bin/bash and /bin/sh
+  rustBash = pkgs.rust-bash;
 
-        int main(int argc, char *argv[]) {
-          int login = argv[0][0] == '-';
-          /* Ignore SIGTTOU so that tcsetpgrp() succeeds even from a
-             background process group (required for brush's
-             TerminalControl::acquire() sequence).
-             Ignore SIGTSTP so Ctrl-Z doesn't stop the shell itself.
-             Do NOT ignore SIGTTIN: if the shell somehow remains in a
-             background group, ignoring SIGTTIN causes read() on the
-             terminal to return EIO instead of stopping the process,
-             which makes brush exit with "input error occurred". */
-          signal(SIGTTOU, SIG_IGN);
-          signal(SIGTSTP, SIG_IGN);
-          char **new_argv = malloc(sizeof(char *) * (argc * 3 + 7));
-          int n = 0;
-          int is_interactive = 1;
-          new_argv[n++] = login ? "-brush" : "brush";
-          if (login) new_argv[n++] = "--login";
-          /* Force the minimal input backend to avoid crossterm hanging
-             on serial consoles (ttyS0) where escape-sequence-based
-             terminal probing never gets a response. The minimal backend
-             uses plain stdin read_line which works everywhere. */
-          new_argv[n++] = "--input-backend";
-          new_argv[n++] = "minimal";
-          int done = 0;
-          for (int i = 1; i < argc && !done; i++) {
-            if (argv[i][0] == '-' && argv[i][1] && argv[i][1] != '-') {
-              for (int j = 1; argv[i][j] && !done; j++) {
-                switch (argv[i][j]) {
-                  case 'e': new_argv[n++] = "-o"; new_argv[n++] = "errexit"; break;
-                  case 'u': new_argv[n++] = "-o"; new_argv[n++] = "nounset"; break;
-                  case 'a': new_argv[n++] = "-o"; new_argv[n++] = "allexport"; break;
-                  case 'b': new_argv[n++] = "-o"; new_argv[n++] = "notify"; break;
-                  case 'f': new_argv[n++] = "-o"; new_argv[n++] = "noglob"; break;
-                  case 'h': new_argv[n++] = "-o"; new_argv[n++] = "hashall"; break;
-                  case 'm': new_argv[n++] = "-o"; new_argv[n++] = "monitor"; break;
-                  case 'p': new_argv[n++] = "-o"; new_argv[n++] = "privileged"; break;
-                  case 'c': case 'o': case 'O':
-                    { char f[3] = {'-', argv[i][j], 0}; new_argv[n++] = strdup(f); }
-                    for (++i; i < argc; i++) new_argv[n++] = argv[i];
-                    is_interactive = 0;
-                    done = 1; break;
-                  default: { char f[3] = {'-', argv[i][j], 0}; new_argv[n++] = strdup(f); break; }
-                }
-              }
-            } else {
-              new_argv[n++] = argv[i];
-              if (argv[i][0] != '-') { is_interactive = 0; for (++i; i < argc; i++) new_argv[n++] = argv[i]; done = 1; }
-            }
-          }
-          new_argv[n] = NULL;
-          /* Set up the process group and foreground ownership here in
-             the wrapper, so brush's TerminalControl::acquire() becomes
-             a no-op. This avoids brush's silent tcsetpgrp() failure
-             (it ignores ENOTTY) that would leave the shell in a
-             background group on serial consoles.
-             Only do this for interactive invocations — doing it for
-             non-interactive scripts (e.g. the NixOS stage-2 init
-             script) changes the foreground group and leaves the parent
-             process in a background group, which can block the boot. */
-          if (is_interactive && isatty(STDIN_FILENO)) {
-            setpgid(0, 0);
-            tcsetpgrp(STDIN_FILENO, getpgrp());
-          }
-          execv("${pkgs.brush}/bin/brush", new_argv);
-          return 1;
-        }
-        EOF
-        cc -O2 -o $out/bin/bash wrapper.c
-        ln -s bash $out/bin/sh
-      '';
-  in [
+  # Create replacement packages with matching names for closure rewriting
+  mkRustBash = name:
+    pkgs.runCommand name {} ''
+      mkdir -p $out/bin
+      ln -s ${rustBash}/bin/bash $out/bin/bash
+      ln -s ${rustBash}/bin/sh $out/bin/sh
+    '';
+in {
+  system.replaceDependencies.replacements = [
     {
       original = pkgs.bashNonInteractive;
-      replacement = mkBrushBash "bash-0.4.0";
+      replacement = mkRustBash "bash-${rustBash.version}";
     }
     {
       original = pkgs.bashInteractive;
-      replacement = mkBrushBash "bash-interactive-0.4.0";
+      replacement = mkRustBash "bash-interactive-${rustBash.version}";
     }
   ];
 }

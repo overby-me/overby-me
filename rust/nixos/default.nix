@@ -16,7 +16,7 @@
     modules = [
       ./base.nix
       ./systemd.nix
-      # ./bash.nix
+      ./bash.nix
       ./sudo.nix
       # ./coreutils.nix
     ];
