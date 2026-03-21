@@ -951,7 +951,7 @@ impl Parser {
         }
 
         // Check for numeric fd — peek ahead to see if next token is a redirect
-        if s.len() == 1 && s.chars().next().unwrap().is_ascii_digit() {
+        if !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()) {
             let saved_pos = self.lexer.save_position();
             let saved_tok = self.current.clone();
             self.advance();

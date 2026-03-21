@@ -249,7 +249,11 @@ fn builtin_printf(_shell: &mut Shell, args: &[String]) -> i32 {
                 Some('s') => {
                     let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("");
                     if w > 0 {
-                        if left { print!("{:<w$}", arg); } else { print!("{:>w$}", arg); }
+                        if left {
+                            print!("{:<w$}", arg);
+                        } else {
+                            print!("{:>w$}", arg);
+                        }
                     } else {
                         print!("{}", arg);
                     }
@@ -259,9 +263,13 @@ fn builtin_printf(_shell: &mut Shell, args: &[String]) -> i32 {
                     let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
                     let n: i64 = arg.parse().unwrap_or(0);
                     if w > 0 {
-                        if left { print!("{:<w$}", n); }
-                        else if zero_pad { print!("{:0>w$}", n); }
-                        else { print!("{:>w$}", n); }
+                        if left {
+                            print!("{:<w$}", n);
+                        } else if zero_pad {
+                            print!("{:0>w$}", n);
+                        } else {
+                            print!("{:>w$}", n);
+                        }
                     } else {
                         print!("{}", n);
                     }
@@ -1160,99 +1168,103 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
 
     let mut line = String::new();
 
+    // Determine which fd to read from
+    let read_fd = fd.unwrap_or(0); // 0 = stdin
+
     // Read input based on options
     if let Some(n) = nchars {
         // Read exactly n characters
-        use std::io::Read as _;
-        let mut buf = vec![0u8; n];
-        let reader: Box<dyn std::io::Read> = if let Some(fd_num) = fd {
-            #[cfg(unix)]
-            {
-                use std::os::unix::io::FromRawFd;
-                Box::new(unsafe { std::fs::File::from_raw_fd(fd_num) })
-            }
-            #[cfg(not(unix))]
-            {
-                let _ = fd_num;
-                Box::new(std::io::stdin())
-            }
-        } else {
-            Box::new(std::io::stdin())
-        };
-        let mut reader = reader;
-        match reader.read(&mut buf) {
-            Ok(0) => return 1,
-            Ok(bytes_read) => {
-                line = String::from_utf8_lossy(&buf[..bytes_read]).to_string();
-            }
-            Err(_) => return 1,
-        }
-        // Prevent the File from being dropped and closing the fd if it came from -u
-        if fd.is_some() {
-            #[cfg(unix)]
-            {
-                // Leak the reader to prevent closing the fd
-                let _ = Box::into_raw(Box::new(reader));
-            }
-        }
-    } else if let Some(delim_char) = delim {
-        // Read until delimiter
-        use std::io::Read as _;
-        let reader: Box<dyn std::io::Read> = if let Some(fd_num) = fd {
-            #[cfg(unix)]
-            {
-                use std::os::unix::io::FromRawFd;
-                Box::new(unsafe { std::fs::File::from_raw_fd(fd_num) })
-            }
-            #[cfg(not(unix))]
-            {
-                let _ = fd_num;
-                Box::new(std::io::stdin())
-            }
-        } else {
-            Box::new(std::io::stdin())
-        };
-        let mut reader = reader;
-        let mut buf = [0u8; 1];
-        loop {
-            match reader.read(&mut buf) {
-                Ok(0) => break,
-                Ok(_) => {
-                    let ch = buf[0] as char;
-                    if ch == delim_char {
-                        break;
-                    }
-                    line.push(ch);
-                }
-                Err(_) => break,
-            }
-        }
-        if fd.is_some() {
-            #[cfg(unix)]
-            {
-                let _ = Box::into_raw(Box::new(reader));
-            }
-        }
-    } else if let Some(fd_num) = fd {
-        // Read a line from a specific file descriptor
         #[cfg(unix)]
         {
-            use std::io::BufRead;
-            use std::os::unix::io::FromRawFd;
-            let file = unsafe { std::fs::File::from_raw_fd(fd_num) };
-            let mut reader = std::io::BufReader::new(file);
-            match reader.read_line(&mut line) {
+            let mut buf = vec![0u8; n];
+            match nix::unistd::read(read_fd, &mut buf) {
                 Ok(0) => return 1,
+                Ok(bytes_read) => {
+                    line = String::from_utf8_lossy(&buf[..bytes_read]).to_string();
+                }
                 Err(_) => return 1,
-                _ => {}
             }
-            // Prevent closing the fd
-            let inner = reader.into_inner();
-            std::mem::forget(inner);
         }
         #[cfg(not(unix))]
         {
-            let _ = fd_num;
+            use std::io::Read as _;
+            let mut buf = vec![0u8; n];
+            match std::io::stdin().read(&mut buf) {
+                Ok(0) => return 1,
+                Ok(bytes_read) => {
+                    line = String::from_utf8_lossy(&buf[..bytes_read]).to_string();
+                }
+                Err(_) => return 1,
+            }
+        }
+    } else if let Some(delim_char) = delim {
+        // Read until delimiter character (byte by byte)
+        #[cfg(unix)]
+        {
+            let mut buf = [0u8; 1];
+            loop {
+                match nix::unistd::read(read_fd, &mut buf) {
+                    Ok(0) => break,
+                    Ok(_) => {
+                        let ch = buf[0] as char;
+                        if ch == delim_char {
+                            break;
+                        }
+                        line.push(ch);
+                    }
+                    Err(_) => break,
+                }
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            use std::io::Read as _;
+            let mut buf = [0u8; 1];
+            loop {
+                match std::io::stdin().read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(_) => {
+                        let ch = buf[0] as char;
+                        if ch == delim_char {
+                            break;
+                        }
+                        line.push(ch);
+                    }
+                    Err(_) => break,
+                }
+            }
+        }
+    } else if fd.is_some() {
+        // Read a line from a specific file descriptor (byte-by-byte to avoid buffering issues)
+        #[cfg(unix)]
+        {
+            let mut buf = [0u8; 1];
+            loop {
+                match nix::unistd::read(read_fd, &mut buf) {
+                    Ok(0) => {
+                        if line.is_empty() {
+                            return 1;
+                        }
+                        break;
+                    }
+                    Ok(_) => {
+                        let ch = buf[0] as char;
+                        if ch == '\n' {
+                            break;
+                        }
+                        line.push(ch);
+                    }
+                    Err(_) => {
+                        if line.is_empty() {
+                            return 1;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        #[cfg(not(unix))]
+        {
             match std::io::stdin().read_line(&mut line) {
                 Ok(0) => return 1,
                 Err(_) => return 1,

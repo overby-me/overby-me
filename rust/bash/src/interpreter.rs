@@ -1333,8 +1333,9 @@ impl Shell {
             match &redir.kind {
                 RedirectKind::Output | RedirectKind::Clobber => {
                     let fd = self.resolve_redir_fd(&redir.fd, 1);
-                    if !is_var_fd(redir) {
-                        let saved_fd = nix::unistd::dup(fd).map_err(|e| e.to_string())?;
+                    if !is_var_fd(redir)
+                        && let Ok(saved_fd) = nix::unistd::dup(fd)
+                    {
                         saved.push((fd, saved_fd));
                     }
 
@@ -1346,8 +1347,9 @@ impl Shell {
                 }
                 RedirectKind::Append => {
                     let fd = self.resolve_redir_fd(&redir.fd, 1);
-                    if !is_var_fd(redir) {
-                        let saved_fd = nix::unistd::dup(fd).map_err(|e| e.to_string())?;
+                    if !is_var_fd(redir)
+                        && let Ok(saved_fd) = nix::unistd::dup(fd)
+                    {
                         saved.push((fd, saved_fd));
                     }
 
@@ -1362,8 +1364,9 @@ impl Shell {
                 }
                 RedirectKind::Input => {
                     let fd = self.resolve_redir_fd(&redir.fd, 0);
-                    if !is_var_fd(redir) {
-                        let saved_fd = nix::unistd::dup(fd).map_err(|e| e.to_string())?;
+                    if !is_var_fd(redir)
+                        && let Ok(saved_fd) = nix::unistd::dup(fd)
+                    {
                         saved.push((fd, saved_fd));
                     }
 
@@ -1378,8 +1381,9 @@ impl Shell {
                     if target_str == "-" {
                         nix::unistd::close(fd).ok();
                     } else if let Ok(src_fd) = target_str.parse::<i32>() {
-                        let saved_fd = nix::unistd::dup(fd).map_err(|e| e.to_string())?;
-                        saved.push((fd, saved_fd));
+                        if let Ok(saved_fd) = nix::unistd::dup(fd) {
+                            saved.push((fd, saved_fd));
+                        }
                         nix::unistd::dup2(src_fd, fd).map_err(|e| e.to_string())?;
                     }
                 }
@@ -1388,15 +1392,17 @@ impl Shell {
                     if target_str == "-" {
                         nix::unistd::close(fd).ok();
                     } else if let Ok(src_fd) = target_str.parse::<i32>() {
-                        let saved_fd = nix::unistd::dup(fd).map_err(|e| e.to_string())?;
-                        saved.push((fd, saved_fd));
+                        if let Ok(saved_fd) = nix::unistd::dup(fd) {
+                            saved.push((fd, saved_fd));
+                        }
                         nix::unistd::dup2(src_fd, fd).map_err(|e| e.to_string())?;
                     }
                 }
                 RedirectKind::HereDoc(_) | RedirectKind::HereString => {
                     let fd = self.resolve_redir_fd(&redir.fd, 0);
-                    let saved_fd = nix::unistd::dup(fd).map_err(|e| e.to_string())?;
-                    saved.push((fd, saved_fd));
+                    if let Ok(saved_fd) = nix::unistd::dup(fd) {
+                        saved.push((fd, saved_fd));
+                    }
 
                     let content = format!("{}\n", target_str);
 
@@ -1409,8 +1415,9 @@ impl Shell {
                 }
                 RedirectKind::ReadWrite => {
                     let fd = self.resolve_redir_fd(&redir.fd, 0);
-                    let saved_fd = nix::unistd::dup(fd).map_err(|e| e.to_string())?;
-                    saved.push((fd, saved_fd));
+                    if let Ok(saved_fd) = nix::unistd::dup(fd) {
+                        saved.push((fd, saved_fd));
+                    }
 
                     let file = std::fs::OpenOptions::new()
                         .read(true)
