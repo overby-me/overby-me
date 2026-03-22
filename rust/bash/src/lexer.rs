@@ -1359,13 +1359,18 @@ impl Lexer {
                                                 _ => break,
                                             }
                                         }
+                                        if val == 0 {
+                                            break; // NUL terminates string
+                                        }
                                         s.push(val as char);
                                     }
                                     Some('x') => {
                                         let mut val = 0u32;
                                         let mut count = 0;
+                                        let mut braced = false;
                                         // \x{NN} or \xNN (up to 2 hex digits without braces)
                                         if self.peek() == Some('{') {
+                                            braced = true;
                                             self.advance(); // consume {
                                             while let Some(c) = self.peek() {
                                                 if c == '}' { self.advance(); break; }
@@ -1387,7 +1392,11 @@ impl Lexer {
                                                 }
                                             }
                                         }
-                                        if count > 0 {
+                                        if count > 0 || braced {
+                                            if val == 0 {
+                                                // NUL byte terminates the string
+                                                break;
+                                            }
                                             if let Some(c) = char::from_u32(val) {
                                                 s.push(c);
                                             }
