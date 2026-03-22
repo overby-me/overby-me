@@ -433,8 +433,10 @@ fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
         }
         "BASHPID" => std::process::id().to_string(),
         "SECONDS" => {
-            // TODO: track shell start time for accurate SECONDS
-            "0".to_string()
+            use std::sync::OnceLock;
+            static START: OnceLock<std::time::Instant> = OnceLock::new();
+            let start = START.get_or_init(std::time::Instant::now);
+            start.elapsed().as_secs().to_string()
         }
         "EPOCHSECONDS" => std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

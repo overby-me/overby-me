@@ -1155,7 +1155,12 @@ impl Shell {
                 self.func_names.iter().rev().cloned().collect(),
             );
         }
+        // Restore positional params but preserve $0 (BASH_ARGV0 may have changed it)
+        let current_zero = self.positional.first().cloned().unwrap_or_default();
         self.positional = saved_positional;
+        if !self.positional.is_empty() {
+            self.positional[0] = current_zero;
+        }
         self.returning = false;
         status
     }
