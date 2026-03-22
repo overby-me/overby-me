@@ -67,7 +67,7 @@ impl Shell {
         vars.insert("BASH".to_string(), "/proc/self/exe".to_string());
         // Report as bash 5.3 for compatibility with setup.sh version check
         vars.insert("BASH_VERSION".to_string(), "5.3.0(1)-rust".to_string());
-        vars.insert("BASH_VERSINFO".to_string(), "5".to_string());
+        // BASH_VERSINFO is stored as both a var (for $BASH_VERSINFO) and array
         vars.insert("SHELL".to_string(), "/bin/bash".to_string());
         vars.insert("OPTIND".to_string(), "1".to_string());
         vars.insert("OPTERR".to_string(), "1".to_string());
@@ -86,7 +86,7 @@ impl Shell {
             }
         });
 
-        Self {
+        let mut shell = Self {
             vars,
             exports,
             readonly_vars: HashSet::new(),
@@ -119,7 +119,22 @@ impl Shell {
             shopt_nocasematch: false,
             shopt_lastpipe: false,
             builtins: builtins::builtins(),
-        }
+        };
+
+        // Set up BASH_VERSINFO array (must be after struct init)
+        shell.arrays.insert(
+            "BASH_VERSINFO".to_string(),
+            vec![
+                "5".to_string(),
+                "3".to_string(),
+                "0".to_string(),
+                "1".to_string(),
+                "release".to_string(),
+                std::env::consts::ARCH.to_string(),
+            ],
+        );
+
+        shell
     }
 
     /// Resolve a variable name through namerefs.

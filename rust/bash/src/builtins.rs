@@ -408,14 +408,22 @@ fn builtin_export(shell: &mut Shell, args: &[String]) -> i32 {
         return 0;
     }
 
+    let mut unexport = false;
+    let mut names = Vec::new();
     for arg in args {
-        if arg == "-n" {
-            continue; // Unexport - skip for now
+        match arg.as_str() {
+            "-n" => unexport = true,
+            a if a.starts_with('-') => {}
+            _ => names.push(arg.clone()),
         }
-        if arg.starts_with('-') {
-            continue;
-        }
-        if let Some(eq_pos) = arg.find('=') {
+    }
+
+    for arg in &names {
+        if unexport {
+            // Remove export attribute but keep the variable
+            shell.exports.remove(arg.as_str());
+            unsafe { std::env::remove_var(arg) };
+        } else if let Some(eq_pos) = arg.find('=') {
             let name = &arg[..eq_pos];
             let value = &arg[eq_pos + 1..];
             shell.vars.insert(name.to_string(), value.to_string());
@@ -425,7 +433,7 @@ fn builtin_export(shell: &mut Shell, args: &[String]) -> i32 {
             // Export existing variable
             let value = shell
                 .vars
-                .get(arg)
+                .get(arg.as_str())
                 .cloned()
                 .or_else(|| std::env::var(arg).ok())
                 .unwrap_or_default();
