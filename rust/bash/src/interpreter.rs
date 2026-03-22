@@ -935,6 +935,7 @@ impl Shell {
         if self.shopt_expand_aliases
             && let Some(alias_value) = self.aliases.get(&expanded_words[0]).cloned()
         {
+            let alias_name = expanded_words[0].clone();
             // Build a new command string: alias value + remaining args
             let mut new_cmd = alias_value.clone();
             for word in &expanded_words[1..] {
@@ -948,16 +949,21 @@ impl Shell {
                     new_cmd.push_str(word);
                 }
             }
+            // Temporarily remove alias to prevent infinite recursion
+            self.aliases.remove(&alias_name);
             // Apply redirections
             let saved_fds = match self.setup_redirections(&cmd.redirections) {
                 Ok(fds) => fds,
                 Err(e) => {
+                    self.aliases.insert(alias_name, alias_value);
                     eprintln!("bash: {}", e);
                     return 1;
                 }
             };
             let status = self.run_string(&new_cmd);
             self.restore_redirections(saved_fds);
+            // Restore alias
+            self.aliases.insert(alias_name, alias_value);
             return status;
         }
 
