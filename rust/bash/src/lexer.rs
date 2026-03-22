@@ -569,7 +569,15 @@ fn parse_brace_param(chars: &[char], i: &mut usize) -> WordPart {
         }
     }
 
-    if *i < chars.len() && chars[*i] == '}' {
+    // Skip to closing } — handles unrecognized syntax gracefully
+    // Skip to closing }, handling nested braces
+    let mut depth = 1i32;
+    while *i < chars.len() && depth > 0 {
+        match chars[*i] {
+            '{' => depth += 1,
+            '}' => depth -= 1,
+            _ => {}
+        }
         *i += 1;
     }
     WordPart::Param(ParamExpr { name, op })
