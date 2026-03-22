@@ -841,7 +841,28 @@ pub fn eval_arith_full(
     last_status: i32,
 ) -> i64 {
     let resolved = resolve_arith_vars(expr, vars, positional, last_status);
-    eval_arith(&resolved).unwrap_or(0)
+    match eval_arith(&resolved) {
+        Ok(val) => val,
+        Err(e) => {
+            let name = vars.get("0")
+                .or_else(|| positional.first())
+                .map(|s| s.as_str())
+                .unwrap_or("bash");
+            let lineno = vars.get("LINENO").map(|s| s.as_str()).unwrap_or("0");
+            eprintln!("{}: line {}: ((: {}: {} (error token is \"{}\")", name, lineno, expr.trim(), e, find_error_token(expr, &e));
+            0
+        }
+    }
+}
+
+fn find_error_token(expr: &str, _error: &str) -> String {
+    // Simple heuristic: return the part after the operator that caused the error
+    let trimmed = expr.trim();
+    if let Some(pos) = trimmed.find("/ 0") {
+        format!("0 {}", &trimmed[pos + 3..].trim_start())
+    } else {
+        trimmed.to_string()
+    }
 }
 
 fn resolve_arith_vars(
