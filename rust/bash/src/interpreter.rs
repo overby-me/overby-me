@@ -310,11 +310,6 @@ impl Shell {
 
                 // lastpipe: run last command in current shell
                 if is_last && self.shopt_lastpipe {
-                    // Wait for all children to finish first
-                    for child in &children {
-                        nix::sys::wait::waitpid(*child, None).ok();
-                    }
-
                     let saved_stdin = if let Some(fd) = prev_read_fd {
                         let saved = nix::unistd::dup(0).ok();
                         nix::unistd::dup2(fd, 0).ok();
@@ -331,11 +326,14 @@ impl Shell {
                         nix::unistd::close(fd).ok();
                     }
 
-                    // Store PIPESTATUS
-                    let mut statuses: Vec<i32> = children
-                        .iter()
-                        .map(|_| 0) // already waited
-                        .collect();
+                    // Wait for all pipeline children
+                    let mut statuses = Vec::new();
+                    for child in &children {
+                        match nix::sys::wait::waitpid(*child, None) {
+                            Ok(nix::sys::wait::WaitStatus::Exited(_, code)) => statuses.push(code),
+                            _ => statuses.push(0),
+                        }
+                    }
                     statuses.push(status);
                     self.arrays.insert(
                         "PIPESTATUS".to_string(),
