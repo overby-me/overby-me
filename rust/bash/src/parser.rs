@@ -817,11 +817,15 @@ impl Parser {
 
             // Check for word
             if let Token::Word(_) = &self.current {
-                // Don't consume keywords that end compound commands
-                if let Some(text) = self.word_text()
-                    && is_compound_end(&text)
-                {
-                    break;
+                // Don't consume keywords that end compound commands,
+                // but only at command position (first word).
+                // In argument position, these are regular words.
+                if words.is_empty() {
+                    if let Some(text) = self.word_text()
+                        && is_compound_end(&text)
+                    {
+                        break;
+                    }
                 }
                 if let Some(w) = self.take_word() {
                     words.push(w);
