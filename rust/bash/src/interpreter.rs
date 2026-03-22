@@ -346,6 +346,7 @@ impl Shell {
                 // lastpipe: run last command in current shell
                 if is_last && self.shopt_lastpipe {
                     let saved_stdin = if let Some(fd) = prev_read_fd {
+                        // Save current stdin (may fail if closed)
                         let saved = nix::unistd::dup(0).ok();
                         nix::unistd::dup2(fd, 0).ok();
                         nix::unistd::close(fd).ok();
@@ -356,9 +357,16 @@ impl Shell {
 
                     let status = self.run_command(cmd);
 
-                    if let Some(fd) = saved_stdin {
-                        nix::unistd::dup2(fd, 0).ok();
-                        nix::unistd::close(fd).ok();
+                    match saved_stdin {
+                        Some(fd) => {
+                            nix::unistd::dup2(fd, 0).ok();
+                            nix::unistd::close(fd).ok();
+                        }
+                        None if prev_read_fd.is_some() => {
+                            // stdin was closed before, close it again
+                            nix::unistd::close(0).ok();
+                        }
+                        _ => {}
                     }
 
                     // Wait for all pipeline children
@@ -375,10 +383,21 @@ impl Shell {
                         statuses.iter().map(|s| s.to_string()).collect(),
                     );
 
-                    return if pipeline.negated {
-                        if status == 0 { 1 } else { 0 }
+                    let final_status = if self.opt_pipefail {
+                        statuses
+                            .iter()
+                            .rev()
+                            .find(|&&s| s != 0)
+                            .copied()
+                            .unwrap_or(0)
                     } else {
                         status
+                    };
+
+                    return if pipeline.negated {
+                        if final_status == 0 { 1 } else { 0 }
+                    } else {
+                        final_status
                     };
                 }
 
