@@ -688,7 +688,8 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 let arr = parse_array_literal(value);
                 shell.arrays.insert(name.to_string(), arr);
             } else if flag_integer {
-                // Evaluate as arithmetic
+                // Mark as integer and evaluate as arithmetic
+                shell.integer_vars.insert(name.to_string());
                 let n = shell.eval_arith_expr(value);
                 shell.set_var(name, n.to_string());
             } else {
@@ -715,6 +716,9 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 shell.vars.entry(name.to_string()).or_default();
             }
 
+            if flag_integer {
+                shell.integer_vars.insert(name.to_string());
+            }
             if flag_readonly {
                 shell.readonly_vars.insert(name.to_string());
             }

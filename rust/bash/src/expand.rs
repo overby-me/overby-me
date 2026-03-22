@@ -812,21 +812,51 @@ fn eval_arith(expr: &str) -> Result<i64, String> {
         return Ok(if left != 0 && right != 0 { 1 } else { 0 });
     }
 
-    // Comparison operators
-    for op in &["==", "!=", "<=", ">=", "<", ">"] {
+    // Bitwise OR (not ||)
+    if let Some(pos) = rfind_op(expr, "|")
+        && pos > 0
+        && expr.as_bytes()[pos - 1] != b'|'
+        && (pos + 1 >= expr.len() || expr.as_bytes()[pos + 1] != b'|')
+    {
+        let left = eval_arith(&expr[..pos])?;
+        let right = eval_arith(&expr[pos + 1..])?;
+        return Ok(left | right);
+    }
+
+    // Bitwise XOR
+    if let Some(pos) = rfind_op(expr, "^") {
+        let left = eval_arith(&expr[..pos])?;
+        let right = eval_arith(&expr[pos + 1..])?;
+        return Ok(left ^ right);
+    }
+
+    // Bitwise AND (not &&)
+    if let Some(pos) = rfind_op(expr, "&")
+        && pos > 0
+        && expr.as_bytes()[pos - 1] != b'&'
+        && (pos + 1 >= expr.len() || expr.as_bytes()[pos + 1] != b'&')
+    {
+        let left = eval_arith(&expr[..pos])?;
+        let right = eval_arith(&expr[pos + 1..])?;
+        return Ok(left & right);
+    }
+
+    // Comparison operators (check multi-char ops first to avoid matching << >> as < >)
+    for op in &["==", "!=", "<=", ">=", "<<", ">>", "<", ">"] {
         if let Some(pos) = rfind_op(expr, op) {
             let left = eval_arith(&expr[..pos])?;
             let right = eval_arith(&expr[pos + op.len()..])?;
-            let result = match *op {
-                "==" => left == right,
-                "!=" => left != right,
-                "<=" => left <= right,
-                ">=" => left >= right,
-                "<" => left < right,
-                ">" => left > right,
-                _ => false,
+            return match *op {
+                "==" => Ok(if left == right { 1 } else { 0 }),
+                "!=" => Ok(if left != right { 1 } else { 0 }),
+                "<=" => Ok(if left <= right { 1 } else { 0 }),
+                ">=" => Ok(if left >= right { 1 } else { 0 }),
+                "<" => Ok(if left < right { 1 } else { 0 }),
+                ">" => Ok(if left > right { 1 } else { 0 }),
+                "<<" => Ok(left << right),
+                ">>" => Ok(left >> right),
+                _ => unreachable!(),
             };
-            return Ok(if result { 1 } else { 0 });
         }
     }
 

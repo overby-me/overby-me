@@ -9,6 +9,7 @@ pub struct Shell {
     pub vars: HashMap<String, String>,
     pub exports: HashMap<String, String>,
     pub readonly_vars: HashSet<String>,
+    pub integer_vars: HashSet<String>,
     pub arrays: HashMap<String, Vec<String>>,
     pub assoc_arrays: HashMap<String, HashMap<String, String>>,
     pub functions: HashMap<String, CompoundCommand>,
@@ -88,6 +89,7 @@ impl Shell {
             vars,
             exports,
             readonly_vars: HashSet::new(),
+            integer_vars: HashSet::new(),
             arrays: HashMap::new(),
             assoc_arrays: HashMap::new(),
             functions: HashMap::new(),
@@ -145,6 +147,12 @@ impl Shell {
             eprintln!("bash: {}: readonly variable", resolved);
             return;
         }
+        // Integer variables: evaluate value as arithmetic expression
+        let value = if self.integer_vars.contains(&resolved) {
+            self.eval_arith_expr(&value).to_string()
+        } else {
+            value
+        };
         // If variable is exported, update the export
         if self.exports.contains_key(&resolved) {
             self.exports.insert(resolved.clone(), value.clone());
@@ -732,6 +740,124 @@ impl Shell {
 
     /// Evaluate an arithmetic expression and return the integer result.
     pub fn eval_arith_expr(&mut self, expr: &str) -> i64 {
+        let expr = expr.trim();
+
+        // Handle comma operator
+        if let Some(pos) = expr.rfind(',') {
+            self.eval_arith_expr(&expr[..pos]);
+            return self.eval_arith_expr(&expr[pos + 1..]);
+        }
+
+        // Handle assignment operators: var=, var+=, var-=, var*=, var/=, var%=,
+        // var<<=, var>>=, var&=, var|=, var^=
+        #[allow(clippy::type_complexity)]
+        let assign_ops: &[(&str, fn(i64, i64) -> i64)] = &[
+            ("<<=", |a, b| a << b),
+            (">>=", |a, b| a >> b),
+            ("+=", |a, b| a + b),
+            ("-=", |a, b| a - b),
+            ("*=", |a, b| a * b),
+            ("/=", |a, b| if b != 0 { a / b } else { 0 }),
+            ("%=", |a, b| if b != 0 { a % b } else { 0 }),
+            ("&=", |a, b| a & b),
+            ("|=", |a, b| a | b),
+            ("^=", |a, b| a ^ b),
+        ];
+
+        for &(op, func) in assign_ops {
+            if let Some(pos) = expr.find(op) {
+                let name = expr[..pos].trim();
+                if !name.is_empty()
+                    && name.chars().all(|c| c.is_alphanumeric() || c == '_')
+                    && name.chars().next().is_some_and(|c| !c.is_ascii_digit())
+                {
+                    let rhs = self.eval_arith_expr(&expr[pos + op.len()..]);
+                    let lhs: i64 = self
+                        .vars
+                        .get(name)
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(0);
+                    let result = func(lhs, rhs);
+                    self.set_var(name, result.to_string());
+                    return result;
+                }
+            }
+        }
+
+        // Handle simple assignment: var=expr (but not ==)
+        if let Some(pos) = expr.find('=')
+            && pos > 0
+            && !expr[..pos].ends_with('!')
+            && !expr[..pos].ends_with('<')
+            && !expr[..pos].ends_with('>')
+            && !expr[pos + 1..].starts_with('=')
+        {
+            let name = expr[..pos].trim();
+            if !name.is_empty()
+                && name.chars().all(|c| c.is_alphanumeric() || c == '_')
+                && name.chars().next().is_some_and(|c| !c.is_ascii_digit())
+            {
+                let val = self.eval_arith_expr(&expr[pos + 1..]);
+                self.set_var(name, val.to_string());
+                return val;
+            }
+        }
+
+        // Handle post-increment/decrement: var++, var--
+        if let Some(stripped) = expr.strip_suffix("++") {
+            let name = stripped.trim();
+            if !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                let val: i64 = self
+                    .vars
+                    .get(name)
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0);
+                self.set_var(name, (val + 1).to_string());
+                return val; // post-increment returns old value
+            }
+        }
+        if let Some(stripped) = expr.strip_suffix("--") {
+            let name = stripped.trim();
+            if !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                let val: i64 = self
+                    .vars
+                    .get(name)
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0);
+                self.set_var(name, (val - 1).to_string());
+                return val; // post-decrement returns old value
+            }
+        }
+
+        // Handle pre-increment/decrement: ++var, --var
+        if let Some(stripped) = expr.strip_prefix("++") {
+            let name = stripped.trim();
+            if !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                let val: i64 = self
+                    .vars
+                    .get(name)
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0);
+                let new_val = val + 1;
+                self.set_var(name, new_val.to_string());
+                return new_val;
+            }
+        }
+        if let Some(stripped) = expr.strip_prefix("--") {
+            let name = stripped.trim();
+            if !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                let val: i64 = self
+                    .vars
+                    .get(name)
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0);
+                let new_val = val - 1;
+                self.set_var(name, new_val.to_string());
+                return new_val;
+            }
+        }
+
+        // Delegate to expand module for pure expressions
         let vars = self.vars.clone();
         let arrays = self.arrays.clone();
         let positional = self.positional.clone();
