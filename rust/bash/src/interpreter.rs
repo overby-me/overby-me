@@ -483,6 +483,11 @@ impl Shell {
         #[cfg(unix)]
         {
             use std::os::unix::io::AsRawFd;
+
+            // Flush stdout before forking to prevent buffered data from being
+            // inherited by the child and written to the capture pipe.
+            std::io::Write::flush(&mut std::io::stdout()).ok();
+
             let (pipe_r, pipe_w) = match nix::unistd::pipe() {
                 Ok(p) => p,
                 Err(_) => return String::new(),
