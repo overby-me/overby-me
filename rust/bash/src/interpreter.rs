@@ -772,6 +772,15 @@ impl Shell {
                     // Check if it's an array append
                     if self.arrays.contains_key(&resolved) {
                         self.arrays.entry(resolved).or_default().push(value);
+                    } else if self.integer_vars.contains(&resolved) {
+                        // Integer append: arithmetic addition
+                        let existing: i64 = self
+                            .vars
+                            .get(&resolved)
+                            .and_then(|v| v.parse().ok())
+                            .unwrap_or(0);
+                        let addend = self.eval_arith_expr(&value);
+                        self.set_var(&assign.name, (existing + addend).to_string());
                     } else {
                         let existing = self.vars.get(&resolved).cloned().unwrap_or_default();
                         self.set_var(&assign.name, format!("{}{}", existing, value));

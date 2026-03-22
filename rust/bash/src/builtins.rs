@@ -185,123 +185,131 @@ fn builtin_printf(_shell: &mut Shell, args: &[String]) -> i32 {
     let fmt_args = &args[1..];
     let mut arg_idx = 0;
 
-    let mut chars = format.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '\\' {
-            match chars.next() {
-                Some('n') => println!(),
-                Some('t') => print!("\t"),
-                Some('r') => print!("\r"),
-                Some('\\') => print!("\\"),
-                Some('a') => print!("\x07"),
-                Some('b') => print!("\x08"),
-                Some('f') => print!("\x0c"),
-                Some('v') => print!("\x0b"),
-                Some('0') => {
-                    let mut val = 0u8;
-                    for _ in 0..3 {
-                        match chars.peek() {
-                            Some(c @ '0'..='7') => {
-                                val = val * 8 + (*c as u8 - b'0');
-                                chars.next();
+    // printf reuses format string until all arguments are consumed
+    loop {
+        let mut chars = format.chars().peekable();
+        let start_arg_idx = arg_idx;
+        while let Some(ch) = chars.next() {
+            if ch == '\\' {
+                match chars.next() {
+                    Some('n') => println!(),
+                    Some('t') => print!("\t"),
+                    Some('r') => print!("\r"),
+                    Some('\\') => print!("\\"),
+                    Some('a') => print!("\x07"),
+                    Some('b') => print!("\x08"),
+                    Some('f') => print!("\x0c"),
+                    Some('v') => print!("\x0b"),
+                    Some('0') => {
+                        let mut val = 0u8;
+                        for _ in 0..3 {
+                            match chars.peek() {
+                                Some(c @ '0'..='7') => {
+                                    val = val * 8 + (*c as u8 - b'0');
+                                    chars.next();
+                                }
+                                _ => break,
                             }
-                            _ => break,
                         }
+                        print!("{}", val as char);
                     }
-                    print!("{}", val as char);
+                    Some(c) => print!("\\{}", c),
+                    None => print!("\\"),
                 }
-                Some(c) => print!("\\{}", c),
-                None => print!("\\"),
-            }
-        } else if ch == '%' {
-            // Parse optional flags, width, precision
-            let mut flags = String::new();
-            let mut width_str = String::new();
-            while let Some(&c) = chars.peek() {
-                if matches!(c, '-' | '+' | ' ' | '0' | '#') {
-                    flags.push(c);
-                    chars.next();
-                } else {
-                    break;
-                }
-            }
-            while let Some(&c) = chars.peek() {
-                if c.is_ascii_digit() {
-                    width_str.push(c);
-                    chars.next();
-                } else {
-                    break;
-                }
-            }
-            // Skip precision for now
-            if chars.peek() == Some(&'.') {
-                chars.next();
+            } else if ch == '%' {
+                // Parse optional flags, width, precision
+                let mut flags = String::new();
+                let mut width_str = String::new();
                 while let Some(&c) = chars.peek() {
-                    if c.is_ascii_digit() {
+                    if matches!(c, '-' | '+' | ' ' | '0' | '#') {
+                        flags.push(c);
                         chars.next();
                     } else {
                         break;
                     }
                 }
-            }
-            let w: usize = width_str.parse().unwrap_or(0);
-            let left = flags.contains('-');
-            let zero_pad = flags.contains('0');
-            match chars.next() {
-                Some('s') => {
-                    let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("");
-                    if w > 0 {
-                        if left {
-                            print!("{:<w$}", arg);
-                        } else {
-                            print!("{:>w$}", arg);
-                        }
+                while let Some(&c) = chars.peek() {
+                    if c.is_ascii_digit() {
+                        width_str.push(c);
+                        chars.next();
                     } else {
-                        print!("{}", arg);
+                        break;
                     }
-                    arg_idx += 1;
                 }
-                Some('d') | Some('i') => {
-                    let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
-                    let n: i64 = arg.parse().unwrap_or(0);
-                    if w > 0 {
-                        if left {
-                            print!("{:<w$}", n);
-                        } else if zero_pad {
-                            print!("{:0>w$}", n);
+                // Skip precision for now
+                if chars.peek() == Some(&'.') {
+                    chars.next();
+                    while let Some(&c) = chars.peek() {
+                        if c.is_ascii_digit() {
+                            chars.next();
                         } else {
-                            print!("{:>w$}", n);
+                            break;
                         }
-                    } else {
-                        print!("{}", n);
                     }
-                    arg_idx += 1;
                 }
-                Some('x') => {
-                    let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
-                    let n: i64 = arg.parse().unwrap_or(0);
-                    print!("{:x}", n);
-                    arg_idx += 1;
+                let w: usize = width_str.parse().unwrap_or(0);
+                let left = flags.contains('-');
+                let zero_pad = flags.contains('0');
+                match chars.next() {
+                    Some('s') => {
+                        let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("");
+                        if w > 0 {
+                            if left {
+                                print!("{:<w$}", arg);
+                            } else {
+                                print!("{:>w$}", arg);
+                            }
+                        } else {
+                            print!("{}", arg);
+                        }
+                        arg_idx += 1;
+                    }
+                    Some('d') | Some('i') => {
+                        let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
+                        let n: i64 = arg.parse().unwrap_or(0);
+                        if w > 0 {
+                            if left {
+                                print!("{:<w$}", n);
+                            } else if zero_pad {
+                                print!("{:0>w$}", n);
+                            } else {
+                                print!("{:>w$}", n);
+                            }
+                        } else {
+                            print!("{}", n);
+                        }
+                        arg_idx += 1;
+                    }
+                    Some('x') => {
+                        let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
+                        let n: i64 = arg.parse().unwrap_or(0);
+                        print!("{:x}", n);
+                        arg_idx += 1;
+                    }
+                    Some('o') => {
+                        let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
+                        let n: i64 = arg.parse().unwrap_or(0);
+                        print!("{:o}", n);
+                        arg_idx += 1;
+                    }
+                    Some('q') => {
+                        let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("");
+                        print!("{}", shell_escape(arg));
+                        arg_idx += 1;
+                    }
+                    Some('%') => print!("%"),
+                    Some(c) => print!("%{}{}{}", flags, width_str, c),
+                    None => print!("%"),
                 }
-                Some('o') => {
-                    let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
-                    let n: i64 = arg.parse().unwrap_or(0);
-                    print!("{:o}", n);
-                    arg_idx += 1;
-                }
-                Some('q') => {
-                    let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("");
-                    print!("{}", shell_escape(arg));
-                    arg_idx += 1;
-                }
-                Some('%') => print!("%"),
-                Some(c) => print!("%{}{}{}", flags, width_str, c),
-                None => print!("%"),
+            } else {
+                print!("{}", ch);
             }
-        } else {
-            print!("{}", ch);
         }
-    }
+        // If no format args were consumed in this pass, or all args consumed, stop
+        if arg_idx == start_arg_idx || arg_idx >= fmt_args.len() {
+            break;
+        }
+    } // end loop
     0
 }
 
@@ -2163,7 +2171,7 @@ fn builtin_ulimit(_shell: &mut Shell, args: &[String]) -> i32 {
                 "-t" => resource = libc::RLIMIT_CPU,
                 "-v" => resource = libc::RLIMIT_AS,
                 "-S" | "-H" => {} // soft/hard limit flags
-                "unlimited" => set_value = Some(libc::RLIM_INFINITY as u64),
+                "unlimited" => set_value = Some(libc::RLIM_INFINITY),
                 val => {
                     if let Ok(n) = val.parse::<u64>() {
                         set_value = Some(n);
@@ -2182,7 +2190,7 @@ fn builtin_ulimit(_shell: &mut Shell, args: &[String]) -> i32 {
         } else {
             let mut rlim: libc::rlimit = unsafe { std::mem::zeroed() };
             unsafe { libc::getrlimit(resource, &mut rlim) };
-            if rlim.rlim_cur == libc::RLIM_INFINITY as u64 {
+            if rlim.rlim_cur == libc::RLIM_INFINITY {
                 println!("unlimited");
             } else {
                 println!("{}", rlim.rlim_cur);
