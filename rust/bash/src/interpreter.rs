@@ -20,6 +20,7 @@ pub struct Shell {
     pub breaking: i32,
     pub continuing: i32,
     pub in_condition: bool,
+    pub errexit_suppressed: bool,
     pub sourcing: bool,
     pub dir_stack: Vec<String>,
     pub func_names: Vec<String>,
@@ -102,6 +103,7 @@ impl Shell {
             breaking: 0,
             continuing: 0,
             in_condition: false,
+            errexit_suppressed: false,
             sourcing: false,
             dir_stack: Vec::new(),
             func_names: Vec::new(),
@@ -232,11 +234,12 @@ impl Shell {
                 break;
             }
             status = self.run_complete_command(cmd);
-            if self.opt_errexit && status != 0 && !self.in_condition {
+            if self.opt_errexit && status != 0 && !self.in_condition && !self.errexit_suppressed {
                 std::io::Write::flush(&mut std::io::stdout()).ok();
                 std::io::Write::flush(&mut std::io::stderr()).ok();
                 std::process::exit(status);
             }
+            self.errexit_suppressed = false;
         }
         status
     }
@@ -276,6 +279,8 @@ impl Shell {
     fn run_and_or_list(&mut self, list: &AndOrList) -> i32 {
         let has_rest = !list.rest.is_empty();
         let saved = self.in_condition;
+        // All commands in &&/|| list are in condition context except the last
+        // that actually runs
         if has_rest {
             self.in_condition = true;
         }
@@ -301,6 +306,13 @@ impl Shell {
         }
 
         self.in_condition = saved;
+
+        // If the AND/OR list had rest items and the non-zero status came
+        // from a condition-position command (not the last executed), suppress errexit
+        if has_rest && status != 0 {
+            self.errexit_suppressed = true;
+        }
+
         status
     }
 
