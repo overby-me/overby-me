@@ -459,6 +459,14 @@ fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
             }
         }
         _ => {
+            // Numeric positional parameters: $1, ${10}, etc.
+            if let Ok(n) = name.parse::<usize>() {
+                if n < ctx.positional.len() {
+                    return ctx.positional[n].clone();
+                }
+                return String::new();
+            }
+
             // Check for array subscript: name[idx]
             if let Some(bracket) = name.find('[') {
                 let base = &name[..bracket];

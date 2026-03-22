@@ -785,11 +785,16 @@ fn read_param_name(chars: &[char], i: &mut usize) -> String {
             || chars[*i] == '?'
             || chars[*i] == '-'
             || chars[*i] == '$'
-            || chars[*i] == '!'
-            || chars[*i].is_ascii_digit())
+            || chars[*i] == '!')
     {
         name.push(chars[*i]);
         *i += 1;
+    } else if *i < chars.len() && chars[*i].is_ascii_digit() {
+        // Read all consecutive digits for positional parameters like ${10}
+        while *i < chars.len() && chars[*i].is_ascii_digit() {
+            name.push(chars[*i]);
+            *i += 1;
+        }
     } else {
         while *i < chars.len() && (chars[*i] == '_' || chars[*i].is_alphanumeric()) {
             name.push(chars[*i]);
