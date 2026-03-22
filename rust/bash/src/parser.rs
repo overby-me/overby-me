@@ -283,6 +283,7 @@ impl Parser {
         if self.is_keyword("{")
             || self.is_keyword("if")
             || self.is_keyword("for")
+            || self.is_keyword("select")
             || self.is_keyword("while")
             || self.is_keyword("until")
             || self.is_keyword("case")
@@ -326,7 +327,7 @@ impl Parser {
             self.parse_subshell()
         } else if self.is_keyword("if") {
             self.parse_if()
-        } else if self.is_keyword("for") {
+        } else if self.is_keyword("for") || self.is_keyword("select") {
             self.parse_for()
         } else if self.is_keyword("while") {
             self.parse_while()
@@ -403,7 +404,10 @@ impl Parser {
     }
 
     fn parse_for(&mut self) -> Result<CompoundCommand, String> {
-        self.expect_keyword("for")?;
+        // Accept both 'for' and 'select'
+        if !self.eat_keyword("for") {
+            self.expect_keyword("select")?;
+        }
 
         // Check for C-style: for (( init; cond; step ))
         if self.current == Token::LParen {
@@ -422,6 +426,12 @@ impl Parser {
         let var = self
             .word_text()
             .ok_or_else(|| "expected variable name after 'for'".to_string())?;
+        // Validate variable name
+        if !var.chars().all(|c| c.is_alphanumeric() || c == '_')
+            || var.chars().next().map_or(true, |c| c.is_ascii_digit())
+        {
+            return Err(format!("`{}': not a valid identifier", var));
+        }
         self.advance();
 
         self.skip_newlines();
