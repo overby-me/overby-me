@@ -111,12 +111,25 @@ fn builtin_echo(shell: &mut Shell, args: &[String]) -> i32 {
         text
     };
 
-    let _ = shell; // Shell not needed for echo but kept for API consistency
-    print!("{}", output);
-    if newline {
-        println!();
+    use std::io::Write;
+    let stdout = std::io::stdout();
+    let mut out = stdout.lock();
+    let result = if newline {
+        writeln!(out, "{}", output)
+    } else {
+        write!(out, "{}", output)
+    };
+    match result {
+        Ok(()) => 0,
+        Err(e) => {
+            let msg = match e.kind() {
+                std::io::ErrorKind::BrokenPipe => "Broken pipe",
+                _ => "write error",
+            };
+            eprintln!("{}: echo: write error: {}", shell.error_prefix(), msg);
+            1
+        }
     }
-    0
 }
 
 fn interpret_echo_escapes(s: &str) -> String {
