@@ -634,7 +634,20 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                         .collect();
                     println!("declare -a {}=({})", name, elements.join(" "));
                 } else {
-                    println!("declare -- {}=\"{}\"", name, value);
+                    let mut flags = String::from("-");
+                    if shell.integer_vars.contains(name) {
+                        flags.push('i');
+                    }
+                    if shell.readonly_vars.contains(name) {
+                        flags.push('r');
+                    }
+                    if shell.exports.contains_key(name) {
+                        flags.push('x');
+                    }
+                    if flags == "-" {
+                        flags.push('-');
+                    }
+                    println!("declare {} {}=\"{}\"", flags, name, value);
                 }
             }
             // Also print arrays not in vars
@@ -671,7 +684,20 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                         .collect();
                     println!("declare -a {}=({})", name, elements.join(" "));
                 } else if let Some(value) = shell.vars.get(name) {
-                    println!("declare -- {}=\"{}\"", name, value);
+                    let mut flags = String::from("-");
+                    if shell.integer_vars.contains(name.as_str()) {
+                        flags.push('i');
+                    }
+                    if shell.readonly_vars.contains(name.as_str()) {
+                        flags.push('r');
+                    }
+                    if shell.exports.contains_key(name.as_str()) {
+                        flags.push('x');
+                    }
+                    if flags == "-" {
+                        flags.push('-');
+                    }
+                    println!("declare {} {}=\"{}\"", flags, name, value);
                 } else {
                     eprintln!("bash: declare: {}: not found", name);
                     return 1;
