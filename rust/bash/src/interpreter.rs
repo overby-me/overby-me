@@ -444,15 +444,22 @@ impl Shell {
                 match unsafe { nix::unistd::fork() } {
                     Ok(nix::unistd::ForkResult::Child) => {
                         if let Some(fd) = prev_read_fd {
-                            nix::unistd::dup2(fd, 0).ok();
-                            nix::unistd::close(fd).ok();
+                            if fd != 0 {
+                                nix::unistd::dup2(fd, 0).ok();
+                                nix::unistd::close(fd).ok();
+                            }
+                            // If fd == 0, it's already stdin (pipe read end assigned to fd 0)
                         }
                         if let Some(fd) = write_fd {
                             nix::unistd::dup2(fd, 1).ok();
-                            nix::unistd::close(fd).ok();
+                            if fd != 1 {
+                                nix::unistd::close(fd).ok();
+                            }
                         }
                         if let Some(fd) = read_fd {
-                            nix::unistd::close(fd).ok();
+                            if fd != 0 && fd != 1 {
+                                nix::unistd::close(fd).ok();
+                            }
                         }
 
                         let status = self.run_command(cmd);
