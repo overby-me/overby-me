@@ -887,13 +887,79 @@ fn parse_array_literal(s: &str) -> Vec<String> {
     elements
 }
 
+/// Quote a value for `set` output, matching bash's format.
+/// Values that need quoting are wrapped in $'...' with proper escaping.
+fn quote_value_for_set(value: &str) -> String {
+    // Check if the value needs quoting
+    let needs_quoting = value.is_empty()
+        || value
+            .chars()
+            .any(|c| " \t\n\\\"'`$!#~&|;()<>{}[]?*".contains(c));
+
+    if !needs_quoting {
+        return value.to_string();
+    }
+
+    // Use single-quote style with \' for embedded single quotes
+    // Bash uses a mix: simple values get \-escaping, complex ones get $'...' or '...'
+    let mut out = String::new();
+    let mut needs_dollar = false;
+
+    for ch in value.chars() {
+        match ch {
+            '\n' | '\t' | '\r' | '\x07' | '\x08' | '\x0b' | '\x0c' | '\x1b' => {
+                needs_dollar = true;
+            }
+            _ => {}
+        }
+    }
+
+    if needs_dollar {
+        out.push_str("$'");
+        for ch in value.chars() {
+            match ch {
+                '\'' => out.push_str("\\'"),
+                '\\' => out.push_str("\\\\"),
+                '\n' => out.push_str("\\n"),
+                '\t' => out.push_str("\\t"),
+                '\r' => out.push_str("\\r"),
+                '\x07' => out.push_str("\\a"),
+                '\x08' => out.push_str("\\b"),
+                '\x0b' => out.push_str("\\v"),
+                '\x0c' => out.push_str("\\f"),
+                '\x1b' => out.push_str("\\E"),
+                c if c.is_control() => {
+                    out.push_str(&format!("\\x{:02x}", c as u32));
+                }
+                c => out.push(c),
+            }
+        }
+        out.push('\'');
+    } else if value.contains('\'') {
+        // Value contains single quotes — use backslash escaping
+        for ch in value.chars() {
+            if ch == '\'' {
+                out.push('\\');
+            }
+            out.push(ch);
+        }
+    } else {
+        // Wrap in single quotes
+        out.push('\'');
+        out.push_str(value);
+        out.push('\'');
+    }
+
+    out
+}
+
 fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
     if args.is_empty() {
-        // Print all variables
+        // Print all variables with proper quoting (like bash)
         let mut vars: Vec<_> = shell.vars.iter().collect();
         vars.sort_by_key(|(k, _)| (*k).clone());
         for (key, value) in vars {
-            println!("{}={}", key, value);
+            println!("{}={}", key, quote_value_for_set(value));
         }
         return 0;
     }
