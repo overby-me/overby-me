@@ -447,6 +447,101 @@ fn parse_dollar(chars: &[char], i: &mut usize) -> WordPart {
             *i += 1;
             WordPart::Variable(name)
         }
+        '"' => {
+            // $"..." locale-specific quoting — treat as regular double quoting
+            *i += 1; // skip "
+            let mut dq_parts = Vec::new();
+            let mut dq_lit = String::new();
+            while *i < chars.len() && chars[*i] != '"' {
+                match chars[*i] {
+                    '\\' if *i + 1 < chars.len() => {
+                        let next = chars[*i + 1];
+                        if matches!(next, '$' | '`' | '"' | '\\') {
+                            dq_lit.push(next);
+                        } else {
+                            dq_lit.push('\\');
+                            dq_lit.push(next);
+                        }
+                        *i += 2;
+                    }
+                    '$' => {
+                        if !dq_lit.is_empty() {
+                            dq_parts.push(WordPart::Literal(std::mem::take(&mut dq_lit)));
+                        }
+                        *i += 1;
+                        dq_parts.push(parse_dollar(chars, i));
+                    }
+                    ch => {
+                        dq_lit.push(ch);
+                        *i += 1;
+                    }
+                }
+            }
+            if *i < chars.len() {
+                *i += 1; // skip closing "
+            }
+            if !dq_lit.is_empty() {
+                dq_parts.push(WordPart::Literal(dq_lit));
+            }
+            WordPart::DoubleQuoted(dq_parts)
+        }
+        '\'' => {
+            // $'...' ANSI-C quoting
+            *i += 1; // skip '
+            let mut s = String::new();
+            while *i < chars.len() && chars[*i] != '\'' {
+                if chars[*i] == '\\' && *i + 1 < chars.len() {
+                    *i += 1;
+                    match chars[*i] {
+                        'n' => s.push('\n'),
+                        't' => s.push('\t'),
+                        'r' => s.push('\r'),
+                        '\\' => s.push('\\'),
+                        '\'' => s.push('\''),
+                        'a' => s.push('\x07'),
+                        'b' => s.push('\x08'),
+                        'e' | 'E' => s.push('\x1b'),
+                        'f' => s.push('\x0c'),
+                        'v' => s.push('\x0b'),
+                        '0' => {
+                            let mut val = 0u8;
+                            for _ in 0..3 {
+                                if *i + 1 < chars.len() && matches!(chars[*i + 1], '0'..='7') {
+                                    *i += 1;
+                                    val = val * 8 + (chars[*i] as u8 - b'0');
+                                } else {
+                                    break;
+                                }
+                            }
+                            s.push(val as char);
+                        }
+                        'x' => {
+                            let mut val = 0u8;
+                            for _ in 0..2 {
+                                if *i + 1 < chars.len() && chars[*i + 1].is_ascii_hexdigit() {
+                                    *i += 1;
+                                    val = val * 16 + chars[*i].to_digit(16).unwrap() as u8;
+                                } else {
+                                    break;
+                                }
+                            }
+                            s.push(val as char);
+                        }
+                        c => {
+                            s.push('\\');
+                            s.push(c);
+                        }
+                    }
+                } else {
+                    s.push(chars[*i]);
+                }
+                *i += 1;
+            }
+            if *i < chars.len() {
+                *i += 1; // skip closing '
+            }
+            WordPart::SingleQuoted(s)
+        }
         _ => WordPart::Literal("$".to_string()),
     }
 }
@@ -1098,7 +1193,72 @@ impl Lexer {
                         parts.push(WordPart::Literal(std::mem::take(&mut literal)));
                     }
                     self.advance();
-                    if self.peek() == Some('\'') {
+                    if self.peek() == Some('"') {
+                        // $"..." locale-specific quoting (treated as regular double quoting)
+                        self.advance(); // consume "
+                        let mut dq_parts = Vec::new();
+                        let mut dq_literal = String::new();
+                        loop {
+                            match self.peek() {
+                                None | Some('"') => {
+                                    self.advance();
+                                    break;
+                                }
+                                Some('\\') => {
+                                    self.advance();
+                                    match self.advance() {
+                                        Some(c @ ('$' | '`' | '"' | '\\')) => {
+                                            dq_literal.push(c);
+                                        }
+                                        Some(c) => {
+                                            dq_literal.push('\\');
+                                            dq_literal.push(c);
+                                        }
+                                        None => dq_literal.push('\\'),
+                                    }
+                                }
+                                Some('$') => {
+                                    if !dq_literal.is_empty() {
+                                        dq_parts
+                                            .push(WordPart::Literal(std::mem::take(&mut dq_literal)));
+                                    }
+                                    self.advance();
+                                    let input_clone = self.input.clone();
+                                    let part = parse_dollar(&input_clone, &mut self.pos);
+                                    dq_parts.push(part);
+                                }
+                                Some('`') => {
+                                    if !dq_literal.is_empty() {
+                                        dq_parts
+                                            .push(WordPart::Literal(std::mem::take(&mut dq_literal)));
+                                    }
+                                    self.advance();
+                                    let mut cmd = String::new();
+                                    loop {
+                                        match self.peek() {
+                                            None | Some('`') => {
+                                                self.advance();
+                                                break;
+                                            }
+                                            Some(c) => {
+                                                cmd.push(c);
+                                                self.advance();
+                                            }
+                                        }
+                                    }
+                                    dq_parts.push(WordPart::BacktickSub(cmd));
+                                }
+                                Some(c) => {
+                                    dq_literal.push(c);
+                                    self.advance();
+                                }
+                            }
+                        }
+                        if !dq_literal.is_empty() {
+                            dq_parts.push(WordPart::Literal(dq_literal));
+                        }
+                        parts.push(WordPart::DoubleQuoted(dq_parts));
+                    } else if self.peek() == Some('\'') {
                         // $'...' ANSI-C quoting
                         self.advance();
                         let mut s = String::new();
