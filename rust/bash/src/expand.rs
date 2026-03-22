@@ -1,8 +1,25 @@
 use crate::ast::*;
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 /// Function type for evaluating command substitutions.
 pub type CmdSubFn<'a> = &'a mut dyn FnMut(&str) -> String;
+
+thread_local! {
+    /// File descriptors opened by process substitutions that need to be closed
+    /// after the command using them completes.
+    static PROCSUB_FDS: RefCell<Vec<i32>> = RefCell::new(Vec::new());
+}
+
+/// Take all pending process substitution fds (draining the list).
+pub fn take_procsub_fds() -> Vec<i32> {
+    PROCSUB_FDS.with(|fds| std::mem::take(&mut *fds.borrow_mut()))
+}
+
+/// Register a process substitution fd for later cleanup.
+fn register_procsub_fd(fd: i32) {
+    PROCSUB_FDS.with(|fds| fds.borrow_mut().push(fd));
+}
 
 /// Represents expanded text with quoting information preserved.
 #[derive(Debug, Clone)]
@@ -325,10 +342,12 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                         let fd = match kind {
                             ProcessSubKind::Input => {
                                 nix::unistd::close(w_fd).ok();
+                                register_procsub_fd(r_fd);
                                 r_fd
                             }
                             ProcessSubKind::Output => {
                                 nix::unistd::close(r_fd).ok();
+                                register_procsub_fd(w_fd);
                                 w_fd
                             }
                         };

@@ -802,6 +802,12 @@ impl Shell {
             self.restore_redirections(saved_fds);
         }
 
+        // Close any file descriptors opened by process substitutions
+        #[cfg(unix)]
+        for fd in crate::expand::take_procsub_fds() {
+            nix::unistd::close(fd).ok();
+        }
+
         self.last_status = status;
         status
     }
