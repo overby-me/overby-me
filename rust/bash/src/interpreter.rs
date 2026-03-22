@@ -762,6 +762,9 @@ impl Shell {
         if self.opt_noexec {
             flags.push('n');
         }
+        // Always-on flags
+        flags.push('h'); // hashall
+        flags.push('B'); // braceexpand
         flags
     }
 
