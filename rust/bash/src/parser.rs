@@ -589,10 +589,11 @@ impl Parser {
         {
             let op = text;
             self.advance();
-            // For =~ (regex match), read the pattern as raw text since it can
-            // contain ( ) | and other chars that are normally special tokens.
-            let right = if op == "=~" {
-                self.read_cond_regex_pattern()?
+            // For =~ (regex match) and == != (glob match), read the pattern as raw text
+            // since it can contain ( ) | and other chars that are normally special tokens
+            // (e.g., extglob patterns like +(foo|bar)).
+            let right = if op == "=~" || op == "==" || op == "!=" || op == "=" {
+                self.read_cond_pattern()?
             } else {
                 self.take_word()
                     .ok_or_else(|| format!("expected operand after '{}'", op))?
@@ -621,9 +622,10 @@ impl Parser {
     /// Read a regex pattern for `[[ x =~ pattern ]]`.
     /// Regex patterns can contain ( ) | which are normally special tokens,
     /// so we read raw text from the lexer until we hit ]], &&, or ||.
-    fn read_cond_regex_pattern(&mut self) -> Result<Word, String> {
+    fn read_cond_pattern(&mut self) -> Result<Word, String> {
         let mut text = String::new();
         // Consume tokens and raw text until ]], &&, ||
+        // This handles extglob patterns like +(foo|bar) and regex patterns
         loop {
             if self.is_keyword("]]") || self.current == Token::Eof {
                 break;
@@ -653,7 +655,7 @@ impl Parser {
         }
         let trimmed = text.trim().to_string();
         if trimmed.is_empty() {
-            return Err("expected regex pattern after =~".to_string());
+            return Err("expected pattern in conditional".to_string());
         }
         Ok(vec![WordPart::Literal(trimmed)])
     }
