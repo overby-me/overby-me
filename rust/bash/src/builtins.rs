@@ -1484,10 +1484,42 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
             }
         }
     } else {
-        match std::io::stdin().read_line(&mut line) {
-            Ok(0) => return 1, // EOF
-            Err(_) => return 1,
-            _ => {}
+        // Read byte-by-byte from fd to avoid buffering issues
+        // (Rust's stdin() has a shared buffer that breaks when fd 0 is redirected)
+        #[cfg(unix)]
+        {
+            let mut buf = [0u8; 1];
+            loop {
+                match nix::unistd::read(read_fd, &mut buf) {
+                    Ok(0) => {
+                        if line.is_empty() {
+                            return 1;
+                        }
+                        break;
+                    }
+                    Ok(_) => {
+                        let ch = buf[0] as char;
+                        if ch == '\n' {
+                            break;
+                        }
+                        line.push(ch);
+                    }
+                    Err(_) => {
+                        if line.is_empty() {
+                            return 1;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            match std::io::stdin().read_line(&mut line) {
+                Ok(0) => return 1,
+                Err(_) => return 1,
+                _ => {}
+            }
         }
     }
 
