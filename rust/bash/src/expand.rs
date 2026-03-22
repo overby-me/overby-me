@@ -1676,6 +1676,7 @@ fn pattern_match_impl(text: &[char], ti: usize, pattern: &[char], pi: usize) -> 
                 if ti >= text.len() {
                     return false;
                 }
+                let bracket_start = pi;
                 pi += 1;
                 let negate = pi < pattern.len() && (pattern[pi] == '!' || pattern[pi] == '^');
                 if negate {
@@ -1735,7 +1736,15 @@ fn pattern_match_impl(text: &[char], ti: usize, pattern: &[char], pi: usize) -> 
                     }
                 }
                 if pi < pattern.len() {
-                    pi += 1;
+                    pi += 1; // skip closing ]
+                } else {
+                    // Unclosed bracket — treat [ as literal
+                    if ti >= text.len() || text[ti] != '[' {
+                        return false;
+                    }
+                    ti += 1;
+                    pi = bracket_start + 1;
+                    continue;
                 }
                 if matched == negate {
                     return false;
