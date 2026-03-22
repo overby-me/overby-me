@@ -717,7 +717,9 @@ impl Shell {
         }
 
         if expanded_words.is_empty() {
-            return 0;
+            // For assignment-only commands, return the status of the last
+            // command substitution (if any), not 0
+            return self.last_status;
         }
 
         // Trace
