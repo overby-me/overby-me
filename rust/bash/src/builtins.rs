@@ -925,6 +925,7 @@ fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
                         "xtrace" => shell.opt_xtrace = enable,
                         "noclobber" => shell.opt_noclobber = enable,
                         "noglob" => shell.opt_noglob = enable,
+                        "posix" => shell.opt_posix = enable,
                         _ => {}
                     }
                 } else if !enable {

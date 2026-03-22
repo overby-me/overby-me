@@ -38,6 +38,7 @@ pub struct Shell {
     pub opt_noclobber: bool,
     pub opt_noglob: bool,
     pub opt_noexec: bool,
+    pub opt_posix: bool,
 
     // Shell options (shopt)
     pub shopt_nullglob: bool,
@@ -117,6 +118,7 @@ impl Shell {
             opt_noclobber: false,
             opt_noglob: false,
             opt_noexec: false,
+            opt_posix: false,
             shopt_nullglob: false,
             shopt_extglob: false,
             shopt_inherit_errexit: false,
@@ -836,7 +838,14 @@ impl Shell {
 
             let result = builtin(self, args);
 
-            if !expanded_words.is_empty() {
+            // In POSIX mode, prefix assignments to special builtins persist
+            let is_special = matches!(
+                command_name.as_str(),
+                "break" | "." | "source" | "continue" | "eval" | "exec"
+                    | "exit" | "export" | "readonly" | "return" | "set"
+                    | "shift" | "trap" | "unset"
+            );
+            if !expanded_words.is_empty() && !(self.opt_posix && is_special) {
                 for (k, old) in saved {
                     match old {
                         Some(v) => {
