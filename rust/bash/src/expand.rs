@@ -844,12 +844,11 @@ pub fn eval_arith_full(
     match eval_arith(&resolved) {
         Ok(val) => val,
         Err(e) => {
-            let name = vars.get("0")
-                .or_else(|| positional.first())
+            let name = positional.first()
                 .map(|s| s.as_str())
                 .unwrap_or("bash");
             let lineno = vars.get("LINENO").map(|s| s.as_str()).unwrap_or("0");
-            eprintln!("{}: line {}: ((: {}: {} (error token is \"{}\")", name, lineno, expr.trim(), e, find_error_token(expr, &e));
+            eprintln!("{}: line {}: ((: {} : {} (error token is \"{}\")", name, lineno, expr.trim(), e, find_error_token(expr, &e));
             0
         }
     }
@@ -1076,14 +1075,14 @@ fn eval_arith(expr: &str) -> Result<i64, String> {
                         '*' => Ok(left * right),
                         '/' => {
                             if right == 0 {
-                                Err("division by zero".to_string())
+                                Err("division by 0".to_string())
                             } else {
                                 Ok(left / right)
                             }
                         }
                         '%' => {
                             if right == 0 {
-                                Err("division by zero".to_string())
+                                Err("division by 0".to_string())
                             } else {
                                 Ok(left % right)
                             }

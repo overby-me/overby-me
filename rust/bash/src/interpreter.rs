@@ -746,6 +746,26 @@ impl Shell {
     }
 
     fn run_simple_command(&mut self, cmd: &SimpleCommand) -> i32 {
+        // Set BASH_COMMAND to the source text before expansion
+        if !cmd.words.is_empty() {
+            let source = cmd
+                .words
+                .iter()
+                .map(|w| {
+                    w.iter()
+                        .map(|p| match p {
+                            WordPart::Literal(s) => s.clone(),
+                            WordPart::SingleQuoted(s) => format!("'{}'", s),
+                            WordPart::Variable(n) => format!("${}", n),
+                            _ => String::new(),
+                        })
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            self.vars.insert("BASH_COMMAND".to_string(), source);
+        }
+
         let ifs = self
             .vars
             .get("IFS")
@@ -780,12 +800,6 @@ impl Shell {
                 0
             };
         }
-
-        // Set BASH_COMMAND
-        self.vars.insert(
-            "BASH_COMMAND".to_string(),
-            expanded_words.join(" "),
-        );
 
         // Trace
         if self.opt_xtrace {
