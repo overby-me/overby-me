@@ -1464,7 +1464,14 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
 
 fn builtin_eval(shell: &mut Shell, args: &[String]) -> i32 {
     let command = args.join(" ");
-    shell.run_string(&command)
+    // Save procsub fds so inner run_simple_command calls don't close them
+    let saved_fds = crate::expand::take_procsub_fds();
+    let result = shell.run_string(&command);
+    // Restore saved fds (they'll be closed by the caller)
+    for fd in saved_fds {
+        crate::expand::register_procsub_fd_pub(fd);
+    }
+    result
 }
 
 fn builtin_exec(shell: &mut Shell, args: &[String]) -> i32 {

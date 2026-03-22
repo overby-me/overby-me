@@ -17,6 +17,10 @@ pub fn take_procsub_fds() -> Vec<i32> {
 }
 
 /// Register a process substitution fd for later cleanup.
+pub fn register_procsub_fd_pub(fd: i32) {
+    register_procsub_fd(fd);
+}
+
 fn register_procsub_fd(fd: i32) {
     PROCSUB_FDS.with(|fds| fds.borrow_mut().push(fd));
 }

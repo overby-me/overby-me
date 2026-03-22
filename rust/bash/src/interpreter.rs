@@ -816,9 +816,13 @@ impl Shell {
         }
 
         // Close any file descriptors opened by process substitutions
+        // in THIS command (not in nested evals/subshells)
         #[cfg(unix)]
-        for fd in crate::expand::take_procsub_fds() {
-            nix::unistd::close(fd).ok();
+        {
+            let fds = crate::expand::take_procsub_fds();
+            for fd in fds {
+                nix::unistd::close(fd).ok();
+            }
         }
 
         self.last_status = status;
