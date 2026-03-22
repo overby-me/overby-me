@@ -1624,24 +1624,42 @@ impl Lexer {
     /// The `((` has already been consumed by the parser.
     pub fn read_until_double_paren(&mut self) -> Result<String, String> {
         let mut expr = String::new();
-        let mut depth = 1; // We're inside one level of ((
+        let mut paren_depth = 0; // Track nested ( ) inside the expression
         while self.pos < self.input.len() {
             let ch = self.input[self.pos];
-            if ch == '(' && self.peek_at(1) == Some('(') {
-                depth += 1;
-                expr.push('(');
-                expr.push('(');
-                self.pos += 2;
-            } else if ch == ')' && self.peek_at(1) == Some(')') {
-                depth -= 1;
-                if depth == 0 {
-                    self.pos += 2;
-                    return Ok(expr.trim().to_string());
+            if ch == '(' {
+                paren_depth += 1;
+                expr.push(ch);
+                self.pos += 1;
+            } else if ch == ')' {
+                if paren_depth > 0 {
+                    // Close an inner paren
+                    paren_depth -= 1;
+                    expr.push(ch);
+                    self.pos += 1;
+                } else {
+                    // At top level — check if this starts the closing ))
+                    // Skip whitespace after first ) to find second )
+                    self.pos += 1;
+                    let saved = self.pos;
+                    while self.pos < self.input.len()
+                        && matches!(self.input[self.pos], ' ' | '\t')
+                    {
+                        self.pos += 1;
+                    }
+                    if self.pos < self.input.len() && self.input[self.pos] == ')' {
+                        // Found )) (possibly with whitespace between)
+                        self.pos += 1;
+                        return Ok(expr.trim().to_string());
+                    }
+                    // Not )), restore position and treat as expression
+                    self.pos = saved;
+                    expr.push(')');
                 }
-                expr.push(')');
-                expr.push(')');
-                self.pos += 2;
             } else {
+                if ch == '\n' {
+                    self.line += 1;
+                }
                 expr.push(ch);
                 self.pos += 1;
             }
