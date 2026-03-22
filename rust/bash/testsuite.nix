@@ -39,6 +39,13 @@ pkgs.runCommand "rust-bash-test-${name}" {
   export THIS_SH="${pkgs.rust-bash}/bin/bash"
   timeout 120 "$THIS_SH" "./${name}.tests" > "$TMPDIR/actual" 2>&1 || true
 
+  # Normalize binary paths so that /nix/store/.../bin/bash differences don't
+  # cause false failures. Replace both shell paths with a generic "bash" prefix.
+  REF_BASH="${pkgs.bash}/bin/bash"
+  TEST_BASH="${pkgs.rust-bash}/bin/bash"
+  sed -i "s|$REF_BASH|bash|g" "$TMPDIR/expected"
+  sed -i "s|$TEST_BASH|bash|g" "$TMPDIR/actual"
+
   # Compare
   if diff "$TMPDIR/actual" "$TMPDIR/expected"; then
     touch $out

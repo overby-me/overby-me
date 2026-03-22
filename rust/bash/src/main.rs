@@ -173,7 +173,15 @@ fn run() -> i32 {
                 return shell.run_string(&content);
             }
             Err(e) => {
-                eprintln!("bash: {}: {}", file, e);
+                let argv0 = std::env::args()
+                    .next()
+                    .unwrap_or_else(|| "bash".to_string());
+                let msg = match e.kind() {
+                    std::io::ErrorKind::NotFound => "No such file or directory",
+                    std::io::ErrorKind::PermissionDenied => "Permission denied",
+                    _ => "No such file or directory",
+                };
+                eprintln!("{}: {}: {}", argv0, file, msg);
                 return 127;
             }
         }
