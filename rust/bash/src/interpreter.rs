@@ -721,7 +721,35 @@ impl Shell {
 
         // Check for function
         let status = if let Some(func_body) = self.functions.get(command_name).cloned() {
-            self.run_function(&func_body, command_name, args)
+            // Apply prefix assignments temporarily for function calls
+            let prefix_saves: Vec<(String, Option<String>)> = cmd
+                .assignments
+                .iter()
+                .map(|a| {
+                    let v = match &a.value {
+                        AssignValue::Scalar(w) => self.expand_word_single(w),
+                        _ => String::new(),
+                    };
+                    let old = self.vars.get(&a.name).cloned();
+                    self.vars.insert(a.name.clone(), v);
+                    (a.name.clone(), old)
+                })
+                .collect();
+
+            let result = self.run_function(&func_body, command_name, args);
+
+            // Restore prefix assignments
+            for (k, old) in prefix_saves {
+                match old {
+                    Some(v) => {
+                        self.vars.insert(k, v);
+                    }
+                    None => {
+                        self.vars.remove(&k);
+                    }
+                }
+            }
+            result
         } else if let Some(builtin) = self.builtins.get(command_name.as_str()).copied() {
             let prefix_exports: Vec<(String, String)> = if !expanded_words.is_empty() {
                 cmd.assignments
