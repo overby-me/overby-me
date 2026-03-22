@@ -894,6 +894,52 @@ impl Lexer {
             };
 
             match ch {
+                // Extglob patterns: @(...), ?(...), *(...), +(...), !(...)
+                '@' | '?' | '+' | '!' if self.peek_at(1) == Some('(') => {
+                    literal.push(ch);
+                    self.advance(); // consume @/+/?/!
+                    literal.push('(');
+                    self.advance(); // consume (
+                    let mut depth = 1;
+                    while let Some(c) = self.peek() {
+                        if c == '(' {
+                            depth += 1;
+                        } else if c == ')' {
+                            depth -= 1;
+                            if depth == 0 {
+                                literal.push(')');
+                                self.advance();
+                                break;
+                            }
+                        }
+                        literal.push(c);
+                        self.advance();
+                    }
+                    continue;
+                }
+                // *(pattern) — extglob (distinct from bare *)
+                '*' if self.peek_at(1) == Some('(') => {
+                    literal.push('*');
+                    self.advance(); // consume *
+                    literal.push('(');
+                    self.advance(); // consume (
+                    let mut depth = 1;
+                    while let Some(c) = self.peek() {
+                        if c == '(' {
+                            depth += 1;
+                        } else if c == ')' {
+                            depth -= 1;
+                            if depth == 0 {
+                                literal.push(')');
+                                self.advance();
+                                break;
+                            }
+                        }
+                        literal.push(c);
+                        self.advance();
+                    }
+                    continue;
+                }
                 // Word terminators
                 ' ' | '\t' | '\n' | ';' | '&' | '|' | '(' | ')' => break,
                 '<' | '>' => {

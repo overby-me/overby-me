@@ -1740,11 +1740,175 @@ fn shell_pattern_match(text: &str, pattern: &str) -> bool {
     pattern_match_impl(&t, 0, &p, 0)
 }
 
+/// Match *(alt1|alt2|...) — zero or more matches of any alternative
+fn extglob_star_match(
+    text: &[char],
+    ti: usize,
+    alts: &[Vec<char>],
+    pattern: &[char],
+    rest_pi: usize,
+) -> bool {
+    // Try matching rest directly (zero matches)
+    if pattern_match_impl(text, ti, pattern, rest_pi) {
+        return true;
+    }
+    // Try each alternative consuming some text, then recurse
+    for alt in alts {
+        for end in ti + 1..=text.len() {
+            if pattern_match_impl(&text[ti..end], 0, alt, 0) {
+                // Matched alt from ti..end, now try * again from end
+                if extglob_star_match(text, end, alts, pattern, rest_pi) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Match +(alt1|alt2|...) — one or more matches of any alternative
+fn extglob_plus_match(
+    text: &[char],
+    ti: usize,
+    alts: &[Vec<char>],
+    pattern: &[char],
+    rest_pi: usize,
+) -> bool {
+    // Must match at least one alternative
+    for alt in alts {
+        for end in ti + 1..=text.len() {
+            if pattern_match_impl(&text[ti..end], 0, alt, 0) {
+                // After one match, try rest (like * from here)
+                if pattern_match_impl(text, end, pattern, rest_pi) {
+                    return true;
+                }
+                // Or try more matches
+                if extglob_star_match(text, end, alts, pattern, rest_pi) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Find the matching closing ')' for an extglob pattern, handling nesting.
+fn find_extglob_close(pattern: &[char], start: usize) -> Option<usize> {
+    let mut depth = 1;
+    let mut i = start;
+    while i < pattern.len() {
+        if pattern[i] == '('
+            && i > 0
+            && matches!(pattern[i - 1], '@' | '?' | '*' | '+' | '!')
+        {
+            depth += 1;
+        } else if pattern[i] == ')' {
+            depth -= 1;
+            if depth == 0 {
+                return Some(i);
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Split extglob alternatives at top-level '|' characters.
+fn split_extglob_alts(pattern: &[char]) -> Vec<Vec<char>> {
+    let mut alts = Vec::new();
+    let mut current = Vec::new();
+    let mut depth = 0;
+    for &ch in pattern {
+        if ch == '(' {
+            depth += 1;
+            current.push(ch);
+        } else if ch == ')' {
+            depth -= 1;
+            current.push(ch);
+        } else if ch == '|' && depth == 0 {
+            alts.push(std::mem::take(&mut current));
+        } else {
+            current.push(ch);
+        }
+    }
+    alts.push(current);
+    alts
+}
+
 fn pattern_match_impl(text: &[char], ti: usize, pattern: &[char], pi: usize) -> bool {
     let mut ti = ti;
     let mut pi = pi;
 
     while pi < pattern.len() {
+        // Extglob: @(...), ?(...), *(...), +(...), !(...)
+        if pi + 1 < pattern.len()
+            && pattern[pi + 1] == '('
+            && matches!(pattern[pi], '@' | '?' | '*' | '+' | '!')
+        {
+            let op = pattern[pi];
+            if let Some(close) = find_extglob_close(pattern, pi + 2) {
+                let inner: Vec<char> = pattern[pi + 2..close].to_vec();
+                let rest_pi = close + 1;
+                let alts = split_extglob_alts(&inner);
+
+                match op {
+                    '@' => {
+                        // Exactly one match of the alternatives
+                        for alt in &alts {
+                            let mut combined = alt.clone();
+                            combined.extend_from_slice(&pattern[rest_pi..]);
+                            if pattern_match_impl(text, ti, &combined, 0) {
+                                return true;
+                            }
+                        }
+                        return false;
+                    }
+                    '?' => {
+                        // Zero or one match
+                        // Try with zero matches (skip the extglob)
+                        if pattern_match_impl(text, ti, pattern, rest_pi) {
+                            return true;
+                        }
+                        // Try with one match
+                        for alt in &alts {
+                            let mut combined = alt.clone();
+                            combined.extend_from_slice(&pattern[rest_pi..]);
+                            if pattern_match_impl(text, ti, &combined, 0) {
+                                return true;
+                            }
+                        }
+                        return false;
+                    }
+                    '*' => {
+                        return extglob_star_match(text, ti, &alts, pattern, rest_pi);
+                    }
+                    '+' => {
+                        return extglob_plus_match(text, ti, &alts, pattern, rest_pi);
+                    }
+                    '!' => {
+                        // Anything that doesn't match any of the alternatives
+                        // Try all possible lengths of text
+                        for end in ti..=text.len() {
+                            let mut any_match = false;
+                            for alt in &alts {
+                                if pattern_match_impl(&text[ti..end], 0, alt, 0) {
+                                    any_match = true;
+                                    break;
+                                }
+                            }
+                            if !any_match
+                                && pattern_match_impl(text, end, pattern, rest_pi)
+                            {
+                                return true;
+                            }
+                        }
+                        return false;
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        }
+
         match pattern[pi] {
             '*' => {
                 pi += 1;

@@ -1540,11 +1540,110 @@ fn shell_pattern_match(text: &str, pattern: &str) -> bool {
     pattern_match_impl(&t, 0, &p, 0)
 }
 
+fn extglob_star_match_ex(
+    text: &[char], ti: usize, alts: &[Vec<char>], pattern: &[char], rest_pi: usize,
+) -> bool {
+    if pattern_match_impl(text, ti, pattern, rest_pi) { return true; }
+    for alt in alts {
+        for end in ti + 1..=text.len() {
+            if pattern_match_impl(&text[ti..end], 0, alt, 0)
+                && extglob_star_match_ex(text, end, alts, pattern, rest_pi)
+            { return true; }
+        }
+    }
+    false
+}
+
+fn extglob_plus_match_ex(
+    text: &[char], ti: usize, alts: &[Vec<char>], pattern: &[char], rest_pi: usize,
+) -> bool {
+    for alt in alts {
+        for end in ti + 1..=text.len() {
+            if pattern_match_impl(&text[ti..end], 0, alt, 0) {
+                if pattern_match_impl(text, end, pattern, rest_pi) { return true; }
+                if extglob_star_match_ex(text, end, alts, pattern, rest_pi) { return true; }
+            }
+        }
+    }
+    false
+}
+
+fn find_extglob_close_ex(pattern: &[char], start: usize) -> Option<usize> {
+    let mut depth = 1;
+    let mut i = start;
+    while i < pattern.len() {
+        if pattern[i] == '(' && i > 0 && matches!(pattern[i - 1], '@' | '?' | '*' | '+' | '!') {
+            depth += 1;
+        } else if pattern[i] == ')' {
+            depth -= 1;
+            if depth == 0 { return Some(i); }
+        }
+        i += 1;
+    }
+    None
+}
+
+fn split_extglob_alts_ex(pattern: &[char]) -> Vec<Vec<char>> {
+    let mut alts = Vec::new();
+    let mut current = Vec::new();
+    let mut depth = 0;
+    for &ch in pattern {
+        if ch == '(' { depth += 1; current.push(ch); }
+        else if ch == ')' { depth -= 1; current.push(ch); }
+        else if ch == '|' && depth == 0 { alts.push(std::mem::take(&mut current)); }
+        else { current.push(ch); }
+    }
+    alts.push(current);
+    alts
+}
+
 fn pattern_match_impl(text: &[char], ti: usize, pattern: &[char], pi: usize) -> bool {
     let mut ti = ti;
     let mut pi = pi;
 
     while pi < pattern.len() {
+        // Extglob
+        if pi + 1 < pattern.len() && pattern[pi + 1] == '(' && matches!(pattern[pi], '@' | '?' | '*' | '+' | '!') {
+            let op = pattern[pi];
+            if let Some(close) = find_extglob_close_ex(pattern, pi + 2) {
+                let inner: Vec<char> = pattern[pi + 2..close].to_vec();
+                let rest_pi = close + 1;
+                let alts = split_extglob_alts_ex(&inner);
+                match op {
+                    '@' => {
+                        for alt in &alts {
+                            let mut combined = alt.clone();
+                            combined.extend_from_slice(&pattern[rest_pi..]);
+                            if pattern_match_impl(text, ti, &combined, 0) { return true; }
+                        }
+                        return false;
+                    }
+                    '?' => {
+                        if pattern_match_impl(text, ti, pattern, rest_pi) { return true; }
+                        for alt in &alts {
+                            let mut combined = alt.clone();
+                            combined.extend_from_slice(&pattern[rest_pi..]);
+                            if pattern_match_impl(text, ti, &combined, 0) { return true; }
+                        }
+                        return false;
+                    }
+                    '*' => return extglob_star_match_ex(text, ti, &alts, pattern, rest_pi),
+                    '+' => return extglob_plus_match_ex(text, ti, &alts, pattern, rest_pi),
+                    '!' => {
+                        for end in ti..=text.len() {
+                            let mut any_match = false;
+                            for alt in &alts {
+                                if pattern_match_impl(&text[ti..end], 0, alt, 0) { any_match = true; break; }
+                            }
+                            if !any_match && pattern_match_impl(text, end, pattern, rest_pi) { return true; }
+                        }
+                        return false;
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        }
+
         match pattern[pi] {
             '*' => {
                 pi += 1;
