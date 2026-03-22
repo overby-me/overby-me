@@ -316,9 +316,20 @@ impl Shell {
         if let Some(start) = start_time {
             let elapsed = start.elapsed();
             let secs = elapsed.as_secs_f64();
-            eprintln!("real {:.2}", secs);
-            eprintln!("user {:.2}", 0.0f64);
-            eprintln!("sys {:.2}", 0.0f64);
+            if let Some(fmt) = self.vars.get("TIMEFORMAT") {
+                let output = fmt
+                    .replace("%2R", &format!("{:.2}", secs))
+                    .replace("%2U", &format!("{:.2}", 0.0f64))
+                    .replace("%2S", &format!("{:.2}", 0.0f64))
+                    .replace("%R", &format!("{:.3}", secs))
+                    .replace("%U", &format!("{:.3}", 0.0f64))
+                    .replace("%S", &format!("{:.3}", 0.0f64));
+                eprintln!("{}", output);
+            } else {
+                eprintln!("\nreal\t{}m{:.3}s", (secs / 60.0) as u64, secs % 60.0);
+                eprintln!("user\t{}m{:.3}s", 0, 0.0f64);
+                eprintln!("sys\t{}m{:.3}s", 0, 0.0f64);
+            }
         }
 
         status
