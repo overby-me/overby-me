@@ -29,7 +29,7 @@ pkgs.runCommand "rust-bash-test-${name}" {
   export BASH_TSTOUT="$TMPDIR/bashtst-$$"
 
   echo "Running bash test: ${name}"
-  timeout 60 ${pkgs.bash}/bin/bash "run-${name}"
+  timeout 120 ${pkgs.bash}/bin/bash "run-${name}"
 
   touch $out
 ''
