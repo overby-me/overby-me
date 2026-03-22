@@ -1334,6 +1334,7 @@ impl Lexer {
                         // $'...' ANSI-C quoting
                         self.advance();
                         let mut s = String::new();
+                        let mut nul_terminated = false;
                         loop {
                             match self.advance() {
                                 None | Some('\'') => break,
@@ -1360,6 +1361,7 @@ impl Lexer {
                                             }
                                         }
                                         if val == 0 {
+                                            nul_terminated = true;
                                             break; // NUL terminates string
                                         }
                                         s.push(val as char);
@@ -1394,7 +1396,7 @@ impl Lexer {
                                         }
                                         if count > 0 || braced {
                                             if val == 0 {
-                                                // NUL byte terminates the string
+                                                nul_terminated = true;
                                                 break;
                                             }
                                             if let Some(c) = char::from_u32(val) {
@@ -1480,6 +1482,13 @@ impl Lexer {
                                     None => s.push('\\'),
                                 },
                                 Some(c) => s.push(c),
+                            }
+                        }
+                        // If NUL-terminated, skip to closing quote
+                        if nul_terminated {
+                            while let Some(c) = self.peek() {
+                                self.advance();
+                                if c == '\'' { break; }
                             }
                         }
                         parts.push(WordPart::SingleQuoted(s));
