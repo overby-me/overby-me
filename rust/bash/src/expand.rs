@@ -351,7 +351,7 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                                 w_fd
                             }
                         };
-                        out.push(Segment::Unquoted(format!("/dev/fd/{}", fd)));
+                        out.push(Segment::Unquoted(format!("/proc/self/fd/{}", fd)));
                     }
                     Err(e) => {
                         eprintln!("bash: process substitution: {}", e);
