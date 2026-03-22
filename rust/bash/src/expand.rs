@@ -844,7 +844,8 @@ pub fn eval_arith_full(
     match eval_arith(&resolved) {
         Ok(val) => val,
         Err(e) => {
-            let name = positional.first()
+            let name = vars.get("_BASH_SOURCE_FILE")
+                .or_else(|| positional.first())
                 .map(|s| s.as_str())
                 .unwrap_or("bash");
             let lineno = vars.get("LINENO").map(|s| s.as_str()).unwrap_or("0");

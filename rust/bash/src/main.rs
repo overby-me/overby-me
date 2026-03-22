@@ -133,6 +133,15 @@ fn run() -> i32 {
         shell.positional = vec![file.clone()];
     }
 
+    // Set script_name for error messages
+    if let Some(ref file) = script_file {
+        shell.script_name = file.clone();
+    } else if command_string.is_some() {
+        shell.script_name = shell.positional.first().cloned().unwrap_or_else(|| "bash".to_string());
+    }
+    // Store in a special internal variable for error reporting
+    shell.vars.insert("_BASH_SOURCE_FILE".to_string(), shell.script_name.clone());
+
     // Execute based on mode
     if let Some(cmd) = command_string {
         return shell.run_string(&cmd);

@@ -22,6 +22,8 @@ pub struct Shell {
     pub in_condition: bool,
     pub errexit_suppressed: bool,
     pub sourcing: bool,
+    /// The original script file name for error messages (doesn't change with BASH_ARGV0)
+    pub script_name: String,
     pub dir_stack: Vec<String>,
     pub func_names: Vec<String>,
     pub traps: HashMap<String, String>,
@@ -106,6 +108,7 @@ impl Shell {
             in_condition: false,
             errexit_suppressed: false,
             sourcing: false,
+            script_name: String::new(),
             dir_stack: Vec::new(),
             func_names: Vec::new(),
             traps: HashMap::new(),
