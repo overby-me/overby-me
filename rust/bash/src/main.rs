@@ -110,12 +110,25 @@ fn run() -> i32 {
 
     // Set positional parameters
     if let Some(start) = positional_start {
-        shell.positional = vec![
-            args.get(start - 1)
-                .cloned()
-                .unwrap_or_else(|| "bash".to_string()),
-        ];
-        shell.positional.extend(args[start..].to_vec());
+        if command_string.is_some() {
+            // For -c: bash -c 'cmd' arg0 arg1 ... → $0=arg0, $1=arg1, ...
+            shell.positional = vec![
+                args.get(start)
+                    .cloned()
+                    .unwrap_or_else(|| "bash".to_string()),
+            ];
+            if start + 1 < args.len() {
+                shell.positional.extend(args[start + 1..].to_vec());
+            }
+        } else {
+            // For scripts: bash script.sh arg1 ... → $0=script.sh, $1=arg1, ...
+            shell.positional = vec![
+                args.get(start - 1)
+                    .cloned()
+                    .unwrap_or_else(|| "bash".to_string()),
+            ];
+            shell.positional.extend(args[start..].to_vec());
+        }
     } else if let Some(ref file) = script_file {
         shell.positional = vec![file.clone()];
     }
