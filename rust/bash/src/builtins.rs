@@ -313,6 +313,12 @@ fn builtin_printf(_shell: &mut Shell, args: &[String]) -> i32 {
                         print!("{:o}", n);
                         arg_idx += 1;
                     }
+                    Some('b') => {
+                        let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("");
+                        let expanded = interpret_echo_escapes(arg);
+                        print!("{}", expanded);
+                        arg_idx += 1;
+                    }
                     Some('q') => {
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("");
                         print!("{}", shell_escape(arg));
