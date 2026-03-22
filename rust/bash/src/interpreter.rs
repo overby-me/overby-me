@@ -314,9 +314,9 @@ impl Shell {
         if let Some(start) = start_time {
             let elapsed = start.elapsed();
             let secs = elapsed.as_secs_f64();
-            eprintln!("\nreal\t{:.2}", secs);
-            eprintln!("user\t{:.2}", 0.0f64);
-            eprintln!("sys\t{:.2}", 0.0f64);
+            eprintln!("real {:.2}", secs);
+            eprintln!("user {:.2}", 0.0f64);
+            eprintln!("sys {:.2}", 0.0f64);
         }
 
         status
