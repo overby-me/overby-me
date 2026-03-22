@@ -233,6 +233,7 @@
         ./rust/grep
         ./rust/sed
         ./rust/make
+        ./rust/meson
         ./rust/gzip
         ./rust/h264toav1
         ./rust/patch

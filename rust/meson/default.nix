@@ -25,4 +25,7 @@
         mainProgram = "meson";
       };
     };
+
+  checks.rust-meson-hello-world = pkgs:
+    import ./hello-world-test.nix {inherit pkgs;};
 }
