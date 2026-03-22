@@ -976,8 +976,18 @@ impl Lexer {
                                         }
                                         Some('\\') => {
                                             self.advance();
-                                            if let Some(c) = self.advance() {
-                                                cmd.push(c);
+                                            match self.peek() {
+                                                // Only these chars are special after \ in double-quoted backtick
+                                                Some(c @ ('$' | '\\' | '`' | '"')) => {
+                                                    cmd.push(c);
+                                                    self.advance();
+                                                }
+                                                Some(c) => {
+                                                    cmd.push('\\');
+                                                    cmd.push(c);
+                                                    self.advance();
+                                                }
+                                                None => cmd.push('\\'),
                                             }
                                         }
                                         Some(c) => {
