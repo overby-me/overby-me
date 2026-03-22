@@ -253,7 +253,7 @@ impl Shell {
     pub fn run_program(&mut self, program: &Program) -> i32 {
         let mut status = 0;
         for cmd in program {
-            if self.returning || self.breaking > 0 {
+            if self.returning || self.breaking > 0 || self.continuing > 0 {
                 break;
             }
             status = self.run_complete_command(cmd);
@@ -314,6 +314,10 @@ impl Shell {
         let mut last_ran_in_condition = has_rest; // first pipeline is in condition if has_rest
 
         for (i, (op, pipeline)) in list.rest.iter().enumerate() {
+            // Check for break/continue/return from previous command
+            if self.breaking > 0 || self.continuing > 0 || self.returning {
+                break;
+            }
             let is_last = i == list.rest.len() - 1;
             if is_last {
                 self.in_condition = saved;
@@ -1542,10 +1546,6 @@ impl Shell {
                 self.breaking -= 1;
                 break;
             }
-            if self.continuing > 0 {
-                self.continuing -= 1;
-                continue;
-            }
 
             self.vars.insert(clause.var.clone(), item);
             // Loop body commands should not trigger errexit individually
@@ -1556,6 +1556,10 @@ impl Shell {
 
             if self.returning {
                 break;
+            }
+            if self.continuing > 0 {
+                self.continuing -= 1;
+                // continue to next iteration
             }
         }
 
@@ -1613,11 +1617,6 @@ impl Shell {
                 break;
             }
 
-            if self.continuing > 0 {
-                self.continuing -= 1;
-                continue;
-            }
-
             let saved_condition = self.in_condition;
             self.in_condition = true;
             status = self.run_program(&clause.body);
@@ -1625,6 +1624,10 @@ impl Shell {
 
             if self.returning {
                 break;
+            }
+            if self.continuing > 0 {
+                self.continuing -= 1;
+                // continue to next iteration (re-evaluate condition)
             }
         }
         status
