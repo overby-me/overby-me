@@ -1226,7 +1226,14 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
             "-n" | "-N" => {
                 i += 1;
                 if i < args.len() {
-                    nchars = args[i].parse().ok();
+                    match args[i].parse::<isize>() {
+                        Ok(n) if n >= 0 => nchars = Some(n as usize),
+                        Ok(_) => {
+                            eprintln!("bash: read: {}: invalid number", args[i]);
+                            return 2;
+                        }
+                        Err(_) => nchars = Some(0),
+                    }
                 }
             }
             "-t" => {
