@@ -147,7 +147,7 @@ impl Shell {
             shell
                 .arrays
                 .insert("GROUPS".to_string(), vec![gid.to_string()]);
-            shell.readonly_vars.insert("GROUPS".to_string());
+            // GROUPS is noassign (silently ignored, not readonly)
         }
 
         shell
@@ -920,6 +920,25 @@ impl Shell {
     }
 
     pub fn execute_assignment(&mut self, assign: &Assignment) {
+        // Extract base name (before [subscript])
+        let base_name = if let Some(bracket) = assign.name.find('[') {
+            &assign.name[..bracket]
+        } else {
+            &assign.name
+        };
+        let resolved_base = self.resolve_nameref(base_name);
+        // Noassign variables: silently ignore assignments
+        if matches!(resolved_base.as_str(), "GROUPS" | "FUNCNAME" | "DIRSTACK") {
+            return;
+        }
+        if self.readonly_vars.contains(&resolved_base) {
+            eprintln!(
+                "{}: {}: readonly variable",
+                self.positional.first().map(|s| s.as_str()).unwrap_or("bash"),
+                assign.name
+            );
+            return;
+        }
         match &assign.value {
             AssignValue::None => {
                 let resolved = self.resolve_nameref(&assign.name);
