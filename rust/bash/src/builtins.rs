@@ -1540,7 +1540,34 @@ fn builtin_eval(shell: &mut Shell, args: &[String]) -> i32 {
     let command = args.join(" ");
     // Save procsub fds so inner run_simple_command calls don't close them
     let saved_fds = crate::expand::take_procsub_fds();
-    let result = shell.run_string(&command);
+
+    // Parse and check for leftover tokens (eval-specific)
+    let mut parser = crate::parser::Parser::new(&command);
+    let result = match parser.parse_program() {
+        Ok(program) => {
+            if !parser.is_at_eof() {
+                let token_desc = parser.current_token_str();
+                let name = shell
+                    .positional
+                    .first()
+                    .map(|s| s.as_str())
+                    .unwrap_or("bash");
+                eprintln!(
+                    "{}: eval: syntax error near unexpected token `{}'",
+                    name, token_desc
+                );
+                eprintln!("{}: eval: `{}'", name, command.trim());
+                2
+            } else {
+                shell.run_program(&program)
+            }
+        }
+        Err(e) => {
+            eprintln!("bash: eval: {}", e);
+            2
+        }
+    };
+
     // Restore saved fds (they'll be closed by the caller)
     for fd in saved_fds {
         crate::expand::register_procsub_fd_pub(fd);

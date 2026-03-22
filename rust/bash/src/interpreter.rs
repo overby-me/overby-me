@@ -216,21 +216,6 @@ impl Shell {
         let mut parser = Parser::new(input);
         match parser.parse_program() {
             Ok(program) => {
-                if !parser.is_at_eof() {
-                    let token_desc = parser.current_token_str();
-                    let name = self
-                        .positional
-                        .first()
-                        .map(|s| s.as_str())
-                        .unwrap_or("bash");
-                    eprintln!(
-                        "{}: eval: syntax error near unexpected token `{}'",
-                        name, token_desc
-                    );
-                    // Show the offending source line
-                    eprintln!("{}: eval: `{}'", name, input.trim());
-                    return 2;
-                }
                 if self.opt_noexec {
                     return 0;
                 }
