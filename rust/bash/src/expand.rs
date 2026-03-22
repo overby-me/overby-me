@@ -7,8 +7,12 @@ pub type CmdSubFn<'a> = &'a mut dyn FnMut(&str) -> String;
 /// Represents expanded text with quoting information preserved.
 #[derive(Debug, Clone)]
 pub enum Segment {
+    /// Text from quotes — no IFS splitting, no glob expansion
     Quoted(String),
+    /// Text from expansions ($var, $(cmd), etc.) — subject to IFS splitting and glob expansion
     Unquoted(String),
+    /// Literal text (not from quotes or expansions) — no IFS splitting, but glob expansion applies
+    Literal(String),
     /// A field separator — forces a word split here (for "$@" and "${arr[@]}")
     SplitHere,
 }
@@ -87,7 +91,7 @@ pub fn expand_word_nosplit(
     segments
         .iter()
         .map(|s| match s {
-            Segment::Quoted(t) | Segment::Unquoted(t) => t.as_str(),
+            Segment::Quoted(t) | Segment::Unquoted(t) | Segment::Literal(t) => t.as_str(),
             Segment::SplitHere => " ",
         })
         .collect()
@@ -150,8 +154,8 @@ fn expand_word_to_segments(word: &Word, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> Vec<
 fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: CmdSubFn) {
     match part {
         WordPart::Literal(s) => {
-            // Literal text is not subject to IFS word splitting
-            out.push(Segment::Quoted(s.clone()));
+            // Literal text: not IFS-split, but glob expansion applies
+            out.push(Segment::Literal(s.clone()));
         }
         WordPart::SingleQuoted(s) => {
             out.push(Segment::Quoted(s.clone()));
@@ -208,7 +212,7 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                         expand_part(p, ctx, &mut inner, cmd_sub);
                         for seg in inner {
                             match seg {
-                                Segment::Quoted(t) | Segment::Unquoted(t) => s.push_str(&t),
+                                Segment::Quoted(t) | Segment::Unquoted(t) | Segment::Literal(t) => s.push_str(&t),
                                 Segment::SplitHere => {
                                     out.push(Segment::Quoted(std::mem::take(&mut s)));
                                     out.push(Segment::SplitHere);
@@ -726,7 +730,7 @@ fn expand_word_nosplit_ctx(word: &Word, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> Stri
     segments
         .iter()
         .map(|s| match s {
-            Segment::Quoted(t) | Segment::Unquoted(t) => t.as_str(),
+            Segment::Quoted(t) | Segment::Unquoted(t) | Segment::Literal(t) => t.as_str(),
             Segment::SplitHere => " ",
         })
         .collect()
@@ -1072,6 +1076,40 @@ fn rfind_op(expr: &str, op: &str) -> Option<usize> {
     result
 }
 
+/// Escape glob metacharacters in quoted text so they are treated literally.
+/// Uses \x00 as escape prefix (cannot appear in normal shell text).
+fn quote_glob_chars(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        if matches!(ch, '*' | '?' | '[' | ']') {
+            out.push('\x00');
+        }
+        out.push(ch);
+    }
+    out
+}
+
+/// Remove the \x00 escape prefixes added by quote_glob_chars.
+pub fn unquote_glob_chars(s: &str) -> String {
+    s.replace('\x00', "")
+}
+
+/// Returns true if the string contains unescaped glob metacharacters.
+fn has_glob_chars(s: &str) -> bool {
+    let mut prev_null = false;
+    for ch in s.chars() {
+        if ch == '\x00' {
+            prev_null = true;
+            continue;
+        }
+        if matches!(ch, '*' | '?' | '[') && !prev_null {
+            return true;
+        }
+        prev_null = false;
+    }
+    false
+}
+
 fn word_split(segments: &[Segment], ifs: &str) -> Vec<String> {
     if segments.is_empty() {
         return vec![];
@@ -1079,13 +1117,17 @@ fn word_split(segments: &[Segment], ifs: &str) -> Vec<String> {
 
     // Check if there are any SplitHere markers or unquoted segments
     let has_split = segments.iter().any(|s| matches!(s, Segment::SplitHere));
-    let all_quoted = segments.iter().all(|s| matches!(s, Segment::Quoted(_)));
-    if all_quoted && !has_split {
+    let all_nosplit = segments
+        .iter()
+        .all(|s| matches!(s, Segment::Quoted(_) | Segment::Literal(_)));
+    if all_nosplit && !has_split {
         let s: String = segments
             .iter()
             .map(|seg| match seg {
-                Segment::Quoted(t) | Segment::Unquoted(t) => t.as_str(),
-                Segment::SplitHere => "",
+                Segment::Quoted(t) => quote_glob_chars(t),
+                Segment::Literal(t) => t.clone(),
+                Segment::Unquoted(t) => t.clone(),
+                Segment::SplitHere => String::new(),
             })
             .collect();
         return vec![s];
@@ -1103,6 +1145,11 @@ fn word_split(segments: &[Segment], ifs: &str) -> Vec<String> {
                 in_field = false;
             }
             Segment::Quoted(s) => {
+                current.push_str(&quote_glob_chars(s));
+                in_field = true;
+            }
+            Segment::Literal(s) => {
+                // Literal text: not IFS-split, glob chars preserved
                 current.push_str(s);
                 in_field = true;
             }
@@ -1274,24 +1321,43 @@ fn split_brace_alternatives(s: &str) -> Vec<String> {
 }
 
 fn glob_expand(field: &str) -> Vec<String> {
-    if field.contains('*') || field.contains('?') || field.contains('[') {
-        match glob::glob(field) {
+    // Only glob if there are unescaped (unquoted) glob metacharacters
+    if has_glob_chars(field) {
+        // Strip the \x00 escape markers before globbing — the quoted chars
+        // have already been accounted for by not reaching here if all were quoted.
+        // We need to build a glob pattern where quoted metacharacters are escaped
+        // with [] bracket quoting so the glob crate treats them literally.
+        let mut pattern = String::with_capacity(field.len());
+        let mut chars = field.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if ch == '\x00' {
+                // Next char is a quoted glob char — escape it for glob
+                if let Some(next) = chars.next() {
+                    pattern.push('[');
+                    pattern.push(next);
+                    pattern.push(']');
+                }
+            } else {
+                pattern.push(ch);
+            }
+        }
+        match glob::glob(&pattern) {
             Ok(paths) => {
                 let mut results: Vec<String> = paths
                     .filter_map(|p| p.ok())
                     .map(|p| p.to_string_lossy().to_string())
                     .collect();
                 if results.is_empty() {
-                    vec![field.to_string()]
+                    vec![unquote_glob_chars(field)]
                 } else {
                     results.sort();
                     results
                 }
             }
-            Err(_) => vec![field.to_string()],
+            Err(_) => vec![unquote_glob_chars(field)],
         }
     } else {
-        vec![field.to_string()]
+        vec![unquote_glob_chars(field)]
     }
 }
 

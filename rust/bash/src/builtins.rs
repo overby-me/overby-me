@@ -718,10 +718,17 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
     }
 
     // Normal declare: set variables
+    // In a function context, declare/typeset creates local variables (unless -g)
+    let make_local = !flag_global && !shell.local_scopes.is_empty();
+
     for name_arg in &names {
         if let Some(eq_pos) = name_arg.find('=') {
             let name = &name_arg[..eq_pos];
             let value = &name_arg[eq_pos + 1..];
+
+            if make_local {
+                shell.declare_local(name);
+            }
 
             if flag_nameref {
                 shell.namerefs.insert(name.to_string(), value.to_string());
@@ -750,6 +757,9 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             }
         } else {
             let name = name_arg.as_str();
+            if make_local {
+                shell.declare_local(name);
+            }
             if flag_nameref {
                 shell.namerefs.entry(name.to_string()).or_default();
             } else if flag_assoc {
