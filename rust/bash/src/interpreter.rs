@@ -1423,7 +1423,11 @@ impl Shell {
             }
 
             self.vars.insert(clause.var.clone(), item);
+            // Loop body commands should not trigger errexit individually
+            let saved_condition = self.in_condition;
+            self.in_condition = true;
             status = self.run_program(&clause.body);
+            self.in_condition = saved_condition;
 
             if self.returning {
                 break;
@@ -1486,7 +1490,10 @@ impl Shell {
                 continue;
             }
 
+            let saved_condition = self.in_condition;
+            self.in_condition = true;
             status = self.run_program(&clause.body);
+            self.in_condition = saved_condition;
 
             if self.returning {
                 break;
@@ -1513,7 +1520,10 @@ impl Shell {
                 continue;
             }
 
+            let saved_condition = self.in_condition;
+            self.in_condition = true;
             status = self.run_program(&clause.body);
+            self.in_condition = saved_condition;
 
             if self.returning {
                 break;
