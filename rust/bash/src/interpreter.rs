@@ -310,6 +310,7 @@ impl Shell {
             self.in_condition = true;
         }
         let mut status = self.run_pipeline(&list.first);
+        let mut last_ran_in_condition = has_rest; // first pipeline is in condition if has_rest
 
         for (i, (op, pipeline)) in list.rest.iter().enumerate() {
             let is_last = i == list.rest.len() - 1;
@@ -320,21 +321,24 @@ impl Shell {
                 AndOr::And => {
                     if status == 0 {
                         status = self.run_pipeline(pipeline);
+                        last_ran_in_condition = !is_last;
                     }
+                    // If skipped (status != 0), the status is from a condition command
                 }
                 AndOr::Or => {
                     if status != 0 {
                         status = self.run_pipeline(pipeline);
+                        last_ran_in_condition = !is_last;
                     }
+                    // If skipped (status == 0), not a failure
                 }
             }
         }
 
         self.in_condition = saved;
 
-        // If the AND/OR list had rest items and the non-zero status came
-        // from a condition-position command (not the last executed), suppress errexit
-        if has_rest && status != 0 {
+        // Only suppress errexit if the failing status came from a condition-position command
+        if has_rest && status != 0 && last_ran_in_condition {
             self.errexit_suppressed = true;
         }
 
