@@ -2109,6 +2109,15 @@ fn pattern_match_impl(text: &[char], ti: usize, pattern: &[char], pi: usize) -> 
                 let mut matched = false;
                 let ch = text[ti];
                 while pi < pattern.len() && pattern[pi] != ']' {
+                    // Handle backslash escape inside bracket
+                    if pattern[pi] == '\\' && pi + 1 < pattern.len() {
+                        pi += 1; // skip backslash
+                        if pattern[pi] == ch {
+                            matched = true;
+                        }
+                        pi += 1;
+                        continue;
+                    }
                     // POSIX character class: [:class:]
                     if pi + 1 < pattern.len() && pattern[pi] == '[' && pattern[pi + 1] == ':' {
                         // Find closing :]
