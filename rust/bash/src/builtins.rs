@@ -30,6 +30,7 @@ pub fn builtins() -> HashMap<&'static str, BuiltinFn> {
     map.insert("source", builtin_source);
     map.insert(".", builtin_source);
     map.insert("type", builtin_type);
+    map.insert("builtin", builtin_builtin);
     map.insert("command", builtin_command);
     map.insert("which", builtin_which);
     map.insert("hash", builtin_hash);
@@ -1795,6 +1796,29 @@ fn builtin_type(shell: &mut Shell, args: &[String]) -> i32 {
         }
     }
     status
+}
+
+fn builtin_builtin(shell: &mut Shell, args: &[String]) -> i32 {
+    if args.is_empty() {
+        return 0;
+    }
+    let builtin_map = builtins();
+    let name = &args[0];
+    if let Some(func) = builtin_map.get(name.as_str()) {
+        func(shell, &args[1..])
+    } else {
+        eprintln!(
+            "{}: builtin: {}: not a shell builtin",
+            shell
+                .vars
+                .get("_BASH_SOURCE_FILE")
+                .or_else(|| shell.positional.first())
+                .map(|s| s.as_str())
+                .unwrap_or("bash"),
+            name
+        );
+        1
+    }
 }
 
 fn builtin_command(_shell: &mut Shell, args: &[String]) -> i32 {
