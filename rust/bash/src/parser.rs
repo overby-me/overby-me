@@ -589,11 +589,29 @@ impl Parser {
         {
             let op = text;
             self.advance();
-            // For =~ (regex match) and == != (glob match), read the pattern as raw text
-            // since it can contain ( ) | and other chars that are normally special tokens
-            // (e.g., extglob patterns like +(foo|bar)).
-            let right = if op == "=~" || op == "==" || op == "!=" || op == "=" {
+            // For =~ (regex match), read the pattern as raw text.
+            // For == != = (glob match), try normal word first but handle
+            // extglob patterns by backtracking if LParen follows.
+            let right = if op == "=~" {
                 self.read_cond_pattern()?
+            } else if op == "==" || op == "!=" || op == "=" {
+                // Save state to backtrack if extglob
+                let saved_lexer = self.lexer.save_position();
+                let saved_tok = self.current.clone();
+                if let Some(word) = self.take_word() {
+                    if self.current == Token::LParen {
+                        // This is an extglob pattern like +(foo) — backtrack
+                        self.lexer.restore_position(saved_lexer);
+                        self.current = saved_tok;
+                        self.read_cond_pattern()?
+                    } else {
+                        word
+                    }
+                } else if matches!(self.current, Token::LParen) {
+                    self.read_cond_pattern()?
+                } else {
+                    return Err(format!("expected operand after '{}'", op));
+                }
             } else {
                 self.take_word()
                     .ok_or_else(|| format!("expected operand after '{}'", op))?
