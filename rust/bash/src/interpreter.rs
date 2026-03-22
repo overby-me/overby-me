@@ -182,11 +182,10 @@ impl Shell {
             unsafe { std::env::set_var(&resolved, &value) };
         }
         // BASH_ARGV0 updates $0
-        if resolved == "BASH_ARGV0" {
-            if !self.positional.is_empty() {
+        if resolved == "BASH_ARGV0"
+            && !self.positional.is_empty() {
                 self.positional[0] = value.clone();
             }
-        }
         self.vars.insert(resolved, value);
     }
 
@@ -219,7 +218,17 @@ impl Shell {
             Ok(program) => {
                 if !parser.is_at_eof() {
                     let token_desc = parser.current_token_str();
-                    eprintln!("bash: eval: syntax error near unexpected token `{}'", token_desc);
+                    let name = self
+                        .positional
+                        .first()
+                        .map(|s| s.as_str())
+                        .unwrap_or("bash");
+                    eprintln!(
+                        "{}: eval: syntax error near unexpected token `{}'",
+                        name, token_desc
+                    );
+                    // Show the offending source line
+                    eprintln!("{}: eval: `{}'", name, input.trim());
                     return 2;
                 }
                 if self.opt_noexec {
@@ -450,24 +459,22 @@ impl Shell {
                 std::io::Write::flush(&mut std::io::stdout()).ok();
                 match unsafe { nix::unistd::fork() } {
                     Ok(nix::unistd::ForkResult::Child) => {
-                        if let Some(fd) = prev_read_fd {
-                            if fd != 0 {
+                        if let Some(fd) = prev_read_fd
+                            && fd != 0 {
                                 nix::unistd::dup2(fd, 0).ok();
                                 nix::unistd::close(fd).ok();
                             }
                             // If fd == 0, it's already stdin (pipe read end assigned to fd 0)
-                        }
                         if let Some(fd) = write_fd {
                             nix::unistd::dup2(fd, 1).ok();
                             if fd != 1 {
                                 nix::unistd::close(fd).ok();
                             }
                         }
-                        if let Some(fd) = read_fd {
-                            if fd != 0 && fd != 1 {
+                        if let Some(fd) = read_fd
+                            && fd != 0 && fd != 1 {
                                 nix::unistd::close(fd).ok();
                             }
-                        }
 
                         let status = self.run_command(cmd);
                         std::io::stdout().flush().ok();
@@ -846,9 +853,20 @@ impl Shell {
             // In POSIX mode, prefix assignments to special builtins persist
             let is_special = matches!(
                 command_name.as_str(),
-                "break" | "." | "source" | "continue" | "eval" | "exec"
-                    | "exit" | "export" | "readonly" | "return" | "set"
-                    | "shift" | "trap" | "unset"
+                "break"
+                    | "."
+                    | "source"
+                    | "continue"
+                    | "eval"
+                    | "exec"
+                    | "exit"
+                    | "export"
+                    | "readonly"
+                    | "return"
+                    | "set"
+                    | "shift"
+                    | "trap"
+                    | "unset"
             );
             if !expanded_words.is_empty() && !(self.opt_posix && is_special) {
                 for (k, old) in saved {
@@ -1885,10 +1903,7 @@ fn find_extglob_close(pattern: &[char], start: usize) -> Option<usize> {
     let mut depth = 1;
     let mut i = start;
     while i < pattern.len() {
-        if pattern[i] == '('
-            && i > 0
-            && matches!(pattern[i - 1], '@' | '?' | '*' | '+' | '!')
-        {
+        if pattern[i] == '(' && i > 0 && matches!(pattern[i - 1], '@' | '?' | '*' | '+' | '!') {
             depth += 1;
         } else if pattern[i] == ')' {
             depth -= 1;
@@ -1984,9 +1999,7 @@ fn pattern_match_impl(text: &[char], ti: usize, pattern: &[char], pi: usize) -> 
                                     break;
                                 }
                             }
-                            if !any_match
-                                && pattern_match_impl(text, end, pattern, rest_pi)
-                            {
+                            if !any_match && pattern_match_impl(text, end, pattern, rest_pi) {
                                 return true;
                             }
                         }
@@ -2034,21 +2047,18 @@ fn pattern_match_impl(text: &[char], ti: usize, pattern: &[char], pi: usize) -> 
                 let ch = text[ti];
                 while pi < pattern.len() && pattern[pi] != ']' {
                     // POSIX character class: [:class:]
-                    if pi + 1 < pattern.len()
-                        && pattern[pi] == '['
-                        && pattern[pi + 1] == ':'
-                    {
+                    if pi + 1 < pattern.len() && pattern[pi] == '[' && pattern[pi + 1] == ':' {
                         // Find closing :]
-                        if let Some(end) = pattern[pi + 2..]
-                            .iter()
-                            .position(|&c| c == ':')
-                            .filter(|&pos| {
-                                pi + 2 + pos + 1 < pattern.len()
-                                    && pattern[pi + 2 + pos + 1] == ']'
-                            })
+                        if let Some(end) =
+                            pattern[pi + 2..]
+                                .iter()
+                                .position(|&c| c == ':')
+                                .filter(|&pos| {
+                                    pi + 2 + pos + 1 < pattern.len()
+                                        && pattern[pi + 2 + pos + 1] == ']'
+                                })
                         {
-                            let class_name: String =
-                                pattern[pi + 2..pi + 2 + end].iter().collect();
+                            let class_name: String = pattern[pi + 2..pi + 2 + end].iter().collect();
                             let in_class = match class_name.as_str() {
                                 "alpha" => ch.is_alphabetic(),
                                 "digit" => ch.is_ascii_digit(),
@@ -2071,8 +2081,7 @@ fn pattern_match_impl(text: &[char], ti: usize, pattern: &[char], pi: usize) -> 
                             continue;
                         }
                     }
-                    if pi + 2 < pattern.len() && pattern[pi + 1] == '-' && pattern[pi + 2] != ']'
-                    {
+                    if pi + 2 < pattern.len() && pattern[pi + 1] == '-' && pattern[pi + 2] != ']' {
                         if ch >= pattern[pi] && ch <= pattern[pi + 2] {
                             matched = true;
                         }

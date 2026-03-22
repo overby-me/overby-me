@@ -8,7 +8,7 @@ pub type CmdSubFn<'a> = &'a mut dyn FnMut(&str) -> String;
 thread_local! {
     /// File descriptors opened by process substitutions that need to be closed
     /// after the command using them completes.
-    static PROCSUB_FDS: RefCell<Vec<i32>> = RefCell::new(Vec::new());
+    static PROCSUB_FDS: RefCell<Vec<i32>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Take all pending process substitution fds (draining the list).
@@ -77,7 +77,9 @@ pub fn expand_word(
         // Check if word contains "$@" or "${arr[@]}" which expand to nothing with 0 elements
         let has_at_expansion = word.iter().any(|p| {
             if let WordPart::DoubleQuoted(parts) = p {
-                parts.iter().any(|inner| matches!(inner, WordPart::Variable(n) if n == "@"))
+                parts
+                    .iter()
+                    .any(|inner| matches!(inner, WordPart::Variable(n) if n == "@"))
             } else {
                 false
             }
@@ -243,7 +245,9 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                         expand_part(p, ctx, &mut inner, cmd_sub);
                         for seg in inner {
                             match seg {
-                                Segment::Quoted(t) | Segment::Unquoted(t) | Segment::Literal(t) => s.push_str(&t),
+                                Segment::Quoted(t) | Segment::Unquoted(t) | Segment::Literal(t) => {
+                                    s.push_str(&t)
+                                }
                                 Segment::SplitHere => {
                                     out.push(Segment::Quoted(std::mem::take(&mut s)));
                                     out.push(Segment::SplitHere);
@@ -1280,11 +1284,10 @@ fn char_matches_pattern(c: char, pattern: &str) -> bool {
         while let Some(ch) = chars.next() {
             if chars.peek() == Some(&'-') {
                 chars.next(); // consume '-'
-                if let Some(end) = chars.next() {
-                    if c >= ch && c <= end {
+                if let Some(end) = chars.next()
+                    && c >= ch && c <= end {
                         found = true;
                     }
-                }
             } else if ch == c {
                 found = true;
             }
@@ -1292,7 +1295,9 @@ fn char_matches_pattern(c: char, pattern: &str) -> bool {
         return if negate { !found } else { found };
     }
     // Literal pattern: match case-insensitively (pattern char matches this char)
-    pattern.chars().any(|p| p == c || p.to_lowercase().eq(c.to_lowercase()))
+    pattern
+        .chars()
+        .any(|p| p == c || p.to_lowercase().eq(c.to_lowercase()))
 }
 
 /// Brace expansion: {a,b,c} → ["a", "b", "c"], pre{a,b}post → ["preapost", "prebpost"]
@@ -1564,27 +1569,43 @@ fn shell_pattern_match(text: &str, pattern: &str) -> bool {
 }
 
 fn extglob_star_match_ex(
-    text: &[char], ti: usize, alts: &[Vec<char>], pattern: &[char], rest_pi: usize,
+    text: &[char],
+    ti: usize,
+    alts: &[Vec<char>],
+    pattern: &[char],
+    rest_pi: usize,
 ) -> bool {
-    if pattern_match_impl(text, ti, pattern, rest_pi) { return true; }
+    if pattern_match_impl(text, ti, pattern, rest_pi) {
+        return true;
+    }
     for alt in alts {
         for end in ti + 1..=text.len() {
             if pattern_match_impl(&text[ti..end], 0, alt, 0)
                 && extglob_star_match_ex(text, end, alts, pattern, rest_pi)
-            { return true; }
+            {
+                return true;
+            }
         }
     }
     false
 }
 
 fn extglob_plus_match_ex(
-    text: &[char], ti: usize, alts: &[Vec<char>], pattern: &[char], rest_pi: usize,
+    text: &[char],
+    ti: usize,
+    alts: &[Vec<char>],
+    pattern: &[char],
+    rest_pi: usize,
 ) -> bool {
     for alt in alts {
         for end in ti + 1..=text.len() {
             if pattern_match_impl(&text[ti..end], 0, alt, 0) {
-                if pattern_match_impl(text, end, pattern, rest_pi) { return true; }
-                if extglob_star_match_ex(text, end, alts, pattern, rest_pi) { return true; }
+                if pattern_match_impl(text, end, pattern, rest_pi) {
+                    return true;
+                }
+                if extglob_star_match_ex(text, end, alts, pattern, rest_pi) {
+                    return true;
+                }
             }
         }
     }
@@ -1599,7 +1620,9 @@ fn find_extglob_close_ex(pattern: &[char], start: usize) -> Option<usize> {
             depth += 1;
         } else if pattern[i] == ')' {
             depth -= 1;
-            if depth == 0 { return Some(i); }
+            if depth == 0 {
+                return Some(i);
+            }
         }
         i += 1;
     }
@@ -1611,10 +1634,17 @@ fn split_extglob_alts_ex(pattern: &[char]) -> Vec<Vec<char>> {
     let mut current = Vec::new();
     let mut depth = 0;
     for &ch in pattern {
-        if ch == '(' { depth += 1; current.push(ch); }
-        else if ch == ')' { depth -= 1; current.push(ch); }
-        else if ch == '|' && depth == 0 { alts.push(std::mem::take(&mut current)); }
-        else { current.push(ch); }
+        if ch == '(' {
+            depth += 1;
+            current.push(ch);
+        } else if ch == ')' {
+            depth -= 1;
+            current.push(ch);
+        } else if ch == '|' && depth == 0 {
+            alts.push(std::mem::take(&mut current));
+        } else {
+            current.push(ch);
+        }
     }
     alts.push(current);
     alts
@@ -1626,7 +1656,10 @@ fn pattern_match_impl(text: &[char], ti: usize, pattern: &[char], pi: usize) -> 
 
     while pi < pattern.len() {
         // Extglob
-        if pi + 1 < pattern.len() && pattern[pi + 1] == '(' && matches!(pattern[pi], '@' | '?' | '*' | '+' | '!') {
+        if pi + 1 < pattern.len()
+            && pattern[pi + 1] == '('
+            && matches!(pattern[pi], '@' | '?' | '*' | '+' | '!')
+        {
             let op = pattern[pi];
             if let Some(close) = find_extglob_close_ex(pattern, pi + 2) {
                 let inner: Vec<char> = pattern[pi + 2..close].to_vec();
@@ -1637,16 +1670,22 @@ fn pattern_match_impl(text: &[char], ti: usize, pattern: &[char], pi: usize) -> 
                         for alt in &alts {
                             let mut combined = alt.clone();
                             combined.extend_from_slice(&pattern[rest_pi..]);
-                            if pattern_match_impl(text, ti, &combined, 0) { return true; }
+                            if pattern_match_impl(text, ti, &combined, 0) {
+                                return true;
+                            }
                         }
                         return false;
                     }
                     '?' => {
-                        if pattern_match_impl(text, ti, pattern, rest_pi) { return true; }
+                        if pattern_match_impl(text, ti, pattern, rest_pi) {
+                            return true;
+                        }
                         for alt in &alts {
                             let mut combined = alt.clone();
                             combined.extend_from_slice(&pattern[rest_pi..]);
-                            if pattern_match_impl(text, ti, &combined, 0) { return true; }
+                            if pattern_match_impl(text, ti, &combined, 0) {
+                                return true;
+                            }
                         }
                         return false;
                     }
@@ -1656,9 +1695,14 @@ fn pattern_match_impl(text: &[char], ti: usize, pattern: &[char], pi: usize) -> 
                         for end in ti..=text.len() {
                             let mut any_match = false;
                             for alt in &alts {
-                                if pattern_match_impl(&text[ti..end], 0, alt, 0) { any_match = true; break; }
+                                if pattern_match_impl(&text[ti..end], 0, alt, 0) {
+                                    any_match = true;
+                                    break;
+                                }
                             }
-                            if !any_match && pattern_match_impl(text, end, pattern, rest_pi) { return true; }
+                            if !any_match && pattern_match_impl(text, end, pattern, rest_pi) {
+                                return true;
+                            }
                         }
                         return false;
                     }
@@ -1704,20 +1748,17 @@ fn pattern_match_impl(text: &[char], ti: usize, pattern: &[char], pi: usize) -> 
                 let ch = text[ti];
                 while pi < pattern.len() && pattern[pi] != ']' {
                     // POSIX character class: [:class:]
-                    if pi + 1 < pattern.len()
-                        && pattern[pi] == '['
-                        && pattern[pi + 1] == ':'
-                    {
-                        if let Some(end) = pattern[pi + 2..]
-                            .iter()
-                            .position(|&c| c == ':')
-                            .filter(|&pos| {
-                                pi + 2 + pos + 1 < pattern.len()
-                                    && pattern[pi + 2 + pos + 1] == ']'
-                            })
+                    if pi + 1 < pattern.len() && pattern[pi] == '[' && pattern[pi + 1] == ':'
+                        && let Some(end) =
+                            pattern[pi + 2..]
+                                .iter()
+                                .position(|&c| c == ':')
+                                .filter(|&pos| {
+                                    pi + 2 + pos + 1 < pattern.len()
+                                        && pattern[pi + 2 + pos + 1] == ']'
+                                })
                         {
-                            let class_name: String =
-                                pattern[pi + 2..pi + 2 + end].iter().collect();
+                            let class_name: String = pattern[pi + 2..pi + 2 + end].iter().collect();
                             let in_class = match class_name.as_str() {
                                 "alpha" => ch.is_alphabetic(),
                                 "digit" => ch.is_ascii_digit(),
@@ -1739,9 +1780,7 @@ fn pattern_match_impl(text: &[char], ti: usize, pattern: &[char], pi: usize) -> 
                             pi = pi + 2 + end + 2;
                             continue;
                         }
-                    }
-                    if pi + 2 < pattern.len() && pattern[pi + 1] == '-' && pattern[pi + 2] != ']'
-                    {
+                    if pi + 2 < pattern.len() && pattern[pi + 1] == '-' && pattern[pi + 2] != ']' {
                         if ch >= pattern[pi] && ch <= pattern[pi + 2] {
                             matched = true;
                         }

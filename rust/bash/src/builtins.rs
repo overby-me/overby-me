@@ -1061,9 +1061,7 @@ fn builtin_return(shell: &mut Shell, args: &[String]) -> i32 {
         .unwrap_or(shell.last_status);
     // return is only valid in functions and sourced scripts
     if shell.local_scopes.is_empty() && !shell.sourcing {
-        eprintln!(
-            "bash: line 1: return: can only `return' from a function or sourced script"
-        );
+        eprintln!("bash: line 1: return: can only `return' from a function or sourced script");
         return 1;
     }
     shell.returning = true;

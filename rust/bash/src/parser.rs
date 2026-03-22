@@ -190,17 +190,19 @@ impl Parser {
             negated = !negated;
         }
         // Consume `time -p` flag (POSIX time format)
-        if timed {
-            if let Token::Word(ref w) = self.current {
-                let s: String = w.iter().map(|p| match p {
-                    WordPart::Literal(s) => s.as_str(),
-                    _ => "",
-                }).collect();
+        if timed
+            && let Token::Word(ref w) = self.current {
+                let s: String = w
+                    .iter()
+                    .map(|p| match p {
+                        WordPart::Literal(s) => s.as_str(),
+                        _ => "",
+                    })
+                    .collect();
                 if s == "-p" || s == "--" {
                     self.advance();
                 }
             }
-        }
 
         let first = self.parse_command()?;
         let mut commands = vec![first];

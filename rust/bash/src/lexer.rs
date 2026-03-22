@@ -522,11 +522,15 @@ fn parse_dollar(chars: &[char], i: &mut usize) -> WordPart {
                                 *i += 1; // skip {
                                 while *i + 1 < chars.len() {
                                     *i += 1;
-                                    if chars[*i] == '}' { break; }
+                                    if chars[*i] == '}' {
+                                        break;
+                                    }
                                     if chars[*i].is_ascii_hexdigit() {
                                         val = val * 16 + chars[*i].to_digit(16).unwrap();
                                         count += 1;
-                                    } else { break; }
+                                    } else {
+                                        break;
+                                    }
                                 }
                             } else {
                                 for _ in 0..2 {
@@ -534,13 +538,18 @@ fn parse_dollar(chars: &[char], i: &mut usize) -> WordPart {
                                         *i += 1;
                                         val = val * 16 + chars[*i].to_digit(16).unwrap();
                                         count += 1;
-                                    } else { break; }
+                                    } else {
+                                        break;
+                                    }
                                 }
                             }
                             if count > 0 {
-                                if let Some(c) = char::from_u32(val) { s.push(c); }
+                                if let Some(c) = char::from_u32(val) {
+                                    s.push(c);
+                                }
                             } else {
-                                s.push('\\'); s.push('x');
+                                s.push('\\');
+                                s.push('x');
                             }
                         }
                         'u' => {
@@ -550,11 +559,15 @@ fn parse_dollar(chars: &[char], i: &mut usize) -> WordPart {
                                 *i += 1;
                                 while *i + 1 < chars.len() {
                                     *i += 1;
-                                    if chars[*i] == '}' { break; }
+                                    if chars[*i] == '}' {
+                                        break;
+                                    }
                                     if chars[*i].is_ascii_hexdigit() {
                                         val = val * 16 + chars[*i].to_digit(16).unwrap();
                                         count += 1;
-                                    } else { break; }
+                                    } else {
+                                        break;
+                                    }
                                 }
                             } else {
                                 for _ in 0..4 {
@@ -562,13 +575,18 @@ fn parse_dollar(chars: &[char], i: &mut usize) -> WordPart {
                                         *i += 1;
                                         val = val * 16 + chars[*i].to_digit(16).unwrap();
                                         count += 1;
-                                    } else { break; }
+                                    } else {
+                                        break;
+                                    }
                                 }
                             }
                             if count > 0 {
-                                if let Some(c) = char::from_u32(val) { s.push(c); }
+                                if let Some(c) = char::from_u32(val) {
+                                    s.push(c);
+                                }
                             } else {
-                                s.push('\\'); s.push('u');
+                                s.push('\\');
+                                s.push('u');
                             }
                         }
                         'U' => {
@@ -578,11 +596,15 @@ fn parse_dollar(chars: &[char], i: &mut usize) -> WordPart {
                                 *i += 1;
                                 while *i + 1 < chars.len() {
                                     *i += 1;
-                                    if chars[*i] == '}' { break; }
+                                    if chars[*i] == '}' {
+                                        break;
+                                    }
                                     if chars[*i].is_ascii_hexdigit() {
                                         val = val * 16 + chars[*i].to_digit(16).unwrap();
                                         count += 1;
-                                    } else { break; }
+                                    } else {
+                                        break;
+                                    }
                                 }
                             } else {
                                 for _ in 0..8 {
@@ -590,13 +612,18 @@ fn parse_dollar(chars: &[char], i: &mut usize) -> WordPart {
                                         *i += 1;
                                         val = val * 16 + chars[*i].to_digit(16).unwrap();
                                         count += 1;
-                                    } else { break; }
+                                    } else {
+                                        break;
+                                    }
                                 }
                             }
                             if count > 0 {
-                                if let Some(c) = char::from_u32(val) { s.push(c); }
+                                if let Some(c) = char::from_u32(val) {
+                                    s.push(c);
+                                }
                             } else {
-                                s.push('\\'); s.push('U');
+                                s.push('\\');
+                                s.push('U');
                             }
                         }
                         c => {
@@ -1296,8 +1323,9 @@ impl Lexer {
                                 }
                                 Some('$') => {
                                     if !dq_literal.is_empty() {
-                                        dq_parts
-                                            .push(WordPart::Literal(std::mem::take(&mut dq_literal)));
+                                        dq_parts.push(WordPart::Literal(std::mem::take(
+                                            &mut dq_literal,
+                                        )));
                                     }
                                     self.advance();
                                     let input_clone = self.input.clone();
@@ -1306,8 +1334,9 @@ impl Lexer {
                                 }
                                 Some('`') => {
                                     if !dq_literal.is_empty() {
-                                        dq_parts
-                                            .push(WordPart::Literal(std::mem::take(&mut dq_literal)));
+                                        dq_parts.push(WordPart::Literal(std::mem::take(
+                                            &mut dq_literal,
+                                        )));
                                     }
                                     self.advance();
                                     let mut cmd = String::new();
@@ -1380,12 +1409,17 @@ impl Lexer {
                                             braced = true;
                                             self.advance(); // consume {
                                             while let Some(c) = self.peek() {
-                                                if c == '}' { self.advance(); break; }
+                                                if c == '}' {
+                                                    self.advance();
+                                                    break;
+                                                }
                                                 if c.is_ascii_hexdigit() {
                                                     val = val * 16 + c.to_digit(16).unwrap();
                                                     self.advance();
                                                     count += 1;
-                                                } else { break; }
+                                                } else {
+                                                    break;
+                                                }
                                             }
                                         } else {
                                             for _ in 0..2 {
@@ -1418,12 +1452,17 @@ impl Lexer {
                                         if self.peek() == Some('{') {
                                             self.advance();
                                             while let Some(c) = self.peek() {
-                                                if c == '}' { self.advance(); break; }
+                                                if c == '}' {
+                                                    self.advance();
+                                                    break;
+                                                }
                                                 if c.is_ascii_hexdigit() {
                                                     val = val * 16 + c.to_digit(16).unwrap();
                                                     self.advance();
                                                     count += 1;
-                                                } else { break; }
+                                                } else {
+                                                    break;
+                                                }
                                             }
                                         } else {
                                             for _ in 0..4 {
@@ -1452,12 +1491,17 @@ impl Lexer {
                                         if self.peek() == Some('{') {
                                             self.advance();
                                             while let Some(c) = self.peek() {
-                                                if c == '}' { self.advance(); break; }
+                                                if c == '}' {
+                                                    self.advance();
+                                                    break;
+                                                }
                                                 if c.is_ascii_hexdigit() {
                                                     val = val * 16 + c.to_digit(16).unwrap();
                                                     self.advance();
                                                     count += 1;
-                                                } else { break; }
+                                                } else {
+                                                    break;
+                                                }
                                             }
                                         } else {
                                             for _ in 0..8 {
@@ -1493,7 +1537,9 @@ impl Lexer {
                         if nul_terminated {
                             while let Some(c) = self.peek() {
                                 self.advance();
-                                if c == '\'' { break; }
+                                if c == '\'' {
+                                    break;
+                                }
                             }
                         }
                         parts.push(WordPart::SingleQuoted(s));
