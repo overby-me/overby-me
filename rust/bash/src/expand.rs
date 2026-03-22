@@ -694,6 +694,29 @@ fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
             }
         }
         ParamOp::LowerAll(_) => val.to_lowercase(),
+        #[allow(clippy::match_single_binding)]
+        ParamOp::Transform(ch) => match ch {
+            'E' => {
+                // Expand backslash escapes like $'...'
+                val.replace("\\n", "\n")
+                    .replace("\\t", "\t")
+                    .replace("\\r", "\r")
+                    .replace("\\\\", "\\")
+                    .replace("\\a", "\x07")
+                    .replace("\\b", "\x08")
+            }
+            'Q' => format!("'{}'", val.replace('\'', "'\\''")),
+            'U' => val.to_uppercase(),
+            'L' => val.to_lowercase(),
+            'u' => {
+                let mut chars = val.chars();
+                match chars.next() {
+                    None => String::new(),
+                    Some(c) => c.to_uppercase().to_string() + chars.as_str(),
+                }
+            }
+            _ => val, // @P, @A, @a, @K — return as-is for now
+        },
     }
 }
 

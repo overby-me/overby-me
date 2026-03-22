@@ -528,6 +528,24 @@ fn parse_brace_param(chars: &[char], i: &mut usize) -> WordPart {
 
     let name = read_param_name_with_subscript(chars, i);
 
+    // Check for @X transform operator before }
+    if *i + 1 < chars.len() && chars[*i] == '@' && chars[*i + 1] != '}' {
+        let transform_char = chars[*i + 1];
+        if matches!(
+            transform_char,
+            'E' | 'Q' | 'P' | 'A' | 'a' | 'K' | 'k' | 'L' | 'U'
+        ) {
+            *i += 2;
+            if *i < chars.len() && chars[*i] == '}' {
+                *i += 1;
+            }
+            return WordPart::Param(ParamExpr {
+                name,
+                op: ParamOp::Transform(transform_char),
+            });
+        }
+    }
+
     if *i >= chars.len() || chars[*i] == '}' {
         if *i < chars.len() {
             *i += 1;
@@ -539,6 +557,18 @@ fn parse_brace_param(chars: &[char], i: &mut usize) -> WordPart {
     }
 
     let op = read_param_op(chars, i, &name);
+
+    // Check for @X transform after operator
+    if *i + 1 < chars.len() && chars[*i] == '@' && chars[*i + 1] != '}' {
+        let transform_char = chars[*i + 1];
+        if matches!(
+            transform_char,
+            'E' | 'Q' | 'P' | 'A' | 'a' | 'K' | 'k' | 'L' | 'U'
+        ) {
+            *i += 2;
+        }
+    }
+
     if *i < chars.len() && chars[*i] == '}' {
         *i += 1;
     }

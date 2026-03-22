@@ -224,6 +224,8 @@ pub enum ParamOp {
     /// `${var,pattern}` / `${var,,pattern}` — lowercase
     LowerFirst(Word),
     LowerAll(Word),
+    /// `${var@E}` / `${var@Q}` / `${var@P}` / `${var@A}` / `${var@a}` / `${var@K}`
+    Transform(char),
 }
 
 /// I/O redirection.
