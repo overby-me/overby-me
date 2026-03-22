@@ -187,7 +187,10 @@ impl Shell {
                 .map(|s| s.as_str())
                 .unwrap_or("bash");
             let lineno = self.vars.get("LINENO").map(|s| s.as_str()).unwrap_or("0");
-            eprintln!("{}: line {}: {}: readonly variable", sname, lineno, resolved);
+            eprintln!(
+                "{}: line {}: {}: readonly variable",
+                sname, lineno, resolved
+            );
             return;
         }
         // Integer variables: evaluate value as arithmetic expression
@@ -202,10 +205,9 @@ impl Shell {
             unsafe { std::env::set_var(&resolved, &value) };
         }
         // BASH_ARGV0 updates $0
-        if resolved == "BASH_ARGV0"
-            && !self.positional.is_empty() {
-                self.positional[0] = value.clone();
-            }
+        if resolved == "BASH_ARGV0" && !self.positional.is_empty() {
+            self.positional[0] = value.clone();
+        }
         self.vars.insert(resolved, value);
     }
 
@@ -267,8 +269,7 @@ impl Shell {
 
     fn run_complete_command(&mut self, cmd: &CompleteCommand) -> i32 {
         // Update LINENO
-        self.vars
-            .insert("LINENO".to_string(), cmd.line.to_string());
+        self.vars.insert("LINENO".to_string(), cmd.line.to_string());
 
         if cmd.background {
             #[cfg(unix)]
@@ -483,11 +484,12 @@ impl Shell {
                 match unsafe { nix::unistd::fork() } {
                     Ok(nix::unistd::ForkResult::Child) => {
                         if let Some(fd) = prev_read_fd
-                            && fd != 0 {
-                                nix::unistd::dup2(fd, 0).ok();
-                                nix::unistd::close(fd).ok();
-                            }
-                            // If fd == 0, it's already stdin (pipe read end assigned to fd 0)
+                            && fd != 0
+                        {
+                            nix::unistd::dup2(fd, 0).ok();
+                            nix::unistd::close(fd).ok();
+                        }
+                        // If fd == 0, it's already stdin (pipe read end assigned to fd 0)
                         if let Some(fd) = write_fd {
                             nix::unistd::dup2(fd, 1).ok();
                             if fd != 1 {
@@ -495,9 +497,11 @@ impl Shell {
                             }
                         }
                         if let Some(fd) = read_fd
-                            && fd != 0 && fd != 1 {
-                                nix::unistd::close(fd).ok();
-                            }
+                            && fd != 0
+                            && fd != 1
+                        {
+                            nix::unistd::close(fd).ok();
+                        }
 
                         let status = self.run_command(cmd);
                         std::io::stdout().flush().ok();
@@ -746,6 +750,68 @@ impl Shell {
         )
     }
 
+    /// Expand tilde in assignment context: `~` at start and after `:` are expanded
+    pub fn expand_assignment_tilde(&self, value: &str) -> String {
+        if !value.contains('~') {
+            return value.to_string();
+        }
+        let home = self.vars.get("HOME").cloned().unwrap_or_default();
+        let mut result = String::new();
+        let mut chars = value.chars().peekable();
+        let mut at_start = true;
+        while let Some(c) = chars.next() {
+            if c == '~' && at_start {
+                // Check what follows: must be / or : or end
+                match chars.peek() {
+                    None | Some('/') | Some(':') => {
+                        result.push_str(&home);
+                    }
+                    _ => {
+                        result.push('~');
+                    }
+                }
+            } else if c == ':' {
+                result.push(':');
+                // After :, check for tilde
+                if chars.peek() == Some(&'~') {
+                    chars.next(); // consume ~
+                    match chars.peek() {
+                        None | Some('/') | Some(':') => {
+                            result.push_str(&home);
+                        }
+                        _ => {
+                            result.push('~');
+                        }
+                    }
+                }
+            } else {
+                result.push(c);
+            }
+            at_start = false;
+        }
+        result
+    }
+
+    /// Returns the error prefix for error messages, matching bash behavior.
+    /// For scripts: "$0: line N:" ; for stdin/interactive: "bash:"
+    pub fn error_prefix(&self) -> String {
+        let name = self
+            .positional
+            .first()
+            .map(|s| s.as_str())
+            .unwrap_or("bash");
+        let lineno = self
+            .vars
+            .get("LINENO")
+            .and_then(|s| s.parse::<i64>().ok())
+            .unwrap_or(0);
+        if name == "bash" || name.is_empty() {
+            "bash".to_string()
+        } else {
+            format!("{}: line {}", name, lineno)
+        }
+    }
+
     fn get_opt_flags(&self) -> String {
         let mut flags = String::new();
         if self.opt_errexit {
@@ -799,11 +865,35 @@ impl Shell {
             .cloned()
             .unwrap_or_else(|| " \t\n".to_string());
 
-        // Expand words
+        // Check if first word is an assignment builtin (for tilde expansion)
+        let is_assignment_builtin = cmd.words.first().is_some_and(|w| {
+            let name = self.expand_word_single(w);
+            matches!(name.as_str(), "export" | "declare" | "typeset" | "local")
+        });
+
+        // Expand words, applying assignment-context tilde expansion where appropriate
         let mut expanded_words: Vec<String> = Vec::new();
-        for word in &cmd.words {
+        for (idx, word) in cmd.words.iter().enumerate() {
             let fields = self.expand_word_fields(word, &ifs);
-            expanded_words.extend(fields);
+            // Check if this word has unquoted tilde (for assignment tilde expansion)
+            let has_unquoted_tilde = word.iter().any(|p| {
+                matches!(p, crate::ast::WordPart::Literal(s) if s.contains('~'))
+                    || matches!(p, crate::ast::WordPart::Tilde(_))
+            });
+            let should_tilde_expand =
+                has_unquoted_tilde && (is_assignment_builtin && idx > 0 || !self.opt_posix);
+            if should_tilde_expand {
+                for mut field in fields {
+                    if let Some(eq_pos) = field.find('=') {
+                        let val = &field[eq_pos + 1..];
+                        let expanded = self.expand_assignment_tilde(val);
+                        field = format!("{}={}", &field[..eq_pos], expanded);
+                    }
+                    expanded_words.push(field);
+                }
+            } else {
+                expanded_words.extend(fields);
+            }
         }
 
         // Handle assignments
@@ -921,7 +1011,7 @@ impl Shell {
                     | "trap"
                     | "unset"
             );
-            if !expanded_words.is_empty() && !(self.opt_posix && is_special) {
+            if !(expanded_words.is_empty() || self.opt_posix && is_special) {
                 for (k, old) in saved {
                     match old {
                         Some(v) => {
@@ -980,7 +1070,10 @@ impl Shell {
                 .map(|s| s.as_str())
                 .unwrap_or("bash");
             let lineno = self.vars.get("LINENO").map(|s| s.as_str()).unwrap_or("0");
-            eprintln!("{}: line {}: {}: readonly variable", name, lineno, assign.name);
+            eprintln!(
+                "{}: line {}: {}: readonly variable",
+                name, lineno, assign.name
+            );
             return;
         }
         match &assign.value {
@@ -989,7 +1082,17 @@ impl Shell {
                 self.vars.entry(resolved).or_default();
             }
             AssignValue::Scalar(w) => {
-                let value = self.expand_word_single(w);
+                let raw_value = self.expand_word_single(w);
+                // Only apply assignment tilde expansion if word has unquoted content
+                let has_unquoted_tilde = w.iter().any(|p| {
+                    matches!(p, crate::ast::WordPart::Literal(s) if s.contains('~'))
+                        || matches!(p, crate::ast::WordPart::Tilde(_))
+                });
+                let value = if has_unquoted_tilde {
+                    self.expand_assignment_tilde(&raw_value)
+                } else {
+                    raw_value
+                };
                 if assign.append {
                     let resolved = self.resolve_nameref(&assign.name);
                     // Check if it's an array append

@@ -1,5 +1,9 @@
 # Run a single test from the official GNU Bash test suite against rust-bash.
 #
+# Compares rust-bash output against reference bash output (both running in the
+# same sandbox), avoiding false failures from .right files generated on
+# different systems.
+#
 # Run with: nix build .#checks.x86_64-linux.rust-bash-test-{name}
 # Example:  nix build .#checks.x86_64-linux.rust-bash-test-arith
 {
@@ -21,15 +25,24 @@ pkgs.runCommand "rust-bash-test-${name}" {
 
   cd "$BASH_SRC/tests"
 
-  # Put helpers on PATH but use real bash for test harness scripts;
-  # only THIS_SH (the shell under test) points to rust-bash
+  # Put helpers on PATH
   export PATH="$OLDPWD:$PATH"
-  export THIS_SH="${pkgs.rust-bash}/bin/bash"
   export TMPDIR="$(mktemp -d)"
-  export BASH_TSTOUT="$TMPDIR/bashtst-$$"
 
   echo "Running bash test: ${name}"
-  timeout 120 ${pkgs.bash}/bin/bash "run-${name}"
 
-  touch $out
+  # Run with reference bash
+  export THIS_SH="${pkgs.bash}/bin/bash"
+  timeout 120 "$THIS_SH" "./${name}.tests" > "$TMPDIR/expected" 2>&1 || true
+
+  # Run with rust-bash
+  export THIS_SH="${pkgs.rust-bash}/bin/bash"
+  timeout 120 "$THIS_SH" "./${name}.tests" > "$TMPDIR/actual" 2>&1 || true
+
+  # Compare
+  if diff "$TMPDIR/actual" "$TMPDIR/expected"; then
+    touch $out
+  else
+    exit 1
+  fi
 ''

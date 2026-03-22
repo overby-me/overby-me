@@ -199,19 +199,18 @@ impl Parser {
             negated = !negated;
         }
         // Consume `time -p` flag (POSIX time format)
-        if timed
-            && let Token::Word(ref w) = self.current {
-                let s: String = w
-                    .iter()
-                    .map(|p| match p {
-                        WordPart::Literal(s) => s.as_str(),
-                        _ => "",
-                    })
-                    .collect();
-                if s == "-p" || s == "--" {
-                    self.advance();
-                }
+        if timed && let Token::Word(ref w) = self.current {
+            let s: String = w
+                .iter()
+                .map(|p| match p {
+                    WordPart::Literal(s) => s.as_str(),
+                    _ => "",
+                })
+                .collect();
+            if s == "-p" || s == "--" {
+                self.advance();
             }
+        }
 
         let first = self.parse_command()?;
         let mut commands = vec![first];
@@ -428,7 +427,7 @@ impl Parser {
             .ok_or_else(|| "expected variable name after 'for'".to_string())?;
         // Validate variable name
         if !var.chars().all(|c| c.is_alphanumeric() || c == '_')
-            || var.chars().next().map_or(true, |c| c.is_ascii_digit())
+            || var.chars().next().is_none_or(|c| c.is_ascii_digit())
         {
             return Err(format!("`{}': not a valid identifier", var));
         }
@@ -830,12 +829,11 @@ impl Parser {
                 // Don't consume keywords that end compound commands,
                 // but only at command position (first word).
                 // In argument position, these are regular words.
-                if words.is_empty() {
-                    if let Some(text) = self.word_text()
-                        && is_compound_end(&text)
-                    {
-                        break;
-                    }
+                if words.is_empty()
+                    && let Some(text) = self.word_text()
+                    && is_compound_end(&text)
+                {
+                    break;
                 }
                 if let Some(w) = self.take_word() {
                     words.push(w);

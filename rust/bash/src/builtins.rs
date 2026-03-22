@@ -273,11 +273,7 @@ fn builtin_printf(_shell: &mut Shell, args: &[String]) -> i32 {
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
                         let n: i64 = arg.parse().unwrap_or(0);
                         // For %d, precision means minimum digits (zero-padded)
-                        let effective_width = if let Some(p) = precision {
-                            p.max(w)
-                        } else {
-                            w
-                        };
+                        let effective_width = if let Some(p) = precision { p.max(w) } else { w };
                         let use_zero_pad = zero_pad || precision.is_some();
                         if effective_width > 0 {
                             if left {
@@ -337,7 +333,19 @@ fn shell_escape(s: &str) -> String {
     if !needs_quoting {
         return s.to_string();
     }
-    // Use $'...' quoting for strings with special characters
+    // Check if we can use simple backslash quoting (no control chars)
+    let has_control = s.chars().any(|c| c.is_ascii_control());
+    if !has_control {
+        let mut result = String::new();
+        for ch in s.chars() {
+            if !ch.is_ascii_alphanumeric() && ch != '_' && ch != '/' && ch != '.' && ch != '-' {
+                result.push('\\');
+            }
+            result.push(ch);
+        }
+        return result;
+    }
+    // Use $'...' quoting for strings with control characters
     let mut result = String::from("$'");
     for ch in s.chars() {
         match ch {
@@ -402,7 +410,13 @@ fn builtin_cd(shell: &mut Shell, args: &[String]) -> i32 {
             0
         }
         Err(e) => {
-            eprintln!("bash: cd: {}: {}", target, e);
+            let msg = match e.kind() {
+                std::io::ErrorKind::NotFound => "No such file or directory",
+                std::io::ErrorKind::PermissionDenied => "Permission denied",
+                std::io::ErrorKind::NotADirectory if cfg!(unix) => "Not a directory",
+                _ => "No such file or directory",
+            };
+            eprintln!("{}: cd: {}: {}", shell.error_prefix(), target, msg);
             1
         }
     }

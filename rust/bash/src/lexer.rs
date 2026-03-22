@@ -1590,17 +1590,52 @@ impl Lexer {
                     parts.push(WordPart::BacktickSub(cmd));
                 }
                 '~' if parts.is_empty() && literal.is_empty() => {
+                    let _tilde_pos = self.pos;
                     self.advance();
                     let mut user = String::new();
-                    while let Some(c) = self.peek() {
-                        if c.is_alphanumeric() || c == '_' || c == '-' || c == '.' {
+                    let mut valid_tilde = true;
+                    // Check for ~+ and ~- first
+                    if let Some(c) = self.peek() {
+                        if (c == '+' || c == '-')
+                            && !self
+                                .input
+                                .get(self.pos + 1)
+                                .is_some_and(|&nc| nc.is_alphanumeric() || nc == '_')
+                        {
                             user.push(c);
                             self.advance();
                         } else {
-                            break;
+                            while let Some(c) = self.peek() {
+                                if c.is_alphanumeric() || c == '_' || c == '-' || c == '.' {
+                                    user.push(c);
+                                    self.advance();
+                                } else {
+                                    break;
+                                }
+                            }
                         }
                     }
-                    parts.push(WordPart::Tilde(user));
+                    // Tilde prefix is only valid if followed by /, :, or end of word
+                    if let Some(next) = self.peek()
+                        && next != '/'
+                        && next != ':'
+                        && !next.is_whitespace()
+                        && next != ';'
+                        && next != '|'
+                        && next != '&'
+                        && next != ')'
+                        && next != '}'
+                        && next != '\n'
+                    {
+                        valid_tilde = false;
+                    }
+                    if valid_tilde {
+                        parts.push(WordPart::Tilde(user));
+                    } else {
+                        // Revert: treat ~ and consumed chars as literal
+                        literal.push('~');
+                        literal.push_str(&user);
+                    }
                 }
                 c => {
                     literal.push(c);
@@ -1642,8 +1677,7 @@ impl Lexer {
                     // Skip whitespace after first ) to find second )
                     self.pos += 1;
                     let saved = self.pos;
-                    while self.pos < self.input.len()
-                        && matches!(self.input[self.pos], ' ' | '\t')
+                    while self.pos < self.input.len() && matches!(self.input[self.pos], ' ' | '\t')
                     {
                         self.pos += 1;
                     }
