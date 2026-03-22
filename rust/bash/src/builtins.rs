@@ -236,16 +236,20 @@ fn builtin_printf(_shell: &mut Shell, args: &[String]) -> i32 {
                         break;
                     }
                 }
-                // Skip precision for now
+                // Parse precision
+                let mut precision: Option<usize> = None;
                 if chars.peek() == Some(&'.') {
                     chars.next();
+                    let mut prec_str = String::new();
                     while let Some(&c) = chars.peek() {
                         if c.is_ascii_digit() {
+                            prec_str.push(c);
                             chars.next();
                         } else {
                             break;
                         }
                     }
+                    precision = Some(prec_str.parse().unwrap_or(0));
                 }
                 let w: usize = width_str.parse().unwrap_or(0);
                 let left = flags.contains('-');
@@ -267,13 +271,20 @@ fn builtin_printf(_shell: &mut Shell, args: &[String]) -> i32 {
                     Some('d') | Some('i') => {
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
                         let n: i64 = arg.parse().unwrap_or(0);
-                        if w > 0 {
+                        // For %d, precision means minimum digits (zero-padded)
+                        let effective_width = if let Some(p) = precision {
+                            p.max(w)
+                        } else {
+                            w
+                        };
+                        let use_zero_pad = zero_pad || precision.is_some();
+                        if effective_width > 0 {
                             if left {
-                                print!("{:<w$}", n);
-                            } else if zero_pad {
-                                print!("{:0>w$}", n);
+                                print!("{:<effective_width$}", n);
+                            } else if use_zero_pad {
+                                print!("{:0>effective_width$}", n);
                             } else {
-                                print!("{:>w$}", n);
+                                print!("{:>effective_width$}", n);
                             }
                         } else {
                             print!("{}", n);
