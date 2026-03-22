@@ -990,6 +990,13 @@ fn builtin_return(shell: &mut Shell, args: &[String]) -> i32 {
         .first()
         .and_then(|s| s.parse().ok())
         .unwrap_or(shell.last_status);
+    // return is only valid in functions and sourced scripts
+    if shell.local_scopes.is_empty() && !shell.sourcing {
+        eprintln!(
+            "bash: line 1: return: can only `return' from a function or sourced script"
+        );
+        return 1;
+    }
     shell.returning = true;
     code
 }
@@ -1578,7 +1585,11 @@ fn builtin_source(shell: &mut Shell, args: &[String]) -> i32 {
                 shell.positional.extend(args[1..].to_vec());
             }
 
+            let saved_sourcing = shell.sourcing;
+            shell.sourcing = true;
             let result = shell.run_string(&content);
+            shell.returning = false; // reset return flag after sourced script
+            shell.sourcing = saved_sourcing;
 
             shell.positional = saved_positional;
             result
