@@ -53,6 +53,8 @@ pub fn builtins() -> HashMap<&'static str, BuiltinFn> {
     map.insert("times", builtin_times);
     map.insert("break", builtin_break);
     map.insert("continue", builtin_continue);
+    map.insert("ulimit", builtin_ulimit);
+    map.insert("caller", builtin_caller);
     map
 }
 
@@ -2133,4 +2135,56 @@ fn find_in_path_opt(name: &str) -> Option<String> {
         }
     }
     None
+}
+
+fn builtin_ulimit(_shell: &mut Shell, args: &[String]) -> i32 {
+    #[cfg(unix)]
+    {
+        // Handle basic -n (open files) case
+        let mut resource = libc::RLIMIT_FSIZE;
+        let mut set_value: Option<u64> = None;
+        let mut i = 0;
+        while i < args.len() {
+            match args[i].as_str() {
+                "-n" => resource = libc::RLIMIT_NOFILE,
+                "-c" => resource = libc::RLIMIT_CORE,
+                "-d" => resource = libc::RLIMIT_DATA,
+                "-f" => resource = libc::RLIMIT_FSIZE,
+                "-l" => resource = libc::RLIMIT_MEMLOCK,
+                "-m" => resource = libc::RLIMIT_RSS,
+                "-s" => resource = libc::RLIMIT_STACK,
+                "-t" => resource = libc::RLIMIT_CPU,
+                "-v" => resource = libc::RLIMIT_AS,
+                "-S" | "-H" => {} // soft/hard limit flags
+                "unlimited" => set_value = Some(libc::RLIM_INFINITY as u64),
+                val => {
+                    if let Ok(n) = val.parse::<u64>() {
+                        set_value = Some(n);
+                    }
+                }
+            }
+            i += 1;
+        }
+
+        if let Some(val) = set_value {
+            let rlim = libc::rlimit {
+                rlim_cur: val,
+                rlim_max: val,
+            };
+            unsafe { libc::setrlimit(resource, &rlim) };
+        } else {
+            let mut rlim: libc::rlimit = unsafe { std::mem::zeroed() };
+            unsafe { libc::getrlimit(resource, &mut rlim) };
+            if rlim.rlim_cur == libc::RLIM_INFINITY as u64 {
+                println!("unlimited");
+            } else {
+                println!("{}", rlim.rlim_cur);
+            }
+        }
+    }
+    0
+}
+
+fn builtin_caller(_shell: &mut Shell, _args: &[String]) -> i32 {
+    0 // stub
 }
