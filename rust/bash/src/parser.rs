@@ -151,10 +151,28 @@ impl Parser {
     }
 
     fn parse_pipeline(&mut self) -> Result<Pipeline, String> {
-        let timed = self.eat_keyword("time");
-        let negated = self.eat_keyword("!");
+        let mut timed = self.eat_keyword("time");
+        let mut negated = self.eat_keyword("!");
         // time can also come after !
-        let timed = timed || self.eat_keyword("time");
+        if !timed {
+            timed = self.eat_keyword("time");
+        }
+        // Handle multiple ! (each additional one toggles negation)
+        while self.eat_keyword("!") {
+            negated = !negated;
+        }
+        // Consume `time -p` flag (POSIX time format)
+        if timed {
+            if let Token::Word(ref w) = self.current {
+                let s: String = w.iter().map(|p| match p {
+                    WordPart::Literal(s) => s.as_str(),
+                    _ => "",
+                }).collect();
+                if s == "-p" || s == "--" {
+                    self.advance();
+                }
+            }
+        }
 
         let first = self.parse_command()?;
         let mut commands = vec![first];
