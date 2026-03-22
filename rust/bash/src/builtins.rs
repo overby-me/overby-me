@@ -1948,6 +1948,13 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
                     shell.shopt_nocasematch = false;
                 }
             }
+            "lastpipe" => {
+                if set {
+                    shell.shopt_lastpipe = true;
+                } else if unset {
+                    shell.shopt_lastpipe = false;
+                }
+            }
             _ => {}
         }
     }

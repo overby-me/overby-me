@@ -42,6 +42,7 @@ pub struct Shell {
     pub shopt_extglob: bool,
     pub shopt_inherit_errexit: bool,
     pub shopt_nocasematch: bool,
+    pub shopt_lastpipe: bool,
 
     builtins: HashMap<&'static str, BuiltinFn>,
 }
@@ -116,6 +117,7 @@ impl Shell {
             shopt_extglob: false,
             shopt_inherit_errexit: false,
             shopt_nocasematch: false,
+            shopt_lastpipe: false,
             builtins: builtins::builtins(),
         }
     }
@@ -305,6 +307,47 @@ impl Shell {
                 } else {
                     (None, None)
                 };
+
+                // lastpipe: run last command in current shell
+                if is_last && self.shopt_lastpipe {
+                    // Wait for all children to finish first
+                    for child in &children {
+                        nix::sys::wait::waitpid(*child, None).ok();
+                    }
+
+                    let saved_stdin = if let Some(fd) = prev_read_fd {
+                        let saved = nix::unistd::dup(0).ok();
+                        nix::unistd::dup2(fd, 0).ok();
+                        nix::unistd::close(fd).ok();
+                        saved
+                    } else {
+                        None
+                    };
+
+                    let status = self.run_command(cmd);
+
+                    if let Some(fd) = saved_stdin {
+                        nix::unistd::dup2(fd, 0).ok();
+                        nix::unistd::close(fd).ok();
+                    }
+
+                    // Store PIPESTATUS
+                    let mut statuses: Vec<i32> = children
+                        .iter()
+                        .map(|_| 0) // already waited
+                        .collect();
+                    statuses.push(status);
+                    self.arrays.insert(
+                        "PIPESTATUS".to_string(),
+                        statuses.iter().map(|s| s.to_string()).collect(),
+                    );
+
+                    return if pipeline.negated {
+                        if status == 0 { 1 } else { 0 }
+                    } else {
+                        status
+                    };
+                }
 
                 match unsafe { nix::unistd::fork() } {
                     Ok(nix::unistd::ForkResult::Child) => {
