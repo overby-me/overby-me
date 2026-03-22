@@ -892,9 +892,11 @@ fn parse_array_literal(s: &str) -> Vec<String> {
 fn quote_value_for_set(value: &str) -> String {
     // Check if the value needs quoting
     let needs_quoting = value.is_empty()
+        || value.starts_with('~')
+        || value.starts_with('#')
         || value
             .chars()
-            .any(|c| " \t\n\\\"'`$!#~&|;()<>{}[]?*".contains(c));
+            .any(|c| " \t\n\\\"'`$!&|;()<>{}[]?*".contains(c));
 
     if !needs_quoting {
         return value.to_string();
