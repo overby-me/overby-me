@@ -227,6 +227,16 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                     .get("HOME")
                     .cloned()
                     .unwrap_or_else(|| "~".to_string())
+            } else if user == "+" {
+                ctx.vars
+                    .get("PWD")
+                    .cloned()
+                    .unwrap_or_else(|| "~+".to_string())
+            } else if user == "-" {
+                ctx.vars
+                    .get("OLDPWD")
+                    .cloned()
+                    .unwrap_or_else(|| "~-".to_string())
             } else {
                 #[cfg(unix)]
                 {
@@ -383,6 +393,18 @@ fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
             // TODO: track shell start time for accurate SECONDS
             "0".to_string()
         }
+        "EPOCHSECONDS" => std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+            .to_string(),
+        "EPOCHREALTIME" => {
+            let d = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default();
+            format!("{}.{:06}", d.as_secs(), d.subsec_micros())
+        }
+        "BASH_COMMAND" => ctx.vars.get("BASH_COMMAND").cloned().unwrap_or_default(),
         "#" => {
             let count = if ctx.positional.is_empty() {
                 0
