@@ -9,6 +9,12 @@ use interpreter::Shell;
 use std::io::{self, BufRead, Write};
 
 fn main() {
+    // Reset SIGPIPE to default (Rust ignores it, but shells need it)
+    #[cfg(unix)]
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+
     let code = run();
     // Flush stdout before exiting - std::process::exit() doesn't flush
     std::io::stdout().flush().ok();
