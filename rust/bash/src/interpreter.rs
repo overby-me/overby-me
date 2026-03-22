@@ -531,8 +531,25 @@ impl Shell {
         }
     }
 
+    /// Pre-evaluate ArithSub expressions that may have side effects (assignments).
+    fn eval_arith_in_word(&mut self, word: &Word) -> Word {
+        word.iter()
+            .map(|part| match part {
+                WordPart::ArithSub(expr) => {
+                    let result = self.eval_arith_expr(expr);
+                    WordPart::Literal(result.to_string())
+                }
+                WordPart::DoubleQuoted(parts) => {
+                    WordPart::DoubleQuoted(self.eval_arith_in_word(parts))
+                }
+                other => other.clone(),
+            })
+            .collect()
+    }
+
     pub fn expand_word_fields(&mut self, word: &Word, ifs: &str) -> Vec<String> {
         self.apply_assign_defaults(word);
+        let word = self.eval_arith_in_word(word);
         let vars = self.vars.clone();
         let arrays = self.arrays.clone();
         let assoc_arrays = self.assoc_arrays.clone();
@@ -543,7 +560,7 @@ impl Shell {
         let opt_flags = self.get_opt_flags();
         let mut cmd_sub = |cmd: &str| -> String { self.capture_output(cmd) };
         expand::expand_word(
-            word,
+            &word,
             &vars,
             &arrays,
             &assoc_arrays,
@@ -559,6 +576,7 @@ impl Shell {
 
     pub fn expand_word_single(&mut self, word: &Word) -> String {
         self.apply_assign_defaults(word);
+        let word = self.eval_arith_in_word(word);
         let vars = self.vars.clone();
         let arrays = self.arrays.clone();
         let assoc_arrays = self.assoc_arrays.clone();
@@ -569,7 +587,7 @@ impl Shell {
         let opt_flags = self.get_opt_flags();
         let mut cmd_sub = |cmd: &str| -> String { self.capture_output(cmd) };
         expand::expand_word_nosplit(
-            word,
+            &word,
             &vars,
             &arrays,
             &assoc_arrays,
@@ -1153,7 +1171,7 @@ impl Shell {
 
     fn run_arith_for(&mut self, clause: &ArithForClause) -> i32 {
         if !clause.init.is_empty() {
-            self.eval_arith_with_side_effects(&clause.init);
+            self.eval_arith_expr(&clause.init);
         }
 
         let mut status = 0;
@@ -1164,7 +1182,7 @@ impl Shell {
             }
 
             if !clause.cond.is_empty() {
-                let cond_val = self.eval_arith_with_side_effects(&clause.cond);
+                let cond_val = self.eval_arith_expr(&clause.cond);
                 if cond_val == 0 {
                     break;
                 }
@@ -1180,7 +1198,7 @@ impl Shell {
             }
 
             if !clause.step.is_empty() {
-                self.eval_arith_with_side_effects(&clause.step);
+                self.eval_arith_expr(&clause.step);
             }
         }
         status
@@ -1421,107 +1439,8 @@ impl Shell {
 
     /// Execute `(( arithmetic expression ))` — exit status 0 if result != 0.
     fn run_arithmetic(&mut self, expr: &str) -> i32 {
-        let result = self.eval_arith_with_side_effects(expr);
+        let result = self.eval_arith_expr(expr);
         if result != 0 { 0 } else { 1 }
-    }
-
-    /// Evaluate arithmetic with side effects (assignments, ++, --).
-    fn eval_arith_with_side_effects(&mut self, expr: &str) -> i64 {
-        let expr = expr.trim();
-
-        // Handle comma operator: eval left for side effects, return right
-        if let Some(pos) = expr.rfind(',') {
-            self.eval_arith_with_side_effects(&expr[..pos]);
-            return self.eval_arith_with_side_effects(&expr[pos + 1..]);
-        }
-
-        // Handle assignment operators: =, +=, -=, *=, /=, %=
-        for op in &[
-            "<<=", ">>=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "=",
-        ] {
-            if let Some(pos) = find_arith_assign(expr, op) {
-                let name = expr[..pos].trim().to_string();
-                let rhs = &expr[pos + op.len()..];
-                let rhs_val = self.eval_arith_with_side_effects(rhs);
-                let result = if *op == "=" {
-                    rhs_val
-                } else {
-                    let lhs_val: i64 = self
-                        .vars
-                        .get(&name)
-                        .and_then(|v| v.parse().ok())
-                        .unwrap_or(0);
-                    match *op {
-                        "+=" => lhs_val + rhs_val,
-                        "-=" => lhs_val - rhs_val,
-                        "*=" => lhs_val * rhs_val,
-                        "/=" => {
-                            if rhs_val != 0 {
-                                lhs_val / rhs_val
-                            } else {
-                                0
-                            }
-                        }
-                        "%=" => {
-                            if rhs_val != 0 {
-                                lhs_val % rhs_val
-                            } else {
-                                0
-                            }
-                        }
-                        _ => rhs_val,
-                    }
-                };
-                self.set_var(&name, result.to_string());
-                return result;
-            }
-        }
-
-        // Handle ++ and -- (post and pre)
-        let trimmed = expr.trim();
-        if let Some(name) = trimmed.strip_suffix("++") {
-            let name = name.trim();
-            let val: i64 = self
-                .vars
-                .get(name)
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(0);
-            self.set_var(name, (val + 1).to_string());
-            return val; // post-increment returns old value
-        }
-        if let Some(name) = trimmed.strip_suffix("--") {
-            let name = name.trim();
-            let val: i64 = self
-                .vars
-                .get(name)
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(0);
-            self.set_var(name, (val - 1).to_string());
-            return val;
-        }
-        if let Some(name) = trimmed.strip_prefix("++") {
-            let name = name.trim();
-            let val: i64 = self
-                .vars
-                .get(name)
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(0);
-            self.set_var(name, (val + 1).to_string());
-            return val + 1;
-        }
-        if let Some(name) = trimmed.strip_prefix("--") {
-            let name = name.trim();
-            let val: i64 = self
-                .vars
-                .get(name)
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(0);
-            self.set_var(name, (val - 1).to_string());
-            return val - 1;
-        }
-
-        // Fall through to regular evaluation
-        self.eval_arith_expr(expr)
     }
 
     #[cfg(unix)]
@@ -1699,35 +1618,6 @@ impl Shell {
 }
 
 /// Find an assignment operator in an arithmetic expression.
-/// Returns position only if left side is a valid variable name.
-fn find_arith_assign(expr: &str, op: &str) -> Option<usize> {
-    let bytes = expr.as_bytes();
-    let op_bytes = op.as_bytes();
-    // For "=" we need to exclude "==", "!=", "<=", ">="
-    for i in 0..bytes.len() {
-        if i + op_bytes.len() <= bytes.len() && &bytes[i..i + op_bytes.len()] == op_bytes {
-            // Make sure this isn't part of ==, !=, <=, >=
-            if op == "=" {
-                if i > 0 && matches!(bytes[i - 1], b'!' | b'<' | b'>' | b'=') {
-                    continue;
-                }
-                if i + 1 < bytes.len() && bytes[i + 1] == b'=' {
-                    continue;
-                }
-            }
-            // Check left side is a valid variable name
-            let left = expr[..i].trim();
-            if !left.is_empty()
-                && left.chars().all(|c| c.is_alphanumeric() || c == '_')
-                && !left.starts_with(|c: char| c.is_ascii_digit())
-            {
-                return Some(i);
-            }
-        }
-    }
-    None
-}
-
 fn case_pattern_match(text: &str, pattern: &str) -> bool {
     if pattern == "*" {
         return true;
