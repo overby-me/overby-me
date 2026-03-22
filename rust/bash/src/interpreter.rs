@@ -401,6 +401,8 @@ impl Shell {
                     };
                 }
 
+                // Flush before fork to prevent buffer duplication
+                std::io::Write::flush(&mut std::io::stdout()).ok();
                 match unsafe { nix::unistd::fork() } {
                     Ok(nix::unistd::ForkResult::Child) => {
                         if let Some(fd) = prev_read_fd {
@@ -1162,6 +1164,9 @@ impl Shell {
             CompoundCommand::Subshell(program) => {
                 #[cfg(unix)]
                 {
+                    // Flush stdout before forking to prevent buffered data from
+                    // being duplicated in the child's output.
+                    std::io::Write::flush(&mut std::io::stdout()).ok();
                     match unsafe { nix::unistd::fork() } {
                         Ok(nix::unistd::ForkResult::Child) => {
                             let status = self.run_program(program);
