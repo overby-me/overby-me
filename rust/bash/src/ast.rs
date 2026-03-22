@@ -27,6 +27,7 @@ pub enum AndOr {
 #[derive(Debug, Clone)]
 pub struct Pipeline {
     pub negated: bool,
+    pub timed: bool,
     pub commands: Vec<Command>,
 }
 

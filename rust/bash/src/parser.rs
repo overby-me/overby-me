@@ -151,7 +151,10 @@ impl Parser {
     }
 
     fn parse_pipeline(&mut self) -> Result<Pipeline, String> {
+        let timed = self.eat_keyword("time");
         let negated = self.eat_keyword("!");
+        // time can also come after !
+        let timed = timed || self.eat_keyword("time");
 
         let first = self.parse_command()?;
         let mut commands = vec![first];
@@ -162,7 +165,11 @@ impl Parser {
             commands.push(self.parse_command()?);
         }
 
-        Ok(Pipeline { negated, commands })
+        Ok(Pipeline {
+            negated,
+            timed,
+            commands,
+        })
     }
 
     fn parse_command(&mut self) -> Result<Command, String> {

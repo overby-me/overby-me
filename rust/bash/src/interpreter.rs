@@ -282,6 +282,26 @@ impl Shell {
     }
 
     fn run_pipeline(&mut self, pipeline: &Pipeline) -> i32 {
+        let start_time = if pipeline.timed {
+            Some(std::time::Instant::now())
+        } else {
+            None
+        };
+
+        let status = self.run_pipeline_inner(pipeline);
+
+        if let Some(start) = start_time {
+            let elapsed = start.elapsed();
+            let secs = elapsed.as_secs_f64();
+            eprintln!("\nreal\t{:.2}", secs);
+            eprintln!("user\t{:.2}", 0.0f64);
+            eprintln!("sys\t{:.2}", 0.0f64);
+        }
+
+        status
+    }
+
+    fn run_pipeline_inner(&mut self, pipeline: &Pipeline) -> i32 {
         if pipeline.commands.len() == 1 {
             let status = self.run_command(&pipeline.commands[0]);
             return if pipeline.negated {
