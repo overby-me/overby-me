@@ -516,16 +516,88 @@ fn parse_dollar(chars: &[char], i: &mut usize) -> WordPart {
                             s.push(val as char);
                         }
                         'x' => {
-                            let mut val = 0u8;
-                            for _ in 0..2 {
-                                if *i + 1 < chars.len() && chars[*i + 1].is_ascii_hexdigit() {
+                            let mut val = 0u32;
+                            let mut count = 0;
+                            if *i + 1 < chars.len() && chars[*i + 1] == '{' {
+                                *i += 1; // skip {
+                                while *i + 1 < chars.len() {
                                     *i += 1;
-                                    val = val * 16 + chars[*i].to_digit(16).unwrap() as u8;
-                                } else {
-                                    break;
+                                    if chars[*i] == '}' { break; }
+                                    if chars[*i].is_ascii_hexdigit() {
+                                        val = val * 16 + chars[*i].to_digit(16).unwrap();
+                                        count += 1;
+                                    } else { break; }
+                                }
+                            } else {
+                                for _ in 0..2 {
+                                    if *i + 1 < chars.len() && chars[*i + 1].is_ascii_hexdigit() {
+                                        *i += 1;
+                                        val = val * 16 + chars[*i].to_digit(16).unwrap();
+                                        count += 1;
+                                    } else { break; }
                                 }
                             }
-                            s.push(val as char);
+                            if count > 0 {
+                                if let Some(c) = char::from_u32(val) { s.push(c); }
+                            } else {
+                                s.push('\\'); s.push('x');
+                            }
+                        }
+                        'u' => {
+                            let mut val = 0u32;
+                            let mut count = 0;
+                            if *i + 1 < chars.len() && chars[*i + 1] == '{' {
+                                *i += 1;
+                                while *i + 1 < chars.len() {
+                                    *i += 1;
+                                    if chars[*i] == '}' { break; }
+                                    if chars[*i].is_ascii_hexdigit() {
+                                        val = val * 16 + chars[*i].to_digit(16).unwrap();
+                                        count += 1;
+                                    } else { break; }
+                                }
+                            } else {
+                                for _ in 0..4 {
+                                    if *i + 1 < chars.len() && chars[*i + 1].is_ascii_hexdigit() {
+                                        *i += 1;
+                                        val = val * 16 + chars[*i].to_digit(16).unwrap();
+                                        count += 1;
+                                    } else { break; }
+                                }
+                            }
+                            if count > 0 {
+                                if let Some(c) = char::from_u32(val) { s.push(c); }
+                            } else {
+                                s.push('\\'); s.push('u');
+                            }
+                        }
+                        'U' => {
+                            let mut val = 0u32;
+                            let mut count = 0;
+                            if *i + 1 < chars.len() && chars[*i + 1] == '{' {
+                                *i += 1;
+                                while *i + 1 < chars.len() {
+                                    *i += 1;
+                                    if chars[*i] == '}' { break; }
+                                    if chars[*i].is_ascii_hexdigit() {
+                                        val = val * 16 + chars[*i].to_digit(16).unwrap();
+                                        count += 1;
+                                    } else { break; }
+                                }
+                            } else {
+                                for _ in 0..8 {
+                                    if *i + 1 < chars.len() && chars[*i + 1].is_ascii_hexdigit() {
+                                        *i += 1;
+                                        val = val * 16 + chars[*i].to_digit(16).unwrap();
+                                        count += 1;
+                                    } else { break; }
+                                }
+                            }
+                            if count > 0 {
+                                if let Some(c) = char::from_u32(val) { s.push(c); }
+                            } else {
+                                s.push('\\'); s.push('U');
+                            }
                         }
                         c => {
                             s.push('\\');
@@ -1290,17 +1362,107 @@ impl Lexer {
                                         s.push(val as char);
                                     }
                                     Some('x') => {
-                                        let mut val = 0u8;
-                                        for _ in 0..2 {
-                                            match self.peek() {
-                                                Some(c) if c.is_ascii_hexdigit() => {
-                                                    val = val * 16 + c.to_digit(16).unwrap() as u8;
+                                        let mut val = 0u32;
+                                        let mut count = 0;
+                                        // \x{NN} or \xNN (up to 2 hex digits without braces)
+                                        if self.peek() == Some('{') {
+                                            self.advance(); // consume {
+                                            while let Some(c) = self.peek() {
+                                                if c == '}' { self.advance(); break; }
+                                                if c.is_ascii_hexdigit() {
+                                                    val = val * 16 + c.to_digit(16).unwrap();
                                                     self.advance();
+                                                    count += 1;
+                                                } else { break; }
+                                            }
+                                        } else {
+                                            for _ in 0..2 {
+                                                match self.peek() {
+                                                    Some(c) if c.is_ascii_hexdigit() => {
+                                                        val = val * 16 + c.to_digit(16).unwrap();
+                                                        self.advance();
+                                                        count += 1;
+                                                    }
+                                                    _ => break,
                                                 }
-                                                _ => break,
                                             }
                                         }
-                                        s.push(val as char);
+                                        if count > 0 {
+                                            if let Some(c) = char::from_u32(val) {
+                                                s.push(c);
+                                            }
+                                        } else {
+                                            s.push('\\');
+                                            s.push('x');
+                                        }
+                                    }
+                                    Some('u') => {
+                                        let mut val = 0u32;
+                                        let mut count = 0;
+                                        if self.peek() == Some('{') {
+                                            self.advance();
+                                            while let Some(c) = self.peek() {
+                                                if c == '}' { self.advance(); break; }
+                                                if c.is_ascii_hexdigit() {
+                                                    val = val * 16 + c.to_digit(16).unwrap();
+                                                    self.advance();
+                                                    count += 1;
+                                                } else { break; }
+                                            }
+                                        } else {
+                                            for _ in 0..4 {
+                                                match self.peek() {
+                                                    Some(c) if c.is_ascii_hexdigit() => {
+                                                        val = val * 16 + c.to_digit(16).unwrap();
+                                                        self.advance();
+                                                        count += 1;
+                                                    }
+                                                    _ => break,
+                                                }
+                                            }
+                                        }
+                                        if count > 0 {
+                                            if let Some(c) = char::from_u32(val) {
+                                                s.push(c);
+                                            }
+                                        } else {
+                                            s.push('\\');
+                                            s.push('u');
+                                        }
+                                    }
+                                    Some('U') => {
+                                        let mut val = 0u32;
+                                        let mut count = 0;
+                                        if self.peek() == Some('{') {
+                                            self.advance();
+                                            while let Some(c) = self.peek() {
+                                                if c == '}' { self.advance(); break; }
+                                                if c.is_ascii_hexdigit() {
+                                                    val = val * 16 + c.to_digit(16).unwrap();
+                                                    self.advance();
+                                                    count += 1;
+                                                } else { break; }
+                                            }
+                                        } else {
+                                            for _ in 0..8 {
+                                                match self.peek() {
+                                                    Some(c) if c.is_ascii_hexdigit() => {
+                                                        val = val * 16 + c.to_digit(16).unwrap();
+                                                        self.advance();
+                                                        count += 1;
+                                                    }
+                                                    _ => break,
+                                                }
+                                            }
+                                        }
+                                        if count > 0 {
+                                            if let Some(c) = char::from_u32(val) {
+                                                s.push(c);
+                                            }
+                                        } else {
+                                            s.push('\\');
+                                            s.push('U');
+                                        }
                                     }
                                     Some(c) => {
                                         s.push('\\');
