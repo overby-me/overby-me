@@ -341,6 +341,10 @@ impl Shell {
         if has_rest && status != 0 && last_ran_in_condition {
             self.errexit_suppressed = true;
         }
+        // Negated pipelines that return non-zero (from flipping 0→1) suppress errexit
+        if list.first.negated && !has_rest && status != 0 {
+            self.errexit_suppressed = true;
+        }
 
         status
     }
@@ -581,8 +585,8 @@ impl Shell {
                     nix::unistd::dup2(pipe_w_raw, 1).ok();
                     drop(pipe_w);
                     // Command substitution does not inherit errexit
-                    // (unless inherit_errexit shopt is set)
-                    if !self.shopt_inherit_errexit {
+                    // (unless inherit_errexit shopt is set or POSIX mode is on)
+                    if !self.shopt_inherit_errexit && !self.opt_posix {
                         self.opt_errexit = false;
                     }
                     let status = self.run_string(cmd_str);
