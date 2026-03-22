@@ -140,6 +140,16 @@ impl Shell {
             ],
         );
 
+        // Set up GROUPS array (readonly)
+        #[cfg(unix)]
+        {
+            let gid = unsafe { libc::getgid() };
+            shell
+                .arrays
+                .insert("GROUPS".to_string(), vec![gid.to_string()]);
+            shell.readonly_vars.insert("GROUPS".to_string());
+        }
+
         shell
     }
 
@@ -770,6 +780,12 @@ impl Shell {
                 0
             };
         }
+
+        // Set BASH_COMMAND
+        self.vars.insert(
+            "BASH_COMMAND".to_string(),
+            expanded_words.join(" "),
+        );
 
         // Trace
         if self.opt_xtrace {
