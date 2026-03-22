@@ -1081,7 +1081,15 @@ impl Shell {
             self.func_names.iter().rev().cloned().collect(),
         );
 
+        // Save procsub fds so inner commands don't close them
+        let saved_fds = crate::expand::take_procsub_fds();
+
         let status = self.run_compound_command(body);
+
+        // Restore procsub fds
+        for fd in saved_fds {
+            crate::expand::register_procsub_fd_pub(fd);
+        }
 
         // Restore local variables
         if let Some(scope) = self.local_scopes.pop() {
