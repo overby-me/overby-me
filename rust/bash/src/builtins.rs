@@ -1162,6 +1162,7 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
     let mut delim: Option<char> = None;
     let mut nchars: Option<usize> = None;
     let mut fd: Option<i32> = None;
+    let mut timeout_secs: Option<f64> = None;
     let mut i = 0;
 
     while i < args.len() {
@@ -1193,7 +1194,10 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
                 }
             }
             "-t" => {
-                i += 1; // Skip timeout argument
+                i += 1;
+                if i < args.len() {
+                    timeout_secs = args[i].parse().ok();
+                }
             }
             "-u" => {
                 i += 1;
@@ -1221,6 +1225,28 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
 
     // Determine which fd to read from
     let read_fd = fd.unwrap_or(0); // 0 = stdin
+
+    // Handle timeout: check if data is available within the timeout period
+    #[cfg(unix)]
+    if let Some(secs) = timeout_secs {
+        use nix::poll::{PollFd, PollFlags, PollTimeout};
+        use std::os::unix::io::BorrowedFd;
+        let poll_fd = PollFd::new(
+            unsafe { BorrowedFd::borrow_raw(read_fd) },
+            PollFlags::POLLIN,
+        );
+        let timeout_ms = (secs * 1000.0) as i32;
+        let timeout = if timeout_ms <= 0 {
+            PollTimeout::ZERO
+        } else {
+            PollTimeout::from(timeout_ms as u16)
+        };
+        match nix::poll::poll(&mut [poll_fd], timeout) {
+            Ok(0) => return 142, // timeout — exit code > 128
+            Err(_) => return 142,
+            _ => {}
+        }
+    }
 
     // Read input based on options
     if let Some(n) = nchars {
