@@ -1298,12 +1298,26 @@ impl Shell {
                 match item.terminator {
                     CaseTerminator::Break => return status,
                     CaseTerminator::FallThrough => {
-                        // Execute next body unconditionally
+                        // Execute next clause(s) unconditionally (;& chains)
                         i += 1;
-                        if i < clause.items.len() {
-                            return self.run_program(&clause.items[i].body);
+                        while i < clause.items.len() {
+                            let next_status = self.run_program(&clause.items[i].body);
+                            match clause.items[i].terminator {
+                                CaseTerminator::Break => return next_status,
+                                CaseTerminator::FallThrough => {
+                                    i += 1;
+                                    continue;
+                                }
+                                CaseTerminator::TestNext => {
+                                    i += 1;
+                                    break; // resume pattern testing
+                                }
+                            }
                         }
-                        return status;
+                        if i >= clause.items.len() {
+                            return status;
+                        }
+                        continue;
                     }
                     CaseTerminator::TestNext => {
                         // Continue testing next patterns
