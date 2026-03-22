@@ -1459,7 +1459,10 @@ impl Shell {
             if self.continuing > 0 {
                 self.continuing -= 1;
             } else {
+                let saved_condition = self.in_condition;
+                self.in_condition = true;
                 status = self.run_program(&clause.body);
+                self.in_condition = saved_condition;
                 if self.returning {
                     break;
                 }
