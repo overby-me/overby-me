@@ -483,11 +483,6 @@ impl Shell {
                 std::io::Write::flush(&mut std::io::stdout()).ok();
                 match unsafe { nix::unistd::fork() } {
                     Ok(nix::unistd::ForkResult::Child) => {
-                        // Ignore SIGPIPE so builtins can report write errors
-                        // instead of being killed silently
-                        unsafe {
-                            libc::signal(libc::SIGPIPE, libc::SIG_IGN);
-                        }
                         if let Some(fd) = prev_read_fd
                             && fd != 0
                         {
@@ -1393,6 +1388,11 @@ impl Shell {
                         })
                         .collect();
 
+                    // Reset SIGPIPE to default before exec so external
+                    // commands get the standard signal behavior
+                    unsafe {
+                        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+                    }
                     nix::unistd::execvp(&c_prog, &c_args).ok();
                     eprintln!("bash: {}: command not found", name);
                     std::process::exit(127);

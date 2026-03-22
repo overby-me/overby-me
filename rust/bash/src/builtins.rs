@@ -124,7 +124,7 @@ fn builtin_echo(shell: &mut Shell, args: &[String]) -> i32 {
         Err(e) => {
             let msg = match e.kind() {
                 std::io::ErrorKind::BrokenPipe => "Broken pipe",
-                _ => "write error",
+                _ => "Input/output error",
             };
             eprintln!("{}: echo: write error: {}", shell.error_prefix(), msg);
             1

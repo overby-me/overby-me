@@ -9,10 +9,11 @@ use interpreter::Shell;
 use std::io::{self, BufRead, Write};
 
 fn main() {
-    // Reset SIGPIPE to default (Rust ignores it, but shells need it)
+    // Ignore SIGPIPE so builtins can handle write errors gracefully.
+    // External commands reset SIGPIPE to SIG_DFL before exec.
     #[cfg(unix)]
     unsafe {
-        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+        libc::signal(libc::SIGPIPE, libc::SIG_IGN);
     }
 
     let code = run();
