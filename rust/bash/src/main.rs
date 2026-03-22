@@ -83,8 +83,10 @@ fn run() -> i32 {
                         }
                     }
                 } else {
+                    let mut has_c = false;
                     for flag in flags.chars() {
                         match flag {
+                            'c' => has_c = true,
                             'e' => shell.opt_errexit = enable,
                             'u' => shell.opt_nounset = enable,
                             'x' => shell.opt_xtrace = enable,
@@ -92,6 +94,16 @@ fn run() -> i32 {
                             'C' => shell.opt_noclobber = enable,
                             'n' => shell.opt_noexec = enable,
                             _ => {}
+                        }
+                    }
+                    if has_c {
+                        i += 1;
+                        if i < args.len() {
+                            command_string = Some(args[i].clone());
+                            if i + 1 < args.len() {
+                                positional_start = Some(i + 1);
+                            }
+                            break;
                         }
                     }
                 }
