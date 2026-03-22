@@ -2191,13 +2191,86 @@ fn builtin_mapfile(shell: &mut Shell, args: &[String]) -> i32 {
     0
 }
 
-fn builtin_alias(_shell: &mut Shell, _args: &[String]) -> i32 {
-    // TODO: Implement aliases
-    0
+fn builtin_alias(shell: &mut Shell, args: &[String]) -> i32 {
+    if args.is_empty() {
+        // Print all aliases
+        let mut names: Vec<&String> = shell.aliases.keys().collect();
+        names.sort();
+        for name in names {
+            let value = &shell.aliases[name];
+            println!("alias {}='{}'", name, value.replace('\'', "'\\''"));
+        }
+        return 0;
+    }
+
+    let mut print_only = false;
+    let mut status = 0;
+    let mut names = Vec::new();
+    for arg in args {
+        match arg.as_str() {
+            "-p" => print_only = true,
+            a if a.starts_with('-') => {
+                eprintln!("{}: alias: {}: invalid option", shell.error_prefix(), a);
+                eprintln!("alias: usage: alias [-p] [name[=value] ... ]");
+                return 2;
+            }
+            _ => names.push(arg.clone()),
+        }
+    }
+
+    if print_only && names.is_empty() {
+        let mut all: Vec<&String> = shell.aliases.keys().collect();
+        all.sort();
+        for name in all {
+            let value = &shell.aliases[name];
+            println!("alias {}='{}'", name, value.replace('\'', "'\\''"));
+        }
+        return 0;
+    }
+
+    for name in &names {
+        if let Some(eq_pos) = name.find('=') {
+            let alias_name = &name[..eq_pos];
+            let alias_value = &name[eq_pos + 1..];
+            shell
+                .aliases
+                .insert(alias_name.to_string(), alias_value.to_string());
+        } else if let Some(value) = shell.aliases.get(name.as_str()) {
+            println!("alias {}='{}'", name, value.replace('\'', "'\\''"));
+        } else {
+            eprintln!("{}: alias: {}: not found", shell.error_prefix(), name);
+            status = 1;
+        }
+    }
+    status
 }
 
-fn builtin_unalias(_shell: &mut Shell, _args: &[String]) -> i32 {
-    0
+fn builtin_unalias(shell: &mut Shell, args: &[String]) -> i32 {
+    if args.is_empty() {
+        eprintln!("unalias: usage: unalias [-a] name [name ...]");
+        return 2;
+    }
+
+    let mut status = 0;
+    for arg in args {
+        match arg.as_str() {
+            "-a" => {
+                shell.aliases.clear();
+            }
+            a if a.starts_with('-') => {
+                eprintln!("{}: unalias: {}: invalid option", shell.error_prefix(), a);
+                eprintln!("unalias: usage: unalias [-a] name [name ...]");
+                return 2;
+            }
+            _ => {
+                if shell.aliases.remove(arg.as_str()).is_none() {
+                    eprintln!("{}: unalias: {}: not found", shell.error_prefix(), arg);
+                    status = 1;
+                }
+            }
+        }
+    }
+    status
 }
 
 fn builtin_enable(_shell: &mut Shell, _args: &[String]) -> i32 {
@@ -2257,6 +2330,13 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
                     shell.shopt_lastpipe = true;
                 } else if unset {
                     shell.shopt_lastpipe = false;
+                }
+            }
+            "expand_aliases" => {
+                if set {
+                    shell.shopt_expand_aliases = true;
+                } else if unset {
+                    shell.shopt_expand_aliases = false;
                 }
             }
             _ => {}

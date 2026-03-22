@@ -48,7 +48,9 @@ pub struct Shell {
     pub shopt_inherit_errexit: bool,
     pub shopt_nocasematch: bool,
     pub shopt_lastpipe: bool,
+    pub shopt_expand_aliases: bool,
 
+    pub aliases: HashMap<String, String>,
     builtins: HashMap<&'static str, BuiltinFn>,
 }
 
@@ -127,6 +129,8 @@ impl Shell {
             shopt_inherit_errexit: false,
             shopt_nocasematch: false,
             shopt_lastpipe: false,
+            shopt_expand_aliases: false,
+            aliases: HashMap::new(),
             builtins: builtins::builtins(),
         };
 
@@ -925,6 +929,36 @@ impl Shell {
         // Trace
         if self.opt_xtrace {
             eprintln!("+ {}", expanded_words.join(" "));
+        }
+
+        // Alias expansion: if the first word is an alias, re-parse and run
+        if self.shopt_expand_aliases
+            && let Some(alias_value) = self.aliases.get(&expanded_words[0]).cloned()
+        {
+            // Build a new command string: alias value + remaining args
+            let mut new_cmd = alias_value.clone();
+            for word in &expanded_words[1..] {
+                new_cmd.push(' ');
+                // Quote args that contain special chars
+                if word.contains(' ') || word.contains('\t') || word.contains('\'') {
+                    new_cmd.push('"');
+                    new_cmd.push_str(word);
+                    new_cmd.push('"');
+                } else {
+                    new_cmd.push_str(word);
+                }
+            }
+            // Apply redirections
+            let saved_fds = match self.setup_redirections(&cmd.redirections) {
+                Ok(fds) => fds,
+                Err(e) => {
+                    eprintln!("bash: {}", e);
+                    return 1;
+                }
+            };
+            let status = self.run_string(&new_cmd);
+            self.restore_redirections(saved_fds);
+            return status;
         }
 
         let command_name = &expanded_words[0];
