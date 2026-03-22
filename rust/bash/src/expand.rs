@@ -150,7 +150,8 @@ fn expand_word_to_segments(word: &Word, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> Vec<
 fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: CmdSubFn) {
     match part {
         WordPart::Literal(s) => {
-            out.push(Segment::Unquoted(s.clone()));
+            // Literal text is not subject to IFS word splitting
+            out.push(Segment::Quoted(s.clone()));
         }
         WordPart::SingleQuoted(s) => {
             out.push(Segment::Quoted(s.clone()));
