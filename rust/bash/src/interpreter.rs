@@ -180,7 +180,14 @@ impl Shell {
     pub fn set_var(&mut self, name: &str, value: String) {
         let resolved = self.resolve_nameref(name);
         if self.readonly_vars.contains(&resolved) {
-            eprintln!("bash: {}: readonly variable", resolved);
+            let sname = self
+                .vars
+                .get("_BASH_SOURCE_FILE")
+                .or_else(|| self.positional.first())
+                .map(|s| s.as_str())
+                .unwrap_or("bash");
+            let lineno = self.vars.get("LINENO").map(|s| s.as_str()).unwrap_or("0");
+            eprintln!("{}: line {}: {}: readonly variable", sname, lineno, resolved);
             return;
         }
         // Integer variables: evaluate value as arithmetic expression
@@ -949,11 +956,14 @@ impl Shell {
             return;
         }
         if self.readonly_vars.contains(&resolved_base) {
-            eprintln!(
-                "{}: {}: readonly variable",
-                self.positional.first().map(|s| s.as_str()).unwrap_or("bash"),
-                assign.name
-            );
+            let name = self
+                .vars
+                .get("_BASH_SOURCE_FILE")
+                .or_else(|| self.positional.first())
+                .map(|s| s.as_str())
+                .unwrap_or("bash");
+            let lineno = self.vars.get("LINENO").map(|s| s.as_str()).unwrap_or("0");
+            eprintln!("{}: line {}: {}: readonly variable", name, lineno, assign.name);
             return;
         }
         match &assign.value {
