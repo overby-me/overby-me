@@ -1580,7 +1580,45 @@ fn pattern_match_impl(text: &[char], ti: usize, pattern: &[char], pi: usize) -> 
                 let mut matched = false;
                 let ch = text[ti];
                 while pi < pattern.len() && pattern[pi] != ']' {
-                    if pi + 2 < pattern.len() && pattern[pi + 1] == '-' {
+                    // POSIX character class: [:class:]
+                    if pi + 1 < pattern.len()
+                        && pattern[pi] == '['
+                        && pattern[pi + 1] == ':'
+                    {
+                        if let Some(end) = pattern[pi + 2..]
+                            .iter()
+                            .position(|&c| c == ':')
+                            .filter(|&pos| {
+                                pi + 2 + pos + 1 < pattern.len()
+                                    && pattern[pi + 2 + pos + 1] == ']'
+                            })
+                        {
+                            let class_name: String =
+                                pattern[pi + 2..pi + 2 + end].iter().collect();
+                            let in_class = match class_name.as_str() {
+                                "alpha" => ch.is_alphabetic(),
+                                "digit" => ch.is_ascii_digit(),
+                                "alnum" => ch.is_alphanumeric(),
+                                "upper" => ch.is_uppercase(),
+                                "lower" => ch.is_lowercase(),
+                                "space" => ch.is_whitespace(),
+                                "blank" => ch == ' ' || ch == '\t',
+                                "print" => !ch.is_control() || ch == ' ',
+                                "graph" => !ch.is_control() && ch != ' ',
+                                "cntrl" => ch.is_control(),
+                                "punct" => ch.is_ascii_punctuation(),
+                                "xdigit" => ch.is_ascii_hexdigit(),
+                                _ => false,
+                            };
+                            if in_class {
+                                matched = true;
+                            }
+                            pi = pi + 2 + end + 2;
+                            continue;
+                        }
+                    }
+                    if pi + 2 < pattern.len() && pattern[pi + 1] == '-' && pattern[pi + 2] != ']'
+                    {
                         if ch >= pattern[pi] && ch <= pattern[pi + 2] {
                             matched = true;
                         }
