@@ -746,6 +746,7 @@ impl Shell {
         }
 
         // Handle assignments
+        let saved_last_status = self.last_status;
         if !cmd.assignments.is_empty() {
             for assign in &cmd.assignments {
                 if expanded_words.is_empty() {
@@ -756,8 +757,14 @@ impl Shell {
 
         if expanded_words.is_empty() {
             // For assignment-only commands, return the status of the last
-            // command substitution (if any), not 0
-            return self.last_status;
+            // command substitution (if any), not 0.
+            // If no command substitution ran, last_status is unchanged from
+            // before the assignment — return 0 for simple assignments.
+            return if self.last_status != saved_last_status {
+                self.last_status
+            } else {
+                0
+            };
         }
 
         // Trace
