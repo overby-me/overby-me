@@ -376,11 +376,18 @@ impl Shell {
 
                 // lastpipe: run last command in current shell
                 if is_last && self.shopt_lastpipe {
+                    let stdin_was_pipe = prev_read_fd == Some(0);
                     let saved_stdin = if let Some(fd) = prev_read_fd {
                         // Save current stdin (may fail if closed)
-                        let saved = nix::unistd::dup(0).ok();
-                        nix::unistd::dup2(fd, 0).ok();
-                        nix::unistd::close(fd).ok();
+                        let saved = if stdin_was_pipe {
+                            None // fd 0 IS the pipe — original stdin was closed
+                        } else {
+                            nix::unistd::dup(0).ok()
+                        };
+                        if fd != 0 {
+                            nix::unistd::dup2(fd, 0).ok();
+                            nix::unistd::close(fd).ok();
+                        }
                         saved
                     } else {
                         None
