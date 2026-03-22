@@ -702,22 +702,66 @@ fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
                 val[start..].to_string()
             }
         }
-        ParamOp::UpperFirst(_) => {
+        ParamOp::UpperFirst(pat) => {
+            let pat_str = expand_word_nosplit_ctx(pat, ctx, cmd_sub);
             let mut chars = val.chars();
             match chars.next() {
                 None => String::new(),
-                Some(c) => c.to_uppercase().to_string() + chars.as_str(),
+                Some(c) => {
+                    if pat_str.is_empty() || char_matches_pattern(c, &pat_str) {
+                        c.to_uppercase().to_string() + chars.as_str()
+                    } else {
+                        val.clone()
+                    }
+                }
             }
         }
-        ParamOp::UpperAll(_) => val.to_uppercase(),
-        ParamOp::LowerFirst(_) => {
+        ParamOp::UpperAll(pat) => {
+            let pat_str = expand_word_nosplit_ctx(pat, ctx, cmd_sub);
+            if pat_str.is_empty() {
+                val.to_uppercase()
+            } else {
+                val.chars()
+                    .map(|c| {
+                        if char_matches_pattern(c, &pat_str) {
+                            c.to_uppercase().collect::<String>()
+                        } else {
+                            c.to_string()
+                        }
+                    })
+                    .collect()
+            }
+        }
+        ParamOp::LowerFirst(pat) => {
+            let pat_str = expand_word_nosplit_ctx(pat, ctx, cmd_sub);
             let mut chars = val.chars();
             match chars.next() {
                 None => String::new(),
-                Some(c) => c.to_lowercase().to_string() + chars.as_str(),
+                Some(c) => {
+                    if pat_str.is_empty() || char_matches_pattern(c, &pat_str) {
+                        c.to_lowercase().to_string() + chars.as_str()
+                    } else {
+                        val.clone()
+                    }
+                }
             }
         }
-        ParamOp::LowerAll(_) => val.to_lowercase(),
+        ParamOp::LowerAll(pat) => {
+            let pat_str = expand_word_nosplit_ctx(pat, ctx, cmd_sub);
+            if pat_str.is_empty() {
+                val.to_lowercase()
+            } else {
+                val.chars()
+                    .map(|c| {
+                        if char_matches_pattern(c, &pat_str) {
+                            c.to_lowercase().collect::<String>()
+                        } else {
+                            c.to_string()
+                        }
+                    })
+                    .collect()
+            }
+        }
         #[allow(clippy::match_single_binding)]
         ParamOp::Transform(ch) => match ch {
             'E' => {
@@ -1193,6 +1237,39 @@ fn word_split(segments: &[Segment], ifs: &str) -> Vec<String> {
     }
 
     fields
+}
+
+/// Check if a character matches a glob-style pattern (used for case modification).
+/// Supports `?` (any char), `[abc]` (character class), and literal characters.
+fn char_matches_pattern(c: char, pattern: &str) -> bool {
+    if pattern == "?" {
+        return true;
+    }
+    if pattern.starts_with('[') && pattern.ends_with(']') {
+        let inner = &pattern[1..pattern.len() - 1];
+        let (negate, inner) = if inner.starts_with('!') || inner.starts_with('^') {
+            (true, &inner[1..])
+        } else {
+            (false, inner)
+        };
+        let mut found = false;
+        let mut chars = inner.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if chars.peek() == Some(&'-') {
+                chars.next(); // consume '-'
+                if let Some(end) = chars.next() {
+                    if c >= ch && c <= end {
+                        found = true;
+                    }
+                }
+            } else if ch == c {
+                found = true;
+            }
+        }
+        return if negate { !found } else { found };
+    }
+    // Literal pattern: match case-insensitively (pattern char matches this char)
+    pattern.chars().any(|p| p == c || p.to_lowercase().eq(c.to_lowercase()))
 }
 
 /// Brace expansion: {a,b,c} → ["a", "b", "c"], pre{a,b}post → ["preapost", "prebpost"]
