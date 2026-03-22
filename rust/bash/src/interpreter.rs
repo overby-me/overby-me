@@ -508,6 +508,11 @@ impl Shell {
                     drop(pipe_r);
                     nix::unistd::dup2(pipe_w_raw, 1).ok();
                     drop(pipe_w);
+                    // Command substitution does not inherit errexit
+                    // (unless inherit_errexit shopt is set)
+                    if !self.shopt_inherit_errexit {
+                        self.opt_errexit = false;
+                    }
                     let status = self.run_string(cmd_str);
                     std::io::Write::flush(&mut std::io::stdout()).ok();
                     std::process::exit(status);
