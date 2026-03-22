@@ -550,9 +550,12 @@ fn parse_dollar(chars: &[char], i: &mut usize) -> WordPart {
                                 }
                             }
                             if count > 0 {
-                                if let Some(c) = char::from_u32(val) {
-                                    s.push(c);
+                                // \x produces single bytes (truncate to 0xFF)
+                                let byte_val = (val & 0xFF) as u8;
+                                if byte_val == 0 {
+                                    break; // NUL terminates
                                 }
+                                s.push(byte_val as char);
                             } else {
                                 s.push('\\');
                                 s.push('x');
@@ -1440,13 +1443,13 @@ impl Lexer {
                                             }
                                         }
                                         if count > 0 || braced {
-                                            if val == 0 {
+                                            // \x produces single bytes (truncate to 0xFF)
+                                            let byte_val = (val & 0xFF) as u8;
+                                            if byte_val == 0 {
                                                 nul_terminated = true;
                                                 break;
                                             }
-                                            if let Some(c) = char::from_u32(val) {
-                                                s.push(c);
-                                            }
+                                            s.push(byte_val as char);
                                         } else {
                                             s.push('\\');
                                             s.push('x');
