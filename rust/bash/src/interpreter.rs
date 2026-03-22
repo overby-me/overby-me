@@ -348,7 +348,13 @@ impl Shell {
             None
         };
 
+        // Negated pipelines suppress errexit for inner commands
+        let saved_condition = self.in_condition;
+        if pipeline.negated {
+            self.in_condition = true;
+        }
         let status = self.run_pipeline_inner(pipeline);
+        self.in_condition = saved_condition;
 
         if let Some(start) = start_time {
             let elapsed = start.elapsed();
