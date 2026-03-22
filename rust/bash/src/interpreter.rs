@@ -246,6 +246,10 @@ impl Shell {
     }
 
     fn run_complete_command(&mut self, cmd: &CompleteCommand) -> i32 {
+        // Update LINENO
+        self.vars
+            .insert("LINENO".to_string(), cmd.line.to_string());
+
         if cmd.background {
             #[cfg(unix)]
             {

@@ -83,6 +83,10 @@ impl Parser {
         self.current == Token::Eof
     }
 
+    pub fn current_line(&self) -> usize {
+        self.lexer.line
+    }
+
     pub fn current_token_str(&self) -> String {
         match &self.current {
             Token::Word(parts) => parts
@@ -137,6 +141,7 @@ impl Parser {
     }
 
     fn parse_complete_command(&mut self) -> Result<CompleteCommand, String> {
+        let line = self.current_line();
         let list = self.parse_and_or_list()?;
 
         let background = match self.current {
@@ -151,7 +156,11 @@ impl Parser {
             _ => false,
         };
 
-        Ok(CompleteCommand { list, background })
+        Ok(CompleteCommand {
+            list,
+            background,
+            line,
+        })
     }
 
     fn parse_and_or_list(&mut self) -> Result<AndOrList, String> {

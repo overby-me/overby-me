@@ -8,6 +8,7 @@ pub type Program = Vec<CompleteCommand>;
 pub struct CompleteCommand {
     pub list: AndOrList,
     pub background: bool,
+    pub line: usize,
 }
 
 /// A chain of pipelines connected by && or ||.

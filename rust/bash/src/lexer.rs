@@ -38,6 +38,7 @@ struct HereDocPending {
 pub struct Lexer {
     input: Vec<char>,
     pos: usize,
+    pub line: usize,
     pending_heredocs: Vec<HereDocPending>,
     heredoc_bodies: Vec<Word>,
     heredoc_index: usize,
@@ -48,6 +49,7 @@ impl Lexer {
         Self {
             input: input.chars().collect(),
             pos: 0,
+            line: 1,
             pending_heredocs: Vec::new(),
             heredoc_bodies: Vec::new(),
             heredoc_index: 0,
@@ -60,7 +62,10 @@ impl Lexer {
 
     fn advance(&mut self) -> Option<char> {
         let ch = self.input.get(self.pos).copied();
-        if ch.is_some() {
+        if let Some(c) = ch {
+            if c == '\n' {
+                self.line += 1;
+            }
             self.pos += 1;
         }
         ch
@@ -70,13 +75,14 @@ impl Lexer {
         self.input.get(self.pos + offset).copied()
     }
 
-    pub fn save_position(&self) -> (usize, usize) {
-        (self.pos, self.pending_heredocs.len())
+    pub fn save_position(&self) -> (usize, usize, usize) {
+        (self.pos, self.pending_heredocs.len(), self.line)
     }
 
-    pub fn restore_position(&mut self, saved: (usize, usize)) {
+    pub fn restore_position(&mut self, saved: (usize, usize, usize)) {
         self.pos = saved.0;
         self.pending_heredocs.truncate(saved.1);
+        self.line = saved.2;
     }
 
     fn skip_whitespace(&mut self) {

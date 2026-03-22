@@ -1552,11 +1552,16 @@ fn builtin_eval(shell: &mut Shell, args: &[String]) -> i32 {
                     .first()
                     .map(|s| s.as_str())
                     .unwrap_or("bash");
+                let lineno = shell
+                    .vars
+                    .get("LINENO")
+                    .and_then(|s| s.parse::<usize>().ok())
+                    .unwrap_or(0);
                 eprintln!(
-                    "{}: eval: syntax error near unexpected token `{}'",
-                    name, token_desc
+                    "{}: eval: line {}: syntax error near unexpected token `{}'",
+                    name, lineno, token_desc
                 );
-                eprintln!("{}: eval: `{}'", name, command.trim());
+                eprintln!("{}: eval: line {}: `{}'", name, lineno, command.trim());
                 2
             } else {
                 shell.run_program(&program)
