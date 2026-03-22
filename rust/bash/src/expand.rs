@@ -1343,7 +1343,14 @@ fn brace_expand(s: &str) -> Vec<String> {
     let mut has_comma = false;
     let mut has_dotdot = false;
 
-    for (i, &ch) in chars.iter().enumerate() {
+    let mut i = 0;
+    while i < chars.len() {
+        let ch = chars[i];
+        // Skip escaped characters
+        if ch == '\\' && i + 1 < chars.len() {
+            i += 2;
+            continue;
+        }
         match ch {
             '{' if depth == 0 => {
                 brace_start = Some(i);
@@ -1353,8 +1360,20 @@ fn brace_expand(s: &str) -> Vec<String> {
             '}' if depth == 1 => {
                 if let Some(start) = brace_start {
                     let inner = &s[start + 1..i];
-                    if inner.contains(',') {
-                        has_comma = true;
+                    // Check for unescaped commas
+                    {
+                        let inner_chars: Vec<char> = inner.chars().collect();
+                        let mut j = 0;
+                        while j < inner_chars.len() {
+                            if inner_chars[j] == '\\' && j + 1 < inner_chars.len() {
+                                j += 2;
+                                continue;
+                            }
+                            if inner_chars[j] == ',' {
+                                has_comma = true;
+                            }
+                            j += 1;
+                        }
                     }
                     if inner.contains("..") {
                         has_dotdot = true;
@@ -1447,6 +1466,7 @@ fn brace_expand(s: &str) -> Vec<String> {
             ',' if depth == 1 => has_comma = true,
             _ => {}
         }
+        i += 1;
     }
 
     vec![s.to_string()]
@@ -1456,8 +1476,17 @@ fn split_brace_alternatives(s: &str) -> Vec<String> {
     let mut result = Vec::new();
     let mut current = String::new();
     let mut depth = 0;
+    let chars: Vec<char> = s.chars().collect();
+    let mut i = 0;
 
-    for ch in s.chars() {
+    while i < chars.len() {
+        let ch = chars[i];
+        if ch == '\\' && i + 1 < chars.len() {
+            current.push(ch);
+            current.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
         match ch {
             '{' => {
                 depth += 1;
@@ -1472,6 +1501,7 @@ fn split_brace_alternatives(s: &str) -> Vec<String> {
             }
             _ => current.push(ch),
         }
+        i += 1;
     }
     result.push(current);
     result
