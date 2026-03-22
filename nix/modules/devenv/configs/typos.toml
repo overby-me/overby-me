@@ -25,6 +25,10 @@ bre = "bre"
 rela = "rela"
 # Siz = ELF readelf output abbreviation (FileSiz, MemSiz)
 Siz = "Siz"
+# GIR = GObject Introspection Repository (GNOME build tool)
+gir = "gir"
+# restat = ninja build system keyword (re-stat output files)
+restat = "restat"
 
 
 [default]
