@@ -7,7 +7,7 @@
   name,
 }:
 pkgs.runCommand "rust-bash-test-${name}" {
-  nativeBuildInputs = [pkgs.rust-bash pkgs.gcc pkgs.coreutils pkgs.diffutils pkgs.gnused pkgs.gnugrep pkgs.gawk pkgs.findutils];
+  nativeBuildInputs = [pkgs.rust-bash pkgs.bash pkgs.gcc pkgs.coreutils pkgs.diffutils pkgs.gnused pkgs.gnugrep pkgs.gawk pkgs.findutils];
   bashSrc = pkgs.bash.src;
 } ''
   # Extract the test suite and helper sources
@@ -21,14 +21,15 @@ pkgs.runCommand "rust-bash-test-${name}" {
 
   cd "$BASH_SRC/tests"
 
-  # Put helpers and rust-bash on PATH
-  export PATH="$OLDPWD:${pkgs.rust-bash}/bin:$PATH"
+  # Put helpers on PATH but use real bash for test harness scripts;
+  # only THIS_SH (the shell under test) points to rust-bash
+  export PATH="$OLDPWD:$PATH"
   export THIS_SH="${pkgs.rust-bash}/bin/bash"
   export TMPDIR="$(mktemp -d)"
   export BASH_TSTOUT="$TMPDIR/bashtst-$$"
 
   echo "Running bash test: ${name}"
-  timeout 60 sh "run-${name}"
+  timeout 60 ${pkgs.bash}/bin/bash "run-${name}"
 
   touch $out
 ''

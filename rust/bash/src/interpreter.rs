@@ -3,6 +3,7 @@ use crate::builtins::{self, BuiltinFn};
 use crate::expand;
 use crate::parser::Parser;
 use std::collections::{HashMap, HashSet};
+use std::io::Write;
 
 pub struct Shell {
     pub vars: HashMap<String, String>,
@@ -282,7 +283,7 @@ impl Shell {
 
         #[cfg(unix)]
         {
-            use std::os::unix::io::{AsRawFd, RawFd};
+            use std::os::unix::io::{IntoRawFd, RawFd};
 
             let mut prev_read_fd: Option<RawFd> = None;
             let mut children: Vec<nix::unistd::Pid> = Vec::new();
@@ -292,7 +293,7 @@ impl Shell {
 
                 let (read_fd, write_fd): (Option<RawFd>, Option<RawFd>) = if !is_last {
                     let (r, w) = nix::unistd::pipe().expect("pipe failed");
-                    (Some(r.as_raw_fd()), Some(w.as_raw_fd()))
+                    (Some(r.into_raw_fd()), Some(w.into_raw_fd()))
                 } else {
                     (None, None)
                 };
@@ -312,6 +313,8 @@ impl Shell {
                         }
 
                         let status = self.run_command(cmd);
+                        std::io::stdout().flush().ok();
+                        std::io::stderr().flush().ok();
                         std::process::exit(status);
                     }
                     Ok(nix::unistd::ForkResult::Parent { child }) => {
@@ -797,10 +800,24 @@ impl Shell {
                         unsafe { std::env::set_var(key, value) };
                     }
 
-                    let c_prog = CString::new(path.as_bytes()).expect("CString::new failed");
+                    let c_prog = match CString::new(path.as_bytes()) {
+                        Ok(c) => c,
+                        Err(_) => {
+                            eprintln!("bash: {}: argument list contains NUL byte", name);
+                            std::process::exit(1);
+                        }
+                    };
                     let c_args: Vec<CString> = args
                         .iter()
-                        .map(|a| CString::new(a.as_bytes()).expect("CString::new failed"))
+                        .map(|a| {
+                            // Strip NUL bytes from arguments (bash truncates at first NUL)
+                            let bytes = a.as_bytes();
+                            let truncated = match bytes.iter().position(|&b| b == 0) {
+                                Some(pos) => &bytes[..pos],
+                                None => bytes,
+                            };
+                            CString::new(truncated).unwrap_or_else(|_| CString::new("").unwrap())
+                        })
                         .collect();
 
                     nix::unistd::execvp(&c_prog, &c_args).ok();
@@ -861,6 +878,8 @@ impl Shell {
                     match unsafe { nix::unistd::fork() } {
                         Ok(nix::unistd::ForkResult::Child) => {
                             let status = self.run_program(program);
+                            std::io::stdout().flush().ok();
+                            std::io::stderr().flush().ok();
                             std::process::exit(status);
                         }
                         Ok(nix::unistd::ForkResult::Parent { child }) => {
