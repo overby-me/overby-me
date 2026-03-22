@@ -413,6 +413,7 @@ fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
                 .as_nanos();
             ((t ^ (std::process::id() as u128 * 2654435761)) % 32768).to_string()
         }
+        "BASHPID" => std::process::id().to_string(),
         "SECONDS" => {
             // TODO: track shell start time for accurate SECONDS
             "0".to_string()

@@ -175,6 +175,12 @@ impl Shell {
             self.exports.insert(resolved.clone(), value.clone());
             unsafe { std::env::set_var(&resolved, &value) };
         }
+        // BASH_ARGV0 updates $0
+        if resolved == "BASH_ARGV0" {
+            if !self.positional.is_empty() {
+                self.positional[0] = value.clone();
+            }
+        }
         self.vars.insert(resolved, value);
     }
 
