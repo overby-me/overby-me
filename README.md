@@ -85,7 +85,7 @@
 | [Pkg-config-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/pkg-config) | pkg-config reimplementation |
 | [H264-decoder-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/h264-decoder) | Pure Rust H.264 decoder library and CLI |
 | [H265-decoder-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/h265-decoder) | Pure Rust H.265/HEVC decoder library |
-| [H264toav1-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/h264toav1) | CLI tool for transcoding H.264/H.265 video to AV1 |
+| [H26xtoav1-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/h26xtoav1) | CLI tool for transcoding H.264/H.265 video to AV1 |
 
 #### Mojo
 
@@ -316,7 +316,7 @@
 | ✅ | Image Codec (Lossless) | [PNG 📖](https://en.wikipedia.org/wiki/Portable_Network_Graphics) | [AVIF (lossless) 📖](https://en.wikipedia.org/wiki/AVIF) | [cavif 🦀](https://github.com/kornelski/cavif-rs) | |
 | ✅ | Media Container | [Matroska/WebM 📖](https://www.matroska.org) | | 🆗 | [MP4 📖](https://en.wikipedia.org/wiki/MPEG-4_Part_14) |
 | ✅ | Audio Codec | [Opus 📖](https://opus-codec.org) | | [Symphonia 🦀](https://github.com/pdeljanov/Symphonia) | [MP3 📖](https://en.wikipedia.org/wiki/MP3) |
-| ✅ | Video Codec | [AV1 📖](https://aomedia.org/av1-features/get-started) | | [rav1d 🦀](https://github.com/memorysafety/rav1d), [h264toav1-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/h264toav1) | [H.264 🔒](https://en.wikipedia.org/wiki/Advanced_Video_Coding) |
+| ✅ | Video Codec | [AV1 📖](https://aomedia.org/av1-features/get-started) | | [rav1d 🦀](https://github.com/memorysafety/rav1d), [h26xtoav1-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/h26xtoav1) | [H.264 🔒](https://en.wikipedia.org/wiki/Advanced_Video_Coding) |
 | 🚧 | 3D Model Format | [glTF 📖](https://www.khronos.org/gltf/) | [OpenUSD](https://openusd.org) | 🆗 | |
 
 #### Text & Object Notation

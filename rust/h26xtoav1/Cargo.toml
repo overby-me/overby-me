@@ -1,13 +1,13 @@
 [package]
-name = "h264toav1"
+name = "h26xtoav1"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-repository = "https://tangled.org/overby.me/overby.me/tree/main/rust/h264toav1"
+repository = "https://tangled.org/overby.me/overby.me/tree/main/rust/h26xtoav1"
 description = "A CLI tool to transcode H.264/H.265 video to AV1 using h264-decode/h265-decode and rav1e"
 
 [[bin]]
-name = "h264toav1"
+name = "h26xtoav1"
 path = "src/main.rs"
 
 [dependencies]

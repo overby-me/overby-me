@@ -3,7 +3,7 @@
 //! # Usage
 //!
 //! ```text
-//! h264toav1 [OPTIONS] <INPUT> -o <OUTPUT>
+//! h26xtoav1 [OPTIONS] <INPUT> -o <OUTPUT>
 //!
 //! Arguments:
 //!   <INPUT>  Path to the input H.264/H.265 Annex B file (.264/.h264/.265/.h265/.hevc)
@@ -238,7 +238,7 @@ impl DecodedFrameRef<'_> {
 /// decoder, re-encodes every frame to AV1 using rav1e, and writes the
 /// output as an IVF container.
 #[derive(Parser, Debug)]
-#[command(name = "h264toav1", version, about)]
+#[command(name = "h26xtoav1", version, about)]
 struct Cli {
     /// Path to the input H.264/H.265 Annex B file (.264/.h264/.265/.h265/.hevc).
     input: PathBuf,

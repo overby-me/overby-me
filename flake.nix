@@ -235,7 +235,7 @@
         ./rust/make
         ./rust/meson
         ./rust/gzip
-        ./rust/h264toav1
+        ./rust/h26xtoav1
         ./rust/patch
         ./rust/patchelf
         ./rust/strip

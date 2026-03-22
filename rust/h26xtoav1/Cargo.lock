@@ -388,7 +388,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "h264toav1"
+name = "h265-decode"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "thiserror",
+]
+
+[[package]]
+name = "h26xtoav1"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -398,14 +406,6 @@ dependencies = [
  "h265-decode",
  "log",
  "rav1e",
-]
-
-[[package]]
-name = "h265-decode"
-version = "0.1.0"
-dependencies = [
- "log",
- "thiserror",
 ]
 
 [[package]]

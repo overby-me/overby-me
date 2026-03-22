@@ -1,4 +1,4 @@
-# h264toav1
+# h26xtoav1
 
 A CLI tool for transcoding H.264 (AVC) and H.265 (HEVC) video to AV1, built entirely in Rust.
 
@@ -7,7 +7,7 @@ Uses [`h264-decode`](../h264-decoder) and [`h265-decode`](../h265-decoder) for d
 ## Project structure
 
 ```text
-h264toav1/
+h26xtoav1/
 ├── Cargo.toml          # Package manifest
 ├── src/
 │   ├── main.rs         # CLI entry point, decode/encode pipeline
@@ -24,37 +24,37 @@ h264toav1/
 cargo build --release
 
 # Basic transcode – codec is auto-detected from extension
-h264toav1 input.264 -o output.ivf     # H.264 input
-h264toav1 input.265 -o output.ivf     # H.265 input
-h264toav1 input.hevc -o output.ivf    # H.265 input
+h26xtoav1 input.264 -o output.ivf     # H.264 input
+h26xtoav1 input.265 -o output.ivf     # H.265 input
+h26xtoav1 input.hevc -o output.ivf    # H.265 input
 
 # Force input codec (overrides auto-detection)
-h264toav1 input.bin -o output.ivf --codec h264
-h264toav1 input.bin -o output.ivf --codec h265
+h26xtoav1 input.bin -o output.ivf --codec h264
+h26xtoav1 input.bin -o output.ivf --codec h265
 
 # Specify speed preset and quantizer
-h264toav1 input.264 -o output.ivf -s 4 -q 80
+h26xtoav1 input.264 -o output.ivf -s 4 -q 80
 
 # Fast preview encode
-h264toav1 input.265 -o output.ivf -s 10 -q 128
+h26xtoav1 input.265 -o output.ivf -s 10 -q 128
 
 # High quality encode
-h264toav1 input.264 -o output.ivf -s 3 -q 60
+h26xtoav1 input.264 -o output.ivf -s 3 -q 60
 
 # Low-latency mode (no frame reordering)
-h264toav1 input.265 -o output.ivf --low-latency
+h26xtoav1 input.265 -o output.ivf --low-latency
 
 # Limit to first 100 frames with verbose logging
-h264toav1 input.264 -o output.ivf --max-frames 100 -v
+h26xtoav1 input.264 -o output.ivf --max-frames 100 -v
 
 # Write to stdout (e.g. pipe to ffplay)
-h264toav1 input.265 -o - | ffplay -i -
+h26xtoav1 input.265 -o - | ffplay -i -
 ```
 
 ## CLI options
 
 ```text
-h264toav1 [OPTIONS] <INPUT> -o <OUTPUT>
+h26xtoav1 [OPTIONS] <INPUT> -o <OUTPUT>
 
 Arguments:
   <INPUT>                  Path to the input H.264/H.265 Annex B file
@@ -171,10 +171,10 @@ just transcode-hq input.264 output.ivf
 
 ```bash
 # Enter the devShell
-direnv allow  # or: nix develop .#h264toav1
+direnv allow  # or: nix develop .#h26xtoav1
 
 # Build the package
-nix build .#h264toav1
+nix build .#h26xtoav1
 ```
 
 ## License

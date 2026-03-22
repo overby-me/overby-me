@@ -1,16 +1,16 @@
 {
-  devShells.rust-h264toav1 = pkgs: {
+  devShells.rust-h26xtoav1 = pkgs: {
     packages = with pkgs; [
       just
     ];
   };
 
-  packages.rust-h264toav1 = {
+  packages.rust-h26xtoav1 = {
     lib,
     rustPlatform,
   }:
     rustPlatform.buildRustPackage {
-      pname = "rust-h264toav1";
+      pname = "rust-h26xtoav1";
       version = "unstable";
 
       src = lib.fileset.toSource {
@@ -28,7 +28,7 @@
         ];
       };
 
-      sourceRoot = "source/h264toav1";
+      sourceRoot = "source/h26xtoav1";
 
       cargoLock.lockFile = ./Cargo.lock;
 
@@ -36,10 +36,10 @@
 
       meta = {
         description = "A CLI tool to transcode H.264/H.265 video to AV1 using h264-decode, h265-decode, and rav1e";
-        homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/h264toav1";
+        homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/h26xtoav1";
         license = lib.licenses.mit;
         maintainers = with lib.maintainers; [noverby];
-        mainProgram = "h264toav1";
+        mainProgram = "h26xtoav1";
       };
     };
 }
