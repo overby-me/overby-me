@@ -74,11 +74,21 @@ pub fn expand_word(
         }
     }
     if result.is_empty() && !word.is_empty() {
-        let all_quoted = word
-            .iter()
-            .all(|p| matches!(p, WordPart::SingleQuoted(_) | WordPart::DoubleQuoted(_)));
-        if all_quoted {
-            result.push(String::new());
+        // Check if word contains "$@" or "${arr[@]}" which expand to nothing with 0 elements
+        let has_at_expansion = word.iter().any(|p| {
+            if let WordPart::DoubleQuoted(parts) = p {
+                parts.iter().any(|inner| matches!(inner, WordPart::Variable(n) if n == "@"))
+            } else {
+                false
+            }
+        });
+        if !has_at_expansion {
+            let all_quoted = word
+                .iter()
+                .all(|p| matches!(p, WordPart::SingleQuoted(_) | WordPart::DoubleQuoted(_)));
+            if all_quoted {
+                result.push(String::new());
+            }
         }
     }
     result
