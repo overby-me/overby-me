@@ -217,6 +217,10 @@ impl Shell {
         let mut parser = Parser::new(input);
         match parser.parse_program() {
             Ok(program) => {
+                if !parser.is_at_eof() {
+                    eprintln!("bash: syntax error near unexpected token");
+                    return 2;
+                }
                 if self.opt_noexec {
                     return 0;
                 }

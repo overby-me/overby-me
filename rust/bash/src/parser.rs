@@ -79,6 +79,10 @@ impl Parser {
         }
     }
 
+    pub fn is_at_eof(&self) -> bool {
+        self.current == Token::Eof
+    }
+
     pub fn parse_program(&mut self) -> Result<Program, String> {
         let mut commands = Vec::new();
         self.skip_newlines();
