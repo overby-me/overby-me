@@ -218,7 +218,8 @@ impl Shell {
         match parser.parse_program() {
             Ok(program) => {
                 if !parser.is_at_eof() {
-                    eprintln!("bash: syntax error near unexpected token");
+                    let token_desc = parser.current_token_str();
+                    eprintln!("bash: eval: syntax error near unexpected token `{}'", token_desc);
                     return 2;
                 }
                 if self.opt_noexec {

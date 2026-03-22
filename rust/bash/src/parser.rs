@@ -83,6 +83,30 @@ impl Parser {
         self.current == Token::Eof
     }
 
+    pub fn current_token_str(&self) -> String {
+        match &self.current {
+            Token::Word(parts) => parts
+                .iter()
+                .map(|p| match p {
+                    WordPart::Literal(s) => s.clone(),
+                    WordPart::SingleQuoted(s) => format!("'{}'", s),
+                    _ => String::new(),
+                })
+                .collect(),
+            Token::RParen => ")".to_string(),
+            Token::LParen => "(".to_string(),
+            Token::Semi => ";".to_string(),
+            Token::DSemi => ";;".to_string(),
+            Token::Pipe => "|".to_string(),
+            Token::Amp => "&".to_string(),
+            Token::AndIf => "&&".to_string(),
+            Token::OrIf => "||".to_string(),
+            Token::Newline => "newline".to_string(),
+            Token::Eof => "EOF".to_string(),
+            _ => "unknown".to_string(),
+        }
+    }
+
     pub fn parse_program(&mut self) -> Result<Program, String> {
         let mut commands = Vec::new();
         self.skip_newlines();
