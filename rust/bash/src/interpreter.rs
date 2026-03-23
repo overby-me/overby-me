@@ -626,6 +626,18 @@ impl Shell {
 
             match parser.parse_complete_command_pub() {
                 Ok(cmd) => {
+                    // Emit heredoc EOF warnings
+                    for (eof_line, start_line, delim) in parser.take_heredoc_eof_warnings() {
+                        let name = self
+                            .positional
+                            .first()
+                            .map(|s| s.as_str())
+                            .unwrap_or("bash");
+                        eprintln!(
+                            "{}: line {}: warning: here-document at line {} delimited by end-of-file (wanted `{}')",
+                            name, eof_line, start_line, delim
+                        );
+                    }
                     if let Some(line_num) = parser.heredoc_overflow_line() {
                         let name = self
                             .positional

@@ -30,6 +30,10 @@ impl Parser {
         self.lexer.heredoc_overflow_line
     }
 
+    pub fn take_heredoc_eof_warnings(&mut self) -> Vec<(usize, usize, String)> {
+        std::mem::take(&mut self.lexer.heredoc_eof_warnings)
+    }
+
     fn skip_newlines(&mut self) {
         while self.current == Token::Newline {
             self.advance();

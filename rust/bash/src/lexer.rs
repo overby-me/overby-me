@@ -35,6 +35,7 @@ struct HereDocPending {
     delimiter: String,
     strip_tabs: bool,
     quoted: bool,
+    start_line: usize,
 }
 
 pub struct Lexer {
@@ -45,6 +46,7 @@ pub struct Lexer {
     heredoc_bodies: Vec<Word>,
     heredoc_index: usize,
     pub heredoc_overflow_line: Option<usize>,
+    pub heredoc_eof_warnings: Vec<(usize, usize, String)>, // (eof_line, start_line, delimiter)
 }
 
 impl Lexer {
@@ -61,6 +63,7 @@ impl Lexer {
             heredoc_bodies: Vec::new(),
             heredoc_index: 0,
             heredoc_overflow_line: None,
+            heredoc_eof_warnings: Vec::new(),
         }
     }
 
@@ -292,6 +295,7 @@ impl Lexer {
             delimiter,
             strip_tabs,
             quoted,
+            start_line: self.line,
         });
     }
 
@@ -325,6 +329,12 @@ impl Lexer {
                     body.push_str(&line);
                 }
                 if self.pos >= self.input.len() {
+                    // EOF terminated here-document — emit warning
+                    self.heredoc_eof_warnings.push((
+                        self.line,
+                        hd.start_line,
+                        hd.delimiter.clone(),
+                    ));
                     break;
                 }
             }
