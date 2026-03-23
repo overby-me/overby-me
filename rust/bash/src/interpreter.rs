@@ -2070,7 +2070,7 @@ impl Shell {
         }
     }
 
-    fn eval_cond_binary(&self, left: &str, op: &str, right: &str) -> bool {
+    fn eval_cond_binary(&mut self, left: &str, op: &str, right: &str) -> bool {
         match op {
             "=" | "==" => {
                 // Pattern matching (right side is a glob pattern)
@@ -2080,24 +2080,34 @@ impl Shell {
             "<" => left < right,
             ">" => left > right,
             "-eq" | "-ne" | "-lt" | "-le" | "-gt" | "-ge" => {
-                let parse_int = |s: &str| -> Result<i64, ()> {
+                fn parse_cond_int(s: &str) -> Option<i64> {
                     if s.is_empty() {
-                        return Ok(0); // empty string treated as 0
+                        return Some(0);
                     }
-                    s.parse::<i64>().map_err(|_| ())
-                };
-                let a = match parse_int(left) {
-                    Ok(n) => n,
-                    Err(()) => {
-                        eprintln!("{}: [[: {}: integer expected", self.error_prefix(), left);
-                        return false;
+                    s.parse::<i64>().ok()
+                }
+                let a = match parse_cond_int(left) {
+                    Some(n) => n,
+                    None => {
+                        // Try arithmetic evaluation
+                        let n = self.eval_arith_expr(left);
+                        // If the expression was completely non-numeric, report error
+                        if left.chars().next().is_some_and(|c| c.is_alphabetic()) && n == 0 {
+                            eprintln!("{}: [[: {}: integer expected", self.error_prefix(), left);
+                            return false;
+                        }
+                        n
                     }
                 };
-                let b = match parse_int(right) {
-                    Ok(n) => n,
-                    Err(()) => {
-                        eprintln!("{}: [[: {}: integer expected", self.error_prefix(), right);
-                        return false;
+                let b = match parse_cond_int(right) {
+                    Some(n) => n,
+                    None => {
+                        let n = self.eval_arith_expr(right);
+                        if right.chars().next().is_some_and(|c| c.is_alphabetic()) && n == 0 {
+                            eprintln!("{}: [[: {}: integer expected", self.error_prefix(), right);
+                            return false;
+                        }
+                        n
                     }
                 };
                 match op {
