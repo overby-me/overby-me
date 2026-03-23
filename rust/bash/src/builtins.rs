@@ -1601,14 +1601,14 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
 }
 
 /// Parse an associative array literal: `([key1]=val1 [key2]=val2 ...)`
-fn parse_assoc_literal(s: &str) -> HashMap<String, String> {
+fn parse_assoc_literal(s: &str) -> crate::interpreter::AssocArray {
     let trimmed = s.trim();
     let inner = if trimmed.starts_with('(') && trimmed.ends_with(')') {
         &trimmed[1..trimmed.len() - 1]
     } else {
         trimmed
     };
-    let mut map = HashMap::new();
+    let mut map = crate::interpreter::AssocArray::default();
     // Split on \x01 separator (from inline array parser) or whitespace
     let entries: Vec<&str> = if inner.contains('\x01') {
         inner.split('\x01').collect()

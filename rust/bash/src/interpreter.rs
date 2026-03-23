@@ -3,6 +3,49 @@ use crate::builtins::{self, BuiltinFn};
 use crate::expand;
 use crate::parser::Parser;
 use std::collections::{HashMap, HashSet};
+
+/// Bash-compatible hash function (FNV-1 variant) for associative arrays.
+/// This ensures iteration order matches bash's hash table ordering.
+#[derive(Default, Clone)]
+pub struct BashHasher(u32);
+
+impl std::hash::Hasher for BashHasher {
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.0 = self
+                .0
+                .wrapping_add(self.0 << 1)
+                .wrapping_add(self.0 << 4)
+                .wrapping_add(self.0 << 7)
+                .wrapping_add(self.0 << 8)
+                .wrapping_add(self.0 << 24);
+            self.0 ^= b as u32;
+        }
+    }
+
+    fn finish(&self) -> u64 {
+        self.0 as u64
+    }
+}
+
+impl BashHasher {
+    fn new() -> Self {
+        BashHasher(2_166_136_261) // FNV_OFFSET
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct BashBuildHasher;
+
+impl std::hash::BuildHasher for BashBuildHasher {
+    type Hasher = BashHasher;
+    fn build_hasher(&self) -> BashHasher {
+        BashHasher::new()
+    }
+}
+
+/// Type alias for associative arrays using bash-compatible hash ordering
+pub type AssocArray = HashMap<String, String, BashBuildHasher>;
 use std::io::Write;
 
 pub struct Shell {
@@ -14,7 +57,7 @@ pub struct Shell {
     pub lowercase_vars: HashSet<String>,
     pub capitalize_vars: HashSet<String>,
     pub arrays: HashMap<String, Vec<String>>,
-    pub assoc_arrays: HashMap<String, HashMap<String, String>>,
+    pub assoc_arrays: HashMap<String, AssocArray>,
     pub functions: HashMap<String, CompoundCommand>,
     pub positional: Vec<String>,
     pub last_status: i32,
@@ -1653,7 +1696,7 @@ impl Shell {
                             .cloned()
                             .unwrap_or_default()
                     } else {
-                        std::collections::HashMap::new()
+                        AssocArray::default()
                     };
                     let mut map = map;
                     for elem in elements {
