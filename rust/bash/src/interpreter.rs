@@ -496,6 +496,12 @@ impl Shell {
                 match unsafe { nix::unistd::fork() } {
                     Ok(nix::unistd::ForkResult::Child) => {
                         self.in_pipeline_child = true;
+                        // Reset SIGPIPE to default in pipeline children so
+                        // builtins writing to closed pipes die from the signal
+                        // (matching bash behavior)
+                        unsafe {
+                            libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+                        }
                         if let Some(fd) = prev_read_fd
                             && fd != 0
                         {
