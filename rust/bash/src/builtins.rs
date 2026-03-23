@@ -2097,10 +2097,7 @@ fn builtin_umask(shell: &mut Shell, args: &[String]) -> i32 {
 
 fn builtin_getopts(shell: &mut Shell, args: &[String]) -> i32 {
     if args.len() < 2 {
-        eprintln!(
-            "{}: getopts: usage: getopts optstring name [arg]",
-            shell.error_prefix()
-        );
+        eprintln!("getopts: usage: getopts optstring name [arg ...]");
         return 2;
     }
 
@@ -2151,7 +2148,7 @@ fn builtin_getopts(shell: &mut Shell, args: &[String]) -> i32 {
                 return 0;
             } else {
                 eprintln!(
-                    "{}: getopts: option requires an argument -- '{}'",
+                    "{}: option requires an argument -- {}",
                     shell.error_prefix(),
                     opt_char
                 );
@@ -2164,11 +2161,7 @@ fn builtin_getopts(shell: &mut Shell, args: &[String]) -> i32 {
         }
         shell.vars.insert(varname.clone(), opt_str);
     } else {
-        eprintln!(
-            "{}: getopts: illegal option -- '{}'",
-            shell.error_prefix(),
-            opt_char
-        );
+        eprintln!("{}: illegal option -- {}", shell.error_prefix(), opt_char);
         shell.vars.insert(varname.clone(), "?".to_string());
     }
 
