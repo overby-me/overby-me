@@ -1937,8 +1937,8 @@ fn builtin_false(_shell: &mut Shell, _args: &[String]) -> i32 {
     1
 }
 
-fn builtin_test(_shell: &mut Shell, args: &[String]) -> i32 {
-    eval_test_expr(args)
+fn builtin_test(shell: &mut Shell, args: &[String]) -> i32 {
+    eval_test_expr(args, shell)
 }
 
 fn builtin_test_bracket(shell: &mut Shell, args: &[String]) -> i32 {
@@ -1949,10 +1949,10 @@ fn builtin_test_bracket(shell: &mut Shell, args: &[String]) -> i32 {
         eprintln!("{}: [: missing `]'", shell.error_prefix());
         return 2;
     };
-    eval_test_expr(args)
+    eval_test_expr(args, shell)
 }
 
-fn eval_test_expr(args: &[String]) -> i32 {
+fn eval_test_expr(args: &[String], shell: &Shell) -> i32 {
     if args.is_empty() {
         return 1; // Empty test is false
     }
@@ -1965,7 +1965,7 @@ fn eval_test_expr(args: &[String]) -> i32 {
     if args.len() == 2 {
         match args[0].as_str() {
             "!" => {
-                return if eval_test_expr(&args[1..]) == 0 {
+                return if eval_test_expr(&args[1..], shell) == 0 {
                     1
                 } else {
                     0
@@ -1973,6 +1973,29 @@ fn eval_test_expr(args: &[String]) -> i32 {
             }
             "-n" => return if !args[1].is_empty() { 0 } else { 1 },
             "-z" => return if args[1].is_empty() { 0 } else { 1 },
+            "-v" => {
+                let name = &args[1];
+                let is_set =
+                    if let Some(bracket) = name.find('[') {
+                        let base = &name[..bracket];
+                        let idx = &name[bracket + 1..name.len() - 1];
+                        if idx == "@" || idx == "*" {
+                            shell.arrays.contains_key(base) || shell.assoc_arrays.contains_key(base)
+                        } else {
+                            shell.arrays.get(base).is_some_and(|a| {
+                                idx.parse::<usize>().ok().is_some_and(|n| n < a.len())
+                            }) || shell
+                                .assoc_arrays
+                                .get(base)
+                                .is_some_and(|a| a.get(idx).is_some())
+                        }
+                    } else {
+                        shell.vars.contains_key(name.as_str())
+                            || shell.arrays.contains_key(name.as_str())
+                            || shell.assoc_arrays.contains_key(name.as_str())
+                    };
+                return if is_set { 0 } else { 1 };
+            }
             "-e" | "-a" => {
                 return if std::path::Path::new(&args[1]).exists() {
                     0
@@ -2118,22 +2141,22 @@ fn eval_test_expr(args: &[String]) -> i32 {
     // Handle -a (and) and -o (or)
     for (i, arg) in args.iter().enumerate() {
         if arg == "-a" && i > 0 && i < args.len() - 1 {
-            let left = eval_test_expr(&args[..i]);
-            let right = eval_test_expr(&args[i + 1..]);
+            let left = eval_test_expr(&args[..i], shell);
+            let right = eval_test_expr(&args[i + 1..], shell);
             return if left == 0 && right == 0 { 0 } else { 1 };
         }
     }
     for (i, arg) in args.iter().enumerate() {
         if arg == "-o" && i > 0 && i < args.len() - 1 {
-            let left = eval_test_expr(&args[..i]);
-            let right = eval_test_expr(&args[i + 1..]);
+            let left = eval_test_expr(&args[..i], shell);
+            let right = eval_test_expr(&args[i + 1..], shell);
             return if left == 0 || right == 0 { 0 } else { 1 };
         }
     }
 
     // Handle ! prefix with 3+ args
     if args[0] == "!" {
-        return if eval_test_expr(&args[1..]) == 0 {
+        return if eval_test_expr(&args[1..], shell) == 0 {
             1
         } else {
             0

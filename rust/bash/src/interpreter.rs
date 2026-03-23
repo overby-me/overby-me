@@ -2762,8 +2762,26 @@ impl Shell {
                 std::path::Path::new(val).exists()
             }
             "-v" => {
-                // Variable is set
-                self.vars.contains_key(val) || self.arrays.contains_key(val)
+                // Variable is set — handle name[@], name[*], name[n]
+                if let Some(bracket) = val.find('[') {
+                    let base = &val[..bracket];
+                    let idx = &val[bracket + 1..val.len() - 1];
+                    if idx == "@" || idx == "*" {
+                        self.arrays.contains_key(base) || self.assoc_arrays.contains_key(base)
+                    } else if let Ok(n) = idx.parse::<usize>() {
+                        self.arrays
+                            .get(base)
+                            .is_some_and(|a| n < a.len() && !a[n].is_empty())
+                    } else {
+                        self.assoc_arrays
+                            .get(base)
+                            .is_some_and(|a| a.get(idx).is_some())
+                    }
+                } else {
+                    self.vars.contains_key(val)
+                        || self.arrays.contains_key(val)
+                        || self.assoc_arrays.contains_key(val)
+                }
             }
             "-R" => {
                 // Variable is nameref
