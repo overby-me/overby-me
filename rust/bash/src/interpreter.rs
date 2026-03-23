@@ -2936,6 +2936,21 @@ impl Shell {
                     {
                         src_fd
                     } else {
+                        // Check noclobber: > cannot overwrite existing file (>| can)
+                        if self.opt_noclobber
+                            && matches!(redir.kind, RedirectKind::Output)
+                            && std::path::Path::new(&target_str).exists()
+                            && !{
+                                use std::os::unix::fs::FileTypeExt;
+                                std::fs::symlink_metadata(&target_str)
+                                    .map(|m| {
+                                        m.file_type().is_char_device() || m.file_type().is_symlink()
+                                    })
+                                    .unwrap_or(false)
+                            }
+                        {
+                            return Err(format!("{}: cannot overwrite existing file", target_str));
+                        }
                         std::fs::File::create(&target_str)
                             .map_err(|e| format!("{}: {}", target_str, Self::io_error_message(&e)))?
                             .into_raw_fd()
