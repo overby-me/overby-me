@@ -2828,9 +2828,50 @@ fn builtin_trap(shell: &mut Shell, args: &[String]) -> i32 {
 
     if args.len() == 1 {
         // trap '' or trap - : list traps or reset
-        if args[0] == "-l" {
-            // List signal names
-            println!("EXIT HUP INT QUIT TERM");
+        if args[0] == "-l" || args[0] == "-L" {
+            // List signal names (same format as kill -l)
+            let signals = [
+                (1, "HUP"),
+                (2, "INT"),
+                (3, "QUIT"),
+                (4, "ILL"),
+                (5, "TRAP"),
+                (6, "ABRT"),
+                (7, "BUS"),
+                (8, "FPE"),
+                (9, "KILL"),
+                (10, "USR1"),
+                (11, "SEGV"),
+                (12, "USR2"),
+                (13, "PIPE"),
+                (14, "ALRM"),
+                (15, "TERM"),
+                (16, "STKFLT"),
+                (17, "CHLD"),
+                (18, "CONT"),
+                (19, "STOP"),
+                (20, "TSTP"),
+                (21, "TTIN"),
+                (22, "TTOU"),
+                (23, "URG"),
+                (24, "XCPU"),
+                (25, "XFSZ"),
+                (26, "VTALRM"),
+                (27, "PROF"),
+                (28, "WINCH"),
+                (29, "IO"),
+                (30, "PWR"),
+                (31, "SYS"),
+            ];
+            for (i, (num, name)) in signals.iter().enumerate() {
+                print!("{:2}) SIG{:<10}", num, name);
+                if (i + 1) % 4 == 0 {
+                    println!();
+                }
+            }
+            if signals.len() % 4 != 0 {
+                println!();
+            }
             return 0;
         }
         if args[0] == "-p" {
@@ -2891,6 +2932,72 @@ fn builtin_kill(shell: &mut Shell, args: &[String]) -> i32 {
     {
         use nix::sys::signal::{self, Signal};
         use nix::unistd::Pid;
+
+        // Handle kill -l [signum]
+        if args.first().map(|s| s.as_str()) == Some("-l")
+            || args.first().map(|s| s.as_str()) == Some("-L")
+        {
+            if args.len() > 1 {
+                // kill -l <signum> — print signal name
+                for arg in &args[1..] {
+                    let num: i32 = arg.parse().unwrap_or(0);
+                    let num = if num > 128 { num - 128 } else { num };
+                    if let Ok(sig) = Signal::try_from(num) {
+                        println!(
+                            "{}",
+                            format!("{:?}", sig)
+                                .strip_prefix("SIG")
+                                .unwrap_or(&format!("{:?}", sig))
+                        );
+                    }
+                }
+            } else {
+                // kill -l — list all signals
+                let signals = [
+                    (1, "HUP"),
+                    (2, "INT"),
+                    (3, "QUIT"),
+                    (4, "ILL"),
+                    (5, "TRAP"),
+                    (6, "ABRT"),
+                    (7, "BUS"),
+                    (8, "FPE"),
+                    (9, "KILL"),
+                    (10, "USR1"),
+                    (11, "SEGV"),
+                    (12, "USR2"),
+                    (13, "PIPE"),
+                    (14, "ALRM"),
+                    (15, "TERM"),
+                    (16, "STKFLT"),
+                    (17, "CHLD"),
+                    (18, "CONT"),
+                    (19, "STOP"),
+                    (20, "TSTP"),
+                    (21, "TTIN"),
+                    (22, "TTOU"),
+                    (23, "URG"),
+                    (24, "XCPU"),
+                    (25, "XFSZ"),
+                    (26, "VTALRM"),
+                    (27, "PROF"),
+                    (28, "WINCH"),
+                    (29, "IO"),
+                    (30, "PWR"),
+                    (31, "SYS"),
+                ];
+                for (i, (num, name)) in signals.iter().enumerate() {
+                    print!("{:2}) SIG{:<10}", num, name);
+                    if (i + 1) % 4 == 0 {
+                        println!();
+                    }
+                }
+                if signals.len() % 4 != 0 {
+                    println!();
+                }
+            }
+            return 0;
+        }
 
         let mut signal = Signal::SIGTERM;
         let mut pids = Vec::new();
