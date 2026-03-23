@@ -2772,10 +2772,67 @@ impl Shell {
                 false
             }
             "-s" => std::fs::metadata(val).map(|m| m.len() > 0).unwrap_or(false),
-            "-b" | "-c" | "-g" | "-k" | "-p" | "-t" | "-u" | "-G" | "-N" | "-O" | "-S" => {
-                // Simplified: just check existence for most
-                std::path::Path::new(val).exists()
+            #[cfg(unix)]
+            "-b" => {
+                use std::os::unix::fs::FileTypeExt;
+                std::fs::metadata(val).is_ok_and(|m| m.file_type().is_block_device())
             }
+            #[cfg(unix)]
+            "-c" => {
+                use std::os::unix::fs::FileTypeExt;
+                std::fs::metadata(val).is_ok_and(|m| m.file_type().is_char_device())
+            }
+            #[cfg(unix)]
+            "-p" => {
+                use std::os::unix::fs::FileTypeExt;
+                std::fs::metadata(val).is_ok_and(|m| m.file_type().is_fifo())
+            }
+            #[cfg(unix)]
+            "-S" => {
+                use std::os::unix::fs::FileTypeExt;
+                std::fs::metadata(val).is_ok_and(|m| m.file_type().is_socket())
+            }
+            #[cfg(unix)]
+            "-u" => {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::metadata(val).is_ok_and(|m| m.permissions().mode() & 0o4000 != 0)
+            }
+            #[cfg(unix)]
+            "-g" => {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::metadata(val).is_ok_and(|m| m.permissions().mode() & 0o2000 != 0)
+            }
+            #[cfg(unix)]
+            "-k" => {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::metadata(val).is_ok_and(|m| m.permissions().mode() & 0o1000 != 0)
+            }
+            #[cfg(unix)]
+            "-O" => {
+                use std::os::unix::fs::MetadataExt;
+                std::fs::metadata(val).is_ok_and(|m| m.uid() == unsafe { libc::getuid() })
+            }
+            #[cfg(unix)]
+            "-G" => {
+                use std::os::unix::fs::MetadataExt;
+                std::fs::metadata(val).is_ok_and(|m| m.gid() == unsafe { libc::getgid() })
+            }
+            "-t" => {
+                if let Ok(fd) = val.parse::<i32>() {
+                    #[cfg(unix)]
+                    {
+                        nix::unistd::isatty(fd).unwrap_or(false)
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        let _ = fd;
+                        false
+                    }
+                } else {
+                    false
+                }
+            }
+            "-N" => std::path::Path::new(val).exists(),
             "-v" => {
                 // Variable is set — handle name[@], name[*], name[n]
                 if let Some(bracket) = val.find('[') {
