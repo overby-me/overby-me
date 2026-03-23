@@ -1510,8 +1510,15 @@ fn word_split(segments: &[Segment], ifs: &str) -> Vec<String> {
                 in_field = true;
             }
             Segment::Unquoted(s) => {
+                let ifs_ws: Vec<char> = ifs.chars().filter(|c| c.is_whitespace()).collect();
+                let ifs_non_ws: Vec<char> = ifs.chars().filter(|c| !c.is_whitespace()).collect();
                 for ch in s.chars() {
-                    if ifs.contains(ch) {
+                    if ifs_non_ws.contains(&ch) {
+                        // Non-whitespace IFS: always produces a field boundary
+                        fields.push(std::mem::take(&mut current));
+                        in_field = false;
+                    } else if ifs_ws.contains(&ch) {
+                        // Whitespace IFS: only separate non-empty fields
                         if in_field {
                             fields.push(std::mem::take(&mut current));
                             in_field = false;
