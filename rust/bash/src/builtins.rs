@@ -699,6 +699,9 @@ fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
     for name in names {
         if unset_functions {
             shell.functions.remove(name);
+            // Also remove the exported function env var
+            let env_key = format!("BASH_FUNC_{}%%", name);
+            unsafe { std::env::remove_var(&env_key) };
         } else {
             shell.vars.remove(name);
             shell.exports.remove(name);
