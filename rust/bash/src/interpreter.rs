@@ -938,6 +938,9 @@ impl Shell {
             .and_then(|s| s.parse::<i64>().ok())
             .unwrap_or(0);
         if name == "bash" || name.is_empty() {
+            if self.dash_c_mode && lineno > 0 {
+                return format!("bash: line {}", lineno);
+            }
             "bash".to_string()
         } else {
             format!("{}: line {}", name, lineno)
