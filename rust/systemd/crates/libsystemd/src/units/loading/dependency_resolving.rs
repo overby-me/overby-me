@@ -328,7 +328,42 @@ fn add_all_implicit_relations(units: &mut UnitTable) -> Result<(), String> {
     add_default_dependency_relations(units);
     add_socket_target_relations(units);
     apply_sockets_to_services(units)?;
+    add_slice_dependencies(units);
     Ok(())
+}
+
+/// When a unit specifies `Slice=foo.slice`, it implicitly gets
+/// `Requires=foo.slice` and `After=foo.slice` (matching systemd's behavior).
+fn add_slice_dependencies(units: &mut UnitTable) {
+    use crate::units::{Specific, UnitId};
+
+    // Collect (unit_id, slice_id) pairs
+    let mut slice_deps: Vec<(UnitId, UnitId)> = Vec::new();
+    for unit in units.values() {
+        let slice_name = match &unit.specific {
+            Specific::Service(s) => s.conf.slice.as_deref(),
+            _ => None,
+        };
+        if let Some(slice_name) = slice_name {
+            if let Ok(slice_id) = <&str as TryInto<UnitId>>::try_into(slice_name) {
+                if units.contains_key(&slice_id) {
+                    slice_deps.push((unit.id.clone(), slice_id));
+                }
+            }
+        }
+    }
+
+    for (unit_id, slice_id) in slice_deps {
+        if let Some(unit) = units.get_mut(&unit_id) {
+            let deps = &mut unit.common.dependencies;
+            if !deps.requires.contains(&slice_id) {
+                deps.requires.push(slice_id.clone());
+            }
+            if !deps.after.contains(&slice_id) {
+                deps.after.push(slice_id.clone());
+            }
+        }
+    }
 }
 
 /// Applies the implicit default dependencies for units that have `DefaultDependencies=yes` (the default).

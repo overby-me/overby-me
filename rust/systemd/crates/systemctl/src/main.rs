@@ -341,7 +341,7 @@ fn main() {
         // Sleep commands — pass through as-is to PID 1
         "suspend" | "hibernate" | "hybrid-sleep" | "suspend-then-hibernate" => &positional[0],
         // Timer, property, edit, revert commands — pass through
-        "list-timers" | "set-property" | "edit" | "revert" => &positional[0],
+        "list-timers" | "list-jobs" | "set-property" | "edit" | "revert" => &positional[0],
         // log-level, log-target, service-watchdogs — get or set manager properties
         "log-level" | "log-target" | "service-watchdogs" => &positional[0],
         _ => &positional[0],
@@ -569,8 +569,8 @@ fn main() {
         } else {
             Some(Value::Object(obj))
         }
-    } else if method == "list-timers" {
-        // list-timers takes no parameters
+    } else if method == "list-timers" || method == "list-jobs" {
+        // list-timers/list-jobs take no parameters
         None
     } else if method == "set-property" {
         // set-property <unit> <prop=val>...
@@ -928,6 +928,29 @@ fn handle_response(
                 && !quiet
             {
                 format_timer_table(arr);
+            }
+        }
+        "list-jobs" => {
+            if let Some(result) = result
+                && let Some(arr) = result.as_array()
+            {
+                for job in arr {
+                    let id = job.get("JOB").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let unit = job
+                        .get("UNIT")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
+                    let jtype = job
+                        .get("TYPE")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("start");
+                    let state = job
+                        .get("STATE")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("running");
+                    println!("{id:>6} {unit:<48} {jtype:<15} {state}");
+                }
+                println!("\n{} jobs listed.", arr.len());
             }
         }
         "list-units" => {

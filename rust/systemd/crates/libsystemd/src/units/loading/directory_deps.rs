@@ -831,6 +831,66 @@ pub fn collect_dropin_entries(
 /// - Settings in drop-ins override settings in the base file
 /// - If a drop-in sets a list-type value to empty (e.g., `ExecStart=`),
 ///   it clears the base value before adding new entries
+/// Collect all applicable drop-in overrides for a given unit name, ordered from
+/// least specific to most specific:
+///   1. Type-level drop-ins (e.g., key "service" applies to all .service units)
+///   2. Hierarchical prefix drop-ins (e.g., "a-.service" → "a-b-.service" → …)
+///   3. Exact unit name drop-ins (e.g., "a-b-c.service")
+///
+/// Specifier resolution (`%n` → unit name, etc.) is applied to each drop-in's
+/// content before returning.
+fn collect_applicable_dropins(
+    unit_name: &str,
+    dropins: &HashMap<String, Vec<(String, String)>>,
+) -> Vec<(String, String)> {
+    let mut result: Vec<(String, String)> = Vec::new();
+
+    // Extract the unit type suffix (e.g., ".service", ".socket")
+    let type_suffix = unit_name
+        .rfind('.')
+        .map(|i| &unit_name[i + 1..])
+        .unwrap_or("");
+
+    // 1. Type-level drop-ins: key is just the type name (e.g., "service")
+    if !type_suffix.is_empty() {
+        if let Some(overrides) = dropins.get(type_suffix) {
+            for (filename, content) in overrides {
+                let resolved = resolve_specifiers(content, unit_name, "");
+                result.push((filename.clone(), resolved));
+            }
+        }
+    }
+
+    // 2. Hierarchical prefix drop-ins (e.g., "a-.service" for "a-b-c.service")
+    //    systemd matches: "a-.service", "a-b-.service" (all dash-separated prefixes)
+    if let Some(dot_pos) = unit_name.rfind('.') {
+        let base = &unit_name[..dot_pos]; // e.g., "a-b-c"
+        let suffix = &unit_name[dot_pos..]; // e.g., ".service"
+        let parts: Vec<&str> = base.split('-').collect();
+        // Generate prefixes: for "a-b-c" → "a-", "a-b-"
+        for i in 1..parts.len() {
+            let prefix = parts[..i].join("-");
+            let key = format!("{prefix}-{suffix}"); // e.g., "a-.service"
+            if let Some(overrides) = dropins.get(&key) {
+                for (filename, content) in overrides {
+                    let resolved = resolve_specifiers(content, unit_name, "");
+                    result.push((filename.clone(), resolved));
+                }
+            }
+        }
+    }
+
+    // 3. Exact unit name drop-ins
+    if let Some(overrides) = dropins.get(unit_name) {
+        for (filename, content) in overrides {
+            let resolved = resolve_specifiers(content, unit_name, "");
+            result.push((filename.clone(), resolved));
+        }
+    }
+
+    result
+}
+
 pub fn apply_dropins(
     units: &mut HashMap<UnitId, Unit>,
     dropins: &HashMap<String, Vec<(String, String)>>,
@@ -839,10 +899,10 @@ pub fn apply_dropins(
     let unit_names: Vec<String> = units.keys().map(|id| id.name.clone()).collect();
 
     for unit_name in unit_names {
-        let overrides = match dropins.get(&unit_name) {
-            Some(o) if !o.is_empty() => o,
-            _ => continue,
-        };
+        let overrides = collect_applicable_dropins(&unit_name, dropins);
+        if overrides.is_empty() {
+            continue;
+        }
 
         // Find the unit in the table
         let unit_id = match units.keys().find(|id| id.name == unit_name) {
@@ -862,7 +922,7 @@ pub fn apply_dropins(
         };
 
         // Merge base + all drop-in contents
-        let merged = merge_unit_contents(&base_content, overrides);
+        let merged = merge_unit_contents(&base_content, &overrides);
 
         let parsed_file = match parse_file(&merged) {
             Ok(pf) => pf,

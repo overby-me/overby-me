@@ -97,6 +97,8 @@ pub enum Command {
     SuspendThenHibernate,
     /// `list-timers` — list active timer units with next elapse times.
     ListTimers,
+    /// `list-jobs` — list currently running/waiting jobs.
+    ListJobs,
     /// `set-property <unit> <property>=<value>...` — set runtime properties on a unit.
     /// Creates a drop-in file at `/etc/systemd/system/<unit>.d/50-set-property.conf`
     /// (or `/run/systemd/system/<unit>.d/` with `--runtime`).
@@ -643,6 +645,7 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
             Command::Unmask(names)
         }
         "list-timers" => Command::ListTimers,
+        "list-jobs" => Command::ListJobs,
         "set-property" => {
             // set-property <unit> <prop=val>...
             match &call.params {
@@ -2107,6 +2110,53 @@ pub fn execute_command(
                     .cmp(b.get("UNIT").and_then(|v| v.as_str()).unwrap_or(""))
             });
             return Ok(Value::Array(timers));
+        }
+        Command::ListJobs => {
+            // Return units currently being activated (Starting status) as jobs.
+            // Real systemd has a formal job queue; we approximate by inspecting
+            // unit statuses.
+            let ri = run_info.read_poisoned();
+            let mut job_id: u64 = 1;
+            let mut jobs: Vec<Value> = Vec::new();
+            for unit in ri.unit_table.values() {
+                let status = unit.common.status.read_poisoned().clone();
+                let (job_type, state) = match &status {
+                    UnitStatus::Starting => ("start", "running"),
+                    UnitStatus::NeverStarted => {
+                        // Check if this unit is wanted/required by a Starting unit
+                        // (i.e., queued to start as part of a transaction)
+                        let is_waiting = ri.unit_table.values().any(|other| {
+                            matches!(*other.common.status.read_poisoned(), UnitStatus::Starting)
+                                && (other
+                                    .common
+                                    .dependencies
+                                    .wants
+                                    .iter()
+                                    .any(|d| d.name == unit.id.name)
+                                    || other
+                                        .common
+                                        .dependencies
+                                        .requires
+                                        .iter()
+                                        .any(|d| d.name == unit.id.name))
+                        });
+                        if is_waiting {
+                            ("start", "waiting")
+                        } else {
+                            continue;
+                        }
+                    }
+                    _ => continue,
+                };
+                jobs.push(serde_json::json!({
+                    "JOB": job_id,
+                    "UNIT": unit.id.name,
+                    "TYPE": job_type,
+                    "STATE": state,
+                }));
+                job_id += 1;
+            }
+            return Ok(Value::Array(jobs));
         }
         Command::ResetFailed(unit_name) => {
             let ri = run_info.read_poisoned();
