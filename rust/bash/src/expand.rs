@@ -1436,7 +1436,7 @@ fn rfind_op(expr: &str, op: &str) -> Option<usize> {
 fn quote_glob_chars(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for ch in s.chars() {
-        if matches!(ch, '*' | '?' | '[' | ']') {
+        if matches!(ch, '*' | '?' | '[' | ']' | '{' | '}' | ',') {
             out.push('\x00');
         }
         out.push(ch);
@@ -1580,8 +1580,8 @@ fn brace_expand(s: &str) -> Vec<String> {
     let mut i = 0;
     while i < chars.len() {
         let ch = chars[i];
-        // Skip escaped characters
-        if ch == '\\' && i + 1 < chars.len() {
+        // Skip escaped characters (backslash or \x00 quote marker)
+        if (ch == '\\' || ch == '\x00') && i + 1 < chars.len() {
             i += 2;
             continue;
         }
@@ -1599,7 +1599,9 @@ fn brace_expand(s: &str) -> Vec<String> {
                         let inner_chars: Vec<char> = inner.chars().collect();
                         let mut j = 0;
                         while j < inner_chars.len() {
-                            if inner_chars[j] == '\\' && j + 1 < inner_chars.len() {
+                            if (inner_chars[j] == '\\' || inner_chars[j] == '\x00')
+                                && j + 1 < inner_chars.len()
+                            {
                                 j += 2;
                                 continue;
                             }
@@ -1715,7 +1717,7 @@ fn split_brace_alternatives(s: &str) -> Vec<String> {
 
     while i < chars.len() {
         let ch = chars[i];
-        if ch == '\\' && i + 1 < chars.len() {
+        if (ch == '\\' || ch == '\x00') && i + 1 < chars.len() {
             current.push(ch);
             current.push(chars[i + 1]);
             i += 2;
