@@ -1189,7 +1189,14 @@ fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
                     Some(c) => c.to_uppercase().to_string() + chars.as_str(),
                 }
             }
-            _ => val, // @P, @A, @a, @K — return as-is for now
+            'a' => {
+                // Variable attributes — look up pre-computed attrs from interpreter
+                ctx.vars
+                    .get(&format!("__ATTRS__{}", expr.name))
+                    .cloned()
+                    .unwrap_or_default()
+            }
+            _ => val, // @P, @A, @K — return as-is for now
         },
     }
 }

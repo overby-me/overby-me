@@ -1168,7 +1168,8 @@ impl Shell {
     pub fn expand_word_fields(&mut self, word: &Word, ifs: &str) -> Vec<String> {
         self.apply_assign_defaults(word);
         let word = self.eval_arith_in_word(word);
-        let vars = self.vars.clone();
+        let mut vars = self.vars.clone();
+        self.inject_transform_attrs(&word, &mut vars);
         let arrays = self.arrays.clone();
         let assoc_arrays = self.assoc_arrays.clone();
         let namerefs = self.namerefs.clone();
@@ -1192,10 +1193,64 @@ impl Shell {
         )
     }
 
+    /// Get the attribute string for a variable (for ${var@a})
+    fn get_var_attrs(&self, name: &str) -> String {
+        let resolved = self.resolve_nameref(name);
+        let mut attrs = String::new();
+        if self.arrays.contains_key(&resolved) {
+            attrs.push('a');
+        }
+        if self.assoc_arrays.contains_key(&resolved) {
+            attrs.push('A');
+        }
+        if self.integer_vars.contains(&resolved) {
+            attrs.push('i');
+        }
+        if self.readonly_vars.contains(&resolved) {
+            attrs.push('r');
+        }
+        if self.exports.contains_key(&resolved) {
+            attrs.push('x');
+        }
+        if self.uppercase_vars.contains(&resolved) {
+            attrs.push('u');
+        }
+        if self.lowercase_vars.contains(&resolved) {
+            attrs.push('l');
+        }
+        if self.namerefs.contains_key(&resolved) {
+            attrs.push('n');
+        }
+        attrs
+    }
+
+    /// Inject ${var@a} results into vars before expansion using special key
+    fn inject_transform_attrs(&self, word: &Word, vars: &mut HashMap<String, String>) {
+        fn scan_parts(
+            parts: &[WordPart],
+            shell: &crate::interpreter::Shell,
+            vars: &mut HashMap<String, String>,
+        ) {
+            for part in parts {
+                if let WordPart::Param(expr) = part
+                    && let crate::ast::ParamOp::Transform('a') = &expr.op
+                {
+                    let attrs = shell.get_var_attrs(&expr.name);
+                    vars.insert(format!("__ATTRS__{}", expr.name), attrs);
+                }
+                if let WordPart::DoubleQuoted(inner) = part {
+                    scan_parts(inner, shell, vars);
+                }
+            }
+        }
+        scan_parts(word, self, vars);
+    }
+
     pub fn expand_word_single(&mut self, word: &Word) -> String {
         self.apply_assign_defaults(word);
         let word = self.eval_arith_in_word(word);
-        let vars = self.vars.clone();
+        let mut vars = self.vars.clone();
+        self.inject_transform_attrs(&word, &mut vars);
         let arrays = self.arrays.clone();
         let assoc_arrays = self.assoc_arrays.clone();
         let namerefs = self.namerefs.clone();
