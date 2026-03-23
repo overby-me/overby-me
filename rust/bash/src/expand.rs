@@ -802,6 +802,69 @@ fn apply_param_op(val: &str, op: &ParamOp, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> S
                 })
                 .collect()
         }
+        ParamOp::TrimSmallLeft(pattern) => {
+            let pat = expand_word_nosplit_ctx(pattern, ctx, cmd_sub);
+            trim_pattern(val, &pat, TrimMode::SmallLeft)
+        }
+        ParamOp::TrimLargeLeft(pattern) => {
+            let pat = expand_word_nosplit_ctx(pattern, ctx, cmd_sub);
+            trim_pattern(val, &pat, TrimMode::LargeLeft)
+        }
+        ParamOp::TrimSmallRight(pattern) => {
+            let pat = expand_word_nosplit_ctx(pattern, ctx, cmd_sub);
+            trim_pattern(val, &pat, TrimMode::SmallRight)
+        }
+        ParamOp::TrimLargeRight(pattern) => {
+            let pat = expand_word_nosplit_ctx(pattern, ctx, cmd_sub);
+            trim_pattern(val, &pat, TrimMode::LargeRight)
+        }
+        ParamOp::Replace(pattern, replacement)
+        | ParamOp::ReplaceAll(pattern, replacement)
+        | ParamOp::ReplacePrefix(pattern, replacement)
+        | ParamOp::ReplaceSuffix(pattern, replacement) => {
+            let pat = expand_word_nosplit_ctx(pattern, ctx, cmd_sub);
+            let rep = expand_word_nosplit_ctx(replacement, ctx, cmd_sub);
+            match op {
+                ParamOp::ReplaceAll(..) => pattern_replace(val, &pat, &rep, true),
+                ParamOp::ReplacePrefix(..) => {
+                    for i in 0..=val.len() {
+                        if shell_pattern_match(&val[..i], &pat) {
+                            return format!("{}{}", rep, &val[i..]);
+                        }
+                    }
+                    val.to_string()
+                }
+                ParamOp::ReplaceSuffix(..) => {
+                    for i in (0..=val.len()).rev() {
+                        if shell_pattern_match(&val[i..], &pat) {
+                            return format!("{}{}", &val[..i], rep);
+                        }
+                    }
+                    val.to_string()
+                }
+                _ => pattern_replace(val, &pat, &rep, false),
+            }
+        }
+        ParamOp::Substring(offset_str, length_str) => {
+            let offset: i64 = offset_str.trim().parse().unwrap_or(0);
+            let char_count = val.chars().count();
+            let start = if offset < 0 {
+                (char_count as i64 + offset).max(0) as usize
+            } else {
+                (offset as usize).min(char_count)
+            };
+            if let Some(len_str) = length_str {
+                let len: i64 = len_str.trim().parse().unwrap_or(char_count as i64);
+                let end = if len < 0 {
+                    (char_count as i64 + len).max(start as i64) as usize
+                } else {
+                    (start + len as usize).min(char_count)
+                };
+                val.chars().skip(start).take(end - start).collect()
+            } else {
+                val.chars().skip(start).collect()
+            }
+        }
         // For other operations, just return the value unchanged
         _ => val.to_string(),
     }
