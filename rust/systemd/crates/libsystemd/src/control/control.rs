@@ -123,6 +123,10 @@ pub enum Command {
     DaemonReexec,
     /// `log-level [LEVEL]` — get or set the service manager log level.
     LogLevel(Option<String>),
+    /// `log-target [TARGET]` — get or set the service manager log target.
+    LogTarget(Option<String>),
+    /// `service-watchdogs [BOOL]` — get or set whether service watchdogs are enabled.
+    ServiceWatchdogs(Option<String>),
 }
 
 /// Parameters for creating a transient (in-memory) service unit.
@@ -375,6 +379,22 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
                 _ => None,
             };
             Command::LogLevel(level)
+        }
+        "log-target" => {
+            let target = match &call.params {
+                Some(Value::String(s)) => Some(s.clone()),
+                Some(Value::Array(arr)) if !arr.is_empty() => arr[0].as_str().map(|s| s.to_owned()),
+                _ => None,
+            };
+            Command::LogTarget(target)
+        }
+        "service-watchdogs" => {
+            let val = match &call.params {
+                Some(Value::String(s)) => Some(s.clone()),
+                Some(Value::Array(arr)) if !arr.is_empty() => arr[0].as_str().map(|s| s.to_owned()),
+                _ => None,
+            };
+            Command::ServiceWatchdogs(val)
         }
         "start-transient" => {
             // Params: JSON object with transient unit properties.
@@ -1613,6 +1633,30 @@ pub fn execute_command(
                 }
             }
         }
+        Command::LogTarget(target) => match target {
+            Some(new_target) => {
+                let _ = std::fs::create_dir_all("/run/rust-systemd");
+                let _ = std::fs::write("/run/rust-systemd/log-target", &new_target);
+                info!("Log target set to {new_target}");
+            }
+            None => {
+                let target = std::fs::read_to_string("/run/rust-systemd/log-target")
+                    .unwrap_or_else(|_| "journal-or-kmsg".to_string());
+                return Ok(Value::String(target.trim().to_string()));
+            }
+        },
+        Command::ServiceWatchdogs(val) => match val {
+            Some(new_val) => {
+                let _ = std::fs::create_dir_all("/run/rust-systemd");
+                let _ = std::fs::write("/run/rust-systemd/service-watchdogs", &new_val);
+                info!("Service watchdogs set to {new_val}");
+            }
+            None => {
+                let val = std::fs::read_to_string("/run/rust-systemd/service-watchdogs")
+                    .unwrap_or_else(|_| "yes".to_string());
+                return Ok(Value::String(val.trim().to_string()));
+            }
+        },
         Command::StartTransient(params) => {
             let unit_name = params.unit_name.clone();
             let id = create_transient_unit(&params, &run_info)?;

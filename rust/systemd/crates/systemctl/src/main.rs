@@ -311,8 +311,8 @@ fn main() {
         "suspend" | "hibernate" | "hybrid-sleep" | "suspend-then-hibernate" => &positional[0],
         // Timer, property, edit, revert commands — pass through
         "list-timers" | "set-property" | "edit" | "revert" => &positional[0],
-        // log-level — get or set the service manager log level
-        "log-level" => &positional[0],
+        // log-level, log-target, service-watchdogs — get or set manager properties
+        "log-level" | "log-target" | "service-watchdogs" => &positional[0],
         _ => &positional[0],
     };
 
@@ -666,6 +666,11 @@ fn main() {
             handle_response(&positional[0], &resp, quiet, value_only, &property_filter);
         }
         Err(e) => {
+            // daemon-reexec causes the server to execve(), dropping the connection.
+            // This is expected — treat it as success.
+            if positional[0] == "daemon-reexec" {
+                return;
+            }
             if !quiet {
                 eprintln!("Error communicating with rust-systemd: {e}");
             }

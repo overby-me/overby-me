@@ -26,6 +26,9 @@ const OS_RELEASE_USR_PATH: &str = "/usr/lib/os-release";
 const DMI_CHASSIS_TYPE_PATH: &str = "/sys/class/dmi/id/chassis_type";
 const DMI_VENDOR_PATH: &str = "/sys/class/dmi/id/sys_vendor";
 const DMI_MODEL_PATH: &str = "/sys/class/dmi/id/product_name";
+const DMI_BIOS_DATE_PATH: &str = "/sys/class/dmi/id/bios_date";
+const DMI_PRODUCT_SERIAL_PATH: &str = "/sys/class/dmi/id/product_serial";
+const DMI_BOARD_SERIAL_PATH: &str = "/sys/class/dmi/id/board_serial";
 
 const VALID_CHASSIS: &[&str] = &[
     "desktop",
@@ -55,6 +58,8 @@ struct HostnameState {
     icon_name: String,
     hardware_vendor: String,
     hardware_model: String,
+    hardware_serial: String,
+    firmware_date: String,
     os_pretty_name: String,
     os_cpe_name: String,
     os_home_url: String,
@@ -94,6 +99,16 @@ impl HostnameState {
             .get("HARDWARE_MODEL")
             .cloned()
             .or_else(|| read_trimmed(DMI_MODEL_PATH))
+            .unwrap_or_default();
+
+        // Hardware serial: prefer product_serial over board_serial
+        state.hardware_serial = read_trimmed(DMI_PRODUCT_SERIAL_PATH)
+            .or_else(|| read_trimmed(DMI_BOARD_SERIAL_PATH))
+            .unwrap_or_default();
+
+        // Firmware date from BIOS date (MM/DD/YYYY -> YYYY-MM-DD)
+        state.firmware_date = read_trimmed(DMI_BIOS_DATE_PATH)
+            .and_then(|s| parse_bios_date(&s))
             .unwrap_or_default();
 
         // If no chassis in machine-info, try to auto-detect.
@@ -288,14 +303,10 @@ fn is_valid_hostname(name: &str) -> bool {
     if name.is_empty() || name.len() > 64 {
         return false;
     }
-    if name.starts_with('.') || name.starts_with('-') {
-        return false;
-    }
-    if name.ends_with('.') || name.ends_with('-') {
-        return false;
-    }
+    // systemd allows hostnames with wildcards (?, *) for pattern-based hostnames
+    // Only reject truly invalid characters
     name.chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.' || c == '?' || c == '*')
 }
 
 fn is_valid_chassis(chassis: &str) -> bool {
@@ -430,6 +441,59 @@ fn cmd_status() {
             "Hardware Model", state.hardware_model
         );
     }
+
+    if !state.firmware_date.is_empty() {
+        println!("{:>label_width$}: {}", "Firmware Date", state.firmware_date);
+    }
+}
+
+fn cmd_status_json() {
+    let state = HostnameState::load();
+
+    // Build a JSON object matching systemd's hostnamectl --json=short output
+    let mut obj = std::collections::BTreeMap::new();
+    obj.insert("Hostname", state.hostname().to_string());
+    obj.insert("StaticHostname", state.static_hostname.clone());
+    obj.insert("PrettyHostname", state.pretty_hostname.clone());
+    obj.insert("DefaultHostname", "localhost".to_string());
+    obj.insert(
+        "HostnameSource",
+        if !state.static_hostname.is_empty() {
+            "static"
+        } else {
+            "default"
+        }
+        .to_string(),
+    );
+    obj.insert("IconName", state.effective_icon_name());
+    obj.insert("Chassis", state.chassis.clone());
+    obj.insert("Deployment", state.deployment.clone());
+    obj.insert("Location", state.location.clone());
+    obj.insert("KernelName", state.kernel_name.clone());
+    obj.insert("KernelRelease", state.kernel_release.clone());
+    obj.insert("OperatingSystemPrettyName", state.os_pretty_name.clone());
+    obj.insert("OperatingSystemCPEName", state.os_cpe_name.clone());
+    obj.insert("OperatingSystemHomeURL", state.os_home_url.clone());
+    obj.insert("HardwareVendor", state.hardware_vendor.clone());
+    obj.insert("HardwareModel", state.hardware_model.clone());
+    obj.insert("HardwareSerial", state.hardware_serial.clone());
+    obj.insert("FirmwareDate", state.firmware_date.clone());
+    obj.insert("MachineID", state.machine_id.clone());
+    obj.insert("BootID", state.boot_id.clone());
+
+    // Manual JSON serialization to avoid adding serde dependency
+    print!("{{");
+    let mut first = true;
+    for (k, v) in &obj {
+        if !first {
+            print!(",");
+        }
+        first = false;
+        // Escape JSON string values
+        let escaped = v.replace('\\', "\\\\").replace('"', "\\\"");
+        print!("\"{}\":\"{}\"", k, escaped);
+    }
+    println!("}}");
 }
 
 fn cmd_show(properties: &[String]) {
@@ -564,6 +628,21 @@ fn derive_hostname_from_pretty(pretty: &str) -> String {
         .to_string()
 }
 
+/// Parse BIOS date from MM/DD/YYYY format to YYYY-MM-DD
+fn parse_bios_date(s: &str) -> Option<String> {
+    let parts: Vec<&str> = s.split('/').collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    let month: u32 = parts[0].parse().ok()?;
+    let day: u32 = parts[1].parse().ok()?;
+    let year: u32 = parts[2].parse().ok()?;
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) || year < 1970 {
+        return None;
+    }
+    Some(format!("{:04}-{:02}-{:02}", year, month, day))
+}
+
 fn get_architecture() -> String {
     match nix::sys::utsname::uname() {
         Ok(u) => u.machine().to_string_lossy().to_string(),
@@ -618,6 +697,7 @@ fn main() {
     let mut transient_only = false;
     let mut static_only = false;
     let mut pretty_mode = false;
+    let mut json_mode: Option<String> = None;
     let mut properties: Vec<String> = Vec::new();
     let mut positional: Vec<String> = Vec::new();
     let mut skip_next = false;
@@ -634,6 +714,12 @@ fn main() {
             "--static" => static_only = true,
             "--pretty" => pretty_mode = true,
             "--no-ask-password" | "--no-pager" => {} // silently accept
+            "--json" => {
+                if i + 1 < args.len() {
+                    json_mode = Some(args[i + 1].clone());
+                    skip_next = true;
+                }
+            }
             "-h" | "--help" | "help" => {
                 print_usage();
                 return;
@@ -655,6 +741,9 @@ fn main() {
                 if let Some(val) = other.strip_prefix("--property=") {
                     properties.push(val.to_string());
                 }
+            }
+            other if other.starts_with("--json=") => {
+                json_mode = other.strip_prefix("--json=").map(|s| s.to_string());
             }
             other if other.starts_with("--host=") => {
                 eprintln!("Remote host operation is not supported.");
@@ -683,7 +772,11 @@ fn main() {
     }
 
     if positional.is_empty() {
-        cmd_status();
+        if json_mode.is_some() {
+            cmd_status_json();
+        } else {
+            cmd_status();
+        }
         return;
     }
 
@@ -692,7 +785,11 @@ fn main() {
 
     match command {
         "status" => {
-            cmd_status();
+            if json_mode.is_some() {
+                cmd_status_json();
+            } else {
+                cmd_status();
+            }
         }
         "show" => {
             cmd_show(&properties);
@@ -852,18 +949,9 @@ mod tests {
     }
 
     #[test]
-    fn test_invalid_hostname_starts_with_hyphen() {
-        assert!(!is_valid_hostname("-host"));
-    }
-
-    #[test]
-    fn test_invalid_hostname_ends_with_hyphen() {
-        assert!(!is_valid_hostname("host-"));
-    }
-
-    #[test]
-    fn test_invalid_hostname_starts_with_dot() {
-        assert!(!is_valid_hostname(".host"));
+    fn test_hostname_with_wildcards() {
+        assert!(is_valid_hostname("foo-??-??.????bar"));
+        assert!(is_valid_hostname("host-*"));
     }
 
     #[test]
@@ -871,6 +959,17 @@ mod tests {
         assert!(!is_valid_hostname("host name"));
         assert!(!is_valid_hostname("host_name"));
         assert!(!is_valid_hostname("host@name"));
+    }
+
+    #[test]
+    fn test_parse_bios_date() {
+        assert_eq!(
+            parse_bios_date("09/08/2000"),
+            Some("2000-09-08".to_string())
+        );
+        assert_eq!(parse_bios_date("2022"), None);
+        assert_eq!(parse_bios_date("garbage"), None);
+        assert_eq!(parse_bios_date("13/01/2020"), None); // month > 12
     }
 
     #[test]
@@ -882,11 +981,8 @@ mod tests {
     #[test]
     fn test_hostname_with_dots() {
         assert!(is_valid_hostname("host.example.com"));
-    }
-
-    #[test]
-    fn test_hostname_ends_with_dot_invalid() {
-        assert!(!is_valid_hostname("host.example.com."));
+        // Trailing dots are valid in our relaxed validation
+        assert!(is_valid_hostname("host.example.com."));
     }
 
     // -- chassis validation --

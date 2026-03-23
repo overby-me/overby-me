@@ -163,6 +163,28 @@ enum Command {
         state: Option<String>,
     },
 
+    /// Get the log level (legacy alias)
+    #[command(name = "get-log-level")]
+    GetLogLevel,
+
+    /// Set the log level (legacy alias)
+    #[command(name = "set-log-level")]
+    SetLogLevel {
+        /// Log level to set
+        level: String,
+    },
+
+    /// Get the log target (legacy alias)
+    #[command(name = "get-log-target")]
+    GetLogTarget,
+
+    /// Set the log target (legacy alias)
+    #[command(name = "set-log-target")]
+    SetLogTarget {
+        /// Log target to set
+        target: String,
+    },
+
     /// Show service security assessment
     Security {
         /// Unit(s) to assess (default: all loaded services)
@@ -985,6 +1007,10 @@ fn main() {
         Some(Command::LogLevel { ref level }) => cmd_log_level(level),
         Some(Command::LogTarget { ref target }) => cmd_log_target(target),
         Some(Command::ServiceWatchdogs { ref state }) => cmd_service_watchdogs(state),
+        Some(Command::GetLogLevel) => cmd_log_level(&None),
+        Some(Command::SetLogLevel { ref level }) => cmd_log_level(&Some(level.clone())),
+        Some(Command::GetLogTarget) => cmd_log_target(&None),
+        Some(Command::SetLogTarget { ref target }) => cmd_log_target(&Some(target.clone())),
         Some(Command::Security { ref units, .. }) => cmd_security(units),
         Some(Command::Plot) => cmd_plot(),
         Some(Command::InspectElf { ref files }) => cmd_inspect_elf(files),
@@ -1412,18 +1438,36 @@ fn cmd_log_level(level: &Option<String>) {
 }
 
 fn cmd_log_target(target: &Option<String>) {
+    let socket_path = "/run/systemd/rust-systemd-notify/control.socket";
     match target {
-        Some(t) => match t.as_str() {
-            "console" | "journal" | "kmsg" | "journal-or-kmsg" | "null" | "auto" => {
-                println!("Would set log target to: {t}");
-                println!("(Not yet implemented: requires communication with PID 1)");
+        Some(t) => {
+            if let Ok(mut stream) = std::os::unix::net::UnixStream::connect(socket_path) {
+                use std::io::Write;
+                let request = format!(
+                    r#"{{"jsonrpc":"2.0","method":"log-target","params":"{}"}}"#,
+                    t
+                );
+                let _ = stream.write_all(request.as_bytes());
+                let _ = stream.shutdown(std::net::Shutdown::Write);
+                let _resp: Result<serde_json::Value, _> = serde_json::from_reader(&mut stream);
+            } else {
+                let _ = fs::create_dir_all("/run/rust-systemd");
+                let _ = fs::write("/run/rust-systemd/log-target", t);
             }
-            _ => {
-                eprintln!("Invalid log target: {t}");
-                process::exit(1);
-            }
-        },
+        }
         None => {
+            if let Ok(mut stream) = std::os::unix::net::UnixStream::connect(socket_path) {
+                use std::io::Write;
+                let request = r#"{"jsonrpc":"2.0","method":"log-target","id":1}"#;
+                let _ = stream.write_all(request.as_bytes());
+                let _ = stream.shutdown(std::net::Shutdown::Write);
+                if let Ok(resp) = serde_json::from_reader::<_, serde_json::Value>(&mut stream)
+                    && let Some(result) = resp.get("result").and_then(|v| v.as_str())
+                {
+                    println!("{result}");
+                    return;
+                }
+            }
             if let Ok(target) = fs::read_to_string("/run/rust-systemd/log-target") {
                 println!("{}", target.trim());
             } else {
@@ -1434,19 +1478,41 @@ fn cmd_log_target(target: &Option<String>) {
 }
 
 fn cmd_service_watchdogs(state: &Option<String>) {
+    let socket_path = "/run/systemd/rust-systemd-notify/control.socket";
     match state {
-        Some(s) => match s.as_str() {
-            "yes" | "no" | "1" | "0" | "true" | "false" | "on" | "off" => {
-                println!("Would set service-watchdogs to: {s}");
-                println!("(Not yet implemented: requires communication with PID 1)");
+        Some(s) => {
+            if let Ok(mut stream) = std::os::unix::net::UnixStream::connect(socket_path) {
+                use std::io::Write;
+                let request = format!(
+                    r#"{{"jsonrpc":"2.0","method":"service-watchdogs","params":"{}"}}"#,
+                    s
+                );
+                let _ = stream.write_all(request.as_bytes());
+                let _ = stream.shutdown(std::net::Shutdown::Write);
+                let _resp: Result<serde_json::Value, _> = serde_json::from_reader(&mut stream);
+            } else {
+                let _ = fs::create_dir_all("/run/rust-systemd");
+                let _ = fs::write("/run/rust-systemd/service-watchdogs", s);
             }
-            _ => {
-                eprintln!("Invalid boolean value: {s}");
-                process::exit(1);
-            }
-        },
+        }
         None => {
-            println!("yes");
+            if let Ok(mut stream) = std::os::unix::net::UnixStream::connect(socket_path) {
+                use std::io::Write;
+                let request = r#"{"jsonrpc":"2.0","method":"service-watchdogs","id":1}"#;
+                let _ = stream.write_all(request.as_bytes());
+                let _ = stream.shutdown(std::net::Shutdown::Write);
+                if let Ok(resp) = serde_json::from_reader::<_, serde_json::Value>(&mut stream)
+                    && let Some(result) = resp.get("result").and_then(|v| v.as_str())
+                {
+                    println!("{result}");
+                    return;
+                }
+            }
+            if let Ok(val) = fs::read_to_string("/run/rust-systemd/service-watchdogs") {
+                println!("{}", val.trim());
+            } else {
+                println!("yes");
+            }
         }
     }
 }
