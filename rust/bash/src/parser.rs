@@ -1074,11 +1074,17 @@ impl Parser {
             let indexed_info = if let Token::Word(parts) = &self.current {
                 if let Some(WordPart::Literal(s)) = parts.first() {
                     if s.starts_with('[') {
-                        if let Some(close) = s.find("]=") {
+                        if let Some(close) = s.find("]+=") {
+                            // [idx]+=value — per-element append
+                            let idx_str = s[1..close].to_string();
+                            let after = s[close + 3..].to_string();
+                            let rest_parts: Vec<WordPart> = parts[1..].to_vec();
+                            Some((idx_str, after, rest_parts, true))
+                        } else if let Some(close) = s.find("]=") {
                             let idx_str = s[1..close].to_string();
                             let after = s[close + 2..].to_string();
                             let rest_parts: Vec<WordPart> = parts[1..].to_vec();
-                            Some((idx_str, after, rest_parts))
+                            Some((idx_str, after, rest_parts, false))
                         } else {
                             None
                         }
@@ -1092,7 +1098,7 @@ impl Parser {
                 None
             };
 
-            if let Some((idx_str, after, rest_parts)) = indexed_info {
+            if let Some((idx_str, after, rest_parts, elem_append)) = indexed_info {
                 self.advance();
                 let mut value_parts = Vec::new();
                 if !after.is_empty() {
@@ -1102,6 +1108,7 @@ impl Parser {
                 elements.push(ArrayElement {
                     index: Some(vec![WordPart::Literal(idx_str)]),
                     value: value_parts,
+                    append: elem_append,
                 });
                 self.skip_newlines();
                 continue;
@@ -1112,6 +1119,7 @@ impl Parser {
                     elements.push(ArrayElement {
                         index: None,
                         value: w,
+                        append: false,
                     });
                 }
             } else {

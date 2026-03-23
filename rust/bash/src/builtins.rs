@@ -687,11 +687,26 @@ fn builtin_export(shell: &mut Shell, args: &[String]) -> i32 {
             shell.exports.remove(arg.as_str());
             unsafe { std::env::remove_var(arg) };
         } else if let Some(eq_pos) = arg.find('=') {
-            let name = &arg[..eq_pos];
-            let value = &arg[eq_pos + 1..];
-            shell.vars.insert(name.to_string(), value.to_string());
-            shell.exports.insert(name.to_string(), value.to_string());
-            unsafe { std::env::set_var(name, value) };
+            let (name, value, is_append) = if eq_pos > 0 && arg.as_bytes()[eq_pos - 1] == b'+' {
+                (&arg[..eq_pos - 1], &arg[eq_pos + 1..], true)
+            } else {
+                (&arg[..eq_pos], &arg[eq_pos + 1..], false)
+            };
+            let final_value = if is_append {
+                let existing = shell.vars.get(name).cloned().unwrap_or_default();
+                if shell.integer_vars.contains(name) {
+                    let e = shell.eval_arith_expr(&existing);
+                    let a = shell.eval_arith_expr(value);
+                    (e + a).to_string()
+                } else {
+                    format!("{}{}", existing, value)
+                }
+            } else {
+                value.to_string()
+            };
+            shell.set_var(name, final_value.clone());
+            shell.exports.insert(name.to_string(), final_value.clone());
+            unsafe { std::env::set_var(name, &final_value) };
         } else {
             // Export existing variable
             let value = shell

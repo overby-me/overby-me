@@ -77,6 +77,8 @@ pub struct ArrayElement {
     /// Optional explicit index: `[n]=word`
     pub index: Option<Word>,
     pub value: Word,
+    /// Per-element append: `[n]+=word`
+    pub append: bool,
 }
 
 /// Compound commands: control flow and grouping.

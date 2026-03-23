@@ -1905,7 +1905,17 @@ impl Shell {
                             while arr.len() <= idx {
                                 arr.push(String::new());
                             }
-                            arr[idx] = value;
+                            if elem.append {
+                                if is_integer {
+                                    let existing: i64 = arr[idx].parse().unwrap_or(0);
+                                    let addend: i64 = value.parse().unwrap_or(0);
+                                    arr[idx] = (existing + addend).to_string();
+                                } else {
+                                    arr[idx].push_str(&value);
+                                }
+                            } else {
+                                arr[idx] = value;
+                            }
                             next_idx = idx + 1;
                         } else {
                             while arr.len() <= next_idx {
