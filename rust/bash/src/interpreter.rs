@@ -1581,11 +1581,8 @@ impl Shell {
                         }
                     } else if self.integer_vars.contains(&resolved) {
                         // Integer append: arithmetic addition
-                        let existing: i64 = self
-                            .vars
-                            .get(&resolved)
-                            .and_then(|v| v.parse().ok())
-                            .unwrap_or(0);
+                        let existing_str = self.vars.get(&resolved).cloned().unwrap_or_default();
+                        let existing = self.eval_arith_expr(&existing_str);
                         let addend = self.eval_arith_expr(&value);
                         self.set_var(&assign.name, (existing + addend).to_string());
                     } else {
