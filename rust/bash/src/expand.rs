@@ -514,7 +514,11 @@ fn is_array_at_expansion(expr: &ParamExpr, ctx: &ExpCtx) -> bool {
         if idx_str == "@" {
             let base = &expr.name[..bracket];
             let resolved = ctx.resolve_nameref(base);
-            return ctx.arrays.contains_key(&resolved) || ctx.assoc_arrays.contains_key(&resolved);
+            // Only for None (plain expansion) and Substring (array slice)
+            if matches!(&expr.op, ParamOp::None | ParamOp::Substring(..)) {
+                return ctx.arrays.contains_key(&resolved)
+                    || ctx.assoc_arrays.contains_key(&resolved);
+            }
         }
     }
     false
