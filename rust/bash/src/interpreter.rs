@@ -1138,9 +1138,18 @@ impl Shell {
                     raw_value
                 };
                 if assign.append {
-                    let resolved = self.resolve_nameref(&assign.name);
-                    // Check if it's an array append
-                    if self.arrays.contains_key(&resolved) {
+                    let resolved = self.resolve_nameref(base_name);
+                    // Check if it's an array element append (x[n]+=val)
+                    if let Some(bracket) = assign.name.find('[') {
+                        let idx_str = &assign.name[bracket + 1..assign.name.len() - 1];
+                        let idx = self.eval_arith_expr(idx_str) as usize;
+                        if let Some(arr) = self.arrays.get_mut(&resolved) {
+                            while arr.len() <= idx {
+                                arr.push(String::new());
+                            }
+                            arr[idx].push_str(&value);
+                        }
+                    } else if self.arrays.contains_key(&resolved) {
                         self.arrays.entry(resolved).or_default().push(value);
                     } else if self.integer_vars.contains(&resolved) {
                         // Integer append: arithmetic addition
