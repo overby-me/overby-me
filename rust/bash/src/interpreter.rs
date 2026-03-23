@@ -12,6 +12,7 @@ pub struct Shell {
     pub integer_vars: HashSet<String>,
     pub uppercase_vars: HashSet<String>,
     pub lowercase_vars: HashSet<String>,
+    pub capitalize_vars: HashSet<String>,
     pub arrays: HashMap<String, Vec<String>>,
     pub assoc_arrays: HashMap<String, HashMap<String, String>>,
     pub functions: HashMap<String, CompoundCommand>,
@@ -126,6 +127,7 @@ impl Shell {
             integer_vars: HashSet::new(),
             uppercase_vars: HashSet::new(),
             lowercase_vars: HashSet::new(),
+            capitalize_vars: HashSet::new(),
             arrays: HashMap::new(),
             assoc_arrays: HashMap::new(),
             functions: HashMap::new(),
@@ -271,6 +273,8 @@ impl Shell {
             value.to_uppercase()
         } else if self.lowercase_vars.contains(&resolved) {
             value.to_lowercase()
+        } else if self.capitalize_vars.contains(&resolved) {
+            capitalize_string(&value)
         } else {
             value
         };
@@ -2585,6 +2589,18 @@ impl Shell {
 
 /// Find an assignment operator in an arithmetic expression.
 /// Quote a word for xtrace output, matching bash's format
+pub fn capitalize_string(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        None => String::new(),
+        Some(first) => {
+            let mut result: String = first.to_uppercase().collect();
+            result.extend(chars.map(|c| c.to_ascii_lowercase()));
+            result
+        }
+    }
+}
+
 fn xtrace_quote(s: &str) -> String {
     if s.is_empty() {
         return "''".to_string();

@@ -2,7 +2,7 @@ use crate::ast::{
     AndOr, AssignValue, CaseTerminator, Command, CompoundCommand, CondExpr, ParamOp, Pipeline,
     ProcessSubKind, Program, RedirFd, RedirectKind, Redirection, SimpleCommand, Word, WordPart,
 };
-use crate::interpreter::Shell;
+use crate::interpreter::{Shell, capitalize_string};
 use std::collections::HashMap;
 
 pub type BuiltinFn = fn(&mut Shell, &[String]) -> i32;
@@ -1198,6 +1198,7 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
     let mut flag_integer = false;
     let mut flag_uppercase = false;
     let mut flag_lowercase = false;
+    let mut flag_capitalize = false;
     let mut flag_global = false; // -g stub
     let mut names = Vec::new();
     let mut i = 0;
@@ -1218,6 +1219,7 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     'i' => flag_integer = true,
                     'u' => flag_uppercase = true,
                     'l' => flag_lowercase = true,
+                    'c' => flag_capitalize = true,
                     'g' => flag_global = true,
                     _ => {}
                 }
@@ -1457,8 +1459,18 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             if flag_lowercase {
                 shell.lowercase_vars.insert(name.to_string());
                 shell.uppercase_vars.remove(name);
+                shell.capitalize_vars.remove(name);
                 if let Some(v) = shell.vars.get(name).cloned() {
                     shell.vars.insert(name.to_string(), v.to_lowercase());
+                }
+            }
+            if flag_capitalize {
+                shell.capitalize_vars.insert(name.to_string());
+                shell.uppercase_vars.remove(name);
+                shell.lowercase_vars.remove(name);
+                if let Some(v) = shell.vars.get(name).cloned() {
+                    let cap = capitalize_string(&v);
+                    shell.vars.insert(name.to_string(), cap);
                 }
             }
         } else {
@@ -1494,6 +1506,12 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             if flag_lowercase {
                 shell.lowercase_vars.insert(name.to_string());
                 shell.uppercase_vars.remove(name);
+                shell.capitalize_vars.remove(name);
+            }
+            if flag_capitalize {
+                shell.capitalize_vars.insert(name.to_string());
+                shell.uppercase_vars.remove(name);
+                shell.lowercase_vars.remove(name);
             }
         }
     }
