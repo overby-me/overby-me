@@ -248,7 +248,7 @@ impl Shell {
                 self.run_program(&program)
             }
             Err(e) => {
-                eprintln!("bash: syntax error: {}", e);
+                eprintln!("{}: {}", self.error_prefix(), e);
                 2
             }
         }
@@ -974,7 +974,7 @@ impl Shell {
         let saved_fds = match self.setup_redirections(&cmd.redirections) {
             Ok(fds) => fds,
             Err(e) => {
-                eprintln!("bash: {}", e);
+                eprintln!("{}: {}", self.error_prefix(), e);
                 return 1;
             }
         };
@@ -1438,7 +1438,7 @@ impl Shell {
                         libc::signal(libc::SIGPIPE, libc::SIG_DFL);
                     }
                     nix::unistd::execvp(&c_prog, &c_args).ok();
-                    eprintln!("bash: {}: command not found", name);
+                    eprintln!("{}: {}: command not found", self.error_prefix(), name);
                     std::process::exit(127);
                 }
                 Ok(nix::unistd::ForkResult::Parent { child }) => {
@@ -1475,7 +1475,7 @@ impl Shell {
         let saved_fds = match self.setup_redirections(redirections) {
             Ok(fds) => fds,
             Err(e) => {
-                eprintln!("bash: {}", e);
+                eprintln!("{}: {}", self.error_prefix(), e);
                 return 1;
             }
         };

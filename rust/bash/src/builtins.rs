@@ -441,14 +441,14 @@ fn builtin_cd(shell: &mut Shell, args: &[String]) -> i32 {
     }
 }
 
-fn builtin_pwd(_shell: &mut Shell, _args: &[String]) -> i32 {
+fn builtin_pwd(shell: &mut Shell, _args: &[String]) -> i32 {
     match std::env::current_dir() {
         Ok(dir) => {
             println!("{}", dir.display());
             0
         }
         Err(e) => {
-            eprintln!("bash: pwd: {}", e);
+            eprintln!("{}: pwd: {}", shell.error_prefix(), e);
             1
         }
     }
@@ -754,7 +754,7 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     }
                     println!("declare {} {}=\"{}\"", flags, name, value);
                 } else {
-                    eprintln!("bash: declare: {}: not found", name);
+                    eprintln!("{}: declare: {}: not found", shell.error_prefix(), name);
                     return 1;
                 }
             }
@@ -1083,7 +1083,7 @@ fn builtin_shift(shell: &mut Shell, args: &[String]) -> i32 {
     if shell.positional.len() > 1 {
         let available = shell.positional.len() - 1;
         if n > available {
-            eprintln!("bash: shift: shift count out of range");
+            eprintln!("{}: shift: shift count out of range", shell.error_prefix());
             return 1;
         }
         shell.positional.drain(1..=n);
@@ -1106,7 +1106,10 @@ fn builtin_return(shell: &mut Shell, args: &[String]) -> i32 {
         .unwrap_or(shell.last_status);
     // return is only valid in functions and sourced scripts
     if shell.local_scopes.is_empty() && !shell.sourcing {
-        eprintln!("bash: line 1: return: can only `return' from a function or sourced script");
+        eprintln!(
+            "{}: line 1: return: can only `return' from a function or sourced script",
+            shell.error_prefix()
+        );
         return 1;
     }
     shell.returning = true;
@@ -1125,12 +1128,12 @@ fn builtin_test(_shell: &mut Shell, args: &[String]) -> i32 {
     eval_test_expr(args)
 }
 
-fn builtin_test_bracket(_shell: &mut Shell, args: &[String]) -> i32 {
+fn builtin_test_bracket(shell: &mut Shell, args: &[String]) -> i32 {
     // Remove trailing ]
     let args = if args.last().map(|s| s.as_str()) == Some("]") {
         &args[..args.len() - 1]
     } else {
-        eprintln!("bash: [: missing `]'");
+        eprintln!("{}: [: missing `]'", shell.error_prefix());
         return 2;
     };
     eval_test_expr(args)
@@ -1366,7 +1369,11 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
                     match args[i].parse::<isize>() {
                         Ok(n) if n >= 0 => nchars = Some(n as usize),
                         Ok(_) => {
-                            eprintln!("bash: read: {}: invalid number", args[i]);
+                            eprintln!(
+                                "{}: read: {}: invalid number",
+                                shell.error_prefix(),
+                                args[i]
+                            );
                             return 2;
                         }
                         Err(_) => nchars = Some(0),
@@ -1645,7 +1652,7 @@ fn builtin_eval(shell: &mut Shell, args: &[String]) -> i32 {
             }
         }
         Err(e) => {
-            eprintln!("bash: eval: {}", e);
+            eprintln!("{}: eval: {}", shell.error_prefix(), e);
             2
         }
     };
@@ -1723,7 +1730,8 @@ fn builtin_exec(shell: &mut Shell, args: &[String]) -> i32 {
 
         nix::unistd::execvp(&c_prog, &c_args).ok();
         eprintln!(
-            "bash: exec: {}: {}",
+            "{}: exec: {}: {}",
+            shell.error_prefix(),
             program,
             std::io::Error::last_os_error()
         );
@@ -1732,14 +1740,20 @@ fn builtin_exec(shell: &mut Shell, args: &[String]) -> i32 {
 
     #[cfg(not(unix))]
     {
-        eprintln!("bash: exec: not supported on this platform");
+        eprintln!(
+            "{}: exec: not supported on this platform",
+            shell.error_prefix()
+        );
         1
     }
 }
 
 fn builtin_source(shell: &mut Shell, args: &[String]) -> i32 {
     if args.is_empty() {
-        eprintln!("bash: source: filename argument required");
+        eprintln!(
+            "{}: source: filename argument required",
+            shell.error_prefix()
+        );
         return 2;
     }
 
@@ -1771,7 +1785,7 @@ fn builtin_source(shell: &mut Shell, args: &[String]) -> i32 {
             result
         }
         Err(e) => {
-            eprintln!("bash: {}: {}", filename, e);
+            eprintln!("{}: {}: {}", shell.error_prefix(), filename, e);
             1
         }
     }
@@ -1823,7 +1837,7 @@ fn builtin_type(shell: &mut Shell, args: &[String]) -> i32 {
             } else if let Some(path) = find_in_path_opt(name) {
                 println!("{} is {}", name, path);
             } else {
-                eprintln!("bash: type: {}: not found", name);
+                eprintln!("{}: type: {}: not found", shell.error_prefix(), name);
                 status = 1;
             }
         }
@@ -1854,7 +1868,7 @@ fn builtin_builtin(shell: &mut Shell, args: &[String]) -> i32 {
     }
 }
 
-fn builtin_command(_shell: &mut Shell, args: &[String]) -> i32 {
+fn builtin_command(shell: &mut Shell, args: &[String]) -> i32 {
     if args.is_empty() {
         return 0;
     }
@@ -1896,7 +1910,7 @@ fn builtin_command(_shell: &mut Shell, args: &[String]) -> i32 {
     {
         Ok(status) => status.code().unwrap_or(1),
         Err(e) => {
-            eprintln!("bash: {}: {}", program, e);
+            eprintln!("{}: {}: {}", shell.error_prefix(), program, e);
             127
         }
     }
@@ -1988,7 +2002,7 @@ fn builtin_wait(_shell: &mut Shell, _args: &[String]) -> i32 {
     0
 }
 
-fn builtin_kill(_shell: &mut Shell, args: &[String]) -> i32 {
+fn builtin_kill(shell: &mut Shell, args: &[String]) -> i32 {
     #[cfg(unix)]
     {
         use nix::sys::signal::{self, Signal};
@@ -2029,7 +2043,11 @@ fn builtin_kill(_shell: &mut Shell, args: &[String]) -> i32 {
         let mut status = 0;
         for pid in pids {
             if signal::kill(Pid::from_raw(pid), signal).is_err() {
-                eprintln!("bash: kill: ({}) - No such process", pid);
+                eprintln!(
+                    "{}: kill: ({}) - No such process",
+                    shell.error_prefix(),
+                    pid
+                );
                 status = 1;
             }
         }
@@ -2038,12 +2056,15 @@ fn builtin_kill(_shell: &mut Shell, args: &[String]) -> i32 {
     #[cfg(not(unix))]
     {
         let _ = args;
-        eprintln!("bash: kill: not supported on this platform");
+        eprintln!(
+            "{}: kill: not supported on this platform",
+            shell.error_prefix()
+        );
         1
     }
 }
 
-fn builtin_umask(_shell: &mut Shell, args: &[String]) -> i32 {
+fn builtin_umask(shell: &mut Shell, args: &[String]) -> i32 {
     #[cfg(unix)]
     {
         use nix::sys::stat::Mode;
@@ -2059,7 +2080,11 @@ fn builtin_umask(_shell: &mut Shell, args: &[String]) -> i32 {
             nix::sys::stat::umask(Mode::from_bits_truncate(mask));
             0
         } else {
-            eprintln!("bash: umask: {}: invalid octal number", args[0]);
+            eprintln!(
+                "{}: umask: {}: invalid octal number",
+                shell.error_prefix(),
+                args[0]
+            );
             1
         }
     }
@@ -2072,7 +2097,10 @@ fn builtin_umask(_shell: &mut Shell, args: &[String]) -> i32 {
 
 fn builtin_getopts(shell: &mut Shell, args: &[String]) -> i32 {
     if args.len() < 2 {
-        eprintln!("bash: getopts: usage: getopts optstring name [arg]");
+        eprintln!(
+            "{}: getopts: usage: getopts optstring name [arg]",
+            shell.error_prefix()
+        );
         return 2;
     }
 
@@ -2123,7 +2151,8 @@ fn builtin_getopts(shell: &mut Shell, args: &[String]) -> i32 {
                 return 0;
             } else {
                 eprintln!(
-                    "bash: getopts: option requires an argument -- '{}'",
+                    "{}: getopts: option requires an argument -- '{}'",
+                    shell.error_prefix(),
                     opt_char
                 );
                 shell.vars.insert(varname.clone(), "?".to_string());
@@ -2135,7 +2164,11 @@ fn builtin_getopts(shell: &mut Shell, args: &[String]) -> i32 {
         }
         shell.vars.insert(varname.clone(), opt_str);
     } else {
-        eprintln!("bash: getopts: illegal option -- '{}'", opt_char);
+        eprintln!(
+            "{}: getopts: illegal option -- '{}'",
+            shell.error_prefix(),
+            opt_char
+        );
         shell.vars.insert(varname.clone(), "?".to_string());
     }
 
@@ -2147,7 +2180,7 @@ fn builtin_getopts(shell: &mut Shell, args: &[String]) -> i32 {
 
 fn builtin_let(shell: &mut Shell, args: &[String]) -> i32 {
     if args.is_empty() {
-        eprintln!("bash: let: expression expected");
+        eprintln!("{}: let: expression expected", shell.error_prefix());
         return 1;
     }
 
