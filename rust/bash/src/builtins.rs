@@ -341,6 +341,18 @@ fn builtin_printf(_shell: &mut Shell, args: &[String]) -> i32 {
 }
 
 /// Shell-escape a string for use with %q in printf.
+/// Convert a Rust io::Error to a bash-style error message
+fn io_error_message(e: &std::io::Error) -> &'static str {
+    match e.kind() {
+        std::io::ErrorKind::NotFound => "No such file or directory",
+        std::io::ErrorKind::PermissionDenied => "Permission denied",
+        std::io::ErrorKind::AlreadyExists => "File exists",
+        std::io::ErrorKind::BrokenPipe => "Broken pipe",
+        std::io::ErrorKind::InvalidInput => "Invalid argument",
+        _ => "Input/output error",
+    }
+}
+
 fn shell_escape(s: &str) -> String {
     if s.is_empty() {
         return "''".to_string();
@@ -1785,7 +1797,8 @@ fn builtin_source(shell: &mut Shell, args: &[String]) -> i32 {
             result
         }
         Err(e) => {
-            eprintln!("{}: {}: {}", shell.error_prefix(), filename, e);
+            let msg = io_error_message(&e);
+            eprintln!("{}: {}: {}", shell.error_prefix(), filename, msg);
             1
         }
     }

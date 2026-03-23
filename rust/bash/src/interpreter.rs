@@ -1902,6 +1902,14 @@ impl Shell {
         if result != 0 { 0 } else { 1 }
     }
 
+    fn io_error_message(e: &std::io::Error) -> &'static str {
+        match e.kind() {
+            std::io::ErrorKind::NotFound => "No such file or directory",
+            std::io::ErrorKind::PermissionDenied => "Permission denied",
+            _ => "No such file or directory",
+        }
+    }
+
     #[cfg(unix)]
     fn setup_redirections(
         &mut self,
@@ -1932,7 +1940,7 @@ impl Shell {
                         src_fd
                     } else {
                         std::fs::File::create(&target_str)
-                            .map_err(|e| format!("{}: {}", target_str, e))?
+                            .map_err(|e| format!("{}: {}", target_str, Self::io_error_message(&e)))?
                             .into_raw_fd()
                     };
                     if raw_fd != fd {
@@ -1952,7 +1960,7 @@ impl Shell {
                         .create(true)
                         .append(true)
                         .open(&target_str)
-                        .map_err(|e| format!("{}: {}", target_str, e))?;
+                        .map_err(|e| format!("{}: {}", target_str, Self::io_error_message(&e)))?;
                     let raw_fd = file.into_raw_fd();
                     nix::unistd::dup2(raw_fd, fd).map_err(|e| e.to_string())?;
                     nix::unistd::close(raw_fd).ok();
@@ -1966,7 +1974,7 @@ impl Shell {
                     }
 
                     let file = std::fs::File::open(&target_str)
-                        .map_err(|e| format!("{}: {}", target_str, e))?;
+                        .map_err(|e| format!("{}: {}", target_str, Self::io_error_message(&e)))?;
                     let raw_fd = file.into_raw_fd();
                     nix::unistd::dup2(raw_fd, fd).map_err(|e| e.to_string())?;
                     nix::unistd::close(raw_fd).ok();
@@ -2020,7 +2028,7 @@ impl Shell {
                         .create(true)
                         .truncate(false)
                         .open(&target_str)
-                        .map_err(|e| format!("{}: {}", target_str, e))?;
+                        .map_err(|e| format!("{}: {}", target_str, Self::io_error_message(&e)))?;
                     let raw_fd = file.into_raw_fd();
                     nix::unistd::dup2(raw_fd, fd).map_err(|e| e.to_string())?;
                     nix::unistd::close(raw_fd).ok();
