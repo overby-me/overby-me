@@ -1644,6 +1644,9 @@ impl Shell {
 
     fn run_arith_for(&mut self, clause: &ArithForClause) -> i32 {
         if !clause.init.is_empty() {
+            if self.opt_xtrace {
+                eprintln!("+ (( {} ))", clause.init);
+            }
             self.eval_arith_expr(&clause.init);
         }
 
@@ -1655,6 +1658,9 @@ impl Shell {
             }
 
             if !clause.cond.is_empty() {
+                if self.opt_xtrace {
+                    eprintln!("+ (( {} ))", clause.cond);
+                }
                 let cond_val = self.eval_arith_expr(&clause.cond);
                 if cond_val == 0 {
                     break;
@@ -1674,6 +1680,9 @@ impl Shell {
             }
 
             if !clause.step.is_empty() {
+                if self.opt_xtrace {
+                    eprintln!("+ (( {} ))", clause.step);
+                }
                 self.eval_arith_expr(&clause.step);
             }
         }
