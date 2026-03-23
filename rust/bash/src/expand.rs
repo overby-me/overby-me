@@ -473,16 +473,19 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
 
 /// Check if a ParamExpr is an array[@] expansion.
 fn is_array_at_expansion(expr: &ParamExpr, ctx: &ExpCtx) -> bool {
-    // Only split into separate words for plain array expansion (no operator)
-    if !matches!(&expr.op, ParamOp::None) {
-        return false;
+    // Check for $@ or $* with Substring (slice) operation
+    if (expr.name == "@" || expr.name == "*")
+        && matches!(&expr.op, ParamOp::Substring(..))
+        && ctx.positional.len() > 1
+    {
+        return true;
     }
     if let Some(bracket) = expr.name.find('[') {
         let idx_str = &expr.name[bracket + 1..expr.name.len() - 1];
         if idx_str == "@" {
             let base = &expr.name[..bracket];
             let resolved = ctx.resolve_nameref(base);
-            return ctx.arrays.contains_key(&resolved);
+            return ctx.arrays.contains_key(&resolved) || ctx.assoc_arrays.contains_key(&resolved);
         }
     }
     false
@@ -490,6 +493,41 @@ fn is_array_at_expansion(expr: &ParamExpr, ctx: &ExpCtx) -> bool {
 
 /// Get array elements for an array[@] expansion.
 fn get_array_elements(expr: &ParamExpr, ctx: &ExpCtx) -> Vec<String> {
+    // Handle ${@:offset:length} — slice of positional params
+    if expr.name == "@" || expr.name == "*" {
+        if let ParamOp::Substring(offset_str, length_str) = &expr.op {
+            let offset: i64 = offset_str.trim().parse().unwrap_or(0);
+            let params = if offset == 0 {
+                ctx.positional
+            } else {
+                &ctx.positional[1..]
+            };
+            let count = params.len();
+            let start = if offset < 0 {
+                (count as i64 + offset).max(0) as usize
+            } else if offset == 0 {
+                0
+            } else {
+                ((offset - 1) as usize).min(count)
+            };
+            let end = if let Some(len_str) = length_str {
+                let len: i64 = len_str.trim().parse().unwrap_or(count as i64);
+                if len < 0 {
+                    (count as i64 + len).max(start as i64) as usize
+                } else {
+                    (start + len as usize).min(count)
+                }
+            } else {
+                count
+            };
+            return params[start..end].to_vec();
+        }
+        // Plain $@ — all positional params
+        if ctx.positional.len() > 1 {
+            return ctx.positional[1..].to_vec();
+        }
+        return vec![];
+    }
     if let Some(bracket) = expr.name.find('[') {
         let base = &expr.name[..bracket];
         let resolved = ctx.resolve_nameref(base);
