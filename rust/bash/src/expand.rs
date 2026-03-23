@@ -509,6 +509,10 @@ fn is_array_at_expansion(expr: &ParamExpr, ctx: &ExpCtx) -> bool {
     {
         return true;
     }
+    // ${!arr[@]} — array indices should split into separate fields
+    if matches!(&expr.op, ParamOp::ArrayIndices('@')) {
+        return ctx.arrays.contains_key(&expr.name) || ctx.assoc_arrays.contains_key(&expr.name);
+    }
     if let Some(bracket) = expr.name.find('[') {
         let idx_str = &expr.name[bracket + 1..expr.name.len() - 1];
         if idx_str == "@" {
@@ -558,6 +562,20 @@ fn get_array_elements(expr: &ParamExpr, ctx: &ExpCtx) -> Vec<String> {
         // Plain $@ — all positional params
         if ctx.positional.len() > 1 {
             return ctx.positional[1..].to_vec();
+        }
+        return vec![];
+    }
+    // ${!arr[@]} — return indices/keys as elements
+    if let ParamOp::ArrayIndices(_) = &expr.op {
+        let resolved = ctx.resolve_nameref(&expr.name);
+        if let Some(arr) = ctx.arrays.get(&resolved) {
+            return (0..arr.len())
+                .filter(|&i| !arr[i].is_empty() || i == 0)
+                .map(|i| i.to_string())
+                .collect();
+        }
+        if let Some(assoc) = ctx.assoc_arrays.get(&resolved) {
+            return assoc.keys().cloned().collect();
         }
         return vec![];
     }
