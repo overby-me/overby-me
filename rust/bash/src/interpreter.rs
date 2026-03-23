@@ -1222,10 +1222,7 @@ impl Shell {
                             AssignValue::Array(elems) => {
                                 let items: Vec<String> = elems
                                     .iter()
-                                    .map(|e| {
-                                        let v = self.expand_word_single(&e.value);
-                                        xtrace_quote(&v)
-                                    })
+                                    .map(|e| xtrace_quote(&crate::ast::word_to_string(&e.value)))
                                     .collect();
                                 if assign.append {
                                     self.xtrace_write(&format!(
