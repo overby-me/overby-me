@@ -56,7 +56,7 @@ pub struct AssocArray {
 impl Default for AssocArray {
     fn default() -> Self {
         Self {
-            buckets: (0..128).map(|_| Vec::new()).collect(),
+            buckets: (0..1024).map(|_| Vec::new()).collect(),
             len: 0,
         }
     }
@@ -67,7 +67,7 @@ impl AssocArray {
     fn bucket_idx(key: &str) -> usize {
         let mut h = BashHasher::new();
         std::hash::Hasher::write(&mut h, key.as_bytes());
-        (std::hash::Hasher::finish(&h) as usize) & 127
+        (std::hash::Hasher::finish(&h) as usize) & 1023
     }
 
     pub fn get(&self, key: &str) -> Option<&String> {
