@@ -254,7 +254,15 @@ impl Lexer {
             }
             _ => {
                 while let Some(ch) = self.peek() {
-                    if ch.is_alphanumeric() || ch == '_' {
+                    if !ch.is_whitespace()
+                        && ch != '\n'
+                        && ch != ';'
+                        && ch != '&'
+                        && ch != '|'
+                        && ch != ')'
+                        && ch != '>'
+                        && ch != '<'
+                    {
                         delimiter.push(ch);
                         self.advance();
                     } else {
@@ -1005,6 +1013,15 @@ fn read_param_word_until(chars: &[char], i: &mut usize, delim: char) -> Word {
     let mut parts = Vec::new();
     let mut literal = String::new();
     let mut depth = 0;
+
+    // Handle tilde at the start of the word (for ${var:=~/path} etc.)
+    if *i < chars.len() && chars[*i] == '~' {
+        let next = chars.get(*i + 1).copied();
+        if next == Some('/') || next == Some('}') || next == Some(delim) || next.is_none() {
+            parts.push(WordPart::Tilde(String::new()));
+            *i += 1;
+        }
+    }
 
     while *i < chars.len() && (chars[*i] != delim || depth > 0) && chars[*i] != '}' {
         match chars[*i] {
