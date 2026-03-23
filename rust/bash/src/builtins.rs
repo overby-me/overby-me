@@ -2416,12 +2416,21 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
     fields.push(current[..end].to_string());
 
     // Assign to variables
+    let mut read_status = 0;
     for (j, name) in var_names.iter().enumerate() {
         let value = fields.get(j).cloned().unwrap_or_default();
+        if shell.readonly_vars.contains(name.as_str())
+            || shell.readonly_vars.contains(&shell.resolve_nameref(name))
+        {
+            let resolved = shell.resolve_nameref(name);
+            eprintln!("{}: {}: readonly variable", shell.error_prefix(), resolved);
+            read_status = 2;
+            break;
+        }
         shell.set_var(name, value);
     }
 
-    0
+    read_status
 }
 
 fn builtin_eval(shell: &mut Shell, args: &[String]) -> i32 {
