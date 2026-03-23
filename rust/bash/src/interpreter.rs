@@ -2444,6 +2444,9 @@ fn xtrace_quote(s: &str) -> String {
         }
         out.push('\'');
         out
+    } else if s.len() == 1 && !s.chars().next().unwrap().is_whitespace() {
+        // Single special char — use backslash quoting
+        format!("\\{}", s)
     } else if !s.contains('\'') {
         format!("'{}'", s)
     } else {
