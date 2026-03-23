@@ -2117,6 +2117,56 @@ pub fn execute_command(
             return Ok(serde_json::json!({ "list-dependencies": out }));
         }
         Command::Show(unit_name, filter) => {
+            if unit_name == "__manager__" {
+                // Manager-level properties
+                let mut props = std::collections::BTreeMap::new();
+                props.insert("Version".to_string(), "258".to_string());
+                props.insert("Architecture".to_string(), "x86-64".to_string());
+                // Read persisted log-level
+                let log_level = std::fs::read_to_string("/run/rust-systemd/log-level")
+                    .unwrap_or_else(|_| "info".to_string());
+                props.insert("LogLevel".to_string(), log_level.trim().to_string());
+                let log_target = std::fs::read_to_string("/run/rust-systemd/log-target")
+                    .unwrap_or_else(|_| "journal-or-kmsg".to_string());
+                props.insert("LogTarget".to_string(), log_target.trim().to_string());
+                // Default rlimits - use current process limits as defaults
+                props.insert("DefaultLimitNOFILE".to_string(), "524288".to_string());
+                props.insert("DefaultLimitNOFILESoft".to_string(), "1024".to_string());
+                // Read from system.conf.d if available
+                if let Ok(content) = std::fs::read_to_string("/run/systemd/system.conf.d/rlimits.conf") {
+                    for line in content.lines() {
+                        let line = line.trim();
+                        if let Some(val) = line.strip_prefix("DefaultLimitNOFILE=") {
+                            if let Some((soft, hard)) = val.split_once(':') {
+                                props.insert("DefaultLimitNOFILESoft".to_string(), soft.to_string());
+                                props.insert("DefaultLimitNOFILE".to_string(), hard.to_string());
+                            } else {
+                                props.insert("DefaultLimitNOFILE".to_string(), val.to_string());
+                                props.insert("DefaultLimitNOFILESoft".to_string(), val.to_string());
+                            }
+                        }
+                    }
+                }
+                let text = if let Some(ref f) = filter {
+                    let mut out = String::new();
+                    for part in f {
+                        let part = part.trim();
+                        if let Some(val) = props.get(part) {
+                            out.push_str(&format!("{}={}\n", part, val));
+                        } else {
+                            out.push_str(&format!("{}=\n", part));
+                        }
+                    }
+                    out
+                } else {
+                    let mut out = String::new();
+                    for (k, v) in &props {
+                        out.push_str(&format!("{}={}\n", k, v));
+                    }
+                    out
+                };
+                return Ok(serde_json::json!({ "show": text }));
+            }
             let ri = run_info.read_poisoned();
             let units = find_units_with_name(&unit_name, &ri.unit_table);
             if units.is_empty() {

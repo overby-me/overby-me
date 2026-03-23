@@ -628,18 +628,22 @@ fn main() {
             Some(positional[1..].iter().cloned().map(Value::String).collect())
         }
     } else if method == "show" {
-        // show <unit> [property-filter...] — send unit name + optional filter
+        // show [unit] [property-filter...] — send unit name + optional filter
+        // If no unit is specified, query manager-level properties
         if positional.len() < 2 {
-            if !quiet {
-                eprintln!("Error: show requires a unit name.");
+            // Manager-level show — send special "__manager__" marker
+            let mut arr = vec![Value::String("__manager__".to_string())];
+            for prop in &property_filter {
+                arr.push(Value::String(prop.clone()));
             }
-            std::process::exit(1);
+            Some(Value::Array(arr))
+        } else {
+            let mut arr = vec![Value::String(positional[1].clone())];
+            for prop in &property_filter {
+                arr.push(Value::String(prop.clone()));
+            }
+            Some(Value::Array(arr))
         }
-        let mut arr = vec![Value::String(positional[1].clone())];
-        for prop in &property_filter {
-            arr.push(Value::String(prop.clone()));
-        }
-        Some(Value::Array(arr))
     } else if positional.len() == 2 {
         Some(Value::String(positional[1].clone()))
     } else if positional.len() > 2 {
