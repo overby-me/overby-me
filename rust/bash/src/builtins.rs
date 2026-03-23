@@ -1153,19 +1153,20 @@ fn format_program(program: &Program, indent: usize) -> String {
         if cc.background {
             line.push_str(" &");
         }
-        // Add semicolons between commands (not after the last one)
-        if idx < program.len() - 1 {
-            let trimmed = line.trim_end();
-            if !trimmed.ends_with('{')
-                && !trimmed.ends_with("fi")
-                && !trimmed.ends_with("done")
-                && !trimmed.ends_with("esac")
-                && !trimmed.ends_with("then")
-                && !trimmed.ends_with("do")
-                && !trimmed.ends_with("else")
-                && !trimmed.ends_with('}')
-                && !trimmed.ends_with('&')
-            {
+        // Add semicolons after commands (bash style)
+        let trimmed = line.trim_end();
+        let is_compound_end = trimmed.ends_with("fi")
+            || trimmed.ends_with("done")
+            || trimmed.ends_with("esac")
+            || trimmed.ends_with('}');
+        let is_keyword = trimmed.ends_with('{')
+            || trimmed.ends_with("then")
+            || trimmed.ends_with("do")
+            || trimmed.ends_with("else");
+        if !is_keyword && !trimmed.ends_with('&') && !trimmed.is_empty() {
+            if is_compound_end && idx == program.len() - 1 {
+                // Don't add ; after the LAST fi/done/esac/} in a block
+            } else {
                 line.push(';');
             }
         }
@@ -1205,23 +1206,33 @@ fn format_compound_command(cmd: &CompoundCommand) -> String {
         }
         CompoundCommand::If(clause) => {
             let mut s = String::from("if ");
-            s.push_str(format_program(&clause.condition, 0).trim());
+            let cond = format_program(&clause.condition, 0);
+            let cond = cond.trim().trim_end_matches(';');
+            s.push_str(cond);
             s.push_str("; then\n");
-            s.push_str(&format_program(&clause.then_body, 1));
-            s.push('\n');
+            s.push_str(&format_program(&clause.then_body, 2));
+            s.push_str("\n    fi");
             for (cond, body) in &clause.elif_parts {
+                // Remove trailing fi and add elif
+                let len = s.len();
+                if s.ends_with("fi") {
+                    s.truncate(len - 2);
+                }
                 s.push_str("elif ");
                 s.push_str(format_program(cond, 0).trim());
                 s.push_str("; then\n");
-                s.push_str(&format_program(body, 1));
-                s.push('\n');
+                s.push_str(&format_program(body, 2));
+                s.push_str("\n    fi");
             }
             if let Some(ref else_body) = clause.else_body {
+                let len = s.len();
+                if s.ends_with("fi") {
+                    s.truncate(len - 2);
+                }
                 s.push_str("else\n");
-                s.push_str(&format_program(else_body, 1));
-                s.push('\n');
+                s.push_str(&format_program(else_body, 2));
+                s.push_str("\n    fi");
             }
-            s.push_str("fi");
             s
         }
         CompoundCommand::For(clause) => {
@@ -1232,9 +1243,9 @@ fn format_compound_command(cmd: &CompoundCommand) -> String {
                     s.push_str(&format_word(w));
                 }
             }
-            s.push_str("; do\n");
-            s.push_str(&format_program(&clause.body, 1));
-            s.push_str("\ndone");
+            s.push_str(";\n    do\n");
+            s.push_str(&format_program(&clause.body, 2));
+            s.push_str("\n    done");
             s
         }
         CompoundCommand::ArithFor(clause) => {
