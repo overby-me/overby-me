@@ -1455,9 +1455,15 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             } else if flag_assoc {
                 let map = parse_assoc_literal(value);
                 shell.assoc_arrays.insert(name.to_string(), map);
+                if flag_integer {
+                    shell.integer_vars.insert(name.to_string());
+                }
             } else if flag_array {
                 let arr = parse_array_literal(value);
                 shell.arrays.insert(name.to_string(), arr);
+                if flag_integer {
+                    shell.integer_vars.insert(name.to_string());
+                }
             } else if flag_integer {
                 // Mark as integer and evaluate as arithmetic
                 shell.integer_vars.insert(name.to_string());

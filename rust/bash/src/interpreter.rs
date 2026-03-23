@@ -1574,10 +1574,23 @@ impl Shell {
                     } else if self.arrays.contains_key(&resolved) {
                         let is_int = self.integer_vars.contains(&resolved);
                         if is_int {
+                            // Integer array: arr+=val adds to element 0
                             let n = self.eval_arith_expr(&value);
-                            self.arrays.entry(resolved).or_default().push(n.to_string());
+                            let arr = self.arrays.entry(resolved).or_default();
+                            if arr.is_empty() {
+                                arr.push(n.to_string());
+                            } else {
+                                let existing: i64 = arr[0].parse().unwrap_or(0);
+                                arr[0] = (existing + n).to_string();
+                            }
                         } else {
-                            self.arrays.entry(resolved).or_default().push(value);
+                            // String array: arr+=val appends to element 0
+                            let arr = self.arrays.entry(resolved).or_default();
+                            if arr.is_empty() {
+                                arr.push(value);
+                            } else {
+                                arr[0].push_str(&value);
+                            }
                         }
                     } else if self.integer_vars.contains(&resolved) {
                         // Integer append: arithmetic addition
