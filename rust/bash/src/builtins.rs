@@ -2067,6 +2067,131 @@ fn eval_test_expr(args: &[String], shell: &Shell) -> i32 {
                     1
                 };
             }
+            #[cfg(unix)]
+            "-c" => {
+                use std::os::unix::fs::FileTypeExt;
+                return if std::fs::metadata(&args[1]).is_ok_and(|m| m.file_type().is_char_device())
+                {
+                    0
+                } else {
+                    1
+                };
+            }
+            #[cfg(unix)]
+            "-b" => {
+                use std::os::unix::fs::FileTypeExt;
+                return if std::fs::metadata(&args[1]).is_ok_and(|m| m.file_type().is_block_device())
+                {
+                    0
+                } else {
+                    1
+                };
+            }
+            #[cfg(unix)]
+            "-p" => {
+                use std::os::unix::fs::FileTypeExt;
+                return if std::fs::metadata(&args[1]).is_ok_and(|m| m.file_type().is_fifo()) {
+                    0
+                } else {
+                    1
+                };
+            }
+            #[cfg(unix)]
+            "-S" => {
+                use std::os::unix::fs::FileTypeExt;
+                return if std::fs::metadata(&args[1]).is_ok_and(|m| m.file_type().is_socket()) {
+                    0
+                } else {
+                    1
+                };
+            }
+            #[cfg(unix)]
+            "-u" => {
+                use std::os::unix::fs::PermissionsExt;
+                return if std::fs::metadata(&args[1])
+                    .is_ok_and(|m| m.permissions().mode() & 0o4000 != 0)
+                {
+                    0
+                } else {
+                    1
+                };
+            }
+            #[cfg(unix)]
+            "-g" => {
+                use std::os::unix::fs::PermissionsExt;
+                return if std::fs::metadata(&args[1])
+                    .is_ok_and(|m| m.permissions().mode() & 0o2000 != 0)
+                {
+                    0
+                } else {
+                    1
+                };
+            }
+            #[cfg(unix)]
+            "-k" => {
+                use std::os::unix::fs::PermissionsExt;
+                return if std::fs::metadata(&args[1])
+                    .is_ok_and(|m| m.permissions().mode() & 0o1000 != 0)
+                {
+                    0
+                } else {
+                    1
+                };
+            }
+            #[cfg(unix)]
+            "-O" => {
+                use std::os::unix::fs::MetadataExt;
+                return if std::fs::metadata(&args[1])
+                    .is_ok_and(|m| m.uid() == unsafe { libc::getuid() })
+                {
+                    0
+                } else {
+                    1
+                };
+            }
+            #[cfg(unix)]
+            "-G" => {
+                use std::os::unix::fs::MetadataExt;
+                return if std::fs::metadata(&args[1])
+                    .is_ok_and(|m| m.gid() == unsafe { libc::getgid() })
+                {
+                    0
+                } else {
+                    1
+                };
+            }
+            "-t" => {
+                let fd: i32 = args[1].parse().unwrap_or(-1);
+                #[cfg(unix)]
+                {
+                    return if nix::unistd::isatty(fd).unwrap_or(false) {
+                        0
+                    } else {
+                        1
+                    };
+                }
+                #[cfg(not(unix))]
+                {
+                    let _ = fd;
+                    return 1;
+                }
+            }
+            "-o" => {
+                // Shell option test
+                let opt = &args[1];
+                let is_set = match opt.as_str() {
+                    "errexit" => shell.opt_errexit,
+                    "nounset" => shell.opt_nounset,
+                    "xtrace" => shell.opt_xtrace,
+                    "noclobber" => shell.opt_noclobber,
+                    "noglob" => shell.opt_noglob,
+                    "noexec" => shell.opt_noexec,
+                    "posix" => shell.opt_posix,
+                    "pipefail" => shell.opt_pipefail,
+                    _ => false,
+                };
+                return if is_set { 0 } else { 1 };
+            }
             _ => {}
         }
     }
