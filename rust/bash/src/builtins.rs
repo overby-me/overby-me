@@ -2122,6 +2122,10 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
         // Handle backslash line continuation only here
         // Backslash before IFS chars is handled during field splitting below
         line = line.replace("\\\n", "");
+        // Remove trailing backslash (continuation at EOF)
+        if line.ends_with('\\') {
+            line.pop();
+        }
     }
 
     let ifs = shell
@@ -2156,6 +2160,7 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
     // Parse the line into fields
     let mut fields: Vec<String> = Vec::new();
     let mut current = String::new();
+    let mut last_escaped_pos: Option<usize> = None; // track last escaped char position in current
     let chars: Vec<char> = line.chars().collect();
     let mut ci = 0;
     let max_fields = var_names.len();
@@ -2171,6 +2176,7 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
             // Backslash escapes the next character
             ci += 1;
             current.push(chars[ci]);
+            last_escaped_pos = Some(current.len() - 1);
             ci += 1;
         } else if fields.len() < max_fields - 1 && ifs.contains(ch) {
             // IFS character — end current field
@@ -2178,6 +2184,7 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
                 // IFS whitespace: skip consecutive whitespace
                 if !current.is_empty() {
                     fields.push(std::mem::take(&mut current));
+                    last_escaped_pos = None;
                 }
                 while ci + 1 < chars.len() && ifs_ws.contains(&chars[ci + 1]) {
                     ci += 1;
@@ -2185,6 +2192,7 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
             } else {
                 // IFS non-whitespace: always produces a field boundary
                 fields.push(std::mem::take(&mut current));
+                last_escaped_pos = None;
             }
             ci += 1;
         } else {
@@ -2192,11 +2200,21 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
             ci += 1;
         }
     }
-    // Strip trailing IFS whitespace from last field
-    let trimmed = current
-        .trim_end_matches(|c: char| ifs_ws.contains(&c))
-        .to_string();
-    fields.push(trimmed);
+    // Strip trailing IFS whitespace from last field, but not past escaped chars
+    let trim_limit = last_escaped_pos.map(|p| p + 1).unwrap_or(0);
+    let mut end = current.len();
+    while end > trim_limit {
+        if let Some(c) = current[..end].chars().last() {
+            if ifs_ws.contains(&c) {
+                end -= c.len_utf8();
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+    fields.push(current[..end].to_string());
 
     // Assign to variables
     for (j, name) in var_names.iter().enumerate() {
