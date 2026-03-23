@@ -61,6 +61,7 @@ pub struct Assignment {
 
 /// The right-hand side of an assignment.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum AssignValue {
     /// No value: `declare name`
     None,

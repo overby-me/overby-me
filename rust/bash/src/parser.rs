@@ -1045,13 +1045,9 @@ impl Parser {
             self.current = saved_tok;
         }
 
-        // Scalar assignment
+        // Scalar assignment — even empty value is a Scalar (a= sets to "")
         self.advance();
-        let value = if value_parts.is_empty() {
-            AssignValue::None
-        } else {
-            AssignValue::Scalar(value_parts)
-        };
+        let value = AssignValue::Scalar(value_parts);
 
         Some(Assignment {
             name: full_name,
