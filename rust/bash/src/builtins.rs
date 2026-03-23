@@ -2019,7 +2019,8 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
         i += 1;
     }
 
-    if var_names.is_empty() && array_name.is_none() {
+    let is_reply = var_names.is_empty() && array_name.is_none();
+    if is_reply {
         var_names.push("REPLY".to_string());
     }
 
@@ -2219,6 +2220,12 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
         .get("IFS")
         .cloned()
         .unwrap_or_else(|| " \t\n".to_string());
+
+    // When no variable names given (reading into REPLY), store raw line without IFS processing
+    if is_reply {
+        shell.set_var("REPLY", line);
+        return 0;
+    }
 
     // Handle -a: read into array
     if let Some(arr_name) = array_name {
