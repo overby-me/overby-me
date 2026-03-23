@@ -1636,27 +1636,58 @@ fn brace_expand(s: &str) -> Vec<String> {
                                 if let (Ok(start_n), Ok(end_n)) =
                                     (parts[0].parse::<i64>(), parts[1].parse::<i64>())
                                 {
+                                    // If step is present but not a valid integer, don't expand
                                     let step: i64 = if parts.len() >= 3 {
-                                        parts[2].parse().unwrap_or(1)
+                                        match parts[2].parse::<i64>() {
+                                            Ok(v) => v,
+                                            Err(_) => {
+                                                // Invalid step — return as literal
+                                                return vec![s.to_string()];
+                                            }
+                                        }
                                     } else {
                                         1
                                     };
                                     let step = if step == 0 { 1 } else { step.abs() };
+                                    // Zero-padding: pad to the widest operand width
+                                    let width = std::cmp::max(parts[0].len(), parts[1].len());
+                                    let needs_pad = parts[0].starts_with('0') && parts[0].len() > 1
+                                        || parts[1].starts_with('0') && parts[1].len() > 1
+                                        || parts[0].starts_with("-0")
+                                        || parts[1].starts_with("-0");
                                     if start_n <= end_n {
                                         let mut n = start_n;
                                         while n <= end_n {
+                                            let num_str = if needs_pad {
+                                                if n < 0 {
+                                                    format!("-{:0>w$}", -n, w = width - 1)
+                                                } else {
+                                                    format!("{:0>w$}", n, w = width)
+                                                }
+                                            } else {
+                                                n.to_string()
+                                            };
                                             result.extend(brace_expand(&format!(
                                                 "{}{}{}",
-                                                prefix, n, suffix
+                                                prefix, num_str, suffix
                                             )));
                                             n += step;
                                         }
                                     } else {
                                         let mut n = start_n;
                                         while n >= end_n {
+                                            let num_str = if needs_pad {
+                                                if n < 0 {
+                                                    format!("-{:0>w$}", -n, w = width - 1)
+                                                } else {
+                                                    format!("{:0>w$}", n, w = width)
+                                                }
+                                            } else {
+                                                n.to_string()
+                                            };
                                             result.extend(brace_expand(&format!(
                                                 "{}{}{}",
-                                                prefix, n, suffix
+                                                prefix, num_str, suffix
                                             )));
                                             n -= step;
                                         }
@@ -1666,27 +1697,37 @@ fn brace_expand(s: &str) -> Vec<String> {
                                     && parts[0].chars().next().unwrap().is_ascii_alphabetic()
                                         == parts[1].chars().next().unwrap().is_ascii_alphabetic()
                                 {
-                                    // Character range: {a..z} — both must be letters or both digits
-                                    let start_c = parts[0].chars().next().unwrap();
-                                    let end_c = parts[1].chars().next().unwrap();
+                                    // Character range: {a..z} or {a..z..2}
+                                    let start_c = parts[0].chars().next().unwrap() as i32;
+                                    let end_c = parts[1].chars().next().unwrap() as i32;
+                                    let step: i32 = if parts.len() >= 3 {
+                                        match parts[2].parse::<i32>() {
+                                            Ok(v) => v,
+                                            Err(_) => {
+                                                return vec![s.to_string()];
+                                            }
+                                        }
+                                    } else {
+                                        1
+                                    };
+                                    let step = if step == 0 { 1 } else { step.abs() };
                                     if start_c <= end_c {
-                                        for c in start_c..=end_c {
+                                        let mut c = start_c;
+                                        while c <= end_c {
                                             result.extend(brace_expand(&format!(
                                                 "{}{}{}",
-                                                prefix, c, suffix
+                                                prefix, c as u8 as char, suffix
                                             )));
+                                            c += step;
                                         }
                                     } else {
                                         let mut c = start_c;
                                         while c >= end_c {
                                             result.extend(brace_expand(&format!(
                                                 "{}{}{}",
-                                                prefix, c, suffix
+                                                prefix, c as u8 as char, suffix
                                             )));
-                                            if c == '\0' {
-                                                break;
-                                            }
-                                            c = (c as u8 - 1) as char;
+                                            c -= step;
                                         }
                                     }
                                 }
