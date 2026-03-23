@@ -2559,7 +2559,7 @@ fn builtin_type(shell: &mut Shell, args: &[String]) -> i32 {
         );
         if flag_t {
             // Print type word only
-            if shell.aliases.contains_key(name) && shell.shopt_expand_aliases {
+            if shell.aliases.contains_key(name) {
                 println!("alias");
             } else if is_keyword {
                 println!("keyword");
