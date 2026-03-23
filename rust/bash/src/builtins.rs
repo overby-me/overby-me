@@ -3093,10 +3093,25 @@ fn builtin_hash(_shell: &mut Shell, _args: &[String]) -> i32 {
 }
 
 fn builtin_trap(shell: &mut Shell, args: &[String]) -> i32 {
+    // Normalize signal name for display
+    fn normalize_signal_name(s: &str) -> String {
+        match s {
+            "0" | "EXIT" | "exit" => "EXIT".to_string(),
+            "ERR" | "err" => "ERR".to_string(),
+            "DEBUG" | "debug" => "DEBUG".to_string(),
+            "RETURN" | "return" => "RETURN".to_string(),
+            _ => {
+                let upper = s.to_uppercase();
+                let name = upper.strip_prefix("SIG").unwrap_or(&upper);
+                format!("SIG{}", name)
+            }
+        }
+    }
+
     if args.is_empty() {
         // Print current traps
         for (signal, handler) in &shell.traps {
-            println!("trap -- '{}' {}", handler, signal);
+            println!("trap -- '{}' {}", handler, normalize_signal_name(signal));
         }
         return 0;
     }
@@ -3151,7 +3166,7 @@ fn builtin_trap(shell: &mut Shell, args: &[String]) -> i32 {
         }
         if args[0] == "-p" {
             for (signal, handler) in &shell.traps {
-                println!("trap -- '{}' {}", handler, signal);
+                println!("trap -- '{}' {}", handler, normalize_signal_name(signal));
             }
             return 0;
         }
@@ -3165,7 +3180,7 @@ fn builtin_trap(shell: &mut Shell, args: &[String]) -> i32 {
     if args.first().map(|s| s.as_str()) == Some("-p") {
         if args.len() < 2 {
             for (signal, handler) in &shell.traps {
-                println!("trap -- '{}' {}", handler, signal);
+                println!("trap -- '{}' {}", handler, normalize_signal_name(signal));
             }
             return 0;
         }
