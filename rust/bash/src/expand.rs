@@ -901,21 +901,22 @@ fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
         }
         ParamOp::Substring(offset_str, length_str) => {
             let offset: i64 = offset_str.trim().parse().unwrap_or(0);
+            let char_count = val.chars().count();
             let start = if offset < 0 {
-                (val.len() as i64 + offset).max(0) as usize
+                (char_count as i64 + offset).max(0) as usize
             } else {
-                (offset as usize).min(val.len())
+                (offset as usize).min(char_count)
             };
             if let Some(len_str) = length_str {
-                let len: i64 = len_str.trim().parse().unwrap_or(val.len() as i64);
+                let len: i64 = len_str.trim().parse().unwrap_or(char_count as i64);
                 let end = if len < 0 {
-                    (val.len() as i64 + len).max(start as i64) as usize
+                    (char_count as i64 + len).max(start as i64) as usize
                 } else {
-                    (start + len as usize).min(val.len())
+                    (start + len as usize).min(char_count)
                 };
-                val[start..end].to_string()
+                val.chars().skip(start).take(end - start).collect()
             } else {
-                val[start..].to_string()
+                val.chars().skip(start).collect()
             }
         }
         ParamOp::UpperFirst(pat) => {
