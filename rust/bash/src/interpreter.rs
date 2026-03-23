@@ -460,6 +460,7 @@ impl Shell {
                 "{}: line {}: {}: readonly variable",
                 sname, lineno, resolved
             );
+            self.last_status = 1;
             return;
         }
         // Integer variables: evaluate value as arithmetic expression
@@ -2532,6 +2533,7 @@ impl Shell {
             .unwrap_or_else(|| " \t\n".to_string());
 
         let _ = ifs;
+        let saved_status = self.last_status;
         let word_expanded = self.expand_word_single(&clause.word);
 
         if self.opt_xtrace {
@@ -2541,10 +2543,16 @@ impl Shell {
         let mut i = 0;
         while i < clause.items.len() {
             let item = &clause.items[i];
+            let saved_pat_status = self.last_status;
             let matched = item.patterns.iter().any(|pattern| {
                 let pat_expanded = self.expand_word_pattern(pattern);
                 case_pattern_match(&word_expanded, &pat_expanded)
             });
+
+            // If expansion caused a readonly/error, skip case body
+            if self.last_status != 0 && self.last_status != saved_pat_status && saved_status == 0 {
+                return self.last_status;
+            }
 
             if matched {
                 let status = self.run_program(&item.body);
