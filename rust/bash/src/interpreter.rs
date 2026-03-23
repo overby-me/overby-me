@@ -386,7 +386,7 @@ impl Shell {
                     .replace("%S", &format!("{:.3}", 0.0f64));
                 eprintln!("{}", output);
             } else {
-                eprintln!("\nreal\t{}m{:.3}s", (secs / 60.0) as u64, secs % 60.0);
+                eprintln!("real\t{}m{:.3}s", (secs / 60.0) as u64, secs % 60.0);
                 eprintln!("user\t{}m{:.3}s", 0, 0.0f64);
                 eprintln!("sys\t{}m{:.3}s", 0, 0.0f64);
             }
