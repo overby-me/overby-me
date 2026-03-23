@@ -1672,9 +1672,23 @@ impl Shell {
                     unsafe {
                         libc::signal(libc::SIGPIPE, libc::SIG_DFL);
                     }
-                    nix::unistd::execvp(&c_prog, &c_args).ok();
-                    eprintln!("{}: {}: command not found", self.error_prefix(), name);
-                    std::process::exit(127);
+                    match nix::unistd::execvp(&c_prog, &c_args) {
+                        Ok(_) => unreachable!(),
+                        Err(e) => {
+                            let msg = match e {
+                                nix::errno::Errno::ENOENT => "No such file or directory",
+                                nix::errno::Errno::EACCES => "Permission denied",
+                                nix::errno::Errno::ENOEXEC => "Exec format error",
+                                _ => "command not found",
+                            };
+                            eprintln!("{}: {}: {}", self.error_prefix(), name, msg);
+                            std::process::exit(if e == nix::errno::Errno::ENOENT {
+                                127
+                            } else {
+                                126
+                            });
+                        }
+                    }
                 }
                 Ok(nix::unistd::ForkResult::Parent { child }) => {
                     match nix::sys::wait::waitpid(child, None) {
