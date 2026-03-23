@@ -894,6 +894,14 @@ impl Parser {
                 continue;
             }
 
+            // Assignments can appear interspersed with redirections before command words
+            if words.is_empty()
+                && let Some(assign) = self.try_parse_assignment()
+            {
+                assignments.push(assign);
+                continue;
+            }
+
             // Check for inline array assignment: if we see word ending with = followed by (
             // This handles `declare -a arr=(one two three)` etc.
             if self.current == Token::LParen && !words.is_empty() {

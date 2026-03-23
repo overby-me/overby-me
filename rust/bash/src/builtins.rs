@@ -3155,6 +3155,35 @@ fn builtin_alias(shell: &mut Shell, args: &[String]) -> i32 {
         if let Some(eq_pos) = name.find('=') {
             let alias_name = &name[..eq_pos];
             let alias_value = &name[eq_pos + 1..];
+            // Validate alias name - reject shell metacharacters
+            let invalid = alias_name.chars().any(|c| {
+                matches!(
+                    c,
+                    '/' | '$'
+                        | '`'
+                        | ' '
+                        | '\t'
+                        | '\n'
+                        | ';'
+                        | '&'
+                        | '|'
+                        | '('
+                        | ')'
+                        | '<'
+                        | '>'
+                        | '"'
+                        | '\\'
+                )
+            });
+            if invalid || alias_name.is_empty() {
+                eprintln!(
+                    "{}: alias: `{}': invalid alias name",
+                    shell.error_prefix(),
+                    alias_name
+                );
+                status = 1;
+                continue;
+            }
             shell
                 .aliases
                 .insert(alias_name.to_string(), alias_value.to_string());
