@@ -760,6 +760,29 @@ fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
             // Also remove the exported function env var
             let env_key = format!("BASH_FUNC_{}%%", name);
             unsafe { std::env::remove_var(&env_key) };
+        } else if let Some(bracket) = name.find('[') {
+            // unset arr[n] — remove specific array element
+            let base = &name[..bracket];
+            let idx_str = &name[bracket + 1..name.len() - 1];
+            let resolved = shell.resolve_nameref(base);
+            if idx_str == "@" || idx_str == "*" {
+                // unset arr[@] — remove entire array
+                shell.arrays.remove(&resolved);
+                shell.assoc_arrays.remove(&resolved);
+                shell.vars.remove(&resolved);
+            } else if shell.assoc_arrays.contains_key(&resolved) {
+                shell
+                    .assoc_arrays
+                    .get_mut(&resolved)
+                    .map(|a| a.remove(idx_str));
+            } else {
+                let idx = shell.eval_arith_expr(idx_str).max(0) as usize;
+                if let Some(arr) = shell.arrays.get_mut(&resolved)
+                    && idx < arr.len()
+                {
+                    arr[idx] = String::new();
+                }
+            }
         } else {
             shell.vars.remove(name);
             shell.exports.remove(name);
