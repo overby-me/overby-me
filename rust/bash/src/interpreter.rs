@@ -2744,7 +2744,22 @@ impl Shell {
             "-L" | "-h" => std::fs::symlink_metadata(val)
                 .map(|m| m.file_type().is_symlink())
                 .unwrap_or(false),
-            "-r" | "-w" => std::path::Path::new(val).exists(),
+            "-r" => {
+                #[cfg(unix)]
+                {
+                    nix::unistd::access(val, nix::unistd::AccessFlags::R_OK).is_ok()
+                }
+                #[cfg(not(unix))]
+                std::path::Path::new(val).exists()
+            }
+            "-w" => {
+                #[cfg(unix)]
+                {
+                    nix::unistd::access(val, nix::unistd::AccessFlags::W_OK).is_ok()
+                }
+                #[cfg(not(unix))]
+                std::path::Path::new(val).exists()
+            }
             "-x" => {
                 #[cfg(unix)]
                 {
