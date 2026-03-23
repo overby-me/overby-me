@@ -193,6 +193,15 @@ impl Shell {
             .collect();
         for (key, value) in func_vars {
             let name = &key["BASH_FUNC_".len()..key.len() - "%%".len()];
+            // Validate function name — reject names with whitespace, special chars, etc.
+            let valid_name = !name.is_empty()
+                && !name.contains(|c: char| c.is_whitespace() || c == '#' || c == '\0')
+                && name
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '.' || c == ':');
+            if !valid_name {
+                continue;
+            }
             // The value starts with "() { " and contains the function body
             if let Some(body) = value.strip_prefix("() ") {
                 let func_source = format!("{} () {}", name, body);
