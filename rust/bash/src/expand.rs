@@ -755,6 +755,36 @@ fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
         && !matches!(expr.op, ParamOp::None | ParamOp::Length)
         && ctx.positional.len() > 1
     {
+        // For Substring: slice the positional params array
+        if let ParamOp::Substring(offset_str, length_str) = &expr.op {
+            let offset: i64 = offset_str.trim().parse().unwrap_or(0);
+            // ${@:0} includes $0, ${@:1} starts at $1
+            let params = if offset == 0 {
+                ctx.positional
+            } else {
+                &ctx.positional[1..]
+            };
+            let count = params.len();
+            let start = if offset < 0 {
+                (count as i64 + offset).max(0) as usize
+            } else if offset == 0 {
+                0
+            } else {
+                ((offset - 1) as usize).min(count)
+            };
+            let end = if let Some(len_str) = length_str {
+                let len: i64 = len_str.trim().parse().unwrap_or(count as i64);
+                if len < 0 {
+                    (count as i64 + len).max(start as i64) as usize
+                } else {
+                    (start + len as usize).min(count)
+                }
+            } else {
+                count
+            };
+            let sliced: Vec<&str> = params[start..end].iter().map(|s| s.as_str()).collect();
+            return sliced.join(" ");
+        }
         let elements: Vec<String> = ctx.positional[1..]
             .iter()
             .map(|elem| apply_param_op(elem, &expr.op, ctx, cmd_sub))
