@@ -500,6 +500,10 @@ impl Shell {
                 }
             }
         }
+        // POSIXLY_CORRECT enables POSIX mode
+        if resolved == "POSIXLY_CORRECT" {
+            self.opt_posix = true;
+        }
         self.vars.insert(resolved, value);
     }
 
@@ -1587,9 +1591,16 @@ impl Shell {
                     };
                     let old = self.vars.get(&a.name).cloned();
                     if a.append {
-                        let existing = old.as_deref().unwrap_or("");
-                        self.vars
-                            .insert(a.name.clone(), format!("{}{}", existing, v));
+                        if self.integer_vars.contains(&a.name) {
+                            let existing = self.eval_arith_expr(old.as_deref().unwrap_or("0"));
+                            let addend = self.eval_arith_expr(&v);
+                            self.vars
+                                .insert(a.name.clone(), (existing + addend).to_string());
+                        } else {
+                            let existing = old.as_deref().unwrap_or("");
+                            self.vars
+                                .insert(a.name.clone(), format!("{}{}", existing, v));
+                        }
                     } else {
                         self.vars.insert(a.name.clone(), v);
                     }
@@ -1621,8 +1632,16 @@ impl Shell {
                             _ => String::new(),
                         };
                         let val = if a.append {
-                            let existing = self.vars.get(&a.name).cloned().unwrap_or_default();
-                            format!("{}{}", existing, v)
+                            if self.integer_vars.contains(&a.name) {
+                                let existing = self.eval_arith_expr(
+                                    &self.vars.get(&a.name).cloned().unwrap_or_default(),
+                                );
+                                let addend = self.eval_arith_expr(&v);
+                                (existing + addend).to_string()
+                            } else {
+                                let existing = self.vars.get(&a.name).cloned().unwrap_or_default();
+                                format!("{}{}", existing, v)
+                            }
                         } else {
                             v
                         };
@@ -2109,13 +2128,19 @@ impl Shell {
                             _ => String::new(),
                         };
                         let value = if assign.append {
-                            let existing = self
+                            let existing_str = self
                                 .vars
                                 .get(&assign.name)
                                 .cloned()
                                 .or_else(|| std::env::var(&assign.name).ok())
                                 .unwrap_or_default();
-                            format!("{}{}", existing, v)
+                            if self.integer_vars.contains(&assign.name) {
+                                let existing = self.eval_arith_expr(&existing_str);
+                                let addend = self.eval_arith_expr(&v);
+                                (existing + addend).to_string()
+                            } else {
+                                format!("{}{}", existing_str, v)
+                            }
                         } else {
                             v
                         };
