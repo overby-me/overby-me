@@ -1222,7 +1222,7 @@ impl Shell {
                             AssignValue::Array(elems) => {
                                 let items: Vec<String> = elems
                                     .iter()
-                                    .map(|e| xtrace_quote(&crate::ast::word_to_string(&e.value)))
+                                    .map(|e| crate::ast::word_to_string(&e.value))
                                     .collect();
                                 if assign.append {
                                     self.xtrace_write(&format!(
@@ -2675,11 +2675,6 @@ fn xtrace_quote(s: &str) -> String {
     // Check for control characters
     let has_control = s.chars().any(|c| c.is_control());
     if has_control {
-        // If only tabs/newlines/printable, use single quotes with literal chars
-        let only_simple_control = s.chars().all(|c| !c.is_control() || c == '\t' || c == '\n');
-        if only_simple_control && !s.contains('\'') {
-            return format!("'{}'", s);
-        }
         let mut out = String::from("$'");
         for ch in s.chars() {
             match ch {
@@ -2696,9 +2691,6 @@ fn xtrace_quote(s: &str) -> String {
         }
         out.push('\'');
         out
-    } else if s.len() == 1 && !s.chars().next().unwrap().is_whitespace() {
-        // Single special char — use backslash quoting
-        format!("\\{}", s)
     } else if !s.contains('\'') {
         format!("'{}'", s)
     } else {
