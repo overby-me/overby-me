@@ -191,74 +191,75 @@
       flakelight.builtinFormatters = false;
 
       imports = [
+        ./nix/modules/flakelight/colmena.nix
+        ./nix/modules/flakelight/desktops.nix
+        ./nix/modules/flakelight/devShellNames.nix
+        ./nix/modules/flakelight/devenvConfigurations.nix
+        ./nix/modules/flakelight/devenvModules.nix
+        ./nix/modules/flakelight/hardware.nix
         ./nix/modules/flakelight/lib.nix
+        ./nix/modules/flakelight/perSystemLib.nix
         ./nix/modules/flakelight/secrets.nix
         ./nix/modules/flakelight/users.nix
-        ./nix/modules/flakelight/hardware.nix
-        ./nix/modules/flakelight/desktops.nix
-        ./nix/modules/flakelight/devenvModules.nix
-        ./nix/modules/flakelight/devenvConfigurations.nix
-        ./nix/modules/flakelight/devShellNames.nix
-        ./nix/modules/flakelight/colmena.nix
-        ./nix/modules/flakelight/perSystemLib.nix
         ./nix/modules/flakelight/zedExtensions.nix
 
-        ./nickel/workspace
+        ./ironclaw/bluesky
+        ./ironclaw/calendar
+        ./ironclaw/contacts
+        ./ironclaw/mail
+        ./ironclaw/matrix
+        ./ironclaw/pixtral
+        ./ironclaw/searxng
+        ./ironclaw/signal
 
-        ./web/homepage
-        ./web/homepage-dioxus
-        ./web/wiki
-
-        ./mojo/wasm
         ./mojo/gui
+        ./mojo/wasm
         ./mojo/zed
+
+        ./nickel/workspace
         ./nickel/zed
 
-        ./rust/nixos
-        ./rust/nixpkgs
-        ./rust/systemd
-        ./rust/pkg-config
         ./nushell/plugin-tramp
-
-        ./slides
 
         ./rust/awk
         ./rust/bash
         ./rust/binutils
         ./rust/bison
+        ./rust/bubblewrap
         ./rust/bzip2
-        ./rust/gcc
         ./rust/cachix
+        ./rust/curl
+        ./rust/diffutils
         ./rust/direnv
+        ./rust/file
+        ./rust/flatpak
+        ./rust/gcc
         ./rust/grep
-        ./rust/sed
-        ./rust/make
-        ./rust/meson
         ./rust/gzip
         ./rust/h26xtoav1
+        ./rust/help2man
+        ./rust/make
+        ./rust/meson
+        ./rust/nixos
+        ./rust/nixpkgs
         ./rust/patch
         ./rust/patchelf
+        ./rust/pkg-config
+        ./rust/sed
         ./rust/strip
+        ./rust/systemd
         ./rust/tar
-        ./rust/xz
-        ./rust/diffutils
-        ./rust/file
         ./rust/texinfo
-        ./rust/help2man
-        ./rust/curl
-        ./rust/bubblewrap
-        ./rust/flatpak
-        ./ironclaw/matrix
-        ./ironclaw/bluesky
-        ./ironclaw/signal
-        ./ironclaw/searxng
-        ./ironclaw/mail
-        ./ironclaw/calendar
-        ./ironclaw/contacts
-        ./ironclaw/pixtral
+        ./rust/xz
+
+        ./slides
 
         ./tangled/cli
         ./tangled/spindle-nix-engine
+
+        ./web/homepage
+        ./web/homepage-dioxus
+        ./web/wiki
       ];
       nixDirAliases = {
         packages = ["pkgs"];
