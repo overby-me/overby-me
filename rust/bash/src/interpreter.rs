@@ -954,6 +954,25 @@ impl Shell {
         if !cmd.assignments.is_empty() {
             for assign in &cmd.assignments {
                 if expanded_words.is_empty() {
+                    // Trace assignment
+                    if self.opt_xtrace {
+                        let val = match &assign.value {
+                            AssignValue::Scalar(w) => self.expand_word_single(w),
+                            AssignValue::Array(elems) => {
+                                let items: Vec<String> = elems
+                                    .iter()
+                                    .map(|e| self.expand_word_single(&e.value))
+                                    .collect();
+                                format!("({})", items.join(" "))
+                            }
+                            AssignValue::None => String::new(),
+                        };
+                        if assign.append {
+                            eprintln!("+ {}+={}", assign.name, val);
+                        } else {
+                            eprintln!("+ {}={}", assign.name, val);
+                        }
+                    }
                     self.execute_assignment(assign);
                 }
             }
