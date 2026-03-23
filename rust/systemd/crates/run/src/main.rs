@@ -164,9 +164,28 @@ struct Cli {
 /// Generate a transient unit name from the command if --unit was not given.
 fn generate_unit_name(command: &[String], scope: bool) -> String {
     let suffix = if scope { ".scope" } else { ".service" };
+    // Use a unique identifier: PID + monotonic clock to avoid collisions
+    // when multiple systemd-run invocations run concurrently.
+    let unique = {
+        let mut ts = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        unsafe {
+            libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts);
+        }
+        // Combine PID + nanoseconds for uniqueness
+        format!(
+            "{}{}",
+            std::process::id(),
+            (ts.tv_sec as u64)
+                .wrapping_mul(1_000_000_000)
+                .wrapping_add(ts.tv_nsec as u64)
+        )
+    };
 
     if command.is_empty() {
-        return format!("run-{}{}", std::process::id(), suffix);
+        return format!("run-u{unique}{suffix}");
     }
 
     // Use the basename of the command as the unit name
@@ -189,7 +208,7 @@ fn generate_unit_name(command: &[String], scope: bool) -> String {
         })
         .collect();
 
-    format!("run-{}{}", sanitized, suffix)
+    format!("run-u{unique}-{sanitized}{suffix}")
 }
 
 /// Look up a username and return (uid, gid, home, shell).

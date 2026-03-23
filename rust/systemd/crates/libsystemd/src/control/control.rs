@@ -1626,9 +1626,28 @@ fn create_transient_unit(
 
     // Insert the transient unit into the unit table.
     let mut ri = run_info.write_poisoned();
-    // Check for duplicate names.
-    if ri.unit_table.values().any(|u| u.id.name == *unit_name) {
-        return Err(format!("Unit {unit_name} already exists"));
+    // If a unit with the same name already exists and is stopped/failed,
+    // remove it so the new transient can replace it (matching systemd behavior).
+    let existing_id = ri
+        .unit_table
+        .values()
+        .find(|u| u.id.name == *unit_name)
+        .map(|u| {
+            let status = u.common.status.read_poisoned();
+            let is_done = matches!(
+                &*status,
+                UnitStatus::NeverStarted | UnitStatus::Stopped(..)
+            );
+            (u.id.clone(), is_done)
+        });
+    match existing_id {
+        Some((id, true)) => {
+            ri.unit_table.remove(&id);
+        }
+        Some((_id, false)) => {
+            return Err(format!("Unit {unit_name} already exists"));
+        }
+        None => {}
     }
     crate::units::insert_new_unit_lenient(unit, &mut ri);
     Ok(unit_id)
