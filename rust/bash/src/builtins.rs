@@ -467,20 +467,28 @@ fn builtin_printf(_shell: &mut Shell, args: &[String]) -> i32 {
 /// Convert a Rust io::Error to a bash-style error message
 /// Quote a string for declare -p output, using $'...' for control chars
 fn quote_for_declare(s: &str) -> String {
-    if s.chars().any(|c| c.is_control()) {
+    let needs_dollar_quote =
+        s.bytes().any(|b| b < 0x20 || b == 0x7f || b > 0x7f) || s.contains('\'');
+    if needs_dollar_quote {
         let mut out = String::from("$'");
-        for ch in s.chars() {
-            match ch {
-                '\n' => out.push_str("\\n"),
-                '\t' => out.push_str("\\t"),
-                '\r' => out.push_str("\\r"),
-                '\x07' => out.push_str("\\a"),
-                '\x08' => out.push_str("\\b"),
-                '\x1b' => out.push_str("\\E"),
-                '\'' => out.push_str("\\'"),
-                '\\' => out.push_str("\\\\"),
-                c if c.is_control() => out.push_str(&format!("\\x{:02x}", c as u32)),
-                c => out.push(c),
+        for b in s.bytes() {
+            match b {
+                b'\n' => out.push_str("\\n"),
+                b'\t' => out.push_str("\\t"),
+                b'\r' => out.push_str("\\r"),
+                0x07 => out.push_str("\\a"),
+                0x08 => out.push_str("\\b"),
+                0x1b => out.push_str("\\E"),
+                b'\'' => out.push_str("\\'"),
+                b'\\' => out.push_str("\\\\"),
+                b if b < 0x20 || b == 0x7f => {
+                    out.push_str(&format!("\\x{:02x}", b));
+                }
+                b if b > 0x7f => {
+                    // Non-ASCII byte: output as octal
+                    out.push_str(&format!("\\{:03o}", b));
+                }
+                b => out.push(b as char),
             }
         }
         out.push('\'');
