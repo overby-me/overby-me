@@ -2590,6 +2590,7 @@ fn pattern_match_impl(text: &[char], ti: usize, pattern: &[char], pi: usize) -> 
                                 "cntrl" => ch.is_control(),
                                 "punct" => ch.is_ascii_punctuation(),
                                 "xdigit" => ch.is_ascii_hexdigit(),
+                                "ascii" => ch.is_ascii(),
                                 _ => false,
                             };
                             if in_class {
@@ -2598,6 +2599,26 @@ fn pattern_match_impl(text: &[char], ti: usize, pattern: &[char], pi: usize) -> 
                             pi = pi + 2 + end + 2; // skip past :]
                             continue;
                         }
+                    }
+                    // POSIX equivalence class: [=x=]
+                    if pi + 1 < pattern.len()
+                        && pattern[pi] == '['
+                        && pattern[pi + 1] == '='
+                        && let Some(end) =
+                            pattern[pi + 2..]
+                                .iter()
+                                .position(|&c| c == '=')
+                                .filter(|&pos| {
+                                    pi + 2 + pos + 1 < pattern.len()
+                                        && pattern[pi + 2 + pos + 1] == ']'
+                                })
+                    {
+                        let equiv: String = pattern[pi + 2..pi + 2 + end].iter().collect();
+                        if equiv.len() == 1 && ch == equiv.chars().next().unwrap() {
+                            matched = true;
+                        }
+                        pi = pi + 2 + end + 2;
+                        continue;
                     }
                     // POSIX collating symbol: [.x.] or [.name.]
                     if pi + 1 < pattern.len()
@@ -2619,45 +2640,63 @@ fn pattern_match_impl(text: &[char], ti: usize, pattern: &[char], pi: usize) -> 
                         let collating_char = match elem.as_str() {
                             "hyphen" | "-" => Some('-'),
                             "space" | " " => Some(' '),
+                            "tab" => Some('\t'),
+                            "newline" => Some('\n'),
                             "grave-accent" | "`" => Some('`'),
                             s if s.len() == 1 => s.chars().next(),
                             _ => None, // multi-char collating elements not fully supported
                         };
                         // Check if this is part of a range: [.a.]-[.z.]
                         let collating_end_pi = pi + 2 + end + 2;
-                        if collating_end_pi + 2 < pattern.len()
+                        if collating_end_pi + 1 < pattern.len()
                             && pattern[collating_end_pi] == '-'
-                            && pattern[collating_end_pi + 1] == '['
-                            && pattern[collating_end_pi + 2] == '.'
+                            && pattern[collating_end_pi + 1] != ']'
                         {
-                            // Range: [.x.]-[.y.]
-                            if let Some(end2) = pattern[collating_end_pi + 3..]
-                                .iter()
-                                .position(|&c| c == '.')
-                                .filter(|&pos| {
-                                    collating_end_pi + 3 + pos + 1 < pattern.len()
-                                        && pattern[collating_end_pi + 3 + pos + 1] == ']'
-                                })
+                            // Check if range end is another collating symbol or a literal
+                            if collating_end_pi + 2 < pattern.len()
+                                && pattern[collating_end_pi + 1] == '['
+                                && pattern[collating_end_pi + 2] == '.'
                             {
-                                let elem2: String = pattern
-                                    [collating_end_pi + 3..collating_end_pi + 3 + end2]
+                                // Range: [.x.]-[.y.]
+                                if let Some(end2) = pattern[collating_end_pi + 3..]
                                     .iter()
-                                    .collect();
-                                let range_start = match elem.as_str() {
-                                    s if s.len() == 1 => s.chars().next(),
-                                    _ => collating_char,
-                                };
-                                let range_end = match elem2.as_str() {
-                                    s if s.len() == 1 => s.chars().next(),
-                                    _ => None,
-                                };
-                                if let (Some(rs), Some(re)) = (range_start, range_end)
+                                    .position(|&c| c == '.')
+                                    .filter(|&pos| {
+                                        collating_end_pi + 3 + pos + 1 < pattern.len()
+                                            && pattern[collating_end_pi + 3 + pos + 1] == ']'
+                                    })
+                                {
+                                    let elem2: String = pattern
+                                        [collating_end_pi + 3..collating_end_pi + 3 + end2]
+                                        .iter()
+                                        .collect();
+                                    let range_start = match elem.as_str() {
+                                        s if s.len() == 1 => s.chars().next(),
+                                        _ => collating_char,
+                                    };
+                                    let range_end = match elem2.as_str() {
+                                        s if s.len() == 1 => s.chars().next(),
+                                        _ => None,
+                                    };
+                                    if let (Some(rs), Some(re)) = (range_start, range_end)
+                                        && ch >= rs
+                                        && ch <= re
+                                    {
+                                        matched = true;
+                                    }
+                                    pi = collating_end_pi + 3 + end2 + 2;
+                                    continue;
+                                }
+                            } else {
+                                // Range: [.x.]-y (collating start, literal end)
+                                let range_end = pattern[collating_end_pi + 1];
+                                if let Some(rs) = collating_char
                                     && ch >= rs
-                                    && ch <= re
+                                    && ch <= range_end
                                 {
                                     matched = true;
                                 }
-                                pi = collating_end_pi + 3 + end2 + 2;
+                                pi = collating_end_pi + 2;
                                 continue;
                             }
                         }
