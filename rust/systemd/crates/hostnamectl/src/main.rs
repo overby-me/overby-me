@@ -315,14 +315,20 @@ fn is_valid_chassis(chassis: &str) -> bool {
 
 fn set_static_hostname(hostname: &str) -> io::Result<()> {
     let clean = hostname.trim();
+    let path = std::path::Path::new(HOSTNAME_PATH);
     if clean.is_empty() {
-        match fs::remove_file(HOSTNAME_PATH) {
+        match fs::remove_file(path) {
             Ok(()) => {}
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
             Err(e) => return Err(e),
         }
     } else {
-        let mut f = fs::File::create(HOSTNAME_PATH)?;
+        // If the path is a symlink (e.g. on NixOS pointing to the store),
+        // remove it first so we can write a regular file.
+        if path.is_symlink() {
+            fs::remove_file(path)?;
+        }
+        let mut f = fs::File::create(path)?;
         writeln!(f, "{}", clean)?;
     }
     Ok(())

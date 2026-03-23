@@ -124,9 +124,11 @@ in
 
       # Install test-specific unit files into systemd unit path if they exist
       system.activationScripts.systemd-test-units = ''
+        # Always create /run/systemd/system so tests can write unit files there
+        mkdir -p /run/systemd/system
+
         UNITS_DIR="/etc/systemd-tests/testdata/${testName}/${testName}.units"
         if [ -d "$UNITS_DIR" ]; then
-          mkdir -p /run/systemd/system
           for f in "$UNITS_DIR"/*; do
             name=$(basename "$f")
             case "$name" in
