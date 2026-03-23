@@ -62,6 +62,8 @@ const KNOWN_FLAGS: &[&str] = &[
     "--check-inhibitors=auto",
     "--check-inhibitors=yes",
     "--check-inhibitors=no",
+    "--show-transaction",
+    "-T",
 ];
 
 /// Short flags we recognize and strip.

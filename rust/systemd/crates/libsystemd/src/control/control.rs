@@ -1271,6 +1271,124 @@ fn unit_status_marker(unit_name: &str, unit_table: &UnitTable) -> &'static str {
 }
 
 /// Create a transient (in-memory) service unit and insert it into the unit table.
+/// Apply drop-in overrides from the filesystem to a transient unit.
+///
+/// Scans all unit directories for applicable drop-in directories
+/// (type-level like `service.d/`, prefix like `a-.service.d/`, and exact like
+/// `unit.service.d/`), collects `.conf` files, parses their [Service] sections,
+/// and applies properties to the transient unit's config.
+fn apply_dropins_to_transient(unit: &mut Unit, unit_dirs: &[std::path::PathBuf]) {
+    use crate::units::loading::directory_deps::{collect_dropin_entries, parse_dropin_dir_name};
+
+    let unit_name = &unit.id.name;
+
+    // Collect all drop-in entries from all unit dirs
+    let mut dropins: std::collections::HashMap<String, Vec<(String, String)>> =
+        std::collections::HashMap::new();
+
+    for dir in unit_dirs {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if let Some(dropin_unit_name) = parse_dropin_dir_name(&name)
+                    && entry.path().is_dir()
+                {
+                    collect_dropin_entries(&entry.path(), &dropin_unit_name, &mut dropins);
+                }
+            }
+        }
+    }
+
+    if dropins.is_empty() {
+        return;
+    }
+
+    // Use the same logic as normal drop-in application to find applicable overrides
+    let overrides =
+        crate::units::loading::directory_deps::collect_applicable_dropins_pub(unit_name, &dropins);
+
+    if overrides.is_empty() {
+        return;
+    }
+
+    // Apply the drop-in overrides to the unit's service config
+    if let Specific::Service(ref mut svc) = unit.specific {
+        for (_filename, content) in &overrides {
+            // Parse the drop-in content as INI sections
+            for line in content.lines() {
+                let line = line.trim();
+                if line.is_empty()
+                    || line.starts_with('#')
+                    || line.starts_with(';')
+                    || line.starts_with('[')
+                {
+                    continue;
+                }
+                if let Some((key, value)) = line.split_once('=') {
+                    let key = key.trim();
+                    let value = value.trim();
+
+                    let parse_cmd = |s: &str| -> crate::units::Commandline {
+                        let parts: Vec<String> =
+                            shlex::split(s).unwrap_or_else(|| vec![s.to_string()]);
+                        crate::units::Commandline {
+                            cmd: parts.first().cloned().unwrap_or_default(),
+                            args: parts.into_iter().skip(1).collect(),
+                            prefixes: vec![],
+                        }
+                    };
+
+                    match key {
+                        "ExecCondition" => {
+                            if value.is_empty() {
+                                svc.conf.exec_condition.clear();
+                            } else {
+                                svc.conf.exec_condition.push(parse_cmd(value));
+                            }
+                        }
+                        "ExecStartPre" => {
+                            if value.is_empty() {
+                                svc.conf.startpre.clear();
+                            } else {
+                                svc.conf.startpre.push(parse_cmd(value));
+                            }
+                        }
+                        "ExecStartPost" => {
+                            if value.is_empty() {
+                                svc.conf.startpost.clear();
+                            } else {
+                                svc.conf.startpost.push(parse_cmd(value));
+                            }
+                        }
+                        "ExecStop" => {
+                            if value.is_empty() {
+                                svc.conf.stop.clear();
+                            } else {
+                                svc.conf.stop.push(parse_cmd(value));
+                            }
+                        }
+                        "ExecStopPost" => {
+                            if value.is_empty() {
+                                svc.conf.stoppost.clear();
+                            } else {
+                                svc.conf.stoppost.push(parse_cmd(value));
+                            }
+                        }
+                        "Description" => {
+                            if !value.is_empty() {
+                                unit.common.unit.description = value.to_string();
+                            }
+                        }
+                        _ => {
+                            // Other properties are not applied to transient units for now
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 ///
 /// Transient units are not backed by a unit file on disk — they exist only in
 /// memory for the lifetime of the service manager (or until explicitly removed).
@@ -1738,7 +1856,7 @@ fn create_transient_unit(
         name: unit_name.clone(),
     };
 
-    let unit = crate::units::Unit {
+    let mut unit = crate::units::Unit {
         id: unit_id.clone(),
         common: Common {
             unit: UnitConfig {
@@ -1817,6 +1935,10 @@ fn create_transient_unit(
             }),
         }),
     };
+
+    // Apply drop-in overrides from the filesystem (e.g., service.d/, a-.service.d/)
+    // to the transient unit, matching systemd behavior.
+    apply_dropins_to_transient(&mut unit, &run_info.read_poisoned().config.unit_dirs);
 
     // Insert the transient unit into the unit table.
     let mut ri = run_info.write_poisoned();

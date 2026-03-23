@@ -23,7 +23,15 @@ pub fn collect_properties(unit: &Unit) -> BTreeMap<String, String> {
 
     // ── Identity ──────────────────────────────────────────────────────
     insert(&mut props, "Id", &unit.id.name);
-    insert(&mut props, "Names", &unit.id.name);
+    {
+        let mut names = vec![unit.id.name.clone()];
+        for alias in &unit.common.unit.aliases {
+            if !names.contains(alias) {
+                names.push(alias.clone());
+            }
+        }
+        insert(&mut props, "Names", &names.join(" "));
+    }
 
     // ── [Unit] section ────────────────────────────────────────────────
     insert_unit_config(&mut props, &unit.common.unit);

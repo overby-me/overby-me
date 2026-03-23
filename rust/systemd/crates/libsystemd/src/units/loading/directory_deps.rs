@@ -892,6 +892,14 @@ fn collect_applicable_dropins(
     result
 }
 
+/// Public wrapper for `collect_applicable_dropins` for use by transient unit drop-in application.
+pub fn collect_applicable_dropins_pub(
+    unit_name: &str,
+    dropins: &HashMap<String, Vec<(String, String)>>,
+) -> Vec<(String, String)> {
+    collect_applicable_dropins(unit_name, dropins)
+}
+
 pub fn apply_dropins(
     units: &mut HashMap<UnitId, Unit>,
     dropins: &HashMap<String, Vec<(String, String)>>,
