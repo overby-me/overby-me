@@ -2938,17 +2938,53 @@ fn builtin_kill(shell: &mut Shell, args: &[String]) -> i32 {
             || args.first().map(|s| s.as_str()) == Some("-L")
         {
             if args.len() > 1 {
-                // kill -l <signum> — print signal name
+                let sig_names: &[(&str, i32)] = &[
+                    ("HUP", 1),
+                    ("INT", 2),
+                    ("QUIT", 3),
+                    ("ILL", 4),
+                    ("TRAP", 5),
+                    ("ABRT", 6),
+                    ("BUS", 7),
+                    ("FPE", 8),
+                    ("KILL", 9),
+                    ("USR1", 10),
+                    ("SEGV", 11),
+                    ("USR2", 12),
+                    ("PIPE", 13),
+                    ("ALRM", 14),
+                    ("TERM", 15),
+                    ("STKFLT", 16),
+                    ("CHLD", 17),
+                    ("CONT", 18),
+                    ("STOP", 19),
+                    ("TSTP", 20),
+                    ("TTIN", 21),
+                    ("TTOU", 22),
+                    ("URG", 23),
+                    ("XCPU", 24),
+                    ("XFSZ", 25),
+                    ("VTALRM", 26),
+                    ("PROF", 27),
+                    ("WINCH", 28),
+                    ("IO", 29),
+                    ("PWR", 30),
+                    ("SYS", 31),
+                ];
                 for arg in &args[1..] {
-                    let num: i32 = arg.parse().unwrap_or(0);
-                    let num = if num > 128 { num - 128 } else { num };
-                    if let Ok(sig) = Signal::try_from(num) {
-                        println!(
-                            "{}",
-                            format!("{:?}", sig)
-                                .strip_prefix("SIG")
-                                .unwrap_or(&format!("{:?}", sig))
-                        );
+                    if let Ok(num) = arg.parse::<i32>() {
+                        // kill -l <signum> — print signal name
+                        let num = if num > 128 { num - 128 } else { num };
+                        if let Some((name, _)) = sig_names.iter().find(|(_, n)| *n == num) {
+                            println!("{}", name);
+                        }
+                    } else {
+                        // kill -l <name> — print signal number
+                        let upper = arg.to_uppercase();
+                        let upper = upper.strip_prefix("SIG").unwrap_or(&upper);
+                        if let Some((_, num)) = sig_names.iter().find(|(n, _)| *n == upper) {
+                            println!("{}", num);
+                        }
                     }
                 }
             } else {
