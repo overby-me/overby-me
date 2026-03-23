@@ -932,16 +932,17 @@ fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
                 .join(sep)
         }
         ParamOp::ArrayIndices(_ch) => {
-            // ${!arr[@]} or ${!arr[*]} — array indices
+            // ${!arr[@]} or ${!arr[*]} — array indices/keys
             let resolved = ctx.resolve_nameref(&expr.name);
             if let Some(arr) = ctx.arrays.get(&resolved) {
                 let indices: Vec<String> = (0..arr.len())
                     .filter(|&i| !arr[i].is_empty() || i == 0)
                     .map(|i| i.to_string())
                     .collect();
-                // TODO: when ch == '*', join with first char of IFS instead of space
-                let sep = " ";
-                indices.join(sep)
+                indices.join(" ")
+            } else if let Some(assoc) = ctx.assoc_arrays.get(&resolved) {
+                let keys: Vec<String> = assoc.keys().cloned().collect();
+                keys.join(" ")
             } else {
                 // Scalar variable — index 0
                 if ctx.vars.contains_key(&resolved) {
