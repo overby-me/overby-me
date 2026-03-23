@@ -612,9 +612,11 @@ fn builtin_export(shell: &mut Shell, args: &[String]) -> i32 {
 
     let mut unexport = false;
     let mut export_funcs = false;
+    let mut print_mode = false;
     let mut names = Vec::new();
     for arg in args {
         match arg.as_str() {
+            "-p" => print_mode = true,
             "-n" => unexport = true,
             "-f" => export_funcs = true,
             "-fn" | "-nf" => {
@@ -644,6 +646,16 @@ fn builtin_export(shell: &mut Shell, args: &[String]) -> i32 {
             }
         }
         return status;
+    }
+
+    if print_mode && names.is_empty() {
+        let mut keys: Vec<&String> = shell.exports.keys().collect();
+        keys.sort();
+        for key in keys {
+            let value = &shell.exports[key];
+            println!("declare -x {}=\"{}\"", key, value);
+        }
+        return 0;
     }
 
     for arg in &names {
@@ -699,8 +711,11 @@ fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
 }
 
 fn builtin_readonly(shell: &mut Shell, args: &[String]) -> i32 {
-    if args.is_empty() {
-        for name in &shell.readonly_vars {
+    let print_all = args.is_empty() || args.iter().all(|a| a.starts_with('-'));
+    if print_all && (args.is_empty() || args.contains(&"-p".to_string())) {
+        let mut names: Vec<&String> = shell.readonly_vars.iter().collect();
+        names.sort();
+        for name in names {
             let val = shell.vars.get(name).cloned().unwrap_or_default();
             println!("declare -r {}=\"{}\"", name, val);
         }
