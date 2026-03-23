@@ -236,6 +236,19 @@ fn interpret_echo_escapes(s: &str) -> String {
     result
 }
 
+/// Parse a printf numeric argument, handling 'char prefix, 0x hex, 0 octal
+fn parse_printf_int(arg: &str) -> i64 {
+    if arg.starts_with("0x") || arg.starts_with("0X") {
+        i64::from_str_radix(&arg[2..], 16).unwrap_or(0)
+    } else if arg.starts_with("0") && arg.len() > 1 && !arg.contains(['8', '9']) {
+        i64::from_str_radix(&arg[1..], 8).unwrap_or(0)
+    } else if arg.starts_with('\'') || arg.starts_with('"') {
+        arg.chars().nth(1).map(|c| c as i64).unwrap_or(0)
+    } else {
+        arg.parse().unwrap_or(0)
+    }
+}
+
 fn builtin_printf(_shell: &mut Shell, args: &[String]) -> i32 {
     if args.is_empty() {
         eprintln!("printf: usage: printf format [arguments]");
@@ -371,7 +384,7 @@ fn builtin_printf(_shell: &mut Shell, args: &[String]) -> i32 {
                     }
                     Some('x') => {
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
-                        let n: i64 = arg.parse().unwrap_or(0);
+                        let n: i64 = parse_printf_int(arg);
                         if flags.contains('#') {
                             print!("{:#x}", n);
                         } else {
@@ -381,7 +394,7 @@ fn builtin_printf(_shell: &mut Shell, args: &[String]) -> i32 {
                     }
                     Some('X') => {
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
-                        let n: i64 = arg.parse().unwrap_or(0);
+                        let n: i64 = parse_printf_int(arg);
                         if flags.contains('#') {
                             print!("{:#X}", n);
                         } else {
@@ -391,13 +404,13 @@ fn builtin_printf(_shell: &mut Shell, args: &[String]) -> i32 {
                     }
                     Some('u') => {
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
-                        let n: u64 = arg.parse().unwrap_or(0);
+                        let n: u64 = parse_printf_int(arg) as u64;
                         print!("{}", n);
                         arg_idx += 1;
                     }
                     Some('o') => {
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
-                        let n: i64 = arg.parse().unwrap_or(0);
+                        let n: i64 = parse_printf_int(arg);
                         print!("{:o}", n);
                         arg_idx += 1;
                     }
