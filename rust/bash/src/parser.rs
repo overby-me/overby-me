@@ -51,11 +51,40 @@ impl Parser {
         }
     }
 
+    fn token_to_str(&self) -> String {
+        match &self.current {
+            Token::Word(parts) => parts
+                .iter()
+                .map(|p| match p {
+                    WordPart::Literal(s) => s.clone(),
+                    _ => String::new(),
+                })
+                .collect(),
+            Token::Newline => "newline".to_string(),
+            Token::Pipe => "|".to_string(),
+            Token::AndIf => "&&".to_string(),
+            Token::OrIf => "||".to_string(),
+            Token::Semi => ";".to_string(),
+            Token::Amp => "&".to_string(),
+            Token::DSemi => ";;".to_string(),
+            Token::SemiAmp => ";&".to_string(),
+            Token::DSemiAmp => ";;&".to_string(),
+            Token::LParen => "(".to_string(),
+            Token::RParen => ")".to_string(),
+            Token::Eof => "EOF".to_string(),
+            _ => format!("{:?}", self.current),
+        }
+    }
+
     fn expect_keyword(&mut self, kw: &str) -> Result<(), String> {
         if self.eat_keyword(kw) {
             Ok(())
         } else {
-            Err(format!("expected keyword '{}', got {:?}", kw, self.current))
+            let token_str = self.token_to_str();
+            Err(format!(
+                "syntax error near unexpected token `{}'",
+                token_str
+            ))
         }
     }
 
@@ -422,9 +451,10 @@ impl Parser {
             self.current = saved_tok;
         }
 
-        let var = self
-            .word_text()
-            .ok_or_else(|| "expected variable name after 'for'".to_string())?;
+        let var = self.word_text().ok_or_else(|| {
+            let token = self.token_to_str();
+            format!("syntax error near unexpected token `{}'", token)
+        })?;
         // Validate variable name
         if !var.chars().all(|c| c.is_alphanumeric() || c == '_')
             || var.chars().next().is_none_or(|c| c.is_ascii_digit())
