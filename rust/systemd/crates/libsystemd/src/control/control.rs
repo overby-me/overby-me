@@ -68,9 +68,9 @@ pub enum Command {
     Restart(String),
     TryRestart(String),
     ReloadOrRestart(String),
-    Start(String),
+    Start(Vec<String>),
     StartAll(String),
-    Stop(String),
+    Stop(Vec<String>),
     StopAll(String),
     IsActive(String),
     IsEnabled(String),
@@ -274,15 +274,19 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
             Command::IsFailed(name)
         }
         "start" => {
-            let name = match &call.params {
-                Some(Value::String(s)) => s.clone(),
+            let names = match &call.params {
+                Some(Value::String(s)) => vec![s.clone()],
+                Some(Value::Array(arr)) => arr
+                    .iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect(),
                 Some(_) | None => {
                     return Err(ParseError::ParamsInvalid(
-                        "Params must be a single string".to_string(),
+                        "Params must be a string or array of strings".to_string(),
                     ));
                 }
             };
-            Command::Start(name)
+            Command::Start(names)
         }
         "start-all" => {
             let name = match &call.params {
@@ -307,15 +311,19 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
             Command::Remove(name)
         }
         "stop" => {
-            let name = match &call.params {
-                Some(Value::String(s)) => s.clone(),
+            let names = match &call.params {
+                Some(Value::String(s)) => vec![s.clone()],
+                Some(Value::Array(arr)) => arr
+                    .iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect(),
                 Some(_) | None => {
                     return Err(ParseError::ParamsInvalid(
-                        "Params must be a single string".to_string(),
+                        "Params must be a string or array of strings".to_string(),
                     ));
                 }
             };
-            Command::Stop(name)
+            Command::Stop(names)
         }
         "stop-all" => {
             let name = match &call.params {
@@ -900,9 +908,100 @@ fn find_or_load_unit(
                         return Ok(id);
                     }
                 }
+                // Last resort: unit_name might be a symlink alias
+                // (e.g., test15-a1.service -> test15-a.service). Resolve it.
+                let suffix = if unit_name.contains('.') {
+                    ""
+                } else {
+                    ".service"
+                };
+                let full_name = format!("{unit_name}{suffix}");
+                for dir in &ri.config.unit_dirs {
+                    let candidate = dir.join(&full_name);
+                    if let Ok(resolved) = std::fs::canonicalize(&candidate)
+                        && let Some(resolved_name) =
+                            resolved.file_name().map(|f| f.to_string_lossy().to_string())
+                        && resolved_name != full_name
+                    {
+                        let found = find_units_with_name(&resolved_name, &ri.unit_table);
+                        if let Some(unit) = found.first() {
+                            return Ok(unit.id.clone());
+                        }
+                    }
+                }
                 Err(format!(
                     "No unit found with name: {unit_name} (also failed to load from disk: {load_err})"
                 ))
+            }
+        }
+    }
+}
+
+/// Refresh a unit's in-memory Wants/Requires dependencies by scanning
+/// on-disk `.wants/` and `.requires/` directories across all unit search paths.
+/// This matches real systemd behaviour where directory dependencies are
+/// re-evaluated dynamically, not only at daemon-reload time.
+///
+/// Any newly discovered dependency units are also loaded from disk if they
+/// aren't already in the unit table.
+fn refresh_directory_deps(unit_name: &str, run_info: &ArcMutRuntimeInfo) {
+    let unit_dirs: Vec<std::path::PathBuf> = {
+        let ri = run_info.read_poisoned();
+        ri.config.unit_dirs.clone()
+    };
+
+    for (suffix, is_requires) in &[("wants", false), ("requires", true)] {
+        for dir in &unit_dirs {
+            let dep_dir = dir.join(format!("{unit_name}.{suffix}"));
+            if !dep_dir.is_dir() {
+                continue;
+            }
+            let entries = match std::fs::read_dir(&dep_dir) {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            for entry in entries.flatten() {
+                let entry_path = entry.path();
+                // Resolve symlinks to get the canonical unit name
+                let child_name = std::fs::canonicalize(&entry_path)
+                    .ok()
+                    .and_then(|p| p.file_name().map(|f| f.to_string_lossy().to_string()))
+                    .unwrap_or_else(|| entry.file_name().to_string_lossy().to_string());
+
+                if !crate::units::loading::directory_deps::is_unit_file(&child_name) {
+                    continue;
+                }
+
+                // Try to load the child unit from disk if not already present.
+                // Skip if it doesn't exist (Wants= is a soft dependency).
+                if find_or_load_unit(&child_name, run_info).is_err() {
+                    continue;
+                }
+
+                // Add the dependency to the parent unit's in-memory deps
+                let mut ri = run_info.write_poisoned();
+                let parent_id = ri
+                    .unit_table
+                    .keys()
+                    .find(|id| id.name == unit_name)
+                    .cloned();
+                let child_id: Option<crate::units::UnitId> = child_name.as_str().try_into().ok();
+
+                if let (Some(parent_id), Some(child_id)) = (parent_id, child_id)
+                    && let Some(parent) = ri.unit_table.get_mut(&parent_id)
+                {
+                    if *is_requires {
+                        if !parent.common.dependencies.requires.contains(&child_id) {
+                            parent.common.dependencies.requires.push(child_id.clone());
+                        }
+                    } else if !parent.common.dependencies.wants.contains(&child_id) {
+                        parent.common.dependencies.wants.push(child_id.clone());
+                    }
+                    // Also add After ordering so the dep is waited on
+                    if !parent.common.dependencies.after.contains(&child_id) {
+                        parent.common.dependencies.after.push(child_id);
+                    }
+                }
             }
         }
     }
@@ -2223,13 +2322,95 @@ pub fn execute_command(
                 };
                 return Ok(serde_json::json!({ "show": text }));
             }
+            // Try to load the unit from disk if not already in memory.
+            // This matches real systemd behaviour where `systemctl show` can
+            // display units that haven't been explicitly loaded yet.
+            let _unit_id = find_or_load_unit(&unit_name, &run_info);
+
             let ri = run_info.read_poisoned();
-            let units = find_units_with_name(&unit_name, &ri.unit_table);
+            let mut units = find_units_with_name(&unit_name, &ri.unit_table);
+
+            // If not found, the name might be a symlink alias (e.g.,
+            // test15-a1.service -> test15-a.service). Resolve it.
+            if units.is_empty() {
+                let suffix = if unit_name.contains('.') {
+                    ""
+                } else {
+                    ".service"
+                };
+                let full_name = format!("{unit_name}{suffix}");
+                for dir in &ri.config.unit_dirs {
+                    let candidate = dir.join(&full_name);
+                    if let Ok(resolved) = std::fs::canonicalize(&candidate)
+                        && let Some(resolved_name) =
+                            resolved.file_name().map(|f| f.to_string_lossy().to_string())
+                    {
+                        units = find_units_with_name(&resolved_name, &ri.unit_table);
+                        if !units.is_empty() {
+                            break;
+                        }
+                    }
+                }
+            }
+
             if units.is_empty() {
                 return Err(format!("Unit {unit_name} not found."));
             }
             let unit = &units[0];
-            let props = unit_properties::collect_properties(unit);
+            let mut props = unit_properties::collect_properties(unit);
+
+            // Dynamically scan .wants/ and .requires/ directories on disk.
+            // Real systemd re-evaluates these at access time, so symlinks
+            // created after daemon-reload are still visible.
+            // Scan both the canonical name and the queried alias name.
+            let unit_file_name = &unit.id.name;
+            let mut scan_names = vec![unit_file_name.clone()];
+            // If the query was for an alias, also scan its .wants/.requires
+            let query_suffix = if unit_name.contains('.') {
+                ""
+            } else {
+                ".service"
+            };
+            let query_full = format!("{unit_name}{query_suffix}");
+            if query_full != *unit_file_name && !scan_names.contains(&query_full) {
+                scan_names.push(query_full);
+            }
+            for scan_name in &scan_names {
+                for dir in &ri.config.unit_dirs {
+                    for (suffix, prop_key) in &[("wants", "Wants"), ("requires", "Requires")] {
+                        let dep_dir = dir.join(format!("{scan_name}.{suffix}"));
+                        if dep_dir.is_dir()
+                            && let Ok(entries) = std::fs::read_dir(&dep_dir)
+                        {
+                            let current = props.get(*prop_key).cloned().unwrap_or_default();
+                            let mut parts: Vec<String> = if current.is_empty() {
+                                Vec::new()
+                            } else {
+                                current.split_whitespace().map(String::from).collect()
+                            };
+                            for entry in entries.flatten() {
+                                let entry_path = entry.path();
+                                let name = std::fs::canonicalize(&entry_path)
+                                    .ok()
+                                    .and_then(|p| {
+                                        p.file_name()
+                                            .map(|f| f.to_string_lossy().to_string())
+                                    })
+                                    .unwrap_or_else(|| {
+                                        entry.file_name().to_string_lossy().to_string()
+                                    });
+                                if crate::units::loading::directory_deps::is_unit_file(&name)
+                                    && !parts.contains(&name)
+                                {
+                                    parts.push(name);
+                                }
+                            }
+                            props.insert(prop_key.to_string(), parts.join(" "));
+                        }
+                    }
+                }
+            }
+
             let text = unit_properties::format_properties(&props, filter.as_deref());
             return Ok(serde_json::json!({ "show": text }));
         }
@@ -2385,12 +2566,47 @@ pub fn execute_command(
             };
             return Ok(serde_json::json!(state));
         }
-        Command::Start(unit_name) => {
-            let id = find_or_load_unit(&unit_name, &run_info)?;
-            let ri = run_info.read_poisoned();
-            crate::units::activate_unit(id, &ri, ActivationSource::Regular)
-                .map_err(|e| format!("{e}"))?;
-            // Happy
+        Command::Start(unit_names) => {
+            for unit_name in &unit_names {
+                let id = find_or_load_unit(unit_name, &run_info)?;
+                // Refresh on-disk .wants/.requires so dynamically created
+                // symlinks are picked up without requiring daemon-reload.
+                refresh_directory_deps(&id.name, &run_info);
+                // Reset the unit (and its Wants deps) from Stopped → NeverStarted
+                // so activate_needed_units will actually start them. Without this,
+                // units that were previously stopped are skipped.
+                {
+                    let ri = run_info.read_poisoned();
+                    let mut ids_to_reset = vec![id.clone()];
+                    if let Some(unit) = ri.unit_table.get(&id) {
+                        for dep_id in unit
+                            .common
+                            .dependencies
+                            .wants
+                            .iter()
+                            .chain(unit.common.dependencies.requires.iter())
+                        {
+                            ids_to_reset.push(dep_id.clone());
+                        }
+                    }
+                    for reset_id in &ids_to_reset {
+                        if let Some(u) = ri.unit_table.get(reset_id) {
+                            let mut status = u.common.status.write_poisoned();
+                            if let crate::units::UnitStatus::Stopped(_, _) = &*status {
+                                *status = crate::units::UnitStatus::NeverStarted;
+                            }
+                        }
+                    }
+                }
+                let errs = crate::units::activate_needed_units(id, run_info.clone());
+                if !errs.is_empty() {
+                    let mut errstr = String::from("Errors while starting the unit:");
+                    for err in errs {
+                        let _ = write!(errstr, "\n{err:?}");
+                    }
+                    return Err(errstr);
+                }
+            }
         }
         Command::StartAll(unit_name) => {
             let id = {
@@ -2438,25 +2654,28 @@ pub fn execute_command(
 
             crate::units::remove_unit_with_dependencies(id, run_info)?;
         }
-        Command::Stop(unit_name) => {
+        Command::Stop(unit_names) => {
             let run_info = &*run_info.read_poisoned();
-            let id = {
-                let units = find_units_with_name(&unit_name, &run_info.unit_table);
-                if units.len() > 1 {
-                    let names: Vec<_> = units.iter().map(|unit| unit.id.name.clone()).collect();
-                    return Err(format!(
-                        "More than one unit found with name: {unit_name}: {names:?}"
-                    ));
-                }
-                if units.is_empty() {
-                    return Err(format!("No unit found with name: {unit_name}"));
-                }
+            for unit_name in &unit_names {
+                let id = {
+                    let units = find_units_with_name(unit_name, &run_info.unit_table);
+                    if units.len() > 1 {
+                        let names: Vec<_> = units.iter().map(|unit| unit.id.name.clone()).collect();
+                        return Err(format!(
+                            "More than one unit found with name: {unit_name}: {names:?}"
+                        ));
+                    }
+                    if units.is_empty() {
+                        // Silently skip units not found (matches real systemd
+                        // behaviour for multi-unit stop).
+                        continue;
+                    }
 
-                units[0].id.clone()
-            };
+                    units[0].id.clone()
+                };
 
-            crate::units::deactivate_unit(&id, run_info).map_err(|e| format!("{e}"))?;
-            // Happy
+                crate::units::deactivate_unit(&id, run_info).map_err(|e| format!("{e}"))?;
+            }
         }
         Command::StopAll(unit_name) => {
             let run_info = &*run_info.read_poisoned();

@@ -127,6 +127,20 @@ in
         # Always create /run/systemd/system so tests can write unit files there
         mkdir -p /run/systemd/system
 
+        # Make /etc/systemd/system writable for tests that create drop-ins
+        # NixOS normally makes this read-only via etc activation
+        if [ -L /etc/systemd/system ] || [ ! -w /etc/systemd/system ]; then
+          # Save existing unit files, recreate as writable directory
+          tmp=$(mktemp -d)
+          if [ -e /etc/systemd/system ]; then
+            cp -a /etc/systemd/system/. "$tmp/" 2>/dev/null || true
+            rm -f /etc/systemd/system
+          fi
+          mkdir -p /etc/systemd/system
+          cp -a "$tmp/." /etc/systemd/system/ 2>/dev/null || true
+          rm -rf "$tmp"
+        fi
+
         UNITS_DIR="/etc/systemd-tests/testdata/${testName}/${testName}.units"
         if [ -d "$UNITS_DIR" ]; then
           for f in "$UNITS_DIR"/*; do
