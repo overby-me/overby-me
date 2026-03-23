@@ -1310,13 +1310,20 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 if shell.namerefs.contains_key(name) {
                     println!("declare -n {}=\"{}\"", name, shell.namerefs[name]);
                 } else if shell.arrays.contains_key(name) {
+                    let mut flags = String::from("-a");
+                    if shell.integer_vars.contains(name.as_str()) {
+                        flags.push('i');
+                    }
+                    if shell.readonly_vars.contains(name.as_str()) {
+                        flags.push('r');
+                    }
                     let arr = &shell.arrays[name];
                     let elements: Vec<String> = arr
                         .iter()
                         .enumerate()
                         .map(|(i, v)| format!("[{}]={}", i, quote_for_declare(v)))
                         .collect();
-                    println!("declare -a {}=({})", name, elements.join(" "));
+                    println!("declare {} {}=({})", flags, name, elements.join(" "));
                 } else {
                     let mut flags = String::from("-");
                     if shell.integer_vars.contains(name) {
@@ -1339,13 +1346,20 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             arr_names.sort();
             for name in arr_names {
                 if !shell.vars.contains_key(name) {
+                    let mut flags = String::from("-a");
+                    if shell.integer_vars.contains(name.as_str()) {
+                        flags.push('i');
+                    }
+                    if shell.readonly_vars.contains(name.as_str()) {
+                        flags.push('r');
+                    }
                     let arr = &shell.arrays[name];
                     let elements: Vec<String> = arr
                         .iter()
                         .enumerate()
                         .map(|(i, v)| format!("[{}]={}", i, quote_for_declare(v)))
                         .collect();
-                    println!("declare -a {}=({})", name, elements.join(" "));
+                    println!("declare {} {}=({})", flags, name, elements.join(" "));
                 }
             }
             // Also print associative arrays
