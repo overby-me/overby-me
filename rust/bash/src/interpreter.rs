@@ -1997,7 +1997,7 @@ impl Shell {
             }
             // Safety: prevent runaway loops (bash stops on arith errors)
             iterations += 1;
-            if iterations > 1_000_000 {
+            if iterations > 100_000 {
                 break;
             }
 
