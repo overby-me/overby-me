@@ -487,8 +487,8 @@ fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart {
             *i += 1;
             WordPart::Variable(name)
         }
-        '"' => {
-            // $"..." locale-specific quoting — treat as regular double quoting
+        '"' if !in_dquote => {
+            // $"..." locale-specific quoting — treat as regular double quoting (not inside double quotes)
             *i += 1; // skip "
             let mut dq_parts = Vec::new();
             let mut dq_lit = String::new();
@@ -525,8 +525,8 @@ fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart {
             }
             WordPart::DoubleQuoted(dq_parts)
         }
-        '\'' => {
-            // $'...' ANSI-C quoting
+        '\'' if !in_dquote => {
+            // $'...' ANSI-C quoting (not inside double quotes)
             *i += 1; // skip '
             let mut s = String::new();
             while *i < chars.len() && chars[*i] != '\'' {
