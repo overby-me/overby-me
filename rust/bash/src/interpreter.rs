@@ -1660,6 +1660,16 @@ impl Shell {
                 break;
             }
 
+            // Trace for loop iteration
+            if self.opt_xtrace
+                && let Some(words) = &clause.words
+            {
+                let expanded_items: Vec<String> = words
+                    .iter()
+                    .flat_map(|w| self.expand_word_fields(w, &ifs))
+                    .collect();
+                eprintln!("+ for {} in {}", clause.var, expanded_items.join(" "));
+            }
             self.vars.insert(clause.var.clone(), item);
             // Loop body commands should not trigger errexit individually
             let saved_condition = self.in_condition;
