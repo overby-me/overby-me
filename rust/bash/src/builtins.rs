@@ -346,6 +346,31 @@ fn builtin_printf(_shell: &mut Shell, args: &[String]) -> i32 {
 
 /// Shell-escape a string for use with %q in printf.
 /// Convert a Rust io::Error to a bash-style error message
+/// Quote a string for declare -p output, using $'...' for control chars
+fn quote_for_declare(s: &str) -> String {
+    if s.chars().any(|c| c.is_control()) {
+        let mut out = String::from("$'");
+        for ch in s.chars() {
+            match ch {
+                '\n' => out.push_str("\\n"),
+                '\t' => out.push_str("\\t"),
+                '\r' => out.push_str("\\r"),
+                '\x07' => out.push_str("\\a"),
+                '\x08' => out.push_str("\\b"),
+                '\x1b' => out.push_str("\\E"),
+                '\'' => out.push_str("\\'"),
+                '\\' => out.push_str("\\\\"),
+                c if c.is_control() => out.push_str(&format!("\\x{:02x}", c as u32)),
+                c => out.push(c),
+            }
+        }
+        out.push('\'');
+        out
+    } else {
+        format!("\"{}\"", s)
+    }
+}
+
 fn io_error_message(e: &std::io::Error) -> &'static str {
     match e.kind() {
         std::io::ErrorKind::NotFound => "No such file or directory",
@@ -1118,7 +1143,7 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     let elements: Vec<String> = arr
                         .iter()
                         .enumerate()
-                        .map(|(i, v)| format!("[{}]=\"{}\"", i, v))
+                        .map(|(i, v)| format!("[{}]={}", i, quote_for_declare(v)))
                         .collect();
                     println!("declare -a {}=({})", name, elements.join(" "));
                 } else {
@@ -1147,7 +1172,7 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     let elements: Vec<String> = arr
                         .iter()
                         .enumerate()
-                        .map(|(i, v)| format!("[{}]=\"{}\"", i, v))
+                        .map(|(i, v)| format!("[{}]={}", i, quote_for_declare(v)))
                         .collect();
                     println!("declare -a {}=({})", name, elements.join(" "));
                 }
@@ -1168,7 +1193,7 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     let elements: Vec<String> = arr
                         .iter()
                         .enumerate()
-                        .map(|(i, v)| format!("[{}]=\"{}\"", i, v))
+                        .map(|(i, v)| format!("[{}]={}", i, quote_for_declare(v)))
                         .collect();
                     println!("declare -a {}=({})", name, elements.join(" "));
                 } else if let Some(value) = shell.vars.get(name) {
@@ -1787,7 +1812,7 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
             "-d" => {
                 i += 1;
                 if i < args.len() {
-                    delim = args[i].chars().next();
+                    delim = Some(args[i].chars().next().unwrap_or('\0'));
                 }
             }
             "-a" => {
@@ -2008,12 +2033,14 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
         }
     }
 
-    // Remove trailing newline
-    if line.ends_with('\n') {
-        line.pop();
-    }
-    if line.ends_with('\r') {
-        line.pop();
+    // Remove trailing newline (but not when -d is used with non-newline delimiter)
+    if delim.is_none() || delim == Some('\n') {
+        if line.ends_with('\n') {
+            line.pop();
+        }
+        if line.ends_with('\r') {
+            line.pop();
+        }
     }
 
     if !raw {
@@ -2029,11 +2056,20 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
 
     // Handle -a: read into array
     if let Some(arr_name) = array_name {
-        let fields: Vec<String> = line
-            .split(|c: char| ifs.contains(c))
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string())
-            .collect();
+        // Split by IFS, preserving empty fields for non-whitespace IFS chars
+        let ifs_whitespace: String = ifs.chars().filter(|c| c.is_whitespace()).collect();
+        let ifs_non_ws: String = ifs.chars().filter(|c| !c.is_whitespace()).collect();
+        let fields: Vec<String> = if !ifs_non_ws.is_empty() {
+            line.split(|c: char| ifs.contains(c))
+                .map(|s| s.to_string())
+                .collect()
+        } else {
+            line.split(|c: char| ifs.contains(c))
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .collect()
+        };
+        let _ = ifs_whitespace;
         shell.arrays.insert(arr_name, fields);
         return 0;
     }
