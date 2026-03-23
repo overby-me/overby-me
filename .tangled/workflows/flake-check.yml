@@ -1,31 +1,35 @@
-when:
-  - event: ["push"]
-    branch: "**"
-
+clone:
+  depth: 1
+  skip: false
+  submodules: false
+dependencies: {}
 engine: nix
-
+env: {}
 environment:
   CACHIX_NAME: overby-me
-
 steps:
-  - name: "Build Cachix"
-    command: |
+  - command: |-
       nix build .#rust-cachix
       export PATH="$(readlink -f result)/bin:$PATH"
       cachix --version
-  - name: "Setup Cachix"
-    command: |
+    name: Build Cachix
+  - command: |-
       export PATH="$(readlink -f result)/bin:$PATH"
       mkdir -p $HOME/.config/nix
       echo "experimental-features = nix-command flakes ca-derivations dynamic-derivations recursive-nix" > $HOME/.config/nix/nix.conf
       echo "max-jobs = auto" >> $HOME/.config/nix/nix.conf
       cachix use $CACHIX_NAME
-  - name: "Nix flake check"
-    command: |
+    name: Setup Cachix
+  - command: |-
       ulimit -n 65536
       printf '{"PWD":"%s"}' "$PWD" > .env
       nix flake check --max-jobs 1 --override-input env path:$(realpath $PWD/.env)
-  - name: "Push to Cachix"
-    command: |
+    name: Nix flake check
+  - command: |-
       export PATH="$(readlink -f result)/bin:$PATH"
       nix flake archive --json --override-input env path:$(realpath $PWD/.env) | nix run nixpkgs#jq -- -r '.path,(.inputs|to_entries[].value.path)' | cachix push $CACHIX_NAME
+    name: Push to Cachix
+when:
+  - branch: '**'
+    event:
+      - push
