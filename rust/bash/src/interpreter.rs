@@ -2080,16 +2080,22 @@ impl Shell {
             "<" => left < right,
             ">" => left > right,
             "-eq" | "-ne" | "-lt" | "-le" | "-gt" | "-ge" => {
-                let a = match left.parse::<i64>() {
+                let parse_int = |s: &str| -> Result<i64, ()> {
+                    if s.is_empty() {
+                        return Ok(0); // empty string treated as 0
+                    }
+                    s.parse::<i64>().map_err(|_| ())
+                };
+                let a = match parse_int(left) {
                     Ok(n) => n,
-                    Err(_) => {
+                    Err(()) => {
                         eprintln!("{}: [[: {}: integer expected", self.error_prefix(), left);
-                        return false; // caller should set status to 2
+                        return false;
                     }
                 };
-                let b = match right.parse::<i64>() {
+                let b = match parse_int(right) {
                     Ok(n) => n,
-                    Err(_) => {
+                    Err(()) => {
                         eprintln!("{}: [[: {}: integer expected", self.error_prefix(), right);
                         return false;
                     }
