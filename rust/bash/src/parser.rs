@@ -227,17 +227,31 @@ impl Parser {
         while self.eat_keyword("!") {
             negated = !negated;
         }
-        // Consume `time -p` flag (POSIX time format)
-        if timed && let Token::Word(ref w) = self.current {
-            let s: String = w
-                .iter()
-                .map(|p| match p {
-                    WordPart::Literal(s) => s.as_str(),
-                    _ => "",
-                })
-                .collect();
-            if s == "-p" || s == "--" {
-                self.advance();
+        // Consume additional time keywords (time time ... is valid)
+        while self.eat_keyword("time") {
+            timed = true;
+        }
+        // Consume `time -p` flag (POSIX time format) and `--`
+        if timed {
+            loop {
+                if let Token::Word(ref w) = self.current {
+                    let s: String = w
+                        .iter()
+                        .map(|p| match p {
+                            WordPart::Literal(s) => s.as_str(),
+                            _ => "",
+                        })
+                        .collect();
+                    if s == "-p" || s == "--" {
+                        self.advance();
+                        continue;
+                    }
+                }
+                // Check for another time keyword after -p
+                if self.eat_keyword("time") {
+                    continue;
+                }
+                break;
             }
         }
 
