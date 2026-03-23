@@ -370,12 +370,18 @@ fn parse_double_quoted_content(s: &str) -> Word {
                 }
             }
             '$' => {
-                if !literal.is_empty() {
-                    parts.push(WordPart::Literal(std::mem::take(&mut literal)));
+                // Inside double quotes, $' and $" are literal
+                if i + 1 < chars.len() && matches!(chars[i + 1], '\'' | '"') {
+                    literal.push('$');
+                    i += 1;
+                } else {
+                    if !literal.is_empty() {
+                        parts.push(WordPart::Literal(std::mem::take(&mut literal)));
+                    }
+                    i += 1;
+                    let part = parse_dollar(&chars, &mut i, true);
+                    parts.push(part);
                 }
-                i += 1;
-                let part = parse_dollar(&chars, &mut i, true);
-                parts.push(part);
             }
             '`' => {
                 if !literal.is_empty() {
@@ -487,8 +493,8 @@ fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart {
             *i += 1;
             WordPart::Variable(name)
         }
-        '"' if !in_dquote => {
-            // $"..." locale-specific quoting — treat as regular double quoting (not inside double quotes)
+        '"' => {
+            // $"..." locale-specific quoting — treat as regular double quoting
             *i += 1; // skip "
             let mut dq_parts = Vec::new();
             let mut dq_lit = String::new();
@@ -505,11 +511,17 @@ fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart {
                         *i += 2;
                     }
                     '$' => {
-                        if !dq_lit.is_empty() {
-                            dq_parts.push(WordPart::Literal(std::mem::take(&mut dq_lit)));
+                        // Inside double quotes, $' and $" are literal
+                        if *i + 1 < chars.len() && matches!(chars[*i + 1], '\'' | '"') {
+                            dq_lit.push('$');
+                            *i += 1;
+                        } else {
+                            if !dq_lit.is_empty() {
+                                dq_parts.push(WordPart::Literal(std::mem::take(&mut dq_lit)));
+                            }
+                            *i += 1;
+                            dq_parts.push(parse_dollar(chars, i, true));
                         }
-                        *i += 1;
-                        dq_parts.push(parse_dollar(chars, i, true));
                     }
                     ch => {
                         dq_lit.push(ch);
@@ -525,8 +537,8 @@ fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart {
             }
             WordPart::DoubleQuoted(dq_parts)
         }
-        '\'' if !in_dquote => {
-            // $'...' ANSI-C quoting (not inside double quotes)
+        '\'' => {
+            // $'...' ANSI-C quoting
             *i += 1; // skip '
             let mut s = String::new();
             while *i < chars.len() && chars[*i] != '\'' {
@@ -1319,13 +1331,20 @@ impl Lexer {
                                 }
                             }
                             Some('$') => {
-                                if !dq_lit.is_empty() {
-                                    dq_parts.push(WordPart::Literal(std::mem::take(&mut dq_lit)));
+                                // Inside double quotes, $' and $" are literal
+                                if matches!(self.peek_at(1), Some('\'' | '"')) {
+                                    dq_lit.push('$');
+                                    self.advance();
+                                } else {
+                                    if !dq_lit.is_empty() {
+                                        dq_parts
+                                            .push(WordPart::Literal(std::mem::take(&mut dq_lit)));
+                                    }
+                                    self.advance();
+                                    let input_clone = self.input.clone();
+                                    let part = parse_dollar(&input_clone, &mut self.pos, true);
+                                    dq_parts.push(part);
                                 }
-                                self.advance();
-                                let input_clone = self.input.clone();
-                                let part = parse_dollar(&input_clone, &mut self.pos, true);
-                                dq_parts.push(part);
                             }
                             Some('`') => {
                                 if !dq_lit.is_empty() {
