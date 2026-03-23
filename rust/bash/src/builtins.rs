@@ -559,13 +559,32 @@ fn builtin_export(shell: &mut Shell, args: &[String]) -> i32 {
     }
 
     let mut unexport = false;
+    let mut export_funcs = false;
     let mut names = Vec::new();
     for arg in args {
         match arg.as_str() {
             "-n" => unexport = true,
+            "-f" => export_funcs = true,
+            "-fn" | "-nf" => {
+                unexport = true;
+                export_funcs = true;
+            }
             a if a.starts_with('-') => {}
             _ => names.push(arg.clone()),
         }
+    }
+
+    // export -f: export functions to environment
+    if export_funcs && !unexport {
+        for name in &names {
+            if let Some(body) = shell.functions.get(name.as_str()) {
+                let body_str = format_compound_command(body);
+                let env_val = format!("() {}", body_str);
+                let env_key = format!("BASH_FUNC_{}%%", name);
+                unsafe { std::env::set_var(&env_key, &env_val) };
+            }
+        }
+        return 0;
     }
 
     for arg in &names {

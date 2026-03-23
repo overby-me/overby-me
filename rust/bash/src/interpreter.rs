@@ -161,6 +161,31 @@ impl Shell {
             // GROUPS is noassign (silently ignored, not readonly)
         }
 
+        // Import exported functions from environment (BASH_FUNC_name%% variables)
+        let func_vars: Vec<(String, String)> = std::env::vars()
+            .filter(|(k, _)| k.starts_with("BASH_FUNC_") && k.ends_with("%%"))
+            .collect();
+        for (key, value) in func_vars {
+            let name = &key["BASH_FUNC_".len()..key.len() - "%%".len()];
+            // The value starts with "() { " and contains the function body
+            if let Some(body) = value.strip_prefix("() ") {
+                let func_source = format!("{} () {}", name, body);
+                let mut parser = crate::parser::Parser::new(&func_source);
+                if let Ok(program) = parser.parse_program() {
+                    for cmd in &program {
+                        if let crate::ast::Command::FunctionDef(fname, fbody) =
+                            &cmd.list.first.commands[0]
+                        {
+                            shell.functions.insert(fname.clone(), *fbody.clone());
+                        }
+                    }
+                }
+            }
+            // Remove the BASH_FUNC variable from our vars
+            shell.vars.remove(&key);
+            shell.exports.remove(&key);
+        }
+
         shell
     }
 
