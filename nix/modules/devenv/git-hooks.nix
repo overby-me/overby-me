@@ -29,6 +29,23 @@ in {
         files = "\\.ncl$";
         pass_filenames = true;
       };
+      tangled-workflows = {
+        enable = true;
+        name = "tangled-workflows";
+        entry = "${pkgs.writeShellScript "tangled-workflows-generate" ''
+          if ! echo "$@" | ${pkgs.gnugrep}/bin/grep -q '\.tangled/workflows\.ncl\|nickel/contracts/tangled-workflow/'; then
+            exit 0
+          fi
+          mkdir -p .tangled/workflows
+          for key in $(${pkgs.pkgsUnstable.nickel}/bin/nickel export --format yaml .tangled/workflows.ncl | ${pkgs.yq-go}/bin/yq 'keys | .[]'); do
+            ${pkgs.pkgsUnstable.nickel}/bin/nickel export --format yaml .tangled/workflows.ncl \
+              | ${pkgs.yq-go}/bin/yq ".$key" > ".tangled/workflows/$key.yml"
+          done
+          ${pkgs.git}/bin/git add .tangled/workflows/
+        ''}";
+        files = "\\.ncl$";
+        pass_filenames = true;
+      };
       mojo-format = {
         enable = true;
         name = "mojo-format";

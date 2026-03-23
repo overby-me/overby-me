@@ -25,8 +25,6 @@ let Event
 in
 
 {
-  Event,
-
   Constraint = {
     event
       | StringOrArray Event

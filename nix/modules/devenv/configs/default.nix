@@ -18,5 +18,13 @@ in {
     mkdir -p .zed && cp -f ${./zed/settings.jsonc} .zed/settings.json
     cp -f ${./zed/rules.md} .rules
     mkdir -p .claude/rules && cp -f ${./zed/rules.md} .claude/rules/rules.md
+    # Generate tangled workflow YAML files from Nickel config
+    if [ -f .tangled/workflows.ncl ]; then
+      mkdir -p .tangled/workflows
+      for key in $(${pkgs.pkgsUnstable.nickel}/bin/nickel export --format yaml .tangled/workflows.ncl | ${pkgs.yq-go}/bin/yq 'keys | .[]'); do
+        ${pkgs.pkgsUnstable.nickel}/bin/nickel export --format yaml .tangled/workflows.ncl \
+          | ${pkgs.yq-go}/bin/yq ".$key" > ".tangled/workflows/$key.yml"
+      done
+    fi
   '';
 }

@@ -1,18 +1,23 @@
-when:
-  - event: ["push"]
-    branch: "main"
-
+clone:
+  depth: 1
+  skip: false
+  submodules: false
+dependencies: {}
 engine: nix
-
+env: {}
+environment: {}
 steps:
-  - name: "Fetch full main history"
-    command: |
-      git fetch --unshallow origin main
-  - name: "Mirror to GitHub"
-    command: |
+  - command: git fetch --unshallow origin main
+    name: Fetch full main history
+  - command: |-
       git remote add github https://x-access-token:${GITHUB_MIRROR_TOKEN}@github.com/noverby/noverby.git 2>/dev/null || true
       git push --force github HEAD:refs/heads/main
-  - name: "Mirror to Codeberg"
-    command: |
+    name: Mirror to GitHub
+  - command: |-
       git remote add codeberg https://x-access-token:${CODEBERG_MIRROR_TOKEN}@codeberg.org/overby-me/overby-me.git 2>/dev/null || true
       git push --force codeberg HEAD:refs/heads/main
+    name: Mirror to Codeberg
+when:
+  - branch: main
+    event:
+      - push
