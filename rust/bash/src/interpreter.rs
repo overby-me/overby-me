@@ -2553,9 +2553,14 @@ fn xtrace_quote(s: &str) -> String {
     if !needs_quoting {
         return s.to_string();
     }
-    // Check for control characters that need $'...' quoting
+    // Check for control characters that need special quoting
     let has_control = s.chars().any(|c| c.is_control());
     if has_control {
+        // If only tabs/newlines, use single quotes with literal chars
+        let only_tab_newline = s.chars().all(|c| !c.is_control() || c == '\t' || c == '\n');
+        if only_tab_newline && !s.contains('\'') {
+            return format!("'{}'", s);
+        }
         let mut out = String::from("$'");
         for ch in s.chars() {
             match ch {
