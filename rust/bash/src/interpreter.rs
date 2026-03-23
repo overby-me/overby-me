@@ -49,6 +49,7 @@ pub struct Shell {
     pub shopt_nocasematch: bool,
     pub shopt_lastpipe: bool,
     pub shopt_expand_aliases: bool,
+    pub in_pipeline_child: bool,
 
     pub aliases: HashMap<String, String>,
     builtins: HashMap<&'static str, BuiltinFn>,
@@ -130,6 +131,7 @@ impl Shell {
             shopt_nocasematch: false,
             shopt_lastpipe: false,
             shopt_expand_aliases: false,
+            in_pipeline_child: false,
             aliases: HashMap::new(),
             builtins: builtins::builtins(),
         };
@@ -491,6 +493,7 @@ impl Shell {
                 std::io::Write::flush(&mut std::io::stdout()).ok();
                 match unsafe { nix::unistd::fork() } {
                     Ok(nix::unistd::ForkResult::Child) => {
+                        self.in_pipeline_child = true;
                         if let Some(fd) = prev_read_fd
                             && fd != 0
                         {
