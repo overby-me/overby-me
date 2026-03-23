@@ -2583,7 +2583,9 @@ fn builtin_type(shell: &mut Shell, args: &[String]) -> i32 {
             }
         } else {
             // Default behavior
-            if is_keyword {
+            if let Some(alias_val) = shell.aliases.get(name) {
+                println!("{} is aliased to `{}'", name, alias_val);
+            } else if is_keyword {
                 println!("{} is a shell keyword", name);
             } else if let Some(body) = shell.functions.get(name) {
                 println!("{} is a function", name);
