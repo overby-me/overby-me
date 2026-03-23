@@ -2064,20 +2064,26 @@ fn eval_test_expr(args: &[String], shell: &Shell) -> i32 {
                     1
                 };
             }
+            #[cfg(unix)]
             "-r" => {
-                return if !args[1].is_empty() && std::path::Path::new(&args[1]).exists() {
+                return if !args[1].is_empty()
+                    && nix::unistd::access(args[1].as_str(), nix::unistd::AccessFlags::R_OK).is_ok()
+                {
                     0
                 } else {
                     1
                 };
-            } // Simplified
+            }
+            #[cfg(unix)]
             "-w" => {
-                return if !args[1].is_empty() && std::path::Path::new(&args[1]).exists() {
+                return if !args[1].is_empty()
+                    && nix::unistd::access(args[1].as_str(), nix::unistd::AccessFlags::W_OK).is_ok()
+                {
                     0
                 } else {
                     1
                 };
-            } // Simplified
+            }
             "-x" => {
                 #[cfg(unix)]
                 {
