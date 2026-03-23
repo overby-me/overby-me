@@ -333,6 +333,19 @@ impl Shell {
         }
     }
 
+    /// Execute the EXIT trap if set
+    pub fn run_exit_trap(&mut self) {
+        if let Some(handler) = self
+            .traps
+            .get("EXIT")
+            .or_else(|| self.traps.get("0"))
+            .cloned()
+            && !handler.is_empty()
+        {
+            self.run_string(&handler);
+        }
+    }
+
     pub fn run_program(&mut self, program: &Program) -> i32 {
         let mut status = 0;
         for cmd in program {

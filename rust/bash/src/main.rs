@@ -164,7 +164,9 @@ fn run() -> i32 {
     // Execute based on mode
     if let Some(cmd) = command_string {
         shell.dash_c_mode = true;
-        return shell.run_string(&cmd);
+        let status = shell.run_string(&cmd);
+        shell.run_exit_trap();
+        return status;
     }
 
     if let Some(file) = script_file
@@ -172,7 +174,9 @@ fn run() -> i32 {
     {
         match std::fs::read_to_string(&file) {
             Ok(content) => {
-                return shell.run_string(&content);
+                let status = shell.run_string(&content);
+                shell.run_exit_trap();
+                return status;
             }
             Err(e) => {
                 let argv0 = std::env::args()
@@ -200,7 +204,9 @@ fn run() -> i32 {
         // Read all of stdin and execute
         let mut input = String::new();
         io::stdin().read_to_string(&mut input).ok();
-        shell.run_string(&input)
+        let status = shell.run_string(&input);
+        shell.run_exit_trap();
+        status
     }
 }
 
