@@ -1571,6 +1571,14 @@ impl Shell {
                                 arr[idx].push_str(&value);
                             }
                         }
+                    } else if self.assoc_arrays.contains_key(&resolved) {
+                        // Associative array: foo+=val adds [0]=val
+                        self.assoc_arrays
+                            .entry(resolved)
+                            .or_default()
+                            .entry("0".to_string())
+                            .and_modify(|v| v.push_str(&value))
+                            .or_insert(value);
                     } else if self.arrays.contains_key(&resolved) {
                         let is_int = self.integer_vars.contains(&resolved);
                         if is_int {
@@ -1629,37 +1637,71 @@ impl Shell {
             }
             AssignValue::Array(elements) => {
                 let resolved = self.resolve_nameref(&assign.name);
-                let mut arr = if assign.append {
-                    self.arrays.get(&resolved).cloned().unwrap_or_default()
-                } else {
-                    Vec::new()
-                };
-                let is_integer = self.integer_vars.contains(&resolved);
-                let mut next_idx = arr.len();
-                for elem in elements {
-                    let raw = self.expand_word_single(&elem.value);
-                    let value = if is_integer {
-                        self.eval_arith_expr(&raw).to_string()
+                // Check if this is an associative array
+                if self.assoc_arrays.contains_key(&resolved)
+                    || (!assign.append
+                        && elements.iter().any(|e| {
+                            e.index.as_ref().is_some_and(|idx| {
+                                let s = crate::ast::word_to_string(idx);
+                                !s.chars().all(|c| c.is_ascii_digit())
+                            })
+                        }))
+                {
+                    let map = if assign.append {
+                        self.assoc_arrays
+                            .get(&resolved)
+                            .cloned()
+                            .unwrap_or_default()
                     } else {
-                        raw
+                        std::collections::HashMap::new()
                     };
-                    if let Some(idx_word) = &elem.index {
-                        let idx_str = self.expand_word_single(idx_word);
-                        let idx = self.eval_arith_expr(&idx_str).max(0) as usize;
-                        while arr.len() <= idx {
-                            arr.push(String::new());
+                    let mut map = map;
+                    for elem in elements {
+                        let raw = self.expand_word_single(&elem.value);
+                        if let Some(idx_word) = &elem.index {
+                            let key = self.expand_word_single(idx_word);
+                            map.insert(key, raw);
+                        } else {
+                            // foo+=(val) on assoc array → key "0"
+                            map.entry("0".to_string())
+                                .and_modify(|v| v.push_str(&raw))
+                                .or_insert(raw);
                         }
-                        arr[idx] = value;
-                        next_idx = idx + 1;
-                    } else {
-                        while arr.len() <= next_idx {
-                            arr.push(String::new());
-                        }
-                        arr[next_idx] = value;
-                        next_idx += 1;
                     }
+                    self.assoc_arrays.insert(resolved, map);
+                } else {
+                    let mut arr = if assign.append {
+                        self.arrays.get(&resolved).cloned().unwrap_or_default()
+                    } else {
+                        Vec::new()
+                    };
+                    let is_integer = self.integer_vars.contains(&resolved);
+                    let mut next_idx = arr.len();
+                    for elem in elements {
+                        let raw = self.expand_word_single(&elem.value);
+                        let value = if is_integer {
+                            self.eval_arith_expr(&raw).to_string()
+                        } else {
+                            raw
+                        };
+                        if let Some(idx_word) = &elem.index {
+                            let idx_str = self.expand_word_single(idx_word);
+                            let idx = self.eval_arith_expr(&idx_str).max(0) as usize;
+                            while arr.len() <= idx {
+                                arr.push(String::new());
+                            }
+                            arr[idx] = value;
+                            next_idx = idx + 1;
+                        } else {
+                            while arr.len() <= next_idx {
+                                arr.push(String::new());
+                            }
+                            arr[next_idx] = value;
+                            next_idx += 1;
+                        }
+                    }
+                    self.arrays.insert(resolved, arr);
                 }
-                self.arrays.insert(resolved, arr);
             }
         }
     }
