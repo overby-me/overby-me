@@ -1436,7 +1436,7 @@ fn rfind_op(expr: &str, op: &str) -> Option<usize> {
 fn quote_glob_chars(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for ch in s.chars() {
-        if matches!(ch, '*' | '?' | '[' | ']' | '{' | '}' | ',') {
+        if matches!(ch, '*' | '?' | '[' | ']' | '{' | '}' | ',' | '\\') {
             out.push('\x00');
         }
         out.push(ch);
