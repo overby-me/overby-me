@@ -286,6 +286,8 @@ fn builtin_printf(_shell: &mut Shell, args: &[String]) -> i32 {
                         }
                         print!("{}", val as char);
                     }
+                    Some('\'') => print!("'"),
+                    Some('"') => print!("\""),
                     Some(c) => print!("\\{}", c),
                     None => print!("\\"),
                 }
