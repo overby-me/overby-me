@@ -1661,8 +1661,12 @@ fn brace_expand(s: &str) -> Vec<String> {
                                             n -= step;
                                         }
                                     }
-                                } else if parts[0].len() == 1 && parts[1].len() == 1 {
-                                    // Character range: {a..z}
+                                } else if parts[0].len() == 1
+                                    && parts[1].len() == 1
+                                    && parts[0].chars().next().unwrap().is_ascii_alphabetic()
+                                        == parts[1].chars().next().unwrap().is_ascii_alphabetic()
+                                {
+                                    // Character range: {a..z} — both must be letters or both digits
                                     let start_c = parts[0].chars().next().unwrap();
                                     let end_c = parts[1].chars().next().unwrap();
                                     if start_c <= end_c {
