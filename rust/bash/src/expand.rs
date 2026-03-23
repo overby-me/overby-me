@@ -1740,8 +1740,14 @@ fn word_split(segments: &[Segment], ifs: &str) -> Vec<String> {
     }
 
     // Push the last field. For "$@" with empty trailing elements, we must
-    // keep empty fields. Check if we had any SplitHere markers (from "$@").
-    if !current.is_empty() || has_split {
+    // keep empty fields — but only if there was actual quoted content after
+    // the last SplitHere (even if that content was empty).
+    let had_quoted_after_split = segments
+        .iter()
+        .rev()
+        .take_while(|s| !matches!(s, Segment::SplitHere))
+        .any(|s| matches!(s, Segment::Quoted(_)));
+    if !current.is_empty() || (has_split && had_quoted_after_split) {
         fields.push(current);
     }
 
