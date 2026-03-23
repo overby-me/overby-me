@@ -252,7 +252,16 @@ impl Shell {
                 self.run_program(&program)
             }
             Err(e) => {
-                eprintln!("{}: {}", self.error_prefix(), e);
+                if let Some(msg) = e.strip_prefix("RUNTIME:") {
+                    eprintln!("{}: {}", self.error_prefix(), msg);
+                } else {
+                    eprintln!("{}: {}", self.syntax_error_prefix(), e);
+                    // In -c mode, echo the offending source line for syntax errors
+                    if self.dash_c_mode && e.contains("syntax error") {
+                        let line = input.lines().next().unwrap_or(input);
+                        eprintln!("{}: `{}'", self.syntax_error_prefix(), line);
+                    }
+                }
                 2
             }
         }
@@ -849,9 +858,31 @@ impl Shell {
         result
     }
 
-    /// Returns the error prefix for error messages, matching bash behavior.
+    /// Returns the error prefix for runtime error messages (no -c:).
     /// For scripts: "$0: line N:" ; for stdin/interactive: "bash:"
     pub fn error_prefix(&self) -> String {
+        let name = self
+            .positional
+            .first()
+            .map(|s| s.as_str())
+            .unwrap_or("bash");
+        let lineno = self
+            .vars
+            .get("LINENO")
+            .and_then(|s| s.parse::<i64>().ok())
+            .unwrap_or(0);
+        if name == "bash" || name.is_empty() {
+            if self.dash_c_mode {
+                return format!("bash: -c: line {}", lineno);
+            }
+            "bash".to_string()
+        } else {
+            format!("{}: line {}", name, lineno)
+        }
+    }
+
+    /// Returns the error prefix for syntax/parse errors (includes -c: in -c mode).
+    pub fn syntax_error_prefix(&self) -> String {
         let name = self
             .positional
             .first()

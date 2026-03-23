@@ -1742,7 +1742,7 @@ impl Lexer {
                 self.pos += 1;
             }
         }
-        Err("unexpected EOF looking for ))".to_string())
+        Err("unexpected EOF while looking for matching `)'".to_string())
     }
 
     /// Read raw text until the given character is found (for C-style for loops).

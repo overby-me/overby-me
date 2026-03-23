@@ -477,7 +477,7 @@ impl Parser {
         if !var.chars().all(|c| c.is_alphanumeric() || c == '_')
             || var.chars().next().is_none_or(|c| c.is_ascii_digit())
         {
-            return Err(format!("`{}': not a valid identifier", var));
+            return Err(format!("RUNTIME:`{}': not a valid identifier", var));
         }
         self.advance();
 
