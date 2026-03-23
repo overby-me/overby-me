@@ -495,7 +495,9 @@ impl Shell {
                 std::io::Write::flush(&mut std::io::stdout()).ok();
                 match unsafe { nix::unistd::fork() } {
                     Ok(nix::unistd::ForkResult::Child) => {
-                        self.in_pipeline_child = true;
+                        // Mark as pipeline child (suppresses broken pipe errors)
+                        // but NOT in lastpipe pipelines where the reader may close early
+                        self.in_pipeline_child = !self.shopt_lastpipe;
                         if let Some(fd) = prev_read_fd
                             && fd != 0
                         {
