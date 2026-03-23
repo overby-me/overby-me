@@ -11,6 +11,10 @@
   - `jj git push` — push to remote
   - `jj git fetch` — fetch from remote
 
+## Pushing rules
+
+- **Always `jj git fetch` before pushing to avoid overwriting upstream changes.** Other branches may have been merged into `main` while you were working. Before moving the `main` bookmark and pushing, fetch first, then rebase or merge if needed. Never blindly `jj bookmark set main -r @- && jj git push` — this can silently discard commits merged upstream.
+
 ## Commit message rules
 
 - **Follow `.commitlintrc.yml` for commit message format.** Before committing, read `.commitlintrc.yml` and ensure the commit message conforms to its rules.
