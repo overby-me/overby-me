@@ -119,18 +119,28 @@ fn builtin_echo(shell: &mut Shell, args: &[String]) -> i32 {
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
     let result = if newline {
-        writeln!(out, "{}", output)
+        writeln!(out, "{}", output).and_then(|_| out.flush())
     } else {
-        write!(out, "{}", output)
+        write!(out, "{}", output).and_then(|_| out.flush())
     };
+    drop(out);
     match result {
         Ok(()) => 0,
-        Err(e) => {
-            let msg = match e.kind() {
-                std::io::ErrorKind::BrokenPipe => "Broken pipe",
-                _ => "Input/output error",
-            };
-            eprintln!("{}: echo: write error: {}", shell.error_prefix(), msg);
+        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {
+            // Only report broken pipe if NOT in a pipeline child
+            // (pipeline children with SIG_DFL would be killed by SIGPIPE;
+            // with SIG_IGN we get this error but should suppress it in
+            // non-lastpipe contexts to match bash behavior)
+            if !shell.in_pipeline_child {
+                eprintln!("{}: echo: write error: Broken pipe", shell.error_prefix());
+            }
+            1
+        }
+        Err(_e) => {
+            eprintln!(
+                "{}: echo: write error: Input/output error",
+                shell.error_prefix()
+            );
             1
         }
     }
