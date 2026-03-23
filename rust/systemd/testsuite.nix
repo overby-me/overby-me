@@ -118,6 +118,7 @@ in
           jq
           procps
           kmod
+          hostname # for hostname command
         ];
       };
 
@@ -143,6 +144,11 @@ in
             esac
           done
         fi
+
+        # Create standard systemd testdata path so unit files referencing
+        # /usr/lib/systemd/tests/testdata/ can find helper scripts
+        mkdir -p /usr/lib/systemd/tests
+        ln -sfn /etc/systemd-tests/testdata /usr/lib/systemd/tests/testdata
       '';
 
       users.users.nixos = {
