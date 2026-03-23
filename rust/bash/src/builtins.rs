@@ -861,7 +861,7 @@ fn format_command(cmd: &Command) -> String {
 fn format_program(program: &Program, indent: usize) -> String {
     let prefix = "    ".repeat(indent);
     let mut lines = Vec::new();
-    for cc in program {
+    for (idx, cc) in program.iter().enumerate() {
         let mut line = String::new();
         line.push_str(&prefix);
         line.push_str(&format_pipeline(&cc.list.first));
@@ -874,6 +874,22 @@ fn format_program(program: &Program, indent: usize) -> String {
         }
         if cc.background {
             line.push_str(" &");
+        }
+        // Add semicolons between commands (not after the last one)
+        if idx < program.len() - 1 {
+            let trimmed = line.trim_end();
+            if !trimmed.ends_with('{')
+                && !trimmed.ends_with("fi")
+                && !trimmed.ends_with("done")
+                && !trimmed.ends_with("esac")
+                && !trimmed.ends_with("then")
+                && !trimmed.ends_with("do")
+                && !trimmed.ends_with("else")
+                && !trimmed.ends_with('}')
+                && !trimmed.ends_with('&')
+            {
+                line.push(';');
+            }
         }
         lines.push(line);
     }
