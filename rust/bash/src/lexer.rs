@@ -519,6 +519,17 @@ fn parse_dollar(chars: &[char], i: &mut usize) -> WordPart {
                         '\'' => s.push('\''),
                         'a' => s.push('\x07'),
                         'b' => s.push('\x08'),
+                        'c' => {
+                            // \cX — control character (X & 0x1F)
+                            if *i + 1 < chars.len() {
+                                *i += 1;
+                                let ctrl = (chars[*i] as u8) & 0x1F;
+                                if ctrl == 0 {
+                                    break; // \c@ terminates
+                                }
+                                s.push(ctrl as char);
+                            }
+                        }
                         'e' | 'E' => s.push('\x1b'),
                         'f' => s.push('\x0c'),
                         'v' => s.push('\x0b'),
@@ -1411,6 +1422,17 @@ impl Lexer {
                                     Some('\'') => s.push('\''),
                                     Some('a') => s.push('\x07'),
                                     Some('b') => s.push('\x08'),
+                                    Some('c') => {
+                                        // \cX — control character
+                                        if let Some(ch) = self.advance() {
+                                            let ctrl = (ch as u8) & 0x1F;
+                                            if ctrl == 0 {
+                                                nul_terminated = true;
+                                                break;
+                                            }
+                                            s.push(ctrl as char);
+                                        }
+                                    }
                                     Some('e') | Some('E') => s.push('\x1b'),
                                     Some('f') => s.push('\x0c'),
                                     Some('v') => s.push('\x0b'),
