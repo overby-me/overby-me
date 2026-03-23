@@ -2599,6 +2599,76 @@ fn pattern_match_impl(text: &[char], ti: usize, pattern: &[char], pi: usize) -> 
                             continue;
                         }
                     }
+                    // POSIX collating symbol: [.x.] or [.name.]
+                    if pi + 1 < pattern.len()
+                        && pattern[pi] == '['
+                        && pattern[pi + 1] == '.'
+                        && let Some(end) =
+                            pattern[pi + 2..]
+                                .iter()
+                                .position(|&c| c == '.')
+                                .filter(|&pos| {
+                                    pi + 2 + pos + 1 < pattern.len()
+                                        && pattern[pi + 2 + pos + 1] == ']'
+                                })
+                    {
+                        // Extract the collating element name
+                        let elem: String = pattern[pi + 2..pi + 2 + end].iter().collect();
+                        // For single-char elements, match directly
+                        // For multi-char or named elements, use lookup
+                        let collating_char = match elem.as_str() {
+                            "hyphen" | "-" => Some('-'),
+                            "space" | " " => Some(' '),
+                            "grave-accent" | "`" => Some('`'),
+                            s if s.len() == 1 => s.chars().next(),
+                            _ => None, // multi-char collating elements not fully supported
+                        };
+                        // Check if this is part of a range: [.a.]-[.z.]
+                        let collating_end_pi = pi + 2 + end + 2;
+                        if collating_end_pi + 2 < pattern.len()
+                            && pattern[collating_end_pi] == '-'
+                            && pattern[collating_end_pi + 1] == '['
+                            && pattern[collating_end_pi + 2] == '.'
+                        {
+                            // Range: [.x.]-[.y.]
+                            if let Some(end2) = pattern[collating_end_pi + 3..]
+                                .iter()
+                                .position(|&c| c == '.')
+                                .filter(|&pos| {
+                                    collating_end_pi + 3 + pos + 1 < pattern.len()
+                                        && pattern[collating_end_pi + 3 + pos + 1] == ']'
+                                })
+                            {
+                                let elem2: String = pattern
+                                    [collating_end_pi + 3..collating_end_pi + 3 + end2]
+                                    .iter()
+                                    .collect();
+                                let range_start = match elem.as_str() {
+                                    s if s.len() == 1 => s.chars().next(),
+                                    _ => collating_char,
+                                };
+                                let range_end = match elem2.as_str() {
+                                    s if s.len() == 1 => s.chars().next(),
+                                    _ => None,
+                                };
+                                if let (Some(rs), Some(re)) = (range_start, range_end)
+                                    && ch >= rs
+                                    && ch <= re
+                                {
+                                    matched = true;
+                                }
+                                pi = collating_end_pi + 3 + end2 + 2;
+                                continue;
+                            }
+                        }
+                        if let Some(cc) = collating_char
+                            && ch == cc
+                        {
+                            matched = true;
+                        }
+                        pi = collating_end_pi;
+                        continue;
+                    }
                     if pi + 2 < pattern.len() && pattern[pi + 1] == '-' && pattern[pi + 2] != ']' {
                         if ch >= pattern[pi] && ch <= pattern[pi + 2] {
                             matched = true;
