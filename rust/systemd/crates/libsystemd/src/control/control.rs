@@ -69,6 +69,7 @@ pub enum Command {
     TryRestart(String),
     ReloadOrRestart(String),
     Start(Vec<String>),
+    StartNoBlock(Vec<String>),
     StartAll(String),
     Stop(Vec<String>),
     StopAll(String),
@@ -287,6 +288,21 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
                 }
             };
             Command::Start(names)
+        }
+        "start-noblock" => {
+            let names = match &call.params {
+                Some(Value::String(s)) => vec![s.clone()],
+                Some(Value::Array(arr)) => arr
+                    .iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect(),
+                Some(_) | None => {
+                    return Err(ParseError::ParamsInvalid(
+                        "Params must be a string or array of strings".to_string(),
+                    ));
+                }
+            };
+            Command::StartNoBlock(names)
         }
         "start-all" => {
             let name = match &call.params {
@@ -919,8 +935,9 @@ fn find_or_load_unit(
                 for dir in &ri.config.unit_dirs {
                     let candidate = dir.join(&full_name);
                     if let Ok(resolved) = std::fs::canonicalize(&candidate)
-                        && let Some(resolved_name) =
-                            resolved.file_name().map(|f| f.to_string_lossy().to_string())
+                        && let Some(resolved_name) = resolved
+                            .file_name()
+                            .map(|f| f.to_string_lossy().to_string())
                         && resolved_name != full_name
                     {
                         let found = find_units_with_name(&resolved_name, &ri.unit_table);
@@ -2342,8 +2359,9 @@ pub fn execute_command(
                 for dir in &ri.config.unit_dirs {
                     let candidate = dir.join(&full_name);
                     if let Ok(resolved) = std::fs::canonicalize(&candidate)
-                        && let Some(resolved_name) =
-                            resolved.file_name().map(|f| f.to_string_lossy().to_string())
+                        && let Some(resolved_name) = resolved
+                            .file_name()
+                            .map(|f| f.to_string_lossy().to_string())
                     {
                         units = find_units_with_name(&resolved_name, &ri.unit_table);
                         if !units.is_empty() {
@@ -2393,8 +2411,7 @@ pub fn execute_command(
                                 let name = std::fs::canonicalize(&entry_path)
                                     .ok()
                                     .and_then(|p| {
-                                        p.file_name()
-                                            .map(|f| f.to_string_lossy().to_string())
+                                        p.file_name().map(|f| f.to_string_lossy().to_string())
                                     })
                                     .unwrap_or_else(|| {
                                         entry.file_name().to_string_lossy().to_string()
@@ -2606,6 +2623,43 @@ pub fn execute_command(
                     }
                     return Err(errstr);
                 }
+            }
+        }
+        Command::StartNoBlock(unit_names) => {
+            // Like Start but returns immediately — activation runs in background.
+            for unit_name in &unit_names {
+                let id = find_or_load_unit(unit_name, &run_info)?;
+                refresh_directory_deps(&id.name, &run_info);
+                {
+                    let ri = run_info.read_poisoned();
+                    let mut ids_to_reset = vec![id.clone()];
+                    if let Some(unit) = ri.unit_table.get(&id) {
+                        for dep_id in unit
+                            .common
+                            .dependencies
+                            .wants
+                            .iter()
+                            .chain(unit.common.dependencies.requires.iter())
+                        {
+                            ids_to_reset.push(dep_id.clone());
+                        }
+                    }
+                    for reset_id in &ids_to_reset {
+                        if let Some(u) = ri.unit_table.get(reset_id) {
+                            let mut status = u.common.status.write_poisoned();
+                            if let crate::units::UnitStatus::Stopped(_, _) = &*status {
+                                *status = crate::units::UnitStatus::NeverStarted;
+                            }
+                        }
+                    }
+                }
+                let run_info_clone = run_info.clone();
+                std::thread::spawn(move || {
+                    let errs = crate::units::activate_needed_units(id, run_info_clone);
+                    for err in &errs {
+                        log::error!("Background activation error: {err}");
+                    }
+                });
             }
         }
         Command::StartAll(unit_name) => {

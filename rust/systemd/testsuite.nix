@@ -161,6 +161,9 @@ in
           done
         fi
 
+        # Create writable /usr/lib/systemd/system/ for tests that write units there
+        mkdir -p /usr/lib/systemd/system
+
         # Create standard systemd testdata path so unit files referencing
         # /usr/lib/systemd/tests/testdata/ can find helper scripts
         mkdir -p /usr/lib/systemd/tests

@@ -123,6 +123,7 @@ fn main() {
 
     // Extract known flags and separate them from positional arguments.
     let mut quiet = false;
+    let mut no_block = false;
     let mut positional: Vec<String> = Vec::new();
     let mut property_filter: Vec<String> = Vec::new();
     let mut value_only = false;
@@ -143,6 +144,9 @@ fn main() {
         if KNOWN_FLAGS.contains(&arg.as_str()) {
             if arg == "--quiet" || arg == "-q" {
                 quiet = true;
+            }
+            if arg == "--no-block" {
+                no_block = true;
             }
             i += 1;
             continue;
@@ -694,6 +698,12 @@ fn main() {
         None
     };
 
+    // --no-block: use a separate method so the server can run it asynchronously
+    let method = if no_block && (method == "start" || method == "restart" || method == "stop") {
+        format!("{method}-noblock")
+    } else {
+        method.to_string()
+    };
     let call = Call {
         method,
         params,
