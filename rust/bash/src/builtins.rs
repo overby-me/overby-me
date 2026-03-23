@@ -2659,74 +2659,164 @@ fn builtin_getopts(shell: &mut Shell, args: &[String]) -> i32 {
         return 2;
     }
 
-    let optstring = &args[0];
+    let raw_optstring = &args[0];
     let varname = &args[1];
-    let opt_args = if args.len() > 2 {
-        args[2..].to_vec()
+
+    // Check for silent error mode (leading ':')
+    let silent = raw_optstring.starts_with(':');
+    let optstring = if silent {
+        &raw_optstring[1..]
+    } else {
+        raw_optstring.as_str()
+    };
+
+    // Determine the arguments to process: explicit args or positional params
+    let opt_args: Vec<&str> = if args.len() > 2 {
+        args[2..].iter().map(|s| s.as_str()).collect()
     } else if shell.positional.len() > 1 {
-        shell.positional[1..].to_vec()
+        shell.positional[1..].iter().map(|s| s.as_str()).collect()
     } else {
         vec![]
     };
 
+    // OPTIND is 1-based index into opt_args
     let optind: usize = shell
         .vars
         .get("OPTIND")
         .and_then(|s| s.parse().ok())
         .unwrap_or(1);
 
-    if optind > opt_args.len() || optind == 0 {
-        shell.vars.insert(varname.clone(), "?".to_string());
+    // Internal character offset within the current argument (0-based offset
+    // into the option characters, i.e. after the leading '-'). We store this
+    // in the shell variable `_GETOPTS_OPTOFS`.
+    let char_ofs: usize = shell
+        .vars
+        .get("_GETOPTS_OPTOFS")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+
+    if optind == 0 || optind > opt_args.len() {
+        shell.set_var(varname, "?".to_string());
         return 1;
     }
 
-    let current = &opt_args[optind - 1];
+    let current = opt_args[optind - 1];
+
+    // Check for end-of-options conditions
+    if current == "--" {
+        // Skip past '--' and signal end of options
+        shell.set_var("OPTIND", (optind + 1).to_string());
+        shell.vars.remove("_GETOPTS_OPTOFS");
+        shell.set_var(varname, "?".to_string());
+        return 1;
+    }
+
     if !current.starts_with('-') || current == "-" {
-        shell.vars.insert(varname.clone(), "?".to_string());
+        shell.set_var(varname, "?".to_string());
         return 1;
     }
 
-    let opt_char = current.chars().nth(1).unwrap_or('?');
-    let opt_str = opt_char.to_string();
+    // The option characters are everything after the leading '-'
+    let opt_chars: Vec<char> = current[1..].chars().collect();
 
-    if let Some(pos) = optstring.find(opt_char) {
-        let needs_arg = optstring.chars().nth(pos + 1) == Some(':');
-        if needs_arg {
-            if current.len() > 2 {
-                let optarg = &current[2..];
-                shell.vars.insert("OPTARG".to_string(), optarg.to_string());
-            } else if optind < opt_args.len() {
-                shell
-                    .vars
-                    .insert("OPTARG".to_string(), opt_args[optind].clone());
-                shell
-                    .vars
-                    .insert("OPTIND".to_string(), (optind + 2).to_string());
-                shell.vars.insert(varname.clone(), opt_str);
-                return 0;
-            } else {
-                eprintln!(
-                    "{}: option requires an argument -- {}",
-                    shell.error_prefix(),
-                    opt_char
-                );
-                shell.vars.insert(varname.clone(), "?".to_string());
-                shell
-                    .vars
-                    .insert("OPTIND".to_string(), (optind + 1).to_string());
+    // Determine which character we're processing
+    let idx = if char_ofs > 0 { char_ofs } else { 0 };
+
+    if idx >= opt_chars.len() {
+        // Shouldn't happen, but be safe — move to next arg
+        shell.set_var("OPTIND", (optind + 1).to_string());
+        shell.vars.remove("_GETOPTS_OPTOFS");
+        shell.set_var(varname, "?".to_string());
+        return 1;
+    }
+
+    let opt_char = opt_chars[idx];
+
+    // Look up the option character in optstring
+    let opt_pos = optstring.find(opt_char);
+
+    match opt_pos {
+        Some(pos) => {
+            let needs_arg = optstring.chars().nth(pos + 1) == Some(':');
+
+            if needs_arg {
+                // Option requires an argument
+                if idx + 1 < opt_chars.len() {
+                    // Rest of current argument is the option-argument
+                    // e.g. -oVALUE — chars after 'o' are the value
+                    let byte_start = current[1..]
+                        .char_indices()
+                        .nth(idx + 1)
+                        .map(|(i, _)| i)
+                        .unwrap_or(current.len() - 1);
+                    let optarg = &current[1 + byte_start..];
+                    shell.set_var("OPTARG", optarg.to_string());
+                    shell.set_var("OPTIND", (optind + 1).to_string());
+                    shell.vars.remove("_GETOPTS_OPTOFS");
+                } else if optind < opt_args.len() {
+                    // Next argument is the option-argument
+                    let optarg = opt_args[optind]; // optind is 1-based, so opt_args[optind] is next
+                    shell.set_var("OPTARG", optarg.to_string());
+                    shell.set_var("OPTIND", (optind + 2).to_string());
+                    shell.vars.remove("_GETOPTS_OPTOFS");
+                } else {
+                    // Missing required argument
+                    if silent {
+                        shell.set_var(varname, ":".to_string());
+                        shell.set_var("OPTARG", opt_char.to_string());
+                    } else {
+                        eprintln!(
+                            "{}: option requires an argument -- {}",
+                            shell.error_prefix(),
+                            opt_char
+                        );
+                        shell.set_var(varname, "?".to_string());
+                        shell.vars.remove("OPTARG");
+                    }
+                    shell.set_var("OPTIND", (optind + 1).to_string());
+                    shell.vars.remove("_GETOPTS_OPTOFS");
+                    return 0;
+                }
+
+                shell.set_var(varname, opt_char.to_string());
                 return 0;
             }
-        }
-        shell.vars.insert(varname.clone(), opt_str);
-    } else {
-        eprintln!("{}: illegal option -- {}", shell.error_prefix(), opt_char);
-        shell.vars.insert(varname.clone(), "?".to_string());
-    }
 
-    shell
-        .vars
-        .insert("OPTIND".to_string(), (optind + 1).to_string());
-    0
+            // Option does NOT require an argument
+            shell.vars.remove("OPTARG");
+            shell.set_var(varname, opt_char.to_string());
+
+            if idx + 1 < opt_chars.len() {
+                // More option characters in this argument — save offset for next call
+                shell.set_var("_GETOPTS_OPTOFS", (idx + 1).to_string());
+                // OPTIND stays the same
+            } else {
+                // Done with this argument — advance OPTIND
+                shell.set_var("OPTIND", (optind + 1).to_string());
+                shell.vars.remove("_GETOPTS_OPTOFS");
+            }
+            0
+        }
+        None => {
+            // Unknown option character
+            if silent {
+                shell.set_var(varname, "?".to_string());
+                shell.set_var("OPTARG", opt_char.to_string());
+            } else {
+                eprintln!("{}: illegal option -- {}", shell.error_prefix(), opt_char);
+                shell.set_var(varname, "?".to_string());
+                shell.vars.remove("OPTARG");
+            }
+
+            if idx + 1 < opt_chars.len() {
+                shell.set_var("_GETOPTS_OPTOFS", (idx + 1).to_string());
+            } else {
+                shell.set_var("OPTIND", (optind + 1).to_string());
+                shell.vars.remove("_GETOPTS_OPTOFS");
+            }
+            0
+        }
+    }
 }
 
 fn builtin_let(shell: &mut Shell, args: &[String]) -> i32 {
