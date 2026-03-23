@@ -304,9 +304,44 @@ pub fn word_to_xtrace_string(word: &Word) -> String {
                 }
             }
             WordPart::SingleQuoted(t) => {
-                s.push('\'');
-                s.push_str(t);
-                s.push('\'');
+                // For xtrace: if single char metacharacter, use \char
+                if t.len() == 1 {
+                    let ch = t.chars().next().unwrap();
+                    if matches!(
+                        ch,
+                        '|' | '&'
+                            | ';'
+                            | '('
+                            | ')'
+                            | '<'
+                            | '>'
+                            | '\\'
+                            | '!'
+                            | '{'
+                            | '}'
+                            | '*'
+                            | '?'
+                            | '['
+                            | ']'
+                    ) {
+                        s.push('\\');
+                        s.push(ch);
+                    } else if ch == ' ' {
+                        s.push_str("' '");
+                    } else if ch == '\t' || ch == '\n' {
+                        s.push('\'');
+                        s.push(ch);
+                        s.push('\'');
+                    } else {
+                        s.push('\'');
+                        s.push_str(t);
+                        s.push('\'');
+                    }
+                } else {
+                    s.push('\'');
+                    s.push_str(t);
+                    s.push('\'');
+                }
             }
             WordPart::Tilde(t) => s.push_str(t),
             WordPart::DoubleQuoted(parts) => {
