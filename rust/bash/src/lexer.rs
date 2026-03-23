@@ -44,6 +44,7 @@ pub struct Lexer {
     pending_heredocs: Vec<HereDocPending>,
     heredoc_bodies: Vec<Word>,
     heredoc_index: usize,
+    pub heredoc_overflow_line: Option<usize>,
 }
 
 impl Lexer {
@@ -59,6 +60,7 @@ impl Lexer {
             pending_heredocs: Vec::new(),
             heredoc_bodies: Vec::new(),
             heredoc_index: 0,
+            heredoc_overflow_line: None,
         }
     }
 
@@ -281,6 +283,11 @@ impl Lexer {
             }
         }
 
+        // Bash limits to 16 here-documents per command
+        if self.pending_heredocs.len() >= 16 {
+            self.heredoc_overflow_line = Some(self.line);
+            return;
+        }
         self.pending_heredocs.push(HereDocPending {
             delimiter,
             strip_tabs,

@@ -333,6 +333,18 @@ impl Shell {
         if self.dash_c_mode {
             match parser.parse_program() {
                 Ok(program) => {
+                    if let Some(line_num) = parser.heredoc_overflow_line() {
+                        let name = self
+                            .positional
+                            .first()
+                            .map(|s| s.as_str())
+                            .unwrap_or("bash");
+                        eprintln!(
+                            "{}: line {}: maximum here-document count exceeded",
+                            name, line_num
+                        );
+                        return 2;
+                    }
                     if !parser.is_at_eof() {
                         let token = parser.current_token_str();
                         eprintln!(
@@ -392,6 +404,18 @@ impl Shell {
 
             match parser.parse_complete_command_pub() {
                 Ok(cmd) => {
+                    if let Some(line_num) = parser.heredoc_overflow_line() {
+                        let name = self
+                            .positional
+                            .first()
+                            .map(|s| s.as_str())
+                            .unwrap_or("bash");
+                        eprintln!(
+                            "{}: line {}: maximum here-document count exceeded",
+                            name, line_num
+                        );
+                        return 2;
+                    }
                     if self.opt_noexec {
                         continue;
                     }

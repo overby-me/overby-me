@@ -26,6 +26,10 @@ impl Parser {
         }
     }
 
+    pub fn heredoc_overflow_line(&self) -> Option<usize> {
+        self.lexer.heredoc_overflow_line
+    }
+
     fn skip_newlines(&mut self) {
         while self.current == Token::Newline {
             self.advance();
