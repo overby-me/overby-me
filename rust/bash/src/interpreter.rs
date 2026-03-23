@@ -359,11 +359,23 @@ impl Shell {
         // Parse one command at a time, execute it, then parse the next
         // This allows scripts to continue after parse errors (like bash)
         let mut status = 0;
+        let mut last_pos = usize::MAX;
         loop {
             parser.skip_newlines_and_semis();
             if parser.is_at_eof() {
                 break;
             }
+            // Safety: detect if we're stuck (parser didn't advance)
+            let cur_pos = parser.current_pos();
+            if cur_pos == last_pos {
+                // Parser is stuck — skip one token and retry
+                parser.skip_to_next_command();
+                if parser.is_at_eof() {
+                    break;
+                }
+                continue;
+            }
+            last_pos = cur_pos;
 
             match parser.parse_complete_command_pub() {
                 Ok(cmd) => {

@@ -47,6 +47,10 @@ pub struct Lexer {
 }
 
 impl Lexer {
+    pub fn current_pos(&self) -> usize {
+        self.pos
+    }
+
     pub fn new(input: &str) -> Self {
         Self {
             input: input.chars().collect(),

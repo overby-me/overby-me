@@ -112,6 +112,11 @@ impl Parser {
         self.current == Token::Eof
     }
 
+    /// Get current lexer position (for stuck detection)
+    pub fn current_pos(&self) -> usize {
+        self.lexer.current_pos()
+    }
+
     /// Skip newlines and semicolons (for incremental parsing)
     pub fn skip_newlines_and_semis(&mut self) {
         while matches!(self.current, Token::Newline | Token::Semi) {
