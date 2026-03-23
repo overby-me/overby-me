@@ -341,6 +341,43 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
             out.push(Segment::Unquoted(val));
         }
         WordPart::Param(expr) => {
+            // Check if this is an array[@] with an operator that should apply per-element
+            if let Some(bracket) = expr.name.find('[') {
+                let base = &expr.name[..bracket];
+                let idx = &expr.name[bracket + 1..expr.name.len().saturating_sub(1)];
+                let resolved = ctx.resolve_nameref(base);
+                if (idx == "@" || idx == "*")
+                    && !matches!(expr.op, ParamOp::None | ParamOp::Length)
+                    && let Some(arr) = ctx.arrays.get(&resolved)
+                {
+                    // Apply operation to each element separately
+                    let mut first = true;
+                    for elem in arr {
+                        if !first {
+                            out.push(if idx == "@" {
+                                Segment::SplitHere
+                            } else {
+                                let ifs_char = ctx
+                                    .vars
+                                    .get("IFS")
+                                    .and_then(|s| s.chars().next())
+                                    .unwrap_or(' ');
+                                Segment::Unquoted(ifs_char.to_string())
+                            });
+                        }
+                        first = false;
+                        // Create a temporary param expr for this single element
+                        let single_expr = ParamExpr {
+                            name: elem.clone(),
+                            op: expr.op.clone(),
+                        };
+                        // Apply the operation using the element value directly
+                        let result = apply_param_op(elem, &single_expr.op, ctx, cmd_sub);
+                        out.push(Segment::Unquoted(result));
+                    }
+                    return;
+                }
+            }
             let val = expand_param(expr, ctx, cmd_sub);
             out.push(Segment::Unquoted(val));
         }
@@ -577,6 +614,75 @@ fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
                 .or_else(|| std::env::var(&resolved).ok())
                 .unwrap_or_default()
         }
+    }
+}
+
+/// Apply a parameter operation to a pre-resolved value (for array per-element operations)
+fn apply_param_op(val: &str, op: &ParamOp, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
+    match op {
+        ParamOp::None | ParamOp::Length | ParamOp::Indirect => val.to_string(),
+        ParamOp::UpperFirst(pat) => {
+            let pat_str = expand_word_nosplit_ctx(pat, ctx, cmd_sub);
+            let mut chars = val.chars();
+            match chars.next() {
+                None => String::new(),
+                Some(c) => {
+                    if pat_str.is_empty() || char_matches_pattern(c, &pat_str) {
+                        c.to_uppercase().to_string() + chars.as_str()
+                    } else {
+                        val.to_string()
+                    }
+                }
+            }
+        }
+        ParamOp::UpperAll(pat) => {
+            let pat_str = expand_word_nosplit_ctx(pat, ctx, cmd_sub);
+            if pat_str.is_empty() {
+                val.to_uppercase()
+            } else {
+                val.chars()
+                    .map(|c| {
+                        if char_matches_pattern(c, &pat_str) {
+                            c.to_uppercase().collect::<String>()
+                        } else {
+                            c.to_string()
+                        }
+                    })
+                    .collect()
+            }
+        }
+        ParamOp::LowerFirst(pat) => {
+            let pat_str = expand_word_nosplit_ctx(pat, ctx, cmd_sub);
+            let mut chars = val.chars();
+            match chars.next() {
+                None => String::new(),
+                Some(c) => {
+                    if pat_str.is_empty() || char_matches_pattern(c, &pat_str) {
+                        c.to_lowercase().to_string() + chars.as_str()
+                    } else {
+                        val.to_string()
+                    }
+                }
+            }
+        }
+        ParamOp::LowerAll(pat) => {
+            let pat_str = expand_word_nosplit_ctx(pat, ctx, cmd_sub);
+            if pat_str.is_empty() {
+                val.to_lowercase()
+            } else {
+                val.chars()
+                    .map(|c| {
+                        if char_matches_pattern(c, &pat_str) {
+                            c.to_lowercase().collect::<String>()
+                        } else {
+                            c.to_string()
+                        }
+                    })
+                    .collect()
+            }
+        }
+        // For other operations, just return the value unchanged
+        _ => val.to_string(),
     }
 }
 
