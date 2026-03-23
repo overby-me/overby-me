@@ -249,10 +249,27 @@ fn parse_printf_int(arg: &str) -> i64 {
     }
 }
 
-fn builtin_printf(_shell: &mut Shell, args: &[String]) -> i32 {
+fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
     if args.is_empty() {
         eprintln!("printf: usage: printf format [arguments]");
         return 1;
+    }
+
+    // Handle -v varname option
+    if args.len() >= 3 && args[0] == "-v" {
+        let var_name = args[1].clone();
+        // Build the printf command without -v and capture output
+        let inner_args: Vec<String> = args[2..].to_vec();
+        let output = shell.capture_output(&format!(
+            "printf {}",
+            inner_args
+                .iter()
+                .map(|a| format!("'{}'", a.replace('\'', "'\\''")))
+                .collect::<Vec<_>>()
+                .join(" ")
+        ));
+        shell.set_var(&var_name, output);
+        return 0;
     }
     let format = &args[0];
     let fmt_args = &args[1..];
