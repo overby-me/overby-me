@@ -1963,10 +1963,25 @@ impl Shell {
             if let Some(pos) = expr.find(op) {
                 let name = expr[..pos].trim();
                 if !name.is_empty()
-                    && name.chars().all(|c| c.is_alphanumeric() || c == '_')
                     && name.chars().next().is_some_and(|c| !c.is_ascii_digit())
+                    && (name.chars().all(|c| c.is_alphanumeric() || c == '_') || name.contains('['))
                 {
                     let rhs = self.eval_arith_expr(&expr[pos + op.len()..]);
+                    // Handle array element: name[subscript]
+                    if let Some(bracket) = name.find('[') {
+                        let base = &name[..bracket];
+                        let idx_str = &name[bracket + 1..name.len() - 1];
+                        let resolved = self.resolve_nameref(base);
+                        let idx = self.eval_arith_expr(idx_str) as usize;
+                        let arr = self.arrays.entry(resolved).or_default();
+                        while arr.len() <= idx {
+                            arr.push(String::new());
+                        }
+                        let lhs: i64 = arr[idx].parse().unwrap_or(0);
+                        let result = func(lhs, rhs);
+                        arr[idx] = result.to_string();
+                        return result;
+                    }
                     let lhs: i64 = self
                         .vars
                         .get(name)
@@ -1989,11 +2004,23 @@ impl Shell {
         {
             let name = expr[..pos].trim();
             if !name.is_empty()
-                && name.chars().all(|c| c.is_alphanumeric() || c == '_')
                 && name.chars().next().is_some_and(|c| !c.is_ascii_digit())
+                && (name.chars().all(|c| c.is_alphanumeric() || c == '_') || name.contains('['))
             {
                 let val = self.eval_arith_expr(&expr[pos + 1..]);
-                self.set_var(name, val.to_string());
+                if let Some(bracket) = name.find('[') {
+                    let base = &name[..bracket];
+                    let idx_str = &name[bracket + 1..name.len() - 1];
+                    let resolved = self.resolve_nameref(base);
+                    let idx = self.eval_arith_expr(idx_str) as usize;
+                    let arr = self.arrays.entry(resolved).or_default();
+                    while arr.len() <= idx {
+                        arr.push(String::new());
+                    }
+                    arr[idx] = val.to_string();
+                } else {
+                    self.set_var(name, val.to_string());
+                }
                 return val;
             }
         }
