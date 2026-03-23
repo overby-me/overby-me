@@ -961,7 +961,7 @@ fn format_word_part(part: &WordPart) -> String {
         WordPart::Tilde(user) => format!("~{}", user),
         WordPart::Variable(name) => format!("${}", name),
         WordPart::Param(expr) => format_param_expr(&expr.name, &expr.op),
-        WordPart::CommandSub(cmd) => format!("$({})", cmd),
+        WordPart::CommandSub(cmd) => format!("$({})", cmd.trim()),
         WordPart::BacktickSub(cmd) => format!("`{}`", cmd),
         WordPart::ArithSub(expr) => format!("$(({}))", expr),
         WordPart::ProcessSub(kind, cmd) => match kind {
@@ -1306,7 +1306,7 @@ fn format_compound_command(cmd: &CompoundCommand) -> String {
             format!("[[ {} ]]", format_cond_expr(expr))
         }
         CompoundCommand::Arithmetic(expr) => {
-            format!("(( {} ))", expr)
+            format!("(( {} ))", expr.trim())
         }
     }
 }
