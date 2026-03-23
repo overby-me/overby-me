@@ -1691,7 +1691,15 @@ impl Shell {
                         Ok(_) => unreachable!(),
                         Err(e) => {
                             let msg = match e {
-                                nix::errno::Errno::ENOENT => "No such file or directory",
+                                nix::errno::Errno::ENOENT => {
+                                    // For commands without path separator, report "command not found"
+                                    // For explicit paths, report the OS error
+                                    if name.contains('/') {
+                                        "No such file or directory"
+                                    } else {
+                                        "command not found"
+                                    }
+                                }
                                 nix::errno::Errno::EACCES => "Permission denied",
                                 nix::errno::Errno::ENOEXEC => "Exec format error",
                                 _ => "command not found",
