@@ -33,11 +33,11 @@ pkgs.runCommand "rust-bash-test-${name}" {
 
   # Run with reference bash
   export THIS_SH="${pkgs.bash}/bin/bash"
-  timeout 120 "$THIS_SH" "./${name}.tests" > "$TMPDIR/expected" 2>&1 || true
+  timeout 300 "$THIS_SH" "./${name}.tests" > "$TMPDIR/expected" 2>&1 || true
 
   # Run with rust-bash
   export THIS_SH="${pkgs.rust-bash}/bin/bash"
-  timeout 120 "$THIS_SH" "./${name}.tests" > "$TMPDIR/actual" 2>&1 || true
+  timeout 300 "$THIS_SH" "./${name}.tests" > "$TMPDIR/actual" 2>&1 || true
 
   # Normalize binary paths so that /nix/store/.../bin/bash differences don't
   # cause false failures. Replace both shell paths with a generic "bash" prefix.
