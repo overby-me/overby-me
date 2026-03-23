@@ -208,4 +208,41 @@
         done
       '';
   };
+
+  checks = let
+    # Upstream systemd integration test names (without TEST- prefix).
+    # Each corresponds to test/units/TEST-{name}.sh in the systemd source.
+    # Run with: nix build .#checks.x86_64-linux.rust-systemd-test-{name}
+    testNames = [
+      "01-BASIC"
+      "03-JOBS"
+      "05-RLIMITS"
+      "07-PID1"
+      "15-DROPIN"
+      "16-EXTEND-TIMEOUT"
+      "18-FAILUREACTION"
+      "23-UNIT-FILE"
+      "26-SYSTEMCTL"
+      "30-ONCLOCKCHANGE"
+      "32-OOMPOLICY"
+      "34-DYNAMICUSERMIGRATE"
+      "38-FREEZER"
+      "44-LOG-NAMESPACE"
+      "52-HONORFIRSTSHUTDOWN"
+      "53-TIMER"
+      "59-RELOADING-RESTART"
+      "63-PATH"
+      "65-ANALYZE"
+      "68-PROPAGATE-EXIT-STATUS"
+      "71-HOSTNAME"
+      "73-LOCALE"
+      "78-SIGQUEUE"
+      "80-NOTIFYACCESS"
+    ];
+  in
+    builtins.listToAttrs (map (name: {
+        name = "rust-systemd-test-${name}";
+        value = pkgs: import ./testsuite.nix {inherit pkgs name;};
+      })
+      testNames);
 }
