@@ -1338,7 +1338,7 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     if flags == "-" {
                         flags.push('-');
                     }
-                    println!("declare {} {}=\"{}\"", flags, name, value);
+                    println!("declare {} {}={}", flags, name, quote_for_declare(&value));
                 }
             }
             // Also print arrays not in vars
@@ -1427,7 +1427,7 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     if flags == "-" {
                         flags.push('-');
                     }
-                    println!("declare {} {}=\"{}\"", flags, name, value);
+                    println!("declare {} {}={}", flags, name, quote_for_declare(value));
                 } else {
                     eprintln!("{}: declare: {}: not found", shell.error_prefix(), name);
                     return 1;
