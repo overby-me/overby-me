@@ -1261,19 +1261,19 @@ fn format_compound_command(cmd: &CompoundCommand) -> String {
             s
         }
         CompoundCommand::While(clause) => {
-            let mut s = String::from("while ");
-            s.push_str(format_program(&clause.condition, 0).trim());
-            s.push_str("; do\n");
-            s.push_str(&format_program(&clause.body, 1));
-            s.push_str("\ndone");
+            let cond = format_program(&clause.condition, 0);
+            let cond = cond.trim().trim_end_matches(';');
+            let mut s = format!("while {}; do\n", cond);
+            s.push_str(&format_program(&clause.body, 2));
+            s.push_str("\n    done");
             s
         }
         CompoundCommand::Until(clause) => {
-            let mut s = String::from("until ");
-            s.push_str(format_program(&clause.condition, 0).trim());
-            s.push_str("; do\n");
-            s.push_str(&format_program(&clause.body, 1));
-            s.push_str("\ndone");
+            let cond = format_program(&clause.condition, 0);
+            let cond = cond.trim().trim_end_matches(';');
+            let mut s = format!("until {}; do\n", cond);
+            s.push_str(&format_program(&clause.body, 2));
+            s.push_str("\n    done");
             s
         }
         CompoundCommand::Case(clause) => {
