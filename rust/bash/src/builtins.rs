@@ -1154,20 +1154,23 @@ fn format_program(program: &Program, indent: usize) -> String {
             line.push_str(" &");
         }
         // Add semicolons after commands (bash style)
-        let trimmed = line.trim_end();
-        let is_compound_end = trimmed.ends_with("fi")
-            || trimmed.ends_with("done")
-            || trimmed.ends_with("esac")
-            || trimmed.ends_with('}');
-        let is_keyword = trimmed.ends_with('{')
-            || trimmed.ends_with("then")
-            || trimmed.ends_with("do")
-            || trimmed.ends_with("else");
-        if !is_keyword && !trimmed.ends_with('&') && !trimmed.is_empty() {
-            if is_compound_end && idx == program.len() - 1 {
-                // Don't add ; after the LAST fi/done/esac/} in a block
-            } else {
-                line.push(';');
+        // Add semicolons between commands; for inner blocks (indent > 1), also after last
+        if idx < program.len() - 1 || indent > 1 {
+            let trimmed = line.trim_end();
+            let is_compound_end = trimmed.ends_with("fi")
+                || trimmed.ends_with("done")
+                || trimmed.ends_with("esac")
+                || trimmed.ends_with('}');
+            let is_keyword = trimmed.ends_with('{')
+                || trimmed.ends_with("then")
+                || trimmed.ends_with("do")
+                || trimmed.ends_with("else");
+            if !is_keyword && !trimmed.ends_with('&') && !trimmed.is_empty() {
+                if is_compound_end && idx == program.len() - 1 {
+                    // Don't add ; after the LAST fi/done/esac/} in a block
+                } else {
+                    line.push(';');
+                }
             }
         }
         lines.push(line);
