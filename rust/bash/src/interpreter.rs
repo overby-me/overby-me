@@ -1804,6 +1804,10 @@ impl Shell {
 
         let word_expanded = self.expand_word_fields(&clause.word, &ifs).join(" ");
 
+        if self.opt_xtrace {
+            eprintln!("+ case {} in", word_expanded);
+        }
+
         let mut i = 0;
         while i < clause.items.len() {
             let item = &clause.items[i];

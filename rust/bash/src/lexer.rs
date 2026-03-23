@@ -1728,7 +1728,7 @@ impl Lexer {
                     if self.pos < self.input.len() && self.input[self.pos] == ')' {
                         // Found )) (possibly with whitespace between)
                         self.pos += 1;
-                        return Ok(expr.trim().to_string());
+                        return Ok(expr.trim_start().to_string());
                     }
                     // Not )), restore position and treat as expression
                     self.pos = saved;
@@ -1758,7 +1758,7 @@ impl Lexer {
             }
             if ch == target && depth == 0 {
                 self.pos += 1; // consume the delimiter
-                return Ok(s.trim().to_string());
+                return Ok(s.trim_start().to_string());
             }
             s.push(ch);
             self.pos += 1;
