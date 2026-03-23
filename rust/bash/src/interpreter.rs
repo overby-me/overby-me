@@ -1655,10 +1655,22 @@ impl Shell {
     pub fn eval_arith_expr(&mut self, expr: &str) -> i64 {
         let expr = expr.trim();
 
-        // Handle comma operator
-        if let Some(pos) = expr.rfind(',') {
-            self.eval_arith_expr(&expr[..pos]);
-            return self.eval_arith_expr(&expr[pos + 1..]);
+        // Handle comma operator (only at top level, not inside parens)
+        {
+            let mut depth = 0i32;
+            let mut last_comma = None;
+            for (i, ch) in expr.char_indices() {
+                match ch {
+                    '(' => depth += 1,
+                    ')' => depth -= 1,
+                    ',' if depth == 0 => last_comma = Some(i),
+                    _ => {}
+                }
+            }
+            if let Some(pos) = last_comma {
+                self.eval_arith_expr(&expr[..pos]);
+                return self.eval_arith_expr(&expr[pos + 1..]);
+            }
         }
 
         // Handle assignment operators: var=, var+=, var-=, var*=, var/=, var%=,
