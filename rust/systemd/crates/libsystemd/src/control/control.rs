@@ -871,17 +871,42 @@ fn find_or_load_unit(
         if let Some(unit) = already.first() {
             return Ok(unit.id.clone());
         }
-        let unit = load_new_unit(&ri.config.unit_dirs, unit_name).map_err(|e| {
-            format!("No unit found with name: {unit_name} (also failed to load from disk: {e})")
-        })?;
-        let id = unit.id.clone();
-        // Use lenient insertion: the unit may reference dependencies that aren't
-        // in the unit table (e.g. it wasn't part of the boot dependency graph).
-        // Missing deps are silently ignored — the unit is wired up to whatever
-        // is already present.
-        crate::units::insert_new_unit_lenient(unit, &mut ri);
-        trace!("Auto-loaded unit {unit_name} from disk");
-        Ok(id)
+
+        // First try loading as a regular unit file.
+        match load_new_unit(&ri.config.unit_dirs, unit_name) {
+            Ok(unit) => {
+                let id = unit.id.clone();
+                crate::units::insert_new_unit_lenient(unit, &mut ri);
+                trace!("Auto-loaded unit {unit_name} from disk");
+                return Ok(id);
+            }
+            Err(load_err) => {
+                // If this looks like a template instance (e.g. "getty@tty1.service"),
+                // try instantiating from the template file (e.g. "getty@.service").
+                if let Some((template_name, instance_name)) =
+                    crate::units::loading::directory_deps::parse_template_instance(unit_name)
+                {
+                    let empty_dropins = std::collections::HashMap::new();
+                    if let Some(unit) =
+                        crate::units::loading::directory_deps::instantiate_template(
+                            &template_name,
+                            &instance_name,
+                            unit_name,
+                            &ri.config.unit_dirs,
+                            &empty_dropins,
+                        )
+                    {
+                        let id = unit.id.clone();
+                        crate::units::insert_new_unit_lenient(unit, &mut ri);
+                        info!("Instantiated template unit {unit_name} from {template_name}");
+                        return Ok(id);
+                    }
+                }
+                return Err(format!(
+                    "No unit found with name: {unit_name} (also failed to load from disk: {load_err})"
+                ));
+            }
+        }
     }
 }
 

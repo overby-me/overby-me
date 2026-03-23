@@ -2,7 +2,7 @@
 
 pub(crate) mod from_parsed_config;
 mod id;
-mod loading;
+pub(crate) mod loading;
 mod status;
 mod unit;
 pub(crate) mod unit_parsing;

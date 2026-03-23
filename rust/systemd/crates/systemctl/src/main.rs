@@ -157,6 +157,21 @@ fn main() {
             continue;
         }
 
+        // -P PROP is shorthand for --value --property=PROP
+        if arg == "-P" {
+            value_only = true;
+            if i + 1 < args.len() {
+                for part in args[i + 1].split(',') {
+                    let trimmed = part.trim();
+                    if !trimmed.is_empty() {
+                        property_filter.push(trimmed.to_owned());
+                    }
+                }
+            }
+            i += 2;
+            continue;
+        }
+
         // Capture -p / --property values for `show` filtering.
         if arg == "-p" || arg == "--property" {
             if i + 1 < args.len() {

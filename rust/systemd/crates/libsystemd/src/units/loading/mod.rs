@@ -1,5 +1,5 @@
 mod dependency_resolving;
-mod directory_deps;
+pub(crate) mod directory_deps;
 pub use dependency_resolving::*;
 use log::{info, trace, warn};
 
