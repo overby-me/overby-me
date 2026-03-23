@@ -2267,6 +2267,11 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
                     Ok(_) => {
                         let ch = buf[0] as char;
                         if ch == '\n' {
+                            // In non-raw mode, backslash-newline is line continuation
+                            if !raw && line.ends_with('\\') {
+                                line.pop(); // remove the backslash
+                                continue; // read next line
+                            }
                             break;
                         }
                         line.push(ch);
