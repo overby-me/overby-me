@@ -2,8 +2,8 @@ use crate::control::unit_properties;
 use crate::lock_ext::RwLockExt;
 use crate::runtime_info::{ArcMutRuntimeInfo, UnitTable};
 use crate::units::{
-    ActivationSource, Specific, Unit, UnitIdKind, UnitStatus, insert_new_units, load_all_units,
-    load_new_unit,
+    ActivationSource, Specific, Unit, UnitIdKind, UnitStatus, insert_new_units,
+    load_all_units_no_prune, load_new_unit,
 };
 
 use std::fmt::Write as _;
@@ -2554,9 +2554,11 @@ pub fn execute_command(
         Command::LoadAllNew => {
             let run_info = &mut *run_info.write_poisoned();
             let unit_table = &run_info.unit_table;
-            // get all units there are
-            let units = load_all_units(&run_info.config.unit_dirs, &run_info.config.target_unit)
-                .map_err(|e| format!("Error while loading unit definitions: {e:?}"))?;
+            // Load all units without pruning so that standalone units
+            // (not reachable from the boot target) are also discovered.
+            let units =
+                load_all_units_no_prune(&run_info.config.unit_dirs, &run_info.config.target_unit)
+                    .map_err(|e| format!("Error while loading unit definitions: {e:?}"))?;
 
             // collect all names
             let existing_names = unit_table
@@ -2592,9 +2594,10 @@ pub fn execute_command(
         Command::LoadAllNewDry => {
             let run_info = &mut *run_info.write_poisoned();
             let unit_table = &run_info.unit_table;
-            // get all units there are
-            let units = load_all_units(&run_info.config.unit_dirs, &run_info.config.target_unit)
-                .map_err(|e| format!("Error while loading unit definitions: {e:?}"))?;
+            // Load all units without pruning (same as LoadAllNew).
+            let units =
+                load_all_units_no_prune(&run_info.config.unit_dirs, &run_info.config.target_unit)
+                    .map_err(|e| format!("Error while loading unit definitions: {e:?}"))?;
 
             // collect all names
             let existing_names = unit_table

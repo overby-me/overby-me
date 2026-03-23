@@ -56,6 +56,24 @@ pub fn load_all_units(
     paths: &[PathBuf],
     target_unit: &str,
 ) -> Result<HashMap<UnitId, Unit>, LoadingError> {
+    load_all_units_inner(paths, target_unit, true)
+}
+
+/// Like `load_all_units` but skips the pruning step, returning ALL parsed
+/// units regardless of whether they are reachable from the boot target.
+/// Used by daemon-reload to discover newly added standalone units.
+pub fn load_all_units_no_prune(
+    paths: &[PathBuf],
+    target_unit: &str,
+) -> Result<HashMap<UnitId, Unit>, LoadingError> {
+    load_all_units_inner(paths, target_unit, false)
+}
+
+fn load_all_units_inner(
+    paths: &[PathBuf],
+    target_unit: &str,
+    prune: bool,
+) -> Result<HashMap<UnitId, Unit>, LoadingError> {
     let mut service_unit_table = HashMap::new();
     let mut socket_unit_table = HashMap::new();
     let mut target_unit_table = HashMap::new();
@@ -249,15 +267,22 @@ pub fn load_all_units(
 
     fill_dependencies(&mut unit_table).map_err(|e| LoadingError::Dependency(e.into()))?;
 
-    info!(
-        "Units before prune: {} total, pruning to target={}",
-        unit_table.len(),
-        target_unit
-    );
+    if prune {
+        info!(
+            "Units before prune: {} total, pruning to target={}",
+            unit_table.len(),
+            target_unit
+        );
 
-    prune_units(target_unit, &mut unit_table).unwrap();
+        prune_units(target_unit, &mut unit_table).unwrap();
 
-    info!("Units after prune: {} total", unit_table.len());
+        info!("Units after prune: {} total", unit_table.len());
+    } else {
+        info!(
+            "Skipping prune (reload mode): {} units total",
+            unit_table.len()
+        );
+    }
 
     // Log multi-user.target deps after pruning
     for name in &["default.target", "multi-user.target"] {
