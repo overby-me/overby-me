@@ -353,7 +353,7 @@ fn parse_double_quoted_content(s: &str) -> Word {
                     parts.push(WordPart::Literal(std::mem::take(&mut literal)));
                 }
                 i += 1;
-                let part = parse_dollar(&chars, &mut i);
+                let part = parse_dollar(&chars, &mut i, true);
                 parts.push(part);
             }
             '`' => {
@@ -388,7 +388,7 @@ fn parse_double_quoted_content(s: &str) -> Word {
     parts
 }
 
-fn parse_dollar(chars: &[char], i: &mut usize) -> WordPart {
+fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart {
     if *i >= chars.len() {
         return WordPart::Literal("$".to_string());
     }
@@ -445,7 +445,7 @@ fn parse_dollar(chars: &[char], i: &mut usize) -> WordPart {
         }
         '{' => {
             *i += 1;
-            parse_brace_param(chars, i)
+            parse_brace_param(chars, i, in_dquote)
         }
         ch if ch == '_' || ch.is_alphabetic() => {
             let mut name = String::new();
@@ -488,7 +488,7 @@ fn parse_dollar(chars: &[char], i: &mut usize) -> WordPart {
                             dq_parts.push(WordPart::Literal(std::mem::take(&mut dq_lit)));
                         }
                         *i += 1;
-                        dq_parts.push(parse_dollar(chars, i));
+                        dq_parts.push(parse_dollar(chars, i, true));
                     }
                     ch => {
                         dq_lit.push(ch);
@@ -678,7 +678,7 @@ fn parse_dollar(chars: &[char], i: &mut usize) -> WordPart {
     }
 }
 
-fn parse_brace_param(chars: &[char], i: &mut usize) -> WordPart {
+fn parse_brace_param(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart {
     // ${!name} — indirect expansion / name prefix / array indices
     if *i < chars.len() && chars[*i] == '!' {
         *i += 1;
@@ -712,7 +712,7 @@ fn parse_brace_param(chars: &[char], i: &mut usize) -> WordPart {
         // Check for operator after indirect name: ${!name+word}, ${!name-word}, etc.
         if *i < chars.len() && chars[*i] != '}' {
             // There's an operator — parse it as indirect + operator
-            let op = read_param_op(chars, i, &name);
+            let op = read_param_op(chars, i, &name, in_dquote);
             if *i < chars.len() && chars[*i] == '}' {
                 *i += 1;
             }
@@ -783,7 +783,7 @@ fn parse_brace_param(chars: &[char], i: &mut usize) -> WordPart {
         });
     }
 
-    let op = read_param_op(chars, i, &name);
+    let op = read_param_op(chars, i, &name, in_dquote);
 
     // Check for @X transform after operator
     if *i + 1 < chars.len() && chars[*i] == '@' && chars[*i + 1] != '}' {
@@ -864,7 +864,13 @@ fn read_param_name(chars: &[char], i: &mut usize) -> String {
     name
 }
 
-fn read_param_op(chars: &[char], i: &mut usize, _name: &str) -> ParamOp {
+fn read_param_op(chars: &[char], i: &mut usize, _name: &str, in_dquote: bool) -> ParamOp {
+    let read_word =
+        |chars: &[char], i: &mut usize| -> Word { read_param_word_impl(chars, i, '}', in_dquote) };
+    let read_word_until = |chars: &[char], i: &mut usize, delim: char| -> Word {
+        read_param_word_impl(chars, i, delim, in_dquote)
+    };
+
     if *i >= chars.len() {
         return ParamOp::None;
     }
@@ -878,22 +884,22 @@ fn read_param_op(chars: &[char], i: &mut usize, _name: &str) -> ParamOp {
             match chars[*i] {
                 '-' => {
                     *i += 1;
-                    let word = read_param_word(chars, i);
+                    let word = read_word(chars, i);
                     ParamOp::Default(true, word)
                 }
                 '=' => {
                     *i += 1;
-                    let word = read_param_word(chars, i);
+                    let word = read_word(chars, i);
                     ParamOp::Assign(true, word)
                 }
                 '?' => {
                     *i += 1;
-                    let word = read_param_word(chars, i);
+                    let word = read_word(chars, i);
                     ParamOp::Error(true, word)
                 }
                 '+' => {
                     *i += 1;
-                    let word = read_param_word(chars, i);
+                    let word = read_word(chars, i);
                     ParamOp::Alt(true, word)
                 }
                 _ => {
@@ -920,32 +926,32 @@ fn read_param_op(chars: &[char], i: &mut usize, _name: &str) -> ParamOp {
         }
         '-' => {
             *i += 1;
-            let word = read_param_word(chars, i);
+            let word = read_word(chars, i);
             ParamOp::Default(false, word)
         }
         '=' => {
             *i += 1;
-            let word = read_param_word(chars, i);
+            let word = read_word(chars, i);
             ParamOp::Assign(false, word)
         }
         '?' => {
             *i += 1;
-            let word = read_param_word(chars, i);
+            let word = read_word(chars, i);
             ParamOp::Error(false, word)
         }
         '+' => {
             *i += 1;
-            let word = read_param_word(chars, i);
+            let word = read_word(chars, i);
             ParamOp::Alt(false, word)
         }
         '#' => {
             *i += 1;
             if *i < chars.len() && chars[*i] == '#' {
                 *i += 1;
-                let word = read_param_word(chars, i);
+                let word = read_word(chars, i);
                 ParamOp::TrimLargeLeft(word)
             } else {
-                let word = read_param_word(chars, i);
+                let word = read_word(chars, i);
                 ParamOp::TrimSmallLeft(word)
             }
         }
@@ -953,10 +959,10 @@ fn read_param_op(chars: &[char], i: &mut usize, _name: &str) -> ParamOp {
             *i += 1;
             if *i < chars.len() && chars[*i] == '%' {
                 *i += 1;
-                let word = read_param_word(chars, i);
+                let word = read_word(chars, i);
                 ParamOp::TrimLargeRight(word)
             } else {
-                let word = read_param_word(chars, i);
+                let word = read_word(chars, i);
                 ParamOp::TrimSmallRight(word)
             }
         }
@@ -981,10 +987,10 @@ fn read_param_op(chars: &[char], i: &mut usize, _name: &str) -> ParamOp {
             } else {
                 'f'
             };
-            let pattern = read_param_word_until(chars, i, '/');
+            let pattern = read_word_until(chars, i, '/');
             let replacement = if *i < chars.len() && chars[*i] == '/' {
                 *i += 1;
-                read_param_word(chars, i)
+                read_word(chars, i)
             } else {
                 vec![]
             };
@@ -999,10 +1005,10 @@ fn read_param_op(chars: &[char], i: &mut usize, _name: &str) -> ParamOp {
             *i += 1;
             if *i < chars.len() && chars[*i] == '^' {
                 *i += 1;
-                let pattern = read_param_word(chars, i);
+                let pattern = read_word(chars, i);
                 ParamOp::UpperAll(pattern)
             } else {
-                let pattern = read_param_word(chars, i);
+                let pattern = read_word(chars, i);
                 ParamOp::UpperFirst(pattern)
             }
         }
@@ -1010,10 +1016,10 @@ fn read_param_op(chars: &[char], i: &mut usize, _name: &str) -> ParamOp {
             *i += 1;
             if *i < chars.len() && chars[*i] == ',' {
                 *i += 1;
-                let pattern = read_param_word(chars, i);
+                let pattern = read_word(chars, i);
                 ParamOp::LowerAll(pattern)
             } else {
-                let pattern = read_param_word(chars, i);
+                let pattern = read_word(chars, i);
                 ParamOp::LowerFirst(pattern)
             }
         }
@@ -1021,11 +1027,7 @@ fn read_param_op(chars: &[char], i: &mut usize, _name: &str) -> ParamOp {
     }
 }
 
-fn read_param_word(chars: &[char], i: &mut usize) -> Word {
-    read_param_word_until(chars, i, '}')
-}
-
-fn read_param_word_until(chars: &[char], i: &mut usize, delim: char) -> Word {
+fn read_param_word_impl(chars: &[char], i: &mut usize, delim: char, in_dquote: bool) -> Word {
     let mut parts = Vec::new();
     let mut literal = String::new();
     let mut depth = 0;
@@ -1034,10 +1036,11 @@ fn read_param_word_until(chars: &[char], i: &mut usize, delim: char) -> Word {
         match chars[*i] {
             '\\' if *i + 1 < chars.len() => {
                 let next = chars[*i + 1];
-                if matches!(next, '$' | '`' | '"' | '\\' | '\n') {
+                if in_dquote && !matches!(next, '$' | '`' | '"' | '\\' | '\n') {
+                    // Inside double quotes, preserve backslash for non-special chars
+                    literal.push('\\');
                     literal.push(next);
                 } else {
-                    literal.push('\\');
                     literal.push(next);
                 }
                 *i += 2;
@@ -1047,7 +1050,7 @@ fn read_param_word_until(chars: &[char], i: &mut usize, delim: char) -> Word {
                     parts.push(WordPart::Literal(std::mem::take(&mut literal)));
                 }
                 *i += 1;
-                parts.push(parse_dollar(chars, i));
+                parts.push(parse_dollar(chars, i, in_dquote));
             }
             '\'' => {
                 *i += 1;
@@ -1082,7 +1085,7 @@ fn read_param_word_until(chars: &[char], i: &mut usize, delim: char) -> Word {
                                 dq_parts.push(WordPart::Literal(std::mem::take(&mut dq_lit)));
                             }
                             *i += 1;
-                            dq_parts.push(parse_dollar(chars, i));
+                            dq_parts.push(parse_dollar(chars, i, true));
                         }
                         ch => {
                             dq_lit.push(ch);
@@ -1281,7 +1284,7 @@ impl Lexer {
                                 }
                                 self.advance();
                                 let input_clone = self.input.clone();
-                                let part = parse_dollar(&input_clone, &mut self.pos);
+                                let part = parse_dollar(&input_clone, &mut self.pos, true);
                                 dq_parts.push(part);
                             }
                             Some('`') => {
@@ -1368,7 +1371,7 @@ impl Lexer {
                                     }
                                     self.advance();
                                     let input_clone = self.input.clone();
-                                    let part = parse_dollar(&input_clone, &mut self.pos);
+                                    let part = parse_dollar(&input_clone, &mut self.pos, true);
                                     dq_parts.push(part);
                                 }
                                 Some('`') => {
@@ -1595,7 +1598,7 @@ impl Lexer {
                         parts.push(WordPart::SingleQuoted(s));
                     } else {
                         let input_clone = self.input.clone();
-                        let part = parse_dollar(&input_clone, &mut self.pos);
+                        let part = parse_dollar(&input_clone, &mut self.pos, false);
                         parts.push(part);
                     }
                 }
