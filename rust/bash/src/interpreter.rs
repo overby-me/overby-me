@@ -1075,7 +1075,7 @@ impl Shell {
 
         // Trace
         if self.opt_xtrace {
-            let mut trace_parts = Vec::new();
+            // Trace prefix assignments on separate lines
             for assign in &cmd.assignments {
                 let val = match &assign.value {
                     AssignValue::Scalar(w) => self.expand_word_single(w),
@@ -1083,13 +1083,12 @@ impl Shell {
                     AssignValue::None => String::new(),
                 };
                 if assign.append {
-                    trace_parts.push(format!("{}+={}", assign.name, val));
+                    eprintln!("+ {}+={}", assign.name, val);
                 } else {
-                    trace_parts.push(format!("{}={}", assign.name, val));
+                    eprintln!("+ {}={}", assign.name, val);
                 }
             }
-            trace_parts.extend(expanded_words.iter().cloned());
-            eprintln!("+ {}", trace_parts.join(" "));
+            eprintln!("+ {}", expanded_words.join(" "));
         }
 
         // Alias expansion: if the first word is an alias, re-parse and run
