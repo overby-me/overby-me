@@ -1119,6 +1119,8 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
     let mut flag_readonly = false;
     let mut flag_export = false;
     let mut flag_integer = false;
+    let mut flag_uppercase = false;
+    let mut flag_lowercase = false;
     let mut flag_global = false; // -g stub
     let mut names = Vec::new();
     let mut i = 0;
@@ -1137,6 +1139,8 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     'r' => flag_readonly = true,
                     'x' => flag_export = true,
                     'i' => flag_integer = true,
+                    'u' => flag_uppercase = true,
+                    'l' => flag_lowercase = true,
                     'g' => flag_global = true,
                     _ => {}
                 }
@@ -1333,6 +1337,21 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 shell.exports.insert(name.to_string(), val.clone());
                 unsafe { std::env::set_var(name, &val) };
             }
+            if flag_uppercase {
+                shell.uppercase_vars.insert(name.to_string());
+                shell.lowercase_vars.remove(name);
+                // Apply to current value
+                if let Some(v) = shell.vars.get(name).cloned() {
+                    shell.vars.insert(name.to_string(), v.to_uppercase());
+                }
+            }
+            if flag_lowercase {
+                shell.lowercase_vars.insert(name.to_string());
+                shell.uppercase_vars.remove(name);
+                if let Some(v) = shell.vars.get(name).cloned() {
+                    shell.vars.insert(name.to_string(), v.to_lowercase());
+                }
+            }
         } else {
             let name = name_arg.as_str();
             if make_local {
@@ -1358,6 +1377,14 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 let val = shell.get_var(name).cloned().unwrap_or_default();
                 shell.exports.insert(name.to_string(), val.clone());
                 unsafe { std::env::set_var(name, &val) };
+            }
+            if flag_uppercase {
+                shell.uppercase_vars.insert(name.to_string());
+                shell.lowercase_vars.remove(name);
+            }
+            if flag_lowercase {
+                shell.lowercase_vars.insert(name.to_string());
+                shell.uppercase_vars.remove(name);
             }
         }
     }

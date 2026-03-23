@@ -10,6 +10,8 @@ pub struct Shell {
     pub exports: HashMap<String, String>,
     pub readonly_vars: HashSet<String>,
     pub integer_vars: HashSet<String>,
+    pub uppercase_vars: HashSet<String>,
+    pub lowercase_vars: HashSet<String>,
     pub arrays: HashMap<String, Vec<String>>,
     pub assoc_arrays: HashMap<String, HashMap<String, String>>,
     pub functions: HashMap<String, CompoundCommand>,
@@ -100,6 +102,8 @@ impl Shell {
             exports,
             readonly_vars: HashSet::new(),
             integer_vars: HashSet::new(),
+            uppercase_vars: HashSet::new(),
+            lowercase_vars: HashSet::new(),
             arrays: HashMap::new(),
             assoc_arrays: HashMap::new(),
             functions: HashMap::new(),
@@ -229,6 +233,10 @@ impl Shell {
         // Integer variables: evaluate value as arithmetic expression
         let value = if self.integer_vars.contains(&resolved) {
             self.eval_arith_expr(&value).to_string()
+        } else if self.uppercase_vars.contains(&resolved) {
+            value.to_uppercase()
+        } else if self.lowercase_vars.contains(&resolved) {
+            value.to_lowercase()
         } else {
             value
         };
