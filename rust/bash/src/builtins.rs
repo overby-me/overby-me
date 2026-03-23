@@ -1443,8 +1443,12 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
 
     for name_arg in &names {
         if let Some(eq_pos) = name_arg.find('=') {
-            let name = &name_arg[..eq_pos];
-            let value = &name_arg[eq_pos + 1..];
+            let (name, value, is_append) = if eq_pos > 0 && name_arg.as_bytes()[eq_pos - 1] == b'+'
+            {
+                (&name_arg[..eq_pos - 1], &name_arg[eq_pos + 1..], true)
+            } else {
+                (&name_arg[..eq_pos], &name_arg[eq_pos + 1..], false)
+            };
 
             if make_local {
                 shell.declare_local(name);
@@ -1468,7 +1472,19 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 // Mark as integer and evaluate as arithmetic
                 shell.integer_vars.insert(name.to_string());
                 let n = shell.eval_arith_expr(value);
-                shell.set_var(name, n.to_string());
+                if is_append {
+                    let existing = shell
+                        .vars
+                        .get(name)
+                        .and_then(|v| v.parse::<i64>().ok())
+                        .unwrap_or(0);
+                    shell.set_var(name, (existing + n).to_string());
+                } else {
+                    shell.set_var(name, n.to_string());
+                }
+            } else if is_append {
+                let existing = shell.vars.get(name).cloned().unwrap_or_default();
+                shell.set_var(name, format!("{}{}", existing, value));
             } else {
                 shell.set_var(name, value.to_string());
             }
