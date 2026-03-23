@@ -739,18 +739,16 @@ fn parse_service_section(
         None => None,
     };
 
+    // For Type=oneshot, systemd allows multiple ExecStart= lines and runs
+    // them sequentially.  We store only the last one in the `exec` field
+    // (the runtime only supports a single command today), but we parse all
+    // entries so that units with multiple ExecStart= don't fail to load.
     let exec = match exec {
-        Some(mut vec) => {
-            if vec.len() == 1 {
-                Some(parse_cmdline(&vec.remove(0).1)?)
-            } else {
-                return Err(ParsingErrorReason::SettingTooManyValues(
-                    "ExecStart".to_owned(),
-                    super::map_tuples_to_second(vec),
-                ));
-            }
+        Some(vec) if !vec.is_empty() => {
+            let last = &vec[vec.len() - 1].1;
+            Some(parse_cmdline(last)?)
         }
-        None => None,
+        _ => None,
     };
 
     let srcv_type = match srcv_type {
@@ -3796,5 +3794,34 @@ MemoryMax=2G
         assert_eq!(exec.prefixes[0], super::super::CommandlinePrefix::Minus);
         assert_eq!(exec.prefixes[1], super::super::CommandlinePrefix::Plus);
         assert_eq!(exec.prefixes[2], super::super::CommandlinePrefix::AtSign);
+    }
+
+    #[test]
+    fn test_parse_oneshot_with_multiple_exec_and_startpost() {
+        // This mirrors testservice-failure-exit-handler-68.service from TEST-68
+        let content = r#"[Service]
+# repeat the check to make sure that values are set correctly on repeated invocations
+Type=oneshot
+ExecStartPre=/tmp/check_on_failure.sh
+ExecStartPre=/tmp/check_on_failure.sh
+ExecStart=/tmp/check_on_failure.sh
+ExecStart=/tmp/check_on_failure.sh
+ExecStartPost=test -z ''
+"#;
+        let parsed = super::super::parse_file(content).unwrap();
+        let result = parse_service(
+            parsed,
+            &std::path::PathBuf::from("/test/failure-handler.service"),
+        );
+        assert!(
+            result.is_ok(),
+            "Failed to parse oneshot service with multiple ExecStart and ExecStartPost: {:?}",
+            result.err()
+        );
+        let config = result.unwrap();
+        // exec is Option<Commandline> — only the last ExecStart= is stored
+        assert!(config.srvc.exec.is_some());
+        assert_eq!(config.srvc.startpre.len(), 2);
+        assert_eq!(config.srvc.startpost.len(), 1);
     }
 }

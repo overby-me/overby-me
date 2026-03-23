@@ -850,10 +850,7 @@ fn find_or_load_unit(
             // the .service unit — matching real systemd behaviour.
             if !unit_name.contains('.') {
                 let service_name = format!("{unit_name}.service");
-                if let Some(unit) = units
-                    .iter()
-                    .find(|u| u.id.name == service_name)
-                {
+                if let Some(unit) = units.iter().find(|u| u.id.name == service_name) {
                     return Ok(unit.id.clone());
                 }
             }
@@ -4616,6 +4613,10 @@ mod tests {
             working_directory: None,
             service_type: None,
             remain_after_exit: false,
+            properties: Vec::new(),
+            environment: Vec::new(),
+            scope: false,
+            wait: false,
         };
         let debug = format!("{params:?}");
         assert!(debug.contains("run-test.service"));
@@ -4633,6 +4634,10 @@ mod tests {
             working_directory: Some("/tmp".to_string()),
             service_type: Some("oneshot".to_string()),
             remain_after_exit: true,
+            properties: Vec::new(),
+            environment: Vec::new(),
+            scope: false,
+            wait: false,
         };
         let cloned = params.clone();
         assert_eq!(cloned.unit_name, params.unit_name);
