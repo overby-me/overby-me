@@ -2521,16 +2521,49 @@ fn builtin_type(shell: &mut Shell, args: &[String]) -> i32 {
     for arg in args {
         match arg.as_str() {
             "-t" => flag_t = true,
-            "-p" => flag_p = true,
-            "-a" | "-f" | "-P" => {}
+            "-p" | "-P" => flag_p = true,
+            "-a" | "-f" => {}
+            a if a.starts_with('-') && a.len() > 1 => {
+                eprintln!("{}: type: {}: invalid option", shell.error_prefix(), a);
+                eprintln!("type: usage: type [-afptP] name [name ...]");
+                return 2;
+            }
             _ => names.push(arg.as_str()),
         }
     }
 
     for name in names {
+        let is_keyword = matches!(
+            name,
+            "if" | "then"
+                | "else"
+                | "elif"
+                | "fi"
+                | "case"
+                | "esac"
+                | "for"
+                | "select"
+                | "while"
+                | "until"
+                | "do"
+                | "done"
+                | "in"
+                | "function"
+                | "time"
+                | "{"
+                | "}"
+                | "!"
+                | "[["
+                | "]]"
+                | "coproc"
+        );
         if flag_t {
             // Print type word only
-            if shell.functions.contains_key(name) {
+            if shell.aliases.contains_key(name) && shell.shopt_expand_aliases {
+                println!("alias");
+            } else if is_keyword {
+                println!("keyword");
+            } else if shell.functions.contains_key(name) {
                 println!("function");
             } else if builtin_map.contains_key(name) {
                 println!("builtin");
@@ -2550,7 +2583,9 @@ fn builtin_type(shell: &mut Shell, args: &[String]) -> i32 {
             }
         } else {
             // Default behavior
-            if let Some(body) = shell.functions.get(name) {
+            if is_keyword {
+                println!("{} is a shell keyword", name);
+            } else if let Some(body) = shell.functions.get(name) {
                 println!("{} is a function", name);
                 println!("{} () \n{}", name, format_compound_command(body));
             } else if builtin_map.contains_key(name) {
