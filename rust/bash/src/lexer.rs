@@ -544,15 +544,18 @@ fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart {
                         'e' | 'E' => s.push('\x1b'),
                         'f' => s.push('\x0c'),
                         'v' => s.push('\x0b'),
-                        '0' => {
-                            let mut val = 0u8;
-                            for _ in 0..3 {
+                        c @ '0'..='7' => {
+                            let mut val = c as u8 - b'0';
+                            for _ in 0..2 {
                                 if *i + 1 < chars.len() && matches!(chars[*i + 1], '0'..='7') {
                                     *i += 1;
                                     val = val * 8 + (chars[*i] as u8 - b'0');
                                 } else {
                                     break;
                                 }
+                            }
+                            if val == 0 {
+                                break; // NUL terminates
                             }
                             s.push(val as char);
                         }
@@ -1463,9 +1466,9 @@ impl Lexer {
                                     Some('e') | Some('E') => s.push('\x1b'),
                                     Some('f') => s.push('\x0c'),
                                     Some('v') => s.push('\x0b'),
-                                    Some('0') => {
-                                        let mut val = 0u8;
-                                        for _ in 0..3 {
+                                    Some(oc @ '0'..='7') => {
+                                        let mut val = oc as u8 - b'0';
+                                        for _ in 0..2 {
                                             match self.peek() {
                                                 Some(c @ '0'..='7') => {
                                                     val = val * 8 + (c as u8 - b'0');
