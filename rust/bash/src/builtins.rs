@@ -1997,30 +1997,31 @@ fn eval_test_expr(args: &[String], shell: &Shell) -> i32 {
                 return if is_set { 0 } else { 1 };
             }
             "-e" | "-a" => {
-                return if std::path::Path::new(&args[1]).exists() {
+                return if !args[1].is_empty() && std::path::Path::new(&args[1]).exists() {
                     0
                 } else {
                     1
                 };
             }
             "-f" => {
-                return if std::path::Path::new(&args[1]).is_file() {
+                return if !args[1].is_empty() && std::path::Path::new(&args[1]).is_file() {
                     0
                 } else {
                     1
                 };
             }
             "-d" => {
-                return if std::path::Path::new(&args[1]).is_dir() {
+                return if !args[1].is_empty() && std::path::Path::new(&args[1]).is_dir() {
                     0
                 } else {
                     1
                 };
             }
             "-L" | "-h" => {
-                return if std::fs::symlink_metadata(&args[1])
-                    .map(|m| m.file_type().is_symlink())
-                    .unwrap_or(false)
+                return if !args[1].is_empty()
+                    && std::fs::symlink_metadata(&args[1])
+                        .map(|m| m.file_type().is_symlink())
+                        .unwrap_or(false)
                 {
                     0
                 } else {
@@ -2028,14 +2029,14 @@ fn eval_test_expr(args: &[String], shell: &Shell) -> i32 {
                 };
             }
             "-r" => {
-                return if std::path::Path::new(&args[1]).exists() {
+                return if !args[1].is_empty() && std::path::Path::new(&args[1]).exists() {
                     0
                 } else {
                     1
                 };
             } // Simplified
             "-w" => {
-                return if std::path::Path::new(&args[1]).exists() {
+                return if !args[1].is_empty() && std::path::Path::new(&args[1]).exists() {
                     0
                 } else {
                     1
@@ -2045,9 +2046,10 @@ fn eval_test_expr(args: &[String], shell: &Shell) -> i32 {
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
-                    return if std::fs::metadata(&args[1])
-                        .map(|m| m.permissions().mode() & 0o111 != 0)
-                        .unwrap_or(false)
+                    return if !args[1].is_empty()
+                        && std::fs::metadata(&args[1])
+                            .map(|m| m.permissions().mode() & 0o111 != 0)
+                            .unwrap_or(false)
                     {
                         0
                     } else {
@@ -2058,9 +2060,10 @@ fn eval_test_expr(args: &[String], shell: &Shell) -> i32 {
                 return 1;
             }
             "-s" => {
-                return if std::fs::metadata(&args[1])
-                    .map(|m| m.len() > 0)
-                    .unwrap_or(false)
+                return if !args[1].is_empty()
+                    && std::fs::metadata(&args[1])
+                        .map(|m| m.len() > 0)
+                        .unwrap_or(false)
                 {
                     0
                 } else {
@@ -2070,7 +2073,8 @@ fn eval_test_expr(args: &[String], shell: &Shell) -> i32 {
             #[cfg(unix)]
             "-c" => {
                 use std::os::unix::fs::FileTypeExt;
-                return if std::fs::metadata(&args[1]).is_ok_and(|m| m.file_type().is_char_device())
+                return if !args[1].is_empty()
+                    && std::fs::metadata(&args[1]).is_ok_and(|m| m.file_type().is_char_device())
                 {
                     0
                 } else {
@@ -2080,7 +2084,8 @@ fn eval_test_expr(args: &[String], shell: &Shell) -> i32 {
             #[cfg(unix)]
             "-b" => {
                 use std::os::unix::fs::FileTypeExt;
-                return if std::fs::metadata(&args[1]).is_ok_and(|m| m.file_type().is_block_device())
+                return if !args[1].is_empty()
+                    && std::fs::metadata(&args[1]).is_ok_and(|m| m.file_type().is_block_device())
                 {
                     0
                 } else {
@@ -2090,7 +2095,9 @@ fn eval_test_expr(args: &[String], shell: &Shell) -> i32 {
             #[cfg(unix)]
             "-p" => {
                 use std::os::unix::fs::FileTypeExt;
-                return if std::fs::metadata(&args[1]).is_ok_and(|m| m.file_type().is_fifo()) {
+                return if !args[1].is_empty()
+                    && std::fs::metadata(&args[1]).is_ok_and(|m| m.file_type().is_fifo())
+                {
                     0
                 } else {
                     1
@@ -2099,7 +2106,9 @@ fn eval_test_expr(args: &[String], shell: &Shell) -> i32 {
             #[cfg(unix)]
             "-S" => {
                 use std::os::unix::fs::FileTypeExt;
-                return if std::fs::metadata(&args[1]).is_ok_and(|m| m.file_type().is_socket()) {
+                return if !args[1].is_empty()
+                    && std::fs::metadata(&args[1]).is_ok_and(|m| m.file_type().is_socket())
+                {
                     0
                 } else {
                     1
@@ -2108,8 +2117,9 @@ fn eval_test_expr(args: &[String], shell: &Shell) -> i32 {
             #[cfg(unix)]
             "-u" => {
                 use std::os::unix::fs::PermissionsExt;
-                return if std::fs::metadata(&args[1])
-                    .is_ok_and(|m| m.permissions().mode() & 0o4000 != 0)
+                return if !args[1].is_empty()
+                    && std::fs::metadata(&args[1])
+                        .is_ok_and(|m| m.permissions().mode() & 0o4000 != 0)
                 {
                     0
                 } else {
@@ -2119,8 +2129,9 @@ fn eval_test_expr(args: &[String], shell: &Shell) -> i32 {
             #[cfg(unix)]
             "-g" => {
                 use std::os::unix::fs::PermissionsExt;
-                return if std::fs::metadata(&args[1])
-                    .is_ok_and(|m| m.permissions().mode() & 0o2000 != 0)
+                return if !args[1].is_empty()
+                    && std::fs::metadata(&args[1])
+                        .is_ok_and(|m| m.permissions().mode() & 0o2000 != 0)
                 {
                     0
                 } else {
@@ -2130,8 +2141,9 @@ fn eval_test_expr(args: &[String], shell: &Shell) -> i32 {
             #[cfg(unix)]
             "-k" => {
                 use std::os::unix::fs::PermissionsExt;
-                return if std::fs::metadata(&args[1])
-                    .is_ok_and(|m| m.permissions().mode() & 0o1000 != 0)
+                return if !args[1].is_empty()
+                    && std::fs::metadata(&args[1])
+                        .is_ok_and(|m| m.permissions().mode() & 0o1000 != 0)
                 {
                     0
                 } else {
@@ -2141,8 +2153,9 @@ fn eval_test_expr(args: &[String], shell: &Shell) -> i32 {
             #[cfg(unix)]
             "-O" => {
                 use std::os::unix::fs::MetadataExt;
-                return if std::fs::metadata(&args[1])
-                    .is_ok_and(|m| m.uid() == unsafe { libc::getuid() })
+                return if !args[1].is_empty()
+                    && std::fs::metadata(&args[1])
+                        .is_ok_and(|m| m.uid() == unsafe { libc::getuid() })
                 {
                     0
                 } else {
@@ -2152,8 +2165,9 @@ fn eval_test_expr(args: &[String], shell: &Shell) -> i32 {
             #[cfg(unix)]
             "-G" => {
                 use std::os::unix::fs::MetadataExt;
-                return if std::fs::metadata(&args[1])
-                    .is_ok_and(|m| m.gid() == unsafe { libc::getgid() })
+                return if !args[1].is_empty()
+                    && std::fs::metadata(&args[1])
+                        .is_ok_and(|m| m.gid() == unsafe { libc::getgid() })
                 {
                     0
                 } else {

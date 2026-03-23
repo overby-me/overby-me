@@ -1739,7 +1739,9 @@ fn word_split(segments: &[Segment], ifs: &str) -> Vec<String> {
         }
     }
 
-    if !current.is_empty() {
+    // Push the last field. For "$@" with empty trailing elements, we must
+    // keep empty fields. Check if we had any SplitHere markers (from "$@").
+    if !current.is_empty() || has_split {
         fields.push(current);
     }
 
