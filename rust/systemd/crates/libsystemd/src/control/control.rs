@@ -846,6 +846,17 @@ fn find_or_load_unit(
         let ri = run_info.read_poisoned();
         let units = find_units_with_name(unit_name, &ri.unit_table);
         if units.len() > 1 {
+            // When the name has no suffix (e.g. "systemd-hostnamed"), prefer
+            // the .service unit — matching real systemd behaviour.
+            if !unit_name.contains('.') {
+                let service_name = format!("{unit_name}.service");
+                if let Some(unit) = units
+                    .iter()
+                    .find(|u| u.id.name == service_name)
+                {
+                    return Ok(unit.id.clone());
+                }
+            }
             let names: Vec<_> = units.iter().map(|unit| unit.id.name.clone()).collect();
             return Err(format!(
                 "More than one unit found with name: {unit_name}: {names:?}"

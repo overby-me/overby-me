@@ -22,6 +22,10 @@ pub fn run_service_manager() {
         unreachable!();
     });
 
+    // Ensure /run/systemd/system exists so it appears in the unit search
+    // path (config filters directories by existence at load time).
+    let _ = std::fs::create_dir_all("/run/systemd/system");
+
     let (log_conf, mut conf) = config::load_config();
 
     logging::setup_logging(&log_conf).unwrap();
