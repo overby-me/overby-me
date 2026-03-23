@@ -86,6 +86,7 @@ const LONG_FLAGS_WITH_VALUE: &[&str] = &[
     "--job-mode",
     "--root",
     "--preset-mode",
+    "--what",
 ];
 
 fn main() {
@@ -131,9 +132,25 @@ fn main() {
     let mut value_only = false;
     let mut state_filter: Option<String> = None;
 
+    let mut what_filter: Option<String> = None;
+
     let mut i = 0;
     while i < args.len() {
         let arg = &args[i];
+
+        // --what flag (for `clean --what=configuration`)
+        if arg == "--what" {
+            if i + 1 < args.len() {
+                what_filter = Some(args[i + 1].clone());
+            }
+            i += 2;
+            continue;
+        }
+        if let Some(rest) = arg.strip_prefix("--what=") {
+            what_filter = Some(rest.to_string());
+            i += 1;
+            continue;
+        }
 
         // --value flag (for `show --value -p Prop`)
         if arg == "--value" {
@@ -342,8 +359,10 @@ fn main() {
         }
         // Sleep commands — pass through as-is to PID 1
         "suspend" | "hibernate" | "hybrid-sleep" | "suspend-then-hibernate" => &positional[0],
-        // Timer, property, edit, revert commands — pass through
-        "list-timers" | "list-jobs" | "set-property" | "edit" | "revert" => &positional[0],
+        // Timer, property, edit, revert, clean commands — pass through
+        "list-timers" | "list-jobs" | "set-property" | "edit" | "revert" | "clean" => {
+            &positional[0]
+        }
         // log-level, log-target, service-watchdogs — get or set manager properties
         "log-level" | "log-target" | "service-watchdogs" => &positional[0],
         _ => &positional[0],
@@ -675,6 +694,19 @@ fn main() {
         } else {
             Some(positional[1..].iter().cloned().map(Value::String).collect())
         }
+    } else if method == "clean" {
+        // clean <unit> [--what=WHAT]
+        if positional.len() < 2 {
+            if !quiet {
+                eprintln!("Error: clean requires a unit name.");
+            }
+            std::process::exit(1);
+        }
+        let mut arr = vec![Value::String(positional[1].clone())];
+        if let Some(ref what) = what_filter {
+            arr.push(Value::String(what.clone()));
+        }
+        Some(Value::Array(arr))
     } else if method == "show" {
         // show [unit] [property-filter...] — send unit name + optional filter
         // If no unit is specified, query manager-level properties
@@ -720,7 +752,10 @@ fn main() {
     } else {
         send_tcp(&addr, &str_call)
     };
-    if result.is_err() {
+    // daemon-reexec causes the server to execve(), dropping the connection.
+    // Don't retry — the broken connection IS the success signal.
+    let is_daemon_reexec = positional[0] == "daemon-reexec";
+    if result.is_err() && !is_daemon_reexec {
         for _ in 0..10 {
             std::thread::sleep(std::time::Duration::from_millis(500));
             result = if addr.starts_with('/') {

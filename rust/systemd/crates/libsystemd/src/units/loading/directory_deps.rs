@@ -900,6 +900,47 @@ pub fn collect_applicable_dropins_pub(
     collect_applicable_dropins(unit_name, dropins)
 }
 
+/// Scan the dropins map for keys that look like slice units (e.g., "a-b-c.slice")
+/// and create implicit (fragmentless) slice units for any that don't already exist
+/// in the unit table. In systemd, slices exist implicitly without a unit file.
+pub fn create_implicit_slices_from_dropins(
+    slice_units: &mut HashMap<UnitId, Unit>,
+    dropins: &HashMap<String, Vec<(String, String)>>,
+    unit_dirs: &[PathBuf],
+) {
+    // Collect slice names that have drop-ins but no unit file on disk and no entry in the table.
+    let mut implicit_names: Vec<String> = Vec::new();
+    for key in dropins.keys() {
+        if key.ends_with(".slice") {
+            let already_loaded = slice_units.values().any(|u| u.id.name == *key);
+            if !already_loaded && find_unit_file_in_dirs(unit_dirs, key).is_none() {
+                implicit_names.push(key.clone());
+            }
+        }
+    }
+
+    for slice_name in implicit_names {
+        let base = slice_name.strip_suffix(".slice").unwrap_or(&slice_name);
+        let path = base.replace('-', "/");
+        let desc = format!("Slice /{path}");
+        let content = format!("[Unit]\nDescription={desc}\n\n[Slice]\n");
+        let fake_path = PathBuf::from(format!("/run/systemd/system/{slice_name}"));
+        let parsed_file = match parse_file(&content) {
+            Ok(pf) => pf,
+            Err(_) => continue,
+        };
+        let parsed_config = match parse_slice(parsed_file, &fake_path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        let unit: Result<Unit, _> = parsed_config.try_into();
+        if let Ok(unit) = unit {
+            info!("Created implicit slice unit from drop-ins: {}", slice_name);
+            slice_units.insert(unit.id.clone(), unit);
+        }
+    }
+}
+
 pub fn apply_dropins(
     units: &mut HashMap<UnitId, Unit>,
     dropins: &HashMap<String, Vec<(String, String)>>,
@@ -919,16 +960,25 @@ pub fn apply_dropins(
             None => continue,
         };
 
-        // Get the base content from the unit's source path
-        let base_path = match find_unit_file_in_dirs(unit_dirs, &unit_name) {
-            Some(p) => p,
-            None => continue,
-        };
-
-        let base_content = match std::fs::read_to_string(&base_path) {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
+        // Get the base content from the unit's source path.
+        // For implicit units (e.g. slices without a fragment file), use a minimal default.
+        let (base_path, base_content) =
+            if let Some(p) = find_unit_file_in_dirs(unit_dirs, &unit_name) {
+                match std::fs::read_to_string(&p) {
+                    Ok(c) => (p, c),
+                    Err(_) => continue,
+                }
+            } else if unit_name.ends_with(".slice") {
+                // Implicit slice: generate a minimal base
+                let base = unit_name.strip_suffix(".slice").unwrap_or(&unit_name);
+                let path = base.replace('-', "/");
+                let desc = format!("Slice /{path}");
+                let fake = PathBuf::from(format!("/run/systemd/system/{unit_name}"));
+                let content = format!("[Unit]\nDescription={desc}\n\n[Slice]\n");
+                (fake, content)
+            } else {
+                continue;
+            };
 
         // Merge base + all drop-in contents
         let merged = merge_unit_contents(&base_content, &overrides);
@@ -1856,6 +1906,11 @@ fn is_list_setting(key: &str) -> bool {
             | "ConfigurationDirectory"
             | "CacheDirectory"
     )
+}
+
+/// Public wrapper for `merge_ini_sections` for use by implicit slice drop-in application.
+pub fn merge_ini_sections_pub(base: &str, overlay: &str) -> String {
+    merge_ini_sections(base, overlay)
 }
 
 fn merge_ini_sections(base: &str, overlay: &str) -> String {

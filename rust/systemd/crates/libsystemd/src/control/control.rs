@@ -130,6 +130,10 @@ pub enum Command {
     LogTarget(Option<String>),
     /// `service-watchdogs [BOOL]` — get or set whether service watchdogs are enabled.
     ServiceWatchdogs(Option<String>),
+    /// `clean <unit> [--what=WHAT]` — remove runtime/configuration/state/cache/log data.
+    /// `--what` can be: configuration, runtime, state, cache, logs, all.
+    /// Default (no --what) removes runtime + cache.
+    Clean(String, Option<String>),
 }
 
 /// Parameters for creating a transient (in-memory) service unit.
@@ -695,6 +699,22 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
                 }
             };
             Command::Revert(name)
+        }
+        "clean" => {
+            // clean <unit> [what]
+            match &call.params {
+                Some(Value::Array(arr)) if !arr.is_empty() => {
+                    let name = arr[0].as_str().unwrap_or("").to_owned();
+                    let what = arr.get(1).and_then(|v| v.as_str()).map(|s| s.to_owned());
+                    Command::Clean(name, what)
+                }
+                Some(Value::String(s)) => Command::Clean(s.clone(), None),
+                Some(_) | None => {
+                    return Err(ParseError::ParamsInvalid(
+                        "clean requires a unit name".to_string(),
+                    ));
+                }
+            }
         }
         _ => {
             return Err(ParseError::MethodNotFound(format!(
@@ -1268,6 +1288,92 @@ fn unit_status_marker(unit_name: &str, unit_table: &UnitTable) -> &'static str {
     } else {
         "○ "
     }
+}
+
+/// Create or update an implicit slice unit with default properties and any applicable
+/// drop-in overrides. In systemd, slice units exist implicitly without a unit file.
+/// The description follows the pattern "Slice /a/b/c" where dashes become path separators.
+fn create_or_update_implicit_slice(
+    slice_name: &str,
+    run_info: &mut crate::runtime_info::RuntimeInfo,
+) {
+    use crate::units::loading::directory_deps::{
+        collect_applicable_dropins_pub, collect_dropin_entries, parse_dropin_dir_name,
+    };
+
+    // Generate description: "a-b-c.slice" -> "Slice /a/b/c"
+    let base = slice_name.strip_suffix(".slice").unwrap_or(slice_name);
+    let path = base.replace('-', "/");
+    let description = format!("Slice /{path}");
+
+    // Build the base content
+    let base_content = format!("[Unit]\nDescription={description}\n\n[Slice]\n");
+
+    // Collect applicable drop-ins from filesystem
+    let mut dropins: std::collections::HashMap<String, Vec<(String, String)>> =
+        std::collections::HashMap::new();
+    for dir in &run_info.config.unit_dirs {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if let Some(dropin_unit_name) = parse_dropin_dir_name(&name)
+                    && entry.path().is_dir()
+                {
+                    collect_dropin_entries(&entry.path(), &dropin_unit_name, &mut dropins);
+                }
+            }
+        }
+    }
+
+    let overrides = collect_applicable_dropins_pub(slice_name, &dropins);
+
+    // Merge base content with drop-in overrides
+    let merged = if overrides.is_empty() {
+        base_content
+    } else {
+        let mut result = base_content;
+        for (_filename, content) in &overrides {
+            result =
+                crate::units::loading::directory_deps::merge_ini_sections_pub(&result, content);
+        }
+        result
+    };
+
+    let fake_path = std::path::PathBuf::from(format!("/run/systemd/system/{slice_name}"));
+    let parsed = match crate::units::parse_file(&merged) {
+        Ok(pf) => pf,
+        Err(e) => {
+            info!("Failed to parse implicit slice {}: {:?}", slice_name, e);
+            return;
+        }
+    };
+    let parsed_config = match crate::units::parse_slice(parsed, &fake_path) {
+        Ok(c) => c,
+        Err(e) => {
+            info!("Failed to create implicit slice {}: {:?}", slice_name, e);
+            return;
+        }
+    };
+    let unit: Unit = match parsed_config.try_into() {
+        Ok(u) => u,
+        Err(e) => {
+            info!("Failed to convert implicit slice {}: {:?}", slice_name, e);
+            return;
+        }
+    };
+
+    // Remove existing entry if any
+    let existing_id = run_info
+        .unit_table
+        .keys()
+        .find(|id| id.name == slice_name)
+        .cloned();
+    if let Some(existing_id) = existing_id {
+        run_info.unit_table.remove(&existing_id);
+    }
+
+    info!("Created/updated implicit slice unit: {}", slice_name);
+    run_info.unit_table.insert(unit.id.clone(), unit);
 }
 
 /// Create a transient (in-memory) service unit and insert it into the unit table.
@@ -2261,6 +2367,158 @@ pub fn execute_command(
             let removed_values: Vec<Value> = removed.into_iter().map(Value::String).collect();
             return Ok(serde_json::json!({ "reverted": unit_name, "removed": removed_values }));
         }
+        Command::Clean(unit_name, what) => {
+            // Clean removes resource directories based on --what flag.
+            // Default (None): runtime + cache
+            // "configuration": ConfigurationDirectory
+            // "runtime": RuntimeDirectory
+            // "state": StateDirectory
+            // "cache": CacheDirectory
+            // "logs": LogsDirectory
+            // "all": all directories
+            let ri = run_info.read_poisoned();
+            let units = find_units_with_name(&unit_name, &ri.unit_table);
+            if units.is_empty() {
+                return Err(format!("Unit {unit_name} not found."));
+            }
+            let unit = &units[0];
+
+            // Unit must be inactive/dead to clean
+            let status = unit.common.status.read_poisoned().clone();
+            if matches!(status, UnitStatus::Started(_) | UnitStatus::Starting) {
+                return Err(format!("Unit {unit_name} is active, cannot clean."));
+            }
+
+            // Extract exec_config from the unit's specific config
+            let exec_config = match &unit.specific {
+                Specific::Service(svc) => Some(&svc.conf.exec_config),
+                Specific::Socket(sock) => Some(&sock.conf.exec_config),
+                _ => None,
+            };
+
+            let exec_config = match exec_config {
+                Some(ec) => ec,
+                None => {
+                    return Ok(serde_json::json!({ "cleaned": unit_name }));
+                }
+            };
+
+            let dynamic_user = exec_config.dynamic_user;
+
+            let what = what.as_deref();
+            let remove_configuration = matches!(what, Some("configuration") | Some("all"));
+            let remove_runtime = matches!(what, None | Some("runtime") | Some("all"));
+            let remove_state = matches!(what, Some("state") | Some("all"));
+            let remove_cache = matches!(what, None | Some("cache") | Some("all"));
+            let remove_logs = matches!(what, Some("logs") | Some("all"));
+
+            let mut removed = Vec::new();
+
+            if remove_configuration {
+                for dir_name in &exec_config.configuration_directory {
+                    let path = format!("/etc/{dir_name}");
+                    if std::path::Path::new(&path).exists() {
+                        let _ = std::fs::remove_dir_all(&path);
+                        removed.push(path);
+                    }
+                }
+            }
+
+            if remove_runtime {
+                for dir_name in &exec_config.runtime_directory {
+                    if dynamic_user {
+                        let private = format!("/run/private/{dir_name}");
+                        let link = format!("/run/{dir_name}");
+                        if std::path::Path::new(&private).exists() {
+                            let _ = std::fs::remove_dir_all(&private);
+                            removed.push(private);
+                        }
+                        if std::path::Path::new(&link).exists() {
+                            let _ = std::fs::remove_file(&link);
+                            removed.push(link);
+                        }
+                    } else {
+                        let path = format!("/run/{dir_name}");
+                        if std::path::Path::new(&path).exists() {
+                            let _ = std::fs::remove_dir_all(&path);
+                            removed.push(path);
+                        }
+                    }
+                }
+            }
+
+            if remove_state {
+                for dir_name in &exec_config.state_directory {
+                    if dynamic_user {
+                        let private = format!("/var/lib/private/{dir_name}");
+                        let link = format!("/var/lib/{dir_name}");
+                        if std::path::Path::new(&private).exists() {
+                            let _ = std::fs::remove_dir_all(&private);
+                            removed.push(private);
+                        }
+                        if std::path::Path::new(&link).exists() {
+                            let _ = std::fs::remove_file(&link);
+                            removed.push(link);
+                        }
+                    } else {
+                        let path = format!("/var/lib/{dir_name}");
+                        if std::path::Path::new(&path).exists() {
+                            let _ = std::fs::remove_dir_all(&path);
+                            removed.push(path);
+                        }
+                    }
+                }
+            }
+
+            if remove_cache {
+                for dir_name in &exec_config.cache_directory {
+                    if dynamic_user {
+                        let private = format!("/var/cache/private/{dir_name}");
+                        let link = format!("/var/cache/{dir_name}");
+                        if std::path::Path::new(&private).exists() {
+                            let _ = std::fs::remove_dir_all(&private);
+                            removed.push(private);
+                        }
+                        if std::path::Path::new(&link).exists() {
+                            let _ = std::fs::remove_file(&link);
+                            removed.push(link);
+                        }
+                    } else {
+                        let path = format!("/var/cache/{dir_name}");
+                        if std::path::Path::new(&path).exists() {
+                            let _ = std::fs::remove_dir_all(&path);
+                            removed.push(path);
+                        }
+                    }
+                }
+            }
+
+            if remove_logs {
+                for dir_name in &exec_config.logs_directory {
+                    if dynamic_user {
+                        let private = format!("/var/log/private/{dir_name}");
+                        let link = format!("/var/log/{dir_name}");
+                        if std::path::Path::new(&private).exists() {
+                            let _ = std::fs::remove_dir_all(&private);
+                            removed.push(private);
+                        }
+                        if std::path::Path::new(&link).exists() {
+                            let _ = std::fs::remove_file(&link);
+                            removed.push(link);
+                        }
+                    } else {
+                        let path = format!("/var/log/{dir_name}");
+                        if std::path::Path::new(&path).exists() {
+                            let _ = std::fs::remove_dir_all(&path);
+                            removed.push(path);
+                        }
+                    }
+                }
+            }
+
+            info!("clean {}: removed {:?}", unit_name, removed);
+            return Ok(serde_json::json!({ "cleaned": unit_name }));
+        }
         Command::ListTimers => {
             let ri = run_info.read_poisoned();
             let mut timers: Vec<Value> = Vec::new();
@@ -2570,6 +2828,22 @@ pub fn execute_command(
             // This matches real systemd behaviour where `systemctl show` can
             // display units that haven't been explicitly loaded yet.
             let _unit_id = find_or_load_unit(&unit_name, &run_info);
+
+            // If the name ends with .slice, create/update the implicit slice unit.
+            // In systemd, slice units exist implicitly to form the cgroup hierarchy.
+            // We always re-apply drop-ins to pick up changes since last query.
+            if unit_name.ends_with(".slice") {
+                let mut ri_mut = run_info.write_poisoned();
+                // Only create/update if there's no fragment file on disk
+                let has_file = ri_mut
+                    .config
+                    .unit_dirs
+                    .iter()
+                    .any(|d| d.join(&unit_name).exists());
+                if !has_file {
+                    create_or_update_implicit_slice(&unit_name, &mut ri_mut);
+                }
+            }
 
             let ri = run_info.read_poisoned();
             let mut units = find_units_with_name(&unit_name, &ri.unit_table);
@@ -3092,16 +3366,21 @@ pub fn execute_command(
         }
         Command::LoadNew(names) => {
             let run_info = &mut *run_info.write_poisoned();
-            let existing_names: Vec<String> = run_info
-                .unit_table
-                .values()
-                .map(|unit| unit.id.name.clone())
-                .collect();
             let mut map = std::collections::HashMap::new();
             for name in &names {
+                // Normalize: append .service suffix if no suffix present
+                let full_name = if name.contains('.') {
+                    name.clone()
+                } else {
+                    format!("{name}.service")
+                };
                 // Skip units that are already loaded (like `systemctl enable`
                 // on an already-active unit should succeed silently).
-                if existing_names.iter().any(|n| n == name) {
+                let already_loaded = run_info
+                    .unit_table
+                    .values()
+                    .any(|u| u.id.name == full_name || u.id.name == *name);
+                if already_loaded {
                     continue;
                 }
                 let unit = load_new_unit(&run_info.config.unit_dirs, name)?;

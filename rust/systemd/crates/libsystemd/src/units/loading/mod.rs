@@ -8,9 +8,9 @@ use crate::units::{ParsingError, Specific, Unit, UnitId, get_file_list, parse_fi
 
 use directory_deps::{
     DirectoryDependency, apply_directory_dependencies, apply_dropins, collect_dep_dir_entries,
-    collect_dropin_entries, generate_fstab_mount_units, generate_getty_units, insert_parsed_unit,
-    instantiate_template_units, is_template_unit, is_unit_file, parse_dep_dir_name,
-    parse_dropin_dir_name, resolve_symlink_aliases,
+    collect_dropin_entries, create_implicit_slices_from_dropins, generate_fstab_mount_units,
+    generate_getty_units, insert_parsed_unit, instantiate_template_units, is_template_unit,
+    is_unit_file, parse_dep_dir_name, parse_dropin_dir_name, resolve_symlink_aliases,
 };
 
 use std::collections::HashMap;
@@ -96,6 +96,10 @@ fn load_all_units_inner(
             &mut dropins,
         )?;
     }
+
+    // Create implicit slice units for any slice drop-in directories that don't
+    // have a corresponding unit file on disk (systemd creates slices on-demand).
+    create_implicit_slices_from_dropins(&mut slice_unit_table, &dropins, paths);
 
     // Apply drop-in overrides to loaded units by re-parsing with merged content
     apply_dropins(&mut service_unit_table, &dropins, paths);
