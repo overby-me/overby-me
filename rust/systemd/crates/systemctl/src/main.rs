@@ -81,7 +81,6 @@ const LONG_FLAGS_WITH_VALUE: &[&str] = &[
     "--signal",
     "--kill-mode",
     "--kill-who",
-    "--state",
     "--job-mode",
     "--root",
     "--preset-mode",
@@ -127,6 +126,7 @@ fn main() {
     let mut positional: Vec<String> = Vec::new();
     let mut property_filter: Vec<String> = Vec::new();
     let mut value_only = false;
+    let mut state_filter: Option<String> = None;
 
     let mut i = 0;
     while i < args.len() {
@@ -182,6 +182,20 @@ fn main() {
             continue;
         }
 
+        // Capture --state value for list-units filtering.
+        if arg == "--state" {
+            if i + 1 < args.len() {
+                state_filter = Some(args[i + 1].clone());
+            }
+            i += 2;
+            continue;
+        }
+        if let Some(rest) = arg.strip_prefix("--state=") {
+            state_filter = Some(rest.to_string());
+            i += 1;
+            continue;
+        }
+
         // Check long flags with value (--type=foo or --type foo).
         let mut matched_long = false;
         for flag in LONG_FLAGS_WITH_VALUE {
@@ -213,11 +227,9 @@ fn main() {
         i += 1;
     }
 
+    // When no command is given, real systemd defaults to `list-units`.
     if positional.is_empty() {
-        if !quiet {
-            eprintln!("Error: no command specified. Run with --help for usage.");
-        }
-        std::process::exit(1);
+        positional.push("list-units".to_string());
     }
 
     // Extract --signal flag for kill command
@@ -523,7 +535,22 @@ fn main() {
     }
 
     let method = command.clone();
-    let params = if method == "list-timers" {
+    let params = if method == "list-units" {
+        // list-units [type] — optional type or state filter
+        // Build a JSON object with optional type and state filters.
+        let mut obj = serde_json::Map::new();
+        if positional.len() >= 2 {
+            obj.insert("type".to_string(), Value::String(positional[1].clone()));
+        }
+        if let Some(ref state) = state_filter {
+            obj.insert("state".to_string(), Value::String(state.clone()));
+        }
+        if obj.is_empty() {
+            None
+        } else {
+            Some(Value::Object(obj))
+        }
+    } else if method == "list-timers" {
         // list-timers takes no parameters
         None
     } else if method == "set-property" {
@@ -861,6 +888,19 @@ fn handle_response(
                 && !quiet
             {
                 format_timer_table(arr);
+            }
+        }
+        "list-units" => {
+            // list-units returns an array of unit name strings.
+            if let Some(result) = result
+                && let Some(arr) = result.as_array()
+                && !quiet
+            {
+                for name in arr {
+                    if let Some(s) = name.as_str() {
+                        println!("{s}");
+                    }
+                }
             }
         }
         "list-dependencies" => {

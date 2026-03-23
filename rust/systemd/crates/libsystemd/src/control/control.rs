@@ -51,7 +51,7 @@ pub fn open_all_sockets(run_info: ArcMutRuntimeInfo, conf: &crate::config::Confi
 
 #[derive(Debug)]
 pub enum Command {
-    ListUnits(Option<UnitIdKind>),
+    ListUnits(Option<UnitIdKind>, Option<String>),
     /// `list-unit-files [--type=TYPE]` — list all unit files on disk with their state.
     ListUnitFiles(Option<String>),
     /// `list-dependencies <unit> [--reverse]` — show the dependency tree.
@@ -330,33 +330,39 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
         }
 
         "list-units" => {
-            let kind = match &call.params {
-                Some(params) => match params {
-                    Value::String(s) => {
-                        let kind = match s.as_str() {
-                            "target" => UnitIdKind::Target,
-                            "socket" => UnitIdKind::Socket,
-                            "service" => UnitIdKind::Service,
-                            "slice" => UnitIdKind::Slice,
-                            "mount" => UnitIdKind::Mount,
-                            "device" => UnitIdKind::Device,
-                            _ => {
-                                return Err(ParseError::ParamsInvalid(format!(
-                                    "Kind not recognized: {s}"
-                                )));
-                            }
+            let mut kind = None;
+            let mut state_filter = None;
+            match &call.params {
+                Some(Value::String(s)) => {
+                    kind = match s.as_str() {
+                        "target" => Some(UnitIdKind::Target),
+                        "socket" => Some(UnitIdKind::Socket),
+                        "service" => Some(UnitIdKind::Service),
+                        "slice" => Some(UnitIdKind::Slice),
+                        "mount" => Some(UnitIdKind::Mount),
+                        "device" => Some(UnitIdKind::Device),
+                        _ => None,
+                    };
+                }
+                Some(Value::Object(obj)) => {
+                    if let Some(Value::String(t)) = obj.get("type") {
+                        kind = match t.as_str() {
+                            "target" => Some(UnitIdKind::Target),
+                            "socket" => Some(UnitIdKind::Socket),
+                            "service" => Some(UnitIdKind::Service),
+                            "slice" => Some(UnitIdKind::Slice),
+                            "mount" => Some(UnitIdKind::Mount),
+                            "device" => Some(UnitIdKind::Device),
+                            _ => None,
                         };
-                        Some(kind)
                     }
-                    _ => {
-                        return Err(ParseError::ParamsInvalid(
-                            "Params must be a single string".to_string(),
-                        ));
+                    if let Some(Value::String(s)) = obj.get("state") {
+                        state_filter = Some(s.clone());
                     }
-                },
-                None => None,
-            };
-            Command::ListUnits(kind)
+                }
+                _ => {}
+            }
+            Command::ListUnits(kind, state_filter)
         }
         "shutdown" => {
             let action = match &call.params {
@@ -2133,12 +2139,15 @@ pub fn execute_command(
                 props.insert("DefaultLimitNOFILE".to_string(), "524288".to_string());
                 props.insert("DefaultLimitNOFILESoft".to_string(), "1024".to_string());
                 // Read from system.conf.d if available
-                if let Ok(content) = std::fs::read_to_string("/run/systemd/system.conf.d/rlimits.conf") {
+                if let Ok(content) =
+                    std::fs::read_to_string("/run/systemd/system.conf.d/rlimits.conf")
+                {
                     for line in content.lines() {
                         let line = line.trim();
                         if let Some(val) = line.strip_prefix("DefaultLimitNOFILE=") {
                             if let Some((soft, hard)) = val.split_once(':') {
-                                props.insert("DefaultLimitNOFILESoft".to_string(), soft.to_string());
+                                props
+                                    .insert("DefaultLimitNOFILESoft".to_string(), soft.to_string());
                                 props.insert("DefaultLimitNOFILE".to_string(), hard.to_string());
                             } else {
                                 props.insert("DefaultLimitNOFILE".to_string(), val.to_string());
@@ -2473,16 +2482,36 @@ pub fn execute_command(
                 }
             }
         }
-        Command::ListUnits(kind) => {
+        Command::ListUnits(kind, state_filter) => {
             let run_info = &*run_info.read_poisoned();
             let unit_table = &run_info.unit_table;
             for (id, unit) in unit_table {
-                let include = if let Some(kind) = kind {
+                let kind_match = if let Some(kind) = kind {
                     id.kind == kind
                 } else {
                     true
                 };
-                if include {
+                let state_match = if let Some(ref state) = state_filter {
+                    let status = unit.common.status.read_poisoned();
+                    let active_state = match &*status {
+                        UnitStatus::NeverStarted => "inactive",
+                        UnitStatus::Starting => "activating",
+                        UnitStatus::Stopping => "deactivating",
+                        UnitStatus::Restarting => "activating",
+                        UnitStatus::Started(_) => "active",
+                        UnitStatus::Stopped(_, errors) => {
+                            if errors.is_empty() {
+                                "inactive"
+                            } else {
+                                "failed"
+                            }
+                        }
+                    };
+                    state.split(',').any(|s| s == active_state)
+                } else {
+                    true
+                };
+                if kind_match && state_match {
                     result_vec
                         .as_array_mut()
                         .unwrap()
@@ -2492,12 +2521,24 @@ pub fn execute_command(
         }
         Command::LoadNew(names) => {
             let run_info = &mut *run_info.write_poisoned();
+            let existing_names: Vec<String> = run_info
+                .unit_table
+                .values()
+                .map(|unit| unit.id.name.clone())
+                .collect();
             let mut map = std::collections::HashMap::new();
             for name in &names {
+                // Skip units that are already loaded (like `systemctl enable`
+                // on an already-active unit should succeed silently).
+                if existing_names.iter().any(|n| n == name) {
+                    continue;
+                }
                 let unit = load_new_unit(&run_info.config.unit_dirs, name)?;
                 map.insert(unit.id.clone(), unit);
             }
-            insert_new_units(map, run_info)?;
+            if !map.is_empty() {
+                insert_new_units(map, run_info)?;
+            }
         }
         Command::LoadAllNew => {
             let run_info = &mut *run_info.write_poisoned();
