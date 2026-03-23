@@ -356,7 +356,13 @@ fn pid1_specific_setup() {
     // DOWN (the kernel creates it but doesn't activate it), which breaks
     // services that bind to 127.0.0.1 and integration tests that check
     // for LOOPBACK,UP.
-    bring_up_loopback();
+    //
+    // Skip during daemon-reexec — real systemd only brings up loopback
+    // during a full (first) setup, not during re-execution.
+    let is_reexec = std::env::var("SYSTEMD_RS_REEXEC").is_ok_and(|v| v == "1");
+    if !is_reexec {
+        bring_up_loopback();
+    }
 
     // Ensure /etc/machine-id exists.
     //
