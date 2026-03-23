@@ -1447,25 +1447,7 @@ fn quote_glob_chars(s: &str) -> String {
 
 /// Remove the \x00 escape prefixes added by quote_glob_chars.
 pub fn unquote_glob_chars(s: &str) -> String {
-    let mut result = String::new();
-    let mut chars = s.chars();
-    while let Some(ch) = chars.next() {
-        if ch == '\x00' {
-            // Quote marker — skip it, keep the next char as literal
-            if let Some(next) = chars.next() {
-                result.push(next);
-            }
-        } else if ch == '\\' {
-            // Backslash quote removal: consume backslash, keep next char
-            // If at end of string, backslash is removed
-            if let Some(next) = chars.next() {
-                result.push(next);
-            }
-        } else {
-            result.push(ch);
-        }
-    }
-    result
+    s.replace('\x00', "")
 }
 
 /// Returns true if the string contains unescaped glob metacharacters.
