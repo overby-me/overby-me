@@ -654,6 +654,10 @@ impl Shell {
                         continue;
                     }
                     status = self.run_complete_command(&cmd);
+                    // Run ERR trap on non-zero status
+                    if status != 0 && !self.in_condition {
+                        self.run_err_trap();
+                    }
                     if self.opt_errexit
                         && status != 0
                         && !self.in_condition
@@ -683,6 +687,17 @@ impl Shell {
         status
     }
 
+    /// Execute the ERR trap if set and the command failed
+    pub fn run_err_trap(&mut self) {
+        if let Some(handler) = self.traps.get("ERR").cloned()
+            && !handler.is_empty()
+        {
+            let saved = self.last_status;
+            self.run_string(&handler);
+            self.last_status = saved;
+        }
+    }
+
     /// Execute the EXIT trap if set
     pub fn run_exit_trap(&mut self) {
         if let Some(handler) = self
@@ -703,6 +718,10 @@ impl Shell {
                 break;
             }
             status = self.run_complete_command(cmd);
+            // Run ERR trap on non-zero status (not in conditions or negated)
+            if status != 0 && !self.in_condition {
+                self.run_err_trap();
+            }
             if self.opt_errexit && status != 0 && !self.in_condition && !self.errexit_suppressed {
                 std::io::Write::flush(&mut std::io::stdout()).ok();
                 std::io::Write::flush(&mut std::io::stderr()).ok();
