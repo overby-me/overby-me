@@ -930,6 +930,14 @@ impl Parser {
                         if i > 0 {
                             last.push(WordPart::Literal("\x01".to_string()));
                         }
+                        // Include [key]= prefix for associative array elements
+                        if let Some(idx) = &elem.index {
+                            last.push(WordPart::Literal("[".to_string()));
+                            for part in idx {
+                                last.push(part.clone());
+                            }
+                            last.push(WordPart::Literal("]=".to_string()));
+                        }
                         for part in &elem.value {
                             last.push(part.clone());
                         }

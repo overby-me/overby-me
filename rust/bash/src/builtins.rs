@@ -1586,36 +1586,44 @@ fn parse_assoc_literal(s: &str) -> HashMap<String, String> {
         trimmed
     };
     let mut map = HashMap::new();
-    let mut rest = inner.trim();
-    while !rest.is_empty() {
-        if rest.starts_with('[')
-            && let Some(close) = rest.find("]=")
-        {
-            let key = &rest[1..close];
-            let after = &rest[close + 2..];
-            let (value, remaining) = if let Some(stripped) = after.strip_prefix('"') {
-                if let Some(end) = stripped.find('"') {
-                    (&stripped[..end], stripped[end + 1..].trim_start())
+    // Split on \x01 separator (from inline array parser) or whitespace
+    let entries: Vec<&str> = if inner.contains('\x01') {
+        inner.split('\x01').collect()
+    } else {
+        vec![inner]
+    };
+    for entry in entries {
+        let mut rest = entry.trim();
+        while !rest.is_empty() {
+            if rest.starts_with('[')
+                && let Some(close) = rest.find("]=")
+            {
+                let key = &rest[1..close];
+                let after = &rest[close + 2..];
+                let (value, remaining) = if let Some(stripped) = after.strip_prefix('"') {
+                    if let Some(end) = stripped.find('"') {
+                        (&stripped[..end], stripped[end + 1..].trim_start())
+                    } else {
+                        (after, "")
+                    }
+                } else if let Some(stripped) = after.strip_prefix('\'') {
+                    if let Some(end) = stripped.find('\'') {
+                        (&stripped[..end], stripped[end + 1..].trim_start())
+                    } else {
+                        (after, "")
+                    }
                 } else {
-                    (after, "")
-                }
-            } else if let Some(stripped) = after.strip_prefix('\'') {
-                if let Some(end) = stripped.find('\'') {
-                    (&stripped[..end], stripped[end + 1..].trim_start())
-                } else {
-                    (after, "")
-                }
-            } else {
-                let end = after.find(char::is_whitespace).unwrap_or(after.len());
-                (&after[..end], after[end..].trim_start())
-            };
-            map.insert(key.to_string(), value.to_string());
-            rest = remaining;
-            continue;
+                    let end = after.find(char::is_whitespace).unwrap_or(after.len());
+                    (&after[..end], after[end..].trim_start())
+                };
+                map.insert(key.to_string(), value.to_string());
+                rest = remaining;
+                continue;
+            }
+            // Skip unknown content
+            let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+            rest = rest[end..].trim_start();
         }
-        // Skip unknown content
-        let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
-        rest = rest[end..].trim_start();
     }
     map
 }
