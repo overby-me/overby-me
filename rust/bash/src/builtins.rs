@@ -2559,7 +2559,7 @@ fn builtin_type(shell: &mut Shell, args: &[String]) -> i32 {
         );
         if flag_t {
             // Print type word only
-            if shell.aliases.contains_key(name) {
+            if shell.aliases.contains_key(name) && shell.shopt_expand_aliases {
                 println!("alias");
             } else if is_keyword {
                 println!("keyword");
@@ -2583,7 +2583,9 @@ fn builtin_type(shell: &mut Shell, args: &[String]) -> i32 {
             }
         } else {
             // Default behavior
-            if let Some(alias_val) = shell.aliases.get(name) {
+            if shell.shopt_expand_aliases
+                && let Some(alias_val) = shell.aliases.get(name)
+            {
                 println!("{} is aliased to `{}'", name, alias_val);
             } else if is_keyword {
                 println!("{} is a shell keyword", name);
