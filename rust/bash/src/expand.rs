@@ -1570,8 +1570,8 @@ fn char_matches_pattern(c: char, pattern: &str) -> bool {
 /// Brace expansion: {a,b,c} → ["a", "b", "c"], pre{a,b}post → ["preapost", "prebpost"]
 /// Also handles sequences: {1..5} → ["1", "2", "3", "4", "5"]
 fn brace_expand(s: &str) -> Vec<String> {
-    // Bash algorithm: find the first '}', then scan backwards for a matching '{'
-    // that forms a valid brace expansion (no nested braces between them).
+    // Bash algorithm: find the first '{', then its matching '}' (tracking depth),
+    // check if the content has commas or '..' at depth 0.
     let chars: Vec<char> = s.chars().collect();
 
     let mut i = 0;
@@ -1580,172 +1580,176 @@ fn brace_expand(s: &str) -> Vec<String> {
             i += 2;
             continue;
         }
-        if chars[i] == '}' {
-            // Scan backwards for the nearest unescaped '{'
-            let end = i;
-            let mut j = end;
-            while j > 0 {
-                j -= 1;
-                if j > 0 && (chars[j - 1] == '\\' || chars[j - 1] == '\x00') {
+        if chars[i] == '{' {
+            let start = i;
+            // Find matching '}' tracking depth
+            let mut depth = 1;
+            let mut has_comma = false;
+            let mut has_dotdot = false;
+            let mut j = i + 1;
+            let mut prev_was_dot = false;
+            while j < chars.len() && depth > 0 {
+                if (chars[j] == '\\' || chars[j] == '\x00') && j + 1 < chars.len() {
+                    prev_was_dot = false;
+                    j += 2;
                     continue;
                 }
-                if chars[j] == '{' {
-                    let start = j;
-                    let inner = &s[start + 1..end];
-                    let mut has_comma = false;
-                    let mut has_dotdot = false;
-                    let inner_chars: Vec<char> = inner.chars().collect();
-                    let mut k = 0;
-                    while k < inner_chars.len() {
-                        if (inner_chars[k] == '\\' || inner_chars[k] == '\x00')
-                            && k + 1 < inner_chars.len()
-                        {
-                            k += 2;
-                            continue;
-                        }
-                        if inner_chars[k] == ',' {
-                            has_comma = true;
-                        }
-                        k += 1;
+                match chars[j] {
+                    '{' => {
+                        depth += 1;
+                        prev_was_dot = false;
                     }
-                    if inner.contains("..") {
+                    '}' => {
+                        depth -= 1;
+                        prev_was_dot = false;
+                    }
+                    ',' if depth == 1 => {
+                        has_comma = true;
+                        prev_was_dot = false;
+                    }
+                    '.' if depth == 1 && prev_was_dot => {
                         has_dotdot = true;
                     }
-                    if has_comma || has_dotdot {
-                        let prefix = &s[..start];
-                        let suffix = &s[end + 1..];
+                    '.' if depth == 1 => {
+                        prev_was_dot = true;
+                        j += 1;
+                        continue;
+                    }
+                    _ => {
+                        prev_was_dot = false;
+                    }
+                }
+                j += 1;
+            }
+            if depth == 0 && (has_comma || has_dotdot) {
+                let end = j - 1; // position of matching '}'
+                let inner = &s[start + 1..end];
+                let prefix = &s[..start];
+                let suffix = &s[end + 1..];
 
-                        if has_comma {
-                            // Split on commas (respecting nested braces)
-                            let alternatives = split_brace_alternatives(inner);
-                            // Expand any brace patterns in the suffix
-                            let suffix_expanded = brace_expand(suffix);
-                            let mut result = Vec::new();
-                            for alt in &alternatives {
-                                // Recursively expand braces within the alternative itself
-                                let alt_expanded = brace_expand(alt);
-                                for ae in &alt_expanded {
-                                    for se in &suffix_expanded {
-                                        result.push(format!("{}{}{}", prefix, ae, se));
-                                    }
-                                }
-                            }
-                            return result;
-                        } else if has_dotdot {
-                            // Sequence: {start..end} or {start..end..step}
-                            let parts: Vec<&str> = inner.split("..").collect();
-                            if parts.len() >= 2 {
-                                let mut result = Vec::new();
-                                if let (Ok(start_n), Ok(end_n)) =
-                                    (parts[0].parse::<i64>(), parts[1].parse::<i64>())
-                                {
-                                    // If step is present but not a valid integer, don't expand
-                                    let step: i64 = if parts.len() >= 3 {
-                                        match parts[2].parse::<i64>() {
-                                            Ok(v) => v,
-                                            Err(_) => {
-                                                // Invalid step — return as literal
-                                                return vec![s.to_string()];
-                                            }
-                                        }
-                                    } else {
-                                        1
-                                    };
-                                    let step = if step == 0 { 1 } else { step.abs() };
-                                    // Zero-padding: pad to the widest operand width
-                                    let width = std::cmp::max(parts[0].len(), parts[1].len());
-                                    let needs_pad = parts[0].starts_with('0') && parts[0].len() > 1
-                                        || parts[1].starts_with('0') && parts[1].len() > 1
-                                        || parts[0].starts_with("-0")
-                                        || parts[1].starts_with("-0");
-                                    let suffix_expanded = brace_expand(suffix);
-                                    if start_n <= end_n {
-                                        let mut n = start_n;
-                                        while n <= end_n {
-                                            let num_str = if needs_pad {
-                                                if n < 0 {
-                                                    format!("-{:0>w$}", -n, w = width - 1)
-                                                } else {
-                                                    format!("{:0>w$}", n, w = width)
-                                                }
-                                            } else {
-                                                n.to_string()
-                                            };
-                                            for se in &suffix_expanded {
-                                                result.push(format!("{}{}{}", prefix, num_str, se));
-                                            }
-                                            n += step;
-                                        }
-                                    } else {
-                                        let mut n = start_n;
-                                        while n >= end_n {
-                                            let num_str = if needs_pad {
-                                                if n < 0 {
-                                                    format!("-{:0>w$}", -n, w = width - 1)
-                                                } else {
-                                                    format!("{:0>w$}", n, w = width)
-                                                }
-                                            } else {
-                                                n.to_string()
-                                            };
-                                            for se in &suffix_expanded {
-                                                result.push(format!("{}{}{}", prefix, num_str, se));
-                                            }
-                                            n -= step;
-                                        }
-                                    }
-                                } else if parts[0].len() == 1
-                                    && parts[1].len() == 1
-                                    && parts[0].chars().next().unwrap().is_ascii_alphabetic()
-                                        == parts[1].chars().next().unwrap().is_ascii_alphabetic()
-                                {
-                                    // Character range: {a..z} or {a..z..2}
-                                    let start_c = parts[0].chars().next().unwrap() as i32;
-                                    let end_c = parts[1].chars().next().unwrap() as i32;
-                                    let step: i32 = if parts.len() >= 3 {
-                                        match parts[2].parse::<i32>() {
-                                            Ok(v) => v,
-                                            Err(_) => {
-                                                return vec![s.to_string()];
-                                            }
-                                        }
-                                    } else {
-                                        1
-                                    };
-                                    let step = if step == 0 { 1 } else { step.abs() };
-                                    let suffix_expanded = brace_expand(suffix);
-                                    if start_c <= end_c {
-                                        let mut c = start_c;
-                                        while c <= end_c {
-                                            for se in &suffix_expanded {
-                                                result.push(format!(
-                                                    "{}{}{}",
-                                                    prefix, c as u8 as char, se
-                                                ));
-                                            }
-                                            c += step;
-                                        }
-                                    } else {
-                                        let mut c = start_c;
-                                        while c >= end_c {
-                                            for se in &suffix_expanded {
-                                                result.push(format!(
-                                                    "{}{}{}",
-                                                    prefix, c as u8 as char, se
-                                                ));
-                                            }
-                                            c -= step;
-                                        }
-                                    }
-                                }
-                                if !result.is_empty() {
-                                    return result;
-                                }
+                if has_comma {
+                    // Split on commas (respecting nested braces)
+                    let alternatives = split_brace_alternatives(inner);
+                    // Expand braces within each alternative and in the suffix separately
+                    let suffix_expanded = brace_expand(suffix);
+                    let mut result = Vec::new();
+                    for alt in &alternatives {
+                        let alt_expanded = brace_expand(alt);
+                        for ae in &alt_expanded {
+                            for se in &suffix_expanded {
+                                result.push(format!("{}{}{}", prefix, ae, se));
                             }
                         }
                     }
-                    // This { didn't form a valid expansion, keep scanning backwards
-                    break;
+                    return result;
+                } else if has_dotdot {
+                    // Sequence: {start..end} or {start..end..step}
+                    let parts: Vec<&str> = inner.split("..").collect();
+                    if parts.len() >= 2 {
+                        let mut result = Vec::new();
+                        if let (Ok(start_n), Ok(end_n)) =
+                            (parts[0].parse::<i64>(), parts[1].parse::<i64>())
+                        {
+                            // If step is present but not a valid integer, don't expand
+                            let step: i64 = if parts.len() >= 3 {
+                                match parts[2].parse::<i64>() {
+                                    Ok(v) => v,
+                                    Err(_) => {
+                                        // Invalid step — return as literal
+                                        return vec![s.to_string()];
+                                    }
+                                }
+                            } else {
+                                1
+                            };
+                            let step = if step == 0 { 1 } else { step.abs() };
+                            // Zero-padding: pad to the widest operand width
+                            let width = std::cmp::max(parts[0].len(), parts[1].len());
+                            let needs_pad = parts[0].starts_with('0') && parts[0].len() > 1
+                                || parts[1].starts_with('0') && parts[1].len() > 1
+                                || parts[0].starts_with("-0")
+                                || parts[1].starts_with("-0");
+                            if start_n <= end_n {
+                                let mut n = start_n;
+                                while n <= end_n {
+                                    let num_str = if needs_pad {
+                                        if n < 0 {
+                                            format!("-{:0>w$}", -n, w = width - 1)
+                                        } else {
+                                            format!("{:0>w$}", n, w = width)
+                                        }
+                                    } else {
+                                        n.to_string()
+                                    };
+                                    result.extend(brace_expand(&format!(
+                                        "{}{}{}",
+                                        prefix, num_str, suffix
+                                    )));
+                                    n += step;
+                                }
+                            } else {
+                                let mut n = start_n;
+                                while n >= end_n {
+                                    let num_str = if needs_pad {
+                                        if n < 0 {
+                                            format!("-{:0>w$}", -n, w = width - 1)
+                                        } else {
+                                            format!("{:0>w$}", n, w = width)
+                                        }
+                                    } else {
+                                        n.to_string()
+                                    };
+                                    result.extend(brace_expand(&format!(
+                                        "{}{}{}",
+                                        prefix, num_str, suffix
+                                    )));
+                                    n -= step;
+                                }
+                            }
+                        } else if parts[0].len() == 1
+                            && parts[1].len() == 1
+                            && parts[0].chars().next().unwrap().is_ascii_alphabetic()
+                                == parts[1].chars().next().unwrap().is_ascii_alphabetic()
+                        {
+                            // Character range: {a..z} or {a..z..2}
+                            let start_c = parts[0].chars().next().unwrap() as i32;
+                            let end_c = parts[1].chars().next().unwrap() as i32;
+                            let step: i32 = if parts.len() >= 3 {
+                                match parts[2].parse::<i32>() {
+                                    Ok(v) => v,
+                                    Err(_) => {
+                                        return vec![s.to_string()];
+                                    }
+                                }
+                            } else {
+                                1
+                            };
+                            let step = if step == 0 { 1 } else { step.abs() };
+                            if start_c <= end_c {
+                                let mut c = start_c;
+                                while c <= end_c {
+                                    result.extend(brace_expand(&format!(
+                                        "{}{}{}",
+                                        prefix, c as u8 as char, suffix
+                                    )));
+                                    c += step;
+                                }
+                            } else {
+                                let mut c = start_c;
+                                while c >= end_c {
+                                    result.extend(brace_expand(&format!(
+                                        "{}{}{}",
+                                        prefix, c as u8 as char, suffix
+                                    )));
+                                    c -= step;
+                                }
+                            }
+                        }
+                        if !result.is_empty() {
+                            return result;
+                        }
+                    }
+                    // Sequence was invalid — don't skip, let inner braces expand
                 }
             }
         }
