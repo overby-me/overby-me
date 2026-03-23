@@ -261,7 +261,9 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                             if i > 0 {
                                 out.push(Segment::SplitHere);
                             }
-                            out.push(Segment::Quoted(elem.clone()));
+                            // Apply param operation (^, ^^, ,, etc.) to each element
+                            let modified = apply_param_op(elem, &expr.op, ctx, cmd_sub);
+                            out.push(Segment::Quoted(modified));
                         }
                     }
                     WordPart::Param(expr) => {
@@ -493,6 +495,9 @@ fn get_array_elements(expr: &ParamExpr, ctx: &ExpCtx) -> Vec<String> {
         let resolved = ctx.resolve_nameref(base);
         if let Some(arr) = ctx.arrays.get(&resolved) {
             return arr.clone();
+        }
+        if let Some(assoc) = ctx.assoc_arrays.get(&resolved) {
+            return assoc.values().cloned().collect();
         }
         // Fall back to scalar as single element
         if let Some(val) = ctx.vars.get(&resolved) {
@@ -743,6 +748,30 @@ fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
             op: expr.op.clone(),
         };
         return expand_param(&indirect_expr, ctx, cmd_sub);
+    }
+
+    // For array[@] or array[*] with operations, apply per-element
+    if let Some(bracket) = expr.name.find('[') {
+        let base = &expr.name[..bracket];
+        let idx_str = &expr.name[bracket + 1..expr.name.len() - 1];
+        if (idx_str == "@" || idx_str == "*") && !matches!(expr.op, ParamOp::None | ParamOp::Length)
+        {
+            let resolved = ctx.resolve_nameref(base);
+            let elements: Vec<String> = if let Some(arr) = ctx.arrays.get(&resolved) {
+                arr.clone()
+            } else if let Some(assoc) = ctx.assoc_arrays.get(&resolved) {
+                assoc.values().cloned().collect()
+            } else if let Some(val) = ctx.vars.get(&resolved) {
+                vec![val.clone()]
+            } else {
+                vec![]
+            };
+            let modified: Vec<String> = elements
+                .iter()
+                .map(|elem| apply_param_op(elem, &expr.op, ctx, cmd_sub))
+                .collect();
+            return modified.join(" ");
+        }
     }
 
     let val = lookup_var(&expr.name, ctx);
