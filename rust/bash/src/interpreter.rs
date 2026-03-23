@@ -1070,10 +1070,11 @@ impl Shell {
                             }
                             AssignValue::None => String::new(),
                         };
+                        let qval = xtrace_quote(&val);
                         if assign.append {
-                            eprintln!("+ {}+={}", assign.name, val);
+                            eprintln!("+ {}+={}", assign.name, qval);
                         } else {
-                            eprintln!("+ {}={}", assign.name, val);
+                            eprintln!("+ {}={}", assign.name, qval);
                         }
                     }
                     self.execute_assignment(assign);
@@ -1102,13 +1103,15 @@ impl Shell {
                     AssignValue::Array(_) => String::new(),
                     AssignValue::None => String::new(),
                 };
+                let qval = xtrace_quote(&val);
                 if assign.append {
-                    eprintln!("+ {}+={}", assign.name, val);
+                    eprintln!("+ {}+={}", assign.name, qval);
                 } else {
-                    eprintln!("+ {}={}", assign.name, val);
+                    eprintln!("+ {}={}", assign.name, qval);
                 }
             }
-            eprintln!("+ {}", expanded_words.join(" "));
+            let quoted: Vec<String> = expanded_words.iter().map(|w| xtrace_quote(w)).collect();
+            eprintln!("+ {}", quoted.join(" "));
         }
 
         // Alias expansion: if the first word is an alias, re-parse and run
@@ -2373,6 +2376,101 @@ impl Shell {
 }
 
 /// Find an assignment operator in an arithmetic expression.
+/// Quote a word for xtrace output, matching bash's format
+fn xtrace_quote(s: &str) -> String {
+    if s.is_empty() {
+        return "''".to_string();
+    }
+    // Check if quoting is needed
+    let needs_quoting = s.chars().any(|c| {
+        matches!(
+            c,
+            '|' | '&'
+                | ';'
+                | '('
+                | ')'
+                | '<'
+                | '>'
+                | ' '
+                | '\t'
+                | '\n'
+                | '\''
+                | '"'
+                | '`'
+                | '$'
+                | '\\'
+                | '!'
+                | '{'
+                | '}'
+                | '*'
+                | '?'
+                | '['
+                | ']'
+                | '#'
+                | '~'
+        )
+    });
+    if !needs_quoting {
+        return s.to_string();
+    }
+    // Check for control characters that need $'...' quoting
+    let has_control = s.chars().any(|c| c.is_control());
+    if has_control {
+        let mut out = String::from("$'");
+        for ch in s.chars() {
+            match ch {
+                '\n' => out.push_str("\\n"),
+                '\t' => out.push_str("\\t"),
+                '\r' => out.push_str("\\r"),
+                '\x07' => out.push_str("\\a"),
+                '\x08' => out.push_str("\\b"),
+                '\'' => out.push_str("\\'"),
+                '\\' => out.push_str("\\\\"),
+                c if c.is_control() => out.push_str(&format!("\\x{:02x}", c as u32)),
+                c => out.push(c),
+            }
+        }
+        out.push('\'');
+        out
+    } else if !s.contains('\'') {
+        format!("'{}'", s)
+    } else {
+        // Use backslash escaping for words with single quotes
+        let mut out = String::new();
+        for ch in s.chars() {
+            if matches!(
+                ch,
+                '|' | '&'
+                    | ';'
+                    | '('
+                    | ')'
+                    | '<'
+                    | '>'
+                    | ' '
+                    | '\t'
+                    | '"'
+                    | '`'
+                    | '$'
+                    | '\\'
+                    | '!'
+                    | '{'
+                    | '}'
+                    | '*'
+                    | '?'
+                    | '['
+                    | ']'
+                    | '#'
+                    | '~'
+                    | '\''
+            ) {
+                out.push('\\');
+            }
+            out.push(ch);
+        }
+        out
+    }
+}
+
 fn case_pattern_match(text: &str, pattern: &str) -> bool {
     if pattern == "*" {
         return true;
