@@ -44,6 +44,16 @@ const DMI_VENDOR_PATH: &str = "/sys/class/dmi/id/sys_vendor";
 const DMI_MODEL_PATH: &str = "/sys/class/dmi/id/product_name";
 const CONTROL_SOCKET_PATH: &str = "/run/systemd/hostnamed.sock";
 
+/// Return the effective hostname file path, honoring `SYSTEMD_ETC_HOSTNAME`.
+fn hostname_path() -> String {
+    env::var("SYSTEMD_ETC_HOSTNAME").unwrap_or_else(|_| HOSTNAME_PATH.to_string())
+}
+
+/// Return the effective machine-info file path, honoring `SYSTEMD_ETC_MACHINE_INFO`.
+fn machine_info_path() -> String {
+    env::var("SYSTEMD_ETC_MACHINE_INFO").unwrap_or_else(|_| MACHINE_INFO_PATH.to_string())
+}
+
 const DBUS_NAME: &str = "org.freedesktop.hostname1";
 const DBUS_PATH: &str = "/org/freedesktop/hostname1";
 
@@ -106,8 +116,8 @@ impl HostnameState {
     /// Load all hostname state from the filesystem.
     pub fn load() -> Self {
         Self::load_from(
-            HOSTNAME_PATH,
-            MACHINE_INFO_PATH,
+            &hostname_path(),
+            &machine_info_path(),
             OS_RELEASE_PATH,
             OS_RELEASE_USR_PATH,
             DMI_CHASSIS_TYPE_PATH,
@@ -299,7 +309,7 @@ impl HostnameState {
 /// Set the static hostname: write to /etc/hostname and optionally set the
 /// kernel hostname too.
 pub fn set_static_hostname(hostname: &str) -> io::Result<()> {
-    set_static_hostname_at(hostname, HOSTNAME_PATH)
+    set_static_hostname_at(hostname, &hostname_path())
 }
 
 pub fn set_static_hostname_at(hostname: &str, path: &str) -> io::Result<()> {
@@ -325,7 +335,7 @@ pub fn set_transient_hostname(hostname: &str) -> io::Result<()> {
 
 /// Update a key in /etc/machine-info. If value is empty, the key is removed.
 pub fn set_machine_info_key(key: &str, value: &str) -> io::Result<()> {
-    set_machine_info_key_at(key, value, MACHINE_INFO_PATH)
+    set_machine_info_key_at(key, value, &machine_info_path())
 }
 
 pub fn set_machine_info_key_at(key: &str, value: &str, path: &str) -> io::Result<()> {

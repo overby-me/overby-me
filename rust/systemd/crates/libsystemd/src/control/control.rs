@@ -878,7 +878,7 @@ fn find_or_load_unit(
                 let id = unit.id.clone();
                 crate::units::insert_new_unit_lenient(unit, &mut ri);
                 trace!("Auto-loaded unit {unit_name} from disk");
-                return Ok(id);
+                Ok(id)
             }
             Err(load_err) => {
                 // If this looks like a template instance (e.g. "getty@tty1.service"),
@@ -887,24 +887,22 @@ fn find_or_load_unit(
                     crate::units::loading::directory_deps::parse_template_instance(unit_name)
                 {
                     let empty_dropins = std::collections::HashMap::new();
-                    if let Some(unit) =
-                        crate::units::loading::directory_deps::instantiate_template(
-                            &template_name,
-                            &instance_name,
-                            unit_name,
-                            &ri.config.unit_dirs,
-                            &empty_dropins,
-                        )
-                    {
+                    if let Some(unit) = crate::units::loading::directory_deps::instantiate_template(
+                        &template_name,
+                        &instance_name,
+                        unit_name,
+                        &ri.config.unit_dirs,
+                        &empty_dropins,
+                    ) {
                         let id = unit.id.clone();
                         crate::units::insert_new_unit_lenient(unit, &mut ri);
                         info!("Instantiated template unit {unit_name} from {template_name}");
                         return Ok(id);
                     }
                 }
-                return Err(format!(
+                Err(format!(
                     "No unit found with name: {unit_name} (also failed to load from disk: {load_err})"
-                ));
+                ))
             }
         }
     }
@@ -1634,10 +1632,7 @@ fn create_transient_unit(
         .find(|u| u.id.name == *unit_name)
         .map(|u| {
             let status = u.common.status.read_poisoned();
-            let is_done = matches!(
-                &*status,
-                UnitStatus::NeverStarted | UnitStatus::Stopped(..)
-            );
+            let is_done = matches!(&*status, UnitStatus::NeverStarted | UnitStatus::Stopped(..));
             (u.id.clone(), is_done)
         });
     match existing_id {
@@ -2607,22 +2602,49 @@ pub fn execute_command(
                 .map(|unit| unit.id.name.clone())
                 .collect::<Vec<_>>();
 
-            // filter out existing units
+            // Separate into new and updated units
             let mut ignored_units_names = Vec::new();
             let mut new_units_names = Vec::new();
+            let mut updated_units_names = Vec::new();
             let mut new_units = std::collections::HashMap::new();
+            let mut updated_units = Vec::new();
             for (id, unit) in units {
                 if existing_names.contains(&unit.id.name) {
-                    ignored_units_names.push(Value::String(unit.id.name.clone()));
+                    updated_units.push((id, unit));
                 } else {
                     new_units_names.push(Value::String(unit.id.name.clone()));
                     new_units.insert(id, unit);
                 }
             }
 
+            // Update existing units' configuration (preserving runtime status)
+            for (new_id, new_unit) in updated_units {
+                // Find the existing unit by name
+                let existing_id = run_info
+                    .unit_table
+                    .keys()
+                    .find(|id| id.name == new_id.name)
+                    .cloned();
+                if let Some(existing_id) = existing_id {
+                    if let Some(existing_unit) = run_info.unit_table.get_mut(&existing_id) {
+                        // Update configuration but preserve runtime status
+                        existing_unit.specific = new_unit.specific;
+                        existing_unit.common.unit = new_unit.common.unit;
+                        existing_unit.common.dependencies = new_unit.common.dependencies;
+                        updated_units_names.push(Value::String(existing_id.name.clone()));
+                    }
+                } else {
+                    ignored_units_names.push(Value::String(new_id.name.clone()));
+                }
+            }
+
             let mut response_object = serde_json::Map::new();
             insert_new_units(new_units, run_info)?;
             response_object.insert("Added".into(), serde_json::Value::Array(new_units_names));
+            response_object.insert(
+                "Updated".into(),
+                serde_json::Value::Array(updated_units_names),
+            );
             response_object.insert(
                 "Ignored".into(),
                 serde_json::Value::Array(ignored_units_names),
