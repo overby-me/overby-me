@@ -3093,6 +3093,37 @@ fn builtin_hash(_shell: &mut Shell, _args: &[String]) -> i32 {
 }
 
 fn builtin_trap(shell: &mut Shell, args: &[String]) -> i32 {
+    fn signal_number(s: &str) -> i32 {
+        let upper = s.to_uppercase();
+        let name = upper.strip_prefix("SIG").unwrap_or(&upper);
+        match name {
+            "EXIT" | "0" => 0,
+            "HUP" | "1" => 1,
+            "INT" | "2" => 2,
+            "QUIT" | "3" => 3,
+            "ILL" | "4" => 4,
+            "TRAP" | "5" => 5,
+            "ABRT" | "6" => 6,
+            "BUS" | "7" => 7,
+            "FPE" | "8" => 8,
+            "KILL" | "9" => 9,
+            "USR1" | "10" => 10,
+            "SEGV" | "11" => 11,
+            "USR2" | "12" => 12,
+            "PIPE" | "13" => 13,
+            "ALRM" | "14" => 14,
+            "TERM" | "15" => 15,
+            "CHLD" | "17" => 17,
+            "CONT" | "18" => 18,
+            "STOP" | "19" => 19,
+            "TSTP" | "20" => 20,
+            "DEBUG" => 100,
+            "ERR" => 101,
+            "RETURN" => 102,
+            _ => 999,
+        }
+    }
+
     // Normalize signal name for display
     fn normalize_signal_name(s: &str) -> String {
         match s {
@@ -3109,8 +3140,10 @@ fn builtin_trap(shell: &mut Shell, args: &[String]) -> i32 {
     }
 
     if args.is_empty() {
-        // Print current traps
-        for (signal, handler) in &shell.traps {
+        // Print current traps in signal number order
+        let mut sorted: Vec<_> = shell.traps.iter().collect();
+        sorted.sort_by_key(|(sig, _)| signal_number(sig));
+        for (signal, handler) in sorted {
             println!("trap -- '{}' {}", handler, normalize_signal_name(signal));
         }
         return 0;
@@ -3165,7 +3198,9 @@ fn builtin_trap(shell: &mut Shell, args: &[String]) -> i32 {
             return 0;
         }
         if args[0] == "-p" {
-            for (signal, handler) in &shell.traps {
+            let mut sorted: Vec<_> = shell.traps.iter().collect();
+            sorted.sort_by_key(|(sig, _)| signal_number(sig));
+            for (signal, handler) in sorted {
                 println!("trap -- '{}' {}", handler, normalize_signal_name(signal));
             }
             return 0;
@@ -3179,7 +3214,9 @@ fn builtin_trap(shell: &mut Shell, args: &[String]) -> i32 {
     // Skip -p flag if present
     if args.first().map(|s| s.as_str()) == Some("-p") {
         if args.len() < 2 {
-            for (signal, handler) in &shell.traps {
+            let mut sorted: Vec<_> = shell.traps.iter().collect();
+            sorted.sort_by_key(|(sig, _)| signal_number(sig));
+            for (signal, handler) in sorted {
                 println!("trap -- '{}' {}", handler, normalize_signal_name(signal));
             }
             return 0;
