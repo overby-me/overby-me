@@ -973,6 +973,10 @@ fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
     match &expr.op {
         ParamOp::None => val,
         ParamOp::Length => {
+            // ${#@} or ${#*} — positional parameter count
+            if expr.name == "@" || expr.name == "*" {
+                return (ctx.positional.len().saturating_sub(1)).to_string();
+            }
             // ${#arr[@]} — array length
             if let Some(bracket) = expr.name.find('[') {
                 let base = &expr.name[..bracket];
