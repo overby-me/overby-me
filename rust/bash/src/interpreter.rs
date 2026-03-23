@@ -758,6 +758,33 @@ impl Shell {
         )
     }
 
+    /// Expand a word as a pattern (for case, [[ = ]]). Quoted glob chars are escaped.
+    pub fn expand_word_pattern(&mut self, word: &Word) -> String {
+        self.apply_assign_defaults(word);
+        let word = self.eval_arith_in_word(word);
+        let vars = self.vars.clone();
+        let arrays = self.arrays.clone();
+        let assoc_arrays = self.assoc_arrays.clone();
+        let namerefs = self.namerefs.clone();
+        let positional = self.positional.clone();
+        let last_status = self.last_status;
+        let last_bg_pid = self.last_bg_pid;
+        let opt_flags = self.get_opt_flags();
+        let mut cmd_sub = |cmd: &str| -> String { self.capture_output(cmd) };
+        expand::expand_word_pattern(
+            &word,
+            &vars,
+            &arrays,
+            &assoc_arrays,
+            &namerefs,
+            &positional,
+            last_status,
+            last_bg_pid,
+            &opt_flags,
+            &mut cmd_sub,
+        )
+    }
+
     /// Expand tilde in assignment context: `~` at start and after `:` are expanded
     pub fn expand_assignment_tilde(&self, value: &str) -> String {
         if !value.contains('~') {
@@ -1725,7 +1752,7 @@ impl Shell {
         while i < clause.items.len() {
             let item = &clause.items[i];
             let matched = item.patterns.iter().any(|pattern| {
-                let pat_expanded = self.expand_word_single(pattern);
+                let pat_expanded = self.expand_word_pattern(pattern);
                 case_pattern_match(&word_expanded, &pat_expanded)
             });
 
@@ -1788,7 +1815,12 @@ impl Shell {
             }
             CondExpr::Binary(left, op, right) => {
                 let lval = self.expand_word_single(left);
-                let rval = self.expand_word_single(right);
+                // For = and != operators, the right side is a pattern
+                let rval = if matches!(op.as_str(), "=" | "==" | "!=") {
+                    self.expand_word_pattern(right)
+                } else {
+                    self.expand_word_single(right)
+                };
                 self.eval_cond_binary(&lval, op, &rval)
             }
         }
