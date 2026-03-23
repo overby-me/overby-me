@@ -1491,41 +1491,64 @@ fn word_split(segments: &[Segment], ifs: &str) -> Vec<String> {
 
     let mut fields: Vec<String> = Vec::new();
     let mut current = String::new();
-    let mut in_field = false;
 
     for segment in segments {
         match segment {
             Segment::SplitHere => {
                 // Force a field break here (for "$@" and "${arr[@]}")
                 fields.push(std::mem::take(&mut current));
-                in_field = false;
             }
             Segment::Quoted(s) => {
                 current.push_str(&quote_glob_chars(s));
-                in_field = true;
             }
             Segment::Literal(s) => {
                 // Literal text: not IFS-split, glob chars preserved
                 current.push_str(s);
-                in_field = true;
             }
             Segment::Unquoted(s) => {
+                let ifs_ws: Vec<char> = ifs.chars().filter(|c| c.is_whitespace()).collect();
+                let ifs_non_ws: Vec<char> = ifs.chars().filter(|c| !c.is_whitespace()).collect();
+                // State machine for IFS splitting:
+                // 0 = start/after ws delim, 1 = in field, 2 = after non-ws delim
+                let mut state = 0u8;
                 for ch in s.chars() {
-                    if ifs.contains(ch) {
-                        if in_field {
-                            fields.push(std::mem::take(&mut current));
-                            in_field = false;
+                    if ifs_non_ws.contains(&ch) {
+                        match state {
+                            1 => {
+                                // End current field
+                                fields.push(std::mem::take(&mut current));
+                            }
+                            2 => {
+                                // Consecutive non-ws delim: push empty field between them
+                                fields.push(String::new());
+                            }
+                            _ => {
+                                // State 0: ws already consumed a delimiter
+                                // If no fields yet, this is a leading non-ws → push empty
+                                // If fields exist, ws+nonws is a single delimiter → absorb
+                                if fields.is_empty() {
+                                    fields.push(String::new());
+                                }
+                            }
                         }
+                        state = 2;
+                    } else if ifs_ws.contains(&ch) {
+                        if state == 1 {
+                            // End current field on whitespace
+                            fields.push(std::mem::take(&mut current));
+                            state = 0;
+                        }
+                        // In states 0 or 2, whitespace is consumed
                     } else {
                         current.push(ch);
-                        in_field = true;
+                        state = 1;
                     }
                 }
             }
         }
     }
 
-    if in_field || !current.is_empty() {
+    if !current.is_empty() {
         fields.push(current);
     }
 
