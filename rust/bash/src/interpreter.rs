@@ -386,6 +386,10 @@ impl Shell {
             }
             last_pos = cur_pos;
 
+            // Update LINENO to current parser line
+            self.vars
+                .insert("LINENO".to_string(), parser.current_line().to_string());
+
             match parser.parse_complete_command_pub() {
                 Ok(cmd) => {
                     if self.opt_noexec {
@@ -1234,13 +1238,53 @@ impl Shell {
             let alias_name = expanded_words[0].clone();
             // Build a new command string: alias value + remaining args
             let mut new_cmd = alias_value.clone();
-            for word in &expanded_words[1..] {
+            let mut remaining_start = 1;
+            // If alias value ends with space, expand next word as alias too (recursively)
+            if new_cmd.ends_with(' ') && expanded_words.len() > 1 {
+                let mut next = expanded_words[1].clone();
+                let mut seen = std::collections::HashSet::new();
+                seen.insert(alias_name.clone());
+                while let Some(expanded) = self.aliases.get(&next).cloned() {
+                    if seen.contains(&next) {
+                        break; // prevent circular
+                    }
+                    seen.insert(next.clone());
+                    next = expanded;
+                }
+                if next != expanded_words[1] {
+                    new_cmd.push_str(&next);
+                    remaining_start = 2;
+                }
+            }
+            for word in &expanded_words[remaining_start..] {
                 new_cmd.push(' ');
-                // Quote args that contain special chars
-                if word.contains(' ') || word.contains('\t') || word.contains('\'') {
-                    new_cmd.push('"');
-                    new_cmd.push_str(word);
-                    new_cmd.push('"');
+                // Use single quotes to prevent re-expansion
+                if word.contains(|c: char| {
+                    c.is_whitespace()
+                        || matches!(
+                            c,
+                            '\'' | '"'
+                                | '\\'
+                                | '$'
+                                | '`'
+                                | '|'
+                                | '&'
+                                | ';'
+                                | '('
+                                | ')'
+                                | '<'
+                                | '>'
+                                | '*'
+                                | '?'
+                                | '['
+                                | ']'
+                        )
+                }) {
+                    // Escape single quotes within
+                    let escaped = word.replace('\'', "'\\''");
+                    new_cmd.push('\'');
+                    new_cmd.push_str(&escaped);
+                    new_cmd.push('\'');
                 } else {
                     new_cmd.push_str(word);
                 }
