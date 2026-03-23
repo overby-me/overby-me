@@ -1989,9 +1989,15 @@ impl Shell {
         }
 
         let mut status = 0;
+        let mut iterations = 0u64;
         loop {
             if self.breaking > 0 {
                 self.breaking -= 1;
+                break;
+            }
+            // Safety: prevent runaway loops (bash stops on arith errors)
+            iterations += 1;
+            if iterations > 1_000_000 {
                 break;
             }
 
