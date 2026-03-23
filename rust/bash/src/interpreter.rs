@@ -246,6 +246,19 @@ impl Shell {
         let mut parser = Parser::new(input);
         match parser.parse_program() {
             Ok(program) => {
+                if !parser.is_at_eof() {
+                    let token = parser.current_token_str();
+                    eprintln!(
+                        "{}: syntax error near unexpected token `{}'",
+                        self.syntax_error_prefix(),
+                        token
+                    );
+                    if self.dash_c_mode {
+                        let line = input.lines().next().unwrap_or(input);
+                        eprintln!("{}: `{}'", self.syntax_error_prefix(), line);
+                    }
+                    return 2;
+                }
                 if self.opt_noexec {
                     return 0;
                 }

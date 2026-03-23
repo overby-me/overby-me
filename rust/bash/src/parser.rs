@@ -527,10 +527,35 @@ impl Parser {
             self.current = self.lexer.next_token();
         }
         self.skip_newlines();
-        self.expect_keyword("do")?;
-        self.skip_newlines();
-        let body = self.parse_program()?;
-        self.expect_keyword("done")?;
+        // Accept either do...done or { ... } for arith-for body
+        let body = if self.eat_keyword("do") {
+            self.skip_newlines();
+            let body = self.parse_program()?;
+            self.expect_keyword("done")?;
+            body
+        } else if let Token::Word(ref w) = self.current
+            && w.len() == 1
+            && matches!(&w[0], WordPart::Literal(s) if s == "{")
+        {
+            self.advance();
+            self.skip_newlines();
+            let body = self.parse_program()?;
+            // Expect closing }
+            if let Token::Word(ref w) = self.current
+                && w.len() == 1
+                && matches!(&w[0], WordPart::Literal(s) if s == "}")
+            {
+                self.advance();
+            } else {
+                return Err("syntax error near unexpected token".to_string());
+            }
+            body
+        } else {
+            return Err(format!(
+                "syntax error near unexpected token `{}'",
+                self.token_to_str()
+            ));
+        };
         Ok(CompoundCommand::ArithFor(ArithForClause {
             init,
             cond,
