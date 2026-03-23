@@ -1233,7 +1233,8 @@ impl Shell {
         ) {
             for part in parts {
                 if let WordPart::Param(expr) = part
-                    && let crate::ast::ParamOp::Transform('a') = &expr.op
+                    && let crate::ast::ParamOp::Transform(ch) = &expr.op
+                    && matches!(ch, 'a' | 'A')
                 {
                     let attrs = shell.get_var_attrs(&expr.name);
                     vars.insert(format!("__ATTRS__{}", expr.name), attrs);

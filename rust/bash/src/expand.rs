@@ -1196,7 +1196,26 @@ fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
                     .cloned()
                     .unwrap_or_default()
             }
-            _ => val, // @P, @A, @K — return as-is for now
+            'A' => {
+                // Assignment form: declare -FLAGS name='value'
+                let attrs = ctx
+                    .vars
+                    .get(&format!("__ATTRS__{}", expr.name))
+                    .cloned()
+                    .unwrap_or_default();
+                let flags = if attrs.is_empty() {
+                    "--".to_string()
+                } else {
+                    format!("-{}", attrs)
+                };
+                format!(
+                    "declare {} {}='{}'",
+                    flags,
+                    expr.name,
+                    val.replace('\'', "'\\''")
+                )
+            }
+            _ => val, // @P, @K — return as-is for now
         },
     }
 }
