@@ -1221,28 +1221,17 @@ fn format_compound_command(cmd: &CompoundCommand) -> String {
             s.push_str(cond);
             s.push_str("; then\n");
             s.push_str(&format_program(&clause.then_body, 2));
-            s.push_str("\n    fi");
-            for (cond, body) in &clause.elif_parts {
-                // Remove trailing fi and add elif
-                let len = s.len();
-                if s.ends_with("fi") {
-                    s.truncate(len - 2);
-                }
-                s.push_str("elif ");
-                s.push_str(format_program(cond, 0).trim());
-                s.push_str("; then\n");
-                s.push_str(&format_program(body, 2));
-                s.push_str("\n    fi");
+            for (elif_cond, elif_body) in &clause.elif_parts {
+                let c = format_program(elif_cond, 0);
+                let c = c.trim().trim_end_matches(';');
+                s.push_str(&format!("\n    elif {}; then\n", c));
+                s.push_str(&format_program(elif_body, 2));
             }
             if let Some(ref else_body) = clause.else_body {
-                let len = s.len();
-                if s.ends_with("fi") {
-                    s.truncate(len - 2);
-                }
-                s.push_str("else\n");
+                s.push_str("\n    else\n");
                 s.push_str(&format_program(else_body, 2));
-                s.push_str("\n    fi");
             }
+            s.push_str("\n    fi");
             s
         }
         CompoundCommand::For(clause) => {
