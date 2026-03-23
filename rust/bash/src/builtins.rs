@@ -2629,19 +2629,63 @@ fn builtin_command(shell: &mut Shell, args: &[String]) -> i32 {
         return 0;
     }
 
-    let mut show_type = false;
+    let mut flag_v = false;
+    let mut flag_big_v = false;
     let mut cmd_args = Vec::new();
 
     for arg in args {
         match arg.as_str() {
-            "-v" | "-V" => show_type = true,
+            "-v" => flag_v = true,
+            "-V" => flag_big_v = true,
+            "-p" => {} // ignored for now
             _ => cmd_args.push(arg.clone()),
         }
     }
 
-    if show_type {
+    if flag_v || flag_big_v {
         let builtin_map = builtins();
         for name in &cmd_args {
+            if flag_big_v {
+                // Verbose output (like type)
+                let is_keyword = matches!(
+                    name.as_str(),
+                    "if" | "then"
+                        | "else"
+                        | "elif"
+                        | "fi"
+                        | "case"
+                        | "esac"
+                        | "for"
+                        | "select"
+                        | "while"
+                        | "until"
+                        | "do"
+                        | "done"
+                        | "in"
+                        | "function"
+                        | "time"
+                        | "{"
+                        | "}"
+                        | "!"
+                        | "[["
+                        | "]]"
+                        | "coproc"
+                );
+                if is_keyword {
+                    println!("{} is a shell keyword", name);
+                } else if shell.functions.contains_key(name.as_str()) {
+                    println!("{} is a function", name);
+                } else if builtin_map.contains_key(name.as_str()) {
+                    println!("{} is a shell builtin", name);
+                } else if let Some(path) = find_in_path_opt(name) {
+                    println!("{} is {}", name, path);
+                } else {
+                    eprintln!("{}: command: {}: not found", shell.error_prefix(), name);
+                    return 1;
+                }
+                continue;
+            }
+            // -v: just print name/path
             if builtin_map.contains_key(name.as_str()) {
                 println!("{}", name);
             } else if let Some(path) = find_in_path_opt(name) {
