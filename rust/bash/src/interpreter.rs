@@ -1057,6 +1057,32 @@ impl Shell {
         result
     }
 
+    /// Write xtrace output to the appropriate fd (BASH_XTRACEFD or stderr)
+    pub fn xtrace_write(&self, msg: &str) {
+        let fd = self
+            .vars
+            .get("BASH_XTRACEFD")
+            .and_then(|v| v.parse::<i32>().ok())
+            .unwrap_or(2);
+        #[cfg(unix)]
+        {
+            use std::io::Write;
+            if fd == 2 {
+                let _ = writeln!(std::io::stderr(), "{}", msg);
+            } else {
+                use std::os::unix::io::FromRawFd;
+                // Use ManuallyDrop to avoid closing the fd
+                let mut f = std::mem::ManuallyDrop::new(unsafe { std::fs::File::from_raw_fd(fd) });
+                let _ = writeln!(f, "{}", msg);
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = fd;
+            eprintln!("{}", msg);
+        }
+    }
+
     /// Returns the error prefix for runtime error messages (no -c:).
     /// For scripts: "$0: line N:" ; for stdin/interactive: "bash:"
     pub fn error_prefix(&self) -> String {
@@ -1202,9 +1228,17 @@ impl Shell {
                                     })
                                     .collect();
                                 if assign.append {
-                                    eprintln!("+ {}+=({})", assign.name, items.join(" "));
+                                    self.xtrace_write(&format!(
+                                        "+ {}+=({})",
+                                        assign.name,
+                                        items.join(" ")
+                                    ));
                                 } else {
-                                    eprintln!("+ {}=({})", assign.name, items.join(" "));
+                                    self.xtrace_write(&format!(
+                                        "+ {}=({})",
+                                        assign.name,
+                                        items.join(" ")
+                                    ));
                                 }
                             }
                             _ => {
@@ -1215,9 +1249,9 @@ impl Shell {
                                 };
                                 let qval = xtrace_quote(&val);
                                 if assign.append {
-                                    eprintln!("+ {}+={}", assign.name, qval);
+                                    self.xtrace_write(&format!("+ {}+={}", assign.name, qval));
                                 } else {
-                                    eprintln!("+ {}={}", assign.name, qval);
+                                    self.xtrace_write(&format!("+ {}={}", assign.name, qval));
                                 }
                             }
                         }
@@ -1250,13 +1284,13 @@ impl Shell {
                 };
                 let qval = xtrace_quote(&val);
                 if assign.append {
-                    eprintln!("+ {}+={}", assign.name, qval);
+                    self.xtrace_write(&format!("+ {}+={}", assign.name, qval));
                 } else {
-                    eprintln!("+ {}={}", assign.name, qval);
+                    self.xtrace_write(&format!("+ {}={}", assign.name, qval));
                 }
             }
             let quoted: Vec<String> = expanded_words.iter().map(|w| xtrace_quote(w)).collect();
-            eprintln!("+ {}", quoted.join(" "));
+            self.xtrace_write(&format!("+ {}", quoted.join(" ")));
         }
 
         // Alias expansion: if the first word is an alias, re-parse and run
@@ -2040,7 +2074,11 @@ impl Shell {
                     .iter()
                     .flat_map(|w| self.expand_word_fields(w, &ifs))
                     .collect();
-                eprintln!("+ for {} in {}", clause.var, expanded_items.join(" "));
+                self.xtrace_write(&format!(
+                    "+ for {} in {}",
+                    clause.var,
+                    expanded_items.join(" ")
+                ));
             }
             self.vars.insert(clause.var.clone(), item);
             // Loop body commands should not trigger errexit individually
@@ -2064,7 +2102,7 @@ impl Shell {
     fn run_arith_for(&mut self, clause: &ArithForClause) -> i32 {
         if !clause.init.is_empty() {
             if self.opt_xtrace {
-                eprintln!("+ (( {} ))", clause.init);
+                self.xtrace_write(&format!("+ (( {} ))", clause.init));
             }
             self.eval_arith_expr(&clause.init);
         }
@@ -2078,7 +2116,7 @@ impl Shell {
 
             if !clause.cond.is_empty() {
                 if self.opt_xtrace {
-                    eprintln!("+ (( {} ))", clause.cond);
+                    self.xtrace_write(&format!("+ (( {} ))", clause.cond));
                 }
                 let cond_val = self.eval_arith_expr(&clause.cond);
                 if cond_val == 0 {
@@ -2100,7 +2138,7 @@ impl Shell {
 
             if !clause.step.is_empty() {
                 if self.opt_xtrace {
-                    eprintln!("+ (( {} ))", clause.step);
+                    self.xtrace_write(&format!("+ (( {} ))", clause.step));
                 }
                 self.eval_arith_expr(&clause.step);
             }
@@ -2177,7 +2215,7 @@ impl Shell {
         let word_expanded = self.expand_word_fields(&clause.word, &ifs).join(" ");
 
         if self.opt_xtrace {
-            eprintln!("+ case {} in", word_expanded);
+            self.xtrace_write(&format!("+ case {} in", word_expanded));
         }
 
         let mut i = 0;
