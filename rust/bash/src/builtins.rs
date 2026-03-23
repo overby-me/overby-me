@@ -744,7 +744,12 @@ fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
             shell.vars.remove(name);
             shell.exports.remove(name);
             shell.arrays.remove(name);
+            shell.assoc_arrays.remove(name);
             shell.namerefs.remove(name);
+            shell.integer_vars.remove(name);
+            shell.uppercase_vars.remove(name);
+            shell.lowercase_vars.remove(name);
+            shell.capitalize_vars.remove(name);
             unsafe { std::env::remove_var(name) };
         }
     }
