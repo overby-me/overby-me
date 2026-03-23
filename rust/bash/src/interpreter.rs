@@ -4,6 +4,15 @@ use crate::expand;
 use crate::parser::Parser;
 use std::collections::{HashMap, HashSet};
 
+/// Saved variable state for local scope restoration
+#[derive(Clone)]
+pub struct SavedVar {
+    pub scalar: Option<String>,
+    pub array: Option<Vec<String>>,
+    pub assoc: Option<AssocArray>,
+    pub was_integer: bool,
+}
+
 /// Bash-compatible hash function (FNV-1 variant) for associative arrays.
 /// This ensures iteration order matches bash's hash table ordering.
 #[derive(Default, Clone)]
@@ -229,7 +238,7 @@ pub struct Shell {
     pub namerefs: HashMap<String, String>,
     /// Stack of local variable scopes. Each scope maps variable names to their
     /// saved values (None if the variable didn't exist before).
-    pub local_scopes: Vec<HashMap<String, Option<String>>>,
+    pub local_scopes: Vec<HashMap<String, SavedVar>>,
 
     // Shell options (set)
     pub opt_errexit: bool,
@@ -513,7 +522,15 @@ impl Shell {
         if let Some(scope) = self.local_scopes.last_mut()
             && !scope.contains_key(name)
         {
-            scope.insert(name.to_string(), self.vars.get(name).cloned());
+            scope.insert(
+                name.to_string(),
+                SavedVar {
+                    scalar: self.vars.get(name).cloned(),
+                    array: self.arrays.get(name).cloned(),
+                    assoc: self.assoc_arrays.get(name).cloned(),
+                    was_integer: self.integer_vars.contains(name),
+                },
+            );
         }
     }
 
@@ -2121,14 +2138,39 @@ impl Shell {
 
         // Restore local variables
         if let Some(scope) = self.local_scopes.pop() {
-            for (var_name, old_value) in scope {
-                match old_value {
+            for (var_name, saved) in scope {
+                // Restore scalar
+                match saved.scalar {
                     Some(val) => {
-                        self.vars.insert(var_name, val);
+                        self.vars.insert(var_name.clone(), val);
                     }
                     None => {
                         self.vars.remove(&var_name);
                     }
+                }
+                // Restore array
+                match saved.array {
+                    Some(arr) => {
+                        self.arrays.insert(var_name.clone(), arr);
+                    }
+                    None => {
+                        self.arrays.remove(&var_name);
+                    }
+                }
+                // Restore assoc array
+                match saved.assoc {
+                    Some(assoc) => {
+                        self.assoc_arrays.insert(var_name.clone(), assoc);
+                    }
+                    None => {
+                        self.assoc_arrays.remove(&var_name);
+                    }
+                }
+                // Restore integer attribute
+                if saved.was_integer {
+                    self.integer_vars.insert(var_name);
+                } else {
+                    self.integer_vars.remove(&var_name);
                 }
             }
         }
