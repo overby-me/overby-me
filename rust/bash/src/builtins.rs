@@ -1,3 +1,7 @@
+use crate::ast::{
+    AndOr, AssignValue, CaseTerminator, Command, CompoundCommand, CondExpr, ParamOp, Pipeline,
+    ProcessSubKind, Program, RedirFd, RedirectKind, Redirection, SimpleCommand, Word, WordPart,
+};
 use crate::interpreter::Shell;
 use std::collections::HashMap;
 
@@ -616,11 +620,385 @@ fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
     0
 }
 
+// ── declare -f formatting helpers ──────────────────────────────────────────
+
+fn format_word(word: &Word) -> String {
+    let mut s = String::new();
+    for part in word {
+        match part {
+            WordPart::Literal(t) => s.push_str(t),
+            WordPart::SingleQuoted(t) => {
+                s.push('\'');
+                s.push_str(t);
+                s.push('\'');
+            }
+            WordPart::DoubleQuoted(parts) => {
+                s.push('"');
+                for p in parts {
+                    match p {
+                        WordPart::Literal(t) => s.push_str(t),
+                        WordPart::Variable(name) => {
+                            s.push('$');
+                            s.push_str(name);
+                        }
+                        WordPart::Param(expr) => {
+                            s.push_str(&format_param_expr(&expr.name, &expr.op));
+                        }
+                        WordPart::CommandSub(cmd) => {
+                            s.push_str("$(");
+                            s.push_str(cmd);
+                            s.push(')');
+                        }
+                        WordPart::BacktickSub(cmd) => {
+                            s.push('`');
+                            s.push_str(cmd);
+                            s.push('`');
+                        }
+                        WordPart::ArithSub(expr) => {
+                            s.push_str("$((");
+                            s.push_str(expr);
+                            s.push_str("))");
+                        }
+                        _ => s.push_str(&format_word_part(p)),
+                    }
+                }
+                s.push('"');
+            }
+            _ => s.push_str(&format_word_part(part)),
+        }
+    }
+    s
+}
+
+fn format_word_part(part: &WordPart) -> String {
+    match part {
+        WordPart::Literal(t) => t.clone(),
+        WordPart::SingleQuoted(t) => format!("'{}'", t),
+        WordPart::DoubleQuoted(parts) => {
+            let mut s = String::from("\"");
+            for p in parts {
+                s.push_str(&format_word_part(p));
+            }
+            s.push('"');
+            s
+        }
+        WordPart::Tilde(user) => format!("~{}", user),
+        WordPart::Variable(name) => format!("${}", name),
+        WordPart::Param(expr) => format_param_expr(&expr.name, &expr.op),
+        WordPart::CommandSub(cmd) => format!("$({})", cmd),
+        WordPart::BacktickSub(cmd) => format!("`{}`", cmd),
+        WordPart::ArithSub(expr) => format!("$(({}))", expr),
+        WordPart::ProcessSub(kind, cmd) => match kind {
+            ProcessSubKind::Input => format!("<({})", cmd),
+            ProcessSubKind::Output => format!(">({})", cmd),
+        },
+    }
+}
+
+fn format_param_expr(name: &str, op: &ParamOp) -> String {
+    match op {
+        ParamOp::None => format!("${{{}}}", name),
+        ParamOp::Length => format!("${{#{}}}", name),
+        ParamOp::Indirect => format!("${{!{}}}", name),
+        ParamOp::NamePrefix(ch) => format!("${{!{}{}}}", name, ch),
+        ParamOp::ArrayIndices(ch) => format!("${{!{}[{}]}}", name, ch),
+        ParamOp::Default(colon, w) => {
+            let op_str = if *colon { ":-" } else { "-" };
+            format!("${{{}{}{}}}", name, op_str, format_word(w))
+        }
+        ParamOp::Assign(colon, w) => {
+            let op_str = if *colon { ":=" } else { "=" };
+            format!("${{{}{}{}}}", name, op_str, format_word(w))
+        }
+        ParamOp::Error(colon, w) => {
+            let op_str = if *colon { ":?" } else { "?" };
+            format!("${{{}{}{}}}", name, op_str, format_word(w))
+        }
+        ParamOp::Alt(colon, w) => {
+            let op_str = if *colon { ":+" } else { "+" };
+            format!("${{{}{}{}}}", name, op_str, format_word(w))
+        }
+        ParamOp::TrimSmallLeft(w) => format!("${{{}#{}}}", name, format_word(w)),
+        ParamOp::TrimLargeLeft(w) => format!("${{{}##{}}}", name, format_word(w)),
+        ParamOp::TrimSmallRight(w) => format!("${{{}%{}}}", name, format_word(w)),
+        ParamOp::TrimLargeRight(w) => format!("${{{}%%{}}}", name, format_word(w)),
+        ParamOp::Replace(pat, rep) => {
+            format!("${{{}/{}/{}}}", name, format_word(pat), format_word(rep))
+        }
+        ParamOp::ReplaceAll(pat, rep) => {
+            format!("${{{}//{}/{}}}", name, format_word(pat), format_word(rep))
+        }
+        ParamOp::ReplacePrefix(pat, rep) => {
+            format!("${{{}/#/{}/{}}}", name, format_word(pat), format_word(rep))
+        }
+        ParamOp::ReplaceSuffix(pat, rep) => {
+            format!("${{{}/%/{}/{}}}", name, format_word(pat), format_word(rep))
+        }
+        ParamOp::Substring(offset, len) => {
+            if let Some(l) = len {
+                format!("${{{}:{}:{}}}", name, offset, l)
+            } else {
+                format!("${{{}:{}}}", name, offset)
+            }
+        }
+        ParamOp::UpperFirst(w) => format!("${{{}^{}}}", name, format_word(w)),
+        ParamOp::UpperAll(w) => format!("${{{}^^{}}}", name, format_word(w)),
+        ParamOp::LowerFirst(w) => format!("${{{},{}}}", name, format_word(w)),
+        ParamOp::LowerAll(w) => format!("${{{},, {}}}", name, format_word(w)),
+        ParamOp::Transform(ch) => format!("${{{}@{}}}", name, ch),
+    }
+}
+
+fn format_redirection(redir: &Redirection) -> String {
+    let mut s = String::new();
+    if let Some(ref fd) = redir.fd {
+        match fd {
+            RedirFd::Number(n) => {
+                // Only print fd number when it differs from the default
+                match redir.kind {
+                    RedirectKind::Input
+                    | RedirectKind::ReadWrite
+                    | RedirectKind::DupInput
+                    | RedirectKind::HereDoc(_)
+                    | RedirectKind::HereString
+                    | RedirectKind::ProcessSubIn => {
+                        if *n != 0 {
+                            s.push_str(&n.to_string());
+                        }
+                    }
+                    _ => {
+                        if *n != 1 {
+                            s.push_str(&n.to_string());
+                        }
+                    }
+                }
+            }
+            RedirFd::Var(name) => {
+                s.push('{');
+                s.push_str(name);
+                s.push('}');
+            }
+        }
+    }
+    match redir.kind {
+        RedirectKind::Input => s.push_str("< "),
+        RedirectKind::Output => s.push_str("> "),
+        RedirectKind::Append => s.push_str(">> "),
+        RedirectKind::Clobber => s.push_str(">| "),
+        RedirectKind::DupInput => s.push_str("<& "),
+        RedirectKind::DupOutput => s.push_str(">& "),
+        RedirectKind::ReadWrite => s.push_str("<> "),
+        RedirectKind::HereDoc(_) => s.push_str("<< "),
+        RedirectKind::HereString => s.push_str("<<< "),
+        RedirectKind::ProcessSubIn => s.push_str("< "),
+        RedirectKind::ProcessSubOut => s.push_str("> "),
+    }
+    s.push_str(&format_word(&redir.target));
+    s
+}
+
+fn format_simple_command(cmd: &SimpleCommand) -> String {
+    let mut parts = Vec::new();
+    for a in &cmd.assignments {
+        let op = if a.append { "+=" } else { "=" };
+        match &a.value {
+            AssignValue::None => parts.push(a.name.clone()),
+            AssignValue::Scalar(w) => parts.push(format!("{}{}{}", a.name, op, format_word(w))),
+            AssignValue::Array(elements) => {
+                let elems: Vec<String> = elements
+                    .iter()
+                    .map(|e| {
+                        if let Some(ref idx) = e.index {
+                            format!("[{}]={}", format_word(idx), format_word(&e.value))
+                        } else {
+                            format_word(&e.value)
+                        }
+                    })
+                    .collect();
+                parts.push(format!("{}{}({})", a.name, op, elems.join(" ")));
+            }
+        }
+    }
+    for w in &cmd.words {
+        parts.push(format_word(w));
+    }
+    for r in &cmd.redirections {
+        parts.push(format_redirection(r));
+    }
+    parts.join(" ")
+}
+
+fn format_pipeline(pipeline: &Pipeline) -> String {
+    let mut s = String::new();
+    if pipeline.negated {
+        s.push_str("! ");
+    }
+    if pipeline.timed {
+        s.push_str("time ");
+    }
+    let cmds: Vec<String> = pipeline.commands.iter().map(format_command).collect();
+    s.push_str(&cmds.join(" | "));
+    s
+}
+
+fn format_command(cmd: &Command) -> String {
+    match cmd {
+        Command::Simple(sc) => format_simple_command(sc),
+        Command::Compound(cc, redirections) => {
+            let mut s = format_compound_command(cc);
+            for r in redirections {
+                s.push(' ');
+                s.push_str(&format_redirection(r));
+            }
+            s
+        }
+        Command::FunctionDef(name, body) => {
+            format!("{} () \n{}", name, format_compound_command(body))
+        }
+    }
+}
+
+fn format_program(program: &Program, indent: usize) -> String {
+    let prefix = "    ".repeat(indent);
+    let mut lines = Vec::new();
+    for cc in program {
+        let mut line = String::new();
+        line.push_str(&prefix);
+        line.push_str(&format_pipeline(&cc.list.first));
+        for (op, pipeline) in &cc.list.rest {
+            match op {
+                AndOr::And => line.push_str(" && "),
+                AndOr::Or => line.push_str(" || "),
+            }
+            line.push_str(&format_pipeline(pipeline));
+        }
+        if cc.background {
+            line.push_str(" &");
+        }
+        lines.push(line);
+    }
+    lines.join("\n")
+}
+
+fn format_cond_expr(expr: &CondExpr) -> String {
+    match expr {
+        CondExpr::Unary(op, word) => format!("{} {}", op, format_word(word)),
+        CondExpr::Binary(left, op, right) => {
+            format!("{} {} {}", format_word(left), op, format_word(right))
+        }
+        CondExpr::Not(inner) => format!("! {}", format_cond_expr(inner)),
+        CondExpr::And(left, right) => {
+            format!("{} && {}", format_cond_expr(left), format_cond_expr(right))
+        }
+        CondExpr::Or(left, right) => {
+            format!("{} || {}", format_cond_expr(left), format_cond_expr(right))
+        }
+        CondExpr::Word(word) => format_word(word),
+    }
+}
+
+fn format_compound_command(cmd: &CompoundCommand) -> String {
+    match cmd {
+        CompoundCommand::BraceGroup(program) => {
+            if program.is_empty() {
+                "{ \n}".to_string()
+            } else {
+                format!("{{ \n{}\n}}", format_program(program, 1))
+            }
+        }
+        CompoundCommand::Subshell(program) => {
+            format!("( \n{}\n)", format_program(program, 1))
+        }
+        CompoundCommand::If(clause) => {
+            let mut s = String::from("if ");
+            s.push_str(format_program(&clause.condition, 0).trim());
+            s.push_str("; then\n");
+            s.push_str(&format_program(&clause.then_body, 1));
+            s.push('\n');
+            for (cond, body) in &clause.elif_parts {
+                s.push_str("elif ");
+                s.push_str(format_program(cond, 0).trim());
+                s.push_str("; then\n");
+                s.push_str(&format_program(body, 1));
+                s.push('\n');
+            }
+            if let Some(ref else_body) = clause.else_body {
+                s.push_str("else\n");
+                s.push_str(&format_program(else_body, 1));
+                s.push('\n');
+            }
+            s.push_str("fi");
+            s
+        }
+        CompoundCommand::For(clause) => {
+            let mut s = format!("for {} in", clause.var);
+            if let Some(ref words) = clause.words {
+                for w in words {
+                    s.push(' ');
+                    s.push_str(&format_word(w));
+                }
+            }
+            s.push_str("; do\n");
+            s.push_str(&format_program(&clause.body, 1));
+            s.push_str("\ndone");
+            s
+        }
+        CompoundCommand::ArithFor(clause) => {
+            let mut s = format!(
+                "for (( {}; {}; {} )); do\n",
+                clause.init, clause.cond, clause.step
+            );
+            s.push_str(&format_program(&clause.body, 1));
+            s.push_str("\ndone");
+            s
+        }
+        CompoundCommand::While(clause) => {
+            let mut s = String::from("while ");
+            s.push_str(format_program(&clause.condition, 0).trim());
+            s.push_str("; do\n");
+            s.push_str(&format_program(&clause.body, 1));
+            s.push_str("\ndone");
+            s
+        }
+        CompoundCommand::Until(clause) => {
+            let mut s = String::from("until ");
+            s.push_str(format_program(&clause.condition, 0).trim());
+            s.push_str("; do\n");
+            s.push_str(&format_program(&clause.body, 1));
+            s.push_str("\ndone");
+            s
+        }
+        CompoundCommand::Case(clause) => {
+            let mut s = format!("case {} in\n", format_word(&clause.word));
+            for item in &clause.items {
+                let patterns: Vec<String> = item.patterns.iter().map(format_word).collect();
+                s.push_str(&format!("    {})\n", patterns.join(" | ")));
+                s.push_str(&format_program(&item.body, 2));
+                s.push('\n');
+                match item.terminator {
+                    CaseTerminator::Break => s.push_str("        ;;\n"),
+                    CaseTerminator::FallThrough => s.push_str("        ;&\n"),
+                    CaseTerminator::TestNext => s.push_str("        ;;&\n"),
+                }
+            }
+            s.push_str("esac");
+            s
+        }
+        CompoundCommand::Conditional(expr) => {
+            format!("[[ {} ]]", format_cond_expr(expr))
+        }
+        CompoundCommand::Arithmetic(expr) => {
+            format!("(( {} ))", expr)
+        }
+    }
+}
+
 fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
     let mut flag_array = false;
     let mut flag_assoc = false; // -A stub
     let mut flag_print = false;
     let mut flag_functions = false;
+    let mut flag_func_body = false;
     let mut flag_nameref = false;
     let mut flag_readonly = false;
     let mut flag_export = false;
@@ -637,6 +1015,7 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     'a' => flag_array = true,
                     'A' => flag_assoc = true,
                     'p' => flag_print = true,
+                    'f' => flag_func_body = true,
                     'F' => flag_functions = true,
                     'n' => flag_nameref = true,
                     'r' => flag_readonly = true,
@@ -655,6 +1034,32 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
     }
 
     let _ = flag_global; // stub
+
+    // declare -f: print function definitions (with body)
+    if flag_func_body {
+        let print_func = |name: &str, body: &CompoundCommand| {
+            println!("{} () \n{}", name, format_compound_command(body));
+        };
+        if names.is_empty() {
+            let mut fnames: Vec<&String> = shell.functions.keys().collect();
+            fnames.sort();
+            for name in fnames {
+                if let Some(body) = shell.functions.get(name.as_str()) {
+                    print_func(name, body);
+                }
+            }
+        } else {
+            for name in &names {
+                if let Some(body) = shell.functions.get(name.as_str()) {
+                    print_func(name, body);
+                } else {
+                    eprintln!("{}: declare: {}: not found", shell.error_prefix(), name);
+                    return 1;
+                }
+            }
+        }
+        return 0;
+    }
 
     // declare -F: list function names
     if flag_functions {
