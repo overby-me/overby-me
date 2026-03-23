@@ -112,6 +112,31 @@ impl Parser {
         self.current == Token::Eof
     }
 
+    /// Skip newlines and semicolons (for incremental parsing)
+    pub fn skip_newlines_and_semis(&mut self) {
+        while matches!(self.current, Token::Newline | Token::Semi) {
+            self.advance();
+        }
+    }
+
+    /// Parse a single complete command (public wrapper)
+    pub fn parse_complete_command_pub(&mut self) -> Result<CompleteCommand, String> {
+        self.parse_complete_command()
+    }
+
+    /// Skip tokens until the next command boundary (newline or semicolon)
+    pub fn skip_to_next_command(&mut self) {
+        let mut limit = 1000; // safety limit
+        while !matches!(self.current, Token::Eof | Token::Newline) && limit > 0 {
+            self.advance();
+            limit -= 1;
+        }
+        // Consume the newline
+        if self.current == Token::Newline {
+            self.advance();
+        }
+    }
+
     pub fn current_line(&self) -> usize {
         self.lexer.line
     }

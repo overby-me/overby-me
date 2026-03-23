@@ -319,40 +319,85 @@ impl Shell {
 
     pub fn run_string(&mut self, input: &str) -> i32 {
         let mut parser = Parser::new(input);
-        match parser.parse_program() {
-            Ok(program) => {
-                // Check for leftover tokens (only in -c mode to avoid
-                // false positives with complex syntax our parser doesn't fully handle)
-                if self.dash_c_mode && !parser.is_at_eof() {
-                    let token = parser.current_token_str();
-                    eprintln!(
-                        "{}: syntax error near unexpected token `{}'",
-                        self.syntax_error_prefix(),
-                        token
-                    );
-                    let line = input.lines().next().unwrap_or(input);
-                    eprintln!("{}: `{}'", self.syntax_error_prefix(), line);
-                    return 2;
-                }
-                if self.opt_noexec {
-                    return 0;
-                }
-                self.run_program(&program)
-            }
-            Err(e) => {
-                if let Some(msg) = e.strip_prefix("RUNTIME:") {
-                    eprintln!("{}: {}", self.error_prefix(), msg);
-                } else {
-                    eprintln!("{}: {}", self.syntax_error_prefix(), e);
-                    // In -c mode, echo the offending source line for syntax errors
-                    if self.dash_c_mode && e.contains("syntax error") {
+
+        // For -c mode, parse all at once (for leftover token detection)
+        if self.dash_c_mode {
+            match parser.parse_program() {
+                Ok(program) => {
+                    if !parser.is_at_eof() {
+                        let token = parser.current_token_str();
+                        eprintln!(
+                            "{}: syntax error near unexpected token `{}'",
+                            self.syntax_error_prefix(),
+                            token
+                        );
                         let line = input.lines().next().unwrap_or(input);
                         eprintln!("{}: `{}'", self.syntax_error_prefix(), line);
+                        return 2;
                     }
+                    if self.opt_noexec {
+                        return 0;
+                    }
+                    return self.run_program(&program);
                 }
-                2
+                Err(e) => {
+                    if let Some(msg) = e.strip_prefix("RUNTIME:") {
+                        eprintln!("{}: {}", self.error_prefix(), msg);
+                    } else {
+                        eprintln!("{}: {}", self.syntax_error_prefix(), e);
+                        if e.contains("syntax error") {
+                            let line = input.lines().next().unwrap_or(input);
+                            eprintln!("{}: `{}'", self.syntax_error_prefix(), line);
+                        }
+                    }
+                    return 2;
+                }
             }
         }
+
+        // For scripts/stdin: incremental parse-execute loop
+        // Parse one command at a time, execute it, then parse the next
+        // This allows scripts to continue after parse errors (like bash)
+        let mut status = 0;
+        loop {
+            parser.skip_newlines_and_semis();
+            if parser.is_at_eof() {
+                break;
+            }
+
+            match parser.parse_complete_command_pub() {
+                Ok(cmd) => {
+                    if self.opt_noexec {
+                        continue;
+                    }
+                    status = self.run_complete_command(&cmd);
+                    if self.opt_errexit
+                        && status != 0
+                        && !self.in_condition
+                        && !self.errexit_suppressed
+                    {
+                        std::io::Write::flush(&mut std::io::stdout()).ok();
+                        std::io::Write::flush(&mut std::io::stderr()).ok();
+                        std::process::exit(status);
+                    }
+                    self.errexit_suppressed = false;
+                    if self.returning || self.breaking > 0 || self.continuing > 0 {
+                        break;
+                    }
+                }
+                Err(e) => {
+                    if let Some(msg) = e.strip_prefix("RUNTIME:") {
+                        eprintln!("{}: {}", self.error_prefix(), msg);
+                    } else {
+                        eprintln!("{}: {}", self.error_prefix(), e);
+                    }
+                    status = 2;
+                    // Skip to the next newline to try to recover
+                    parser.skip_to_next_command();
+                }
+            }
+        }
+        status
     }
 
     /// Execute the EXIT trap if set
