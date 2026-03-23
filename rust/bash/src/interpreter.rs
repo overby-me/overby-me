@@ -1294,14 +1294,31 @@ impl Shell {
                     if let Some(bracket) = assign.name.find('[') {
                         let idx_str = &assign.name[bracket + 1..assign.name.len() - 1];
                         let idx = self.eval_arith_expr(idx_str) as usize;
+                        let is_int = self.integer_vars.contains(&resolved);
+                        let addend = if is_int {
+                            self.eval_arith_expr(&value)
+                        } else {
+                            0
+                        };
                         if let Some(arr) = self.arrays.get_mut(&resolved) {
                             while arr.len() <= idx {
                                 arr.push(String::new());
                             }
-                            arr[idx].push_str(&value);
+                            if is_int {
+                                let existing: i64 = arr[idx].parse().unwrap_or(0);
+                                arr[idx] = (existing + addend).to_string();
+                            } else {
+                                arr[idx].push_str(&value);
+                            }
                         }
                     } else if self.arrays.contains_key(&resolved) {
-                        self.arrays.entry(resolved).or_default().push(value);
+                        let is_int = self.integer_vars.contains(&resolved);
+                        if is_int {
+                            let n = self.eval_arith_expr(&value);
+                            self.arrays.entry(resolved).or_default().push(n.to_string());
+                        } else {
+                            self.arrays.entry(resolved).or_default().push(value);
+                        }
                     } else if self.integer_vars.contains(&resolved) {
                         // Integer append: arithmetic addition
                         let existing: i64 = self
@@ -1347,9 +1364,15 @@ impl Shell {
                 } else {
                     Vec::new()
                 };
+                let is_integer = self.integer_vars.contains(&resolved);
                 let mut next_idx = arr.len();
                 for elem in elements {
-                    let value = self.expand_word_single(&elem.value);
+                    let raw = self.expand_word_single(&elem.value);
+                    let value = if is_integer {
+                        self.eval_arith_expr(&raw).to_string()
+                    } else {
+                        raw
+                    };
                     if let Some(idx_word) = &elem.index {
                         let idx_str = self.expand_word_single(idx_word);
                         let idx = self.eval_arith_expr(&idx_str).max(0) as usize;
