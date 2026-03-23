@@ -1277,11 +1277,14 @@ fn format_compound_command(cmd: &CompoundCommand) -> String {
             s
         }
         CompoundCommand::Case(clause) => {
-            let mut s = format!("case {} in\n", format_word(&clause.word));
+            let mut s = format!("case {} in \n", format_word(&clause.word));
             for item in &clause.items {
                 let patterns: Vec<String> = item.patterns.iter().map(format_word).collect();
-                s.push_str(&format!("    {})\n", patterns.join(" | ")));
-                s.push_str(&format_program(&item.body, 2));
+                s.push_str(&format!("        {})\n", patterns.join(" | ")));
+                let body = format_program(&item.body, 3);
+                // Strip trailing ; from case body (bash doesn't add it before ;;)
+                let body = body.trim_end_matches(';');
+                s.push_str(body);
                 s.push('\n');
                 match item.terminator {
                     CaseTerminator::Break => s.push_str("        ;;\n"),
@@ -1289,7 +1292,7 @@ fn format_compound_command(cmd: &CompoundCommand) -> String {
                     CaseTerminator::TestNext => s.push_str("        ;;&\n"),
                 }
             }
-            s.push_str("esac");
+            s.push_str("    esac");
             s
         }
         CompoundCommand::Conditional(expr) => {
