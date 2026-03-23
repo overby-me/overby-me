@@ -273,16 +273,19 @@ fn builtin_printf(_shell: &mut Shell, args: &[String]) -> i32 {
                     Some('b') => print!("\x08"),
                     Some('f') => print!("\x0c"),
                     Some('v') => print!("\x0b"),
-                    Some('0') => {
-                        let mut val = 0u8;
-                        for _ in 0..3 {
+                    Some(c @ '0'..='7') => {
+                        let mut val = c as u8 - b'0';
+                        for _ in 0..2 {
                             match chars.peek() {
-                                Some(c @ '0'..='7') => {
-                                    val = val * 8 + (*c as u8 - b'0');
+                                Some(d @ '0'..='7') => {
+                                    val = val * 8 + (*d as u8 - b'0');
                                     chars.next();
                                 }
                                 _ => break,
                             }
+                        }
+                        if val == 0 {
+                            break; // NUL terminates
                         }
                         print!("{}", val as char);
                     }
