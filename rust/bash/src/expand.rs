@@ -253,7 +253,31 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                     }
                     WordPart::Param(expr) if is_array_at_expansion(expr, ctx) => {
                         // "${arr[@]}" — each element becomes a separate field
-                        let elements = get_array_elements(expr, ctx);
+                        let mut elements = get_array_elements(expr, ctx);
+                        // For Substring on arrays (but not @/*): slice the array
+                        if let ParamOp::Substring(offset_str, length_str) = &expr.op {
+                            // @/* slicing is already handled in get_array_elements
+                            if expr.name != "@" && expr.name != "*" {
+                                let offset: i64 = offset_str.trim().parse().unwrap_or(0);
+                                let count = elements.len();
+                                let start = if offset < 0 {
+                                    (count as i64 + offset).max(0) as usize
+                                } else {
+                                    (offset as usize).min(count)
+                                };
+                                let end = if let Some(len_str) = length_str {
+                                    let len: i64 = len_str.trim().parse().unwrap_or(count as i64);
+                                    if len < 0 {
+                                        (count as i64 + len).max(start as i64) as usize
+                                    } else {
+                                        (start + len as usize).min(count)
+                                    }
+                                } else {
+                                    count
+                                };
+                                elements = elements[start..end].to_vec();
+                            }
+                        }
                         if !s.is_empty() {
                             out.push(Segment::Quoted(std::mem::take(&mut s)));
                         }
@@ -262,7 +286,12 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                                 out.push(Segment::SplitHere);
                             }
                             // Apply param operation (^, ^^, ,, etc.) to each element
-                            let modified = apply_param_op(elem, &expr.op, ctx, cmd_sub);
+                            // (but not Substring, which was already handled as array slice)
+                            let modified = if matches!(&expr.op, ParamOp::Substring(..)) {
+                                elem.clone()
+                            } else {
+                                apply_param_op(elem, &expr.op, ctx, cmd_sub)
+                            };
                             out.push(Segment::Quoted(modified));
                         }
                     }
