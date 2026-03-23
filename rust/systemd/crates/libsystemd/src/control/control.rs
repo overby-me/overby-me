@@ -900,7 +900,13 @@ fn find_or_load_unit(
         }
 
         // First try loading as a regular unit file.
-        match load_new_unit(&ri.config.unit_dirs, unit_name) {
+        // If the name has no suffix, also try with .service appended.
+        let load_name = if unit_name.contains('.') {
+            unit_name.to_string()
+        } else {
+            format!("{unit_name}.service")
+        };
+        match load_new_unit(&ri.config.unit_dirs, &load_name) {
             Ok(unit) => {
                 let id = unit.id.clone();
                 crate::units::insert_new_unit_lenient(unit, &mut ri);
@@ -1023,6 +1029,36 @@ fn refresh_directory_deps(unit_name: &str, run_info: &ArcMutRuntimeInfo) {
                     }
                 }
             }
+        }
+    }
+}
+
+/// Recursively load all dependency units (Wants, Requires, After) for a
+/// given unit from disk. This ensures that when a unit is started, all units
+/// in its dependency graph are present in the unit table.
+fn load_dependency_units(unit_id: &crate::units::UnitId, run_info: &ArcMutRuntimeInfo) {
+    let mut to_load: Vec<crate::units::UnitId> = Vec::new();
+    {
+        let ri = run_info.read_poisoned();
+        if let Some(unit) = ri.unit_table.get(unit_id) {
+            let deps = &unit.common.dependencies;
+            for dep_id in deps
+                .wants
+                .iter()
+                .chain(deps.requires.iter())
+                .chain(deps.after.iter())
+                .chain(deps.binds_to.iter())
+            {
+                if !ri.unit_table.contains_key(dep_id) {
+                    to_load.push(dep_id.clone());
+                }
+            }
+        }
+    }
+    for dep_id in to_load {
+        if find_or_load_unit(&dep_id.name, run_info).is_ok() {
+            // Recursively load dependencies of newly loaded units
+            load_dependency_units(&dep_id, run_info);
         }
     }
 }
@@ -2636,6 +2672,8 @@ pub fn execute_command(
         Command::Start(unit_names) => {
             for unit_name in &unit_names {
                 let id = find_or_load_unit(unit_name, &run_info)?;
+                // Load all dependency units from disk so the full graph is available.
+                load_dependency_units(&id, &run_info);
                 // Refresh on-disk .wants/.requires so dynamically created
                 // symlinks are picked up without requiring daemon-reload.
                 refresh_directory_deps(&id.name, &run_info);
@@ -2679,6 +2717,7 @@ pub fn execute_command(
             // Like Start but returns immediately — activation runs in background.
             for unit_name in &unit_names {
                 let id = find_or_load_unit(unit_name, &run_info)?;
+                load_dependency_units(&id, &run_info);
                 refresh_directory_deps(&id.name, &run_info);
                 {
                     let ri = run_info.read_poisoned();
