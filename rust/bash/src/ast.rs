@@ -273,6 +273,63 @@ pub enum RedirectKind {
 }
 
 /// Get the literal text of a word (without expansion).
+/// Reconstruct word text for xtrace display — preserves $var syntax and escapes metacharacters
+pub fn word_to_xtrace_string(word: &Word) -> String {
+    let mut s = String::new();
+    for part in word {
+        match part {
+            WordPart::Literal(t) => {
+                // Escape shell metacharacters with backslash
+                for ch in t.chars() {
+                    if matches!(
+                        ch,
+                        '|' | '&'
+                            | ';'
+                            | '('
+                            | ')'
+                            | '<'
+                            | '>'
+                            | '\\'
+                            | '!'
+                            | '{'
+                            | '}'
+                            | '*'
+                            | '?'
+                            | '['
+                            | ']'
+                    ) {
+                        s.push('\\');
+                    }
+                    s.push(ch);
+                }
+            }
+            WordPart::SingleQuoted(t) => {
+                s.push('\'');
+                s.push_str(t);
+                s.push('\'');
+            }
+            WordPart::Tilde(t) => s.push_str(t),
+            WordPart::DoubleQuoted(parts) => {
+                s.push_str(&word_to_xtrace_string(parts));
+            }
+            WordPart::Variable(name) => {
+                s.push('$');
+                s.push_str(name);
+            }
+            WordPart::Param(_) => {
+                // Just show as raw text
+                s.push_str(&word_to_string(word));
+                return s;
+            }
+            _ => {
+                let v = vec![part.clone()];
+                s.push_str(&word_to_string(&v));
+            }
+        }
+    }
+    s
+}
+
 pub fn word_to_string(word: &Word) -> String {
     let mut s = String::new();
     for part in word {

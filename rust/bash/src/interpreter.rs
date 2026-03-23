@@ -1222,10 +1222,7 @@ impl Shell {
                             AssignValue::Array(elems) => {
                                 let items: Vec<String> = elems
                                     .iter()
-                                    .map(|e| {
-                                        let v = self.expand_word_single(&e.value);
-                                        xtrace_quote_assign(&v)
-                                    })
+                                    .map(|e| crate::ast::word_to_xtrace_string(&e.value))
                                     .collect();
                                 if assign.append {
                                     self.xtrace_write(&format!(
@@ -2636,100 +2633,6 @@ pub fn capitalize_string(s: &str) -> String {
             result.extend(chars.map(|c| c.to_ascii_lowercase()));
             result
         }
-    }
-}
-
-/// Quote for xtrace in assignment context — uses backslash for metacharacters
-fn xtrace_quote_assign(s: &str) -> String {
-    if s.is_empty() {
-        return "''".to_string();
-    }
-    let needs_quoting = s.chars().any(|c| {
-        matches!(
-            c,
-            '|' | '&'
-                | ';'
-                | '('
-                | ')'
-                | '<'
-                | '>'
-                | ' '
-                | '\t'
-                | '\n'
-                | '\''
-                | '"'
-                | '`'
-                | '$'
-                | '\\'
-                | '!'
-                | '{'
-                | '}'
-                | '*'
-                | '?'
-                | '['
-                | ']'
-                | '#'
-                | '~'
-        )
-    });
-    if !needs_quoting {
-        return s.to_string();
-    }
-    let has_control = s.chars().any(|c| c.is_control());
-    if has_control {
-        let mut out = String::from("$'");
-        for ch in s.chars() {
-            match ch {
-                '\n' => out.push_str("\\n"),
-                '\t' => out.push_str("\\t"),
-                '\'' => out.push_str("\\'"),
-                '\\' => out.push_str("\\\\"),
-                c if c.is_control() => out.push_str(&format!("\\x{:02x}", c as u32)),
-                c => out.push(c),
-            }
-        }
-        out.push('\'');
-        out
-    } else if s.len() == 1 && !s.chars().next().unwrap().is_whitespace() {
-        // Single special char — use backslash quoting
-        format!("\\{}", s)
-    } else if !s.contains('\'')
-        && s.chars()
-            .all(|c| c == ' ' || (!c.is_whitespace() && !c.is_control()))
-    {
-        // Use single quotes for strings that are just spaces + printable
-        format!("'{}'", s)
-    } else {
-        // Backslash-escape each special character
-        let mut out = String::new();
-        for ch in s.chars() {
-            if matches!(
-                ch,
-                '|' | '&'
-                    | ';'
-                    | '('
-                    | ')'
-                    | '<'
-                    | '>'
-                    | '"'
-                    | '`'
-                    | '$'
-                    | '\\'
-                    | '!'
-                    | '{'
-                    | '}'
-                    | '*'
-                    | '?'
-                    | '['
-                    | ']'
-                    | '#'
-                    | '~'
-            ) {
-                out.push('\\');
-            }
-            out.push(ch);
-        }
-        out
     }
 }
 
