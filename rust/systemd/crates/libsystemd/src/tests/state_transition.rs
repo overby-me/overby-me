@@ -64,6 +64,9 @@ fn test_service_state_transitions_inner() {
         stderr_eventfd: crate::platform::make_event_fd().unwrap(),
         notification_eventfd: crate::platform::make_event_fd().unwrap(),
         socket_activation_eventfd: crate::platform::make_event_fd().unwrap(),
+        pending_activations: std::sync::Arc::new(std::sync::Mutex::new(
+            std::collections::HashSet::new(),
+        )),
     }));
 
     let signals = signal_hook::iterator::Signals::new([signal_hook::consts::SIGCHLD]).unwrap();

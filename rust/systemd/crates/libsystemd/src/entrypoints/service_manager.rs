@@ -662,6 +662,9 @@ fn prepare_runtimeinfo(conf: &config::Config, dry_run: bool) -> runtime_info::Ar
         stderr_eventfd: platform::make_event_fd().unwrap(),
         notification_eventfd: platform::make_event_fd().unwrap(),
         socket_activation_eventfd: platform::make_event_fd().unwrap(),
+        pending_activations: std::sync::Arc::new(std::sync::Mutex::new(
+            std::collections::HashSet::new(),
+        )),
     }))
 }
 

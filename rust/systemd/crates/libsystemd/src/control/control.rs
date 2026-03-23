@@ -906,7 +906,42 @@ fn find_or_load_unit(
         } else {
             format!("{unit_name}.service")
         };
-        match load_new_unit(&ri.config.unit_dirs, &load_name) {
+
+        // If the file is a symlink, resolve to canonical name and check
+        // if that unit is already loaded (e.g., test15-a1.service → test15-a.service).
+        let canonical_name = {
+            let mut resolved = load_name.clone();
+            for dir in &ri.config.unit_dirs {
+                let candidate = dir.join(&load_name);
+                if candidate.symlink_metadata().map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+                    if let Ok(target) = std::fs::canonicalize(&candidate) {
+                        if let Some(name) = target.file_name().map(|f| f.to_string_lossy().to_string()) {
+                            resolved = name;
+                            break;
+                        }
+                    }
+                }
+            }
+            resolved
+        };
+
+        // If the canonical name differs (symlink alias), check if it's already
+        // in the table. Also prefer loading by canonical name to avoid duplicates.
+        if canonical_name != load_name {
+            let found = find_units_with_name(&canonical_name, &ri.unit_table);
+            if let Some(unit) = found.first() {
+                return Ok(unit.id.clone());
+            }
+        }
+
+        // Load by canonical name if it differs — this ensures the unit's ID
+        // uses the real name, not the alias.
+        let actual_load_name = if canonical_name != load_name {
+            &canonical_name
+        } else {
+            &load_name
+        };
+        match load_new_unit(&ri.config.unit_dirs, actual_load_name) {
             Ok(unit) => {
                 let id = unit.id.clone();
                 crate::units::insert_new_unit_lenient(unit, &mut ri);
@@ -2148,39 +2183,19 @@ pub fn execute_command(
             return Ok(Value::Array(timers));
         }
         Command::ListJobs => {
-            // Return units currently being activated (Starting status) as jobs.
-            // Real systemd has a formal job queue; we approximate by inspecting
-            // unit statuses.
+            // Return units currently being activated as jobs. Units in the
+            // pending_activations set that are NeverStarted are "waiting";
+            // units in Starting state are "running".
             let ri = run_info.read_poisoned();
+            let pending = ri.pending_activations.lock().unwrap().clone();
             let mut job_id: u64 = 1;
             let mut jobs: Vec<Value> = Vec::new();
             for unit in ri.unit_table.values() {
                 let status = unit.common.status.read_poisoned().clone();
                 let (job_type, state) = match &status {
                     UnitStatus::Starting => ("start", "running"),
-                    UnitStatus::NeverStarted => {
-                        // Check if this unit is wanted/required by a Starting unit
-                        // (i.e., queued to start as part of a transaction)
-                        let is_waiting = ri.unit_table.values().any(|other| {
-                            matches!(*other.common.status.read_poisoned(), UnitStatus::Starting)
-                                && (other
-                                    .common
-                                    .dependencies
-                                    .wants
-                                    .iter()
-                                    .any(|d| d.name == unit.id.name)
-                                    || other
-                                        .common
-                                        .dependencies
-                                        .requires
-                                        .iter()
-                                        .any(|d| d.name == unit.id.name))
-                        });
-                        if is_waiting {
-                            ("start", "waiting")
-                        } else {
-                            continue;
-                        }
+                    UnitStatus::NeverStarted if pending.contains(&unit.id) => {
+                        ("start", "waiting")
                     }
                     _ => continue,
                 };
@@ -2742,12 +2757,33 @@ pub fn execute_command(
                         }
                     }
                 }
+                // Record the full activation subgraph so list-jobs can find
+                // "waiting" units.
+                let pending = {
+                    let ri = run_info.read_poisoned();
+                    let mut ids = vec![id.clone()];
+                    crate::units::collect_unit_start_subgraph(&mut ids, &ri.unit_table);
+                    ri.pending_activations.clone()
+                };
+                {
+                    let mut pa = pending.lock().unwrap();
+                    let ri = run_info.read_poisoned();
+                    let mut ids = vec![id.clone()];
+                    crate::units::collect_unit_start_subgraph(&mut ids, &ri.unit_table);
+                    for pending_id in &ids {
+                        pa.insert(pending_id.clone());
+                    }
+                }
                 let run_info_clone = run_info.clone();
                 std::thread::spawn(move || {
-                    let errs = crate::units::activate_needed_units(id, run_info_clone);
+                    let errs = crate::units::activate_needed_units(id, run_info_clone.clone());
                     for err in &errs {
                         log::error!("Background activation error: {err}");
                     }
+                    // Clean up pending activations
+                    let ri = run_info_clone.read_poisoned();
+                    let mut pa = ri.pending_activations.lock().unwrap();
+                    pa.clear();
                 });
             }
         }

@@ -36,6 +36,10 @@ pub type MutFDStore = RwLock<FDStore>;
 /// handler.
 pub type ArcMutPidTable = Arc<Mutex<PidTable>>;
 
+/// Set of unit IDs that are part of a pending activation (started via --no-block).
+/// Used by `list-jobs` to determine which units are "waiting" vs "running".
+pub type PendingActivations = Arc<Mutex<std::collections::HashSet<UnitId>>>;
+
 /// This will be passed through to all the different threads as a central state struct
 pub struct RuntimeInfo {
     pub unit_table: UnitTable,
@@ -46,6 +50,7 @@ pub struct RuntimeInfo {
     pub stderr_eventfd: EventFd,
     pub notification_eventfd: EventFd,
     pub socket_activation_eventfd: EventFd,
+    pub pending_activations: PendingActivations,
 }
 
 impl RuntimeInfo {
