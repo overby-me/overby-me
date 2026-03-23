@@ -3035,9 +3035,59 @@ fn builtin_trap(shell: &mut Shell, args: &[String]) -> i32 {
     0
 }
 
-fn builtin_wait(_shell: &mut Shell, _args: &[String]) -> i32 {
-    // TODO: Wait for background jobs
-    0
+fn builtin_wait(shell: &mut Shell, args: &[String]) -> i32 {
+    #[cfg(unix)]
+    {
+        use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
+        use nix::unistd::Pid;
+
+        if args.is_empty() {
+            // Wait for all background children
+            loop {
+                match waitpid(Pid::from_raw(-1), Some(WaitPidFlag::WNOHANG)) {
+                    Ok(WaitStatus::StillAlive) => break,
+                    Ok(WaitStatus::Exited(_, code)) => {
+                        shell.last_status = code;
+                    }
+                    Ok(WaitStatus::Signaled(_, sig, _)) => {
+                        shell.last_status = 128 + sig as i32;
+                    }
+                    Ok(_) => continue,
+                    Err(nix::errno::Errno::ECHILD) => break,
+                    Err(_) => break,
+                }
+            }
+            // Also do a blocking wait for any remaining
+            loop {
+                match waitpid(Pid::from_raw(-1), None) {
+                    Ok(WaitStatus::Exited(_, code)) => {
+                        shell.last_status = code;
+                    }
+                    Ok(WaitStatus::Signaled(_, sig, _)) => {
+                        shell.last_status = 128 + sig as i32;
+                    }
+                    Ok(_) => continue,
+                    Err(_) => break,
+                }
+            }
+        } else {
+            // Wait for specific PIDs
+            for arg in args {
+                if let Ok(pid) = arg.parse::<i32>() {
+                    match waitpid(Pid::from_raw(pid), None) {
+                        Ok(WaitStatus::Exited(_, code)) => {
+                            shell.last_status = code;
+                        }
+                        Ok(WaitStatus::Signaled(_, sig, _)) => {
+                            shell.last_status = 128 + sig as i32;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+    shell.last_status
 }
 
 fn builtin_kill(shell: &mut Shell, args: &[String]) -> i32 {
