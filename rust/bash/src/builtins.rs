@@ -191,6 +191,38 @@ fn interpret_echo_escapes(s: &str) -> String {
                     }
                     result.push(val as char);
                 }
+                Some('u') => {
+                    let mut val = 0u32;
+                    for _ in 0..4 {
+                        let mut peek = chars.clone();
+                        match peek.next() {
+                            Some(c) if c.is_ascii_hexdigit() => {
+                                val = val * 16 + c.to_digit(16).unwrap();
+                                chars = peek;
+                            }
+                            _ => break,
+                        }
+                    }
+                    if let Some(c) = char::from_u32(val) {
+                        result.push(c);
+                    }
+                }
+                Some('U') => {
+                    let mut val = 0u32;
+                    for _ in 0..8 {
+                        let mut peek = chars.clone();
+                        match peek.next() {
+                            Some(c) if c.is_ascii_hexdigit() => {
+                                val = val * 16 + c.to_digit(16).unwrap();
+                                chars = peek;
+                            }
+                            _ => break,
+                        }
+                    }
+                    if let Some(c) = char::from_u32(val) {
+                        result.push(c);
+                    }
+                }
                 Some(c) => {
                     result.push('\\');
                     result.push(c);
@@ -340,7 +372,27 @@ fn builtin_printf(_shell: &mut Shell, args: &[String]) -> i32 {
                     Some('x') => {
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
                         let n: i64 = arg.parse().unwrap_or(0);
-                        print!("{:x}", n);
+                        if flags.contains('#') {
+                            print!("{:#x}", n);
+                        } else {
+                            print!("{:x}", n);
+                        }
+                        arg_idx += 1;
+                    }
+                    Some('X') => {
+                        let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
+                        let n: i64 = arg.parse().unwrap_or(0);
+                        if flags.contains('#') {
+                            print!("{:#X}", n);
+                        } else {
+                            print!("{:X}", n);
+                        }
+                        arg_idx += 1;
+                    }
+                    Some('u') => {
+                        let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
+                        let n: u64 = arg.parse().unwrap_or(0);
+                        print!("{}", n);
                         arg_idx += 1;
                     }
                     Some('o') => {
