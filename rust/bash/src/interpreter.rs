@@ -1130,7 +1130,13 @@ impl Shell {
                         _ => String::new(),
                     };
                     let old = self.vars.get(&a.name).cloned();
-                    self.vars.insert(a.name.clone(), v);
+                    if a.append {
+                        let existing = old.as_deref().unwrap_or("");
+                        self.vars
+                            .insert(a.name.clone(), format!("{}{}", existing, v));
+                    } else {
+                        self.vars.insert(a.name.clone(), v);
+                    }
                     (a.name.clone(), old)
                 })
                 .collect();
@@ -1158,7 +1164,13 @@ impl Shell {
                             AssignValue::Scalar(w) => self.expand_word_single(w),
                             _ => String::new(),
                         };
-                        (a.name.clone(), v)
+                        let val = if a.append {
+                            let existing = self.vars.get(&a.name).cloned().unwrap_or_default();
+                            format!("{}{}", existing, v)
+                        } else {
+                            v
+                        };
+                        (a.name.clone(), val)
                     })
                     .collect()
             } else {
@@ -1549,9 +1561,20 @@ impl Shell {
             match unsafe { nix::unistd::fork() } {
                 Ok(nix::unistd::ForkResult::Child) => {
                     for assign in assignments {
-                        let value = match &assign.value {
+                        let v = match &assign.value {
                             AssignValue::Scalar(w) => self.expand_word_single(w),
                             _ => String::new(),
+                        };
+                        let value = if assign.append {
+                            let existing = self
+                                .vars
+                                .get(&assign.name)
+                                .cloned()
+                                .or_else(|| std::env::var(&assign.name).ok())
+                                .unwrap_or_default();
+                            format!("{}{}", existing, v)
+                        } else {
+                            v
                         };
                         unsafe { std::env::set_var(&assign.name, &value) };
                     }
