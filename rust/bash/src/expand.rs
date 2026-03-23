@@ -750,6 +750,18 @@ fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
         return expand_param(&indirect_expr, ctx, cmd_sub);
     }
 
+    // For $@ and $* with operations, apply per-element
+    if (expr.name == "@" || expr.name == "*")
+        && !matches!(expr.op, ParamOp::None | ParamOp::Length)
+        && ctx.positional.len() > 1
+    {
+        let elements: Vec<String> = ctx.positional[1..]
+            .iter()
+            .map(|elem| apply_param_op(elem, &expr.op, ctx, cmd_sub))
+            .collect();
+        return elements.join(" ");
+    }
+
     // For array[@] or array[*] with operations, apply per-element
     if let Some(bracket) = expr.name.find('[') {
         let base = &expr.name[..bracket];
