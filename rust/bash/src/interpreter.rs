@@ -2304,6 +2304,18 @@ fn pattern_match_impl(text: &[char], ti: usize, pattern: &[char], pi: usize) -> 
         }
 
         match pattern[pi] {
+            // \x00 prefix means the next char is quoted (literal, not a glob char)
+            '\x00' => {
+                pi += 1;
+                if pi >= pattern.len() {
+                    return false;
+                }
+                if ti >= text.len() || text[ti] != pattern[pi] {
+                    return false;
+                }
+                ti += 1;
+                pi += 1;
+            }
             '*' => {
                 pi += 1;
                 while pi < pattern.len() && pattern[pi] == '*' {
@@ -2338,7 +2350,9 @@ fn pattern_match_impl(text: &[char], ti: usize, pattern: &[char], pi: usize) -> 
                 }
                 let mut matched = false;
                 let ch = text[ti];
-                while pi < pattern.len() && pattern[pi] != ']' {
+                // In POSIX, ] at the start of a bracket expression is a literal
+                let bracket_first = pi;
+                while pi < pattern.len() && (pattern[pi] != ']' || pi == bracket_first) {
                     // Handle backslash escape inside bracket
                     if pattern[pi] == '\\' && pi + 1 < pattern.len() {
                         pi += 1; // skip backslash
