@@ -686,11 +686,26 @@ fn main() {
     };
     let str_call = serde_json::to_string(&call.to_json()).unwrap();
 
-    let result = if addr.starts_with('/') {
+    // Retry on connection refused (e.g. after daemon-reexec, the socket
+    // may not be ready yet).
+    let mut result = if addr.starts_with('/') {
         send_unix(&addr, &str_call)
     } else {
         send_tcp(&addr, &str_call)
     };
+    if result.is_err() {
+        for _ in 0..10 {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            result = if addr.starts_with('/') {
+                send_unix(&addr, &str_call)
+            } else {
+                send_tcp(&addr, &str_call)
+            };
+            if result.is_ok() {
+                break;
+            }
+        }
+    }
 
     match result {
         Ok(resp) => {
