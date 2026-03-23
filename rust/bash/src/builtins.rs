@@ -2279,8 +2279,14 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
             ci += 1;
         }
     }
-    // Strip trailing IFS whitespace from last field, but not past escaped chars
-    let trim_limit = last_escaped_pos.map(|p| p + 1).unwrap_or(0);
+    // Strip trailing IFS whitespace from last field
+    // For single variable: strip all trailing whitespace (even escaped)
+    // For multiple variables: preserve escaped trailing whitespace
+    let trim_limit = if var_names.len() == 1 {
+        0
+    } else {
+        last_escaped_pos.map(|p| p + 1).unwrap_or(0)
+    };
     let mut end = current.len();
     while end > trim_limit {
         if let Some(c) = current[..end].chars().last() {
