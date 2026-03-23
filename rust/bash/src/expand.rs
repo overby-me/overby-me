@@ -1588,8 +1588,31 @@ fn quote_glob_chars(s: &str) -> String {
 }
 
 /// Remove the \x00 escape prefixes added by quote_glob_chars.
+#[allow(dead_code)]
 pub fn unquote_glob_chars(s: &str) -> String {
     s.replace('\x00', "")
+}
+
+/// Remove both \x00 quote markers and backslash quoting (for word expansion, NOT case patterns)
+fn remove_quotes(s: &str) -> String {
+    let mut result = String::new();
+    let mut chars = s.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '\x00' {
+            // Quote marker — skip it, keep the next char
+            if let Some(next) = chars.next() {
+                result.push(next);
+            }
+        } else if ch == '\\' {
+            // Backslash quote removal: keep the next char, discard backslash
+            if let Some(next) = chars.next() {
+                result.push(next);
+            }
+        } else {
+            result.push(ch);
+        }
+    }
+    result
 }
 
 /// Returns true if the string contains unescaped glob metacharacters.
@@ -1988,16 +2011,16 @@ fn glob_expand(field: &str) -> Vec<String> {
                     .map(|p| p.to_string_lossy().to_string())
                     .collect();
                 if results.is_empty() {
-                    vec![unquote_glob_chars(field)]
+                    vec![remove_quotes(field)]
                 } else {
                     results.sort();
                     results
                 }
             }
-            Err(_) => vec![unquote_glob_chars(field)],
+            Err(_) => vec![remove_quotes(field)],
         }
     } else {
-        vec![unquote_glob_chars(field)]
+        vec![remove_quotes(field)]
     }
 }
 
