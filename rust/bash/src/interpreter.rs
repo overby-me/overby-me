@@ -682,7 +682,18 @@ impl Shell {
                         let empty = if *colon { val.is_empty() } else { false };
                         let unset = !self.vars.contains_key(&resolved);
                         if unset || empty {
-                            let default_val = self.expand_word_single(default_word);
+                            let raw_val = self.expand_word_single(default_word);
+                            // Apply tilde expansion for := defaults
+                            let default_val = if let Some(rest) = raw_val.strip_prefix('~') {
+                                let home = self.vars.get("HOME").cloned().unwrap_or_default();
+                                if rest.is_empty() || rest.starts_with('/') {
+                                    format!("{}{}", home, rest)
+                                } else {
+                                    raw_val
+                                }
+                            } else {
+                                raw_val
+                            };
                             self.set_var(&expr.name, default_val);
                         }
                     }

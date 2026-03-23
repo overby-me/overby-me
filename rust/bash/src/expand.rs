@@ -378,7 +378,17 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                     return;
                 }
             }
-            let val = expand_param(expr, ctx, cmd_sub);
+            let mut val = expand_param(expr, ctx, cmd_sub);
+            // Apply tilde expansion for default/assign values
+            if matches!(
+                &expr.op,
+                ParamOp::Default(..) | ParamOp::Assign(..) | ParamOp::Alt(..)
+            ) && val.starts_with('~')
+                && (val.len() == 1 || val.as_bytes().get(1) == Some(&b'/'))
+            {
+                let home = ctx.vars.get("HOME").cloned().unwrap_or_default();
+                val = format!("{}{}", home, &val[1..]);
+            }
             out.push(Segment::Unquoted(val));
         }
         WordPart::CommandSub(cmd) => {
