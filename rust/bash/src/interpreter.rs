@@ -176,12 +176,15 @@ impl Shell {
                 let func_source = format!("{} () {}", name, body);
                 let mut parser = crate::parser::Parser::new(&func_source);
                 if let Ok(program) = parser.parse_program() {
-                    for cmd in &program {
-                        if let crate::ast::Command::FunctionDef(fname, fbody) =
-                            &cmd.list.first.commands[0]
-                        {
-                            shell.functions.insert(fname.clone(), *fbody.clone());
-                        }
+                    // Only accept if the program is exactly one function definition
+                    // (security: prevent Shellshock-style command injection)
+                    if program.len() == 1
+                        && program[0].list.first.commands.len() == 1
+                        && program[0].list.rest.is_empty()
+                        && let crate::ast::Command::FunctionDef(fname, fbody) =
+                            &program[0].list.first.commands[0]
+                    {
+                        shell.functions.insert(fname.clone(), *fbody.clone());
                     }
                 }
             }
