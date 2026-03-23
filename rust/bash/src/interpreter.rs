@@ -86,6 +86,28 @@ impl Shell {
         vars.insert("RANDOM".to_string(), "0".to_string());
         vars.insert("SECONDS".to_string(), "0".to_string());
         vars.insert("BASHPID".to_string(), std::process::id().to_string());
+        #[cfg(unix)]
+        {
+            vars.insert("UID".to_string(), unsafe { libc::getuid() }.to_string());
+            vars.insert("EUID".to_string(), unsafe { libc::geteuid() }.to_string());
+        }
+        // SHLVL: increment from environment
+        let shlvl: i32 = std::env::var("SHLVL")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0)
+            + 1;
+        vars.insert("SHLVL".to_string(), shlvl.to_string());
+        exports.insert("SHLVL".to_string(), shlvl.to_string());
+        unsafe { std::env::set_var("SHLVL", shlvl.to_string()) };
+        if let Ok(hostname) = std::env::var("HOSTNAME") {
+            vars.entry("HOSTNAME".to_string()).or_insert(hostname);
+        }
+        vars.insert("OSTYPE".to_string(), "linux-gnu".to_string());
+        vars.insert(
+            "MACHTYPE".to_string(),
+            format!("{}-pc-linux-gnu", std::env::consts::ARCH),
+        );
         vars.insert("PPID".to_string(), {
             #[cfg(unix)]
             {
