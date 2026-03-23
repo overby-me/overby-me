@@ -831,6 +831,7 @@ pub fn collect_dropin_entries(
 /// - Settings in drop-ins override settings in the base file
 /// - If a drop-in sets a list-type value to empty (e.g., `ExecStart=`),
 ///   it clears the base value before adding new entries
+///
 /// Collect all applicable drop-in overrides for a given unit name, ordered from
 /// least specific to most specific:
 ///   1. Type-level drop-ins (e.g., key "service" applies to all .service units)
@@ -852,12 +853,12 @@ fn collect_applicable_dropins(
         .unwrap_or("");
 
     // 1. Type-level drop-ins: key is just the type name (e.g., "service")
-    if !type_suffix.is_empty() {
-        if let Some(overrides) = dropins.get(type_suffix) {
-            for (filename, content) in overrides {
-                let resolved = resolve_specifiers(content, unit_name, "");
-                result.push((filename.clone(), resolved));
-            }
+    if !type_suffix.is_empty()
+        && let Some(overrides) = dropins.get(type_suffix)
+    {
+        for (filename, content) in overrides {
+            let resolved = resolve_specifiers(content, unit_name, "");
+            result.push((filename.clone(), resolved));
         }
     }
 

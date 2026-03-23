@@ -913,13 +913,15 @@ fn find_or_load_unit(
             let mut resolved = load_name.clone();
             for dir in &ri.config.unit_dirs {
                 let candidate = dir.join(&load_name);
-                if candidate.symlink_metadata().map(|m| m.file_type().is_symlink()).unwrap_or(false) {
-                    if let Ok(target) = std::fs::canonicalize(&candidate) {
-                        if let Some(name) = target.file_name().map(|f| f.to_string_lossy().to_string()) {
-                            resolved = name;
-                            break;
-                        }
-                    }
+                if candidate
+                    .symlink_metadata()
+                    .map(|m| m.file_type().is_symlink())
+                    .unwrap_or(false)
+                    && let Ok(target) = std::fs::canonicalize(&candidate)
+                    && let Some(name) = target.file_name().map(|f| f.to_string_lossy().to_string())
+                {
+                    resolved = name;
+                    break;
                 }
             }
             resolved
@@ -1569,9 +1571,13 @@ fn create_transient_unit(
     // Parse "Key=Value" pairs and set the corresponding fields.
     let mut failure_action = crate::units::UnitAction::None;
     let mut success_action = crate::units::UnitAction::None;
+    let mut prop_description: Option<String> = None;
     for prop in &params.properties {
         if let Some((key, value)) = prop.split_once('=') {
             match key {
+                "Description" => {
+                    prop_description = Some(value.to_string());
+                }
                 "Type" => {
                     service_conf.srcv_type = match value {
                         "simple" => ServiceType::Simple,
@@ -1736,9 +1742,9 @@ fn create_transient_unit(
         id: unit_id.clone(),
         common: Common {
             unit: UnitConfig {
-                description: params
-                    .description
+                description: prop_description
                     .clone()
+                    .or_else(|| params.description.clone())
                     .unwrap_or_else(|| format!("Transient unit {unit_name}")),
                 documentation: vec![],
                 fragment_path: None, // transient — no file on disk
@@ -2194,9 +2200,7 @@ pub fn execute_command(
                 let status = unit.common.status.read_poisoned().clone();
                 let (job_type, state) = match &status {
                     UnitStatus::Starting => ("start", "running"),
-                    UnitStatus::NeverStarted if pending.contains(&unit.id) => {
-                        ("start", "waiting")
-                    }
+                    UnitStatus::NeverStarted if pending.contains(&unit.id) => ("start", "waiting"),
                     _ => continue,
                 };
                 jobs.push(serde_json::json!({

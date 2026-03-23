@@ -344,12 +344,11 @@ fn add_slice_dependencies(units: &mut UnitTable) {
             Specific::Service(s) => s.conf.slice.as_deref(),
             _ => None,
         };
-        if let Some(slice_name) = slice_name {
-            if let Ok(slice_id) = <&str as TryInto<UnitId>>::try_into(slice_name) {
-                if units.contains_key(&slice_id) {
-                    slice_deps.push((unit.id.clone(), slice_id));
-                }
-            }
+        if let Some(slice_name) = slice_name
+            && let Ok(slice_id) = <&str as TryInto<UnitId>>::try_into(slice_name)
+            && units.contains_key(&slice_id)
+        {
+            slice_deps.push((unit.id.clone(), slice_id));
         }
     }
 

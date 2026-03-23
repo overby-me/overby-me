@@ -940,10 +940,7 @@ fn handle_response(
                         .get("UNIT")
                         .and_then(|v| v.as_str())
                         .unwrap_or("unknown");
-                    let jtype = job
-                        .get("TYPE")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("start");
+                    let jtype = job.get("TYPE").and_then(|v| v.as_str()).unwrap_or("start");
                     let state = job
                         .get("STATE")
                         .and_then(|v| v.as_str())
