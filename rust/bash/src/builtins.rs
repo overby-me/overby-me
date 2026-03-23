@@ -2088,7 +2088,8 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
     }
 
     if !raw {
-        // Handle backslash continuation
+        // Handle backslash line continuation only here
+        // Backslash before IFS chars is handled during field splitting below
         line = line.replace("\\\n", "");
     }
 
@@ -2118,16 +2119,58 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
         return 0;
     }
 
-    if var_names.len() == 1 {
-        shell.set_var(&var_names[0], line);
-    } else {
-        let fields: Vec<&str> = line
-            .splitn(var_names.len(), |c: char| ifs.contains(c))
-            .collect();
-        for (j, name) in var_names.iter().enumerate() {
-            let value = fields.get(j).unwrap_or(&"").trim().to_string();
-            shell.set_var(name, value);
+    // Split the line into fields respecting backslash escapes (if not raw)
+    let ifs_ws: Vec<char> = ifs.chars().filter(|c| c.is_whitespace()).collect();
+
+    // Parse the line into fields
+    let mut fields: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let chars: Vec<char> = line.chars().collect();
+    let mut ci = 0;
+    let max_fields = var_names.len();
+
+    // Skip leading IFS whitespace
+    while ci < chars.len() && ifs_ws.contains(&chars[ci]) {
+        ci += 1;
+    }
+
+    while ci < chars.len() {
+        let ch = chars[ci];
+        if !raw && ch == '\\' && ci + 1 < chars.len() {
+            // Backslash escapes the next character
+            ci += 1;
+            current.push(chars[ci]);
+            ci += 1;
+        } else if fields.len() < max_fields - 1 && ifs.contains(ch) {
+            // IFS character — end current field
+            if ifs_ws.contains(&ch) {
+                // IFS whitespace: skip consecutive whitespace
+                if !current.is_empty() {
+                    fields.push(std::mem::take(&mut current));
+                }
+                while ci + 1 < chars.len() && ifs_ws.contains(&chars[ci + 1]) {
+                    ci += 1;
+                }
+            } else {
+                // IFS non-whitespace: always produces a field boundary
+                fields.push(std::mem::take(&mut current));
+            }
+            ci += 1;
+        } else {
+            current.push(ch);
+            ci += 1;
         }
+    }
+    // Strip trailing IFS whitespace from last field
+    let trimmed = current
+        .trim_end_matches(|c: char| ifs_ws.contains(&c))
+        .to_string();
+    fields.push(trimmed);
+
+    // Assign to variables
+    for (j, name) in var_names.iter().enumerate() {
+        let value = fields.get(j).cloned().unwrap_or_default();
+        shell.set_var(name, value);
     }
 
     0
