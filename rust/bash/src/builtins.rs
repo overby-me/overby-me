@@ -2264,8 +2264,9 @@ fn builtin_type(shell: &mut Shell, args: &[String]) -> i32 {
             }
         } else {
             // Default behavior
-            if shell.functions.contains_key(name) {
+            if let Some(body) = shell.functions.get(name) {
                 println!("{} is a function", name);
+                println!("{} () \n{}", name, format_compound_command(body));
             } else if builtin_map.contains_key(name) {
                 println!("{} is a shell builtin", name);
             } else if let Some(path) = find_in_path_opt(name) {
