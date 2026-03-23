@@ -897,10 +897,13 @@ fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
                 let base = &expr.name[..bracket];
                 let idx_str = &expr.name[bracket + 1..expr.name.len() - 1];
                 let resolved = ctx.resolve_nameref(base);
-                if (idx_str == "@" || idx_str == "*")
-                    && let Some(arr) = ctx.arrays.get(&resolved)
-                {
-                    return arr.len().to_string();
+                if idx_str == "@" || idx_str == "*" {
+                    if let Some(arr) = ctx.arrays.get(&resolved) {
+                        return arr.len().to_string();
+                    }
+                    if let Some(assoc) = ctx.assoc_arrays.get(&resolved) {
+                        return assoc.len().to_string();
+                    }
                 }
             }
             val.len().to_string()
