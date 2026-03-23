@@ -288,20 +288,42 @@ fn builtin_printf(_shell: &mut Shell, args: &[String]) -> i32 {
                     }
                     Some('d') | Some('i') => {
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
-                        let n: i64 = arg.parse().unwrap_or(0);
-                        // For %d, precision means minimum digits (zero-padded)
+                        let n: i64 = if arg.starts_with("0x") || arg.starts_with("0X") {
+                            i64::from_str_radix(&arg[2..], 16).unwrap_or(0)
+                        } else if arg.starts_with("0") && arg.len() > 1 && !arg.contains(['8', '9'])
+                        {
+                            i64::from_str_radix(&arg[1..], 8).unwrap_or(0)
+                        } else if arg.starts_with('\'') || arg.starts_with('"') {
+                            arg.chars().nth(1).map(|c| c as i64).unwrap_or(0)
+                        } else {
+                            arg.parse().unwrap_or(0)
+                        };
+                        let show_sign = flags.contains('+');
+                        let space_sign = flags.contains(' ');
+                        let sign_prefix = if n >= 0 && show_sign {
+                            "+"
+                        } else if n >= 0 && space_sign {
+                            " "
+                        } else {
+                            ""
+                        };
                         let effective_width = if let Some(p) = precision { p.max(w) } else { w };
                         let use_zero_pad = zero_pad || precision.is_some();
+                        let formatted = if n < 0 {
+                            format!("{}", n)
+                        } else {
+                            format!("{}{}", sign_prefix, n)
+                        };
                         if effective_width > 0 {
                             if left {
-                                print!("{:<effective_width$}", n);
+                                print!("{:<effective_width$}", formatted);
                             } else if use_zero_pad {
-                                print!("{:0>effective_width$}", n);
+                                print!("{:0>effective_width$}", formatted);
                             } else {
-                                print!("{:>effective_width$}", n);
+                                print!("{:>effective_width$}", formatted);
                             }
                         } else {
-                            print!("{}", n);
+                            print!("{}", formatted);
                         }
                         arg_idx += 1;
                     }
@@ -315,6 +337,28 @@ fn builtin_printf(_shell: &mut Shell, args: &[String]) -> i32 {
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
                         let n: i64 = arg.parse().unwrap_or(0);
                         print!("{:o}", n);
+                        arg_idx += 1;
+                    }
+                    Some('f') | Some('g') | Some('G') => {
+                        let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
+                        let n: f64 = arg.parse().unwrap_or(0.0);
+                        let p = precision.unwrap_or(6);
+                        if w > 0 {
+                            if left {
+                                print!("{:<w$.p$}", n);
+                            } else {
+                                print!("{:>w$.p$}", n);
+                            }
+                        } else {
+                            print!("{:.p$}", n);
+                        }
+                        arg_idx += 1;
+                    }
+                    Some('c') => {
+                        let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("");
+                        if let Some(ch) = arg.chars().next() {
+                            print!("{}", ch);
+                        }
                         arg_idx += 1;
                     }
                     Some('b') => {
