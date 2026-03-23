@@ -1059,22 +1059,34 @@ impl Shell {
                 if expanded_words.is_empty() {
                     // Trace assignment
                     if self.opt_xtrace {
-                        let val = match &assign.value {
-                            AssignValue::Scalar(w) => self.expand_word_single(w),
+                        match &assign.value {
                             AssignValue::Array(elems) => {
                                 let items: Vec<String> = elems
                                     .iter()
-                                    .map(|e| self.expand_word_single(&e.value))
+                                    .map(|e| {
+                                        let v = self.expand_word_single(&e.value);
+                                        xtrace_quote(&v)
+                                    })
                                     .collect();
-                                format!("({})", items.join(" "))
+                                if assign.append {
+                                    eprintln!("+ {}+=({})", assign.name, items.join(" "));
+                                } else {
+                                    eprintln!("+ {}=({})", assign.name, items.join(" "));
+                                }
                             }
-                            AssignValue::None => String::new(),
-                        };
-                        let qval = xtrace_quote(&val);
-                        if assign.append {
-                            eprintln!("+ {}+={}", assign.name, qval);
-                        } else {
-                            eprintln!("+ {}={}", assign.name, qval);
+                            _ => {
+                                let val = match &assign.value {
+                                    AssignValue::Scalar(w) => self.expand_word_single(w),
+                                    AssignValue::None => String::new(),
+                                    _ => unreachable!(),
+                                };
+                                let qval = xtrace_quote(&val);
+                                if assign.append {
+                                    eprintln!("+ {}+={}", assign.name, qval);
+                                } else {
+                                    eprintln!("+ {}={}", assign.name, qval);
+                                }
+                            }
                         }
                     }
                     self.execute_assignment(assign);
