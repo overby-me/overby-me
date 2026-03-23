@@ -2531,7 +2531,8 @@ impl Shell {
             .cloned()
             .unwrap_or_else(|| " \t\n".to_string());
 
-        let word_expanded = self.expand_word_fields(&clause.word, &ifs).join(" ");
+        let _ = ifs;
+        let word_expanded = self.expand_word_single(&clause.word);
 
         if self.opt_xtrace {
             self.xtrace_write(&format!("+ case {} in", word_expanded));
