@@ -35,6 +35,7 @@ impl BashHasher {
 }
 
 #[derive(Clone, Default)]
+#[allow(dead_code)]
 pub struct BashBuildHasher;
 
 impl std::hash::BuildHasher for BashBuildHasher {
@@ -44,8 +45,160 @@ impl std::hash::BuildHasher for BashBuildHasher {
     }
 }
 
-/// Type alias for associative arrays using bash-compatible hash ordering
-pub type AssocArray = HashMap<String, String, BashBuildHasher>;
+/// Bash-compatible hash table for associative arrays.
+/// Uses separate chaining with LIFO insertion per bucket, matching bash's exact iteration order.
+#[derive(Clone, Debug)]
+pub struct AssocArray {
+    buckets: Vec<Vec<(String, String)>>,
+    len: usize,
+}
+
+impl Default for AssocArray {
+    fn default() -> Self {
+        Self {
+            buckets: (0..128).map(|_| Vec::new()).collect(),
+            len: 0,
+        }
+    }
+}
+
+#[allow(dead_code)]
+impl AssocArray {
+    fn bucket_idx(key: &str) -> usize {
+        let mut h = BashHasher::new();
+        std::hash::Hasher::write(&mut h, key.as_bytes());
+        (std::hash::Hasher::finish(&h) as usize) & 127
+    }
+
+    pub fn get(&self, key: &str) -> Option<&String> {
+        let idx = Self::bucket_idx(key);
+        self.buckets[idx]
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v)
+    }
+
+    pub fn insert(&mut self, key: String, value: String) -> Option<String> {
+        let idx = Self::bucket_idx(&key);
+        if let Some(entry) = self.buckets[idx].iter_mut().find(|(k, _)| *k == key) {
+            let old = std::mem::replace(&mut entry.1, value);
+            Some(old)
+        } else {
+            // LIFO: insert at the front of the bucket
+            self.buckets[idx].insert(0, (key, value));
+            self.len += 1;
+            None
+        }
+    }
+
+    pub fn contains_key(&self, key: &str) -> bool {
+        self.get(key).is_some()
+    }
+
+    pub fn remove(&mut self, key: &str) -> Option<String> {
+        let idx = Self::bucket_idx(key);
+        if let Some(pos) = self.buckets[idx].iter().position(|(k, _)| k == key) {
+            let (_, v) = self.buckets[idx].remove(pos);
+            self.len -= 1;
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    pub fn keys(&self) -> impl Iterator<Item = &String> {
+        self.buckets.iter().flat_map(|b| b.iter().map(|(k, _)| k))
+    }
+
+    pub fn values(&self) -> impl Iterator<Item = &String> {
+        self.buckets.iter().flat_map(|b| b.iter().map(|(_, v)| v))
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &String)> {
+        self.buckets
+            .iter()
+            .flat_map(|b| b.iter().map(|(k, v)| (k, v)))
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    pub fn entry(&mut self, key: String) -> AssocEntry<'_> {
+        let idx = Self::bucket_idx(&key);
+        if self.buckets[idx].iter().any(|(k, _)| *k == key) {
+            AssocEntry::Occupied(AssocOccupiedEntry {
+                buckets: &mut self.buckets[idx],
+                key,
+            })
+        } else {
+            AssocEntry::Vacant(AssocVacantEntry {
+                buckets: &mut self.buckets[idx],
+                len: &mut self.len,
+                key,
+            })
+        }
+    }
+}
+
+pub enum AssocEntry<'a> {
+    Occupied(AssocOccupiedEntry<'a>),
+    Vacant(AssocVacantEntry<'a>),
+}
+
+pub struct AssocOccupiedEntry<'a> {
+    buckets: &'a mut Vec<(String, String)>,
+    key: String,
+}
+
+pub struct AssocVacantEntry<'a> {
+    buckets: &'a mut Vec<(String, String)>,
+    len: &'a mut usize,
+    key: String,
+}
+
+#[allow(dead_code)]
+impl<'a> AssocEntry<'a> {
+    pub fn or_default(self) -> &'a mut String {
+        self.or_insert_with(String::new)
+    }
+
+    pub fn or_insert(self, default: String) -> &'a mut String {
+        self.or_insert_with(|| default)
+    }
+
+    pub fn or_insert_with<F: FnOnce() -> String>(self, f: F) -> &'a mut String {
+        match self {
+            AssocEntry::Occupied(e) => {
+                let pos = e.buckets.iter().position(|(k, _)| *k == e.key).unwrap();
+                &mut e.buckets[pos].1
+            }
+            AssocEntry::Vacant(e) => {
+                e.buckets.insert(0, (e.key, f()));
+                *e.len += 1;
+                &mut e.buckets[0].1
+            }
+        }
+    }
+
+    pub fn and_modify<F: FnOnce(&mut String)>(self, f: F) -> Self {
+        match self {
+            AssocEntry::Occupied(e) => {
+                let pos = e.buckets.iter().position(|(k, _)| *k == e.key).unwrap();
+                f(&mut e.buckets[pos].1);
+                AssocEntry::Occupied(AssocOccupiedEntry {
+                    buckets: e.buckets,
+                    key: e.key,
+                })
+            }
+            AssocEntry::Vacant(e) => AssocEntry::Vacant(e),
+        }
+    }
+}
 use std::io::Write;
 
 pub struct Shell {

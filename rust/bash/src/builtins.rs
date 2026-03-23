@@ -1392,13 +1392,11 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             assoc_names.sort();
             for name in assoc_names {
                 let assoc = &shell.assoc_arrays[name];
-                let mut keys: Vec<&String> = assoc.keys().collect();
-                keys.sort();
-                let elements: Vec<String> = keys
+                let elements: Vec<String> = assoc
                     .iter()
-                    .map(|k| format!("[{}]={}", k, quote_for_declare(&assoc[*k])))
+                    .map(|(k, v)| format!("[{}]={}", k, quote_for_declare(v)))
                     .collect();
-                println!("declare -A {}=({})", name, elements.join(" "));
+                println!("declare -A {}=({} )", name, elements.join(" "));
             }
             // Print namerefs not in vars
             let mut nref_names: Vec<&String> = shell.namerefs.keys().collect();
@@ -1431,13 +1429,11 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     if shell.readonly_vars.contains(name.as_str()) {
                         flags.push('r');
                     }
-                    let mut keys: Vec<&String> = assoc.keys().collect();
-                    keys.sort();
-                    let elements: Vec<String> = keys
+                    let elements: Vec<String> = assoc
                         .iter()
-                        .map(|k| format!("[{}]={}", k, quote_for_declare(&assoc[*k])))
+                        .map(|(k, v)| format!("[{}]={}", k, quote_for_declare(v)))
                         .collect();
-                    println!("declare {} {}=({})", flags, name, elements.join(" "));
+                    println!("declare {} {}=({} )", flags, name, elements.join(" "));
                 } else if let Some(value) = shell.vars.get(name) {
                     let mut flags = String::from("-");
                     if shell.integer_vars.contains(name.as_str()) {
