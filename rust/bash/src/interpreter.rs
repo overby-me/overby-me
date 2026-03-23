@@ -252,6 +252,23 @@ impl Shell {
         if resolved == "BASH_ARGV0" && !self.positional.is_empty() {
             self.positional[0] = value.clone();
         }
+        // BASH_XTRACEFD: validate file descriptor
+        if resolved == "BASH_XTRACEFD"
+            && let Ok(fd) = value.parse::<i32>()
+        {
+            #[cfg(unix)]
+            {
+                // Check if fd is valid
+                let valid = fd >= 0 && nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_GETFD).is_ok();
+                if !valid && fd != 2 {
+                    eprintln!(
+                        "{}: BASH_XTRACEFD: {}: invalid value for trace file descriptor",
+                        self.error_prefix(),
+                        fd
+                    );
+                }
+            }
+        }
         self.vars.insert(resolved, value);
     }
 
