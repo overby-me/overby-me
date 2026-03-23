@@ -628,7 +628,14 @@ fn builtin_export(shell: &mut Shell, args: &[String]) -> i32 {
 
     // export -f: export functions to environment
     if export_funcs && !unexport {
+        let mut status = 0;
         for name in &names {
+            // Reject names that can't be valid function names
+            if name.contains('=') || name.contains('/') || name.is_empty() {
+                eprintln!("{}: export: {}: cannot export", shell.error_prefix(), name);
+                status = 1;
+                continue;
+            }
             if let Some(body) = shell.functions.get(name.as_str()) {
                 let body_str = format_compound_command(body);
                 let env_val = format!("() {}", body_str);
@@ -636,7 +643,7 @@ fn builtin_export(shell: &mut Shell, args: &[String]) -> i32 {
                 unsafe { std::env::set_var(&env_key, &env_val) };
             }
         }
-        return 0;
+        return status;
     }
 
     for arg in &names {
