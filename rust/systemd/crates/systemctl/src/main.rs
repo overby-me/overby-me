@@ -311,6 +311,8 @@ fn main() {
         "suspend" | "hibernate" | "hybrid-sleep" | "suspend-then-hibernate" => &positional[0],
         // Timer, property, edit, revert commands — pass through
         "list-timers" | "set-property" | "edit" | "revert" => &positional[0],
+        // log-level — get or set the service manager log level
+        "log-level" => &positional[0],
         _ => &positional[0],
     };
 

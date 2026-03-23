@@ -121,6 +121,8 @@ pub enum Command {
     StartTransient(TransientUnitParams),
     /// `daemon-reexec` — re-execute the service manager binary in-place.
     DaemonReexec,
+    /// `log-level [LEVEL]` — get or set the service manager log level.
+    LogLevel(Option<String>),
 }
 
 /// Parameters for creating a transient (in-memory) service unit.
@@ -134,6 +136,14 @@ pub struct TransientUnitParams {
     pub working_directory: Option<String>,
     pub service_type: Option<String>,
     pub remain_after_exit: bool,
+    /// Additional properties specified via `-p NAME=VALUE`.
+    pub properties: Vec<String>,
+    /// Environment variables specified via `-E NAME=VALUE`.
+    pub environment: Vec<String>,
+    /// Whether to run as a scope unit.
+    pub scope: bool,
+    /// Whether the caller wants to wait for completion.
+    pub wait: bool,
 }
 
 #[derive(Debug)]
@@ -358,6 +368,14 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
         "suspend-then-hibernate" => Command::SuspendThenHibernate,
         "reload" | "daemon-reload" => Command::LoadAllNew,
         "daemon-reexec" => Command::DaemonReexec,
+        "log-level" => {
+            let level = match &call.params {
+                Some(Value::String(s)) => Some(s.clone()),
+                Some(Value::Array(arr)) if !arr.is_empty() => arr[0].as_str().map(|s| s.to_owned()),
+                _ => None,
+            };
+            Command::LogLevel(level)
+        }
         "start-transient" => {
             // Params: JSON object with transient unit properties.
             match &call.params {
@@ -402,6 +420,26 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
                         .get("remain_after_exit")
                         .and_then(|v| v.as_bool())
                         .unwrap_or(false);
+                    let properties = obj
+                        .get("properties")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|v| v.as_str().map(|s| s.to_owned()))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let environment = obj
+                        .get("environment")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|v| v.as_str().map(|s| s.to_owned()))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let scope = obj.get("scope").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let wait = obj.get("wait").and_then(|v| v.as_bool()).unwrap_or(false);
 
                     Command::StartTransient(TransientUnitParams {
                         unit_name,
@@ -412,6 +450,10 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
                         working_directory,
                         service_type,
                         remain_after_exit,
+                        properties,
+                        environment,
+                        scope,
+                        wait,
                     })
                 }
                 Some(_) | None => {
@@ -1172,7 +1214,7 @@ fn create_transient_unit(
         cgroup_path: std::path::PathBuf::from(format!("/sys/fs/cgroup/rust-systemd/{unit_name}")),
     };
 
-    let service_conf = ServiceConfig {
+    let mut service_conf = ServiceConfig {
         restart: crate::units::ServiceRestart::No,
         restart_sec: None,
         kill_mode: crate::units::KillMode::ControlGroup,
@@ -1276,6 +1318,168 @@ fn create_transient_unit(
         nft_set: vec![],
     };
 
+    // Apply -p / --property overrides from the caller.
+    // Parse "Key=Value" pairs and set the corresponding fields.
+    let mut failure_action = crate::units::UnitAction::None;
+    let mut success_action = crate::units::UnitAction::None;
+    for prop in &params.properties {
+        if let Some((key, value)) = prop.split_once('=') {
+            match key {
+                "Type" => {
+                    service_conf.srcv_type = match value {
+                        "simple" => ServiceType::Simple,
+                        "exec" => ServiceType::Exec,
+                        "oneshot" => ServiceType::OneShot,
+                        "forking" => ServiceType::Forking,
+                        "notify" => ServiceType::Notify,
+                        "notify-reload" => ServiceType::NotifyReload,
+                        "dbus" => ServiceType::Dbus,
+                        "idle" => ServiceType::Idle,
+                        _ => service_conf.srcv_type,
+                    };
+                }
+                "RuntimeMaxSec" => {
+                    // Parse simple seconds (e.g. "5" or "5s")
+                    let trimmed = value.trim_end_matches('s');
+                    if let Ok(secs) = trimmed.parse::<u64>() {
+                        service_conf.runtime_max_sec =
+                            Some(crate::units::unit_parsing::Timeout::Duration(
+                                std::time::Duration::from_secs(secs),
+                            ));
+                    }
+                }
+                "RemainAfterExit" => {
+                    service_conf.remain_after_exit = matches!(value, "yes" | "true" | "1");
+                }
+                "DynamicUser" => {
+                    service_conf.exec_config.dynamic_user = matches!(value, "yes" | "true" | "1");
+                }
+                "NotifyAccess" => {
+                    service_conf.notifyaccess = match value {
+                        "all" => NotifyKind::All,
+                        "main" => NotifyKind::Main,
+                        "exec" => NotifyKind::Exec,
+                        _ => NotifyKind::None,
+                    };
+                }
+                "FailureAction" => {
+                    failure_action = match value {
+                        "poweroff" => crate::units::UnitAction::Poweroff,
+                        "reboot" => crate::units::UnitAction::Reboot,
+                        "exit" => crate::units::UnitAction::Exit,
+                        _ => crate::units::UnitAction::None,
+                    };
+                }
+                "SuccessAction" => {
+                    success_action = match value {
+                        "poweroff" => crate::units::UnitAction::Poweroff,
+                        "reboot" => crate::units::UnitAction::Reboot,
+                        "exit" => crate::units::UnitAction::Exit,
+                        _ => crate::units::UnitAction::None,
+                    };
+                }
+                "User" => {
+                    service_conf.exec_config.user = Some(value.to_string());
+                }
+                "Group" => {
+                    service_conf.exec_config.group = Some(value.to_string());
+                }
+                "WorkingDirectory" => {
+                    service_conf.exec_config.working_directory =
+                        Some(std::path::PathBuf::from(value));
+                }
+                "StateDirectory" => {
+                    service_conf.exec_config.state_directory = vec![value.to_string()];
+                }
+                "RuntimeDirectory" => {
+                    service_conf.exec_config.runtime_directory = vec![value.to_string()];
+                }
+                "CacheDirectory" => {
+                    service_conf.exec_config.cache_directory = vec![value.to_string()];
+                }
+                "LogsDirectory" => {
+                    service_conf.exec_config.logs_directory = vec![value.to_string()];
+                }
+                "ConfigurationDirectory" => {
+                    service_conf.exec_config.configuration_directory = vec![value.to_string()];
+                }
+                "RuntimeDirectoryPreserve" => {
+                    service_conf.exec_config.runtime_directory_preserve = match value {
+                        "yes" | "true" | "1" => crate::units::RuntimeDirectoryPreserve::Yes,
+                        "restart" => crate::units::RuntimeDirectoryPreserve::Restart,
+                        _ => crate::units::RuntimeDirectoryPreserve::No,
+                    };
+                }
+                "TemporaryFileSystem"
+                | "PrivateNetwork"
+                | "PrivateDevices"
+                | "PrivateUsers"
+                | "ProtectSystem"
+                | "ProtectHome" => {
+                    // These sandbox properties are parsed but may not all be
+                    // fully wired. Set what we can.
+                    match key {
+                        "PrivateNetwork" => {
+                            service_conf.exec_config.private_network =
+                                matches!(value, "yes" | "true" | "1");
+                        }
+                        "PrivateDevices" => {
+                            service_conf.exec_config.private_devices =
+                                matches!(value, "yes" | "true" | "1");
+                        }
+                        "PrivateUsers" => {
+                            service_conf.exec_config.private_users =
+                                matches!(value, "yes" | "true" | "1");
+                        }
+                        _ => {}
+                    }
+                }
+                "OOMPolicy" => {
+                    service_conf.oom_policy = match value {
+                        "stop" => crate::units::OOMPolicy::Stop,
+                        "kill" => crate::units::OOMPolicy::Kill,
+                        "continue" => crate::units::OOMPolicy::Continue,
+                        _ => crate::units::OOMPolicy::Stop,
+                    };
+                }
+                "Restart" => {
+                    service_conf.restart = match value {
+                        "always" => crate::units::ServiceRestart::Always,
+                        "on-failure" => crate::units::ServiceRestart::OnFailure,
+                        "on-abnormal" => crate::units::ServiceRestart::OnAbnormal,
+                        "on-abort" => crate::units::ServiceRestart::OnAbort,
+                        "on-watchdog" => crate::units::ServiceRestart::OnWatchdog,
+                        "on-success" => crate::units::ServiceRestart::OnSuccess,
+                        _ => crate::units::ServiceRestart::No,
+                    };
+                }
+                "Environment" => {
+                    // Append to environment
+                    if let Some((k, v)) = value.split_once('=') {
+                        let env = service_conf.exec_config.environment.get_or_insert_with(|| {
+                            crate::units::unit_parsing::EnvVars { vars: vec![] }
+                        });
+                        env.vars.push((k.to_string(), v.to_string()));
+                    }
+                }
+                _ => {
+                    log::debug!("Ignoring unknown transient unit property: {key}={value}");
+                }
+            }
+        }
+    }
+
+    // Apply environment variables from -E/--setenv
+    for env_str in &params.environment {
+        if let Some((k, v)) = env_str.split_once('=') {
+            let env = service_conf
+                .exec_config
+                .environment
+                .get_or_insert_with(|| crate::units::unit_parsing::EnvVars { vars: vec![] });
+            env.vars.push((k.to_string(), v.to_string()));
+        }
+    }
+
     let unit_id = UnitId {
         kind: UnitIdKind::Service,
         name: unit_name.clone(),
@@ -1295,8 +1499,8 @@ fn create_transient_unit(
                 default_dependencies: false,
                 conditions: vec![],
                 assertions: vec![],
-                success_action: crate::units::UnitAction::None,
-                failure_action: crate::units::UnitAction::None,
+                success_action,
+                failure_action,
                 aliases: vec![],
                 ignore_on_isolate: false,
                 default_instance: None,
@@ -1382,6 +1586,32 @@ pub fn execute_command(
             crate::signal_handler::daemon_reexec(&run_info);
             // If we get here, execve failed — daemon_reexec logs the error.
             return Err("daemon-reexec failed".to_string());
+        }
+        Command::LogLevel(level) => {
+            match level {
+                Some(new_level) => {
+                    // Set the log level
+                    let filter = match new_level.to_lowercase().as_str() {
+                        "emerg" | "alert" | "crit" => log::LevelFilter::Error,
+                        "err" => log::LevelFilter::Error,
+                        "warning" => log::LevelFilter::Warn,
+                        "notice" | "info" => log::LevelFilter::Info,
+                        "debug" => log::LevelFilter::Debug,
+                        _ => return Err(format!("Invalid log level: {new_level}")),
+                    };
+                    log::set_max_level(filter);
+                    // Persist the level so queries can read it
+                    let _ = std::fs::create_dir_all("/run/rust-systemd");
+                    let _ = std::fs::write("/run/rust-systemd/log-level", &new_level);
+                    info!("Log level set to {new_level}");
+                }
+                None => {
+                    // Query current level
+                    let level = std::fs::read_to_string("/run/rust-systemd/log-level")
+                        .unwrap_or_else(|_| "info".to_string());
+                    return Ok(Value::String(level.trim().to_string()));
+                }
+            }
         }
         Command::StartTransient(params) => {
             let unit_name = params.unit_name.clone();

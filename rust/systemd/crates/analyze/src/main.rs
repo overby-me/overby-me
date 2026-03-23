@@ -1356,22 +1356,52 @@ fn cmd_unit_paths(user_mode: bool) {
 }
 
 fn cmd_log_level(level: &Option<String>) {
+    // Try to communicate with PID 1 via control socket
+    let socket_path = "/run/systemd/rust-systemd-notify/control.socket";
+
     match level {
         Some(l) => {
             // Validate the level
             match l.to_lowercase().as_str() {
-                "emerg" | "alert" | "crit" | "err" | "warning" | "notice" | "info" | "debug" => {
-                    println!("Would set log level to: {l}");
-                    println!("(Not yet implemented: requires communication with PID 1)");
-                }
+                "emerg" | "alert" | "crit" | "err" | "warning" | "notice" | "info" | "debug" => {}
                 _ => {
                     eprintln!("Invalid log level: {l}");
                     process::exit(1);
                 }
             }
+
+            // Send log-level command to PID 1
+            if let Ok(mut stream) = std::os::unix::net::UnixStream::connect(socket_path) {
+                use std::io::Write;
+                let request = format!(
+                    r#"{{"jsonrpc":"2.0","method":"log-level","params":"{}"}}"#,
+                    l
+                );
+                let _ = stream.write_all(request.as_bytes());
+                let _ = stream.shutdown(std::net::Shutdown::Write);
+                // Read response (we don't need to check it for set operations)
+                let _resp: Result<serde_json::Value, _> = serde_json::from_reader(&mut stream);
+            } else {
+                // Fallback: write directly (works if we have permissions)
+                let _ = fs::create_dir_all("/run/rust-systemd");
+                let _ = fs::write("/run/rust-systemd/log-level", l);
+            }
         }
         None => {
-            // Query current level — read from /run/rust-systemd/log-level if available
+            // Query current level — try control socket first, then file
+            if let Ok(mut stream) = std::os::unix::net::UnixStream::connect(socket_path) {
+                use std::io::Write;
+                let request = r#"{"jsonrpc":"2.0","method":"log-level","id":1}"#;
+                let _ = stream.write_all(request.as_bytes());
+                let _ = stream.shutdown(std::net::Shutdown::Write);
+                if let Ok(resp) = serde_json::from_reader::<_, serde_json::Value>(&mut stream)
+                    && let Some(result) = resp.get("result").and_then(|v| v.as_str())
+                {
+                    println!("{result}");
+                    return;
+                }
+            }
+            // Fallback
             if let Ok(level) = fs::read_to_string("/run/rust-systemd/log-level") {
                 println!("{}", level.trim());
             } else {

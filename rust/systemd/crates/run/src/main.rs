@@ -53,7 +53,7 @@ struct Cli {
     scope: bool,
 
     /// Use the specified unit name for the transient unit.
-    #[arg(long, value_name = "NAME")]
+    #[arg(short = 'u', long, value_name = "NAME")]
     unit: Option<String>,
 
     /// Set a human-readable description for the unit.
@@ -134,6 +134,15 @@ struct Cli {
     /// Define a calendar-based timer (e.g. "Mon *-*-* 03:00:00").
     #[arg(long, value_name = "SPEC")]
     on_calendar: Option<String>,
+
+    /// Run the command when the system clock (CLOCK_REALTIME) jumps
+    /// relative to the monotonic clock.
+    #[arg(long)]
+    on_clock_change: bool,
+
+    /// Run the command when the system timezone changes.
+    #[arg(long)]
+    on_timezone_change: bool,
 
     /// Set a property on the timer unit. Can be specified multiple times.
     #[arg(long, value_name = "NAME=VALUE")]
@@ -420,6 +429,46 @@ fn try_create_transient_unit(cli: &Cli, unit_name: &str) -> Result<bool, String>
         );
     }
 
+    if cli.scope {
+        properties.insert("scope".into(), Value::Bool(true));
+    }
+
+    if cli.wait {
+        properties.insert("wait".into(), Value::Bool(true));
+    }
+
+    if let Some(ref slice) = cli.slice {
+        properties.insert("slice".into(), Value::String(slice.clone()));
+    }
+
+    if let Some(ref service_type) = cli.service_type {
+        properties.insert("service_type".into(), Value::String(service_type.clone()));
+    }
+
+    if cli.remain_after_exit {
+        properties.insert("remain_after_exit".into(), Value::Bool(true));
+    }
+
+    // Pass -p / --property overrides
+    if !cli.property.is_empty() {
+        let props: Vec<Value> = cli
+            .property
+            .iter()
+            .map(|s| Value::String(s.clone()))
+            .collect();
+        properties.insert("properties".into(), Value::Array(props));
+    }
+
+    // Pass environment variables
+    if !cli.setenv.is_empty() {
+        let envs: Vec<Value> = cli
+            .setenv
+            .iter()
+            .map(|s| Value::String(s.clone()))
+            .collect();
+        properties.insert("environment".into(), Value::Array(envs));
+    }
+
     let params = Value::Object(properties);
 
     let call = Call {
@@ -465,7 +514,11 @@ fn main() {
     };
 
     // If a timer is requested but no command, that's an error
-    let has_timer = cli.on_active.is_some() || cli.on_boot.is_some() || cli.on_calendar.is_some();
+    let has_timer = cli.on_active.is_some()
+        || cli.on_boot.is_some()
+        || cli.on_calendar.is_some()
+        || cli.on_clock_change
+        || cli.on_timezone_change;
 
     if command.is_empty() && !has_timer {
         eprintln!("Error: No command specified. Use --shell to start a shell.");
@@ -485,15 +538,48 @@ fn main() {
     match try_create_transient_unit(&cli, &unit_name) {
         Ok(true) => {
             // Successfully created the transient unit
-            eprintln!("Started transient unit {unit_name}");
-
-            if cli.wait && !command.is_empty() {
-                // In wait mode, we'd normally monitor the unit until it
-                // finishes. For now, we just report success.
-                eprintln!("Note: --wait monitoring not yet fully implemented; unit was started");
+            if !cli.wait {
+                eprintln!("Running as unit: {unit_name}");
+                process::exit(0);
             }
 
-            process::exit(0);
+            // In --wait mode, poll the unit status until it completes
+            eprintln!("Running as unit: {unit_name}");
+            let socket_path = "/run/systemd/rust-systemd-notify/control.socket";
+            let mut exit_code = 0i32;
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(250));
+                if let Ok(mut stream) = std::os::unix::net::UnixStream::connect(socket_path) {
+                    use std::io::Write;
+                    let request = format!(
+                        r#"{{"jsonrpc":"2.0","method":"is-active","params":"{}","id":1}}"#,
+                        unit_name
+                    );
+                    let _ = stream.write_all(request.as_bytes());
+                    let _ = stream.shutdown(std::net::Shutdown::Write);
+                    if let Ok(resp) = serde_json::from_reader::<_, serde_json::Value>(&mut stream) {
+                        if let Some(result) = resp.get("result").and_then(|v| v.as_str()) {
+                            match result {
+                                "inactive" | "failed" => {
+                                    // Unit has completed
+                                    if result == "failed" {
+                                        exit_code = 1;
+                                    }
+                                    break;
+                                }
+                                _ => continue,
+                            }
+                        }
+                        // If we got an error (unit not found), it's done
+                        if resp.get("error").is_some() {
+                            break;
+                        }
+                    }
+                } else {
+                    break;
+                }
+            }
+            process::exit(exit_code);
         }
         Ok(false) => {
             // Control socket not available — fall back to direct execution

@@ -1481,6 +1481,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "libsystemd",
+ "serde_json",
 ]
 
 [[package]]

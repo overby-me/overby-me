@@ -96,9 +96,11 @@ impl HostnameState {
             .or_else(|| read_trimmed(DMI_MODEL_PATH))
             .unwrap_or_default();
 
-        // If no chassis in machine-info, try to auto-detect from DMI
+        // If no chassis in machine-info, try to auto-detect.
+        // Check virtualization first (like real systemd does), then fall
+        // back to DMI chassis type.
         if state.chassis.is_empty() {
-            state.chassis = detect_chassis_from_dmi(DMI_CHASSIS_TYPE_PATH);
+            state.chassis = detect_chassis();
         }
 
         // OS release info
@@ -228,6 +230,36 @@ fn get_uname() -> (String, String) {
         ),
         Err(_) => ("Linux".to_string(), String::new()),
     }
+}
+
+/// Detect chassis type by checking virtualization first, then DMI.
+///
+/// Real systemd uses systemd-detect-virt to determine if running in a VM
+/// or container, and returns "vm" or "container" accordingly. Only if
+/// not virtualized does it fall back to DMI chassis type.
+fn detect_chassis() -> String {
+    // Check if running in a container
+    if std::process::Command::new("systemd-detect-virt")
+        .arg("-q")
+        .arg("-c")
+        .status()
+        .is_ok_and(|s| s.success())
+    {
+        return "container".to_string();
+    }
+
+    // Check if running in a VM
+    if std::process::Command::new("systemd-detect-virt")
+        .arg("-q")
+        .arg("-v")
+        .status()
+        .is_ok_and(|s| s.success())
+    {
+        return "vm".to_string();
+    }
+
+    // Fall back to DMI chassis type
+    detect_chassis_from_dmi(DMI_CHASSIS_TYPE_PATH)
 }
 
 fn detect_chassis_from_dmi(dmi_chassis_path: &str) -> String {

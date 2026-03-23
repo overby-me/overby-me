@@ -348,6 +348,16 @@ fn pid1_specific_setup() {
         }
     }
 
+    // Bring up the loopback network interface.
+    //
+    // Real systemd calls loopback_setup() very early during PID 1
+    // initialization to ensure localhost networking is available before
+    // any services start.  Without this, the loopback interface stays
+    // DOWN (the kernel creates it but doesn't activate it), which breaks
+    // services that bind to 127.0.0.1 and integration tests that check
+    // for LOOPBACK,UP.
+    bring_up_loopback();
+
     // Ensure /etc/machine-id exists.
     //
     // systemd-journald uses the machine-id to name the journal directory
@@ -482,6 +492,58 @@ fn pid1_specific_setup() {
             }
         }
     }
+}
+
+/// Bring up the loopback network interface in the host network namespace.
+///
+/// Uses ioctl to set the IFF_UP flag on the "lo" interface, matching what
+/// real systemd does via `loopback_setup()` during early PID 1 init.
+fn bring_up_loopback() {
+    let sock = unsafe { libc::socket(libc::AF_INET, libc::SOCK_DGRAM, 0) };
+    if sock < 0 {
+        eprintln!(
+            "rust-systemd: failed to create socket for loopback setup: {}",
+            std::io::Error::last_os_error()
+        );
+        return;
+    }
+
+    let mut ifr: libc::ifreq = unsafe { std::mem::zeroed() };
+    let lo_name = b"lo\0";
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            lo_name.as_ptr(),
+            ifr.ifr_name.as_mut_ptr().cast(),
+            lo_name.len(),
+        );
+    }
+
+    // Get current flags
+    let ret = unsafe { libc::ioctl(sock, libc::SIOCGIFFLAGS, &mut ifr) };
+    if ret != 0 {
+        eprintln!(
+            "rust-systemd: failed to get loopback flags: {}",
+            std::io::Error::last_os_error()
+        );
+        unsafe { libc::close(sock) };
+        return;
+    }
+
+    // Set IFF_UP
+    unsafe {
+        ifr.ifr_ifru.ifru_flags |= libc::IFF_UP as libc::c_short;
+    }
+    let ret = unsafe { libc::ioctl(sock, libc::SIOCSIFFLAGS, &ifr) };
+    if ret == 0 {
+        eprintln!("rust-systemd: brought up loopback interface");
+    } else {
+        eprintln!(
+            "rust-systemd: failed to bring up loopback interface: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+
+    unsafe { libc::close(sock) };
 }
 
 /// Read /etc/passwd and create any missing home directories with the
