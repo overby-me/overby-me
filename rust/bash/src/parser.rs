@@ -257,8 +257,11 @@ impl Parser {
 
         let first = self.parse_command()?;
         let mut commands = vec![first];
+        let mut pipe_stderr = Vec::new();
 
-        while self.current == Token::Pipe {
+        while self.current == Token::Pipe || self.current == Token::PipeAmp {
+            let is_pipe_amp = self.current == Token::PipeAmp;
+            pipe_stderr.push(is_pipe_amp);
             self.advance();
             self.skip_newlines();
             commands.push(self.parse_command()?);
@@ -268,6 +271,7 @@ impl Parser {
             negated,
             timed,
             commands,
+            pipe_stderr,
         })
     }
 

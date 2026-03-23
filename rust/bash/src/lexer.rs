@@ -5,6 +5,8 @@ pub enum Token {
     Word(Word),
     Newline,
     Pipe,
+    /// `|&` — pipe with stderr redirect
+    PipeAmp,
     AndIf,
     OrIf,
     Semi,
@@ -130,6 +132,9 @@ impl Lexer {
                 if self.peek() == Some('|') {
                     self.advance();
                     Token::OrIf
+                } else if self.peek() == Some('&') {
+                    self.advance();
+                    Token::PipeAmp
                 } else {
                     Token::Pipe
                 }

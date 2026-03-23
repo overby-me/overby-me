@@ -500,7 +500,11 @@ impl Shell {
                         // If fd == 0, it's already stdin (pipe read end assigned to fd 0)
                         if let Some(fd) = write_fd {
                             nix::unistd::dup2(fd, 1).ok();
-                            if fd != 1 {
+                            // |& redirects stderr to the pipe too
+                            if i < pipeline.pipe_stderr.len() && pipeline.pipe_stderr[i] {
+                                nix::unistd::dup2(fd, 2).ok();
+                            }
+                            if fd != 1 && fd != 2 {
                                 nix::unistd::close(fd).ok();
                             }
                         }

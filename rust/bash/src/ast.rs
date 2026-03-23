@@ -30,6 +30,9 @@ pub struct Pipeline {
     pub negated: bool,
     pub timed: bool,
     pub commands: Vec<Command>,
+    /// For each pipe connection (between commands[i] and commands[i+1]),
+    /// true means `|&` (redirect stderr to pipe too)
+    pub pipe_stderr: Vec<bool>,
 }
 
 /// A single command: simple, compound, or function definition.
