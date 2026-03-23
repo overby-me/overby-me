@@ -1241,7 +1241,12 @@ impl Lexer {
                         if next == '\n' {
                             // Line continuation - skip
                         } else {
-                            literal.push(next);
+                            // Push escaped char as SingleQuoted so it's treated as
+                            // literal in pattern matching (gets \x00 quoting)
+                            if !literal.is_empty() {
+                                parts.push(WordPart::Literal(std::mem::take(&mut literal)));
+                            }
+                            parts.push(WordPart::SingleQuoted(next.to_string()));
                         }
                     }
                 }

@@ -2058,8 +2058,8 @@ fn pattern_match_impl(text: &[char], ti: usize, pattern: &[char], pi: usize) -> 
                 // In POSIX, ] at the start of a bracket expression is a literal
                 let bracket_first = pi;
                 while pi < pattern.len() && (pattern[pi] != ']' || pi == bracket_first) {
-                    // Handle backslash escape inside bracket
-                    if pattern[pi] == '\\' && pi + 1 < pattern.len() {
+                    // Handle backslash or \x00 escape inside bracket
+                    if (pattern[pi] == '\\' || pattern[pi] == '\x00') && pi + 1 < pattern.len() {
                         pi += 1;
                         if pattern[pi] == ch {
                             matched = true;
