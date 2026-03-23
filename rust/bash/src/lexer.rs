@@ -1023,6 +1023,17 @@ fn read_param_op(chars: &[char], i: &mut usize, _name: &str, in_dquote: bool) ->
                 ParamOp::LowerFirst(pattern)
             }
         }
+        '~' => {
+            *i += 1;
+            if *i < chars.len() && chars[*i] == '~' {
+                *i += 1;
+                let pattern = read_word(chars, i);
+                ParamOp::ToggleAll(pattern)
+            } else {
+                let pattern = read_word(chars, i);
+                ParamOp::ToggleFirst(pattern)
+            }
+        }
         _ => ParamOp::None,
     }
 }

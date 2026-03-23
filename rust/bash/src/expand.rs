@@ -691,6 +691,41 @@ fn apply_param_op(val: &str, op: &ParamOp, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> S
                     .collect()
             }
         }
+        ParamOp::ToggleFirst(pat) => {
+            let pat_str = expand_word_nosplit_ctx(pat, ctx, cmd_sub);
+            let mut chars = val.chars();
+            match chars.next() {
+                None => String::new(),
+                Some(c) => {
+                    if pat_str.is_empty() || char_matches_pattern(c, &pat_str) {
+                        let toggled = if c.is_uppercase() {
+                            c.to_lowercase().collect::<String>()
+                        } else {
+                            c.to_uppercase().collect::<String>()
+                        };
+                        toggled + chars.as_str()
+                    } else {
+                        val.to_string()
+                    }
+                }
+            }
+        }
+        ParamOp::ToggleAll(pat) => {
+            let pat_str = expand_word_nosplit_ctx(pat, ctx, cmd_sub);
+            val.chars()
+                .map(|c| {
+                    if pat_str.is_empty() || char_matches_pattern(c, &pat_str) {
+                        if c.is_uppercase() {
+                            c.to_lowercase().collect::<String>()
+                        } else {
+                            c.to_uppercase().collect::<String>()
+                        }
+                    } else {
+                        c.to_string()
+                    }
+                })
+                .collect()
+        }
         // For other operations, just return the value unchanged
         _ => val.to_string(),
     }
@@ -936,6 +971,53 @@ fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
                     .map(|c| {
                         if char_matches_pattern(c, &pat_str) {
                             c.to_lowercase().collect::<String>()
+                        } else {
+                            c.to_string()
+                        }
+                    })
+                    .collect()
+            }
+        }
+        ParamOp::ToggleFirst(pat) => {
+            let pat_str = expand_word_nosplit_ctx(pat, ctx, cmd_sub);
+            let mut chars = val.chars();
+            match chars.next() {
+                None => String::new(),
+                Some(c) => {
+                    if pat_str.is_empty() || char_matches_pattern(c, &pat_str) {
+                        let toggled = if c.is_uppercase() {
+                            c.to_lowercase().collect::<String>()
+                        } else {
+                            c.to_uppercase().collect::<String>()
+                        };
+                        toggled + chars.as_str()
+                    } else {
+                        val.clone()
+                    }
+                }
+            }
+        }
+        ParamOp::ToggleAll(pat) => {
+            let pat_str = expand_word_nosplit_ctx(pat, ctx, cmd_sub);
+            if pat_str.is_empty() {
+                val.chars()
+                    .map(|c| {
+                        if c.is_uppercase() {
+                            c.to_lowercase().collect::<String>()
+                        } else {
+                            c.to_uppercase().collect::<String>()
+                        }
+                    })
+                    .collect()
+            } else {
+                val.chars()
+                    .map(|c| {
+                        if char_matches_pattern(c, &pat_str) {
+                            if c.is_uppercase() {
+                                c.to_lowercase().collect::<String>()
+                            } else {
+                                c.to_uppercase().collect::<String>()
+                            }
                         } else {
                             c.to_string()
                         }

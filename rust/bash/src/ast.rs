@@ -228,6 +228,9 @@ pub enum ParamOp {
     /// `${var,pattern}` / `${var,,pattern}` — lowercase
     LowerFirst(Word),
     LowerAll(Word),
+    /// `${var~pattern}` / `${var~~pattern}` — toggle case
+    ToggleFirst(Word),
+    ToggleAll(Word),
     /// `${var@E}` / `${var@Q}` / `${var@P}` / `${var@A}` / `${var@a}` / `${var@K}`
     Transform(char),
 }

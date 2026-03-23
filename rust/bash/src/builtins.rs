@@ -824,6 +824,8 @@ fn format_param_expr(name: &str, op: &ParamOp) -> String {
         ParamOp::UpperAll(w) => format!("${{{}^^{}}}", name, format_word(w)),
         ParamOp::LowerFirst(w) => format!("${{{},{}}}", name, format_word(w)),
         ParamOp::LowerAll(w) => format!("${{{},, {}}}", name, format_word(w)),
+        ParamOp::ToggleFirst(w) => format!("${{{}~{}}}", name, format_word(w)),
+        ParamOp::ToggleAll(w) => format!("${{{}~~{}}}", name, format_word(w)),
         ParamOp::Transform(ch) => format!("${{{}@{}}}", name, ch),
     }
 }
