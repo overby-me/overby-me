@@ -163,6 +163,7 @@ fn run() -> i32 {
 
     // Execute based on mode
     if let Some(cmd) = command_string {
+        shell.dash_c_mode = true;
         return shell.run_string(&cmd);
     }
 

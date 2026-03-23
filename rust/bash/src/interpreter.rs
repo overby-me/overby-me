@@ -50,6 +50,7 @@ pub struct Shell {
     pub shopt_lastpipe: bool,
     pub shopt_expand_aliases: bool,
     pub in_pipeline_child: bool,
+    pub dash_c_mode: bool,
 
     pub aliases: HashMap<String, String>,
     builtins: HashMap<&'static str, BuiltinFn>,
@@ -132,6 +133,7 @@ impl Shell {
             shopt_lastpipe: false,
             shopt_expand_aliases: false,
             in_pipeline_child: false,
+            dash_c_mode: false,
             aliases: HashMap::new(),
             builtins: builtins::builtins(),
         };
@@ -858,7 +860,9 @@ impl Shell {
             .get("LINENO")
             .and_then(|s| s.parse::<i64>().ok())
             .unwrap_or(0);
-        if name == "bash" || name.is_empty() {
+        if self.dash_c_mode {
+            format!("{}: -c: line {}", name, lineno)
+        } else if name == "bash" || name.is_empty() {
             "bash".to_string()
         } else {
             format!("{}: line {}", name, lineno)
