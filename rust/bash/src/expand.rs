@@ -1570,62 +1570,65 @@ fn char_matches_pattern(c: char, pattern: &str) -> bool {
 /// Brace expansion: {a,b,c} → ["a", "b", "c"], pre{a,b}post → ["preapost", "prebpost"]
 /// Also handles sequences: {1..5} → ["1", "2", "3", "4", "5"]
 fn brace_expand(s: &str) -> Vec<String> {
-    // Find the first unquoted { with matching }
+    // Bash algorithm: find the first '}', then scan backwards for a matching '{'
+    // that forms a valid brace expansion (no nested braces between them).
     let chars: Vec<char> = s.chars().collect();
-    let mut depth = 0;
-    let mut brace_start = None;
-    let mut has_comma = false;
-    let mut has_dotdot = false;
 
     let mut i = 0;
     while i < chars.len() {
-        let ch = chars[i];
-        // Skip escaped characters (backslash or \x00 quote marker)
-        if (ch == '\\' || ch == '\x00') && i + 1 < chars.len() {
+        if (chars[i] == '\\' || chars[i] == '\x00') && i + 1 < chars.len() {
             i += 2;
             continue;
         }
-        match ch {
-            '{' if depth == 0 => {
-                brace_start = Some(i);
-                depth = 1;
-            }
-            '{' => depth += 1,
-            '}' if depth == 1 => {
-                if let Some(start) = brace_start {
-                    let inner = &s[start + 1..i];
-                    // Check for unescaped commas
-                    {
-                        let inner_chars: Vec<char> = inner.chars().collect();
-                        let mut j = 0;
-                        while j < inner_chars.len() {
-                            if (inner_chars[j] == '\\' || inner_chars[j] == '\x00')
-                                && j + 1 < inner_chars.len()
-                            {
-                                j += 2;
-                                continue;
-                            }
-                            if inner_chars[j] == ',' {
-                                has_comma = true;
-                            }
-                            j += 1;
+        if chars[i] == '}' {
+            // Scan backwards for the nearest unescaped '{'
+            let end = i;
+            let mut j = end;
+            while j > 0 {
+                j -= 1;
+                if j > 0 && (chars[j - 1] == '\\' || chars[j - 1] == '\x00') {
+                    continue;
+                }
+                if chars[j] == '{' {
+                    let start = j;
+                    let inner = &s[start + 1..end];
+                    let mut has_comma = false;
+                    let mut has_dotdot = false;
+                    let inner_chars: Vec<char> = inner.chars().collect();
+                    let mut k = 0;
+                    while k < inner_chars.len() {
+                        if (inner_chars[k] == '\\' || inner_chars[k] == '\x00')
+                            && k + 1 < inner_chars.len()
+                        {
+                            k += 2;
+                            continue;
                         }
+                        if inner_chars[k] == ',' {
+                            has_comma = true;
+                        }
+                        k += 1;
                     }
                     if inner.contains("..") {
                         has_dotdot = true;
                     }
                     if has_comma || has_dotdot {
                         let prefix = &s[..start];
-                        let suffix = &s[i + 1..];
+                        let suffix = &s[end + 1..];
 
                         if has_comma {
                             // Split on commas (respecting nested braces)
                             let alternatives = split_brace_alternatives(inner);
+                            // Expand any brace patterns in the suffix
+                            let suffix_expanded = brace_expand(suffix);
                             let mut result = Vec::new();
                             for alt in &alternatives {
-                                let expanded =
-                                    brace_expand(&format!("{}{}{}", prefix, alt, suffix));
-                                result.extend(expanded);
+                                // Recursively expand braces within the alternative itself
+                                let alt_expanded = brace_expand(alt);
+                                for ae in &alt_expanded {
+                                    for se in &suffix_expanded {
+                                        result.push(format!("{}{}{}", prefix, ae, se));
+                                    }
+                                }
                             }
                             return result;
                         } else if has_dotdot {
@@ -1655,6 +1658,7 @@ fn brace_expand(s: &str) -> Vec<String> {
                                         || parts[1].starts_with('0') && parts[1].len() > 1
                                         || parts[0].starts_with("-0")
                                         || parts[1].starts_with("-0");
+                                    let suffix_expanded = brace_expand(suffix);
                                     if start_n <= end_n {
                                         let mut n = start_n;
                                         while n <= end_n {
@@ -1667,10 +1671,9 @@ fn brace_expand(s: &str) -> Vec<String> {
                                             } else {
                                                 n.to_string()
                                             };
-                                            result.extend(brace_expand(&format!(
-                                                "{}{}{}",
-                                                prefix, num_str, suffix
-                                            )));
+                                            for se in &suffix_expanded {
+                                                result.push(format!("{}{}{}", prefix, num_str, se));
+                                            }
                                             n += step;
                                         }
                                     } else {
@@ -1685,10 +1688,9 @@ fn brace_expand(s: &str) -> Vec<String> {
                                             } else {
                                                 n.to_string()
                                             };
-                                            result.extend(brace_expand(&format!(
-                                                "{}{}{}",
-                                                prefix, num_str, suffix
-                                            )));
+                                            for se in &suffix_expanded {
+                                                result.push(format!("{}{}{}", prefix, num_str, se));
+                                            }
                                             n -= step;
                                         }
                                     }
@@ -1711,22 +1713,27 @@ fn brace_expand(s: &str) -> Vec<String> {
                                         1
                                     };
                                     let step = if step == 0 { 1 } else { step.abs() };
+                                    let suffix_expanded = brace_expand(suffix);
                                     if start_c <= end_c {
                                         let mut c = start_c;
                                         while c <= end_c {
-                                            result.extend(brace_expand(&format!(
-                                                "{}{}{}",
-                                                prefix, c as u8 as char, suffix
-                                            )));
+                                            for se in &suffix_expanded {
+                                                result.push(format!(
+                                                    "{}{}{}",
+                                                    prefix, c as u8 as char, se
+                                                ));
+                                            }
                                             c += step;
                                         }
                                     } else {
                                         let mut c = start_c;
                                         while c >= end_c {
-                                            result.extend(brace_expand(&format!(
-                                                "{}{}{}",
-                                                prefix, c as u8 as char, suffix
-                                            )));
+                                            for se in &suffix_expanded {
+                                                result.push(format!(
+                                                    "{}{}{}",
+                                                    prefix, c as u8 as char, se
+                                                ));
+                                            }
                                             c -= step;
                                         }
                                     }
@@ -1737,15 +1744,10 @@ fn brace_expand(s: &str) -> Vec<String> {
                             }
                         }
                     }
+                    // This { didn't form a valid expansion, keep scanning backwards
+                    break;
                 }
-                depth = 0;
-                brace_start = None;
-                has_comma = false;
-                has_dotdot = false;
             }
-            '}' => depth -= 1,
-            ',' if depth == 1 => has_comma = true,
-            _ => {}
         }
         i += 1;
     }
