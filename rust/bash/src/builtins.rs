@@ -753,9 +753,24 @@ fn builtin_readonly(shell: &mut Shell, args: &[String]) -> i32 {
             continue;
         }
         if let Some(eq_pos) = arg.find('=') {
-            let name = &arg[..eq_pos];
-            let value = &arg[eq_pos + 1..];
-            shell.vars.insert(name.to_string(), value.to_string());
+            let (name, value, is_append) = if eq_pos > 0 && arg.as_bytes()[eq_pos - 1] == b'+' {
+                (&arg[..eq_pos - 1], &arg[eq_pos + 1..], true)
+            } else {
+                (&arg[..eq_pos], &arg[eq_pos + 1..], false)
+            };
+            if is_append {
+                if shell.integer_vars.contains(name) {
+                    let existing_str = shell.vars.get(name).cloned().unwrap_or_default();
+                    let existing = shell.eval_arith_expr(&existing_str);
+                    let addend = shell.eval_arith_expr(value);
+                    shell.set_var(name, (existing + addend).to_string());
+                } else {
+                    let existing = shell.vars.get(name).cloned().unwrap_or_default();
+                    shell.set_var(name, format!("{}{}", existing, value));
+                }
+            } else {
+                shell.set_var(name, value.to_string());
+            }
             shell.readonly_vars.insert(name.to_string());
         } else {
             shell.readonly_vars.insert(arg.clone());
@@ -1493,8 +1508,16 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     shell.set_var(name, n.to_string());
                 }
             } else if is_append {
-                let existing = shell.vars.get(name).cloned().unwrap_or_default();
-                shell.set_var(name, format!("{}{}", existing, value));
+                // Check if variable already has integer attribute
+                if shell.integer_vars.contains(name) {
+                    let existing_str = shell.vars.get(name).cloned().unwrap_or_default();
+                    let existing = shell.eval_arith_expr(&existing_str);
+                    let addend = shell.eval_arith_expr(value);
+                    shell.set_var(name, (existing + addend).to_string());
+                } else {
+                    let existing = shell.vars.get(name).cloned().unwrap_or_default();
+                    shell.set_var(name, format!("{}{}", existing, value));
+                }
             } else {
                 shell.set_var(name, value.to_string());
             }
