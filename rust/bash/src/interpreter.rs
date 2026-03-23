@@ -2079,35 +2079,30 @@ impl Shell {
             "!=" => !case_pattern_match(left, right),
             "<" => left < right,
             ">" => left > right,
-            "-eq" => {
-                let a: i64 = left.parse().unwrap_or(0);
-                let b: i64 = right.parse().unwrap_or(0);
-                a == b
-            }
-            "-ne" => {
-                let a: i64 = left.parse().unwrap_or(0);
-                let b: i64 = right.parse().unwrap_or(0);
-                a != b
-            }
-            "-lt" => {
-                let a: i64 = left.parse().unwrap_or(0);
-                let b: i64 = right.parse().unwrap_or(0);
-                a < b
-            }
-            "-le" => {
-                let a: i64 = left.parse().unwrap_or(0);
-                let b: i64 = right.parse().unwrap_or(0);
-                a <= b
-            }
-            "-gt" => {
-                let a: i64 = left.parse().unwrap_or(0);
-                let b: i64 = right.parse().unwrap_or(0);
-                a > b
-            }
-            "-ge" => {
-                let a: i64 = left.parse().unwrap_or(0);
-                let b: i64 = right.parse().unwrap_or(0);
-                a >= b
+            "-eq" | "-ne" | "-lt" | "-le" | "-gt" | "-ge" => {
+                let a = match left.parse::<i64>() {
+                    Ok(n) => n,
+                    Err(_) => {
+                        eprintln!("{}: [[: {}: integer expected", self.error_prefix(), left);
+                        return false; // caller should set status to 2
+                    }
+                };
+                let b = match right.parse::<i64>() {
+                    Ok(n) => n,
+                    Err(_) => {
+                        eprintln!("{}: [[: {}: integer expected", self.error_prefix(), right);
+                        return false;
+                    }
+                };
+                match op {
+                    "-eq" => a == b,
+                    "-ne" => a != b,
+                    "-lt" => a < b,
+                    "-le" => a <= b,
+                    "-gt" => a > b,
+                    "-ge" => a >= b,
+                    _ => unreachable!(),
+                }
             }
             "-nt" => {
                 let a = std::fs::metadata(left).and_then(|m| m.modified()).ok();
