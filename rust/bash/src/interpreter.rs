@@ -2289,10 +2289,29 @@ impl Shell {
                 false
             }
             "=~" => {
-                // Regex matching
+                // Regex matching with BASH_REMATCH capture groups
                 match regex_lite::Regex::new(right) {
-                    Ok(re) => re.is_match(left),
-                    Err(_) => false,
+                    Ok(re) => {
+                        if let Some(caps) = re.captures(left) {
+                            let mut rematch = Vec::new();
+                            for i in 0..caps.len() {
+                                rematch.push(
+                                    caps.get(i)
+                                        .map(|m| m.as_str().to_string())
+                                        .unwrap_or_default(),
+                                );
+                            }
+                            self.arrays.insert("BASH_REMATCH".to_string(), rematch);
+                            true
+                        } else {
+                            self.arrays.insert("BASH_REMATCH".to_string(), Vec::new());
+                            false
+                        }
+                    }
+                    Err(_) => {
+                        self.arrays.insert("BASH_REMATCH".to_string(), Vec::new());
+                        false
+                    }
                 }
             }
             _ => false,
