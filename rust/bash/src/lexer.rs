@@ -391,7 +391,14 @@ fn parse_double_quoted_content(s: &str) -> Word {
                 let mut cmd = String::new();
                 while i < chars.len() && chars[i] != '`' {
                     if chars[i] == '\\' && i + 1 < chars.len() {
-                        cmd.push(chars[i + 1]);
+                        let next = chars[i + 1];
+                        // Inside double-quoted context backticks, also unescape \"
+                        if matches!(next, '$' | '`' | '\\' | '"') {
+                            cmd.push(next);
+                        } else {
+                            cmd.push('\\');
+                            cmd.push(next);
+                        }
                         i += 2;
                     } else {
                         cmd.push(chars[i]);
