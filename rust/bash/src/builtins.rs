@@ -1936,15 +1936,48 @@ fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
                         "posix" => shell.opt_posix = enable,
                         _ => {}
                     }
-                } else if !enable {
+                } else if enable {
+                    // set -o - print human-readable option listing
+                    let options: Vec<(&str, bool)> = vec![
+                        ("errexit", shell.opt_errexit),
+                        ("hashall", false),
+                        ("keyword", shell.opt_keyword),
+                        ("noclobber", shell.opt_noclobber),
+                        ("noexec", shell.opt_noexec),
+                        ("noglob", shell.opt_noglob),
+                        ("nounset", shell.opt_nounset),
+                        ("pipefail", shell.opt_pipefail),
+                        ("posix", shell.opt_posix),
+                        ("xtrace", shell.opt_xtrace),
+                    ];
+                    for (name, val) in options {
+                        println!(
+                            "{:<16}{}",
+                            name,
+                            if val { "on" } else { "off" }
+                        );
+                    }
+                } else {
                     // set +o - print settings in reusable format
-                    println!("set {}o errexit", if shell.opt_errexit { "-" } else { "+" });
-                    println!("set {}o nounset", if shell.opt_nounset { "-" } else { "+" });
-                    println!("set {}o xtrace", if shell.opt_xtrace { "-" } else { "+" });
-                    println!(
-                        "set {}o pipefail",
-                        if shell.opt_pipefail { "-" } else { "+" }
-                    );
+                    let options: Vec<(&str, bool)> = vec![
+                        ("errexit", shell.opt_errexit),
+                        ("hashall", false),
+                        ("keyword", shell.opt_keyword),
+                        ("noclobber", shell.opt_noclobber),
+                        ("noexec", shell.opt_noexec),
+                        ("noglob", shell.opt_noglob),
+                        ("nounset", shell.opt_nounset),
+                        ("pipefail", shell.opt_pipefail),
+                        ("posix", shell.opt_posix),
+                        ("xtrace", shell.opt_xtrace),
+                    ];
+                    for (name, val) in options {
+                        println!(
+                            "set {}o {}",
+                            if val { "-" } else { "+" },
+                            name
+                        );
+                    }
                 }
             } else {
                 for flag in flags.chars() {
