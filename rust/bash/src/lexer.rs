@@ -31,6 +31,15 @@ pub enum Token {
     Eof,
 }
 
+/// Saved lexer state for backtracking in parser look-ahead.
+pub struct LexerSaveState {
+    pos: usize,
+    pending_heredocs: Vec<HereDocPending>,
+    heredoc_bodies_len: usize,
+    line: usize,
+}
+
+#[derive(Clone)]
 struct HereDocPending {
     delimiter: String,
     strip_tabs: bool,
@@ -86,14 +95,20 @@ impl Lexer {
         self.input.get(self.pos + offset).copied()
     }
 
-    pub fn save_position(&self) -> (usize, usize, usize) {
-        (self.pos, self.pending_heredocs.len(), self.line)
+    pub fn save_position(&self) -> LexerSaveState {
+        LexerSaveState {
+            pos: self.pos,
+            pending_heredocs: self.pending_heredocs.clone(),
+            heredoc_bodies_len: self.heredoc_bodies.len(),
+            line: self.line,
+        }
     }
 
-    pub fn restore_position(&mut self, saved: (usize, usize, usize)) {
-        self.pos = saved.0;
-        self.pending_heredocs.truncate(saved.1);
-        self.line = saved.2;
+    pub fn restore_position(&mut self, saved: LexerSaveState) {
+        self.pos = saved.pos;
+        self.pending_heredocs = saved.pending_heredocs;
+        self.heredoc_bodies.truncate(saved.heredoc_bodies_len);
+        self.line = saved.line;
     }
 
     fn skip_whitespace(&mut self) {
