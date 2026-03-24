@@ -23,7 +23,10 @@
   hardware.enableRedistributableFirmware = true;
 
   # zswap – compressed swap cache backed by real swap
-  zswap.enable = true;
+  zswap = {
+    enable = true;
+    swapSize = 8 * 1024;
+  };
 
   # DHCP by default; override per-interface in the machine config if needed
   networking.useDHCP = lib.mkDefault true;

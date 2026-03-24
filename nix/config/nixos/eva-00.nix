@@ -117,7 +117,10 @@ inputs.nixos-raspberrypi.lib.nixosSystem {
 
       # ── Firmware & swap ─────────────────────────────────────────────
       hardware.enableRedistributableFirmware = true;
-      zswap.enable = true;
+      zswap = {
+        enable = true;
+        swapSize = 8 * 1024;
+      };
 
       # ── Locale & time ───────────────────────────────────────────────
       time.timeZone = "Europe/Copenhagen";

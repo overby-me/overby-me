@@ -27,6 +27,7 @@
     home-manager
     cloud-hypervisor
     tangled-spindle-nix-engine
+    {zswap.swapSize = 32 * 1024;}
     ({pkgs, ...}: {
       age.secrets = {
         spindle-token = {
