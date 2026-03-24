@@ -1680,6 +1680,36 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
         return 0;
     }
 
+    // declare -r with no names: list readonly variables
+    if flag_readonly && names.is_empty() && !flag_print {
+        let mut sorted: Vec<_> = shell.readonly_vars.iter().collect();
+        sorted.sort();
+        for name in sorted {
+            if let Some(val) = shell.vars.get(name) {
+                println!(
+                    "declare -r {}=\"{}\"",
+                    name,
+                    val.replace('\\', "\\\\").replace('"', "\\\"")
+                );
+            } else {
+                println!("declare -r {}", name);
+            }
+        }
+        return 0;
+    }
+
+    // declare -i with no names: list integer variables
+    if flag_integer && names.is_empty() && !flag_print {
+        let mut sorted: Vec<_> = shell.integer_vars.iter().collect();
+        sorted.sort();
+        for name in sorted {
+            if let Some(val) = shell.vars.get(name) {
+                println!("declare -i {}=\"{}\"", name, val);
+            }
+        }
+        return 0;
+    }
+
     // Normal declare: set variables
     // In a function context, declare/typeset creates local variables (unless -g)
     let make_local = !flag_global && !shell.local_scopes.is_empty();

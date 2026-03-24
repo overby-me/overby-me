@@ -1011,6 +1011,7 @@ fn read_param_name(chars: &[char], i: &mut usize) -> String {
 }
 
 fn read_param_op(chars: &[char], i: &mut usize, _name: &str, in_dquote: bool) -> ParamOp {
+    // Pattern operations (#, %, /): single quotes always protect $ even in dquote
     let read_word =
         |chars: &[char], i: &mut usize| -> Word { read_param_word_impl(chars, i, '}', in_dquote) };
     let read_word_until = |chars: &[char], i: &mut usize, delim: char| -> Word {
