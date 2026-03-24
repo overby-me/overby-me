@@ -199,16 +199,28 @@ in
       # Tests source util.sh and test-control.sh from $(dirname "$0"),
       # so we run from the units directory.
       # Skip testcases that require D-Bus (busctl) or features not yet implemented.
-      (rc, output) = machine.execute(
+      test_cmd = (
           "cd /etc/systemd-tests/units && "
           "export TEST_SKIP_TESTCASES='testcase_hierarchical_slice_dropins testcase_transient_slice_dropins testcase_transient_service_dropins testcase_template_dropins testcase_template_alias testcase_masked_dropins testcase_invalid_dropins testcase_symlink_dropin_directory testcase_order_dropin_paths_set_property testcase_linked_units testcase_hostnamed_alternate_paths testcase_nss-myhostname' && "
           "bash -x ./${testName}.sh 2>&1"
       )
 
-      print(output)
-
-      if rc != 0:
-          raise Exception("${testName} failed with exit code " + str(rc))
+      try:
+          (rc, output) = machine.execute(test_cmd)
+          print(output)
+          if rc != 0:
+              raise Exception("${testName} failed with exit code " + str(rc))
+      except BrokenPipeError:
+          # Some tests (e.g. TEST-18-FAILUREACTION) trigger a VM reboot.
+          # Wait for the machine to come back up, then re-run the test script
+          # which will detect the second phase (e.g. via /firstphase marker).
+          print("BrokenPipeError: VM likely rebooted, waiting for it to come back...")
+          machine.wait_for_unit("multi-user.target", timeout=120)
+          machine.succeed("systemctl daemon-reload")
+          (rc, output) = machine.execute(test_cmd)
+          print(output)
+          if rc != 0:
+              raise Exception("${testName} failed with exit code " + str(rc))
 
       # Check for /testok (standard systemd test success marker)
       machine.succeed("test -f /testok")
