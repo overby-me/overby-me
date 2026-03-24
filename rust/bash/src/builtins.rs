@@ -1498,20 +1498,21 @@ fn format_compound_command_indent(cmd: &CompoundCommand, indent: usize) -> Strin
             s
         }
         CompoundCommand::Case(clause) => {
-            let case_prefix = "    ".repeat(indent + 1);
+            let pat_prefix = "    ".repeat(indent + 1);
             let mut s = format!("case {} in \n", format_word(&clause.word));
             for item in &clause.items {
                 let patterns: Vec<String> = item.patterns.iter().map(format_word).collect();
-                s.push_str(&format!("{case_prefix}    {})\n", patterns.join(" | ")));
+                s.push_str(&format!("{pat_prefix}{})\n", patterns.join(" | ")));
                 let body = format_program(&item.body, indent + 2);
                 let body = body.trim_end_matches(';');
                 s.push_str(body);
                 s.push('\n');
-                match item.terminator {
-                    CaseTerminator::Break => s.push_str(&format!("{case_prefix}    ;;\n")),
-                    CaseTerminator::FallThrough => s.push_str(&format!("{case_prefix}    ;&\n")),
-                    CaseTerminator::TestNext => s.push_str(&format!("{case_prefix}    ;;&\n")),
-                }
+                let term = match item.terminator {
+                    CaseTerminator::Break => ";;",
+                    CaseTerminator::FallThrough => ";&",
+                    CaseTerminator::TestNext => ";;&",
+                };
+                s.push_str(&format!("{pat_prefix}{term}\n"));
             }
             s.push_str(&format!("{iprefix}esac"));
             s
