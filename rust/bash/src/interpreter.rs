@@ -1615,6 +1615,12 @@ impl Shell {
             }
         }
 
+        // Check for arithmetic errors during word expansion
+        if crate::expand::take_arith_error() {
+            self.last_status = 1;
+            return 1;
+        }
+
         // Handle assignments
         let saved_last_status = self.last_status;
         if !cmd.assignments.is_empty() {

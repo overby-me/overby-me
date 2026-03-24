@@ -1478,7 +1478,7 @@ pub fn eval_arith_full(
                 .unwrap_or("bash");
             let lineno = vars.get("LINENO").map(|s| s.as_str()).unwrap_or("0");
             // Error from eval_arith is already fully formatted with error token
-            eprintln!("{}: line {}: ((: {}: {}", name, lineno, expr.trim(), e);
+            eprintln!("{}: line {}: {}: {}", name, lineno, expr.trim(), e);
             ARITH_ERROR.with(|f| *f.borrow_mut() = true);
             0
         }
