@@ -1302,9 +1302,16 @@ fn format_command_indent(cmd: &Command, indent: usize) -> String {
 fn format_program(program: &Program, indent: usize) -> String {
     let prefix = "    ".repeat(indent);
     let mut lines = Vec::new();
+    let mut pending_bg: Option<String> = None;
     for (idx, cc) in program.iter().enumerate() {
         let mut line = String::new();
-        line.push_str(&prefix);
+        // If previous command was background, combine on same line
+        if let Some(bg_line) = pending_bg.take() {
+            line.push_str(&bg_line);
+            line.push(' ');
+        } else {
+            line.push_str(&prefix);
+        }
         line.push_str(&format_pipeline_indent(&cc.list.first, indent));
         for (op, pipeline) in &cc.list.rest {
             match op {
@@ -1315,9 +1322,11 @@ fn format_program(program: &Program, indent: usize) -> String {
         }
         if cc.background {
             line.push_str(" &");
+            // Save this line to combine with next command
+            pending_bg = Some(line);
+            continue;
         }
         // Add semicolons after commands (bash style)
-        // Add semicolons between commands; for inner blocks (indent > 1), also after last
         if idx < program.len() - 1 || indent > 1 {
             let trimmed = line.trim_end();
             let is_compound_end = trimmed.ends_with("fi")
@@ -1337,6 +1346,10 @@ fn format_program(program: &Program, indent: usize) -> String {
             }
         }
         lines.push(line);
+    }
+    // If last command was background, push it
+    if let Some(bg_line) = pending_bg {
+        lines.push(bg_line);
     }
     lines.join("\n")
 }
@@ -1369,7 +1382,11 @@ fn format_compound_command_indent(cmd: &CompoundCommand, indent: usize) -> Strin
             if program.is_empty() {
                 "{ \n}".to_string()
             } else {
-                format!("{{ \n{}\n}}", format_program(program, 1))
+                format!(
+                    "{{ \n{}\n{}}}",
+                    format_program(program, indent + 1),
+                    iprefix
+                )
             }
         }
         CompoundCommand::Subshell(program) => {
@@ -1389,13 +1406,39 @@ fn format_compound_command_indent(cmd: &CompoundCommand, indent: usize) -> Strin
             s.push_str(cond);
             s.push_str("; then\n");
             s.push_str(&format_program(&clause.then_body, indent + 1));
-            for (elif_cond, elif_body) in &clause.elif_parts {
-                let c = format_program(elif_cond, 0);
-                let c = c.trim().trim_end_matches(';');
-                s.push_str(&format!("\n{iprefix}elif {}; then\n", c));
-                s.push_str(&format_program(elif_body, indent + 1));
-            }
-            if let Some(ref else_body) = clause.else_body {
+            // Bash expands elif to nested else { if ... fi }
+            let mut remaining_elifs = clause.elif_parts.iter().peekable();
+            let else_body_ref = clause.else_body.as_ref();
+            if remaining_elifs.peek().is_some() {
+                // Build nested else/if structure
+                let mut else_content = String::new();
+                let mut nest_level = 0;
+                for (elif_cond, elif_body) in remaining_elifs {
+                    let inner_prefix = "    ".repeat(indent + 1 + nest_level);
+                    let c = format_program(elif_cond, 0);
+                    let c = c.trim().trim_end_matches(';');
+                    else_content.push_str(&format!(
+                        "\n{}else\n{}if {}; then\n{}",
+                        "    ".repeat(indent + nest_level),
+                        inner_prefix,
+                        c,
+                        format_program(elif_body, indent + 2 + nest_level)
+                    ));
+                    nest_level += 1;
+                }
+                if let Some(eb) = else_body_ref {
+                    else_content.push_str(&format!(
+                        "\n{}else\n{}",
+                        "    ".repeat(indent + nest_level),
+                        format_program(eb, indent + 1 + nest_level)
+                    ));
+                }
+                // Close all nested fi's
+                for i in (0..nest_level).rev() {
+                    else_content.push_str(&format!("\n{}fi", "    ".repeat(indent + 1 + i)));
+                }
+                s.push_str(&else_content);
+            } else if let Some(else_body) = else_body_ref {
                 s.push_str(&format!("\n{iprefix}else\n"));
                 s.push_str(&format_program(else_body, indent + 1));
             }
