@@ -299,7 +299,15 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                         s.push_str(&expand_param(expr, ctx, cmd_sub));
                     }
                     WordPart::CommandSub(cmd) => {
-                        s.push_str(&cmd_sub(cmd));
+                        let trimmed = cmd.trim();
+                        if let Some(file) = trimmed.strip_prefix("< ").or_else(|| trimmed.strip_prefix("<\t")) {
+                            let file = file.trim();
+                            if let Ok(content) = std::fs::read_to_string(file) {
+                                s.push_str(content.trim_end_matches('\n'));
+                            }
+                        } else {
+                            s.push_str(&cmd_sub(cmd));
+                        }
                     }
                     WordPart::BacktickSub(cmd) => {
                         s.push_str(&cmd_sub(cmd));
@@ -423,7 +431,26 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
             out.push(Segment::Unquoted(val));
         }
         WordPart::CommandSub(cmd) => {
-            let val = cmd_sub(cmd);
+            // Optimize $(< file) — read file content directly
+            let trimmed = cmd.trim();
+            let val = if let Some(file) = trimmed.strip_prefix("< ").or_else(|| trimmed.strip_prefix("<\t")) {
+                let file = file.trim();
+                // Expand the filename
+                let expanded = expand_word_nosplit_ctx(
+                    &vec![WordPart::Literal(file.to_string())],
+                    ctx,
+                    &mut |c| cmd_sub(c),
+                );
+                match std::fs::read_to_string(expanded.trim()) {
+                    Ok(content) => {
+                        // Strip trailing newlines (like command substitution)
+                        content.trim_end_matches('\n').to_string()
+                    }
+                    Err(_) => String::new(),
+                }
+            } else {
+                cmd_sub(cmd)
+            };
             out.push(Segment::Unquoted(val));
         }
         WordPart::BacktickSub(cmd) => {
