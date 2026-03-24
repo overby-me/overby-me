@@ -828,11 +828,13 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
         '(' => {
             *i += 1;
             if *i < chars.len() && chars[*i] == '(' {
-                // Arithmetic: $(( ... ))
+                // Try arithmetic: $(( ... )), fall back to command sub if content has ';'
+                let saved_i = *i;
                 *i += 1;
                 let mut depth = 1; // nested $(( )) depth
                 let mut paren_depth = 0i32; // inner () depth
                 let mut expr = String::new();
+                let mut has_semicolon_at_top = false;
                 while *i < chars.len() && depth > 0 {
                     if *i + 1 < chars.len()
                         && chars[*i] == ')'
@@ -858,13 +860,22 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                             paren_depth += 1;
                         } else if chars[*i] == ')' {
                             paren_depth -= 1;
+                        } else if chars[*i] == ';' && paren_depth <= 0 {
+                            has_semicolon_at_top = true;
                         }
                         expr.push(chars[*i]);
                         *i += 1;
                     }
                 }
-                WordPart::ArithSub(expr)
-            } else {
+                if has_semicolon_at_top {
+                    // Content has ';' at top paren level — reparse as $( (cmd); (cmd) )
+                    *i = saved_i; // Back to the second '('
+                // Fall through to command substitution below
+                } else {
+                    return WordPart::ArithSub(expr);
+                }
+            }
+            {
                 // Command substitution: $( ... )
                 // Must handle case...esac, quotes, nested $(...)
                 let mut depth = 1;
