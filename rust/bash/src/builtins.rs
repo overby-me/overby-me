@@ -1668,6 +1668,18 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
         return 0;
     }
 
+    // declare -x with no names: list exports
+    if flag_export && names.is_empty() && !flag_print {
+        let mut sorted: Vec<_> = shell.exports.iter().collect();
+        sorted.sort_by_key(|(k, _)| k.clone());
+        for (name, value) in sorted {
+            // Use current var value if available
+            let val = shell.vars.get(name).unwrap_or(value);
+            println!("declare -x {}=\"{}\"", name, val.replace('\\', "\\\\").replace('"', "\\\""));
+        }
+        return 0;
+    }
+
     // Normal declare: set variables
     // In a function context, declare/typeset creates local variables (unless -g)
     let make_local = !flag_global && !shell.local_scopes.is_empty();
