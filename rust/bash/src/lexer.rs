@@ -2252,6 +2252,27 @@ impl Lexer {
         let mut paren_depth = 0; // Track nested ( ) inside the expression
         while self.pos < self.input.len() {
             let ch = self.input[self.pos];
+            // Handle $(...) — skip the entire command substitution
+            if ch == '$' && self.pos + 1 < self.input.len() && self.input[self.pos + 1] == '(' {
+                expr.push(ch);
+                self.pos += 1;
+                let mut cs_depth = 0i32;
+                while self.pos < self.input.len() {
+                    let c = self.input[self.pos];
+                    expr.push(c);
+                    if c == '(' {
+                        cs_depth += 1;
+                    } else if c == ')' {
+                        cs_depth -= 1;
+                        if cs_depth == 0 {
+                            self.pos += 1;
+                            break;
+                        }
+                    }
+                    self.pos += 1;
+                }
+                continue;
+            }
             if ch == '(' {
                 paren_depth += 1;
                 expr.push(ch);
@@ -2299,6 +2320,28 @@ impl Lexer {
         let mut depth = 0i32;
         while self.pos < self.input.len() {
             let ch = self.input[self.pos];
+            // Handle $(...) — skip the entire command substitution
+            if ch == '$' && self.pos + 1 < self.input.len() && self.input[self.pos + 1] == '(' {
+                s.push(ch);
+                self.pos += 1;
+                // Now consume until matching )
+                let mut cs_depth = 0i32;
+                while self.pos < self.input.len() {
+                    let c = self.input[self.pos];
+                    s.push(c);
+                    if c == '(' {
+                        cs_depth += 1;
+                    } else if c == ')' {
+                        cs_depth -= 1;
+                        if cs_depth == 0 {
+                            self.pos += 1;
+                            break;
+                        }
+                    }
+                    self.pos += 1;
+                }
+                continue;
+            }
             if ch == '(' {
                 depth += 1;
             } else if ch == ')' {

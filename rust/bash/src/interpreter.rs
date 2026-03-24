@@ -265,6 +265,8 @@ pub struct Shell {
     pub in_pipeline_child: bool,
     pub dash_c_mode: bool,
     pub loop_depth: i32,
+    /// Original top-level arithmetic expression for error reporting
+    arith_top_expr: Option<String>,
 
     pub aliases: HashMap<String, String>,
     builtins: HashMap<&'static str, BuiltinFn>,
@@ -387,6 +389,7 @@ impl Shell {
             in_pipeline_child: false,
             dash_c_mode: false,
             loop_depth: 0,
+            arith_top_expr: None,
             aliases: HashMap::new(),
             builtins: builtins::builtins(),
         };
@@ -719,7 +722,17 @@ impl Shell {
                                 .lines()
                                 .nth(lineno.saturating_sub(1))
                                 .unwrap_or(input.lines().next().unwrap_or(input));
-                            eprintln!("{}: `{}'", self.syntax_error_prefix(), line);
+                            // For arith-for errors, extract the (( ... )) portion
+                            let display_line = if let Some(pos) = line.find("((") {
+                                &line[pos..]
+                            } else {
+                                line
+                            };
+                            eprintln!(
+                                "{}: syntax error: `{}'",
+                                self.syntax_error_prefix(),
+                                display_line
+                            );
                         }
                         return 2;
                     } else {
@@ -2123,6 +2136,18 @@ impl Shell {
     }
 
     pub fn eval_arith_expr(&mut self, expr: &str) -> i64 {
+        let is_top_level = self.arith_top_expr.is_none();
+        if is_top_level {
+            self.arith_top_expr = Some(expr.to_string());
+        }
+        let result = self.eval_arith_expr_impl(expr);
+        if is_top_level {
+            self.arith_top_expr = None;
+        }
+        result
+    }
+
+    fn eval_arith_expr_impl(&mut self, expr: &str) -> i64 {
         let expr = expr.trim_start();
 
         // Expand command substitutions $(...) BEFORE stripping quotes,
@@ -2157,8 +2182,8 @@ impl Shell {
                 }
             }
             if let Some(pos) = last_comma {
-                self.eval_arith_expr(&expr[..pos]);
-                return self.eval_arith_expr(&expr[pos + 1..]);
+                self.eval_arith_expr_impl(&expr[..pos]);
+                return self.eval_arith_expr_impl(&expr[pos + 1..]);
             }
         }
 
@@ -2185,13 +2210,13 @@ impl Shell {
                     && name.chars().next().is_some_and(|c| !c.is_ascii_digit())
                     && (name.chars().all(|c| c.is_alphanumeric() || c == '_') || name.contains('['))
                 {
-                    let rhs = self.eval_arith_expr(&expr[pos + op.len()..]);
+                    let rhs = self.eval_arith_expr_impl(&expr[pos + op.len()..]);
                     // Handle array element: name[subscript]
                     if let Some(bracket) = name.find('[') {
                         let base = &name[..bracket];
                         let idx_str = &name[bracket + 1..name.len() - 1];
                         let resolved = self.resolve_nameref(base);
-                        let idx = self.eval_arith_expr(idx_str) as usize;
+                        let idx = self.eval_arith_expr_impl(idx_str) as usize;
                         let arr = self.arrays.entry(resolved).or_default();
                         while arr.len() <= idx {
                             arr.push(String::new());
@@ -2238,12 +2263,12 @@ impl Shell {
                     crate::expand::set_arith_error();
                     return 0;
                 }
-                let val = self.eval_arith_expr(rhs);
+                let val = self.eval_arith_expr_impl(rhs);
                 if let Some(bracket) = name.find('[') {
                     let base = &name[..bracket];
                     let idx_str = &name[bracket + 1..name.len() - 1];
                     let resolved = self.resolve_nameref(base);
-                    let idx = self.eval_arith_expr(idx_str) as usize;
+                    let idx = self.eval_arith_expr_impl(idx_str) as usize;
                     let arr = self.arrays.entry(resolved).or_default();
                     while arr.len() <= idx {
                         arr.push(String::new());
@@ -2351,11 +2376,11 @@ impl Shell {
                     b')' => depth += 1,
                     b'(' => depth -= 1,
                     b'|' if depth == 0 && i > 0 && bytes[i - 1] == b'|' => {
-                        let left = self.eval_arith_expr(&expr[..i - 1]);
+                        let left = self.eval_arith_expr_impl(&expr[..i - 1]);
                         if left != 0 {
                             return 1;
                         }
-                        let right = self.eval_arith_expr(&expr[i + 1..]);
+                        let right = self.eval_arith_expr_impl(&expr[i + 1..]);
                         return if right != 0 { 1 } else { 0 };
                     }
                     _ => {}
@@ -2374,11 +2399,11 @@ impl Shell {
                     b')' => depth += 1,
                     b'(' => depth -= 1,
                     b'&' if depth == 0 && i > 0 && bytes[i - 1] == b'&' => {
-                        let left = self.eval_arith_expr(&expr[..i - 1]);
+                        let left = self.eval_arith_expr_impl(&expr[..i - 1]);
                         if left == 0 {
                             return 0;
                         }
-                        let right = self.eval_arith_expr(&expr[i + 1..]);
+                        let right = self.eval_arith_expr_impl(&expr[i + 1..]);
                         return if right != 0 { 1 } else { 0 };
                     }
                     _ => {}
@@ -2404,7 +2429,7 @@ impl Shell {
                 }
             }
             if all_matched {
-                return self.eval_arith_expr(&expr[1..expr.len() - 1]);
+                return self.eval_arith_expr_impl(&expr[1..expr.len() - 1]);
             }
         }
 
@@ -2419,13 +2444,13 @@ impl Shell {
                     b')' => depth += 1,
                     b'(' => depth -= 1,
                     b'=' if depth == 0 && i > 0 && bytes[i - 1] == b'<' => {
-                        let left = self.eval_arith_expr(&expr[..i - 1]);
-                        let right = self.eval_arith_expr(&expr[i + 1..]);
+                        let left = self.eval_arith_expr_impl(&expr[..i - 1]);
+                        let right = self.eval_arith_expr_impl(&expr[i + 1..]);
                         return if left <= right { 1 } else { 0 };
                     }
                     b'=' if depth == 0 && i > 0 && bytes[i - 1] == b'>' => {
-                        let left = self.eval_arith_expr(&expr[..i - 1]);
-                        let right = self.eval_arith_expr(&expr[i + 1..]);
+                        let left = self.eval_arith_expr_impl(&expr[..i - 1]);
+                        let right = self.eval_arith_expr_impl(&expr[i + 1..]);
                         return if left >= right { 1 } else { 0 };
                     }
                     b'=' if depth == 0
@@ -2433,13 +2458,13 @@ impl Shell {
                         && bytes[i - 1] == b'='
                         && !(i >= 2 && bytes[i - 2] == b'!') =>
                     {
-                        let left = self.eval_arith_expr(&expr[..i - 1]);
-                        let right = self.eval_arith_expr(&expr[i + 1..]);
+                        let left = self.eval_arith_expr_impl(&expr[..i - 1]);
+                        let right = self.eval_arith_expr_impl(&expr[i + 1..]);
                         return if left == right { 1 } else { 0 };
                     }
                     b'=' if depth == 0 && i > 0 && bytes[i - 1] == b'!' => {
-                        let left = self.eval_arith_expr(&expr[..i - 1]);
-                        let right = self.eval_arith_expr(&expr[i + 1..]);
+                        let left = self.eval_arith_expr_impl(&expr[..i - 1]);
+                        let right = self.eval_arith_expr_impl(&expr[i + 1..]);
                         return if left != right { 1 } else { 0 };
                     }
                     b'<' if depth == 0
@@ -2447,8 +2472,8 @@ impl Shell {
                         && (i + 1 >= bytes.len()
                             || (bytes[i + 1] != b'=' && bytes[i + 1] != b'<')) =>
                     {
-                        let left = self.eval_arith_expr(&expr[..i]);
-                        let right = self.eval_arith_expr(&expr[i + 1..]);
+                        let left = self.eval_arith_expr_impl(&expr[..i]);
+                        let right = self.eval_arith_expr_impl(&expr[i + 1..]);
                         return if left < right { 1 } else { 0 };
                     }
                     b'>' if depth == 0
@@ -2456,8 +2481,8 @@ impl Shell {
                         && (i + 1 >= bytes.len()
                             || (bytes[i + 1] != b'=' && bytes[i + 1] != b'>')) =>
                     {
-                        let left = self.eval_arith_expr(&expr[..i]);
-                        let right = self.eval_arith_expr(&expr[i + 1..]);
+                        let left = self.eval_arith_expr_impl(&expr[..i]);
+                        let right = self.eval_arith_expr_impl(&expr[i + 1..]);
                         return if left > right { 1 } else { 0 };
                     }
                     _ => {}
@@ -2498,8 +2523,8 @@ impl Shell {
                                 | b'|'
                         ) && next != bytes[i]
                         {
-                            let left = self.eval_arith_expr(&expr[..i]);
-                            let right = self.eval_arith_expr(&expr[i + 1..]);
+                            let left = self.eval_arith_expr_impl(&expr[..i]);
+                            let right = self.eval_arith_expr_impl(&expr[i + 1..]);
                             return if bytes[i] == b'+' {
                                 left + right
                             } else {
@@ -2529,17 +2554,18 @@ impl Shell {
                         if bytes[i] == b'*' && i > 0 && bytes[i - 1] == b'*' {
                             continue;
                         }
-                        let left = self.eval_arith_expr(&expr[..i]);
-                        let right = self.eval_arith_expr(&expr[i + 1..]);
+                        let left = self.eval_arith_expr_impl(&expr[..i]);
+                        let right = self.eval_arith_expr_impl(&expr[i + 1..]);
                         return match bytes[i] {
                             b'*' => left * right,
                             b'/' => {
                                 if right == 0 {
+                                    let top_expr = self.arith_top_expr.as_deref().unwrap_or(expr);
                                     let error_token = expr[i + 1..].trim_start();
                                     eprintln!(
                                         "{}: ((: {}: division by 0 (error token is \"{}\")",
                                         self.arith_error_prefix(),
-                                        expr,
+                                        top_expr,
                                         error_token
                                     );
                                     crate::expand::set_arith_error();
@@ -2550,11 +2576,12 @@ impl Shell {
                             }
                             b'%' => {
                                 if right == 0 {
+                                    let top_expr = self.arith_top_expr.as_deref().unwrap_or(expr);
                                     let error_token = expr[i + 1..].trim_start();
                                     eprintln!(
                                         "{}: ((: {}: division by 0 (error token is \"{}\")",
                                         self.arith_error_prefix(),
-                                        expr,
+                                        top_expr,
                                         error_token
                                     );
                                     crate::expand::set_arith_error();
@@ -2573,27 +2600,27 @@ impl Shell {
 
         // Handle exponentiation
         if let Some(pos) = Self::find_top_level_arith_op(expr, "**") {
-            let base = self.eval_arith_expr(&expr[..pos]);
-            let exp = self.eval_arith_expr(&expr[pos + 2..]);
+            let base = self.eval_arith_expr_impl(&expr[..pos]);
+            let exp = self.eval_arith_expr_impl(&expr[pos + 2..]);
             return base.pow(exp as u32);
         }
 
         // Unary operators
         if let Some(stripped) = expr.strip_prefix('-') {
-            return -self.eval_arith_expr(stripped);
+            return -self.eval_arith_expr_impl(stripped);
         }
         if let Some(stripped) = expr.strip_prefix('+') {
-            return self.eval_arith_expr(stripped);
+            return self.eval_arith_expr_impl(stripped);
         }
         if let Some(stripped) = expr.strip_prefix('!') {
-            return if self.eval_arith_expr(stripped) == 0 {
+            return if self.eval_arith_expr_impl(stripped) == 0 {
                 1
             } else {
                 0
             };
         }
         if let Some(stripped) = expr.strip_prefix('~') {
-            return !self.eval_arith_expr(stripped);
+            return !self.eval_arith_expr_impl(stripped);
         }
 
         // Variable lookup or number literal
@@ -2622,7 +2649,7 @@ impl Shell {
                 if let Ok(n) = val.parse::<i64>() {
                     return n;
                 }
-                return self.eval_arith_expr(&val);
+                return self.eval_arith_expr_impl(&val);
             }
         }
 
@@ -2641,7 +2668,7 @@ impl Shell {
             if let Ok(n) = val.parse::<i64>() {
                 return n;
             }
-            return self.eval_arith_expr(&val);
+            return self.eval_arith_expr_impl(&val);
         }
 
         // Number literal
@@ -2663,7 +2690,7 @@ impl Shell {
             let name = &expr[..bracket];
             let idx_str = &expr[bracket + 1..expr.len() - 1];
             let resolved = self.resolve_nameref(name);
-            let idx = self.eval_arith_expr(idx_str) as usize;
+            let idx = self.eval_arith_expr_impl(idx_str) as usize;
             if let Some(arr) = self.arrays.get(&resolved) {
                 return arr.get(idx).and_then(|v| v.parse().ok()).unwrap_or(0);
             }
