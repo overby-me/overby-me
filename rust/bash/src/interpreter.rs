@@ -2729,10 +2729,10 @@ impl Shell {
                                 while k > 0 && bytes[k].is_ascii_whitespace() {
                                     k -= 1;
                                 }
-                                // Check if there's a variable name before
-                                bytes[k].is_ascii_alphanumeric()
+                                // Check if there's a variable name before (not a digit)
+                                (bytes[k].is_ascii_alphabetic()
                                     || bytes[k] == b'_'
-                                    || bytes[k] == b']'
+                                    || bytes[k] == b']')
                             } else {
                                 false
                             }
@@ -2752,7 +2752,24 @@ impl Shell {
                                 | b'&'
                                 | b'|'
                         ) || is_after_postop)
-                            && next != bytes[i]
+                            && (next != bytes[i]
+                                || {
+                                    // Allow split when ++ or -- is followed by a variable
+                                    // e.g., "4+++a" splits as "4" + "++a"
+                                    // The right side starts at i+1, the ++ is at i+1..i+3,
+                                    // so the variable starts at i+3 (or after any whitespace)
+                                    let mut after_op = i + 3;
+                                    while after_op < bytes.len()
+                                        && bytes[after_op].is_ascii_whitespace()
+                                    {
+                                        after_op += 1;
+                                    }
+                                    after_op < bytes.len()
+                                        && (bytes[after_op].is_ascii_alphabetic()
+                                            || bytes[after_op] == b'_'
+                                            || bytes[after_op] == b'$'
+                                            || bytes[after_op] == b'(')
+                                })
                         {
                             let left = self.eval_arith_expr_impl(&expr[..i]);
                             let right = self.eval_arith_expr_impl(&expr[i + 1..]);
