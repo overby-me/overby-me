@@ -1654,24 +1654,31 @@ fn eval_arith(expr: &str) -> Result<i64, String> {
                 ')' => depth += 1,
                 '(' => depth -= 1,
                 '+' | '-' if depth == 0 && i > 0 => {
-                    let prev = chars[i - 1];
                     // Skip if this is part of ++ or -- (check next char)
                     let next = if i + 1 < chars.len() {
                         chars[i + 1]
                     } else {
                         ' '
                     };
+                    // Look past whitespace to find the real previous character
+                    let effective_prev = {
+                        let mut j = i - 1;
+                        while j > 0 && chars[j].is_ascii_whitespace() {
+                            j -= 1;
+                        }
+                        chars[j]
+                    };
                     if !matches!(
-                        prev,
+                        effective_prev,
                         '+' | '-' | '*' | '/' | '%' | '(' | '<' | '>' | '=' | '!' | '&' | '|'
                     ) && (next != chars[i])
                     {
                         let left = eval_arith(&expr[..i])?;
                         let right = eval_arith(&expr[i + 1..])?;
                         return Ok(if chars[i] == '+' {
-                            left + right
+                            left.wrapping_add(right)
                         } else {
-                            left - right
+                            left.wrapping_sub(right)
                         });
                     }
                 }
@@ -1700,17 +1707,19 @@ fn eval_arith(expr: &str) -> Result<i64, String> {
                     let left = eval_arith(&expr[..i])?;
                     let right = eval_arith(&expr[i + 1..])?;
                     return match chars[i] {
-                        '*' => Ok(left * right),
+                        '*' => Ok(left.wrapping_mul(right)),
                         '/' => {
                             if right == 0 {
                                 Err("division by 0 (error token is \"0\")".to_string())
                             } else {
-                                Ok(left / right)
+                                Ok(left.wrapping_div(right))
                             }
                         }
                         '%' => {
                             if right == 0 {
                                 Err("division by 0 (error token is \"0\")".to_string())
+                            } else if left == i64::MIN && right == -1 {
+                                Ok(0)
                             } else {
                                 Ok(left % right)
                             }
@@ -1727,12 +1736,25 @@ fn eval_arith(expr: &str) -> Result<i64, String> {
     if let Some(pos) = find_op(expr, "**") {
         let base = eval_arith(&expr[..pos])?;
         let exp = eval_arith(&expr[pos + 2..])?;
-        return Ok(base.pow(exp as u32));
+        if exp < 0 {
+            return Err(format!(
+                "exponent less than 0 (error token is \"{}\")",
+                &expr[pos + 2..].trim()
+            ));
+        }
+        return Ok(base.wrapping_pow(exp as u32));
+    }
+
+    // Try parsing as a number first (handles negative literals like -9223372036854775808)
+    if expr.starts_with('-')
+        && let Ok(n) = expr.parse::<i64>()
+    {
+        return Ok(n);
     }
 
     // Unary operators
     if let Some(stripped) = expr.strip_prefix('-') {
-        return eval_arith(stripped).map(|n| -n);
+        return eval_arith(stripped).map(|n| n.wrapping_neg());
     }
     if let Some(stripped) = expr.strip_prefix('+') {
         return eval_arith(stripped);
@@ -2321,7 +2343,10 @@ fn brace_expand(s: &str) -> Vec<String> {
                                         "{}{}{}",
                                         prefix, num_str, suffix
                                     )));
-                                    n += step;
+                                    match n.checked_add(step) {
+                                        Some(next) => n = next,
+                                        None => break,
+                                    }
                                 }
                             } else {
                                 let mut n = start_n;
@@ -2339,7 +2364,10 @@ fn brace_expand(s: &str) -> Vec<String> {
                                         "{}{}{}",
                                         prefix, num_str, suffix
                                     )));
-                                    n -= step;
+                                    match n.checked_sub(step) {
+                                        Some(next) => n = next,
+                                        None => break,
+                                    }
                                 }
                             }
                         } else if parts[0].len() == 1

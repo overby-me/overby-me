@@ -267,6 +267,8 @@ pub struct Shell {
     pub loop_depth: i32,
     /// Original top-level arithmetic expression for error reporting
     arith_top_expr: Option<String>,
+    /// Arithmetic evaluation recursion depth
+    arith_depth: u32,
 
     pub aliases: HashMap<String, String>,
     builtins: HashMap<&'static str, BuiltinFn>,
@@ -390,6 +392,7 @@ impl Shell {
             dash_c_mode: false,
             loop_depth: 0,
             arith_top_expr: None,
+            arith_depth: 0,
             aliases: HashMap::new(),
             builtins: builtins::builtins(),
         };
@@ -2153,7 +2156,28 @@ impl Shell {
     }
 
     fn eval_arith_expr_impl(&mut self, expr: &str) -> i64 {
+        self.arith_depth += 1;
+        let result = self.eval_arith_expr_inner(expr);
+        self.arith_depth -= 1;
+        result
+    }
+
+    fn eval_arith_expr_inner(&mut self, expr: &str) -> i64 {
         let expr = expr.trim_start();
+
+        // Check recursion depth limit (bash uses 1024, but each level uses
+        // significant stack space so we use a lower limit)
+        if self.arith_depth > 512 {
+            let var_name = expr.trim();
+            eprintln!(
+                "{}: {}: expression recursion level exceeded (error token is \"{}\")",
+                self.arith_error_prefix(),
+                var_name,
+                var_name
+            );
+            crate::expand::set_arith_error();
+            return 0;
+        }
 
         // Expand command substitutions $(...) BEFORE stripping quotes,
         // since commands inside $() need their quotes preserved
@@ -2196,13 +2220,19 @@ impl Shell {
         // var<<=, var>>=, var&=, var|=, var^=
         #[allow(clippy::type_complexity)]
         let assign_ops: &[(&str, fn(i64, i64) -> i64)] = &[
-            ("<<=", |a, b| a << b),
-            (">>=", |a, b| a >> b),
-            ("+=", |a, b| a + b),
-            ("-=", |a, b| a - b),
-            ("*=", |a, b| a * b),
-            ("/=", |a, b| if b != 0 { a / b } else { 0 }),
-            ("%=", |a, b| if b != 0 { a % b } else { 0 }),
+            ("<<=", |a, b| a.wrapping_shl(b as u32)),
+            (">>=", |a, b| a.wrapping_shr(b as u32)),
+            ("+=", |a, b| a.wrapping_add(b)),
+            ("-=", |a, b| a.wrapping_sub(b)),
+            ("*=", |a, b| a.wrapping_mul(b)),
+            ("/=", |a, b| if b == 0 { 0 } else { a.wrapping_div(b) }),
+            ("%=", |a, b| {
+                if b == 0 || (a == i64::MIN && b == -1) {
+                    0
+                } else {
+                    a.wrapping_rem(b)
+                }
+            }),
             ("&=", |a, b| a & b),
             ("|=", |a, b| a | b),
             ("^=", |a, b| a ^ b),
@@ -2372,14 +2402,17 @@ impl Shell {
         }
 
         // Handle ternary operator: expr ? expr : expr
+        // Only evaluate the taken branch (short-circuit)
         if let Some(q_pos) = Self::find_top_level_arith_op(expr, "?") {
             let cond = self.eval_arith_expr_impl(&expr[..q_pos]);
             let rest = &expr[q_pos + 1..];
             // Find the matching ':' at top level in the rest
             if let Some(c_pos) = Self::find_top_level_arith_op(rest, ":") {
-                let then_val = self.eval_arith_expr_impl(&rest[..c_pos]);
-                let else_val = self.eval_arith_expr_impl(&rest[c_pos + 1..]);
-                return if cond != 0 { then_val } else { else_val };
+                return if cond != 0 {
+                    self.eval_arith_expr_impl(&rest[..c_pos])
+                } else {
+                    self.eval_arith_expr_impl(&rest[c_pos + 1..])
+                };
             }
         }
 
@@ -2622,7 +2655,14 @@ impl Shell {
                     b')' => depth += 1,
                     b'(' => depth -= 1,
                     b'+' | b'-' if depth == 0 && i > 0 => {
-                        let prev = bytes[i - 1];
+                        // Look past whitespace to find the real previous character
+                        let effective_prev = {
+                            let mut j = i - 1;
+                            while j > 0 && bytes[j].is_ascii_whitespace() {
+                                j -= 1;
+                            }
+                            bytes[j]
+                        };
                         let next = if i + 1 < bytes.len() {
                             bytes[i + 1]
                         } else {
@@ -2630,7 +2670,7 @@ impl Shell {
                         };
                         // Skip ++ or -- or after an operator
                         if !matches!(
-                            prev,
+                            effective_prev,
                             b'+' | b'-'
                                 | b'*'
                                 | b'/'
@@ -2647,9 +2687,9 @@ impl Shell {
                             let left = self.eval_arith_expr_impl(&expr[..i]);
                             let right = self.eval_arith_expr_impl(&expr[i + 1..]);
                             return if bytes[i] == b'+' {
-                                left + right
+                                left.wrapping_add(right)
                             } else {
-                                left - right
+                                left.wrapping_sub(right)
                             };
                         }
                     }
@@ -2678,7 +2718,7 @@ impl Shell {
                         let left = self.eval_arith_expr_impl(&expr[..i]);
                         let right = self.eval_arith_expr_impl(&expr[i + 1..]);
                         return match bytes[i] {
-                            b'*' => left * right,
+                            b'*' => left.wrapping_mul(right),
                             b'/' => {
                                 if right == 0 {
                                     let top_expr = self.arith_top_expr.as_deref().unwrap_or(expr);
@@ -2692,21 +2732,27 @@ impl Shell {
                                     crate::expand::set_arith_error();
                                     0
                                 } else {
-                                    left / right
+                                    left.wrapping_div(right)
                                 }
                             }
                             b'%' => {
-                                if right == 0 {
-                                    let top_expr = self.arith_top_expr.as_deref().unwrap_or(expr);
-                                    let error_token = expr[i + 1..].trim_start();
-                                    eprintln!(
-                                        "{}: ((: {}: division by 0 (error token is \"{}\")",
-                                        self.arith_error_prefix(),
-                                        top_expr,
-                                        error_token
-                                    );
-                                    crate::expand::set_arith_error();
-                                    0
+                                if right == 0 || (left == i64::MIN && right == -1) {
+                                    if right != 0 {
+                                        // MIN % -1 = 0 in bash
+                                        0
+                                    } else {
+                                        let top_expr =
+                                            self.arith_top_expr.as_deref().unwrap_or(expr);
+                                        let error_token = expr[i + 1..].trim_start();
+                                        eprintln!(
+                                            "{}: ((: {}: division by 0 (error token is \"{}\")",
+                                            self.arith_error_prefix(),
+                                            top_expr,
+                                            error_token
+                                        );
+                                        crate::expand::set_arith_error();
+                                        0
+                                    }
                                 } else {
                                     left % right
                                 }
@@ -2723,12 +2769,22 @@ impl Shell {
         if let Some(pos) = Self::find_top_level_arith_op(expr, "**") {
             let base = self.eval_arith_expr_impl(&expr[..pos]);
             let exp = self.eval_arith_expr_impl(&expr[pos + 2..]);
-            return base.pow(exp as u32);
+            if exp < 0 {
+                eprintln!(
+                    "{}: {}: exponent less than 0 (error token is \"{}\")",
+                    self.arith_error_prefix(),
+                    expr.trim(),
+                    &expr[pos + 2..].trim()
+                );
+                crate::expand::set_arith_error();
+                return 0;
+            }
+            return base.wrapping_pow(exp as u32);
         }
 
         // Unary operators
         if let Some(stripped) = expr.strip_prefix('-') {
-            return -self.eval_arith_expr_impl(stripped);
+            return self.eval_arith_expr_impl(stripped).wrapping_neg();
         }
         if let Some(stripped) = expr.strip_prefix('+') {
             return self.eval_arith_expr_impl(stripped);
@@ -2750,12 +2806,19 @@ impl Shell {
             return 0;
         }
 
-        // $var reference — strip $ and treat as variable name
+        // $var and ${var} reference — strip $ and treat as variable name
         if let Some(stripped) = expr.strip_prefix('$') {
             let name = stripped.trim();
             if name == "?" {
                 return self.last_status as i64;
             }
+            // Handle ${var} syntax
+            let name = if let Some(inner) = name.strip_prefix('{').and_then(|s| s.strip_suffix('}'))
+            {
+                inner
+            } else {
+                name
+            };
             if !name.is_empty()
                 && name
                     .chars()
