@@ -1356,7 +1356,37 @@ fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
                     .replace("\\a", "\x07")
                     .replace("\\b", "\x08")
             }
-            'Q' => format!("'{}'", val.replace('\'', "'\\''")),
+            'Q' => {
+                let has_control = val.bytes().any(|b| b < 0x20 || b == 0x7f);
+                if val.is_empty() {
+                    "''".to_string()
+                } else if has_control {
+                    // Use $'...' quoting for strings with control chars
+                    let mut s = String::from("$'");
+                    for ch in val.chars() {
+                        match ch {
+                            '\x07' => s.push_str("\\a"),
+                            '\x08' => s.push_str("\\b"),
+                            '\x1b' => s.push_str("\\E"),
+                            '\x0c' => s.push_str("\\f"),
+                            '\n' => s.push_str("\\n"),
+                            '\r' => s.push_str("\\r"),
+                            '\t' => s.push_str("\\t"),
+                            '\x0b' => s.push_str("\\v"),
+                            '\'' => s.push_str("\\'"),
+                            '\\' => s.push_str("\\\\"),
+                            c if (c as u32) < 0x20 || c == '\x7f' => {
+                                s.push_str(&format!("\\x{:02x}", c as u32));
+                            }
+                            c => s.push(c),
+                        }
+                    }
+                    s.push('\'');
+                    s
+                } else {
+                    format!("'{}'", val.replace('\'', "'\\''"))
+                }
+            }
             'U' => val.to_uppercase(),
             'L' => val.to_lowercase(),
             'u' => {
