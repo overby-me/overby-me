@@ -2166,16 +2166,20 @@ impl Shell {
     ///
     /// Find an operator in the expression at top-level (outside parentheses).
     fn find_top_level_arith_op(expr: &str, op: &str) -> Option<usize> {
-        let mut depth = 0i32;
+        let mut paren_depth = 0i32;
+        let mut bracket_depth = 0i32;
         let bytes = expr.as_bytes();
         let op_bytes = op.as_bytes();
         for i in 0..bytes.len() {
             match bytes[i] {
-                b'(' => depth += 1,
-                b')' => depth -= 1,
+                b'(' => paren_depth += 1,
+                b')' => paren_depth -= 1,
+                b'[' => bracket_depth += 1,
+                b']' => bracket_depth -= 1,
                 _ => {}
             }
-            if depth == 0
+            if paren_depth == 0
+                && bracket_depth == 0
                 && i + op_bytes.len() <= bytes.len()
                 && &bytes[i..i + op_bytes.len()] == op_bytes
             {
