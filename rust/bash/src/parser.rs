@@ -1,5 +1,6 @@
 use crate::ast::*;
 use crate::lexer::{Lexer, Token};
+use std::collections::HashMap;
 
 pub struct Parser {
     lexer: Lexer,
@@ -11,6 +12,24 @@ impl Parser {
         let mut lexer = Lexer::new(input);
         let current = lexer.next_token();
         Self { lexer, current }
+    }
+
+    pub fn new_with_aliases(
+        input: &str,
+        aliases: HashMap<String, String>,
+        expand_aliases: bool,
+    ) -> Self {
+        let mut lexer = Lexer::new(input);
+        lexer.aliases = aliases;
+        lexer.shopt_expand_aliases = expand_aliases;
+        let current = lexer.next_token();
+        Self { lexer, current }
+    }
+
+    /// Update the alias table (called between parse-execute cycles)
+    pub fn update_aliases(&mut self, aliases: HashMap<String, String>, expand_aliases: bool) {
+        self.lexer.aliases = aliases;
+        self.lexer.shopt_expand_aliases = expand_aliases;
     }
 
     fn advance(&mut self) -> Token {
@@ -132,9 +151,11 @@ impl Parser {
         }
     }
 
-    /// Parse a single complete command (public wrapper)
+    /// Parse a single complete command (public wrapper for incremental loop).
+    /// Does NOT consume the trailing terminator, so the caller can sync aliases
+    /// before the next token is read.
     pub fn parse_complete_command_pub(&mut self) -> Result<CompleteCommand, String> {
-        self.parse_complete_command()
+        self.parse_complete_command_inner(false)
     }
 
     /// Skip tokens until the next command boundary (newline or semicolon)
@@ -208,6 +229,17 @@ impl Parser {
     }
 
     fn parse_complete_command(&mut self) -> Result<CompleteCommand, String> {
+        self.parse_complete_command_inner(true)
+    }
+
+    /// Parse a single complete command.
+    /// If `consume_terminator` is true, advance past the trailing newline/semi.
+    /// If false, leave the terminator in `self.current` so the caller can handle it
+    /// (used by incremental parse-execute loop to sync aliases before reading the next token).
+    fn parse_complete_command_inner(
+        &mut self,
+        consume_terminator: bool,
+    ) -> Result<CompleteCommand, String> {
         let line = self.current_line();
         let mut list = self.parse_and_or_list()?;
 
@@ -217,7 +249,9 @@ impl Parser {
                 true
             }
             Token::Semi | Token::Newline => {
-                self.advance();
+                if consume_terminator {
+                    self.advance();
+                }
                 false
             }
             _ => false,
@@ -251,10 +285,9 @@ impl Parser {
                             && (redir.target.is_empty()
                                 || (redir.target.len() == 1
                                     && matches!(&redir.target[0], WordPart::Literal(s) if s.is_empty())))
+                            && let Some(body) = self.lexer.take_heredoc_body()
                         {
-                            if let Some(body) = self.lexer.take_heredoc_body() {
-                                redir.target = body;
-                            }
+                            redir.target = body;
                         }
                     }
                 }
@@ -264,10 +297,9 @@ impl Parser {
                             && (redir.target.is_empty()
                                 || (redir.target.len() == 1
                                     && matches!(&redir.target[0], WordPart::Literal(s) if s.is_empty())))
+                            && let Some(body) = self.lexer.take_heredoc_body()
                         {
-                            if let Some(body) = self.lexer.take_heredoc_body() {
-                                redir.target = body;
-                            }
+                            redir.target = body;
                         }
                     }
                 }

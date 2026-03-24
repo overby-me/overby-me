@@ -210,6 +210,9 @@ impl<'a> AssocEntry<'a> {
 }
 use std::io::Write;
 
+/// Saved shell options: (errexit, nounset, xtrace, noclobber, noglob, pipefail)
+type SavedOpts = (bool, bool, bool, bool, bool, bool);
+
 pub struct Shell {
     pub vars: HashMap<String, String>,
     pub exports: HashMap<String, String>,
@@ -239,7 +242,7 @@ pub struct Shell {
     /// Stack of local variable scopes. Each scope maps variable names to their
     /// saved values (None if the variable didn't exist before).
     pub local_scopes: Vec<HashMap<String, SavedVar>>,
-    pub saved_opts_stack: Vec<Option<(bool, bool, bool, bool, bool, bool)>>,
+    pub saved_opts_stack: Vec<Option<SavedOpts>>,
 
     // Shell options (set)
     pub opt_errexit: bool,
@@ -297,8 +300,7 @@ impl Shell {
         vars.insert("BASH_SUBSHELL".to_string(), "0".to_string());
         {
             let mut buf = [0u8; 256];
-            if unsafe { libc::gethostname(buf.as_mut_ptr() as *mut libc::c_char, buf.len()) } == 0
-            {
+            if unsafe { libc::gethostname(buf.as_mut_ptr() as *mut libc::c_char, buf.len()) } == 0 {
                 let len = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
                 vars.insert(
                     "HOSTNAME".to_string(),
@@ -565,7 +567,8 @@ impl Shell {
     }
 
     pub fn run_string(&mut self, input: &str) -> i32 {
-        let mut parser = Parser::new(input);
+        let mut parser =
+            Parser::new_with_aliases(input, self.aliases.clone(), self.shopt_expand_aliases);
 
         // For -c mode, parse all at once (for leftover token detection)
         if self.dash_c_mode {
@@ -670,6 +673,8 @@ impl Shell {
                         continue;
                     }
                     status = self.run_complete_command(&cmd);
+                    // Sync aliases back to parser (alias/unalias may have changed them)
+                    parser.update_aliases(self.aliases.clone(), self.shopt_expand_aliases);
                     // Run ERR trap on non-zero status
                     if status != 0 && !self.in_condition {
                         self.run_err_trap();
@@ -1598,21 +1603,20 @@ impl Shell {
         if self.opt_keyword {
             let mut new_words = Vec::new();
             for word in expanded_words.iter() {
-                if let Some(eq) = word.find('=') {
-                    if eq > 0
-                        && word[..eq]
-                            .chars()
-                            .all(|c| c.is_ascii_alphanumeric() || c == '_')
-                        && word
-                            .chars()
-                            .next()
-                            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
-                    {
-                        let name = &word[..eq];
-                        let value = &word[eq + 1..];
-                        self.set_var(name, value.to_string());
-                        continue;
-                    }
+                if let Some(eq) = word.find('=')
+                    && eq > 0
+                    && word[..eq]
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '_')
+                    && word
+                        .chars()
+                        .next()
+                        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                {
+                    let name = &word[..eq];
+                    let value = &word[eq + 1..];
+                    self.set_var(name, value.to_string());
+                    continue;
                 }
                 new_words.push(word.clone());
             }
@@ -1651,81 +1655,8 @@ impl Shell {
             self.xtrace_write(&format!("+ {}", quoted.join(" ")));
         }
 
-        // Alias expansion: if the first word is an alias, re-parse and run
-        if self.shopt_expand_aliases
-            && let Some(alias_value) = self.aliases.get(&expanded_words[0]).cloned()
-        {
-            let alias_name = expanded_words[0].clone();
-            // Build a new command string: alias value + remaining args
-            let mut new_cmd = alias_value.clone();
-            let mut remaining_start = 1;
-            // If alias value ends with space, expand next word as alias too (recursively)
-            if new_cmd.ends_with(' ') && expanded_words.len() > 1 {
-                let mut next = expanded_words[1].clone();
-                let mut seen = std::collections::HashSet::new();
-                seen.insert(alias_name.clone());
-                while let Some(expanded) = self.aliases.get(&next).cloned() {
-                    if seen.contains(&next) {
-                        break; // prevent circular
-                    }
-                    seen.insert(next.clone());
-                    next = expanded;
-                }
-                if next != expanded_words[1] {
-                    new_cmd.push_str(&next);
-                    remaining_start = 2;
-                }
-            }
-            for word in &expanded_words[remaining_start..] {
-                new_cmd.push(' ');
-                // Use single quotes to prevent re-expansion
-                if word.contains(|c: char| {
-                    c.is_whitespace()
-                        || matches!(
-                            c,
-                            '\'' | '"'
-                                | '\\'
-                                | '$'
-                                | '`'
-                                | '|'
-                                | '&'
-                                | ';'
-                                | '('
-                                | ')'
-                                | '<'
-                                | '>'
-                                | '*'
-                                | '?'
-                                | '['
-                                | ']'
-                        )
-                }) {
-                    // Escape single quotes within
-                    let escaped = word.replace('\'', "'\\''");
-                    new_cmd.push('\'');
-                    new_cmd.push_str(&escaped);
-                    new_cmd.push('\'');
-                } else {
-                    new_cmd.push_str(word);
-                }
-            }
-            // Temporarily remove alias to prevent infinite recursion
-            self.aliases.remove(&alias_name);
-            // Apply redirections
-            let saved_fds = match self.setup_redirections(&cmd.redirections) {
-                Ok(fds) => fds,
-                Err(e) => {
-                    self.aliases.insert(alias_name, alias_value);
-                    eprintln!("bash: {}", e);
-                    return 1;
-                }
-            };
-            let status = self.run_string(&new_cmd);
-            self.restore_redirections(saved_fds);
-            // Restore alias
-            self.aliases.insert(alias_name, alias_value);
-            return status;
-        }
+        // Alias expansion now happens at the lexer level (during parsing),
+        // not at runtime. See Lexer::try_alias_expand().
 
         let command_name = &expanded_words[0];
         let args = &expanded_words[1..];
@@ -2265,18 +2196,18 @@ impl Shell {
 
     fn run_function(&mut self, body: &CompoundCommand, name: &str, args: &[String]) -> i32 {
         // Check FUNCNEST limit
-        if let Some(limit_str) = self.vars.get("FUNCNEST") {
-            if let Ok(limit) = limit_str.parse::<usize>() {
-                if limit > 0 && self.func_names.len() >= limit {
-                    eprintln!(
-                        "{}: {}: maximum function nesting level exceeded ({})",
-                        self.error_prefix(),
-                        name,
-                        limit
-                    );
-                    return 1;
-                }
-            }
+        if let Some(limit_str) = self.vars.get("FUNCNEST")
+            && let Ok(limit) = limit_str.parse::<usize>()
+            && limit > 0
+            && self.func_names.len() >= limit
+        {
+            eprintln!(
+                "{}: {}: maximum function nesting level exceeded ({})",
+                self.error_prefix(),
+                name,
+                limit
+            );
+            return 1;
         }
 
         let saved_positional = self.positional.clone();
@@ -2305,15 +2236,15 @@ impl Shell {
         }
 
         // Restore shell options if `local -` was used
-        if let Some(saved) = self.saved_opts_stack.pop() {
-            if let Some((errexit, nounset, xtrace, noclobber, noglob, pipefail)) = saved {
-                self.opt_errexit = errexit;
-                self.opt_nounset = nounset;
-                self.opt_xtrace = xtrace;
-                self.opt_noclobber = noclobber;
-                self.opt_noglob = noglob;
-                self.opt_pipefail = pipefail;
-            }
+        if let Some(Some((errexit, nounset, xtrace, noclobber, noglob, pipefail))) =
+            self.saved_opts_stack.pop()
+        {
+            self.opt_errexit = errexit;
+            self.opt_nounset = nounset;
+            self.opt_xtrace = xtrace;
+            self.opt_noclobber = noclobber;
+            self.opt_noglob = noglob;
+            self.opt_pipefail = pipefail;
         }
 
         // Restore local variables
@@ -3079,7 +3010,9 @@ impl Shell {
                     use std::os::unix::fs::MetadataExt;
                     let a = std::fs::metadata(left).ok();
                     let b = std::fs::metadata(right).ok();
-                    Ok(matches!((a, b), (Some(a), Some(b)) if a.dev() == b.dev() && a.ino() == b.ino()))
+                    Ok(
+                        matches!((a, b), (Some(a), Some(b)) if a.dev() == b.dev() && a.ino() == b.ino()),
+                    )
                 }
                 #[cfg(not(unix))]
                 Ok(false)

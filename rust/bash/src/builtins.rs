@@ -395,8 +395,8 @@ fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                     }
                 }
                 // Handle negative width (means left-align)
-                let (w, left) = if width_str.starts_with('-') {
-                    let abs_w: usize = width_str[1..].parse().unwrap_or(0);
+                let (w, left) = if let Some(stripped) = width_str.strip_prefix('-') {
+                    let abs_w: usize = stripped.parse().unwrap_or(0);
                     (abs_w, true)
                 } else {
                     (width_str.parse().unwrap_or(0), flags.contains('-'))
@@ -977,17 +977,17 @@ fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
         let arg = &args[i];
         if arg == "-" {
             // local - : save shell options for restoration on function return
-            if let Some(last) = shell.saved_opts_stack.last_mut() {
-                if last.is_none() {
-                    *last = Some((
-                        shell.opt_errexit,
-                        shell.opt_nounset,
-                        shell.opt_xtrace,
-                        shell.opt_noclobber,
-                        shell.opt_noglob,
-                        shell.opt_pipefail,
-                    ));
-                }
+            if let Some(last) = shell.saved_opts_stack.last_mut()
+                && last.is_none()
+            {
+                *last = Some((
+                    shell.opt_errexit,
+                    shell.opt_nounset,
+                    shell.opt_xtrace,
+                    shell.opt_noclobber,
+                    shell.opt_noglob,
+                    shell.opt_pipefail,
+                ));
             }
         } else if arg.starts_with('-') && arg.len() > 1 {
             for ch in arg[1..].chars() {
@@ -1676,11 +1676,15 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
     // declare -x with no names: list exports
     if flag_export && names.is_empty() && !flag_print {
         let mut sorted: Vec<_> = shell.exports.iter().collect();
-        sorted.sort_by_key(|(k, _)| k.clone());
+        sorted.sort_by_key(|(k, _)| k.to_string());
         for (name, value) in sorted {
             // Use current var value if available
             let val = shell.vars.get(name).unwrap_or(value);
-            println!("declare -x {}=\"{}\"", name, val.replace('\\', "\\\\").replace('"', "\\\""));
+            println!(
+                "declare -x {}=\"{}\"",
+                name,
+                val.replace('\\', "\\\\").replace('"', "\\\"")
+            );
         }
         return 0;
     }
@@ -1736,7 +1740,7 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
     // declare -n with no names: list all namerefs
     if flag_nameref && names.is_empty() && !flag_print {
         let mut sorted: Vec<_> = shell.namerefs.iter().collect();
-        sorted.sort_by_key(|(k, _)| k.clone());
+        sorted.sort_by_key(|(k, _)| k.to_string());
         for (name, target) in sorted {
             println!("declare -n {}=\"{}\"", name, target);
         }
@@ -2131,11 +2135,7 @@ fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
                         ("xtrace", shell.opt_xtrace),
                     ];
                     for (name, val) in options {
-                        println!(
-                            "{:<16}{}",
-                            name,
-                            if val { "on" } else { "off" }
-                        );
+                        println!("{:<16}{}", name, if val { "on" } else { "off" });
                     }
                 } else {
                     // set +o - print settings in reusable format
@@ -2152,11 +2152,7 @@ fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
                         ("xtrace", shell.opt_xtrace),
                     ];
                     for (name, val) in options {
-                        println!(
-                            "set {}o {}",
-                            if val { "-" } else { "+" },
-                            name
-                        );
+                        println!("set {}o {}", if val { "-" } else { "+" }, name);
                     }
                 }
             } else {
@@ -2331,8 +2327,7 @@ fn eval_test_expr(args: &[String], shell: &Shell, cmd_name: &str) -> i32 {
                 {
                     use std::os::unix::fs::MetadataExt;
                     return if !args[1].is_empty()
-                        && std::fs::metadata(&args[1])
-                            .is_ok_and(|m| m.mtime() >= m.atime())
+                        && std::fs::metadata(&args[1]).is_ok_and(|m| m.mtime() >= m.atime())
                     {
                         0
                     } else {
@@ -2543,30 +2538,60 @@ fn eval_test_expr(args: &[String], shell: &Shell, cmd_name: &str) -> i32 {
                 let a = match args[0].parse::<i64>() {
                     Ok(v) => v,
                     Err(_) => {
-                        eprintln!(
-                            "{}: {}: {}: integer expected",
-                            prefix, cmd_name, args[0]
-                        );
+                        eprintln!("{}: {}: {}: integer expected", prefix, cmd_name, args[0]);
                         return 2;
                     }
                 };
                 let b = match args[2].parse::<i64>() {
                     Ok(v) => v,
                     Err(_) => {
-                        eprintln!(
-                            "{}: {}: {}: integer expected",
-                            prefix, cmd_name, args[2]
-                        );
+                        eprintln!("{}: {}: {}: integer expected", prefix, cmd_name, args[2]);
                         return 2;
                     }
                 };
                 return match args[1].as_str() {
-                    "-eq" => if a == b { 0 } else { 1 },
-                    "-ne" => if a != b { 0 } else { 1 },
-                    "-lt" => if a < b { 0 } else { 1 },
-                    "-le" => if a <= b { 0 } else { 1 },
-                    "-gt" => if a > b { 0 } else { 1 },
-                    "-ge" => if a >= b { 0 } else { 1 },
+                    "-eq" => {
+                        if a == b {
+                            0
+                        } else {
+                            1
+                        }
+                    }
+                    "-ne" => {
+                        if a != b {
+                            0
+                        } else {
+                            1
+                        }
+                    }
+                    "-lt" => {
+                        if a < b {
+                            0
+                        } else {
+                            1
+                        }
+                    }
+                    "-le" => {
+                        if a <= b {
+                            0
+                        } else {
+                            1
+                        }
+                    }
+                    "-gt" => {
+                        if a > b {
+                            0
+                        } else {
+                            1
+                        }
+                    }
+                    "-ge" => {
+                        if a >= b {
+                            0
+                        } else {
+                            1
+                        }
+                    }
                     _ => unreachable!(),
                 };
             }
@@ -2620,8 +2645,7 @@ fn eval_test_expr(args: &[String], shell: &Shell, cmd_name: &str) -> i32 {
     }
 
     // Handle parenthesized grouping: ( expr )
-    if args.first().map(|s| s.as_str()) == Some("(")
-        && args.last().map(|s| s.as_str()) == Some(")")
+    if args.first().map(|s| s.as_str()) == Some("(") && args.last().map(|s| s.as_str()) == Some(")")
     {
         // Find matching close paren, handling nesting
         let mut depth = 0;
@@ -2637,11 +2661,11 @@ fn eval_test_expr(args: &[String], shell: &Shell, cmd_name: &str) -> i32 {
                 }
             }
         }
-        if let Some(close_idx) = close {
-            if close_idx == args.len() - 1 {
-                // All args are inside parens
-                return eval_test_expr(&args[1..close_idx], shell, cmd_name);
-            }
+        if let Some(close_idx) = close
+            && close_idx == args.len() - 1
+        {
+            // All args are inside parens
+            return eval_test_expr(&args[1..close_idx], shell, cmd_name);
         }
     }
 
@@ -3068,7 +3092,11 @@ fn builtin_eval(shell: &mut Shell, args: &[String]) -> i32 {
     let saved_fds = crate::expand::take_procsub_fds();
 
     // Parse and check for leftover tokens (eval-specific)
-    let mut parser = crate::parser::Parser::new(&command);
+    let mut parser = crate::parser::Parser::new_with_aliases(
+        &command,
+        shell.aliases.clone(),
+        shell.shopt_expand_aliases,
+    );
     let result = match parser.parse_program() {
         Ok(program) => {
             if !parser.is_at_eof() {
@@ -3228,10 +3256,10 @@ fn builtin_source(shell: &mut Shell, args: &[String]) -> i32 {
             shell.sourcing = saved_sourcing;
 
             // Pop BASH_SOURCE stack
-            if let Some(arr) = shell.arrays.get_mut("BASH_SOURCE") {
-                if !arr.is_empty() {
-                    arr.remove(0);
-                }
+            if let Some(arr) = shell.arrays.get_mut("BASH_SOURCE")
+                && !arr.is_empty()
+            {
+                arr.remove(0);
             }
 
             // Run RETURN trap after sourced script completes
@@ -3590,8 +3618,8 @@ fn builtin_trap(shell: &mut Shell, args: &[String]) -> i32 {
     }
 
     // trap [-p|-P] 'handler' signal [signal...]
-    let mut handler_idx = 0;
-    let mut sig_start = 1;
+    let handler_idx = 0;
+    let sig_start = 1;
 
     // Check for conflicting -p and -P
     if args.contains(&"-p".to_string()) && args.contains(&"-P".to_string()) {
@@ -3640,10 +3668,7 @@ fn builtin_trap(shell: &mut Shell, args: &[String]) -> i32 {
             let norm = normalize_signal_name(sig_arg);
             let key = if norm == "EXIT" {
                 // Check both "EXIT" and "0"
-                shell
-                    .traps
-                    .get("EXIT")
-                    .or_else(|| shell.traps.get("0"))
+                shell.traps.get("EXIT").or_else(|| shell.traps.get("0"))
             } else {
                 shell.traps.get(&norm)
             };
@@ -4275,7 +4300,7 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
     let mut set = false;
     let mut unset = false;
     let mut query = false;
-    let mut print = false;
+    let mut _print = false;
     let mut set_o = false;
     let mut opts = Vec::new();
 
@@ -4284,14 +4309,10 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
             "-s" => set = true,
             "-u" => unset = true,
             "-q" => query = true,
-            "-p" => print = true,
+            "-p" => _print = true,
             "-o" => set_o = true,
             a if a.starts_with('-') => {
-                eprintln!(
-                    "{}: shopt: {}: invalid option",
-                    shell.error_prefix(),
-                    a
-                );
+                eprintln!("{}: shopt: {}: invalid option", shell.error_prefix(), a);
                 eprintln!("shopt: usage: shopt [-pqsu] [-o] [optname ...]");
                 return 2;
             }
@@ -4306,22 +4327,69 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
 
     // All known shopt option names (accept silently even if not fully implemented)
     let all_known_opts = [
-        "array_expand_once", "assoc_expand_once", "autocd", "bash_source_fullpath",
-        "cdable_vars", "cdspell", "checkhash", "checkjobs", "checkwinsize",
-        "cmdhist", "compat31", "compat32", "compat40", "compat41", "compat42",
-        "compat43", "compat44", "complete_fullquote", "direxpand", "dirspell",
-        "dotglob", "execfail", "expand_aliases", "extdebug", "extglob", "extquote",
-        "failglob", "force_fignore", "globasciiranges", "globskipdots", "globstar",
-        "gnu_errfmt", "histappend", "histreedit", "histverify", "hostcomplete",
-        "huponexit", "inherit_errexit", "interactive_comments", "lastpipe",
-        "lithist", "localvar_inherit", "localvar_unset", "login_shell", "mailwarn",
-        "no_empty_cmd_completion", "nocaseglob", "nocasematch", "noexpand_translation",
-        "nullglob", "patsub_replacement", "progcomp", "progcomp_alias", "promptvars",
-        "restricted_shell", "shift_verbose", "sourcepath", "varredir_close", "xpg_echo",
+        "array_expand_once",
+        "assoc_expand_once",
+        "autocd",
+        "bash_source_fullpath",
+        "cdable_vars",
+        "cdspell",
+        "checkhash",
+        "checkjobs",
+        "checkwinsize",
+        "cmdhist",
+        "compat31",
+        "compat32",
+        "compat40",
+        "compat41",
+        "compat42",
+        "compat43",
+        "compat44",
+        "complete_fullquote",
+        "direxpand",
+        "dirspell",
+        "dotglob",
+        "execfail",
+        "expand_aliases",
+        "extdebug",
+        "extglob",
+        "extquote",
+        "failglob",
+        "force_fignore",
+        "globasciiranges",
+        "globskipdots",
+        "globstar",
+        "gnu_errfmt",
+        "histappend",
+        "histreedit",
+        "histverify",
+        "hostcomplete",
+        "huponexit",
+        "inherit_errexit",
+        "interactive_comments",
+        "lastpipe",
+        "lithist",
+        "localvar_inherit",
+        "localvar_unset",
+        "login_shell",
+        "mailwarn",
+        "no_empty_cmd_completion",
+        "nocaseglob",
+        "nocasematch",
+        "noexpand_translation",
+        "nullglob",
+        "patsub_replacement",
+        "progcomp",
+        "progcomp_alias",
+        "promptvars",
+        "restricted_shell",
+        "shift_verbose",
+        "sourcepath",
+        "varredir_close",
+        "xpg_echo",
     ];
 
     // Options we actually track for listing
-    let shopt_options: Vec<(&str, bool)> = vec![
+    let _shopt_options: Vec<(&str, bool)> = vec![
         ("expand_aliases", shell.shopt_expand_aliases),
         ("extglob", shell.shopt_extglob),
         ("globstar", false),

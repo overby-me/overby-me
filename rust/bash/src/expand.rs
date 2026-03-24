@@ -314,7 +314,10 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                     }
                     WordPart::CommandSub(cmd) => {
                         let trimmed = cmd.trim();
-                        if let Some(file) = trimmed.strip_prefix("< ").or_else(|| trimmed.strip_prefix("<\t")) {
+                        if let Some(file) = trimmed
+                            .strip_prefix("< ")
+                            .or_else(|| trimmed.strip_prefix("<\t"))
+                        {
                             let file = file.trim();
                             if let Ok(content) = std::fs::read_to_string(file) {
                                 s.push_str(content.trim_end_matches('\n'));
@@ -457,14 +460,14 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                         }
                         ParamOp::Alt(colon, _) => {
                             let empty = if *colon { orig_val.is_empty() } else { false };
-                            !(!orig_set || empty)
+                            orig_set && !empty
                         }
                         _ => false,
                     };
                     is_active
-                        && word
-                            .iter()
-                            .any(|p| matches!(p, WordPart::DoubleQuoted(_) | WordPart::SingleQuoted(_)))
+                        && word.iter().any(|p| {
+                            matches!(p, WordPart::DoubleQuoted(_) | WordPart::SingleQuoted(_))
+                        })
                 }
                 _ => false,
             };
@@ -477,7 +480,10 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
         WordPart::CommandSub(cmd) => {
             // Optimize $(< file) — read file content directly
             let trimmed = cmd.trim();
-            let val = if let Some(file) = trimmed.strip_prefix("< ").or_else(|| trimmed.strip_prefix("<\t")) {
+            let val = if let Some(file) = trimmed
+                .strip_prefix("< ")
+                .or_else(|| trimmed.strip_prefix("<\t"))
+            {
                 let file = file.trim();
                 // Expand the filename
                 let expanded = expand_word_nosplit_ctx(
@@ -696,7 +702,11 @@ fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
             }
             u32::from_ne_bytes(buf).to_string()
         }
-        "BASH_SUBSHELL" => ctx.vars.get("BASH_SUBSHELL").cloned().unwrap_or_else(|| "0".to_string()),
+        "BASH_SUBSHELL" => ctx
+            .vars
+            .get("BASH_SUBSHELL")
+            .cloned()
+            .unwrap_or_else(|| "0".to_string()),
         "SECONDS" => {
             use std::sync::OnceLock;
             static START: OnceLock<std::time::Instant> = OnceLock::new();
@@ -1657,11 +1667,16 @@ fn eval_arith(expr: &str) -> Result<i64, String> {
                 '+' | '-' if depth == 0 && i > 0 => {
                     let prev = chars[i - 1];
                     // Skip if this is part of ++ or -- (check next char)
-                    let next = if i + 1 < chars.len() { chars[i + 1] } else { ' ' };
+                    let next = if i + 1 < chars.len() {
+                        chars[i + 1]
+                    } else {
+                        ' '
+                    };
                     if !matches!(
                         prev,
                         '+' | '-' | '*' | '/' | '%' | '(' | '<' | '>' | '=' | '!' | '&' | '|'
-                    ) && !(next == chars[i]) {
+                    ) && (next != chars[i])
+                    {
                         let left = eval_arith(&expr[..i])?;
                         let right = eval_arith(&expr[i + 1..])?;
                         return Ok(if chars[i] == '+' {
@@ -2146,8 +2161,7 @@ fn word_level_brace_expand(word: &Word) -> Vec<Word> {
                         while i < chars.len() && chars[i] != '"' {
                             if chars[i] == '$' {
                                 if !dq_lit.is_empty() {
-                                    dq_parts
-                                        .push(WordPart::Literal(std::mem::take(&mut dq_lit)));
+                                    dq_parts.push(WordPart::Literal(std::mem::take(&mut dq_lit)));
                                 }
                                 i += 1;
                                 dq_parts.push(crate::lexer::parse_dollar(&chars, &mut i, true));
@@ -2167,10 +2181,7 @@ fn word_level_brace_expand(word: &Word) -> Vec<Word> {
                     '~' if i == 0 => {
                         let mut user = String::new();
                         i += 1;
-                        while i < chars.len()
-                            && chars[i] != '/'
-                            && !chars[i].is_whitespace()
-                        {
+                        while i < chars.len() && chars[i] != '/' && !chars[i].is_whitespace() {
                             user.push(chars[i]);
                             i += 1;
                         }
