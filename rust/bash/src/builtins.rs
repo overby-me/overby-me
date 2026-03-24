@@ -1421,7 +1421,37 @@ fn format_compound_command_indent(cmd: &CompoundCommand, indent: usize) -> Strin
             if !trimmed.contains('\n') {
                 format!("( {} )", trimmed.trim_end_matches(';'))
             } else {
-                format!("( \n{}\n{})", format_program(program, indent + 1), iprefix)
+                // Check if body is a single compound command with a brace group
+                // and redirections on the command — format as ( { ... } ) redirects
+                let single_compound = if program.len() == 1
+                    && program[0].list.rest.is_empty()
+                    && !program[0].background
+                    && program[0].list.first.commands.len() == 1
+                {
+                    let cmd = &program[0].list.first.commands[0];
+                    if let crate::ast::Command::Compound(
+                        CompoundCommand::BraceGroup(inner),
+                        redirs,
+                    ) = cmd
+                    {
+                        Some((inner, redirs))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                if let Some((inner, redirs)) = single_compound {
+                    let inner_body = format_program_impl(inner, indent + 1, false);
+                    let redir_str: String = redirs
+                        .iter()
+                        .map(|r| format!(" {}", format_redirection(r)))
+                        .collect();
+                    format!("( {{ \n{}\n{}}} ){redir_str}", inner_body, iprefix,)
+                } else {
+                    format!("( \n{}\n{})", format_program(program, indent + 1), iprefix)
+                }
             }
         }
         CompoundCommand::If(clause) => {
