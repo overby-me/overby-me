@@ -2126,7 +2126,7 @@ impl Shell {
         // Strip double quotes from arith expressions (bash behavior)
         let unquoted: String;
         let expr = {
-            let trimmed = expr.trim();
+            let trimmed = expr.trim_start();
             if trimmed.contains('"') {
                 unquoted = trimmed.replace('"', "");
                 &unquoted
@@ -2268,7 +2268,7 @@ impl Shell {
         }
 
         // Handle post-increment/decrement: var++, var--
-        if let Some(stripped) = expr.strip_suffix("++") {
+        if let Some(stripped) = expr.trim_end().strip_suffix("++") {
             let name = stripped.trim();
             if !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_') {
                 if name.chars().next().is_some_and(|c| c.is_ascii_digit()) {
@@ -2290,7 +2290,7 @@ impl Shell {
                 return val; // post-increment returns old value
             }
         }
-        if let Some(stripped) = expr.strip_suffix("--") {
+        if let Some(stripped) = expr.trim_end().strip_suffix("--") {
             let name = stripped.trim();
             if !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_') {
                 if name.chars().next().is_some_and(|c| c.is_ascii_digit()) {
