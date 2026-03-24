@@ -245,6 +245,7 @@ pub struct Shell {
     pub opt_nounset: bool,
     pub opt_xtrace: bool,
     pub opt_pipefail: bool,
+    pub opt_keyword: bool,
     pub opt_noclobber: bool,
     pub opt_noglob: bool,
     pub opt_noexec: bool,
@@ -355,6 +356,7 @@ impl Shell {
             opt_nounset: false,
             opt_xtrace: false,
             opt_pipefail: false,
+            opt_keyword: false,
             opt_noclobber: false,
             opt_noglob: false,
             opt_noexec: false,
@@ -1535,7 +1537,7 @@ impl Shell {
         let saved_last_status = self.last_status;
         if !cmd.assignments.is_empty() {
             for assign in &cmd.assignments {
-                if expanded_words.is_empty() {
+                if expanded_words.is_empty() || self.opt_keyword {
                     // Trace assignment
                     if self.opt_xtrace {
                         match &assign.value {
@@ -1576,6 +1578,31 @@ impl Shell {
                     self.execute_assignment(assign);
                 }
             }
+        }
+
+        // set -k: extract assignment-looking words from expanded_words
+        if self.opt_keyword {
+            let mut new_words = Vec::new();
+            for word in expanded_words.iter() {
+                if let Some(eq) = word.find('=') {
+                    if eq > 0
+                        && word[..eq]
+                            .chars()
+                            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+                        && word
+                            .chars()
+                            .next()
+                            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                    {
+                        let name = &word[..eq];
+                        let value = &word[eq + 1..];
+                        self.set_var(name, value.to_string());
+                        continue;
+                    }
+                }
+                new_words.push(word.clone());
+            }
+            expanded_words = new_words;
         }
 
         if expanded_words.is_empty() {

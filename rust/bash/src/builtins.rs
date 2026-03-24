@@ -1931,6 +1931,7 @@ fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
                         "nounset" => shell.opt_nounset = enable,
                         "xtrace" => shell.opt_xtrace = enable,
                         "noclobber" => shell.opt_noclobber = enable,
+                        "keyword" => shell.opt_keyword = enable,
                         "noglob" => shell.opt_noglob = enable,
                         "posix" => shell.opt_posix = enable,
                         _ => {}
@@ -1952,6 +1953,7 @@ fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
                         'u' => shell.opt_nounset = enable,
                         'x' => shell.opt_xtrace = enable,
                         'f' => shell.opt_noglob = enable,
+                        'k' => shell.opt_keyword = enable,
                         'C' => shell.opt_noclobber = enable,
                         'n' => shell.opt_noexec = enable,
                         _ => {}
