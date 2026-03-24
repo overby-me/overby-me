@@ -60,6 +60,11 @@ pub fn builtins() -> HashMap<&'static str, BuiltinFn> {
     map.insert("continue", builtin_continue);
     map.insert("ulimit", builtin_ulimit);
     map.insert("caller", builtin_caller);
+    map.insert("jobs", builtin_jobs);
+    map.insert("disown", builtin_disown);
+    map.insert("fg", builtin_fg);
+    map.insert("bg", builtin_bg);
+    map.insert("suspend", builtin_suspend);
     map
 }
 
@@ -4419,4 +4424,28 @@ fn builtin_ulimit(_shell: &mut Shell, args: &[String]) -> i32 {
 
 fn builtin_caller(_shell: &mut Shell, _args: &[String]) -> i32 {
     0 // stub
+}
+
+fn builtin_jobs(_shell: &mut Shell, _args: &[String]) -> i32 {
+    // Minimal stub — job control is not fully implemented
+    0
+}
+
+fn builtin_disown(_shell: &mut Shell, _args: &[String]) -> i32 {
+    0
+}
+
+fn builtin_fg(_shell: &mut Shell, _args: &[String]) -> i32 {
+    eprintln!("bash: fg: no job control");
+    1
+}
+
+fn builtin_bg(_shell: &mut Shell, _args: &[String]) -> i32 {
+    eprintln!("bash: bg: no job control");
+    1
+}
+
+fn builtin_suspend(_shell: &mut Shell, _args: &[String]) -> i32 {
+    eprintln!("bash: suspend: cannot suspend");
+    1
 }
