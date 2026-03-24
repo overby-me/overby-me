@@ -636,6 +636,18 @@ fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
             ((t ^ (std::process::id() as u128 * 2654435761)) % 32768).to_string()
         }
         "BASHPID" => std::process::id().to_string(),
+        "SRANDOM" => {
+            // Secure random 32-bit number
+            let mut buf = [0u8; 4];
+            #[cfg(unix)]
+            {
+                use std::io::Read;
+                if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
+                    let _ = f.read_exact(&mut buf);
+                }
+            }
+            u32::from_ne_bytes(buf).to_string()
+        }
         "BASH_SUBSHELL" => ctx.vars.get("BASH_SUBSHELL").cloned().unwrap_or_else(|| "0".to_string()),
         "SECONDS" => {
             use std::sync::OnceLock;
