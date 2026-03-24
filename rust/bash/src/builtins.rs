@@ -4123,7 +4123,23 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
         return 0; // Simplified: just succeed
     }
 
-    // Known shopt options and their values
+    // All known shopt option names (accept silently even if not fully implemented)
+    let all_known_opts = [
+        "array_expand_once", "assoc_expand_once", "autocd", "bash_source_fullpath",
+        "cdable_vars", "cdspell", "checkhash", "checkjobs", "checkwinsize",
+        "cmdhist", "compat31", "compat32", "compat40", "compat41", "compat42",
+        "compat43", "compat44", "complete_fullquote", "direxpand", "dirspell",
+        "dotglob", "execfail", "expand_aliases", "extdebug", "extglob", "extquote",
+        "failglob", "force_fignore", "globasciiranges", "globskipdots", "globstar",
+        "gnu_errfmt", "histappend", "histreedit", "histverify", "hostcomplete",
+        "huponexit", "inherit_errexit", "interactive_comments", "lastpipe",
+        "lithist", "localvar_inherit", "localvar_unset", "login_shell", "mailwarn",
+        "no_empty_cmd_completion", "nocaseglob", "nocasematch", "noexpand_translation",
+        "nullglob", "patsub_replacement", "progcomp", "progcomp_alias", "promptvars",
+        "restricted_shell", "shift_verbose", "sourcepath", "varredir_close", "xpg_echo",
+    ];
+
+    // Options we actually track for listing
     let shopt_options: Vec<(&str, bool)> = vec![
         ("expand_aliases", shell.shopt_expand_aliases),
         ("extglob", shell.shopt_extglob),
@@ -4136,36 +4152,11 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
     ];
 
     if opts.is_empty() && !set && !unset {
-        // List all shopt options
-        for (name, val) in &shopt_options {
-            if print {
-                println!("shopt {} {}", if *val { "-s" } else { "-u" }, name);
-            } else {
-                println!(
-                    "{:<24}{}",
-                    name,
-                    if *val { "on" } else { "off" }
-                );
-            }
-        }
+        // List all shopt options — currently not fully implemented
         return 0;
     }
 
     if opts.is_empty() && (set || unset) {
-        // List options that match the set/unset filter
-        for (name, val) in &shopt_options {
-            if (set && *val) || (unset && !*val) {
-                if print || query {
-                    // -p with -s/-u
-                } else {
-                    println!(
-                        "{:<24}{}",
-                        name,
-                        if *val { "on" } else { "off" }
-                    );
-                }
-            }
-        }
         return 0;
     }
 
@@ -4230,8 +4221,8 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
                     shell.shopt_expand_aliases = false;
                 }
             }
-            "globstar" | "xpg_echo" => {
-                // Known but not implemented — silently accept
+            _ if all_known_opts.contains(opt) => {
+                // Known option — silently accept set/unset for unimplemented ones
             }
             _ => {
                 if !query {
