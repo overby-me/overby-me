@@ -1651,6 +1651,12 @@ impl Shell {
             }
         }
 
+        // Check for arithmetic errors during word expansion (e.g., echo $(( 1/0 )))
+        if crate::expand::take_arith_error() {
+            self.last_status = 1;
+            return 1;
+        }
+
         // Handle assignments
         let saved_last_status = self.last_status;
         if !cmd.assignments.is_empty() {
@@ -4029,7 +4035,15 @@ impl Shell {
         self.arith_is_command = true;
         let result = self.eval_arith_expr(expr);
         self.arith_is_command = false;
-        if result != 0 { 0 } else { 1 }
+        // Drain any arithmetic error flag — (( )) errors are handled by exit status
+        let had_error = crate::expand::take_arith_error();
+        if had_error {
+            1
+        } else if result != 0 {
+            0
+        } else {
+            1
+        }
     }
 
     fn io_error_message(e: &std::io::Error) -> &'static str {
