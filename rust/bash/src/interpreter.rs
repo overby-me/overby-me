@@ -2307,6 +2307,16 @@ impl Shell {
 
             match unsafe { nix::unistd::fork() } {
                 Ok(nix::unistd::ForkResult::Child) => {
+                    // Export shell variables to the environment
+                    for (key, export_val) in &self.exports {
+                        // Use current shell var value if set (more up-to-date than
+                        // the export snapshot), fall back to export value
+                        let value = self.vars.get(key).unwrap_or(export_val);
+                        unsafe { std::env::set_var(key, value) };
+                    }
+
+                    // Apply prefix assignments AFTER exports so they take
+                    // precedence over any exported values
                     for assign in assignments {
                         let v = match &assign.value {
                             AssignValue::Scalar(w) => self.expand_word_single(w),
@@ -2330,10 +2340,6 @@ impl Shell {
                             v
                         };
                         unsafe { std::env::set_var(&assign.name, &value) };
-                    }
-
-                    for (key, value) in &self.exports {
-                        unsafe { std::env::set_var(key, value) };
                     }
 
                     let c_prog = match CString::new(path.as_bytes()) {
