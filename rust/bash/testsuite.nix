@@ -11,7 +11,7 @@
   name,
 }:
 pkgs.runCommand "rust-bash-test-${name}" {
-  nativeBuildInputs = [pkgs.rust-bash pkgs.bash pkgs.gcc pkgs.coreutils pkgs.diffutils pkgs.gnused pkgs.gnugrep pkgs.gawk pkgs.findutils];
+  nativeBuildInputs = [pkgs.rust-bash-dev pkgs.bash pkgs.gcc pkgs.coreutils pkgs.diffutils pkgs.gnused pkgs.gnugrep pkgs.gawk pkgs.findutils];
   bashSrc = pkgs.bash.src;
 } ''
   # Extract the test suite and helper sources
@@ -36,13 +36,13 @@ pkgs.runCommand "rust-bash-test-${name}" {
   timeout 300 "$THIS_SH" "./${name}.tests" > "$TMPDIR/expected" 2>&1 || true
 
   # Run with rust-bash
-  export THIS_SH="${pkgs.rust-bash}/bin/bash"
+  export THIS_SH="${pkgs.rust-bash-dev}/bin/bash"
   timeout 300 "$THIS_SH" "./${name}.tests" > "$TMPDIR/actual" 2>&1 || true
 
   # Normalize binary paths so that /nix/store/.../bin/bash differences don't
   # cause false failures. Replace both shell paths with a generic "bash" prefix.
   REF_BASH="${pkgs.bash}/bin/bash"
-  TEST_BASH="${pkgs.rust-bash}/bin/bash"
+  TEST_BASH="${pkgs.rust-bash-dev}/bin/bash"
   sed -i "s|$REF_BASH|bash|g" "$TMPDIR/expected"
   sed -i "s|$TEST_BASH|bash|g" "$TMPDIR/actual"
 
