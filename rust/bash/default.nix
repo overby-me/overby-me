@@ -63,46 +63,6 @@
           mainProgram = "bash";
         };
       };
-
-    rust-bash-drowse = {
-      drowse,
-      lib,
-    }:
-      drowse.crate2nix {
-        pname = "rust-bash";
-        version = "0.1.0";
-
-        src = lib.fileset.toSource {
-          root = ./.;
-          fileset = lib.fileset.unions [
-            ./Cargo.toml
-            ./Cargo.lock
-            ./src
-          ];
-        };
-
-        select = ''
-          project:
-          let
-            pkgs = import <nixpkgs> {};
-            build = project.workspaceMembers.rust-bash.build;
-          in
-          pkgs.runCommand "rust-bash-0.1.0" {} '''
-            mkdir -p $out/bin
-            cp -a ''${build}/bin/bash $out/bin/bash
-            ln -s $out/bin/bash $out/bin/sh
-          '''
-        '';
-
-        doCheck = false;
-
-        meta = {
-          description = "A Bash-compatible shell written in Rust (incremental crate-level build)";
-          homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/bash";
-          license = lib.licenses.mit;
-          mainProgram = "bash";
-        };
-      };
   };
 
   checks = let
