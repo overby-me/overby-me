@@ -69,6 +69,7 @@ pub struct Lexer {
     expand_alias_next: bool, // next word in command position should be checked for alias expansion
     redirect_target_next: bool, // next word is a redirect target (not a command)
     pub in_case_pattern: bool, // suppress alias expansion in case patterns
+    pub had_whitespace_before_token: bool, // tracks if whitespace preceded the last token
 }
 
 impl Lexer {
@@ -93,6 +94,7 @@ impl Lexer {
             expand_alias_next: true, // first word is command position
             redirect_target_next: false,
             in_case_pattern: false,
+            had_whitespace_before_token: false,
         }
     }
 
@@ -332,7 +334,9 @@ impl Lexer {
     }
 
     pub fn next_token(&mut self) -> Token {
+        let pos_before_ws = self.pos;
         self.skip_whitespace();
+        self.had_whitespace_before_token = self.pos > pos_before_ws;
 
         // Check alias end markers AFTER skipping whitespace, so that trailing
         // spaces in alias expansions are consumed before we check positions

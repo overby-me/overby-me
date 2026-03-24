@@ -1315,21 +1315,24 @@ impl Parser {
             }
         }
 
-        // Check for numeric fd — peek ahead to see if next token is a redirect
+        // Check for numeric fd — only if the next token is a redirect operator
+        // and there was no whitespace between the digit word and the redirect.
+        // The lexer records whether whitespace preceded the current token.
         if !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()) {
             let saved_pos = self.lexer.save_position();
             let saved_tok = self.current.clone();
             self.advance();
-            let is_redir = matches!(
-                self.current,
-                Token::Less
-                    | Token::Great
-                    | Token::DGreat
-                    | Token::LessAnd
-                    | Token::GreatAnd
-                    | Token::LessGreat
-                    | Token::Clobber
-            );
+            let is_redir = !self.lexer.had_whitespace_before_token
+                && matches!(
+                    self.current,
+                    Token::Less
+                        | Token::Great
+                        | Token::DGreat
+                        | Token::LessAnd
+                        | Token::GreatAnd
+                        | Token::LessGreat
+                        | Token::Clobber
+                );
             if is_redir {
                 let n: i32 = s.parse().unwrap();
                 return Some(RedirFd::Number(n));
