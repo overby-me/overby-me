@@ -317,6 +317,15 @@ fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
         shell.set_var(&var_name, output);
         return 0;
     }
+    // Skip -- (end of options marker)
+    let args = if !args.is_empty() && args[0] == "--" {
+        &args[1..]
+    } else {
+        args
+    };
+    if args.is_empty() {
+        return 0;
+    }
     let format = &args[0];
     let fmt_args = &args[1..];
     let mut arg_idx = 0;
