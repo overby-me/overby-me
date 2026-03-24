@@ -70,14 +70,20 @@ pub fn expand_word(
         last_bg_pid,
         opt_flags,
     };
-    let segments = expand_word_to_segments(word, &ctx, cmd_sub);
-    let fields = word_split(&segments, ifs);
+    // Pre-expansion brace expansion: expand braces at the word level before
+    // variable/command expansion, matching bash's expansion order
+    let words_to_expand = word_level_brace_expand(word);
+
     let mut result = Vec::new();
-    for field in fields {
-        let braced = brace_expand(&field);
-        for b in braced {
-            let globbed = glob_expand(&b);
-            result.extend(globbed);
+    for w in &words_to_expand {
+        let segments = expand_word_to_segments(w, &ctx, cmd_sub);
+        let fields = word_split(&segments, ifs);
+        for field in fields {
+            let braced = brace_expand(&field);
+            for b in braced {
+                let globbed = glob_expand(&b);
+                result.extend(globbed);
+            }
         }
     }
     if result.is_empty() && !word.is_empty() {
@@ -1931,6 +1937,192 @@ fn char_matches_pattern(c: char, pattern: &str) -> bool {
 
 /// Brace expansion: {a,b,c} → ["a", "b", "c"], pre{a,b}post → ["preapost", "prebpost"]
 /// Also handles sequences: {1..5} → ["1", "2", "3", "4", "5"]
+/// Pre-expansion brace expansion at the Word level.
+/// Converts the word to raw text, checks for unquoted brace patterns,
+/// brace-expands, and re-lexes each result into Words.
+fn word_level_brace_expand(word: &Word) -> Vec<Word> {
+    // Convert word to raw text, tracking whether brace expansion
+    // should happen at the word level (before variable expansion).
+    // This is only needed when a brace pattern is split across word parts,
+    // e.g., $var{x,y} where $var is a Variable and {x,y} is Literal.
+    let mut raw = String::new();
+    let mut has_brace_in_literal = false;
+
+    // Check specifically for Variable followed by Literal starting with {
+    for i in 0..word.len().saturating_sub(1) {
+        if matches!(&word[i], WordPart::Variable(_))
+            && matches!(&word[i + 1], WordPart::Literal(s) if s.starts_with('{'))
+        {
+            has_brace_in_literal = true;
+            break;
+        }
+    }
+
+    for part in word {
+        match part {
+            WordPart::Literal(s) => {
+                raw.push_str(s);
+            }
+            WordPart::SingleQuoted(s) => {
+                // Single-quoted text: braces are not special
+                raw.push('\'');
+                raw.push_str(s);
+                raw.push('\'');
+            }
+            WordPart::DoubleQuoted(parts) => {
+                raw.push('"');
+                for p in parts {
+                    match p {
+                        WordPart::Literal(s) => raw.push_str(s),
+                        WordPart::Variable(name) => {
+                            raw.push('$');
+                            raw.push_str(name);
+                        }
+                        WordPart::Param(expr) => {
+                            // Reconstruct ${...} — simplified
+                            raw.push_str("${");
+                            raw.push_str(&expr.name);
+                            raw.push('}');
+                        }
+                        WordPart::CommandSub(cmd) => {
+                            raw.push_str("$(");
+                            raw.push_str(cmd);
+                            raw.push(')');
+                        }
+                        _ => {}
+                    }
+                }
+                raw.push('"');
+            }
+            WordPart::Variable(name) => {
+                raw.push('$');
+                raw.push_str(name);
+            }
+            WordPart::Param(expr) => {
+                raw.push_str("${");
+                raw.push_str(&expr.name);
+                raw.push('}');
+            }
+            WordPart::Tilde(user) => {
+                raw.push('~');
+                raw.push_str(user);
+            }
+            WordPart::CommandSub(cmd) => {
+                raw.push_str("$(");
+                raw.push_str(cmd);
+                raw.push(')');
+            }
+            WordPart::BacktickSub(cmd) => {
+                raw.push('`');
+                raw.push_str(cmd);
+                raw.push('`');
+            }
+            WordPart::ArithSub(expr) => {
+                raw.push_str("$((");
+                raw.push_str(expr);
+                raw.push_str("))");
+            }
+            _ => {}
+        }
+    }
+
+    // Check if brace expansion would produce multiple results
+    if !has_brace_in_literal {
+        return vec![word.clone()];
+    }
+
+    let expanded = brace_expand(&raw);
+    if expanded.len() <= 1 {
+        return vec![word.clone()];
+    }
+
+    // Re-lex each expanded string into a Word
+    expanded
+        .into_iter()
+        .map(|s| {
+            let chars: Vec<char> = s.chars().collect();
+            let mut i = 0;
+            let mut parts = Vec::new();
+            let mut literal = String::new();
+
+            while i < chars.len() {
+                match chars[i] {
+                    '$' => {
+                        if !literal.is_empty() {
+                            parts.push(WordPart::Literal(std::mem::take(&mut literal)));
+                        }
+                        i += 1;
+                        parts.push(crate::lexer::parse_dollar(&chars, &mut i, false));
+                    }
+                    '\'' => {
+                        if !literal.is_empty() {
+                            parts.push(WordPart::Literal(std::mem::take(&mut literal)));
+                        }
+                        i += 1;
+                        let mut sq = String::new();
+                        while i < chars.len() && chars[i] != '\'' {
+                            sq.push(chars[i]);
+                            i += 1;
+                        }
+                        if i < chars.len() {
+                            i += 1;
+                        }
+                        parts.push(WordPart::SingleQuoted(sq));
+                    }
+                    '"' => {
+                        if !literal.is_empty() {
+                            parts.push(WordPart::Literal(std::mem::take(&mut literal)));
+                        }
+                        i += 1;
+                        let mut dq_parts = Vec::new();
+                        let mut dq_lit = String::new();
+                        while i < chars.len() && chars[i] != '"' {
+                            if chars[i] == '$' {
+                                if !dq_lit.is_empty() {
+                                    dq_parts
+                                        .push(WordPart::Literal(std::mem::take(&mut dq_lit)));
+                                }
+                                i += 1;
+                                dq_parts.push(crate::lexer::parse_dollar(&chars, &mut i, true));
+                            } else {
+                                dq_lit.push(chars[i]);
+                                i += 1;
+                            }
+                        }
+                        if i < chars.len() {
+                            i += 1;
+                        }
+                        if !dq_lit.is_empty() {
+                            dq_parts.push(WordPart::Literal(dq_lit));
+                        }
+                        parts.push(WordPart::DoubleQuoted(dq_parts));
+                    }
+                    '~' if i == 0 => {
+                        let mut user = String::new();
+                        i += 1;
+                        while i < chars.len()
+                            && chars[i] != '/'
+                            && !chars[i].is_whitespace()
+                        {
+                            user.push(chars[i]);
+                            i += 1;
+                        }
+                        parts.push(WordPart::Tilde(user));
+                    }
+                    c => {
+                        literal.push(c);
+                        i += 1;
+                    }
+                }
+            }
+            if !literal.is_empty() {
+                parts.push(WordPart::Literal(literal));
+            }
+            parts
+        })
+        .collect()
+}
+
 fn brace_expand(s: &str) -> Vec<String> {
     // Bash algorithm: find the first '{', then its matching '}' (tracking depth),
     // check if the content has commas or '..' at depth 0.

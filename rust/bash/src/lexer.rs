@@ -450,7 +450,7 @@ fn parse_double_quoted_content(s: &str) -> Word {
     parts
 }
 
-fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart {
+pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart {
     if *i >= chars.len() {
         return WordPart::Literal("$".to_string());
     }
