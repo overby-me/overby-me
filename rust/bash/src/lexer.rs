@@ -2246,32 +2246,188 @@ impl Lexer {
     }
 
     /// Read raw text until `))` is found (for arithmetic commands).
+    /// Skip a `$(...)` command substitution starting at the `(` after `$`.
+    /// Handles case/esac, quotes, nested $(), and backticks.
+    /// Returns the consumed text including the outer `(...)`.
+    fn skip_comsub(&mut self) -> String {
+        let mut s = String::new();
+        // self.pos is at the '(' of '$('
+        s.push(self.input[self.pos]); // '('
+        self.pos += 1;
+        let mut depth = 1i32;
+        let mut case_depth = 0i32;
+        while self.pos < self.input.len() && depth > 0 {
+            let ch = self.input[self.pos];
+            match ch {
+                '\'' => {
+                    // Single-quoted string — skip entirely
+                    s.push(ch);
+                    self.pos += 1;
+                    while self.pos < self.input.len() && self.input[self.pos] != '\'' {
+                        s.push(self.input[self.pos]);
+                        self.pos += 1;
+                    }
+                    if self.pos < self.input.len() {
+                        s.push(self.input[self.pos]);
+                        self.pos += 1;
+                    }
+                    continue;
+                }
+                '"' => {
+                    // Double-quoted string — skip but handle escapes
+                    s.push(ch);
+                    self.pos += 1;
+                    while self.pos < self.input.len() && self.input[self.pos] != '"' {
+                        if self.input[self.pos] == '\\' && self.pos + 1 < self.input.len() {
+                            s.push(self.input[self.pos]);
+                            self.pos += 1;
+                        }
+                        s.push(self.input[self.pos]);
+                        self.pos += 1;
+                    }
+                    if self.pos < self.input.len() {
+                        s.push(self.input[self.pos]);
+                        self.pos += 1;
+                    }
+                    continue;
+                }
+                '`' => {
+                    // Backtick command sub — skip
+                    s.push(ch);
+                    self.pos += 1;
+                    while self.pos < self.input.len() && self.input[self.pos] != '`' {
+                        if self.input[self.pos] == '\\' && self.pos + 1 < self.input.len() {
+                            s.push(self.input[self.pos]);
+                            self.pos += 1;
+                        }
+                        s.push(self.input[self.pos]);
+                        self.pos += 1;
+                    }
+                    if self.pos < self.input.len() {
+                        s.push(self.input[self.pos]);
+                        self.pos += 1;
+                    }
+                    continue;
+                }
+                '(' => depth += 1,
+                ')' => {
+                    if case_depth <= 0 {
+                        depth -= 1;
+                        if depth == 0 {
+                            s.push(ch);
+                            self.pos += 1;
+                            return s;
+                        }
+                    }
+                    // Inside a case block, ) is a pattern delimiter — skip
+                }
+                _ => {}
+            }
+            // Track case/esac keywords
+            if ch.is_alphabetic() {
+                let mut word = String::new();
+                while self.pos < self.input.len()
+                    && (self.input[self.pos].is_alphanumeric() || self.input[self.pos] == '_')
+                {
+                    word.push(self.input[self.pos]);
+                    self.pos += 1;
+                }
+                if word == "case" {
+                    case_depth += 1;
+                } else if word == "esac" {
+                    case_depth -= 1;
+                }
+                s.push_str(&word);
+                continue;
+            }
+            s.push(ch);
+            self.pos += 1;
+        }
+        s
+    }
+
+    /// Skip a `${ ... }` funsub starting at the `{` after `$`.
+    /// Returns the consumed text including the outer `{...}`.
+    fn skip_funsub(&mut self) -> String {
+        let mut s = String::new();
+        // self.pos is at the '{' of '${'
+        s.push(self.input[self.pos]); // '{'
+        self.pos += 1;
+        // Skip whitespace after '{' to confirm it's a funsub (has space)
+        let mut depth = 1i32;
+        while self.pos < self.input.len() && depth > 0 {
+            let ch = self.input[self.pos];
+            match ch {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        s.push(ch);
+                        self.pos += 1;
+                        return s;
+                    }
+                }
+                '\'' => {
+                    s.push(ch);
+                    self.pos += 1;
+                    while self.pos < self.input.len() && self.input[self.pos] != '\'' {
+                        s.push(self.input[self.pos]);
+                        self.pos += 1;
+                    }
+                    if self.pos < self.input.len() {
+                        s.push(self.input[self.pos]);
+                        self.pos += 1;
+                    }
+                    continue;
+                }
+                '"' => {
+                    s.push(ch);
+                    self.pos += 1;
+                    while self.pos < self.input.len() && self.input[self.pos] != '"' {
+                        if self.input[self.pos] == '\\' && self.pos + 1 < self.input.len() {
+                            s.push(self.input[self.pos]);
+                            self.pos += 1;
+                        }
+                        s.push(self.input[self.pos]);
+                        self.pos += 1;
+                    }
+                    if self.pos < self.input.len() {
+                        s.push(self.input[self.pos]);
+                        self.pos += 1;
+                    }
+                    continue;
+                }
+                _ => {}
+            }
+            s.push(ch);
+            self.pos += 1;
+        }
+        s
+    }
+
     /// The `((` has already been consumed by the parser.
     pub fn read_until_double_paren(&mut self) -> Result<String, String> {
         let mut expr = String::new();
         let mut paren_depth = 0; // Track nested ( ) inside the expression
         while self.pos < self.input.len() {
             let ch = self.input[self.pos];
-            // Handle $(...) — skip the entire command substitution
-            if ch == '$' && self.pos + 1 < self.input.len() && self.input[self.pos + 1] == '(' {
-                expr.push(ch);
-                self.pos += 1;
-                let mut cs_depth = 0i32;
-                while self.pos < self.input.len() {
-                    let c = self.input[self.pos];
-                    expr.push(c);
-                    if c == '(' {
-                        cs_depth += 1;
-                    } else if c == ')' {
-                        cs_depth -= 1;
-                        if cs_depth == 0 {
-                            self.pos += 1;
-                            break;
-                        }
-                    }
+            // Handle $(...) and ${ ... } — use proper parsers
+            if ch == '$' && self.pos + 1 < self.input.len() {
+                if self.input[self.pos + 1] == '(' {
+                    expr.push(ch);
                     self.pos += 1;
+                    expr.push_str(&self.skip_comsub());
+                    continue;
                 }
-                continue;
+                if self.input[self.pos + 1] == '{'
+                    && self.pos + 2 < self.input.len()
+                    && self.input[self.pos + 2] == ' '
+                {
+                    expr.push(ch);
+                    self.pos += 1;
+                    expr.push_str(&self.skip_funsub());
+                    continue;
+                }
             }
             if ch == '(' {
                 paren_depth += 1;
@@ -2320,27 +2476,23 @@ impl Lexer {
         let mut depth = 0i32;
         while self.pos < self.input.len() {
             let ch = self.input[self.pos];
-            // Handle $(...) — skip the entire command substitution
-            if ch == '$' && self.pos + 1 < self.input.len() && self.input[self.pos + 1] == '(' {
-                s.push(ch);
-                self.pos += 1;
-                // Now consume until matching )
-                let mut cs_depth = 0i32;
-                while self.pos < self.input.len() {
-                    let c = self.input[self.pos];
-                    s.push(c);
-                    if c == '(' {
-                        cs_depth += 1;
-                    } else if c == ')' {
-                        cs_depth -= 1;
-                        if cs_depth == 0 {
-                            self.pos += 1;
-                            break;
-                        }
-                    }
+            // Handle $(...) — use proper comsub parser with case/esac awareness
+            if ch == '$' && self.pos + 1 < self.input.len() {
+                if self.input[self.pos + 1] == '(' {
+                    s.push(ch);
                     self.pos += 1;
+                    s.push_str(&self.skip_comsub());
+                    continue;
                 }
-                continue;
+                if self.input[self.pos + 1] == '{'
+                    && self.pos + 2 < self.input.len()
+                    && self.input[self.pos + 2] == ' '
+                {
+                    s.push(ch);
+                    self.pos += 1;
+                    s.push_str(&self.skip_funsub());
+                    continue;
+                }
             }
             if ch == '(' {
                 depth += 1;

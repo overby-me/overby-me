@@ -2158,7 +2158,7 @@ impl Shell {
         // Expand command substitutions $(...) BEFORE stripping quotes,
         // since commands inside $() need their quotes preserved
         let expanded_cs: String;
-        let expr = if expr.contains("$(") {
+        let expr = if expr.contains("$(") || expr.contains("${ ") {
             expanded_cs = self.expand_comsubs_in_arith(expr);
             &expanded_cs
         } else {
@@ -2719,18 +2719,100 @@ impl Shell {
         let chars: Vec<char> = expr.chars().collect();
         let mut i = 0;
         while i < chars.len() {
+            // Handle ${ command; } funsub
+            if i + 2 < chars.len() && chars[i] == '$' && chars[i + 1] == '{' && chars[i + 2] == ' '
+            {
+                // Find matching }
+                let mut depth = 1i32;
+                let mut j = i + 2;
+                while j < chars.len() && depth > 0 {
+                    match chars[j] {
+                        '{' => depth += 1,
+                        '}' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                break;
+                            }
+                        }
+                        '\'' => {
+                            j += 1;
+                            while j < chars.len() && chars[j] != '\'' {
+                                j += 1;
+                            }
+                        }
+                        '"' => {
+                            j += 1;
+                            while j < chars.len() && chars[j] != '"' {
+                                if chars[j] == '\\' && j + 1 < chars.len() {
+                                    j += 1;
+                                }
+                                j += 1;
+                            }
+                        }
+                        _ => {}
+                    }
+                    j += 1;
+                }
+                let cmd: String = chars[i + 2..j].iter().collect();
+                let output = self.capture_output(&cmd);
+                result.push_str(output.trim());
+                i = j + 1;
+                continue;
+            }
             if i + 1 < chars.len() && chars[i] == '$' && chars[i + 1] == '(' {
-                // Find matching closing paren
-                let mut depth = 0;
+                // Find matching closing paren with case/esac and quote awareness
+                let mut depth = 0i32;
+                let mut case_depth = 0i32;
                 let mut j = i + 1;
                 while j < chars.len() {
-                    if chars[j] == '(' {
-                        depth += 1;
-                    } else if chars[j] == ')' {
-                        depth -= 1;
-                        if depth == 0 {
-                            break;
+                    match chars[j] {
+                        '\'' => {
+                            j += 1;
+                            while j < chars.len() && chars[j] != '\'' {
+                                j += 1;
+                            }
+                            if j < chars.len() {
+                                j += 1;
+                            }
+                            continue;
                         }
+                        '"' => {
+                            j += 1;
+                            while j < chars.len() && chars[j] != '"' {
+                                if chars[j] == '\\' && j + 1 < chars.len() {
+                                    j += 1;
+                                }
+                                j += 1;
+                            }
+                            if j < chars.len() {
+                                j += 1;
+                            }
+                            continue;
+                        }
+                        '(' => depth += 1,
+                        ')' => {
+                            if case_depth <= 0 {
+                                depth -= 1;
+                                if depth == 0 {
+                                    break;
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                    // Track case/esac keywords
+                    if chars[j].is_alphabetic() {
+                        let mut word = String::new();
+                        while j < chars.len() && (chars[j].is_alphanumeric() || chars[j] == '_') {
+                            word.push(chars[j]);
+                            j += 1;
+                        }
+                        if word == "case" {
+                            case_depth += 1;
+                        } else if word == "esac" {
+                            case_depth -= 1;
+                        }
+                        continue;
                     }
                     j += 1;
                 }
