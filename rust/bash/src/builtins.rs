@@ -1057,9 +1057,34 @@ fn format_word(word: &Word) -> String {
         match part {
             WordPart::Literal(t) => s.push_str(t),
             WordPart::SingleQuoted(t) => {
-                s.push('\'');
-                s.push_str(t);
-                s.push('\'');
+                // For single characters that are shell metacharacters,
+                // use \char escaping instead of 'char' quoting (bash style)
+                if t.len() == 1
+                    && t.chars().next().is_some_and(|c| {
+                        matches!(
+                            c,
+                            '$' | '`'
+                                | '\\'
+                                | '&'
+                                | '|'
+                                | ';'
+                                | '<'
+                                | '>'
+                                | '{'
+                                | '}'
+                                | '%'
+                                | '!'
+                                | '#'
+                        )
+                    })
+                {
+                    s.push('\\');
+                    s.push_str(t);
+                } else {
+                    s.push('\'');
+                    s.push_str(t);
+                    s.push('\'');
+                }
             }
             WordPart::DoubleQuoted(parts) => {
                 s.push('"');
