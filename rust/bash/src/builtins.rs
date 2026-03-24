@@ -251,13 +251,40 @@ fn parse_printf_int(arg: &str) -> i64 {
 
 fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
     if args.is_empty() {
-        eprintln!("printf: usage: printf format [arguments]");
+        eprintln!("printf: usage: printf [-v var] format [arguments]");
         return 1;
+    }
+
+    // Handle options
+    if args[0].starts_with('-') && args[0] != "-v" && args[0] != "--" {
+        eprintln!(
+            "{}: printf: {}: invalid option",
+            shell.error_prefix(),
+            args[0]
+        );
+        eprintln!("printf: usage: printf [-v var] format [arguments]");
+        return 2;
     }
 
     // Handle -v varname option
     if args.len() >= 3 && args[0] == "-v" {
         let var_name = args[1].clone();
+        // Validate variable name
+        if !var_name
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+            || !var_name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            eprintln!(
+                "{}: printf: `{}': not a valid identifier",
+                shell.error_prefix(),
+                var_name
+            );
+            return 2;
+        }
         // Build the printf command without -v and capture output
         let inner_args: Vec<String> = args[2..].to_vec();
         let output = shell.capture_output(&format!(
