@@ -79,13 +79,13 @@ enum Command {
         #[arg(long)]
         order: bool,
 
-        /// From pattern
+        /// From pattern (can be specified multiple times)
         #[arg(long)]
-        from_pattern: Option<String>,
+        from_pattern: Vec<String>,
 
-        /// To pattern
+        /// To pattern (can be specified multiple times)
         #[arg(long)]
-        to_pattern: Option<String>,
+        to_pattern: Vec<String>,
     },
 
     /// Normalize a calendar time specification and calculate next elapse
@@ -1110,8 +1110,8 @@ fn cmd_dot(
     _patterns: &[String],
     _require: bool,
     _order: bool,
-    _from_pattern: &Option<String>,
-    _to_pattern: &Option<String>,
+    _from_pattern: &[String],
+    _to_pattern: &[String],
 ) {
     // Read unit files from standard paths and generate dot output
     println!("digraph systemd {{");
@@ -1387,6 +1387,8 @@ fn cmd_log_level(level: &Option<String>) {
 
     match level {
         Some(l) => {
+            // Strip surrounding quotes (test scripts may pass e.g. '"debug"')
+            let l = l.trim_matches('"').trim_matches('\'');
             // Validate the level
             match l.to_lowercase().as_str() {
                 "emerg" | "alert" | "crit" | "err" | "warning" | "notice" | "info" | "debug" => {}

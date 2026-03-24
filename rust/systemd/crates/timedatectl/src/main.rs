@@ -430,9 +430,13 @@ fn print_status(info: &TimeInfo) {
     } else {
         println!("                 RTC time: n/a");
     }
+    // Show timezone abbreviation and offset, matching systemd format:
+    // "Time zone: America/New_York (EST, -0500)"
+    let local_tm = get_local_tm();
+    let tz_abbr = get_tz_abbr(&local_tm);
     println!(
-        "                Time zone: {} ({})",
-        info.timezone, info.utc_offset
+        "                Time zone: {} ({}, {})",
+        info.timezone, tz_abbr, info.utc_offset
     );
 
     println!("System clock synchronized: {}", yes_no(info.ntp_synced));
@@ -881,6 +885,50 @@ fn cmd_timesync_status() {
 
 // ── Usage ──────────────────────────────────────────────────────────────────
 
+fn cmd_ntp_servers(iface: &str, servers: &[&str]) {
+    // Write a networkd drop-in that sets NTP servers for this link.
+    // Real systemd-timedated writes to /run/systemd/network/XX-<iface>.network.d/
+    let dropin_dir = format!("/run/systemd/network/50-{iface}.network.d");
+    let dropin_file = format!("{dropin_dir}/ntp.conf");
+
+    if let Err(e) = fs::create_dir_all(&dropin_dir) {
+        eprintln!("Failed to create drop-in directory {dropin_dir}: {e}");
+        process::exit(1);
+    }
+
+    let ntp_list = servers.join(" ");
+    let content = format!("[Network]\nNTP={ntp_list}\n");
+
+    if let Err(e) = fs::write(&dropin_file, content) {
+        eprintln!("Failed to write {dropin_file}: {e}");
+        process::exit(1);
+    }
+
+    // Reload networkd to pick up the change
+    let _ = process::Command::new("networkctl")
+        .args(["reload"])
+        .status();
+    let _ = process::Command::new("networkctl")
+        .args(["reconfigure", iface])
+        .status();
+}
+
+fn cmd_revert(iface: &str) {
+    let dropin_dir = format!("/run/systemd/network/50-{iface}.network.d");
+    if Path::new(&dropin_dir).exists() {
+        if let Err(e) = fs::remove_dir_all(&dropin_dir) {
+            eprintln!("Failed to remove {dropin_dir}: {e}");
+            process::exit(1);
+        }
+    }
+    let _ = process::Command::new("networkctl")
+        .args(["reload"])
+        .status();
+    let _ = process::Command::new("networkctl")
+        .args(["reconfigure", iface])
+        .status();
+}
+
 fn print_usage() {
     eprintln!("timedatectl — Control the system time and date");
     eprintln!();
@@ -895,6 +943,8 @@ fn print_usage() {
     eprintln!("  set-ntp BOOL        Enable/disable NTP synchronization");
     eprintln!("  list-timezones      List available timezones");
     eprintln!("  timesync-status     Show NTP sync status");
+    eprintln!("  ntp-servers IFACE SERVER...  Set per-link NTP servers");
+    eprintln!("  revert IFACE        Remove per-link NTP overrides");
     eprintln!("  help                Show this help");
 }
 
@@ -996,6 +1046,28 @@ fn main() {
         }
         "list-timezones" => cmd_list_timezones(),
         "timesync-status" => cmd_timesync_status(),
+        "ntp-servers" => {
+            // timedatectl ntp-servers INTERFACE SERVER...
+            // Sets per-link NTP server addresses via networkd drop-in config.
+            if args.len() < 4 {
+                eprintln!("Error: ntp-servers requires an interface and at least one server.");
+                eprintln!("Usage: timedatectl ntp-servers INTERFACE SERVER...");
+                process::exit(1);
+            }
+            let iface = &args[2];
+            let servers: Vec<&str> = args[3..].iter().map(|s| s.as_str()).collect();
+            cmd_ntp_servers(iface, &servers);
+        }
+        "revert" => {
+            // timedatectl revert INTERFACE
+            // Removes per-link NTP server overrides.
+            if args.len() < 3 {
+                eprintln!("Error: revert requires an interface argument.");
+                eprintln!("Usage: timedatectl revert INTERFACE");
+                process::exit(1);
+            }
+            cmd_revert(&args[2]);
+        }
         "help" | "--help" | "-h" => {
             print_usage();
         }

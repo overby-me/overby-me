@@ -261,6 +261,14 @@ struct Cli {
     #[arg(long = "vacuum-files", value_name = "N")]
     vacuum_files: Option<usize>,
 
+    /// Show a list of journal namespaces.
+    #[arg(long = "list-namespaces")]
+    list_namespaces: bool,
+
+    /// Show entries from the specified journal namespace.
+    #[arg(long = "namespace", value_name = "NAMESPACE")]
+    namespace: Option<String>,
+
     /// Free-form match expressions: FIELD=VALUE
     #[arg(trailing_var_arg = true)]
     matches: Vec<String>,
@@ -1083,6 +1091,16 @@ fn detect_boots(entries: &[JournalEntry]) -> Vec<BootRecord> {
 fn open_storage(cli: &Cli) -> Result<JournalStorage, String> {
     let directory = if let Some(ref dir) = cli.directory {
         PathBuf::from(dir)
+    } else if let Some(ref ns) = cli.namespace {
+        // For namespaced journals, look for <machine-id>.<namespace> subdirs
+        let persistent = PathBuf::from("/var/log/journal");
+        let volatile = PathBuf::from("/run/log/journal");
+        find_namespace_dir(&persistent, ns)
+            .or_else(|| find_namespace_dir(&volatile, ns))
+            .unwrap_or_else(|| {
+                // Fall back to volatile base dir if namespace dir not found
+                volatile
+            })
     } else {
         // Try persistent first, then volatile
         let persistent = PathBuf::from("/var/log/journal");
@@ -1121,10 +1139,29 @@ fn main() {
         return;
     }
 
+    if cli.list_namespaces {
+        // List journal namespaces. Namespaces are subdirectories under
+        // /var/log/journal/<machine-id>.* or /run/log/journal/<machine-id>.*
+        let namespaces = discover_namespaces();
+        if cli.output.starts_with("json") {
+            let items: Vec<String> = namespaces.iter().map(|n| format!("\"{}\"", n)).collect();
+            println!("[{}]", items.join(","));
+        } else {
+            for ns in &namespaces {
+                println!("{}", ns);
+            }
+        }
+        return;
+    }
+
     if cli.sync {
         // Send SIGRTMIN+1 to journald to trigger a sync to disk
         eprintln!("Requesting sync of journal to persistent storage...");
         send_signal_to_journald(libc::SIGRTMIN() + 1);
+        // Also signal namespace-specific journald instances
+        if let Some(ref ns) = cli.namespace {
+            send_signal_to_journald_namespace(ns, libc::SIGRTMIN() + 1);
+        }
         return;
     }
 
@@ -2022,6 +2059,86 @@ fn send_signal_to_journald(signal: libc::c_int) {
     }
 
     eprintln!("journalctl: Could not find systemd-journald process");
+}
+
+/// Find a namespace-specific journal directory under a base path.
+/// Namespace dirs are named `<machine-id>.<namespace>`.
+fn find_namespace_dir(base: &PathBuf, namespace: &str) -> Option<PathBuf> {
+    let Ok(entries) = fs::read_dir(base) else {
+        return None;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        if let Some(dot_pos) = name_str.find('.') {
+            let ns = &name_str[dot_pos + 1..];
+            if ns == namespace && entry.path().is_dir() {
+                return Some(entry.path());
+            }
+        }
+    }
+    None
+}
+
+/// Discover journal namespaces by scanning journal directories for
+/// namespace-specific subdirectories (e.g., `<machine-id>.foobar`).
+fn discover_namespaces() -> Vec<String> {
+    let mut namespaces = Vec::new();
+    let dirs = ["/var/log/journal", "/run/log/journal"];
+
+    for dir in &dirs {
+        let Ok(entries) = fs::read_dir(dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            // Namespace dirs look like <machine-id>.<namespace>
+            // where machine-id is a 32-char hex string
+            if let Some(dot_pos) = name_str.find('.') {
+                let prefix = &name_str[..dot_pos];
+                let ns = &name_str[dot_pos + 1..];
+                if prefix.len() == 32
+                    && prefix.chars().all(|c| c.is_ascii_hexdigit())
+                    && !ns.is_empty()
+                {
+                    if !namespaces.contains(&ns.to_string()) {
+                        namespaces.push(ns.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    namespaces.sort();
+    namespaces
+}
+
+/// Send a signal to a namespace-specific journald instance.
+fn send_signal_to_journald_namespace(namespace: &str, signal: libc::c_int) {
+    // Namespace-specific journald instances have comm like
+    // "sd-journald-ns" or the unit is systemd-journald@<ns>.service
+    if let Ok(proc_dir) = fs::read_dir("/proc") {
+        for entry in proc_dir.flatten() {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            let pid: i32 = match name_str.parse() {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
+
+            // Check if this process is a namespace-specific journald
+            let cmdline_path = format!("/proc/{}/cmdline", pid);
+            if let Ok(cmdline) = fs::read_to_string(&cmdline_path) {
+                if cmdline.contains("systemd-journald") && cmdline.contains(namespace) {
+                    unsafe {
+                        libc::kill(pid, signal);
+                    }
+                    return;
+                }
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -156,6 +156,11 @@ struct Cli {
     #[arg(long)]
     system: bool,
 
+    /// Execute operation on a local container or on the host.
+    /// Format: [user@]machine. Accepted for compatibility.
+    #[arg(short = 'M', long, value_name = "MACHINE")]
+    machine: Option<String>,
+
     /// The command and its arguments to run.
     #[arg(trailing_var_arg = true)]
     command: Vec<String>,
