@@ -264,6 +264,7 @@ pub struct Shell {
     pub shopt_expand_aliases: bool,
     pub in_pipeline_child: bool,
     pub dash_c_mode: bool,
+    pub loop_depth: i32,
 
     pub aliases: HashMap<String, String>,
     builtins: HashMap<&'static str, BuiltinFn>,
@@ -385,6 +386,7 @@ impl Shell {
             shopt_expand_aliases: false,
             in_pipeline_child: false,
             dash_c_mode: false,
+            loop_depth: 0,
             aliases: HashMap::new(),
             builtins: builtins::builtins(),
         };
@@ -1450,6 +1452,22 @@ impl Shell {
 
     /// Returns the error prefix for runtime error messages (no -c:).
     /// For scripts: "$0: line N:" ; for stdin/interactive: "bash:"
+    /// Error prefix for arithmetic errors — uses _BASH_SOURCE_FILE if set.
+    fn arith_error_prefix(&self) -> String {
+        let name = self
+            .vars
+            .get("_BASH_SOURCE_FILE")
+            .or_else(|| self.positional.first())
+            .map(|s| s.as_str())
+            .unwrap_or("bash");
+        let lineno = self
+            .vars
+            .get("LINENO")
+            .and_then(|s| s.parse::<i64>().ok())
+            .unwrap_or(0);
+        format!("{}: line {}", name, lineno)
+    }
+
     pub fn error_prefix(&self) -> String {
         let name = self
             .positional
@@ -2082,8 +2100,49 @@ impl Shell {
     }
 
     /// Evaluate an arithmetic expression and return the integer result.
+    ///
+    /// Find an operator in the expression at top-level (outside parentheses).
+    fn find_top_level_arith_op(expr: &str, op: &str) -> Option<usize> {
+        let mut depth = 0i32;
+        let bytes = expr.as_bytes();
+        let op_bytes = op.as_bytes();
+        for i in 0..bytes.len() {
+            match bytes[i] {
+                b'(' => depth += 1,
+                b')' => depth -= 1,
+                _ => {}
+            }
+            if depth == 0
+                && i + op_bytes.len() <= bytes.len()
+                && &bytes[i..i + op_bytes.len()] == op_bytes
+            {
+                return Some(i);
+            }
+        }
+        None
+    }
+
     pub fn eval_arith_expr(&mut self, expr: &str) -> i64 {
-        let expr = expr.trim();
+        // Strip double quotes from arith expressions (bash behavior)
+        let unquoted: String;
+        let expr = {
+            let trimmed = expr.trim();
+            if trimmed.contains('"') {
+                unquoted = trimmed.replace('"', "");
+                &unquoted
+            } else {
+                trimmed
+            }
+        };
+
+        // Expand command substitutions $(...) before arithmetic evaluation
+        let expanded_cs: String;
+        let expr = if expr.contains("$(") {
+            expanded_cs = self.expand_comsubs_in_arith(expr);
+            &expanded_cs
+        } else {
+            expr
+        };
 
         // Handle comma operator (only at top level, not inside parens)
         {
@@ -2120,7 +2179,7 @@ impl Shell {
         ];
 
         for &(op, func) in assign_ops {
-            if let Some(pos) = expr.find(op) {
+            if let Some(pos) = Self::find_top_level_arith_op(expr, op) {
                 let name = expr[..pos].trim();
                 if !name.is_empty()
                     && name.chars().next().is_some_and(|c| !c.is_ascii_digit())
@@ -2155,7 +2214,7 @@ impl Shell {
         }
 
         // Handle simple assignment: var=expr (but not ==)
-        if let Some(pos) = expr.find('=')
+        if let Some(pos) = Self::find_top_level_arith_op(expr, "=")
             && pos > 0
             && !expr[..pos].ends_with('!')
             && !expr[..pos].ends_with('<')
@@ -2167,7 +2226,19 @@ impl Shell {
                 && name.chars().next().is_some_and(|c| !c.is_ascii_digit())
                 && (name.chars().all(|c| c.is_alphanumeric() || c == '_') || name.contains('['))
             {
-                let val = self.eval_arith_expr(&expr[pos + 1..]);
+                let rhs = &expr[pos + 1..];
+                if rhs.trim().is_empty() {
+                    // Empty RHS: e.g. "j=" → syntax error
+                    eprintln!(
+                        "{}: ((: {}: arithmetic syntax error: operand expected (error token is \"{}\")",
+                        self.arith_error_prefix(),
+                        expr,
+                        &expr[pos..]
+                    );
+                    crate::expand::set_arith_error();
+                    return 0;
+                }
+                let val = self.eval_arith_expr(rhs);
                 if let Some(bracket) = name.find('[') {
                     let base = &name[..bracket];
                     let idx_str = &name[bracket + 1..name.len() - 1];
@@ -2183,15 +2254,33 @@ impl Shell {
                 }
                 return val;
             }
+            // Assignment to non-variable (e.g., 7=4)
+            if !name.is_empty() && name.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+                eprintln!(
+                    "{}: ((: {}: attempted assignment to non-variable (error token is \"{}\")",
+                    self.arith_error_prefix(),
+                    expr,
+                    &expr[pos..]
+                );
+                crate::expand::set_arith_error();
+                return 0;
+            }
         }
 
         // Handle post-increment/decrement: var++, var--
         if let Some(stripped) = expr.strip_suffix("++") {
             let name = stripped.trim();
-            if !name.is_empty()
-                && name.chars().next().is_some_and(|c| !c.is_ascii_digit())
-                && name.chars().all(|c| c.is_alphanumeric() || c == '_')
-            {
+            if !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                if name.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+                    // Number followed by ++ is a syntax error
+                    eprintln!(
+                        "{}: ((: {} : arithmetic syntax error: operand expected (error token is \"+ \")",
+                        self.arith_error_prefix(),
+                        expr,
+                    );
+                    crate::expand::set_arith_error();
+                    return 0;
+                }
                 let val: i64 = self
                     .vars
                     .get(name)
@@ -2203,10 +2292,16 @@ impl Shell {
         }
         if let Some(stripped) = expr.strip_suffix("--") {
             let name = stripped.trim();
-            if !name.is_empty()
-                && name.chars().next().is_some_and(|c| !c.is_ascii_digit())
-                && name.chars().all(|c| c.is_alphanumeric() || c == '_')
-            {
+            if !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                if name.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+                    eprintln!(
+                        "{}: ((: {} : arithmetic syntax error: operand expected (error token is \"- \")",
+                        self.arith_error_prefix(),
+                        expr,
+                    );
+                    crate::expand::set_arith_error();
+                    return 0;
+                }
                 let val: i64 = self
                     .vars
                     .get(name)
@@ -2245,11 +2340,379 @@ impl Shell {
             }
         }
 
-        // Delegate to expand module for pure expressions
-        let vars = self.vars.clone();
-        let arrays = self.arrays.clone();
-        let positional = self.positional.clone();
-        expand::eval_arith_full(expr, &vars, &arrays, &positional, self.last_status)
+        // Handle || at top level (preserves assignments in subexprs)
+        {
+            let mut depth = 0i32;
+            let bytes = expr.as_bytes();
+            let mut i = bytes.len();
+            while i > 1 {
+                i -= 1;
+                match bytes[i] {
+                    b')' => depth += 1,
+                    b'(' => depth -= 1,
+                    b'|' if depth == 0 && i > 0 && bytes[i - 1] == b'|' => {
+                        let left = self.eval_arith_expr(&expr[..i - 1]);
+                        if left != 0 {
+                            return 1;
+                        }
+                        let right = self.eval_arith_expr(&expr[i + 1..]);
+                        return if right != 0 { 1 } else { 0 };
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // Handle && at top level
+        {
+            let mut depth = 0i32;
+            let bytes = expr.as_bytes();
+            let mut i = bytes.len();
+            while i > 1 {
+                i -= 1;
+                match bytes[i] {
+                    b')' => depth += 1,
+                    b'(' => depth -= 1,
+                    b'&' if depth == 0 && i > 0 && bytes[i - 1] == b'&' => {
+                        let left = self.eval_arith_expr(&expr[..i - 1]);
+                        if left == 0 {
+                            return 0;
+                        }
+                        let right = self.eval_arith_expr(&expr[i + 1..]);
+                        return if right != 0 { 1 } else { 0 };
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // Handle parenthesized expressions at top level
+        if expr.starts_with('(') && expr.ends_with(')') {
+            let mut depth = 0i32;
+            let mut all_matched = true;
+            for (i, ch) in expr.chars().enumerate() {
+                match ch {
+                    '(' => depth += 1,
+                    ')' => {
+                        depth -= 1;
+                        if depth == 0 && i < expr.len() - 1 {
+                            all_matched = false;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if all_matched {
+                return self.eval_arith_expr(&expr[1..expr.len() - 1]);
+            }
+        }
+
+        // Handle comparison operators at top level (right-to-left scan)
+        {
+            let bytes = expr.as_bytes();
+            let mut depth = 0i32;
+            let mut i = bytes.len();
+            while i > 0 {
+                i -= 1;
+                match bytes[i] {
+                    b')' => depth += 1,
+                    b'(' => depth -= 1,
+                    b'=' if depth == 0 && i > 0 && bytes[i - 1] == b'<' => {
+                        let left = self.eval_arith_expr(&expr[..i - 1]);
+                        let right = self.eval_arith_expr(&expr[i + 1..]);
+                        return if left <= right { 1 } else { 0 };
+                    }
+                    b'=' if depth == 0 && i > 0 && bytes[i - 1] == b'>' => {
+                        let left = self.eval_arith_expr(&expr[..i - 1]);
+                        let right = self.eval_arith_expr(&expr[i + 1..]);
+                        return if left >= right { 1 } else { 0 };
+                    }
+                    b'=' if depth == 0
+                        && i > 0
+                        && bytes[i - 1] == b'='
+                        && !(i >= 2 && bytes[i - 2] == b'!') =>
+                    {
+                        let left = self.eval_arith_expr(&expr[..i - 1]);
+                        let right = self.eval_arith_expr(&expr[i + 1..]);
+                        return if left == right { 1 } else { 0 };
+                    }
+                    b'=' if depth == 0 && i > 0 && bytes[i - 1] == b'!' => {
+                        let left = self.eval_arith_expr(&expr[..i - 1]);
+                        let right = self.eval_arith_expr(&expr[i + 1..]);
+                        return if left != right { 1 } else { 0 };
+                    }
+                    b'<' if depth == 0
+                        && !(i > 0 && bytes[i - 1] == b'<')
+                        && (i + 1 >= bytes.len()
+                            || (bytes[i + 1] != b'=' && bytes[i + 1] != b'<')) =>
+                    {
+                        let left = self.eval_arith_expr(&expr[..i]);
+                        let right = self.eval_arith_expr(&expr[i + 1..]);
+                        return if left < right { 1 } else { 0 };
+                    }
+                    b'>' if depth == 0
+                        && !(i > 0 && bytes[i - 1] == b'>')
+                        && (i + 1 >= bytes.len()
+                            || (bytes[i + 1] != b'=' && bytes[i + 1] != b'>')) =>
+                    {
+                        let left = self.eval_arith_expr(&expr[..i]);
+                        let right = self.eval_arith_expr(&expr[i + 1..]);
+                        return if left > right { 1 } else { 0 };
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // Handle addition/subtraction at top level
+        {
+            let bytes = expr.as_bytes();
+            let mut depth = 0i32;
+            let mut i = bytes.len();
+            while i > 0 {
+                i -= 1;
+                match bytes[i] {
+                    b')' => depth += 1,
+                    b'(' => depth -= 1,
+                    b'+' | b'-' if depth == 0 && i > 0 => {
+                        let prev = bytes[i - 1];
+                        let next = if i + 1 < bytes.len() {
+                            bytes[i + 1]
+                        } else {
+                            b' '
+                        };
+                        // Skip ++ or -- or after an operator
+                        if !matches!(
+                            prev,
+                            b'+' | b'-'
+                                | b'*'
+                                | b'/'
+                                | b'%'
+                                | b'('
+                                | b'<'
+                                | b'>'
+                                | b'='
+                                | b'!'
+                                | b'&'
+                                | b'|'
+                        ) && next != bytes[i]
+                        {
+                            let left = self.eval_arith_expr(&expr[..i]);
+                            let right = self.eval_arith_expr(&expr[i + 1..]);
+                            return if bytes[i] == b'+' {
+                                left + right
+                            } else {
+                                left - right
+                            };
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // Handle multiplication/division/modulo at top level
+        {
+            let bytes = expr.as_bytes();
+            let mut depth = 0i32;
+            let mut i = bytes.len();
+            while i > 0 {
+                i -= 1;
+                match bytes[i] {
+                    b')' => depth += 1,
+                    b'(' => depth -= 1,
+                    b'*' | b'/' | b'%' if depth == 0 => {
+                        if bytes[i] == b'*' && i + 1 < bytes.len() && bytes[i + 1] == b'*' {
+                            continue;
+                        }
+                        if bytes[i] == b'*' && i > 0 && bytes[i - 1] == b'*' {
+                            continue;
+                        }
+                        let left = self.eval_arith_expr(&expr[..i]);
+                        let right = self.eval_arith_expr(&expr[i + 1..]);
+                        return match bytes[i] {
+                            b'*' => left * right,
+                            b'/' => {
+                                if right == 0 {
+                                    let error_token = expr[i + 1..].trim_start();
+                                    eprintln!(
+                                        "{}: ((: {}: division by 0 (error token is \"{}\")",
+                                        self.arith_error_prefix(),
+                                        expr,
+                                        error_token
+                                    );
+                                    crate::expand::set_arith_error();
+                                    0
+                                } else {
+                                    left / right
+                                }
+                            }
+                            b'%' => {
+                                if right == 0 {
+                                    let error_token = expr[i + 1..].trim_start();
+                                    eprintln!(
+                                        "{}: ((: {}: division by 0 (error token is \"{}\")",
+                                        self.arith_error_prefix(),
+                                        expr,
+                                        error_token
+                                    );
+                                    crate::expand::set_arith_error();
+                                    0
+                                } else {
+                                    left % right
+                                }
+                            }
+                            _ => unreachable!(),
+                        };
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // Handle exponentiation
+        if let Some(pos) = Self::find_top_level_arith_op(expr, "**") {
+            let base = self.eval_arith_expr(&expr[..pos]);
+            let exp = self.eval_arith_expr(&expr[pos + 2..]);
+            return base.pow(exp as u32);
+        }
+
+        // Unary operators
+        if let Some(stripped) = expr.strip_prefix('-') {
+            return -self.eval_arith_expr(stripped);
+        }
+        if let Some(stripped) = expr.strip_prefix('+') {
+            return self.eval_arith_expr(stripped);
+        }
+        if let Some(stripped) = expr.strip_prefix('!') {
+            return if self.eval_arith_expr(stripped) == 0 {
+                1
+            } else {
+                0
+            };
+        }
+        if let Some(stripped) = expr.strip_prefix('~') {
+            return !self.eval_arith_expr(stripped);
+        }
+
+        // Variable lookup or number literal
+        let expr = expr.trim();
+        if expr.is_empty() {
+            return 0;
+        }
+
+        // $var reference — strip $ and treat as variable name
+        if let Some(stripped) = expr.strip_prefix('$') {
+            let name = stripped.trim();
+            if name == "?" {
+                return self.last_status as i64;
+            }
+            if !name.is_empty()
+                && name
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                && name.chars().all(|c| c.is_alphanumeric() || c == '_')
+            {
+                let val = self.vars.get(name).cloned().unwrap_or_default();
+                if val.is_empty() {
+                    return 0;
+                }
+                if let Ok(n) = val.parse::<i64>() {
+                    return n;
+                }
+                return self.eval_arith_expr(&val);
+            }
+        }
+
+        // Variable reference
+        if expr
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+            && expr.chars().all(|c| c.is_alphanumeric() || c == '_')
+        {
+            let val = self.vars.get(expr).cloned().unwrap_or_default();
+            if val.is_empty() {
+                return 0;
+            }
+            // If the variable's value is itself a valid expression, evaluate it
+            if let Ok(n) = val.parse::<i64>() {
+                return n;
+            }
+            return self.eval_arith_expr(&val);
+        }
+
+        // Number literal
+        if let Some(hex) = expr.strip_prefix("0x").or_else(|| expr.strip_prefix("0X")) {
+            return i64::from_str_radix(hex, 16).unwrap_or(0);
+        }
+        if expr.starts_with('0')
+            && expr.len() > 1
+            && expr.chars().skip(1).all(|c| c.is_ascii_digit())
+        {
+            return i64::from_str_radix(&expr[1..], 8).unwrap_or(0);
+        }
+        if let Ok(n) = expr.parse::<i64>() {
+            return n;
+        }
+
+        // Array element: arr[idx]
+        if let Some(bracket) = expr.find('[') {
+            let name = &expr[..bracket];
+            let idx_str = &expr[bracket + 1..expr.len() - 1];
+            let resolved = self.resolve_nameref(name);
+            let idx = self.eval_arith_expr(idx_str) as usize;
+            if let Some(arr) = self.arrays.get(&resolved) {
+                return arr.get(idx).and_then(|v| v.parse().ok()).unwrap_or(0);
+            }
+            return 0;
+        }
+
+        // Fall back to reporting error
+        eprintln!(
+            "{}: ((: {}: syntax error: operand expected (error token is \"{}\")",
+            self.arith_error_prefix(),
+            expr,
+            expr
+        );
+        crate::expand::set_arith_error();
+        0
+    }
+
+    /// Expand command substitutions $(...) within an arithmetic expression string.
+    fn expand_comsubs_in_arith(&mut self, expr: &str) -> String {
+        let mut result = String::new();
+        let chars: Vec<char> = expr.chars().collect();
+        let mut i = 0;
+        while i < chars.len() {
+            if i + 1 < chars.len() && chars[i] == '$' && chars[i + 1] == '(' {
+                // Find matching closing paren
+                let mut depth = 0;
+                let mut j = i + 1;
+                while j < chars.len() {
+                    if chars[j] == '(' {
+                        depth += 1;
+                    } else if chars[j] == ')' {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    j += 1;
+                }
+                // Extract the command inside $(...)
+                let cmd: String = chars[i + 2..j].iter().collect();
+                let output = self.capture_output(&cmd);
+                result.push_str(output.trim());
+                i = j + 1;
+            } else {
+                result.push(chars[i]);
+                i += 1;
+            }
+        }
+        result
     }
 
     fn run_function(&mut self, body: &CompoundCommand, name: &str, args: &[String]) -> i32 {
@@ -2589,6 +3052,13 @@ impl Shell {
     }
 
     fn run_for(&mut self, clause: &ForClause) -> i32 {
+        self.loop_depth += 1;
+        let status = self.run_for_inner(clause);
+        self.loop_depth -= 1;
+        status
+    }
+
+    fn run_for_inner(&mut self, clause: &ForClause) -> i32 {
         let ifs = self
             .vars
             .get("IFS")
@@ -2648,11 +3118,21 @@ impl Shell {
     }
 
     fn run_arith_for(&mut self, clause: &ArithForClause) -> i32 {
+        self.loop_depth += 1;
+        let status = self.run_arith_for_inner(clause);
+        self.loop_depth -= 1;
+        status
+    }
+
+    fn run_arith_for_inner(&mut self, clause: &ArithForClause) -> i32 {
         if !clause.init.is_empty() {
             if self.opt_xtrace {
                 self.xtrace_write(&format!("+ (( {} ))", clause.init));
             }
             self.eval_arith_expr(&clause.init);
+            if crate::expand::take_arith_error() {
+                return 1;
+            }
         }
 
         let mut status = 0;
@@ -2667,6 +3147,9 @@ impl Shell {
                     self.xtrace_write(&format!("+ (( {} ))", clause.cond));
                 }
                 let cond_val = self.eval_arith_expr(&clause.cond);
+                if crate::expand::take_arith_error() {
+                    break;
+                }
                 if cond_val == 0 {
                     break;
                 }
@@ -2699,6 +3182,7 @@ impl Shell {
     }
 
     fn run_while(&mut self, clause: &WhileClause) -> i32 {
+        self.loop_depth += 1;
         let mut status = 0;
         loop {
             if self.breaking > 0 {
@@ -2721,13 +3205,14 @@ impl Shell {
             }
             if self.continuing > 0 {
                 self.continuing -= 1;
-                // continue to next iteration (re-evaluate condition)
             }
         }
+        self.loop_depth -= 1;
         status
     }
 
     fn run_until(&mut self, clause: &WhileClause) -> i32 {
+        self.loop_depth += 1;
         let mut status = 0;
         loop {
             if self.breaking > 0 {
@@ -2754,6 +3239,7 @@ impl Shell {
                 break;
             }
         }
+        self.loop_depth -= 1;
         status
     }
 

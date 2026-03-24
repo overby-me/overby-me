@@ -2280,6 +2280,8 @@ impl Lexer {
                     self.pos = saved;
                     expr.push(')');
                 }
+            } else if ch == ';' && paren_depth == 0 {
+                return Err("syntax error: `;' unexpected".to_string());
             } else {
                 if ch == '\n' {
                     self.line += 1;

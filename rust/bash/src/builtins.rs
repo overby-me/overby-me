@@ -69,12 +69,26 @@ pub fn builtins() -> HashMap<&'static str, BuiltinFn> {
 }
 
 fn builtin_break(shell: &mut Shell, args: &[String]) -> i32 {
+    if shell.loop_depth == 0 {
+        eprintln!(
+            "{}: break: only meaningful in a `for', `while', or `until' loop",
+            shell.error_prefix()
+        );
+        return 0;
+    }
     let n: i32 = args.first().and_then(|s| s.parse().ok()).unwrap_or(1);
     shell.breaking = n;
     0
 }
 
 fn builtin_continue(shell: &mut Shell, args: &[String]) -> i32 {
+    if shell.loop_depth == 0 {
+        eprintln!(
+            "{}: continue: only meaningful in a `for', `while', or `until' loop",
+            shell.error_prefix()
+        );
+        return 0;
+    }
     let n: i32 = args.first().and_then(|s| s.parse().ok()).unwrap_or(1);
     shell.continuing = n;
     0
@@ -1243,7 +1257,7 @@ fn format_simple_command(cmd: &SimpleCommand) -> String {
     parts.join(" ")
 }
 
-fn format_pipeline(pipeline: &Pipeline) -> String {
+fn format_pipeline_indent(pipeline: &Pipeline, indent: usize) -> String {
     let mut s = String::new();
     if pipeline.negated {
         s.push_str("! ");
@@ -1255,16 +1269,20 @@ fn format_pipeline(pipeline: &Pipeline) -> String {
             s.push_str("time ");
         }
     }
-    let cmds: Vec<String> = pipeline.commands.iter().map(format_command).collect();
+    let cmds: Vec<String> = pipeline
+        .commands
+        .iter()
+        .map(|c| format_command_indent(c, indent))
+        .collect();
     s.push_str(&cmds.join(" | "));
     s
 }
 
-fn format_command(cmd: &Command) -> String {
+fn format_command_indent(cmd: &Command, indent: usize) -> String {
     match cmd {
         Command::Simple(sc) => format_simple_command(sc),
         Command::Compound(cc, redirections) => {
-            let mut s = format_compound_command(cc);
+            let mut s = format_compound_command_indent(cc, indent);
             for r in redirections {
                 s.push(' ');
                 s.push_str(&format_redirection(r));
@@ -1283,13 +1301,13 @@ fn format_program(program: &Program, indent: usize) -> String {
     for (idx, cc) in program.iter().enumerate() {
         let mut line = String::new();
         line.push_str(&prefix);
-        line.push_str(&format_pipeline(&cc.list.first));
+        line.push_str(&format_pipeline_indent(&cc.list.first, indent));
         for (op, pipeline) in &cc.list.rest {
             match op {
                 AndOr::And => line.push_str(" && "),
                 AndOr::Or => line.push_str(" || "),
             }
-            line.push_str(&format_pipeline(pipeline));
+            line.push_str(&format_pipeline_indent(pipeline, indent));
         }
         if cc.background {
             line.push_str(" &");
@@ -1337,6 +1355,11 @@ fn format_cond_expr(expr: &CondExpr) -> String {
 }
 
 fn format_compound_command(cmd: &CompoundCommand) -> String {
+    format_compound_command_indent(cmd, 0)
+}
+
+fn format_compound_command_indent(cmd: &CompoundCommand, indent: usize) -> String {
+    let iprefix = "    ".repeat(indent);
     match cmd {
         CompoundCommand::BraceGroup(program) => {
             if program.is_empty() {
@@ -1361,18 +1384,18 @@ fn format_compound_command(cmd: &CompoundCommand) -> String {
             let cond = cond.trim().trim_end_matches(';');
             s.push_str(cond);
             s.push_str("; then\n");
-            s.push_str(&format_program(&clause.then_body, 2));
+            s.push_str(&format_program(&clause.then_body, indent + 1));
             for (elif_cond, elif_body) in &clause.elif_parts {
                 let c = format_program(elif_cond, 0);
                 let c = c.trim().trim_end_matches(';');
-                s.push_str(&format!("\n    elif {}; then\n", c));
-                s.push_str(&format_program(elif_body, 2));
+                s.push_str(&format!("\n{iprefix}elif {}; then\n", c));
+                s.push_str(&format_program(elif_body, indent + 1));
             }
             if let Some(ref else_body) = clause.else_body {
-                s.push_str("\n    else\n");
-                s.push_str(&format_program(else_body, 2));
+                s.push_str(&format!("\n{iprefix}else\n"));
+                s.push_str(&format_program(else_body, indent + 1));
             }
-            s.push_str("\n    fi");
+            s.push_str(&format!("\n{iprefix}fi"));
             s
         }
         CompoundCommand::For(clause) => {
@@ -1383,53 +1406,67 @@ fn format_compound_command(cmd: &CompoundCommand) -> String {
                     s.push_str(&format_word(w));
                 }
             }
-            s.push_str(";\n    do\n");
-            s.push_str(&format_program(&clause.body, 2));
-            s.push_str("\n    done");
+            s.push_str(&format!(";\n{iprefix}do\n"));
+            s.push_str(&format_program(&clause.body, indent + 1));
+            s.push_str(&format!("\n{iprefix}done"));
             s
         }
         CompoundCommand::ArithFor(clause) => {
-            let mut s = format!(
-                "for (( {}; {}; {} )); do\n",
-                clause.init, clause.cond, clause.step
-            );
-            s.push_str(&format_program(&clause.body, 1));
-            s.push_str("\ndone");
+            let init = if clause.init.trim().is_empty() {
+                "1".to_string()
+            } else {
+                clause.init.trim().to_string()
+            };
+            let cond = if clause.cond.trim().is_empty() {
+                "1".to_string()
+            } else {
+                clause.cond.trim().to_string()
+            };
+            // Step: keep trailing whitespace from original, empty → "1"
+            let step_part = if clause.step.trim().is_empty() {
+                "1".to_string()
+            } else {
+                // Trim start but keep trailing whitespace
+                clause.step.trim_start().to_string()
+            };
+            let mut s = format!("for (({init}; {cond}; {step_part}))\n{iprefix}do\n");
+            s.push_str(&format_program(&clause.body, indent + 1));
+            s.push_str(&format!("\n{iprefix}done"));
             s
         }
         CompoundCommand::While(clause) => {
             let cond = format_program(&clause.condition, 0);
             let cond = cond.trim().trim_end_matches(';');
             let mut s = format!("while {}; do\n", cond);
-            s.push_str(&format_program(&clause.body, 2));
-            s.push_str("\n    done");
+            s.push_str(&format_program(&clause.body, indent + 1));
+            s.push_str(&format!("\n{iprefix}done"));
             s
         }
         CompoundCommand::Until(clause) => {
             let cond = format_program(&clause.condition, 0);
             let cond = cond.trim().trim_end_matches(';');
             let mut s = format!("until {}; do\n", cond);
-            s.push_str(&format_program(&clause.body, 2));
-            s.push_str("\n    done");
+            s.push_str(&format_program(&clause.body, indent + 1));
+            s.push_str(&format!("\n{iprefix}done"));
             s
         }
         CompoundCommand::Case(clause) => {
+            let case_prefix = "    ".repeat(indent + 1);
             let mut s = format!("case {} in \n", format_word(&clause.word));
             for item in &clause.items {
                 let patterns: Vec<String> = item.patterns.iter().map(format_word).collect();
-                s.push_str(&format!("        {})\n", patterns.join(" | ")));
-                let body = format_program(&item.body, 3);
-                // Strip trailing ; from case body (bash doesn't add it before ;;)
+                s.push_str(&format!("{case_prefix}    {})\n", patterns.join(" | ")));
+                let body = format_program(&item.body, indent + 2);
                 let body = body.trim_end_matches(';');
                 s.push_str(body);
                 s.push('\n');
                 match item.terminator {
-                    CaseTerminator::Break => s.push_str("        ;;\n"),
-                    CaseTerminator::FallThrough => s.push_str("        ;&\n"),
-                    CaseTerminator::TestNext => s.push_str("        ;;&\n"),
+                    CaseTerminator::Break => s.push_str(&format!("{case_prefix}    ;;\n")),
+                    CaseTerminator::FallThrough => s.push_str(&format!("{case_prefix}    ;&\n")),
+                    CaseTerminator::TestNext => s.push_str(&format!("{case_prefix}    ;;&\n")),
                 }
             }
-            s.push_str("    esac");
+            s.push_str(&format!("{iprefix}esac"));
             s
         }
         CompoundCommand::Conditional(expr) => {

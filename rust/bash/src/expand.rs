@@ -18,6 +18,11 @@ pub fn take_arith_error() -> bool {
     ARITH_ERROR.with(|f| std::mem::replace(&mut *f.borrow_mut(), false))
 }
 
+/// Set the arithmetic error flag.
+pub fn set_arith_error() {
+    ARITH_ERROR.with(|f| *f.borrow_mut() = true);
+}
+
 /// Take all pending process substitution fds (draining the list).
 pub fn take_procsub_fds() -> Vec<i32> {
     PROCSUB_FDS.with(|fds| std::mem::take(&mut *fds.borrow_mut()))
@@ -1472,27 +1477,11 @@ pub fn eval_arith_full(
                 .map(|s| s.as_str())
                 .unwrap_or("bash");
             let lineno = vars.get("LINENO").map(|s| s.as_str()).unwrap_or("0");
-            eprintln!(
-                "{}: line {}: ((: {} : {} (error token is \"{}\")",
-                name,
-                lineno,
-                expr.trim(),
-                e,
-                find_error_token(expr, &e)
-            );
+            // Error from eval_arith is already fully formatted with error token
+            eprintln!("{}: line {}: ((: {}: {}", name, lineno, expr.trim(), e);
             ARITH_ERROR.with(|f| *f.borrow_mut() = true);
             0
         }
-    }
-}
-
-fn find_error_token(expr: &str, _error: &str) -> String {
-    // Simple heuristic: return the part after the operator that caused the error
-    let trimmed = expr.trim();
-    if let Some(pos) = trimmed.find("/ 0") {
-        format!("0 {}", &trimmed[pos + 3..].trim_start())
-    } else {
-        trimmed.to_string()
     }
 }
 
@@ -1714,14 +1703,14 @@ fn eval_arith(expr: &str) -> Result<i64, String> {
                         '*' => Ok(left * right),
                         '/' => {
                             if right == 0 {
-                                Err("division by 0".to_string())
+                                Err("division by 0 (error token is \"0\")".to_string())
                             } else {
                                 Ok(left / right)
                             }
                         }
                         '%' => {
                             if right == 0 {
-                                Err("division by 0".to_string())
+                                Err("division by 0 (error token is \"0\")".to_string())
                             } else {
                                 Ok(left % right)
                             }
@@ -1762,16 +1751,31 @@ fn eval_arith(expr: &str) -> Result<i64, String> {
 
     // Number literal
     let expr = expr.trim();
+    if expr.is_empty() {
+        return Err("syntax error: operand expected".to_string());
+    }
     if let Some(hex) = expr.strip_prefix("0x").or_else(|| expr.strip_prefix("0X")) {
-        i64::from_str_radix(hex, 16).map_err(|e| e.to_string())
+        i64::from_str_radix(hex, 16)
+            .map_err(|_| format!("value too great for base (error token is \"{}\")", expr))
     } else if let Some(oct) = expr.strip_prefix('0') {
         if !oct.is_empty() && oct.chars().all(|c| c.is_ascii_digit()) {
-            i64::from_str_radix(oct, 8).map_err(|e| e.to_string())
+            i64::from_str_radix(oct, 8)
+                .map_err(|_| format!("value too great for base (error token is \"{}\")", expr))
         } else {
-            expr.parse::<i64>().map_err(|e| e.to_string())
+            expr.parse::<i64>().map_err(|_| {
+                format!(
+                    "syntax error: operand expected (error token is \"{}\")",
+                    expr
+                )
+            })
         }
     } else {
-        expr.parse::<i64>().map_err(|e| e.to_string())
+        expr.parse::<i64>().map_err(|_| {
+            format!(
+                "syntax error: operand expected (error token is \"{}\")",
+                expr
+            )
+        })
     }
 }
 

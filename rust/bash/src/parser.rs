@@ -649,8 +649,14 @@ impl Parser {
 
     /// Parse `for (( init; cond; step )) do body done` — already consumed `((`
     fn parse_arith_for(&mut self) -> Result<CompoundCommand, String> {
-        let init = self.lexer.read_until_char(';')?;
-        let cond = self.lexer.read_until_char(';')?;
+        let init = self
+            .lexer
+            .read_until_char(';')
+            .map_err(|_| "syntax error: arithmetic expression required".to_string())?;
+        let cond = self
+            .lexer
+            .read_until_char(';')
+            .map_err(|_| "syntax error: arithmetic expression required".to_string())?;
         let step = self.lexer.read_until_double_paren()?;
         // Sync parser — skip ; or newline before 'do'
         self.current = self.lexer.next_token();
