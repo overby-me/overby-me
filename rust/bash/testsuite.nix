@@ -47,7 +47,7 @@ pkgs.runCommand "rust-bash-test-${name}" {
   sed -i "s|$TEST_BASH|bash|g" "$TMPDIR/actual"
 
   # Compare
-  if diff "$TMPDIR/actual" "$TMPDIR/expected"; then
+  if diff --text "$TMPDIR/actual" "$TMPDIR/expected"; then
     touch $out
   else
     exit 1
