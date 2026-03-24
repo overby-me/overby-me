@@ -293,6 +293,18 @@ impl Shell {
         vars.insert("RANDOM".to_string(), "0".to_string());
         vars.insert("SECONDS".to_string(), "0".to_string());
         vars.insert("BASHPID".to_string(), std::process::id().to_string());
+        vars.insert("BASH_SUBSHELL".to_string(), "0".to_string());
+        {
+            let mut buf = [0u8; 256];
+            if unsafe { libc::gethostname(buf.as_mut_ptr() as *mut libc::c_char, buf.len()) } == 0
+            {
+                let len = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+                vars.insert(
+                    "HOSTNAME".to_string(),
+                    String::from_utf8_lossy(&buf[..len]).to_string(),
+                );
+            }
+        }
         #[cfg(unix)]
         {
             vars.insert("UID".to_string(), unsafe { libc::getuid() }.to_string());
