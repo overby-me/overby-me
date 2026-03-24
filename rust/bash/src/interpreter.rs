@@ -269,6 +269,8 @@ pub struct Shell {
     arith_top_expr: Option<String>,
     /// Arithmetic evaluation recursion depth
     arith_depth: u32,
+    /// Whether current arithmetic evaluation is from (( )) command (adds ((: prefix to errors)
+    arith_is_command: bool,
 
     pub aliases: HashMap<String, String>,
     builtins: HashMap<&'static str, BuiltinFn>,
@@ -393,6 +395,7 @@ impl Shell {
             loop_depth: 0,
             arith_top_expr: None,
             arith_depth: 0,
+            arith_is_command: false,
             aliases: HashMap::new(),
             builtins: builtins::builtins(),
         };
@@ -1474,6 +1477,11 @@ impl Shell {
     /// Returns the error prefix for runtime error messages (no -c:).
     /// For scripts: "$0: line N:" ; for stdin/interactive: "bash:"
     /// Error prefix for arithmetic errors — uses _BASH_SOURCE_FILE if set.
+    /// Returns the "((: " prefix for error messages when in (( )) command context
+    fn arith_cmd_prefix(&self) -> &str {
+        if self.arith_is_command { "((: " } else { "" }
+    }
+
     fn arith_error_prefix(&self) -> String {
         let name = self
             .vars
@@ -2296,8 +2304,9 @@ impl Shell {
                 if rhs.trim().is_empty() {
                     // Empty RHS: e.g. "j=" → syntax error
                     eprintln!(
-                        "{}: ((: {}: arithmetic syntax error: operand expected (error token is \"{}\")",
+                        "{}: {}{}: arithmetic syntax error: operand expected (error token is \"{}\")",
                         self.arith_error_prefix(),
+                        self.arith_cmd_prefix(),
                         expr,
                         &expr[pos..]
                     );
@@ -2323,8 +2332,9 @@ impl Shell {
             // Assignment to non-variable (e.g., 7=4)
             if !name.is_empty() && name.chars().next().is_some_and(|c| c.is_ascii_digit()) {
                 eprintln!(
-                    "{}: ((: {}: attempted assignment to non-variable (error token is \"{}\")",
+                    "{}: {}{}: attempted assignment to non-variable (error token is \"{}\")",
                     self.arith_error_prefix(),
+                    self.arith_cmd_prefix(),
                     expr,
                     &expr[pos..]
                 );
@@ -2360,8 +2370,9 @@ impl Shell {
                     if name.chars().next().is_some_and(|c| c.is_ascii_digit()) {
                         let op_char = if *delta > 0 { "+" } else { "-" };
                         eprintln!(
-                            "{}: ((: {}: arithmetic syntax error: operand expected (error token is \"{} \")",
+                            "{}: {}{}: arithmetic syntax error: operand expected (error token is \"{} \")",
                             self.arith_error_prefix(),
+                            self.arith_cmd_prefix(),
                             expr,
                             op_char,
                         );
@@ -2730,8 +2741,9 @@ impl Shell {
                                     let top_expr = self.arith_top_expr.as_deref().unwrap_or(expr);
                                     let error_token = expr[i + 1..].trim_start();
                                     eprintln!(
-                                        "{}: ((: {}: division by 0 (error token is \"{}\")",
+                                        "{}: {}{}: division by 0 (error token is \"{}\")",
                                         self.arith_error_prefix(),
+                                        self.arith_cmd_prefix(),
                                         top_expr,
                                         error_token
                                     );
@@ -2751,8 +2763,9 @@ impl Shell {
                                             self.arith_top_expr.as_deref().unwrap_or(expr);
                                         let error_token = expr[i + 1..].trim_start();
                                         eprintln!(
-                                            "{}: ((: {}: division by 0 (error token is \"{}\")",
+                                            "{}: {}{}: division by 0 (error token is \"{}\")",
                                             self.arith_error_prefix(),
+                                            self.arith_cmd_prefix(),
                                             top_expr,
                                             error_token
                                         );
@@ -2943,8 +2956,9 @@ impl Shell {
 
         // Fall back to reporting error
         eprintln!(
-            "{}: ((: {}: syntax error: operand expected (error token is \"{}\")",
+            "{}: {}{}: syntax error: operand expected (error token is \"{}\")",
             self.arith_error_prefix(),
+            self.arith_cmd_prefix(),
             expr,
             expr
         );
@@ -3949,7 +3963,9 @@ impl Shell {
 
     /// Execute `(( arithmetic expression ))` — exit status 0 if result != 0.
     fn run_arithmetic(&mut self, expr: &str) -> i32 {
+        self.arith_is_command = true;
         let result = self.eval_arith_expr(expr);
+        self.arith_is_command = false;
         if result != 0 { 0 } else { 1 }
     }
 
