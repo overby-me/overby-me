@@ -268,7 +268,35 @@ impl Lexer {
             }
             _ => {
                 while let Some(ch) = self.peek() {
-                    if !ch.is_whitespace()
+                    if ch == '\\' {
+                        // Backslash quoting in heredoc delimiter
+                        quoted = true;
+                        self.advance();
+                        if let Some(next) = self.peek() {
+                            delimiter.push(next);
+                            self.advance();
+                        }
+                    } else if ch == '\''  {
+                        // Single-quoted portion of delimiter
+                        quoted = true;
+                        self.advance();
+                        while let Some(c) = self.advance() {
+                            if c == '\'' {
+                                break;
+                            }
+                            delimiter.push(c);
+                        }
+                    } else if ch == '"'  {
+                        // Double-quoted portion of delimiter
+                        quoted = true;
+                        self.advance();
+                        while let Some(c) = self.advance() {
+                            if c == '"' {
+                                break;
+                            }
+                            delimiter.push(c);
+                        }
+                    } else if !ch.is_whitespace()
                         && ch != '\n'
                         && ch != ';'
                         && ch != '&'
