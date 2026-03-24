@@ -590,10 +590,19 @@ fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                     }
                     Some('q') => {
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("");
-                        if arg.is_empty() {
-                            print!("''");
+                        let quoted = if arg.is_empty() {
+                            "''".to_string()
                         } else {
-                            print!("{}", shell_escape(arg));
+                            shell_escape(arg)
+                        };
+                        if w > 0 {
+                            if left {
+                                print!("{:<w$}", quoted);
+                            } else {
+                                print!("{:>w$}", quoted);
+                            }
+                        } else {
+                            print!("{}", quoted);
                         }
                         arg_idx += 1;
                     }
@@ -1057,10 +1066,9 @@ fn format_word(word: &Word) -> String {
         match part {
             WordPart::Literal(t) => s.push_str(t),
             WordPart::SingleQuoted(t) => {
-                // For single characters that are shell metacharacters,
-                // use \char escaping instead of 'char' quoting (bash style)
-                if t.len() == 1
-                    && t.chars().next().is_some_and(|c| {
+                // Use \char escaping for shell metacharacters (bash style)
+                let all_meta = !t.is_empty()
+                    && t.chars().all(|c| {
                         matches!(
                             c,
                             '$' | '`'
@@ -1075,11 +1083,18 @@ fn format_word(word: &Word) -> String {
                                 | '%'
                                 | '!'
                                 | '#'
+                                | '*'
+                                | '?'
+                                | '['
+                                | ']'
+                                | '~'
                         )
-                    })
-                {
-                    s.push('\\');
-                    s.push_str(t);
+                    });
+                if all_meta {
+                    for ch in t.chars() {
+                        s.push('\\');
+                        s.push(ch);
+                    }
                 } else {
                     s.push('\'');
                     s.push_str(t);
