@@ -60,6 +60,9 @@ inputs.nixos-raspberrypi.lib.nixosSystem {
     # ── Overlays (make pkgs.ironclaw etc. available) ────────────────────
     {nixpkgs.overlays = [inputs.self.overlays.default];}
 
+    # ── zswap ──────────────────────────────────────────────────────────
+    ../../modules/nixos/core/zswap.nix
+
     # ── IronClaw service module ─────────────────────────────────────────
     ../../modules/nixos/services/ironclaw.nix
 
@@ -114,7 +117,7 @@ inputs.nixos-raspberrypi.lib.nixosSystem {
 
       # ── Firmware & swap ─────────────────────────────────────────────
       hardware.enableRedistributableFirmware = true;
-      zramSwap.enable = true;
+      zswap.enable = true;
 
       # ── Locale & time ───────────────────────────────────────────────
       time.timeZone = "Europe/Copenhagen";

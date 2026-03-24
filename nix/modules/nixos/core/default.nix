@@ -13,5 +13,6 @@
     ./system.nix
     ./users.nix
     ./virtualisation.nix
+    ./zswap.nix
   ];
 }

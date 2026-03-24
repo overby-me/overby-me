@@ -22,8 +22,8 @@
   # Enable wireless firmware shipped by nixos-raspberrypi
   hardware.enableRedistributableFirmware = true;
 
-  # zram swap – sensible on the RPi5's limited RAM
-  zramSwap.enable = true;
+  # zswap – compressed swap cache backed by real swap
+  zswap.enable = true;
 
   # DHCP by default; override per-interface in the machine config if needed
   networking.useDHCP = lib.mkDefault true;
