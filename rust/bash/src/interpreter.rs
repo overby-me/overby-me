@@ -2264,6 +2264,21 @@ impl Shell {
     }
 
     fn run_function(&mut self, body: &CompoundCommand, name: &str, args: &[String]) -> i32 {
+        // Check FUNCNEST limit
+        if let Some(limit_str) = self.vars.get("FUNCNEST") {
+            if let Ok(limit) = limit_str.parse::<usize>() {
+                if limit > 0 && self.func_names.len() >= limit {
+                    eprintln!(
+                        "{}: {}: maximum function nesting level exceeded ({})",
+                        self.error_prefix(),
+                        name,
+                        limit
+                    );
+                    return 1;
+                }
+            }
+        }
+
         let saved_positional = self.positional.clone();
         let prog = self.positional.first().cloned().unwrap_or_default();
         self.positional = vec![prog];
