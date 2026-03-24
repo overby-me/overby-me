@@ -929,9 +929,10 @@ impl Parser {
     /// Regex patterns can contain ( ) | which are normally special tokens,
     /// so we read raw text from the lexer until we hit ]], &&, or ||.
     fn read_cond_pattern(&mut self) -> Result<Word, String> {
-        let mut text = String::new();
+        let mut parts: Word = Vec::new();
         // Consume tokens and raw text until ]], &&, ||
         // This handles extglob patterns like +(foo|bar) and regex patterns
+        // Preserve word parts for proper variable expansion
         loop {
             if self.is_keyword("]]") || self.current == Token::Eof {
                 break;
@@ -940,30 +941,29 @@ impl Parser {
                 break;
             }
             match &self.current {
-                Token::Word(parts) => {
-                    text.push_str(&word_to_string(parts));
+                Token::Word(word_parts) => {
+                    parts.extend(word_parts.clone());
                     self.advance();
                 }
                 Token::LParen => {
-                    text.push('(');
+                    parts.push(WordPart::Literal("(".to_string()));
                     self.advance();
                 }
                 Token::RParen => {
-                    text.push(')');
+                    parts.push(WordPart::Literal(")".to_string()));
                     self.advance();
                 }
                 Token::Pipe => {
-                    text.push('|');
+                    parts.push(WordPart::Literal("|".to_string()));
                     self.advance();
                 }
                 _ => break,
             }
         }
-        let trimmed = text.trim().to_string();
-        if trimmed.is_empty() {
+        if parts.is_empty() {
             return Err("expected pattern in conditional".to_string());
         }
-        Ok(vec![WordPart::Literal(trimmed)])
+        Ok(parts)
     }
 
     fn parse_compound_list(&mut self) -> Result<Program, String> {
