@@ -722,17 +722,22 @@ impl Shell {
                                 .lines()
                                 .nth(lineno.saturating_sub(1))
                                 .unwrap_or(input.lines().next().unwrap_or(input));
-                            // For arith-for errors, extract the (( ... )) portion
-                            let display_line = if let Some(pos) = line.find("((") {
-                                &line[pos..]
+                            // "syntax error: X" → second line gets "syntax error: `...'"
+                            // "syntax error near X" → second line gets just "`...'"
+                            if e.starts_with("syntax error:") {
+                                let display_line = if let Some(pos) = line.find("((") {
+                                    &line[pos..]
+                                } else {
+                                    line
+                                };
+                                eprintln!(
+                                    "{}: syntax error: `{}'",
+                                    self.syntax_error_prefix(),
+                                    display_line
+                                );
                             } else {
-                                line
-                            };
-                            eprintln!(
-                                "{}: syntax error: `{}'",
-                                self.syntax_error_prefix(),
-                                display_line
-                            );
+                                eprintln!("{}: `{}'", self.syntax_error_prefix(), line);
+                            }
                         }
                         return 2;
                     } else {
