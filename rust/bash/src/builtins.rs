@@ -1418,13 +1418,12 @@ fn format_compound_command_indent(cmd: &CompoundCommand, indent: usize) -> Strin
             }
         }
         CompoundCommand::Subshell(program) => {
-            // For simple single-command subshells, put on one line
             let body = format_program(program, 0);
             let trimmed = body.trim();
             if !trimmed.contains('\n') {
                 format!("( {} )", trimmed.trim_end_matches(';'))
             } else {
-                format!("( \n{}\n )", format_program(program, 1))
+                format!("( \n{}\n{})", format_program(program, indent + 1), iprefix)
             }
         }
         CompoundCommand::If(clause) => {
