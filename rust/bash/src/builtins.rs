@@ -3480,7 +3480,7 @@ fn builtin_trap(shell: &mut Shell, args: &[String]) -> i32 {
     let mut handler_idx = 0;
     let mut sig_start = 1;
 
-    // Skip -p flag if present
+    // Handle -p flag — print traps for specified signals
     if args.first().map(|s| s.as_str()) == Some("-p") {
         if args.len() < 2 {
             let mut sorted: Vec<_> = shell.traps.iter().collect();
@@ -3490,8 +3490,23 @@ fn builtin_trap(shell: &mut Shell, args: &[String]) -> i32 {
             }
             return 0;
         }
-        handler_idx = 1;
-        sig_start = 2;
+        // trap -p SIG1 SIG2 ... — print traps for specific signals
+        for sig_arg in &args[1..] {
+            let norm = normalize_signal_name(sig_arg);
+            let key = if norm == "EXIT" {
+                // Check both "EXIT" and "0"
+                shell
+                    .traps
+                    .get("EXIT")
+                    .or_else(|| shell.traps.get("0"))
+            } else {
+                shell.traps.get(&norm)
+            };
+            if let Some(handler) = key {
+                println!("trap -- '{}' {}", handler, norm);
+            }
+        }
+        return 0;
     }
 
     if args.len() < sig_start + 1 {
