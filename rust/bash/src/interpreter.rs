@@ -3103,6 +3103,32 @@ impl Shell {
                     nix::unistd::dup2(raw_fd, fd).map_err(|e| e.to_string())?;
                     nix::unistd::close(raw_fd).ok();
                 }
+                RedirectKind::OutputAll | RedirectKind::AppendAll => {
+                    // &> or &>> — redirect both stdout and stderr to file
+                    // Save both fd 1 and fd 2
+                    if let Ok(saved_fd1) = nix::unistd::dup(1) {
+                        saved.push((1, saved_fd1));
+                    }
+                    if let Ok(saved_fd2) = nix::unistd::dup(2) {
+                        saved.push((2, saved_fd2));
+                    }
+
+                    let raw_fd = if matches!(redir.kind, RedirectKind::AppendAll) {
+                        std::fs::OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(&target_str)
+                            .map_err(|e| format!("{}: {}", target_str, Self::io_error_message(&e)))?
+                            .into_raw_fd()
+                    } else {
+                        std::fs::File::create(&target_str)
+                            .map_err(|e| format!("{}: {}", target_str, Self::io_error_message(&e)))?
+                            .into_raw_fd()
+                    };
+                    nix::unistd::dup2(raw_fd, 1).map_err(|e| e.to_string())?;
+                    nix::unistd::dup2(raw_fd, 2).map_err(|e| e.to_string())?;
+                    nix::unistd::close(raw_fd).ok();
+                }
                 RedirectKind::Input => {
                     let fd = self.resolve_redir_fd(&redir.fd, 0);
                     if !is_var_fd(redir)

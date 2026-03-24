@@ -262,6 +262,10 @@ pub enum RedirectKind {
     Output,
     Append,
     Clobber,
+    /// `&>` — redirect both stdout and stderr to file
+    OutputAll,
+    /// `&>>` — append both stdout and stderr to file
+    AppendAll,
     DupInput,
     DupOutput,
     ReadWrite,

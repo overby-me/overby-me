@@ -1242,6 +1242,8 @@ impl Parser {
             Token::DLess => Some(RedirectKind::HereDoc(false)),
             Token::DLessDash => Some(RedirectKind::HereDoc(true)),
             Token::TripleLess => Some(RedirectKind::HereString),
+            Token::AmpGreat => Some(RedirectKind::OutputAll),
+            Token::AmpDGreat => Some(RedirectKind::AppendAll),
             _ => {
                 if fd.is_some() {
                     // We consumed an IO number but there's no redirect operator.
@@ -1332,6 +1334,8 @@ impl Parser {
                         | Token::GreatAnd
                         | Token::LessGreat
                         | Token::Clobber
+                        | Token::AmpGreat
+                        | Token::AmpDGreat
                 );
             if is_redir {
                 let n: i32 = s.parse().unwrap();

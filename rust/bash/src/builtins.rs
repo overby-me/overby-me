@@ -1203,6 +1203,8 @@ fn format_redirection(redir: &Redirection) -> String {
         RedirectKind::ReadWrite => s.push_str("<> "),
         RedirectKind::HereDoc(_) => s.push_str("<< "),
         RedirectKind::HereString => s.push_str("<<< "),
+        RedirectKind::OutputAll => s.push_str("&> "),
+        RedirectKind::AppendAll => s.push_str("&>> "),
         RedirectKind::ProcessSubIn => s.push_str("< "),
         RedirectKind::ProcessSubOut => s.push_str("> "),
     }

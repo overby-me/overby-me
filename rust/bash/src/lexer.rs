@@ -29,6 +29,10 @@ pub enum Token {
     DLessDash,
     Clobber,
     TripleLess,
+    /// `&>` — redirect both stdout and stderr to file
+    AmpGreat,
+    /// `&>>` — append both stdout and stderr to file
+    AmpDGreat,
     Eof,
 }
 
@@ -374,6 +378,15 @@ impl Lexer {
                 if self.peek() == Some('&') {
                     self.advance();
                     Token::AndIf
+                } else if self.peek() == Some('>') {
+                    // &> or &>> — redirect both stdout and stderr
+                    self.advance();
+                    if self.peek() == Some('>') {
+                        self.advance();
+                        Token::AmpDGreat // &>>
+                    } else {
+                        Token::AmpGreat // &>
+                    }
                 } else {
                     Token::Amp
                 }
@@ -527,7 +540,9 @@ impl Lexer {
             | Token::LessGreat
             | Token::DLessDash
             | Token::Clobber
-            | Token::TripleLess => {
+            | Token::TripleLess
+            | Token::AmpGreat
+            | Token::AmpDGreat => {
                 self.redirect_target_next = true;
                 // Don't change expand_alias_next
             }
