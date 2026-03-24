@@ -1106,43 +1106,6 @@ fn read_param_word_impl(chars: &[char], i: &mut usize, delim: char, in_dquote: b
                 *i += 1;
                 parts.push(parse_dollar(chars, i, in_dquote));
             }
-            '\'' if in_dquote => {
-                // Inside double quotes, single quotes protect } from closing
-                // the expansion but are preserved as literal characters and
-                // do NOT prevent $-expansion (unlike normal single quotes)
-                literal.push('\'');
-                *i += 1;
-                while *i < chars.len() && chars[*i] != '\'' {
-                    match chars[*i] {
-                        '$' => {
-                            // Flush literal and process $ expansion
-                            if !literal.is_empty() {
-                                parts.push(WordPart::Literal(std::mem::take(&mut literal)));
-                            }
-                            *i += 1;
-                            parts.push(parse_dollar(chars, i, true));
-                        }
-                        '\\' if *i + 1 < chars.len() => {
-                            let next = chars[*i + 1];
-                            if matches!(next, '$' | '`' | '"' | '\\') {
-                                literal.push(next);
-                            } else {
-                                literal.push('\\');
-                                literal.push(next);
-                            }
-                            *i += 2;
-                        }
-                        ch => {
-                            literal.push(ch);
-                            *i += 1;
-                        }
-                    }
-                }
-                if *i < chars.len() {
-                    literal.push('\'');
-                    *i += 1;
-                }
-            }
             '\'' => {
                 if !literal.is_empty() {
                     parts.push(WordPart::Literal(std::mem::take(&mut literal)));
