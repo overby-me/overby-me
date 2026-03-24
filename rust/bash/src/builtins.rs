@@ -1974,7 +1974,7 @@ fn builtin_false(_shell: &mut Shell, _args: &[String]) -> i32 {
 }
 
 fn builtin_test(shell: &mut Shell, args: &[String]) -> i32 {
-    eval_test_expr(args, shell)
+    eval_test_expr(args, shell, "test")
 }
 
 fn builtin_test_bracket(shell: &mut Shell, args: &[String]) -> i32 {
@@ -1985,10 +1985,10 @@ fn builtin_test_bracket(shell: &mut Shell, args: &[String]) -> i32 {
         eprintln!("{}: [: missing `]'", shell.error_prefix());
         return 2;
     };
-    eval_test_expr(args, shell)
+    eval_test_expr(args, shell, "[")
 }
 
-fn eval_test_expr(args: &[String], shell: &Shell) -> i32 {
+fn eval_test_expr(args: &[String], shell: &Shell, cmd_name: &str) -> i32 {
     if args.is_empty() {
         return 1; // Empty test is false
     }
@@ -2001,7 +2001,7 @@ fn eval_test_expr(args: &[String], shell: &Shell) -> i32 {
     if args.len() == 2 {
         match args[0].as_str() {
             "!" => {
-                return if eval_test_expr(&args[1..], shell) == 0 {
+                return if eval_test_expr(&args[1..], shell, cmd_name) == 0 {
                     1
                 } else {
                     0
@@ -2256,35 +2256,37 @@ fn eval_test_expr(args: &[String], shell: &Shell) -> i32 {
         match args[1].as_str() {
             "=" | "==" => return if args[0] == args[2] { 0 } else { 1 },
             "!=" => return if args[0] != args[2] { 0 } else { 1 },
-            "-eq" => {
-                let a: i64 = args[0].parse().unwrap_or(0);
-                let b: i64 = args[2].parse().unwrap_or(0);
-                return if a == b { 0 } else { 1 };
-            }
-            "-ne" => {
-                let a: i64 = args[0].parse().unwrap_or(0);
-                let b: i64 = args[2].parse().unwrap_or(0);
-                return if a != b { 0 } else { 1 };
-            }
-            "-lt" => {
-                let a: i64 = args[0].parse().unwrap_or(0);
-                let b: i64 = args[2].parse().unwrap_or(0);
-                return if a < b { 0 } else { 1 };
-            }
-            "-le" => {
-                let a: i64 = args[0].parse().unwrap_or(0);
-                let b: i64 = args[2].parse().unwrap_or(0);
-                return if a <= b { 0 } else { 1 };
-            }
-            "-gt" => {
-                let a: i64 = args[0].parse().unwrap_or(0);
-                let b: i64 = args[2].parse().unwrap_or(0);
-                return if a > b { 0 } else { 1 };
-            }
-            "-ge" => {
-                let a: i64 = args[0].parse().unwrap_or(0);
-                let b: i64 = args[2].parse().unwrap_or(0);
-                return if a >= b { 0 } else { 1 };
+            "-eq" | "-ne" | "-lt" | "-le" | "-gt" | "-ge" => {
+                let prefix = shell.error_prefix();
+                let a = match args[0].parse::<i64>() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        eprintln!(
+                            "{}: {}: {}: integer expected",
+                            prefix, cmd_name, args[0]
+                        );
+                        return 2;
+                    }
+                };
+                let b = match args[2].parse::<i64>() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        eprintln!(
+                            "{}: {}: {}: integer expected",
+                            prefix, cmd_name, args[2]
+                        );
+                        return 2;
+                    }
+                };
+                return match args[1].as_str() {
+                    "-eq" => if a == b { 0 } else { 1 },
+                    "-ne" => if a != b { 0 } else { 1 },
+                    "-lt" => if a < b { 0 } else { 1 },
+                    "-le" => if a <= b { 0 } else { 1 },
+                    "-gt" => if a > b { 0 } else { 1 },
+                    "-ge" => if a >= b { 0 } else { 1 },
+                    _ => unreachable!(),
+                };
             }
             "-nt" => {
                 // Newer than
@@ -2322,22 +2324,22 @@ fn eval_test_expr(args: &[String], shell: &Shell) -> i32 {
     // Handle -a (and) and -o (or)
     for (i, arg) in args.iter().enumerate() {
         if arg == "-a" && i > 0 && i < args.len() - 1 {
-            let left = eval_test_expr(&args[..i], shell);
-            let right = eval_test_expr(&args[i + 1..], shell);
+            let left = eval_test_expr(&args[..i], shell, cmd_name);
+            let right = eval_test_expr(&args[i + 1..], shell, cmd_name);
             return if left == 0 && right == 0 { 0 } else { 1 };
         }
     }
     for (i, arg) in args.iter().enumerate() {
         if arg == "-o" && i > 0 && i < args.len() - 1 {
-            let left = eval_test_expr(&args[..i], shell);
-            let right = eval_test_expr(&args[i + 1..], shell);
+            let left = eval_test_expr(&args[..i], shell, cmd_name);
+            let right = eval_test_expr(&args[i + 1..], shell, cmd_name);
             return if left == 0 || right == 0 { 0 } else { 1 };
         }
     }
 
     // Handle ! prefix with 3+ args
     if args[0] == "!" {
-        return if eval_test_expr(&args[1..], shell) == 0 {
+        return if eval_test_expr(&args[1..], shell, cmd_name) == 0 {
             1
         } else {
             0
