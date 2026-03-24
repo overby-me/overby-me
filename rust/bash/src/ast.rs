@@ -29,6 +29,7 @@ pub enum AndOr {
 pub struct Pipeline {
     pub negated: bool,
     pub timed: bool,
+    pub time_posix: bool,
     pub commands: Vec<Command>,
     /// For each pipe connection (between commands[i] and commands[i+1]),
     /// true means `|&` (redirect stderr to pipe too)

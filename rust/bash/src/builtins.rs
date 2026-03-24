@@ -1112,7 +1112,11 @@ fn format_pipeline(pipeline: &Pipeline) -> String {
         s.push_str("! ");
     }
     if pipeline.timed {
-        s.push_str("time ");
+        if pipeline.time_posix {
+            s.push_str("time -p ");
+        } else {
+            s.push_str("time ");
+        }
     }
     let cmds: Vec<String> = pipeline.commands.iter().map(format_command).collect();
     s.push_str(&cmds.join(" | "));

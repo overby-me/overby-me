@@ -270,6 +270,7 @@ impl Parser {
             timed = true;
         }
         // Consume `time -p` flag (POSIX time format) and `--`
+        let mut time_posix = false;
         if timed {
             loop {
                 if let Token::Word(ref w) = self.current {
@@ -280,7 +281,12 @@ impl Parser {
                             _ => "",
                         })
                         .collect();
-                    if s == "-p" || s == "--" {
+                    if s == "-p" {
+                        time_posix = true;
+                        self.advance();
+                        continue;
+                    }
+                    if s == "--" {
                         self.advance();
                         continue;
                     }
@@ -308,6 +314,7 @@ impl Parser {
         Ok(Pipeline {
             negated,
             timed,
+            time_posix,
             commands,
             pipe_stderr,
         })

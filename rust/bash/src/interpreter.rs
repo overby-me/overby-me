@@ -857,6 +857,10 @@ impl Shell {
                     .replace("%U", &format!("{:.3}", 0.0f64))
                     .replace("%S", &format!("{:.3}", 0.0f64));
                 eprintln!("{}", output);
+            } else if pipeline.time_posix {
+                eprintln!("real {:.2}", secs);
+                eprintln!("user {:.2}", 0.0f64);
+                eprintln!("sys {:.2}", 0.0f64);
             } else {
                 eprintln!("real\t{}m{:.3}s", (secs / 60.0) as u64, secs % 60.0);
                 eprintln!("user\t{}m{:.3}s", 0, 0.0f64);
