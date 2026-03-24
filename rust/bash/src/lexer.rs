@@ -38,9 +38,10 @@ pub struct LexerSaveState {
     pending_heredocs: Vec<HereDocPending>,
     heredoc_bodies_len: usize,
     line: usize,
-    expand_alias_next: bool,
-    expanding_aliases: HashSet<String>,
-    alias_end_markers: Vec<(String, usize, bool)>,
+    // Note: alias expansion state (expand_alias_next, expanding_aliases,
+    // alias_end_markers) is NOT saved/restored because alias expansion
+    // permanently modifies the input buffer. Restoring would undo marker
+    // removals that correspond to already-consumed expansion text.
 }
 
 #[derive(Clone)]
@@ -120,9 +121,6 @@ impl Lexer {
             pending_heredocs: self.pending_heredocs.clone(),
             heredoc_bodies_len: self.heredoc_bodies.len(),
             line: self.line,
-            expand_alias_next: self.expand_alias_next,
-            expanding_aliases: self.expanding_aliases.clone(),
-            alias_end_markers: self.alias_end_markers.clone(),
         }
     }
 
@@ -131,9 +129,6 @@ impl Lexer {
         self.pending_heredocs = saved.pending_heredocs;
         self.heredoc_bodies.truncate(saved.heredoc_bodies_len);
         self.line = saved.line;
-        self.expand_alias_next = saved.expand_alias_next;
-        self.expanding_aliases = saved.expanding_aliases;
-        self.alias_end_markers = saved.alias_end_markers;
     }
 
     fn skip_whitespace(&mut self) {
@@ -163,20 +158,18 @@ impl Lexer {
 
     /// Check alias end markers and remove aliases that have been fully consumed
     fn check_alias_end_markers(&mut self) {
-        self.alias_end_markers
-            .retain(|(name, end_pos, ends_with_space)| {
-                if self.pos >= *end_pos {
-                    self.expanding_aliases.remove(name);
-                    // If the expansion ended with space/tab, the next word after the
-                    // expansion should also be checked for alias expansion
-                    if *ends_with_space {
-                        self.expand_alias_next = true;
-                    }
-                    false
-                } else {
-                    true
+        let mut i = 0;
+        while i < self.alias_end_markers.len() {
+            if self.pos >= self.alias_end_markers[i].1 {
+                let (name, _end_pos, ends_with_space) = self.alias_end_markers.remove(i);
+                self.expanding_aliases.remove(&name);
+                if ends_with_space {
+                    self.expand_alias_next = true;
                 }
-            });
+            } else {
+                i += 1;
+            }
+        }
     }
 
     /// Extract the plain text of a word token (for alias lookup).
@@ -254,8 +247,9 @@ impl Lexer {
         // Use the original expansion length (without boundary space) for the marker.
         let orig_expansion_len = expansion.chars().count();
         self.expanding_aliases.insert(text.clone());
+        let end_pos = word_start + orig_expansion_len;
         self.alias_end_markers
-            .push((text, word_start + orig_expansion_len, ends_with_space));
+            .push((text, end_pos, ends_with_space));
 
         // The first word of the expansion is in command position, so always
         // check it for alias expansion
