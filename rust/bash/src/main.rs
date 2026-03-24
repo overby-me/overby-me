@@ -161,6 +161,13 @@ fn run() -> i32 {
         .vars
         .insert("_BASH_SOURCE_FILE".to_string(), shell.script_name.clone());
 
+    // Set BASH_SOURCE array
+    if !shell.script_name.is_empty() {
+        shell
+            .arrays
+            .insert("BASH_SOURCE".to_string(), vec![shell.script_name.clone()]);
+    }
+
     // Execute based on mode
     if let Some(cmd) = command_string {
         shell.dash_c_mode = true;

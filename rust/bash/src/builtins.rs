@@ -3126,11 +3126,22 @@ fn builtin_source(shell: &mut Shell, args: &[String]) -> i32 {
                 shell.positional.extend(args[1..].to_vec());
             }
 
+            // Push source file onto BASH_SOURCE stack
+            let bash_source = shell.arrays.entry("BASH_SOURCE".to_string()).or_default();
+            bash_source.insert(0, path.clone());
+
             let saved_sourcing = shell.sourcing;
             shell.sourcing = true;
             let result = shell.run_string(&content);
             shell.returning = false; // reset return flag after sourced script
             shell.sourcing = saved_sourcing;
+
+            // Pop BASH_SOURCE stack
+            if let Some(arr) = shell.arrays.get_mut("BASH_SOURCE") {
+                if !arr.is_empty() {
+                    arr.remove(0);
+                }
+            }
 
             // Run RETURN trap after sourced script completes
             shell.run_return_trap();
