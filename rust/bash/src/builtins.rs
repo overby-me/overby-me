@@ -493,7 +493,21 @@ fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                     }
                     Some('q') => {
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("");
-                        print!("{}", shell_escape(arg));
+                        if arg.is_empty() {
+                            print!("''");
+                        } else {
+                            print!("{}", shell_escape(arg));
+                        }
+                        arg_idx += 1;
+                    }
+                    Some('Q') => {
+                        let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("");
+                        if arg.is_empty() {
+                            print!("''");
+                        } else {
+                            // %Q uses $'...' quoting style
+                            print!("'{}'", arg.replace('\'', "'\\''"));
+                        }
                         arg_idx += 1;
                     }
                     Some('%') => print!("%"),
