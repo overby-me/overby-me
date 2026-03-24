@@ -2533,6 +2533,9 @@ impl Shell {
                             self.vars
                                 .insert("BASH_SUBSHELL".to_string(), (subshell + 1).to_string());
                             let status = self.run_program(program);
+                            self.last_status = status;
+                            // Run EXIT trap in subshell before exiting
+                            self.run_exit_trap();
                             std::io::stdout().flush().ok();
                             std::io::stderr().flush().ok();
                             std::process::exit(status);
