@@ -2274,7 +2274,7 @@ impl Shell {
                 if name.chars().next().is_some_and(|c| c.is_ascii_digit()) {
                     // Number followed by ++ is a syntax error
                     eprintln!(
-                        "{}: ((: {} : arithmetic syntax error: operand expected (error token is \"+ \")",
+                        "{}: ((: {}: arithmetic syntax error: operand expected (error token is \"+ \")",
                         self.arith_error_prefix(),
                         expr,
                     );
@@ -2295,7 +2295,7 @@ impl Shell {
             if !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_') {
                 if name.chars().next().is_some_and(|c| c.is_ascii_digit()) {
                     eprintln!(
-                        "{}: ((: {} : arithmetic syntax error: operand expected (error token is \"- \")",
+                        "{}: ((: {}: arithmetic syntax error: operand expected (error token is \"- \")",
                         self.arith_error_prefix(),
                         expr,
                     );
@@ -3155,9 +3155,7 @@ impl Shell {
                 }
             }
 
-            if self.continuing > 0 {
-                self.continuing -= 1;
-            } else {
+            {
                 let saved_condition = self.in_condition;
                 self.in_condition = true;
                 status = self.run_program(&clause.body);
@@ -3165,6 +3163,11 @@ impl Shell {
                 if self.returning {
                     break;
                 }
+            }
+
+            // Handle continue: decrement counter and skip to step
+            if self.continuing > 0 {
+                self.continuing -= 1;
             }
 
             if !clause.step.is_empty() {
