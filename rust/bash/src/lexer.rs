@@ -926,7 +926,7 @@ fn parse_brace_param(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart
         let transform_char = chars[*i + 1];
         if matches!(
             transform_char,
-            'E' | 'Q' | 'P' | 'A' | 'a' | 'K' | 'k' | 'L' | 'U'
+            'E' | 'Q' | 'P' | 'A' | 'a' | 'K' | 'k' | 'L' | 'U' | 'u'
         ) {
             *i += 2;
             if *i < chars.len() && chars[*i] == '}' {
@@ -956,7 +956,7 @@ fn parse_brace_param(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart
         let transform_char = chars[*i + 1];
         if matches!(
             transform_char,
-            'E' | 'Q' | 'P' | 'A' | 'a' | 'K' | 'k' | 'L' | 'U'
+            'E' | 'Q' | 'P' | 'A' | 'a' | 'K' | 'k' | 'L' | 'U' | 'u'
         ) {
             *i += 2;
         }
