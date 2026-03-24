@@ -181,10 +181,11 @@ fn interpret_echo_escapes(s: &str) -> String {
                 Some('v') => result.push('\x0b'),
                 Some('e') | Some('E') => result.push('\x1b'),
                 Some('c') => break, // Stop output
-                Some('0') => {
-                    let mut val = 0u8;
-                    for _ in 0..3 {
-                        // Peek by cloning
+                Some(first @ '0'..='7') => {
+                    // \0NNN or \NNN — octal escape
+                    let mut val = first as u8 - b'0';
+                    let max_extra = if first == '0' { 3 } else { 2 };
+                    for _ in 0..max_extra {
                         let mut peek = chars.clone();
                         match peek.next() {
                             Some(c @ '0'..='7') => {
@@ -617,11 +618,25 @@ fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                     }
                     Some('Q') => {
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("");
-                        if arg.is_empty() {
-                            print!("''");
+                        // %Q: precision truncates the value BEFORE quoting
+                        let truncated = if let Some(p) = precision {
+                            &arg[..arg.len().min(p)]
                         } else {
-                            // %Q uses $'...' quoting style
-                            print!("'{}'", arg.replace('\'', "'\\''"));
+                            arg
+                        };
+                        let quoted = if truncated.is_empty() {
+                            "''".to_string()
+                        } else {
+                            shell_escape(truncated)
+                        };
+                        if w > 0 {
+                            if left {
+                                print!("{:<w$}", quoted);
+                            } else {
+                                print!("{:>w$}", quoted);
+                            }
+                        } else {
+                            print!("{}", quoted);
                         }
                         arg_idx += 1;
                     }
