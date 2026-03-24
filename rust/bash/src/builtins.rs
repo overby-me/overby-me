@@ -1710,6 +1710,50 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
         return 0;
     }
 
+    // declare -a with no names: list all indexed arrays
+    if flag_array && names.is_empty() && !flag_print {
+        let mut sorted: Vec<_> = shell.arrays.keys().collect();
+        sorted.sort();
+        for name in sorted {
+            if let Some(arr) = shell.arrays.get(name) {
+                let elements: Vec<String> = arr
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, v)| !v.is_empty())
+                    .map(|(i, v)| format!("[{}]=\"{}\"", i, v))
+                    .collect();
+                println!("declare -a {}=({})", name, elements.join(" "));
+            }
+        }
+        return 0;
+    }
+
+    // declare -n with no names: list all namerefs
+    if flag_nameref && names.is_empty() && !flag_print {
+        let mut sorted: Vec<_> = shell.namerefs.iter().collect();
+        sorted.sort_by_key(|(k, _)| k.clone());
+        for (name, target) in sorted {
+            println!("declare -n {}=\"{}\"", name, target);
+        }
+        return 0;
+    }
+
+    // declare -A with no names: list all associative arrays
+    if flag_assoc && names.is_empty() && !flag_print {
+        let mut sorted: Vec<_> = shell.assoc_arrays.keys().collect();
+        sorted.sort();
+        for name in sorted {
+            if let Some(assoc) = shell.assoc_arrays.get(name) {
+                let elements: Vec<String> = assoc
+                    .iter()
+                    .map(|(k, v)| format!("[{}]=\"{}\"", k, v))
+                    .collect();
+                println!("declare -A {}=({})", name, elements.join(" "));
+            }
+        }
+        return 0;
+    }
+
     // Normal declare: set variables
     // In a function context, declare/typeset creates local variables (unless -g)
     let make_local = !flag_global && !shell.local_scopes.is_empty();
