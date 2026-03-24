@@ -3098,6 +3098,7 @@ fn builtin_eval(shell: &mut Shell, args: &[String]) -> i32 {
         &command,
         shell.aliases.clone(),
         shell.shopt_expand_aliases,
+        shell.opt_posix,
     );
     let result = match parser.parse_program() {
         Ok(program) => {

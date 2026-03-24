@@ -507,6 +507,33 @@ impl Shell {
             self.exports.insert(resolved.clone(), value.clone());
             unsafe { std::env::set_var(&resolved, &value) };
         }
+        // Locale variables: warn if locale cannot be set
+        if matches!(
+            resolved.as_str(),
+            "LC_ALL" | "LC_CTYPE" | "LC_COLLATE" | "LC_MESSAGES" | "LC_NUMERIC" | "LANG"
+        ) && !value.is_empty()
+        {
+            #[cfg(unix)]
+            {
+                use std::ffi::CString;
+                if let Ok(cval) = CString::new(value.clone()) {
+                    let result = unsafe { libc::setlocale(libc::LC_ALL, cval.as_ptr()) };
+                    if result.is_null() {
+                        let name = self
+                            .positional
+                            .first()
+                            .or_else(|| self.vars.get("_BASH_SOURCE_FILE"))
+                            .map(|s| s.as_str())
+                            .unwrap_or("bash");
+                        let lineno = self.vars.get("LINENO").map(|s| s.as_str()).unwrap_or("0");
+                        eprintln!(
+                            "{}: line {}: warning: setlocale: {}: cannot change locale ({}): No such file or directory",
+                            name, lineno, resolved, value
+                        );
+                    }
+                }
+            }
+        }
         // BASH_ARGV0 updates $0
         if resolved == "BASH_ARGV0" && !self.positional.is_empty() {
             self.positional[0] = value.clone();
@@ -567,8 +594,12 @@ impl Shell {
     }
 
     pub fn run_string(&mut self, input: &str) -> i32 {
-        let mut parser =
-            Parser::new_with_aliases(input, self.aliases.clone(), self.shopt_expand_aliases);
+        let mut parser = Parser::new_with_aliases(
+            input,
+            self.aliases.clone(),
+            self.shopt_expand_aliases,
+            self.opt_posix,
+        );
 
         // Incremental parse-execute loop (for both scripts and -c mode)
         // Parse one command at a time, execute it, then parse the next
@@ -591,7 +622,15 @@ impl Shell {
                         self.syntax_error_prefix(),
                         token
                     );
-                    let line = input.lines().next().unwrap_or(input);
+                    let lineno: usize = self
+                        .vars
+                        .get("LINENO")
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(1);
+                    let line = input
+                        .lines()
+                        .nth(lineno.saturating_sub(1))
+                        .unwrap_or(input.lines().next().unwrap_or(input));
                     eprintln!("{}: `{}'", self.syntax_error_prefix(), line);
                     return 2;
                 }
@@ -639,7 +678,11 @@ impl Shell {
                     }
                     status = self.run_complete_command(&cmd);
                     // Sync aliases back to parser (alias/unalias may have changed them)
-                    parser.update_aliases(self.aliases.clone(), self.shopt_expand_aliases);
+                    parser.update_aliases(
+                        self.aliases.clone(),
+                        self.shopt_expand_aliases,
+                        self.opt_posix,
+                    );
                     // Run ERR trap on non-zero status
                     if status != 0 && !self.in_condition {
                         self.run_err_trap();
@@ -664,7 +707,16 @@ impl Shell {
                     } else if self.dash_c_mode {
                         eprintln!("{}: {}", self.syntax_error_prefix(), e);
                         if e.contains("syntax error") {
-                            let line = input.lines().next().unwrap_or(input);
+                            // Show the line where the error occurred
+                            let lineno: usize = self
+                                .vars
+                                .get("LINENO")
+                                .and_then(|s| s.parse().ok())
+                                .unwrap_or(1);
+                            let line = input
+                                .lines()
+                                .nth(lineno.saturating_sub(1))
+                                .unwrap_or(input.lines().next().unwrap_or(input));
                             eprintln!("{}: `{}'", self.syntax_error_prefix(), line);
                         }
                         return 2;
@@ -1894,20 +1946,54 @@ impl Shell {
                     if let Some(bracket) = assign.name.find('[') {
                         let base = &assign.name[..bracket];
                         let idx_str = &assign.name[bracket + 1..assign.name.len() - 1];
-                        let resolved = self.resolve_nameref(base);
-                        // Check if it's an associative array
-                        if self.assoc_arrays.contains_key(&resolved) {
-                            self.assoc_arrays
-                                .entry(resolved)
-                                .or_default()
-                                .insert(idx_str.to_string(), value);
-                        } else {
-                            let idx: usize = self.eval_arith_expr(idx_str).max(0) as usize;
-                            let arr = self.arrays.entry(resolved).or_default();
-                            while arr.len() <= idx {
-                                arr.push(String::new());
+
+                        // BASH_ALIASES[key]=value → alias key=value
+                        if base == "BASH_ALIASES" {
+                            let alias_name = idx_str.to_string();
+                            let invalid = alias_name.is_empty()
+                                || alias_name.chars().any(|c| {
+                                    matches!(
+                                        c,
+                                        '/' | '$'
+                                            | '`'
+                                            | '='
+                                            | '\\'
+                                            | '\''
+                                            | '"'
+                                            | '&'
+                                            | '|'
+                                            | ';'
+                                            | '('
+                                            | ')'
+                                            | '<'
+                                            | '>'
+                                    )
+                                });
+                            if invalid {
+                                eprintln!(
+                                    "{}: `{}': invalid alias name",
+                                    self.error_prefix(),
+                                    alias_name
+                                );
+                            } else {
+                                self.aliases.insert(alias_name, value);
                             }
-                            arr[idx] = value;
+                        } else {
+                            let resolved = self.resolve_nameref(base);
+                            // Check if it's an associative array
+                            if self.assoc_arrays.contains_key(&resolved) {
+                                self.assoc_arrays
+                                    .entry(resolved)
+                                    .or_default()
+                                    .insert(idx_str.to_string(), value);
+                            } else {
+                                let idx: usize = self.eval_arith_expr(idx_str).max(0) as usize;
+                                let arr = self.arrays.entry(resolved).or_default();
+                                while arr.len() <= idx {
+                                    arr.push(String::new());
+                                }
+                                arr[idx] = value;
+                            }
                         }
                     } else {
                         self.set_var(&assign.name, value);

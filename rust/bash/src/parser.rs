@@ -18,18 +18,26 @@ impl Parser {
         input: &str,
         aliases: HashMap<String, String>,
         expand_aliases: bool,
+        posix_mode: bool,
     ) -> Self {
         let mut lexer = Lexer::new(input);
         lexer.aliases = aliases;
         lexer.shopt_expand_aliases = expand_aliases;
+        lexer.posix_mode = posix_mode;
         let current = lexer.next_token();
         Self { lexer, current }
     }
 
     /// Update the alias table (called between parse-execute cycles)
-    pub fn update_aliases(&mut self, aliases: HashMap<String, String>, expand_aliases: bool) {
+    pub fn update_aliases(
+        &mut self,
+        aliases: HashMap<String, String>,
+        expand_aliases: bool,
+        posix_mode: bool,
+    ) {
         self.lexer.aliases = aliases;
         self.lexer.shopt_expand_aliases = expand_aliases;
+        self.lexer.posix_mode = posix_mode;
     }
 
     fn advance(&mut self) -> Token {
@@ -1102,6 +1110,64 @@ impl Parser {
                             value_parts.push(part.clone());
                         }
                         Some((full_name, append, after_eq, num_parts, value_parts))
+                    } else {
+                        None
+                    }
+                } else if s.ends_with('[') || s.contains('[') {
+                    // Handle array assignment with quoted subscript: name[quoted_key]=value
+                    // The = is in a later part (e.g., BASH_ALIASES['\$']=xx)
+                    let base_end = s.find('[').unwrap();
+                    let base_name = &s[..base_end];
+                    if !base_name.is_empty()
+                        && base_name.chars().all(|c| c.is_alphanumeric() || c == '_')
+                        && !base_name.chars().next().unwrap().is_ascii_digit()
+                    {
+                        // Find ]=  or ]+=  in a later Literal part
+                        let mut found_eq = false;
+                        let mut name_text = s.to_string();
+                        let mut value_parts = Vec::new();
+                        let mut eq_part_idx = 0;
+                        for (idx, part) in parts[1..].iter().enumerate() {
+                            if found_eq {
+                                value_parts.push(part.clone());
+                                continue;
+                            }
+                            match part {
+                                WordPart::Literal(lit) => {
+                                    if let Some(eq_pos) = lit.find("]=") {
+                                        let before = &lit[..eq_pos + 1]; // include ]
+                                        name_text.push_str(before);
+                                        let after_eq = &lit[eq_pos + 2..];
+                                        if !after_eq.is_empty() {
+                                            value_parts
+                                                .push(WordPart::Literal(after_eq.to_string()));
+                                        }
+                                        found_eq = true;
+                                        eq_part_idx = idx + 1;
+                                    } else {
+                                        name_text.push_str(lit);
+                                    }
+                                }
+                                WordPart::SingleQuoted(sq) => {
+                                    name_text.push_str(sq);
+                                }
+                                WordPart::DoubleQuoted(dq) => {
+                                    for dp in dq {
+                                        if let WordPart::Literal(l) = dp {
+                                            name_text.push_str(l);
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        if found_eq {
+                            let append = name_text.ends_with("+=");
+                            let _ = eq_part_idx;
+                            Some((name_text, append, String::new(), parts.len(), value_parts))
+                        } else {
+                            None
+                        }
                     } else {
                         None
                     }

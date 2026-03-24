@@ -80,6 +80,12 @@ fn run() -> i32 {
                             "errexit" => shell.opt_errexit = enable,
                             "nounset" => shell.opt_nounset = enable,
                             "xtrace" => shell.opt_xtrace = enable,
+                            "posix" => {
+                                shell.opt_posix = enable;
+                                if enable {
+                                    shell.shopt_expand_aliases = true;
+                                }
+                            }
                             _ => {}
                         }
                     }

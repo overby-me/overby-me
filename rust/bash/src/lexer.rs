@@ -68,6 +68,7 @@ pub struct Lexer {
     // Alias expansion
     pub aliases: HashMap<String, String>,
     pub shopt_expand_aliases: bool,
+    pub posix_mode: bool,
     expanding_aliases: HashSet<String>, // aliases currently being expanded (prevent recursion)
     alias_end_markers: Vec<(String, usize, bool, usize)>, // (alias_name, end_pos, ends_with_space, newline_count) - when pos passes end_pos, remove from expanding and adjust line count
     expand_alias_next: bool, // next word in command position should be checked for alias expansion
@@ -93,6 +94,7 @@ impl Lexer {
             heredoc_eof_warnings: Vec::new(),
             aliases: HashMap::new(),
             shopt_expand_aliases: false,
+            posix_mode: false,
             expanding_aliases: HashSet::new(),
             alias_end_markers: Vec::new(),
             expand_alias_next: true, // first word is command position
@@ -214,6 +216,34 @@ impl Lexer {
         if text.is_empty() || self.expanding_aliases.contains(&text) {
             return false;
         }
+        // In POSIX mode, don't alias-expand reserved words
+        if self.posix_mode
+            && matches!(
+                text.as_str(),
+                "if" | "then"
+                    | "else"
+                    | "elif"
+                    | "fi"
+                    | "case"
+                    | "esac"
+                    | "for"
+                    | "while"
+                    | "until"
+                    | "do"
+                    | "done"
+                    | "in"
+                    | "function"
+                    | "select"
+                    | "coproc"
+                    | "{"
+                    | "}"
+                    | "!"
+                    | "[["
+                    | "]]"
+            )
+        {
+            return false;
+        }
         let expansion = match self.aliases.get(&text) {
             Some(v) => v.clone(),
             None => return false,
@@ -296,8 +326,32 @@ impl Lexer {
                     next_pos += 1;
                 }
                 let next_word: String = self.input[word_start2..next_pos].iter().collect();
+                let is_reserved_in_posix = self.posix_mode
+                    && matches!(
+                        next_word.as_str(),
+                        "if" | "then"
+                            | "else"
+                            | "elif"
+                            | "fi"
+                            | "case"
+                            | "esac"
+                            | "for"
+                            | "while"
+                            | "until"
+                            | "do"
+                            | "done"
+                            | "in"
+                            | "function"
+                            | "select"
+                            | "{"
+                            | "}"
+                            | "!"
+                            | "[["
+                            | "]]"
+                    );
                 if !next_word.is_empty()
                     && !self.expanding_aliases.contains(&next_word)
+                    && !is_reserved_in_posix
                     && let Some(next_expansion) = self.aliases.get(&next_word).cloned()
                 {
                     // Expand the next word too
