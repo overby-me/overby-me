@@ -2256,6 +2256,8 @@ fn eval_test_expr(args: &[String], shell: &Shell, cmd_name: &str) -> i32 {
         match args[1].as_str() {
             "=" | "==" => return if args[0] == args[2] { 0 } else { 1 },
             "!=" => return if args[0] != args[2] { 0 } else { 1 },
+            "<" => return if args[0] < args[2] { 0 } else { 1 },
+            ">" => return if args[0] > args[2] { 0 } else { 1 },
             "-eq" | "-ne" | "-lt" | "-le" | "-gt" | "-ge" => {
                 let prefix = shell.error_prefix();
                 let a = match args[0].parse::<i64>() {
@@ -2309,6 +2311,22 @@ fn eval_test_expr(args: &[String], shell: &Shell, cmd_name: &str) -> i32 {
                 return match (a, b) {
                     (Some(a), Some(b)) => {
                         if a < b {
+                            0
+                        } else {
+                            1
+                        }
+                    }
+                    _ => 1,
+                };
+            }
+            #[cfg(unix)]
+            "-ef" => {
+                use std::os::unix::fs::MetadataExt;
+                let a = std::fs::metadata(&args[0]).ok();
+                let b = std::fs::metadata(&args[2]).ok();
+                return match (a, b) {
+                    (Some(a), Some(b)) => {
+                        if a.dev() == b.dev() && a.ino() == b.ino() {
                             0
                         } else {
                             1
