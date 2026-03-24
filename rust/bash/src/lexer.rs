@@ -133,7 +133,12 @@ impl Lexer {
         match ch {
             '\n' => {
                 self.advance();
-                self.read_heredoc_bodies();
+                // Only read heredoc bodies if there are pending heredocs
+                // AND we're not in the middle of a pipeline (where the body
+                // reading is deferred to after the full command line is parsed)
+                if !self.pending_heredocs.is_empty() {
+                    self.read_heredoc_bodies();
+                }
                 Token::Newline
             }
             '|' => {
