@@ -487,17 +487,92 @@ fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart {
                 WordPart::ArithSub(expr)
             } else {
                 // Command substitution: $( ... )
+                // Must handle case...esac, quotes, nested $(...)
                 let mut depth = 1;
                 let mut cmd = String::new();
+                let mut case_depth = 0i32;
                 while *i < chars.len() && depth > 0 {
-                    if chars[*i] == '(' {
-                        depth += 1;
-                    } else if chars[*i] == ')' {
-                        depth -= 1;
-                        if depth == 0 {
+                    match chars[*i] {
+                        '\'' => {
+                            // Single-quoted string — skip entirely
+                            cmd.push(chars[*i]);
                             *i += 1;
-                            break;
+                            while *i < chars.len() && chars[*i] != '\'' {
+                                cmd.push(chars[*i]);
+                                *i += 1;
+                            }
+                            if *i < chars.len() {
+                                cmd.push(chars[*i]);
+                                *i += 1;
+                            }
+                            continue;
                         }
+                        '"' => {
+                            // Double-quoted string — skip but handle $() inside
+                            cmd.push(chars[*i]);
+                            *i += 1;
+                            while *i < chars.len() && chars[*i] != '"' {
+                                if chars[*i] == '\\' && *i + 1 < chars.len() {
+                                    cmd.push(chars[*i]);
+                                    *i += 1;
+                                }
+                                cmd.push(chars[*i]);
+                                *i += 1;
+                            }
+                            if *i < chars.len() {
+                                cmd.push(chars[*i]);
+                                *i += 1;
+                            }
+                            continue;
+                        }
+                        '`' => {
+                            // Backtick command sub — skip
+                            cmd.push(chars[*i]);
+                            *i += 1;
+                            while *i < chars.len() && chars[*i] != '`' {
+                                if chars[*i] == '\\' && *i + 1 < chars.len() {
+                                    cmd.push(chars[*i]);
+                                    *i += 1;
+                                }
+                                cmd.push(chars[*i]);
+                                *i += 1;
+                            }
+                            if *i < chars.len() {
+                                cmd.push(chars[*i]);
+                                *i += 1;
+                            }
+                            continue;
+                        }
+                        '(' => {
+                            depth += 1;
+                        }
+                        ')' => {
+                            if case_depth <= 0 {
+                                depth -= 1;
+                                if depth == 0 {
+                                    *i += 1;
+                                    break;
+                                }
+                            }
+                            // Inside a case block, ) is a pattern delimiter — skip
+                        }
+                        _ => {}
+                    }
+                    // Track case/esac keywords
+                    if chars[*i].is_alphabetic() {
+                        let start = *i;
+                        let mut word = String::new();
+                        while *i < chars.len() && (chars[*i].is_alphanumeric() || chars[*i] == '_') {
+                            word.push(chars[*i]);
+                            *i += 1;
+                        }
+                        if word == "case" {
+                            case_depth += 1;
+                        } else if word == "esac" {
+                            case_depth -= 1;
+                        }
+                        cmd.push_str(&word);
+                        continue;
                     }
                     cmd.push(chars[*i]);
                     *i += 1;
