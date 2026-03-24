@@ -3519,6 +3519,22 @@ fn builtin_wait(shell: &mut Shell, args: &[String]) -> i32 {
         use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
         use nix::unistd::Pid;
 
+        // Handle -n flag (wait for any single job)
+        if args.first().map(|s| s.as_str()) == Some("-n") {
+            match waitpid(Pid::from_raw(-1), None) {
+                Ok(WaitStatus::Exited(_, code)) => {
+                    shell.last_status = code;
+                    return code;
+                }
+                Ok(WaitStatus::Signaled(_, sig, _)) => {
+                    let code = 128 + sig as i32;
+                    shell.last_status = code;
+                    return code;
+                }
+                _ => return shell.last_status,
+            }
+        }
+
         if args.is_empty() {
             // Wait for all background children
             loop {
