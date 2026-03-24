@@ -3584,9 +3584,41 @@ fn builtin_trap(shell: &mut Shell, args: &[String]) -> i32 {
         }
     }
 
-    // trap [-p] 'handler' signal [signal...]
+    // trap [-p|-P] 'handler' signal [signal...]
     let mut handler_idx = 0;
     let mut sig_start = 1;
+
+    // Check for conflicting -p and -P
+    if args.contains(&"-p".to_string()) && args.contains(&"-P".to_string()) {
+        eprintln!(
+            "{}: trap: cannot specify both -p and -P",
+            shell.error_prefix()
+        );
+        return 2;
+    }
+
+    // Handle -P flag — print just the handler command for specified signals
+    if args.first().map(|s| s.as_str()) == Some("-P") {
+        if args.len() < 2 {
+            eprintln!(
+                "{}: trap: -P requires at least one signal name",
+                shell.error_prefix()
+            );
+            return 1;
+        }
+        for sig_arg in &args[1..] {
+            let norm = normalize_signal_name(sig_arg);
+            let key = if norm == "EXIT" {
+                shell.traps.get("EXIT").or_else(|| shell.traps.get("0"))
+            } else {
+                shell.traps.get(&norm)
+            };
+            if let Some(handler) = key {
+                println!("{}", handler);
+            }
+        }
+        return 0;
+    }
 
     // Handle -p flag — print traps for specified signals
     if args.first().map(|s| s.as_str()) == Some("-p") {
