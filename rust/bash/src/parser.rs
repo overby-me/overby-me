@@ -486,26 +486,11 @@ impl Parser {
             let saved_tok = self.current.clone();
             self.advance(); // consume first (
             if self.current == Token::LParen {
-                // Try (( expression )) — if read_until_double_paren fails,
-                // fall back to nested subshell: ( (subshell) ... )
-                let arith_saved_pos = self.lexer.save_position();
-                let arith_saved_tok = self.current.clone();
-                match self.read_arith_command() {
-                    Ok(expr) => {
-                        self.current = self.lexer.next_token();
-                        return Ok(CompoundCommand::Arithmetic(expr));
-                    }
-                    Err(_) => {
-                        // Fall back to subshell: restore to before second (
-                        self.lexer.restore_position(arith_saved_pos);
-                        self.current = arith_saved_tok;
-                        // Now we're at the second (, which is inside a subshell
-                        // Restore to the first ( and parse as subshell
-                        self.lexer.restore_position(saved_pos);
-                        self.current = saved_tok;
-                        return self.parse_subshell();
-                    }
-                }
+                // (( expression )) — don't consume second ( as token;
+                // instead, use raw lexer to read until ))
+                let expr = self.read_arith_command()?;
+                self.current = self.lexer.next_token();
+                return Ok(CompoundCommand::Arithmetic(expr));
             }
             // Not ((, backtrack to regular subshell
             self.lexer.restore_position(saved_pos);

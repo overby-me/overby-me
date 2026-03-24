@@ -1651,12 +1651,6 @@ impl Shell {
             }
         }
 
-        // Check for arithmetic errors during word expansion
-        if crate::expand::take_arith_error() {
-            self.last_status = 1;
-            return 1;
-        }
-
         // Handle assignments
         let saved_last_status = self.last_status;
         if !cmd.assignments.is_empty() {
@@ -3553,7 +3547,9 @@ impl Shell {
 
     fn run_arith_for(&mut self, clause: &ArithForClause) -> i32 {
         self.loop_depth += 1;
+        self.arith_is_command = true;
         let status = self.run_arith_for_inner(clause);
+        self.arith_is_command = false;
         self.loop_depth -= 1;
         status
     }
