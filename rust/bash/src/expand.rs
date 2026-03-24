@@ -430,6 +430,9 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                     return;
                 }
             }
+            // Save original variable value before expansion (needed for quoting check)
+            let orig_val = lookup_var(&expr.name, ctx);
+            let orig_set = ctx.is_param_set(&expr.name);
             let mut val = expand_param(expr, ctx, cmd_sub);
             // Apply tilde expansion for default/assign values
             if matches!(
@@ -445,20 +448,15 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
             // quoted content — if so, the result should be treated as quoted
             // to prevent field splitting (e.g., ${B:-"$A"} preserves quotes)
             let has_quoted_word = match &expr.op {
-                ParamOp::Default(_, word) | ParamOp::Assign(_, word) | ParamOp::Alt(_, word) => {
+                ParamOp::Default(_, word) | ParamOp::Alt(_, word) => {
                     let is_active = match &expr.op {
                         ParamOp::Default(colon, _) => {
-                            let empty = if *colon { val.is_empty() } else { false };
-                            !ctx.is_param_set(&expr.name) || empty
-                        }
-                        ParamOp::Assign(colon, _) => {
-                            let empty = if *colon { val.is_empty() } else { false };
-                            !ctx.is_param_set(&expr.name) || empty
+                            let empty = if *colon { orig_val.is_empty() } else { false };
+                            !orig_set || empty
                         }
                         ParamOp::Alt(colon, _) => {
-                            let empty = if *colon { val.is_empty() } else { false };
-                            let unset = !ctx.is_param_set(&expr.name);
-                            !(unset || empty)
+                            let empty = if *colon { orig_val.is_empty() } else { false };
+                            !(!orig_set || empty)
                         }
                         _ => false,
                     };
