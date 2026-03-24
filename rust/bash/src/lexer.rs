@@ -65,7 +65,7 @@ pub struct Lexer {
     pub aliases: HashMap<String, String>,
     pub shopt_expand_aliases: bool,
     expanding_aliases: HashSet<String>, // aliases currently being expanded (prevent recursion)
-    alias_end_markers: Vec<(String, usize, bool)>, // (alias_name, end_pos, ends_with_space) - when pos passes end_pos, remove from expanding
+    alias_end_markers: Vec<(String, usize, bool, usize)>, // (alias_name, end_pos, ends_with_space, newline_count) - when pos passes end_pos, remove from expanding and adjust line count
     expand_alias_next: bool, // next word in command position should be checked for alias expansion
     redirect_target_next: bool, // next word is a redirect target (not a command)
     pub in_case_pattern: bool, // suppress alias expansion in case patterns
@@ -161,10 +161,16 @@ impl Lexer {
         let mut i = 0;
         while i < self.alias_end_markers.len() {
             if self.pos >= self.alias_end_markers[i].1 {
-                let (name, _end_pos, ends_with_space) = self.alias_end_markers.remove(i);
+                let (name, _end_pos, ends_with_space, newline_count) =
+                    self.alias_end_markers.remove(i);
                 self.expanding_aliases.remove(&name);
                 if ends_with_space {
                     self.expand_alias_next = true;
+                }
+                // Adjust line counter: newlines in the expansion text were
+                // counted by the lexer but shouldn't affect source line numbers
+                if newline_count > 0 {
+                    self.line = self.line.saturating_sub(newline_count);
                 }
             } else {
                 i += 1;
@@ -237,7 +243,7 @@ impl Lexer {
         let ends_with_space = expansion.ends_with(' ') || expansion.ends_with('\t');
 
         // Adjust existing alias end markers that are past the splice point
-        for (_, end_pos, _) in &mut self.alias_end_markers {
+        for (_, end_pos, _, _) in &mut self.alias_end_markers {
             if *end_pos > word_start {
                 *end_pos = (*end_pos as isize + delta) as usize;
             }
@@ -246,10 +252,11 @@ impl Lexer {
         // Set up end marker so we can un-mark this alias when we pass the end.
         // Use the original expansion length (without boundary space) for the marker.
         let orig_expansion_len = expansion.chars().count();
+        let newline_count = expansion.chars().filter(|&c| c == '\n').count();
         self.expanding_aliases.insert(text.clone());
         let end_pos = word_start + orig_expansion_len;
         self.alias_end_markers
-            .push((text, end_pos, ends_with_space));
+            .push((text, end_pos, ends_with_space, newline_count));
 
         // The first word of the expansion is in command position, so always
         // check it for alias expansion
@@ -299,18 +306,20 @@ impl Lexer {
                         .splice(word_start2..next_pos, next_expansion_chars);
 
                     // Adjust existing markers
-                    for (_, ep, _) in &mut self.alias_end_markers {
+                    for (_, ep, _, _) in &mut self.alias_end_markers {
                         if *ep > word_start2 {
                             *ep = (*ep as isize + delta2) as usize;
                         }
                     }
 
                     let next_orig_len = next_expansion.chars().count();
+                    let next_newline_count = next_expansion.chars().filter(|&c| c == '\n').count();
                     self.expanding_aliases.insert(next_word.clone());
                     self.alias_end_markers.push((
                         next_word,
                         word_start2 + next_orig_len,
                         next_ends_with_space,
+                        next_newline_count,
                     ));
                 }
             }

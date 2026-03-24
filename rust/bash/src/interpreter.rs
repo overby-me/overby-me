@@ -570,54 +570,7 @@ impl Shell {
         let mut parser =
             Parser::new_with_aliases(input, self.aliases.clone(), self.shopt_expand_aliases);
 
-        // For -c mode, parse all at once (for leftover token detection)
-        if self.dash_c_mode {
-            match parser.parse_program() {
-                Ok(program) => {
-                    if let Some(line_num) = parser.heredoc_overflow_line() {
-                        let name = self
-                            .positional
-                            .first()
-                            .map(|s| s.as_str())
-                            .unwrap_or("bash");
-                        eprintln!(
-                            "{}: line {}: maximum here-document count exceeded",
-                            name, line_num
-                        );
-                        return 2;
-                    }
-                    if !parser.is_at_eof() {
-                        let token = parser.current_token_str();
-                        eprintln!(
-                            "{}: syntax error near unexpected token `{}'",
-                            self.syntax_error_prefix(),
-                            token
-                        );
-                        let line = input.lines().next().unwrap_or(input);
-                        eprintln!("{}: `{}'", self.syntax_error_prefix(), line);
-                        return 2;
-                    }
-                    if self.opt_noexec {
-                        return 0;
-                    }
-                    return self.run_program(&program);
-                }
-                Err(e) => {
-                    if let Some(msg) = e.strip_prefix("RUNTIME:") {
-                        eprintln!("{}: {}", self.error_prefix(), msg);
-                    } else {
-                        eprintln!("{}: {}", self.syntax_error_prefix(), e);
-                        if e.contains("syntax error") {
-                            let line = input.lines().next().unwrap_or(input);
-                            eprintln!("{}: `{}'", self.syntax_error_prefix(), line);
-                        }
-                    }
-                    return 2;
-                }
-            }
-        }
-
-        // For scripts/stdin: incremental parse-execute loop
+        // Incremental parse-execute loop (for both scripts and -c mode)
         // Parse one command at a time, execute it, then parse the next
         // This allows scripts to continue after parse errors (like bash)
         let mut status = 0;
@@ -630,6 +583,18 @@ impl Shell {
             // Safety: detect if we're stuck (parser didn't advance)
             let cur_pos = parser.current_pos();
             if cur_pos == last_pos {
+                if self.dash_c_mode {
+                    // In -c mode, a stuck parser is a syntax error
+                    let token = parser.current_token_str();
+                    eprintln!(
+                        "{}: syntax error near unexpected token `{}'",
+                        self.syntax_error_prefix(),
+                        token
+                    );
+                    let line = input.lines().next().unwrap_or(input);
+                    eprintln!("{}: `{}'", self.syntax_error_prefix(), line);
+                    return 2;
+                }
                 // Parser is stuck — skip one token and retry
                 parser.skip_to_next_command();
                 if parser.is_at_eof() {
@@ -696,6 +661,13 @@ impl Shell {
                 Err(e) => {
                     if let Some(msg) = e.strip_prefix("RUNTIME:") {
                         eprintln!("{}: {}", self.error_prefix(), msg);
+                    } else if self.dash_c_mode {
+                        eprintln!("{}: {}", self.syntax_error_prefix(), e);
+                        if e.contains("syntax error") {
+                            let line = input.lines().next().unwrap_or(input);
+                            eprintln!("{}: `{}'", self.syntax_error_prefix(), line);
+                        }
+                        return 2;
                     } else {
                         eprintln!("{}: {}", self.error_prefix(), e);
                     }
