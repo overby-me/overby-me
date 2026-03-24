@@ -2803,16 +2803,51 @@ impl Shell {
             if let Ok(base) = base_str.parse::<u32>()
                 && (2..=64).contains(&base)
             {
-                return i64::from_str_radix(value_str, base).unwrap_or_else(|_| {
-                    eprintln!(
-                        "{}: {}: value too great for base (error token is \"{}\")",
-                        self.arith_error_prefix(),
-                        expr,
-                        expr
-                    );
-                    crate::expand::set_arith_error();
-                    0
-                });
+                if base <= 36 {
+                    return i64::from_str_radix(value_str, base).unwrap_or_else(|_| {
+                        eprintln!(
+                            "{}: {}: value too great for base (error token is \"{}\")",
+                            self.arith_error_prefix(),
+                            expr,
+                            expr
+                        );
+                        crate::expand::set_arith_error();
+                        0
+                    });
+                }
+                // Bases 37-64: digits are 0-9, a-z, A-Z, @, _
+                let mut result: i64 = 0;
+                for ch in value_str.chars() {
+                    let digit = match ch {
+                        '0'..='9' => ch as u32 - '0' as u32,
+                        'a'..='z' => ch as u32 - 'a' as u32 + 10,
+                        'A'..='Z' => ch as u32 - 'A' as u32 + 36,
+                        '@' => 62,
+                        '_' => 63,
+                        _ => {
+                            eprintln!(
+                                "{}: {}: value too great for base (error token is \"{}\")",
+                                self.arith_error_prefix(),
+                                expr,
+                                expr
+                            );
+                            crate::expand::set_arith_error();
+                            return 0;
+                        }
+                    };
+                    if digit >= base {
+                        eprintln!(
+                            "{}: {}: value too great for base (error token is \"{}\")",
+                            self.arith_error_prefix(),
+                            expr,
+                            expr
+                        );
+                        crate::expand::set_arith_error();
+                        return 0;
+                    }
+                    result = result * base as i64 + digit as i64;
+                }
+                return result;
             }
         }
         if expr.starts_with('0')
