@@ -9,6 +9,13 @@ thread_local! {
     /// File descriptors opened by process substitutions that need to be closed
     /// after the command using them completes.
     static PROCSUB_FDS: RefCell<Vec<i32>> = const { RefCell::new(Vec::new()) };
+    /// Flag set when arithmetic evaluation encounters an error.
+    static ARITH_ERROR: RefCell<bool> = const { RefCell::new(false) };
+}
+
+/// Check and clear the arithmetic error flag.
+pub fn take_arith_error() -> bool {
+    ARITH_ERROR.with(|f| std::mem::replace(&mut *f.borrow_mut(), false))
 }
 
 /// Take all pending process substitution fds (draining the list).
@@ -1390,6 +1397,7 @@ pub fn eval_arith_full(
                 e,
                 find_error_token(expr, &e)
             );
+            ARITH_ERROR.with(|f| *f.borrow_mut() = true);
             0
         }
     }
@@ -1575,10 +1583,12 @@ fn eval_arith(expr: &str) -> Result<i64, String> {
                 '(' => depth -= 1,
                 '+' | '-' if depth == 0 && i > 0 => {
                     let prev = chars[i - 1];
+                    // Skip if this is part of ++ or -- (check next char)
+                    let next = if i + 1 < chars.len() { chars[i + 1] } else { ' ' };
                     if !matches!(
                         prev,
                         '+' | '-' | '*' | '/' | '%' | '(' | '<' | '>' | '=' | '!' | '&' | '|'
-                    ) {
+                    ) && !(next == chars[i]) {
                         let left = eval_arith(&expr[..i])?;
                         let right = eval_arith(&expr[i + 1..])?;
                         return Ok(if chars[i] == '+' {

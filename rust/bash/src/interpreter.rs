@@ -2197,7 +2197,10 @@ impl Shell {
         // Handle post-increment/decrement: var++, var--
         if let Some(stripped) = expr.strip_suffix("++") {
             let name = stripped.trim();
-            if !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+            if !name.is_empty()
+                && name.chars().next().is_some_and(|c| !c.is_ascii_digit())
+                && name.chars().all(|c| c.is_alphanumeric() || c == '_')
+            {
                 let val: i64 = self
                     .vars
                     .get(name)
@@ -2209,7 +2212,10 @@ impl Shell {
         }
         if let Some(stripped) = expr.strip_suffix("--") {
             let name = stripped.trim();
-            if !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+            if !name.is_empty()
+                && name.chars().next().is_some_and(|c| !c.is_ascii_digit())
+                && name.chars().all(|c| c.is_alphanumeric() || c == '_')
+            {
                 let val: i64 = self
                     .vars
                     .get(name)
@@ -2661,6 +2667,10 @@ impl Shell {
                     self.xtrace_write(&format!("+ (( {} ))", clause.step));
                 }
                 self.eval_arith_expr(&clause.step);
+                // Break if step expression had an error (e.g., 7++)
+                if crate::expand::take_arith_error() {
+                    break;
+                }
             }
         }
         status
