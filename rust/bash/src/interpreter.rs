@@ -273,6 +273,8 @@ pub struct Shell {
     arith_is_command: bool,
     /// Whether current arithmetic evaluation is from let builtin (adds let: prefix to errors)
     pub arith_is_let: bool,
+    /// Seed for RANDOM variable (bash-compatible LCRNG)
+    random_seed: u32,
 
     pub aliases: HashMap<String, String>,
     builtins: HashMap<&'static str, BuiltinFn>,
@@ -399,6 +401,7 @@ impl Shell {
             arith_depth: 0,
             arith_is_command: false,
             arith_is_let: false,
+            random_seed: std::process::id(),
             aliases: HashMap::new(),
             builtins: builtins::builtins(),
         };
@@ -481,9 +484,19 @@ impl Shell {
     }
 
     /// Get a variable value, resolving namerefs.
-    pub fn get_var(&self, name: &str) -> Option<&String> {
+    pub fn get_var(&mut self, name: &str) -> Option<String> {
         let resolved = self.resolve_nameref(name);
-        self.vars.get(&resolved)
+        if resolved == "RANDOM" {
+            // Bash-compatible LCRNG: seed = seed * 1103515245 + 12345
+            self.random_seed = self
+                .random_seed
+                .wrapping_mul(1103515245)
+                .wrapping_add(12345);
+            let val = ((self.random_seed >> 16) & 0x7fff).to_string();
+            self.vars.insert("RANDOM".to_string(), val.clone());
+            return Some(val);
+        }
+        self.vars.get(&resolved).cloned()
     }
 
     /// Set a variable value, resolving namerefs.
@@ -503,6 +516,12 @@ impl Shell {
             );
             self.last_status = 1;
             return;
+        }
+        // Setting RANDOM sets the seed
+        if resolved == "RANDOM"
+            && let Ok(seed) = value.parse::<u32>()
+        {
+            self.random_seed = seed;
         }
         // Integer variables: evaluate value as arithmetic expression
         let value = if self.integer_vars.contains(&resolved) {

@@ -1870,7 +1870,7 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 shell.readonly_vars.insert(name.to_string());
             }
             if flag_export {
-                let val = shell.get_var(name).cloned().unwrap_or_default();
+                let val = shell.get_var(name).unwrap_or_default();
                 shell.exports.insert(name.to_string(), val.clone());
                 unsafe { std::env::set_var(name, &val) };
             }
@@ -1921,7 +1921,7 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 shell.readonly_vars.insert(name.to_string());
             }
             if flag_export {
-                let val = shell.get_var(name).cloned().unwrap_or_default();
+                let val = shell.get_var(name).unwrap_or_default();
                 shell.exports.insert(name.to_string(), val.clone());
                 unsafe { std::env::set_var(name, &val) };
             }
