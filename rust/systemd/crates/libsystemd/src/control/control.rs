@@ -1181,7 +1181,12 @@ fn find_units_with_pattern<'a>(
 }
 
 /// Determine the state of a unit file: "enabled", "disabled", "static", or "indirect".
-fn unit_file_state(name: &str, unit_table: &UnitTable, path: &std::path::Path) -> &'static str {
+fn unit_file_state(
+    name: &str,
+    unit_table: &UnitTable,
+    path: &std::path::Path,
+    unit_dirs: &[std::path::PathBuf],
+) -> &'static str {
     // Check if the unit has an [Install] section by looking for WantedBy=/RequiredBy=
     // in the loaded unit table, or by reading the file itself.
     let has_install = if let Some(unit) = unit_table.values().find(|u| u.id.name == name) {
@@ -1200,9 +1205,22 @@ fn unit_file_state(name: &str, unit_table: &UnitTable, path: &std::path::Path) -
     if !has_install {
         // No [Install] section → static (cannot be enabled/disabled)
         "static"
-    } else if unit_table.values().any(|u| u.id.name == name) {
-        "enabled"
     } else {
+        // Check if enablement symlinks exist in .wants/.requires directories.
+        for dir in unit_dirs {
+            if let Ok(entries) = std::fs::read_dir(dir) {
+                for entry in entries.flatten() {
+                    let entry_name = entry.file_name();
+                    let entry_str = entry_name.to_string_lossy();
+                    if entry_str.ends_with(".wants") || entry_str.ends_with(".requires") {
+                        let symlink = entry.path().join(name);
+                        if symlink.exists() || symlink.symlink_metadata().is_ok() {
+                            return "enabled";
+                        }
+                    }
+                }
+            }
+        }
         "disabled"
     }
 }
@@ -3102,12 +3120,12 @@ pub fn execute_command(
                             "generated"
                         } else {
                             // Symlink to a real file — check if it has [Install]
-                            unit_file_state(&name, unit_table, &path)
+                            unit_file_state(&name, unit_table, &path, unit_dirs)
                         }
                     } else if path.to_string_lossy().contains("/run/systemd/generator") {
                         "generated"
                     } else {
-                        unit_file_state(&name, unit_table, &path)
+                        unit_file_state(&name, unit_table, &path, unit_dirs)
                     };
 
                     entries.insert(name, (state, path));
@@ -3550,52 +3568,67 @@ pub fn execute_command(
             crate::units::reactivate_unit(id, &ri).map_err(|e| format!("{e}"))?;
         }
         Command::IsActive(unit_name) => {
-            let run_info = &*run_info.read_poisoned();
-            let unit_table = &run_info.unit_table;
-            let units = find_units_with_name(&unit_name, unit_table);
-            if units.is_empty() {
-                return Ok(serde_json::json!("inactive"));
+            // Try to find the unit in memory, or load it from disk.
+            match find_or_load_unit(&unit_name, &run_info) {
+                Err(_) => return Err(format!("Unit {unit_name} not found.")),
+                Ok(id) => {
+                    let ri = run_info.read_poisoned();
+                    let unit = ri
+                        .unit_table
+                        .get(&id)
+                        .ok_or_else(|| format!("Unit {unit_name} not found."))?;
+                    let status_locked = unit.common.status.read_poisoned();
+                    let state = match &*status_locked {
+                        crate::units::UnitStatus::Started(_) => "active",
+                        crate::units::UnitStatus::Starting => "activating",
+                        crate::units::UnitStatus::Stopping => "deactivating",
+                        crate::units::UnitStatus::Restarting => "activating",
+                        crate::units::UnitStatus::Stopped(_, errors) if !errors.is_empty() => {
+                            "failed"
+                        }
+                        crate::units::UnitStatus::Stopped(_, _) => "inactive",
+                        crate::units::UnitStatus::NeverStarted => "inactive",
+                    };
+                    return Ok(serde_json::json!(state));
+                }
             }
-            let unit = &units[0];
-            let status_locked = unit.common.status.read_poisoned();
-            let state = match &*status_locked {
-                crate::units::UnitStatus::Started(_) => "active",
-                crate::units::UnitStatus::Starting => "activating",
-                crate::units::UnitStatus::Stopping => "deactivating",
-                crate::units::UnitStatus::Restarting => "activating",
-                crate::units::UnitStatus::Stopped(_, errors) if !errors.is_empty() => "failed",
-                crate::units::UnitStatus::Stopped(_, _) => "inactive",
-                crate::units::UnitStatus::NeverStarted => "inactive",
-            };
-            return Ok(serde_json::json!(state));
         }
         Command::IsEnabled(unit_name) => {
-            // Check if the unit is enabled (i.e. has an [Install] section
-            // and is linked in the target wants).
-            // For now, if the unit is loaded at all, report "enabled".
-            let run_info = &*run_info.read_poisoned();
-            let unit_table = &run_info.unit_table;
-            let units = find_units_with_name(&unit_name, unit_table);
-            if units.is_empty() {
-                return Ok(serde_json::json!("disabled"));
+            // Try to find the unit file on disk across all unit directories.
+            let ri = run_info.read_poisoned();
+            let mut found_path = None;
+            for dir in &ri.config.unit_dirs {
+                let candidate = dir.join(&unit_name);
+                if candidate.exists() {
+                    found_path = Some(candidate);
+                    break;
+                }
             }
-            return Ok(serde_json::json!("enabled"));
-        }
-        Command::IsFailed(unit_name) => {
-            let run_info = &*run_info.read_poisoned();
-            let unit_table = &run_info.unit_table;
-            let units = find_units_with_name(&unit_name, unit_table);
-            if units.is_empty() {
-                return Ok(serde_json::json!("inactive"));
+            match found_path {
+                None => return Err(format!("Unit {unit_name} not found.")),
+                Some(path) => {
+                    let state =
+                        unit_file_state(&unit_name, &ri.unit_table, &path, &ri.config.unit_dirs);
+                    return Ok(serde_json::json!(state));
+                }
             }
-            let unit = &units[0];
-            let status_locked = unit.common.status.read_poisoned();
-            let state = match &*status_locked {
-                crate::units::UnitStatus::Stopped(_, errors) if !errors.is_empty() => "failed",
-                _ => "inactive",
-            };
-            return Ok(serde_json::json!(state));
         }
+        Command::IsFailed(unit_name) => match find_or_load_unit(&unit_name, &run_info) {
+            Err(_) => return Err(format!("Unit {unit_name} not found.")),
+            Ok(id) => {
+                let ri = run_info.read_poisoned();
+                let unit = ri
+                    .unit_table
+                    .get(&id)
+                    .ok_or_else(|| format!("Unit {unit_name} not found."))?;
+                let status_locked = unit.common.status.read_poisoned();
+                let state = match &*status_locked {
+                    crate::units::UnitStatus::Stopped(_, errors) if !errors.is_empty() => "failed",
+                    _ => "inactive",
+                };
+                return Ok(serde_json::json!(state));
+            }
+        },
         Command::Start(unit_names) => {
             for unit_name in &unit_names {
                 let id = find_or_load_unit(unit_name, &run_info)?;
@@ -5241,7 +5274,7 @@ mod tests {
         let path = dir.path().join("basic.target");
         std::fs::write(&path, "[Unit]\nDescription=Basic\n").unwrap();
 
-        let state = unit_file_state("basic.target", &table, &path);
+        let state = unit_file_state("basic.target", &table, &path, &[]);
         assert_eq!(state, "static");
     }
 
@@ -5260,7 +5293,13 @@ mod tests {
         )
         .unwrap();
 
-        let state = unit_file_state("sshd.service", &table, &path);
+        // Create enablement symlink in multi-user.target.wants/
+        let wants_dir = dir.path().join("multi-user.target.wants");
+        std::fs::create_dir_all(&wants_dir).unwrap();
+        std::os::unix::fs::symlink(&path, wants_dir.join("sshd.service")).unwrap();
+
+        let unit_dirs = vec![dir.path().to_path_buf()];
+        let state = unit_file_state("sshd.service", &table, &path, &unit_dirs);
         assert_eq!(state, "enabled");
     }
 
@@ -5278,7 +5317,13 @@ mod tests {
         )
         .unwrap();
 
-        let state = unit_file_state("dbus.service", &table, &path);
+        // Create enablement symlink in multi-user.target.requires/
+        let requires_dir = dir.path().join("multi-user.target.requires");
+        std::fs::create_dir_all(&requires_dir).unwrap();
+        std::os::unix::fs::symlink(&path, requires_dir.join("dbus.service")).unwrap();
+
+        let unit_dirs = vec![dir.path().to_path_buf()];
+        let state = unit_file_state("dbus.service", &table, &path, &unit_dirs);
         assert_eq!(state, "enabled");
     }
 
@@ -5295,7 +5340,7 @@ mod tests {
         )
         .unwrap();
 
-        let state = unit_file_state("unloaded.service", &table, &path);
+        let state = unit_file_state("unloaded.service", &table, &path, &[]);
         assert_eq!(state, "disabled");
     }
 
@@ -5312,7 +5357,7 @@ mod tests {
         )
         .unwrap();
 
-        let state = unit_file_state("noinst.service", &table, &path);
+        let state = unit_file_state("noinst.service", &table, &path, &[]);
         assert_eq!(state, "static");
     }
 
@@ -5330,7 +5375,7 @@ mod tests {
         )
         .unwrap();
 
-        let state = unit_file_state("simple.service", &table, &path);
+        let state = unit_file_state("simple.service", &table, &path, &[]);
         assert_eq!(state, "static");
     }
 
@@ -5339,7 +5384,7 @@ mod tests {
         // Path doesn't exist and unit not loaded → "static" (can't read file)
         let table: UnitTable = HashMap::new();
         let path = std::path::Path::new("/nonexistent/path/to/unit.service");
-        let state = unit_file_state("unit.service", &table, path);
+        let state = unit_file_state("unit.service", &table, path, &[]);
         assert_eq!(state, "static");
     }
 

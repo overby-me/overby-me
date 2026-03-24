@@ -1097,7 +1097,7 @@ fn open_storage(cli: &Cli) -> Result<JournalStorage, String> {
         let volatile = PathBuf::from("/run/log/journal");
         find_namespace_dir(&persistent, ns)
             .or_else(|| find_namespace_dir(&volatile, ns))
-            .unwrap_or_else(|| {
+            .unwrap_or({
                 // Fall back to volatile base dir if namespace dir not found
                 volatile
             })
@@ -2101,10 +2101,9 @@ fn discover_namespaces() -> Vec<String> {
                 if prefix.len() == 32
                     && prefix.chars().all(|c| c.is_ascii_hexdigit())
                     && !ns.is_empty()
+                    && !namespaces.contains(&ns.to_string())
                 {
-                    if !namespaces.contains(&ns.to_string()) {
-                        namespaces.push(ns.to_string());
-                    }
+                    namespaces.push(ns.to_string());
                 }
             }
         }
@@ -2129,13 +2128,14 @@ fn send_signal_to_journald_namespace(namespace: &str, signal: libc::c_int) {
 
             // Check if this process is a namespace-specific journald
             let cmdline_path = format!("/proc/{}/cmdline", pid);
-            if let Ok(cmdline) = fs::read_to_string(&cmdline_path) {
-                if cmdline.contains("systemd-journald") && cmdline.contains(namespace) {
-                    unsafe {
-                        libc::kill(pid, signal);
-                    }
-                    return;
+            if let Ok(cmdline) = fs::read_to_string(&cmdline_path)
+                && cmdline.contains("systemd-journald")
+                && cmdline.contains(namespace)
+            {
+                unsafe {
+                    libc::kill(pid, signal);
                 }
+                return;
             }
         }
     }

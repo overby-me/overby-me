@@ -63,6 +63,9 @@ const KNOWN_FLAGS: &[&str] = &[
     "--check-inhibitors=yes",
     "--check-inhibitors=no",
     "--show-transaction",
+    "--recursive",
+    "--with-dependencies",
+    "--dry-run",
     "-T",
 ];
 
@@ -89,6 +92,9 @@ const LONG_FLAGS_WITH_VALUE: &[&str] = &[
     "--root",
     "--preset-mode",
     "--what",
+    "--legend",
+    "--timestamp",
+    "--message",
 ];
 
 fn main() {
@@ -317,18 +323,16 @@ fn main() {
             if let Some(offset) = name_upper
                 .strip_prefix("SIGRTMIN+")
                 .or_else(|| name_upper.strip_prefix("RTMIN+"))
+                && let Ok(n) = offset.parse::<i32>()
             {
-                if let Ok(n) = offset.parse::<i32>() {
-                    return Some(34 + n); // SIGRTMIN = 34 on Linux
-                }
+                return Some(34 + n); // SIGRTMIN = 34 on Linux
             }
             if let Some(offset) = name_upper
                 .strip_prefix("SIGRTMAX-")
                 .or_else(|| name_upper.strip_prefix("RTMAX-"))
+                && let Ok(n) = offset.parse::<i32>()
             {
-                if let Ok(n) = offset.parse::<i32>() {
-                    return Some(64 - n); // SIGRTMAX = 64 on Linux
-                }
+                return Some(64 - n); // SIGRTMAX = 64 on Linux
             }
             match name_upper.as_str() {
                 "SIGTERM" | "TERM" => Some(15),
@@ -366,15 +370,29 @@ fn main() {
         }
     }
 
-    // Extract --reverse flag for list-dependencies
+    // Extract --reverse, --after, --before, --plain flags for list-dependencies
     let mut reverse = false;
-    positional.retain(|arg| {
-        if arg == "--reverse" {
+    let mut after = false;
+    let mut before = false;
+    let mut plain = false;
+    positional.retain(|arg| match arg.as_str() {
+        "--reverse" => {
             reverse = true;
             false
-        } else {
-            true
         }
+        "--after" => {
+            after = true;
+            false
+        }
+        "--before" => {
+            before = true;
+            false
+        }
+        "--plain" => {
+            plain = true;
+            false
+        }
+        _ => true,
     });
 
     // Extract --full flag for edit
@@ -415,7 +433,7 @@ fn main() {
             positional[0] = "try-restart".to_string();
             &positional[0]
         }
-        "force-reload" => {
+        "force-reload" | "try-reload-or-restart" => {
             positional[0] = "try-restart".to_string();
             &positional[0]
         }
@@ -702,6 +720,15 @@ fn main() {
         if reverse {
             arr.push(Value::String("--reverse".to_owned()));
         }
+        if after {
+            arr.push(Value::String("--after".to_owned()));
+        }
+        if before {
+            arr.push(Value::String("--before".to_owned()));
+        }
+        if plain {
+            arr.push(Value::String("--plain".to_owned()));
+        }
         Some(Value::Array(arr))
     } else if method == "kill" {
         // kill <unit> [--signal=SIG] [--kill-whom=WHO] [--kill-value=N]
@@ -882,23 +909,28 @@ fn handle_response(
 
         match command {
             "is-active" => {
+                // Exit 4 for "not found", 3 for other errors (inactive)
+                let code = if message.contains("not found") { 4 } else { 3 };
                 if !quiet {
                     println!("inactive");
                 }
-                std::process::exit(3);
+                std::process::exit(code);
             }
             "is-enabled" => {
+                // Exit 4 for "not found", 1 for other errors
+                let code = if message.contains("not found") { 4 } else { 1 };
                 if !quiet {
                     println!("disabled");
                 }
-                std::process::exit(1);
+                std::process::exit(code);
             }
             "is-failed" => {
-                // Not failed (or unknown) → exit 1
+                // Exit 4 for "not found", 1 for other errors
+                let code = if message.contains("not found") { 4 } else { 1 };
                 if !quiet {
                     println!("inactive");
                 }
-                std::process::exit(1);
+                std::process::exit(code);
             }
             _ => {
                 if !quiet {

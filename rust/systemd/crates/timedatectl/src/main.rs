@@ -915,11 +915,11 @@ fn cmd_ntp_servers(iface: &str, servers: &[&str]) {
 
 fn cmd_revert(iface: &str) {
     let dropin_dir = format!("/run/systemd/network/50-{iface}.network.d");
-    if Path::new(&dropin_dir).exists() {
-        if let Err(e) = fs::remove_dir_all(&dropin_dir) {
-            eprintln!("Failed to remove {dropin_dir}: {e}");
-            process::exit(1);
-        }
+    if Path::new(&dropin_dir).exists()
+        && let Err(e) = fs::remove_dir_all(&dropin_dir)
+    {
+        eprintln!("Failed to remove {dropin_dir}: {e}");
+        process::exit(1);
     }
     let _ = process::Command::new("networkctl")
         .args(["reload"])
