@@ -1241,8 +1241,8 @@ fn format_redirection(redir: &Redirection) -> String {
         RedirectKind::Output => s.push_str("> "),
         RedirectKind::Append => s.push_str(">> "),
         RedirectKind::Clobber => s.push_str(">| "),
-        RedirectKind::DupInput => s.push_str("<& "),
-        RedirectKind::DupOutput => s.push_str(">& "),
+        RedirectKind::DupInput => s.push_str("<&"),
+        RedirectKind::DupOutput => s.push_str(">&"),
         RedirectKind::ReadWrite => s.push_str("<> "),
         RedirectKind::HereDoc(_) => s.push_str("<< "),
         RedirectKind::HereString => s.push_str("<<< "),
@@ -1325,6 +1325,11 @@ fn format_command_indent(cmd: &Command, indent: usize) -> String {
 }
 
 fn format_program(program: &Program, indent: usize) -> String {
+    format_program_impl(program, indent, indent > 1)
+}
+
+/// Format a program with control over whether the last command gets a semicolon
+fn format_program_impl(program: &Program, indent: usize, semi_last: bool) -> String {
     let prefix = "    ".repeat(indent);
     let mut lines = Vec::new();
     let mut pending_bg: Option<String> = None;
@@ -1352,16 +1357,9 @@ fn format_program(program: &Program, indent: usize) -> String {
             continue;
         }
         // Add semicolons after commands (bash style):
-        // Add ; after every command at indent > 0, except the very last in a
-        // brace group or function body (indent == 1)
         {
             let is_last = idx == program.len() - 1;
-            let add_semi = if is_last {
-                // Last command: add ; only if indent > 1 (inside while/for/if body, not brace group)
-                indent > 1
-            } else {
-                true
-            };
+            let add_semi = if is_last { semi_last } else { true };
             if add_semi {
                 let trimmed = line.trim_end();
                 let is_keyword = trimmed.ends_with('{')
@@ -1412,7 +1410,7 @@ fn format_compound_command_indent(cmd: &CompoundCommand, indent: usize) -> Strin
             } else {
                 format!(
                     "{{ \n{}\n{}}}",
-                    format_program(program, indent + 1),
+                    format_program_impl(program, indent + 1, false),
                     iprefix
                 )
             }
@@ -1460,9 +1458,9 @@ fn format_compound_command_indent(cmd: &CompoundCommand, indent: usize) -> Strin
                         format_program(eb, indent + 1 + nest_level)
                     ));
                 }
-                // Close all nested fi's
+                // Close all nested fi's (all get ; since they're inside the else)
                 for i in (0..nest_level).rev() {
-                    else_content.push_str(&format!("\n{}fi", "    ".repeat(indent + 1 + i)));
+                    else_content.push_str(&format!("\n{}fi;", "    ".repeat(indent + 1 + i)));
                 }
                 s.push_str(&else_content);
             } else if let Some(else_body) = else_body_ref {
