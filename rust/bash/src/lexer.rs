@@ -1086,7 +1086,10 @@ fn read_param_word_impl(chars: &[char], i: &mut usize, delim: char, in_dquote: b
     let mut literal = String::new();
     let mut depth = 0;
 
-    while *i < chars.len() && (chars[*i] != delim || depth > 0) && chars[*i] != '}' {
+    while *i < chars.len()
+        && (chars[*i] != delim || depth > 0)
+        && (delim == '}' || chars[*i] != '}' || depth > 0)
+    {
         match chars[*i] {
             '\\' if *i + 1 < chars.len() => {
                 let next = chars[*i + 1];
@@ -1106,7 +1109,47 @@ fn read_param_word_impl(chars: &[char], i: &mut usize, delim: char, in_dquote: b
                 *i += 1;
                 parts.push(parse_dollar(chars, i, in_dquote));
             }
+            '\'' if in_dquote => {
+                // Inside double quotes, single quotes protect } from closing
+                // the expansion but are preserved as literal characters and
+                // do NOT prevent $-expansion (unlike normal single quotes)
+                literal.push('\'');
+                *i += 1;
+                while *i < chars.len() && chars[*i] != '\'' {
+                    match chars[*i] {
+                        '$' => {
+                            // Flush literal and process $ expansion
+                            if !literal.is_empty() {
+                                parts.push(WordPart::Literal(std::mem::take(&mut literal)));
+                            }
+                            *i += 1;
+                            parts.push(parse_dollar(chars, i, true));
+                        }
+                        '\\' if *i + 1 < chars.len() => {
+                            let next = chars[*i + 1];
+                            if matches!(next, '$' | '`' | '"' | '\\') {
+                                literal.push(next);
+                            } else {
+                                literal.push('\\');
+                                literal.push(next);
+                            }
+                            *i += 2;
+                        }
+                        ch => {
+                            literal.push(ch);
+                            *i += 1;
+                        }
+                    }
+                }
+                if *i < chars.len() {
+                    literal.push('\'');
+                    *i += 1;
+                }
+            }
             '\'' => {
+                if !literal.is_empty() {
+                    parts.push(WordPart::Literal(std::mem::take(&mut literal)));
+                }
                 *i += 1;
                 let mut s = String::new();
                 while *i < chars.len() && chars[*i] != '\'' {
@@ -1118,7 +1161,26 @@ fn read_param_word_impl(chars: &[char], i: &mut usize, delim: char, in_dquote: b
                 }
                 parts.push(WordPart::SingleQuoted(s));
             }
+            '"' if in_dquote => {
+                // Inside double-quoted ${var+word}, a " toggles OUT of double
+                // quoting.  Read the unquoted segment (where single quotes work
+                // normally and protect }) until the next " toggles back in.
+                if !literal.is_empty() {
+                    parts.push(WordPart::Literal(std::mem::take(&mut literal)));
+                }
+                *i += 1; // skip the "
+                // Read unquoted content until " or }
+                let unquoted = read_param_word_impl(chars, i, '"', false);
+                parts.extend(unquoted);
+                // Skip the closing " if present
+                if *i < chars.len() && chars[*i] == '"' {
+                    *i += 1;
+                }
+            }
             '"' => {
+                if !literal.is_empty() {
+                    parts.push(WordPart::Literal(std::mem::take(&mut literal)));
+                }
                 *i += 1;
                 let mut dq_parts = Vec::new();
                 let mut dq_lit = String::new();
