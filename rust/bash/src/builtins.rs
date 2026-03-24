@@ -620,6 +620,10 @@ fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
             break;
         }
     } // end loop
+    // Flush stdout to ensure output goes to the correct fd
+    // (redirections may change fd 1 before the buffer is flushed)
+    use std::io::Write;
+    std::io::stdout().flush().ok();
     0
 }
 
