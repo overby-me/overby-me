@@ -268,7 +268,29 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                         }
                     }
                     WordPart::Variable(name) => {
-                        s.push_str(&lookup_var(name, ctx));
+                        let val = lookup_var(name, ctx);
+                        if val.is_empty()
+                            && ctx.opt_flags.contains('u')
+                            && !matches!(
+                                name.as_str(),
+                                "?" | "$" | "#" | "@" | "*" | "!" | "-" | "0"
+                            )
+                            && name.parse::<usize>().is_err()
+                            && !ctx.vars.contains_key(name.as_str())
+                            && !ctx.arrays.contains_key(name.as_str())
+                            && std::env::var(name.as_str()).is_err()
+                        {
+                            let sname = ctx
+                                .vars
+                                .get("_BASH_SOURCE_FILE")
+                                .or_else(|| ctx.positional.first())
+                                .map(|s| s.as_str())
+                                .unwrap_or("bash");
+                            let lineno = ctx.vars.get("LINENO").map(|s| s.as_str()).unwrap_or("0");
+                            eprintln!("{}: line {}: {}: unbound variable", sname, lineno, name);
+                            set_arith_error();
+                        }
+                        s.push_str(&val);
                     }
                     WordPart::Param(expr) if is_array_at_expansion(expr, ctx) => {
                         // "${arr[@]}" — each element becomes a separate field
@@ -399,6 +421,24 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
         }
         WordPart::Variable(name) => {
             let val = lookup_var(name, ctx);
+            if val.is_empty()
+                && ctx.opt_flags.contains('u')
+                && !matches!(name.as_str(), "?" | "$" | "#" | "@" | "*" | "!" | "-" | "0")
+                && name.parse::<usize>().is_err()
+                && !ctx.vars.contains_key(name.as_str())
+                && !ctx.arrays.contains_key(name.as_str())
+                && std::env::var(name.as_str()).is_err()
+            {
+                let sname = ctx
+                    .vars
+                    .get("_BASH_SOURCE_FILE")
+                    .or_else(|| ctx.positional.first())
+                    .map(|s| s.as_str())
+                    .unwrap_or("bash");
+                let lineno = ctx.vars.get("LINENO").map(|s| s.as_str()).unwrap_or("0");
+                eprintln!("{}: line {}: {}: unbound variable", sname, lineno, name);
+                set_arith_error();
+            }
             out.push(Segment::Unquoted(val));
         }
         WordPart::Param(expr) => {
@@ -1072,6 +1112,35 @@ fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
     }
 
     let val = lookup_var(&expr.name, ctx);
+
+    // set -u (nounset): error on unset variables, unless operation provides a default
+    if val.is_empty()
+        && ctx.opt_flags.contains('u')
+        && matches!(
+            expr.op,
+            ParamOp::None | ParamOp::Length | ParamOp::Substring(..)
+        )
+        && !matches!(
+            expr.name.as_str(),
+            "?" | "$" | "#" | "@" | "*" | "!" | "-" | "0"
+        )
+        && expr.name.parse::<usize>().is_err()
+        && !ctx.vars.contains_key(&expr.name)
+        && !ctx.arrays.contains_key(&expr.name)
+        && !ctx.assoc_arrays.contains_key(&expr.name)
+        && std::env::var(&expr.name).is_err()
+    {
+        let name = ctx
+            .vars
+            .get("_BASH_SOURCE_FILE")
+            .or_else(|| ctx.positional.first())
+            .map(|s| s.as_str())
+            .unwrap_or("bash");
+        let lineno = ctx.vars.get("LINENO").map(|s| s.as_str()).unwrap_or("0");
+        eprintln!("{}: line {}: {}: unbound variable", name, lineno, expr.name);
+        set_arith_error(); // Reuse arith error flag to signal abort
+        return String::new();
+    }
 
     match &expr.op {
         ParamOp::None => val,
