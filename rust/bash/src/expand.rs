@@ -495,6 +495,8 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
             } else {
                 cmd_sub(cmd)
             };
+            // Protect backslashes from quote removal with \x00 markers
+            let val = val.replace('\\', "\x00\\");
             out.push(Segment::Unquoted(val));
         }
         WordPart::BacktickSub(cmd) => {
