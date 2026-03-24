@@ -536,7 +536,7 @@ fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                         print!("{:o}", n);
                         arg_idx += 1;
                     }
-                    Some('f') | Some('g') | Some('G') => {
+                    Some('f') | Some('e') | Some('E') | Some('g') | Some('G') => {
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
                         let n: f64 = arg.parse().unwrap_or(0.0);
                         let p = precision.unwrap_or(6);
