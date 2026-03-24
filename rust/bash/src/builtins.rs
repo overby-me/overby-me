@@ -1351,21 +1351,24 @@ fn format_program(program: &Program, indent: usize) -> String {
             pending_bg = Some(line);
             continue;
         }
-        // Add semicolons after commands (bash style)
-        if idx < program.len() - 1 || indent > 1 {
-            let trimmed = line.trim_end();
-            let is_compound_end = trimmed.ends_with("fi")
-                || trimmed.ends_with("done")
-                || trimmed.ends_with("esac")
-                || trimmed.ends_with('}');
-            let is_keyword = trimmed.ends_with('{')
-                || trimmed.ends_with("then")
-                || trimmed.ends_with("do")
-                || trimmed.ends_with("else");
-            if !is_keyword && !trimmed.ends_with('&') && !trimmed.is_empty() {
-                if is_compound_end && idx == program.len() - 1 {
-                    // Don't add ; after the LAST fi/done/esac/} in a block
-                } else {
+        // Add semicolons after commands (bash style):
+        // Add ; after every command at indent > 0, except the very last in a
+        // brace group or function body (indent == 1)
+        {
+            let is_last = idx == program.len() - 1;
+            let add_semi = if is_last {
+                // Last command: add ; only if indent > 1 (inside while/for/if body, not brace group)
+                indent > 1
+            } else {
+                true
+            };
+            if add_semi {
+                let trimmed = line.trim_end();
+                let is_keyword = trimmed.ends_with('{')
+                    || trimmed.ends_with("then")
+                    || trimmed.ends_with("do")
+                    || trimmed.ends_with("else");
+                if !is_keyword && !trimmed.ends_with('&') && !trimmed.is_empty() {
                     line.push(';');
                 }
             }
