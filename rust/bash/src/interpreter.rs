@@ -698,6 +698,17 @@ impl Shell {
         }
     }
 
+    /// Execute the RETURN trap if set
+    pub fn run_return_trap(&mut self) {
+        if let Some(handler) = self.traps.get("RETURN").cloned()
+            && !handler.is_empty()
+        {
+            let saved = self.last_status;
+            self.run_string(&handler);
+            self.last_status = saved;
+        }
+    }
+
     /// Execute the EXIT trap if set
     pub fn run_exit_trap(&mut self) {
         if let Some(handler) = self
@@ -2217,6 +2228,9 @@ impl Shell {
         let saved_fds = crate::expand::take_procsub_fds();
 
         let status = self.run_compound_command(body);
+
+        // Run RETURN trap before restoring scope
+        self.run_return_trap();
 
         // Restore procsub fds
         for fd in saved_fds {

@@ -2897,6 +2897,9 @@ fn builtin_source(shell: &mut Shell, args: &[String]) -> i32 {
             shell.returning = false; // reset return flag after sourced script
             shell.sourcing = saved_sourcing;
 
+            // Run RETURN trap after sourced script completes
+            shell.run_return_trap();
+
             shell.positional = saved_positional;
             result
         }
