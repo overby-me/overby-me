@@ -276,12 +276,12 @@ fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
 
     // Handle options
     if args[0].starts_with('-') && args[0] != "-v" && args[0] != "--" {
+        eprintln!("printf: usage: printf [-v var] format [arguments]");
         eprintln!(
             "{}: printf: {}: invalid option",
             shell.error_prefix(),
             args[0]
         );
-        eprintln!("printf: usage: printf [-v var] format [arguments]");
         return 2;
     }
 
@@ -613,6 +613,24 @@ fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                         } else {
                             // %Q uses $'...' quoting style
                             print!("'{}'", arg.replace('\'', "'\\''"));
+                        }
+                        arg_idx += 1;
+                    }
+                    Some('n') => {
+                        // %n: store number of chars written so far
+                        let var_name = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("");
+                        if !var_name.is_empty()
+                            && var_name.chars().all(|c| c.is_alphanumeric() || c == '_')
+                            && var_name.chars().next().is_some_and(|c| !c.is_ascii_digit())
+                        {
+                            // We don't track exact chars written, use 0 as approximation
+                            shell.set_var(var_name, "0".to_string());
+                        } else if !var_name.is_empty() {
+                            eprintln!(
+                                "{}: printf: `{}': not a valid identifier",
+                                shell.error_prefix(),
+                                var_name
+                            );
                         }
                         arg_idx += 1;
                     }
