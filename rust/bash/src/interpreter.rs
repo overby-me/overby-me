@@ -2476,6 +2476,14 @@ impl Shell {
                     std::io::Write::flush(&mut std::io::stdout()).ok();
                     match unsafe { nix::unistd::fork() } {
                         Ok(nix::unistd::ForkResult::Child) => {
+                            // Increment BASH_SUBSHELL in subshell
+                            let subshell: i32 = self
+                                .vars
+                                .get("BASH_SUBSHELL")
+                                .and_then(|s| s.parse().ok())
+                                .unwrap_or(0);
+                            self.vars
+                                .insert("BASH_SUBSHELL".to_string(), (subshell + 1).to_string());
                             let status = self.run_program(program);
                             std::io::stdout().flush().ok();
                             std::io::stderr().flush().ok();

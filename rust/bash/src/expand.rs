@@ -636,6 +636,7 @@ fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
             ((t ^ (std::process::id() as u128 * 2654435761)) % 32768).to_string()
         }
         "BASHPID" => std::process::id().to_string(),
+        "BASH_SUBSHELL" => ctx.vars.get("BASH_SUBSHELL").cloned().unwrap_or_else(|| "0".to_string()),
         "SECONDS" => {
             use std::sync::OnceLock;
             static START: OnceLock<std::time::Instant> = OnceLock::new();
