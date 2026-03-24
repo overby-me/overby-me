@@ -2109,6 +2109,26 @@ fn eval_test_expr(args: &[String], shell: &Shell, cmd_name: &str) -> i32 {
                     1
                 };
             }
+            "-N" => {
+                // File exists and has been modified since last read
+                // In a simplified implementation, check if mtime > atime
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::MetadataExt;
+                    return if !args[1].is_empty()
+                        && std::fs::metadata(&args[1])
+                            .is_ok_and(|m| m.mtime() >= m.atime())
+                    {
+                        0
+                    } else {
+                        1
+                    };
+                }
+                #[cfg(not(unix))]
+                {
+                    return 1;
+                }
+            }
             #[cfg(unix)]
             "-r" => {
                 return if !args[1].is_empty()
