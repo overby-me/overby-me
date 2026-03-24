@@ -67,6 +67,7 @@ pub struct Lexer {
     alias_end_markers: Vec<(String, usize, bool)>, // (alias_name, end_pos, ends_with_space) - when pos passes end_pos, remove from expanding
     expand_alias_next: bool, // next word in command position should be checked for alias expansion
     redirect_target_next: bool, // next word is a redirect target (not a command)
+    pub in_case_pattern: bool, // suppress alias expansion in case patterns
 }
 
 impl Lexer {
@@ -90,6 +91,7 @@ impl Lexer {
             alias_end_markers: Vec::new(),
             expand_alias_next: true, // first word is command position
             redirect_target_next: false,
+            in_case_pattern: false,
         }
     }
 
@@ -193,7 +195,11 @@ impl Lexer {
     /// Try to expand a word as an alias. Returns true if expansion happened
     /// (caller should re-lex from the expansion start).
     fn try_alias_expand(&mut self, word: &Word, word_start: usize) -> bool {
-        if !self.shopt_expand_aliases || !self.expand_alias_next || self.redirect_target_next {
+        if !self.shopt_expand_aliases
+            || !self.expand_alias_next
+            || self.redirect_target_next
+            || self.in_case_pattern
+        {
             return false;
         }
         let text = match Self::word_to_plain_text(word) {

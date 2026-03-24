@@ -3466,15 +3466,25 @@ fn builtin_command(shell: &mut Shell, args: &[String]) -> i32 {
         return 0;
     }
 
-    // Execute command bypassing functions
+    // Execute command bypassing functions (but not builtins)
     if cmd_args.is_empty() {
         return 0;
     }
 
     let program = &cmd_args[0];
-    let exec_args: Vec<String> = cmd_args[1..].to_vec();
+    let exec_args = &cmd_args[1..];
+
+    // Check for builtins first (command bypasses functions, not builtins)
+    let builtin_map = builtins();
+    if let Some(builtin_fn) = builtin_map.get(program.as_str()) {
+        let args_owned: Vec<String> = exec_args.iter().map(|s| s.to_string()).collect();
+        return builtin_fn(shell, &args_owned);
+    }
+
+    // External command
+    let exec_args_owned: Vec<String> = exec_args.iter().map(|s| s.to_string()).collect();
     match std::process::Command::new(program)
-        .args(&exec_args)
+        .args(&exec_args_owned)
         .status()
     {
         Ok(status) => status.code().unwrap_or(1),

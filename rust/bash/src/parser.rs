@@ -716,6 +716,8 @@ impl Parser {
             .ok_or_else(|| "expected word after 'case'".to_string())?;
         self.skip_newlines();
         self.expect_keyword("in")?;
+        // Suppress alias expansion in case patterns
+        self.lexer.in_case_pattern = true;
         self.skip_newlines();
 
         let mut items = Vec::new();
@@ -724,7 +726,6 @@ impl Parser {
             if self.current == Token::LParen {
                 self.advance();
             }
-
             let mut patterns = Vec::new();
             while let Some(w) = self.take_word() {
                 patterns.push(w);
@@ -734,6 +735,7 @@ impl Parser {
                     break;
                 }
             }
+            self.lexer.in_case_pattern = false;
 
             if !self.eat(&Token::RParen) {
                 // Try to recover
@@ -757,6 +759,8 @@ impl Parser {
             } else {
                 CaseTerminator::Break
             };
+            // Re-suppress alias expansion for next pattern
+            self.lexer.in_case_pattern = true;
             self.skip_newlines();
 
             items.push(CaseItem {
@@ -766,6 +770,7 @@ impl Parser {
             });
         }
 
+        self.lexer.in_case_pattern = false;
         self.expect_keyword("esac")?;
         Ok(CompoundCommand::Case(CaseClause { word, items }))
     }
