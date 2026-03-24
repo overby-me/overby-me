@@ -134,13 +134,14 @@ pub fn expand_word_nosplit(
         opt_flags,
     };
     let segments = expand_word_to_segments(word, &ctx, cmd_sub);
-    segments
+    let result: String = segments
         .iter()
         .map(|s| match s {
             Segment::Quoted(t) | Segment::Unquoted(t) | Segment::Literal(t) => t.as_str(),
             Segment::SplitHere => " ",
         })
-        .collect()
+        .collect();
+    result.replace('\x00', "")
 }
 
 /// Expand a word for use as a pattern (case, [[=]], etc.).
@@ -498,8 +499,7 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
         }
         WordPart::BacktickSub(cmd) => {
             let val = cmd_sub(cmd);
-            // Escape backslashes in command substitution results so they
-            // survive quote removal (backslashes are literal, not escapes)
+            // Protect backslashes from quote removal with \x00 markers
             let val = val.replace('\\', "\x00\\");
             out.push(Segment::Unquoted(val));
         }
@@ -1397,13 +1397,15 @@ fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
 
 fn expand_word_nosplit_ctx(word: &Word, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
     let segments = expand_word_to_segments(word, ctx, cmd_sub);
-    segments
+    let result: String = segments
         .iter()
         .map(|s| match s {
             Segment::Quoted(t) | Segment::Unquoted(t) | Segment::Literal(t) => t.as_str(),
             Segment::SplitHere => " ",
         })
-        .collect()
+        .collect();
+    // Strip any \x00 escape markers from backtick results
+    result.replace('\x00', "")
 }
 
 fn expand_arith(expr: &str, ctx: &ExpCtx) -> String {
