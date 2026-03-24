@@ -1097,7 +1097,13 @@ fn read_param_word_impl(chars: &[char], i: &mut usize, delim: char, in_dquote: b
                     // Inside double quotes, preserve backslash for non-special chars
                     literal.push('\\');
                     literal.push(next);
+                } else if in_dquote {
+                    // In dquote context, just consume the escape (no quote removal later)
+                    literal.push(next);
                 } else {
+                    // Unquoted: mark escaped char with \x00 so it survives
+                    // quote removal in glob expansion stage
+                    literal.push('\x00');
                     literal.push(next);
                 }
                 *i += 2;
