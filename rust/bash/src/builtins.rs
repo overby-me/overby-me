@@ -350,28 +350,44 @@ fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                         break;
                     }
                 }
-                while let Some(&c) = chars.peek() {
-                    if c.is_ascii_digit() {
-                        width_str.push(c);
-                        chars.next();
-                    } else {
-                        break;
+                if chars.peek() == Some(&'*') {
+                    // Width from argument
+                    chars.next();
+                    let w_arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
+                    width_str = w_arg.to_string();
+                    arg_idx += 1;
+                } else {
+                    while let Some(&c) = chars.peek() {
+                        if c.is_ascii_digit() {
+                            width_str.push(c);
+                            chars.next();
+                        } else {
+                            break;
+                        }
                     }
                 }
                 // Parse precision
                 let mut precision: Option<usize> = None;
                 if chars.peek() == Some(&'.') {
                     chars.next();
-                    let mut prec_str = String::new();
-                    while let Some(&c) = chars.peek() {
-                        if c.is_ascii_digit() {
-                            prec_str.push(c);
-                            chars.next();
-                        } else {
-                            break;
+                    if chars.peek() == Some(&'*') {
+                        // Precision from argument
+                        chars.next();
+                        let p_arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
+                        precision = Some(p_arg.parse().unwrap_or(0));
+                        arg_idx += 1;
+                    } else {
+                        let mut prec_str = String::new();
+                        while let Some(&c) = chars.peek() {
+                            if c.is_ascii_digit() {
+                                prec_str.push(c);
+                                chars.next();
+                            } else {
+                                break;
+                            }
                         }
+                        precision = Some(prec_str.parse().unwrap_or(0));
                     }
-                    precision = Some(prec_str.parse().unwrap_or(0));
                 }
                 let w: usize = width_str.parse().unwrap_or(0);
                 let left = flags.contains('-');
