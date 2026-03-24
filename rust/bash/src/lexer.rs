@@ -1051,6 +1051,7 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                         'r' => s.push('\r'),
                         '\\' => s.push('\\'),
                         '\'' => s.push('\''),
+                        '"' => s.push('"'),
                         'a' => s.push('\x07'),
                         'b' => s.push('\x08'),
                         'c' => {
@@ -1994,6 +1995,7 @@ impl Lexer {
                                     Some('r') => s.push('\r'),
                                     Some('\\') => s.push('\\'),
                                     Some('\'') => s.push('\''),
+                                    Some('"') => s.push('"'),
                                     Some('a') => s.push('\x07'),
                                     Some('b') => s.push('\x08'),
                                     Some('c') => {
