@@ -202,12 +202,15 @@ fn check_all_names_exist(
 /// part of the initial boot dependency graph). Missing dependency references are
 /// silently ignored — the unit is inserted and wired up to whatever units are
 /// already present in the table.
-pub fn insert_new_unit_lenient(unit: units::Unit, run_info: &mut RuntimeInfo) {
+pub fn insert_new_unit_lenient(mut unit: units::Unit, run_info: &mut RuntimeInfo) {
     let new_id = unit.id.clone();
     let unit_table = &mut run_info.unit_table;
 
     // Wire up bidirectional dependency relations with existing units.
+    // Direction 1: new unit references existing units → update existing units.
+    // Direction 2: existing units reference new unit → update new unit.
     for existing in unit_table.values_mut() {
+        // Direction 1: new → existing
         if unit.common.dependencies.after.contains(&existing.id) {
             existing.common.dependencies.before.push(new_id.clone());
         }
@@ -250,6 +253,44 @@ pub fn insert_new_unit_lenient(unit: units::Unit, run_info: &mut RuntimeInfo) {
         }
         if unit.common.dependencies.bound_by.contains(&existing.id) {
             existing.common.dependencies.binds_to.push(new_id.clone());
+        }
+
+        // Direction 2: existing → new (e.g., existing has Before=new_unit)
+        if existing.common.dependencies.before.contains(&new_id) {
+            unit.common.dependencies.after.push(existing.id.clone());
+        }
+        if existing.common.dependencies.after.contains(&new_id) {
+            unit.common.dependencies.before.push(existing.id.clone());
+        }
+        if existing.common.dependencies.wants.contains(&new_id) {
+            unit.common.dependencies.wanted_by.push(existing.id.clone());
+        }
+        if existing.common.dependencies.requires.contains(&new_id) {
+            unit.common
+                .dependencies
+                .required_by
+                .push(existing.id.clone());
+        }
+        if existing.common.dependencies.wanted_by.contains(&new_id) {
+            unit.common.dependencies.wants.push(existing.id.clone());
+        }
+        if existing.common.dependencies.required_by.contains(&new_id) {
+            unit.common.dependencies.requires.push(existing.id.clone());
+        }
+        if existing.common.dependencies.conflicts.contains(&new_id) {
+            unit.common
+                .dependencies
+                .conflicted_by
+                .push(existing.id.clone());
+        }
+        if existing.common.dependencies.conflicted_by.contains(&new_id) {
+            unit.common.dependencies.conflicts.push(existing.id.clone());
+        }
+        if existing.common.dependencies.binds_to.contains(&new_id) {
+            unit.common.dependencies.bound_by.push(existing.id.clone());
+        }
+        if existing.common.dependencies.bound_by.contains(&new_id) {
+            unit.common.dependencies.binds_to.push(existing.id.clone());
         }
     }
 
