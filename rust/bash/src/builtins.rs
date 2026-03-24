@@ -600,11 +600,16 @@ fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                     }
                     Some('q') => {
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("");
-                        let quoted = if arg.is_empty() {
+                        let mut quoted = if arg.is_empty() {
                             "''".to_string()
                         } else {
                             shell_escape(arg)
                         };
+                        // %q precision truncates the QUOTED form
+                        if let Some(p) = precision {
+                            let truncated: String = quoted.chars().take(p).collect();
+                            quoted = truncated;
+                        }
                         if w > 0 {
                             if left {
                                 print!("{:<w$}", quoted);
