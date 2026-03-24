@@ -377,6 +377,63 @@ fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                 let left = flags.contains('-');
                 let zero_pad = flags.contains('0');
                 match chars.next() {
+                    Some('(') => {
+                        // %(fmt)T — strftime format
+                        let mut fmt = String::new();
+                        while let Some(&c) = chars.peek() {
+                            if c == ')' {
+                                chars.next();
+                                break;
+                            }
+                            fmt.push(c);
+                            chars.next();
+                        }
+                        // Consume the T
+                        if chars.peek() == Some(&'T') {
+                            chars.next();
+                        }
+                        let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("-1");
+                        let timestamp: i64 = if arg == "-1" {
+                            // -1 means current time
+                            std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs() as i64
+                        } else if arg == "-2" {
+                            // -2 means shell startup time
+                            std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs() as i64
+                        } else {
+                            arg.parse().unwrap_or(0)
+                        };
+
+                        // Use libc strftime for formatting
+                        #[cfg(unix)]
+                        {
+                            let tm = unsafe {
+                                let t = timestamp as libc::time_t;
+                                let mut tm: libc::tm = std::mem::zeroed();
+                                libc::localtime_r(&t, &mut tm);
+                                tm
+                            };
+                            let c_fmt = std::ffi::CString::new(fmt.as_str()).unwrap_or_default();
+                            let mut buf = [0u8; 512];
+                            let len = unsafe {
+                                libc::strftime(
+                                    buf.as_mut_ptr() as *mut libc::c_char,
+                                    buf.len(),
+                                    c_fmt.as_ptr(),
+                                    &tm,
+                                )
+                            };
+                            if len > 0 {
+                                print!("{}", String::from_utf8_lossy(&buf[..len]));
+                            }
+                        }
+                        arg_idx += 1;
+                    }
                     Some('s') => {
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("");
                         if w > 0 {
