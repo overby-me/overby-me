@@ -830,10 +830,15 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
             if *i < chars.len() && chars[*i] == '(' {
                 // Arithmetic: $(( ... ))
                 *i += 1;
-                let mut depth = 1;
+                let mut depth = 1; // nested $(( )) depth
+                let mut paren_depth = 0i32; // inner () depth
                 let mut expr = String::new();
                 while *i < chars.len() && depth > 0 {
-                    if *i + 1 < chars.len() && chars[*i] == ')' && chars[*i + 1] == ')' {
+                    if *i + 1 < chars.len()
+                        && chars[*i] == ')'
+                        && chars[*i + 1] == ')'
+                        && paren_depth <= 0
+                    {
                         depth -= 1;
                         if depth == 0 {
                             *i += 2;
@@ -849,6 +854,11 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                         expr.push(chars[*i]);
                         *i += 1;
                     } else {
+                        if chars[*i] == '(' {
+                            paren_depth += 1;
+                        } else if chars[*i] == ')' {
+                            paren_depth -= 1;
+                        }
                         expr.push(chars[*i]);
                         *i += 1;
                     }

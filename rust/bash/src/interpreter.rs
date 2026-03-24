@@ -2498,15 +2498,16 @@ impl Shell {
         }
 
         // Handle parenthesized expressions at top level
-        if expr.starts_with('(') && expr.ends_with(')') {
+        let trimmed_for_paren = expr.trim_end();
+        if trimmed_for_paren.starts_with('(') && trimmed_for_paren.ends_with(')') {
             let mut depth = 0i32;
             let mut all_matched = true;
-            for (i, ch) in expr.chars().enumerate() {
+            for (i, ch) in trimmed_for_paren.chars().enumerate() {
                 match ch {
                     '(' => depth += 1,
                     ')' => {
                         depth -= 1;
-                        if depth == 0 && i < expr.len() - 1 {
+                        if depth == 0 && i < trimmed_for_paren.len() - 1 {
                             all_matched = false;
                             break;
                         }
@@ -2515,7 +2516,8 @@ impl Shell {
                 }
             }
             if all_matched {
-                return self.eval_arith_expr_impl(&expr[1..expr.len() - 1]);
+                return self
+                    .eval_arith_expr_impl(&trimmed_for_paren[1..trimmed_for_paren.len() - 1]);
             }
         }
 
