@@ -2321,6 +2321,32 @@ fn eval_test_expr(args: &[String], shell: &Shell, cmd_name: &str) -> i32 {
         }
     }
 
+    // Handle parenthesized grouping: ( expr )
+    if args.first().map(|s| s.as_str()) == Some("(")
+        && args.last().map(|s| s.as_str()) == Some(")")
+    {
+        // Find matching close paren, handling nesting
+        let mut depth = 0;
+        let mut close = None;
+        for (i, arg) in args.iter().enumerate() {
+            if arg == "(" {
+                depth += 1;
+            } else if arg == ")" {
+                depth -= 1;
+                if depth == 0 {
+                    close = Some(i);
+                    break;
+                }
+            }
+        }
+        if let Some(close_idx) = close {
+            if close_idx == args.len() - 1 {
+                // All args are inside parens
+                return eval_test_expr(&args[1..close_idx], shell, cmd_name);
+            }
+        }
+    }
+
     // Handle -a (and) and -o (or)
     for (i, arg) in args.iter().enumerate() {
         if arg == "-a" && i > 0 && i < args.len() - 1 {
