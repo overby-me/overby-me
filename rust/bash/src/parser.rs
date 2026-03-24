@@ -486,11 +486,24 @@ impl Parser {
             let saved_tok = self.current.clone();
             self.advance(); // consume first (
             if self.current == Token::LParen {
-                // (( expression )) — don't consume second ( as token;
-                // instead, use raw lexer to read until ))
-                let expr = self.read_arith_command()?;
-                self.current = self.lexer.next_token();
-                return Ok(CompoundCommand::Arithmetic(expr));
+                // Try (( expression )) first, but fall back to nested subshell
+                // if the content contains command separators (;, |, &)
+                let arith_saved_pos = self.lexer.save_position();
+                match self.read_arith_command() {
+                    Ok(expr) => {
+                        self.current = self.lexer.next_token();
+                        return Ok(CompoundCommand::Arithmetic(expr));
+                    }
+                    Err(e) if e.contains("`;'") => {
+                        // Content has command separators — treat as nested subshell
+                        self.lexer.restore_position(arith_saved_pos);
+                        // Restore to the first ( and parse as subshell
+                        self.lexer.restore_position(saved_pos);
+                        self.current = saved_tok;
+                        return self.parse_subshell();
+                    }
+                    Err(e) => return Err(e),
+                }
             }
             // Not ((, backtrack to regular subshell
             self.lexer.restore_position(saved_pos);
