@@ -2748,21 +2748,37 @@ impl Shell {
 
     /// Execute `[[ conditional expression ]]`
     fn run_conditional(&mut self, expr: &CondExpr) -> i32 {
-        if self.eval_cond(expr) { 0 } else { 1 }
+        match self.eval_cond(expr) {
+            Ok(true) => 0,
+            Ok(false) => 1,
+            Err(_) => 2,
+        }
     }
 
-    fn eval_cond(&mut self, expr: &CondExpr) -> bool {
+    fn eval_cond(&mut self, expr: &CondExpr) -> Result<bool, ()> {
         match expr {
             CondExpr::Word(w) => {
                 let s = self.expand_word_single(w);
-                !s.is_empty()
+                Ok(!s.is_empty())
             }
-            CondExpr::Not(e) => !self.eval_cond(e),
-            CondExpr::And(a, b) => self.eval_cond(a) && self.eval_cond(b),
-            CondExpr::Or(a, b) => self.eval_cond(a) || self.eval_cond(b),
+            CondExpr::Not(e) => self.eval_cond(e).map(|v| !v),
+            CondExpr::And(a, b) => {
+                let av = self.eval_cond(a)?;
+                if !av {
+                    return Ok(false);
+                }
+                self.eval_cond(b)
+            }
+            CondExpr::Or(a, b) => {
+                let av = self.eval_cond(a)?;
+                if av {
+                    return Ok(true);
+                }
+                self.eval_cond(b)
+            }
             CondExpr::Unary(op, w) => {
                 let val = self.expand_word_single(w);
-                self.eval_cond_unary(op, &val)
+                Ok(self.eval_cond_unary(op, &val))
             }
             CondExpr::Binary(left, op, right) => {
                 let lval = self.expand_word_single(left);
@@ -2906,15 +2922,15 @@ impl Shell {
         }
     }
 
-    fn eval_cond_binary(&mut self, left: &str, op: &str, right: &str) -> bool {
+    fn eval_cond_binary(&mut self, left: &str, op: &str, right: &str) -> Result<bool, ()> {
         match op {
             "=" | "==" => {
                 // Pattern matching (right side is a glob pattern)
-                case_pattern_match(left, right)
+                Ok(case_pattern_match(left, right))
             }
-            "!=" => !case_pattern_match(left, right),
-            "<" => left < right,
-            ">" => left > right,
+            "!=" => Ok(!case_pattern_match(left, right)),
+            "<" => Ok(left < right),
+            ">" => Ok(left > right),
             "-eq" | "-ne" | "-lt" | "-le" | "-gt" | "-ge" => {
                 fn parse_cond_int(s: &str) -> Option<i64> {
                     if s.is_empty() {
@@ -2930,7 +2946,7 @@ impl Shell {
                         // If the expression was completely non-numeric, report error
                         if left.chars().next().is_some_and(|c| c.is_alphabetic()) && n == 0 {
                             eprintln!("{}: [[: {}: integer expected", self.error_prefix(), left);
-                            return false;
+                            return Err(());
                         }
                         n
                     }
@@ -2941,12 +2957,12 @@ impl Shell {
                         let n = self.eval_arith_expr(right);
                         if right.chars().next().is_some_and(|c| c.is_alphabetic()) && n == 0 {
                             eprintln!("{}: [[: {}: integer expected", self.error_prefix(), right);
-                            return false;
+                            return Err(());
                         }
                         n
                     }
                 };
-                match op {
+                Ok(match op {
                     "-eq" => a == b,
                     "-ne" => a != b,
                     "-lt" => a < b,
@@ -2954,17 +2970,17 @@ impl Shell {
                     "-gt" => a > b,
                     "-ge" => a >= b,
                     _ => unreachable!(),
-                }
+                })
             }
             "-nt" => {
                 let a = std::fs::metadata(left).and_then(|m| m.modified()).ok();
                 let b = std::fs::metadata(right).and_then(|m| m.modified()).ok();
-                matches!((a, b), (Some(a), Some(b)) if a > b)
+                Ok(matches!((a, b), (Some(a), Some(b)) if a > b))
             }
             "-ot" => {
                 let a = std::fs::metadata(left).and_then(|m| m.modified()).ok();
                 let b = std::fs::metadata(right).and_then(|m| m.modified()).ok();
-                matches!((a, b), (Some(a), Some(b)) if a < b)
+                Ok(matches!((a, b), (Some(a), Some(b)) if a < b))
             }
             "-ef" => {
                 // Same device and inode
@@ -2973,10 +2989,10 @@ impl Shell {
                     use std::os::unix::fs::MetadataExt;
                     let a = std::fs::metadata(left).ok();
                     let b = std::fs::metadata(right).ok();
-                    matches!((a, b), (Some(a), Some(b)) if a.dev() == b.dev() && a.ino() == b.ino())
+                    Ok(matches!((a, b), (Some(a), Some(b)) if a.dev() == b.dev() && a.ino() == b.ino()))
                 }
                 #[cfg(not(unix))]
-                false
+                Ok(false)
             }
             "=~" => {
                 // Regex matching with BASH_REMATCH capture groups
@@ -2992,19 +3008,19 @@ impl Shell {
                                 );
                             }
                             self.arrays.insert("BASH_REMATCH".to_string(), rematch);
-                            true
+                            Ok(true)
                         } else {
                             self.arrays.insert("BASH_REMATCH".to_string(), Vec::new());
-                            false
+                            Ok(false)
                         }
                     }
                     Err(_) => {
                         self.arrays.insert("BASH_REMATCH".to_string(), Vec::new());
-                        false
+                        Ok(false)
                     }
                 }
             }
-            _ => false,
+            _ => Ok(false),
         }
     }
 
