@@ -70,7 +70,14 @@ struct Cli {
     #[arg(long)]
     no_block: bool,
 
+    /// Send the notification, then exec the remaining command line.
+    /// This is useful to send notifications before exec'ing the actual
+    /// daemon binary (e.g., `systemd-notify --exec --ready -- /usr/bin/mydaemon`).
+    #[arg(long)]
+    exec: bool,
+
     /// Additional variables to send, in VAR=VALUE format.
+    /// When --exec is used, everything after `;` or `--` is the command to exec.
     #[arg(trailing_var_arg = true)]
     variables: Vec<String>,
 }
@@ -214,11 +221,20 @@ fn main() {
         parts.push(format!("MAINPID={pid}"));
     }
 
-    // Append any trailing VAR=VALUE arguments
+    // Separate variables from exec command (when --exec is used).
+    // With --exec, arguments after ";" or without "=" are the command.
+    let mut exec_cmd: Vec<String> = Vec::new();
+    let mut found_separator = false;
     for var in &cli.variables {
-        if var.contains('=') {
+        if cli.exec && (var == ";" || var == "--") {
+            found_separator = true;
+            continue;
+        }
+        if found_separator || (cli.exec && !var.contains('=')) {
+            exec_cmd.push(var.clone());
+        } else if var.contains('=') {
             parts.push(var.clone());
-        } else {
+        } else if !cli.exec {
             eprintln!("Warning: ignoring argument without '=': {var}");
         }
     }
@@ -258,6 +274,16 @@ fn main() {
 
     if let Err(e) = send_notification(&socket_path, &message) {
         eprintln!("Error: {e}");
+        process::exit(1);
+    }
+
+    // If --exec was specified, exec the remaining command
+    if cli.exec && !exec_cmd.is_empty() {
+        use std::os::unix::process::CommandExt;
+        let cmd = &exec_cmd[0];
+        let args = &exec_cmd[1..];
+        let err = process::Command::new(cmd).args(args).exec();
+        eprintln!("Error: failed to exec {cmd}: {err}");
         process::exit(1);
     }
 }

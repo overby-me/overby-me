@@ -83,6 +83,8 @@ const LONG_FLAGS_WITH_VALUE: &[&str] = &[
     "--signal",
     "--kill-mode",
     "--kill-who",
+    "--kill-whom",
+    "--kill-value",
     "--job-mode",
     "--root",
     "--preset-mode",
@@ -133,6 +135,8 @@ fn main() {
     let mut state_filter: Option<String> = None;
 
     let mut what_filter: Option<String> = None;
+    let mut kill_whom: Option<String> = None;
+    let mut kill_value: Option<i32> = None;
 
     let mut i = 0;
     while i < args.len() {
@@ -148,6 +152,37 @@ fn main() {
         }
         if let Some(rest) = arg.strip_prefix("--what=") {
             what_filter = Some(rest.to_string());
+            i += 1;
+            continue;
+        }
+
+        // --kill-whom flag (for `kill --kill-whom=main`)
+        if arg == "--kill-whom" || arg == "--kill-who" {
+            if i + 1 < args.len() {
+                kill_whom = Some(args[i + 1].clone());
+            }
+            i += 2;
+            continue;
+        }
+        if let Some(rest) = arg
+            .strip_prefix("--kill-whom=")
+            .or_else(|| arg.strip_prefix("--kill-who="))
+        {
+            kill_whom = Some(rest.to_string());
+            i += 1;
+            continue;
+        }
+
+        // --kill-value flag (for `kill --kill-value=4`)
+        if arg == "--kill-value" {
+            if i + 1 < args.len() {
+                kill_value = args[i + 1].parse::<i32>().ok();
+            }
+            i += 2;
+            continue;
+        }
+        if let Some(rest) = arg.strip_prefix("--kill-value=") {
+            kill_value = rest.parse::<i32>().ok();
             i += 1;
             continue;
         }
@@ -273,30 +308,57 @@ fn main() {
     // Extract --signal flag for kill command
     let mut kill_signal: Option<i32> = None;
     {
+        let parse_signal_name = |name: &str| -> Option<i32> {
+            if let Ok(sig) = name.parse::<i32>() {
+                return Some(sig);
+            }
+            // Handle SIGRTMIN+N / SIGRTMAX-N
+            let name_upper = name.to_uppercase();
+            if let Some(offset) = name_upper
+                .strip_prefix("SIGRTMIN+")
+                .or_else(|| name_upper.strip_prefix("RTMIN+"))
+            {
+                if let Ok(n) = offset.parse::<i32>() {
+                    return Some(34 + n); // SIGRTMIN = 34 on Linux
+                }
+            }
+            if let Some(offset) = name_upper
+                .strip_prefix("SIGRTMAX-")
+                .or_else(|| name_upper.strip_prefix("RTMAX-"))
+            {
+                if let Ok(n) = offset.parse::<i32>() {
+                    return Some(64 - n); // SIGRTMAX = 64 on Linux
+                }
+            }
+            match name_upper.as_str() {
+                "SIGTERM" | "TERM" => Some(15),
+                "SIGKILL" | "KILL" => Some(9),
+                "SIGHUP" | "HUP" => Some(1),
+                "SIGINT" | "INT" => Some(2),
+                "SIGUSR1" | "USR1" => Some(10),
+                "SIGUSR2" | "USR2" => Some(12),
+                "SIGCONT" | "CONT" => Some(18),
+                "SIGSTOP" | "STOP" => Some(19),
+                "SIGTSTP" | "TSTP" => Some(20),
+                "SIGQUIT" | "QUIT" => Some(3),
+                "SIGABRT" | "ABRT" => Some(6),
+                "SIGPIPE" | "PIPE" => Some(13),
+                "SIGALRM" | "ALRM" => Some(14),
+                "SIGCHLD" | "CHLD" => Some(17),
+                "SIGWINCH" | "WINCH" => Some(28),
+                _ => None,
+            }
+        };
         let mut i = 0;
         while i < positional.len() {
             if positional[i] == "--signal" || positional[i] == "-s" {
                 positional.remove(i);
                 if i < positional.len() {
-                    if let Ok(sig) = positional[i].parse::<i32>() {
-                        kill_signal = Some(sig);
-                    } else {
-                        // Try signal name mapping
-                        kill_signal = match positional[i].as_str() {
-                            "SIGTERM" | "TERM" => Some(15),
-                            "SIGKILL" | "KILL" => Some(9),
-                            "SIGHUP" | "HUP" => Some(1),
-                            "SIGINT" | "INT" => Some(2),
-                            "SIGUSR1" | "USR1" => Some(10),
-                            "SIGUSR2" | "USR2" => Some(12),
-                            "SIGCONT" | "CONT" => Some(18),
-                            _ => Some(15),
-                        };
-                    }
+                    kill_signal = parse_signal_name(&positional[i]).or(Some(15));
                     positional.remove(i);
                 }
             } else if let Some(rest) = positional[i].strip_prefix("--signal=") {
-                kill_signal = rest.parse::<i32>().ok().or(Some(15));
+                kill_signal = parse_signal_name(rest).or(Some(15));
                 positional.remove(i);
             } else {
                 i += 1;
@@ -642,7 +704,7 @@ fn main() {
         }
         Some(Value::Array(arr))
     } else if method == "kill" {
-        // kill <unit> [--signal=SIG]
+        // kill <unit> [--signal=SIG] [--kill-whom=WHO] [--kill-value=N]
         if positional.len() < 2 {
             if !quiet {
                 eprintln!("Error: kill requires a unit name.");
@@ -652,6 +714,14 @@ fn main() {
         let mut arr = vec![Value::String(positional[1].clone())];
         if let Some(sig) = kill_signal {
             arr.push(Value::String(sig.to_string()));
+        } else {
+            arr.push(Value::String("15".to_string())); // SIGTERM default
+        }
+        arr.push(Value::String(
+            kill_whom.unwrap_or_else(|| "all".to_string()),
+        ));
+        if let Some(val) = kill_value {
+            arr.push(Value::String(val.to_string()));
         }
         Some(Value::Array(arr))
     } else if method == "suspend"

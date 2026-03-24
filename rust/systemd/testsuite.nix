@@ -172,7 +172,18 @@ in
         ln -sfn /etc/systemd-tests/testdata /usr/lib/systemd/tests/testdata
 
         # Make /etc/dbus-1 writable for tests that install D-Bus policy files
-        mkdir -p /etc/dbus-1/system.d
+        if [ -L /etc/dbus-1 ] || [ ! -w /etc/dbus-1 2>/dev/null ]; then
+          tmp=$(mktemp -d)
+          if [ -e /etc/dbus-1 ]; then
+            cp -a /etc/dbus-1/. "$tmp/" 2>/dev/null || true
+            rm -f /etc/dbus-1
+          fi
+          mkdir -p /etc/dbus-1/system.d
+          cp -a "$tmp/." /etc/dbus-1/ 2>/dev/null || true
+          rm -rf "$tmp"
+        else
+          mkdir -p /etc/dbus-1/system.d
+        fi
       '';
 
       users = {

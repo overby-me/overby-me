@@ -84,8 +84,10 @@ pub enum Command {
     Disable(Vec<String>),
     /// `reset-failed [unit]` — clear the failed state of a unit (or all units).
     ResetFailed(Option<String>),
-    /// `kill <unit> [--signal=SIG]` — send a signal to a unit's processes.
-    Kill(String, i32),
+    /// `kill <unit> [--signal=SIG] [--kill-whom=WHO] [--kill-value=N]`
+    /// Send a signal to a unit's processes.
+    /// Fields: unit_name, signal, kill_whom ("main"/"control"/"all"), kill_value
+    Kill(String, i32, String, Option<i32>),
     Shutdown(crate::shutdown::ShutdownAction),
     /// `suspend` — put the system to sleep (suspend to RAM).
     Suspend,
@@ -155,6 +157,12 @@ pub struct TransientUnitParams {
     pub scope: bool,
     /// Whether the caller wants to wait for completion.
     pub wait: bool,
+    /// Slice to place the unit in.
+    pub slice: Option<String>,
+    /// Timer properties — if any are set, a companion .timer unit is created.
+    pub on_calendar: Option<String>,
+    pub on_active: Option<String>,
+    pub on_boot: Option<String>,
 }
 
 #[derive(Debug)]
@@ -496,6 +504,23 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
                         .unwrap_or_default();
                     let scope = obj.get("scope").and_then(|v| v.as_bool()).unwrap_or(false);
                     let wait = obj.get("wait").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let slice = obj
+                        .get("slice")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_owned());
+
+                    let on_calendar = obj
+                        .get("on_calendar")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_owned());
+                    let on_active = obj
+                        .get("on_active")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_owned());
+                    let on_boot = obj
+                        .get("on_boot")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_owned());
 
                     Command::StartTransient(TransientUnitParams {
                         unit_name,
@@ -510,6 +535,10 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
                         environment,
                         scope,
                         wait,
+                        slice,
+                        on_calendar,
+                        on_active,
+                        on_boot,
                     })
                 }
                 Some(_) | None => {
@@ -575,9 +604,9 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
             Command::ResetFailed(name)
         }
         "kill" => {
-            // Params: String (unit name) or Array [unit_name, signal_number_string]
+            // Params: String (unit name) or Array [unit_name, signal, kill_whom, kill_value]
             match &call.params {
-                Some(Value::String(s)) => Command::Kill(s.clone(), 15), // default SIGTERM
+                Some(Value::String(s)) => Command::Kill(s.clone(), 15, "all".to_string(), None),
                 Some(Value::Array(arr)) if !arr.is_empty() => {
                     let name = arr[0].as_str().unwrap_or("").to_owned();
                     let sig = arr
@@ -585,7 +614,16 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
                         .and_then(|v| v.as_str())
                         .and_then(|s| s.parse::<i32>().ok())
                         .unwrap_or(15);
-                    Command::Kill(name, sig)
+                    let whom = arr
+                        .get(2)
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("all")
+                        .to_owned();
+                    let value = arr
+                        .get(3)
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| s.parse::<i32>().ok());
+                    Command::Kill(name, sig, whom, value)
                 }
                 Some(_) | None => {
                     return Err(ParseError::ParamsInvalid(
@@ -1711,7 +1749,7 @@ fn create_transient_unit(
         dbus_name: None,
         pid_file: None,
         sockets: vec![],
-        slice: None,
+        slice: params.slice.clone(),
         remain_after_exit: params.remain_after_exit,
         success_exit_status: SuccessExitStatus::default(),
         restart_force_exit_status: SuccessExitStatus::default(),
@@ -1939,6 +1977,27 @@ fn create_transient_unit(
                         env.vars.push((k.to_string(), v.to_string()));
                     }
                 }
+                "MemoryMax" => {
+                    service_conf.memory_max = Some(parse_memory_limit(value));
+                }
+                "MemoryHigh" => {
+                    service_conf.memory_high = Some(parse_memory_limit(value));
+                }
+                "MemoryMin" => {
+                    service_conf.memory_min = Some(parse_memory_limit(value));
+                }
+                "MemoryLow" => {
+                    service_conf.memory_low = Some(parse_memory_limit(value));
+                }
+                "TasksMax" => {
+                    service_conf.tasks_max = Some(parse_tasks_max(value));
+                }
+                "Slice" => {
+                    service_conf.slice = Some(value.to_string());
+                }
+                "SendSIGHUP" => {
+                    service_conf.send_sighup = matches!(value, "yes" | "true" | "1");
+                }
                 _ => {
                     log::debug!("Ignoring unknown transient unit property: {key}={value}");
                 }
@@ -2069,7 +2128,224 @@ fn create_transient_unit(
         None => {}
     }
     crate::units::insert_new_unit_lenient(unit, &mut ri);
+
+    // If timer properties are set, create a companion .timer unit
+    let has_timer =
+        params.on_calendar.is_some() || params.on_active.is_some() || params.on_boot.is_some();
+    if has_timer {
+        let timer_name = if unit_name.ends_with(".service") {
+            format!("{}.timer", unit_name.strip_suffix(".service").unwrap())
+        } else {
+            format!("{unit_name}.timer")
+        };
+
+        let service_unit_name = if unit_name.ends_with(".service") {
+            unit_name.clone()
+        } else {
+            format!("{unit_name}.service")
+        };
+
+        let on_calendar = params.on_calendar.iter().cloned().collect::<Vec<String>>();
+
+        let on_active_sec = params
+            .on_active
+            .as_ref()
+            .and_then(|s| parse_timespan(s))
+            .into_iter()
+            .collect::<Vec<_>>();
+
+        let on_boot_sec = params
+            .on_boot
+            .as_ref()
+            .and_then(|s| parse_timespan(s))
+            .into_iter()
+            .collect::<Vec<_>>();
+
+        let timer_config = crate::units::TimerConfig {
+            on_active_sec,
+            on_boot_sec,
+            on_startup_sec: vec![],
+            on_unit_active_sec: vec![],
+            on_unit_inactive_sec: vec![],
+            on_calendar,
+            accuracy_sec: std::time::Duration::from_secs(60),
+            randomized_delay_sec: std::time::Duration::ZERO,
+            fixed_random_delay: false,
+            persistent: false,
+            wake_system: false,
+            remain_after_elapse: true,
+            on_clock_change: false,
+            on_timezone_change: false,
+            unit: service_unit_name,
+        };
+
+        let timer_id = UnitId {
+            kind: crate::units::UnitIdKind::Timer,
+            name: timer_name.clone(),
+        };
+
+        let timer_unit = crate::units::Unit {
+            id: timer_id.clone(),
+            common: Common {
+                unit: UnitConfig {
+                    description: params
+                        .description
+                        .clone()
+                        .unwrap_or_else(|| format!("Timer for {unit_name}")),
+                    documentation: vec![],
+                    fragment_path: None,
+                    refs_by_name: vec![],
+                    default_dependencies: false,
+                    conditions: vec![],
+                    assertions: vec![],
+                    success_action: crate::units::UnitAction::None,
+                    failure_action: crate::units::UnitAction::None,
+                    aliases: vec![],
+                    ignore_on_isolate: false,
+                    default_instance: None,
+                    allow_isolate: false,
+                    job_timeout_sec: None,
+                    job_timeout_action: crate::units::UnitAction::None,
+                    refuse_manual_start: false,
+                    refuse_manual_stop: false,
+                    on_failure: vec![],
+                    on_failure_job_mode: crate::units::OnFailureJobMode::default(),
+                    start_limit_interval_sec: None,
+                    start_limit_burst: None,
+                    start_limit_action: crate::units::UnitAction::None,
+                },
+                dependencies: Dependencies {
+                    wants: vec![],
+                    wanted_by: vec![],
+                    requires: vec![],
+                    required_by: vec![],
+                    conflicts: vec![],
+                    conflicted_by: vec![],
+                    before: vec![],
+                    after: vec![],
+                    part_of: vec![],
+                    part_of_by: vec![],
+                    binds_to: vec![],
+                    bound_by: vec![],
+                },
+                status: RwLock::new(UnitStatus::Started(crate::units::StatusStarted::Running)),
+            },
+            specific: Specific::Timer(crate::units::TimerSpecific {
+                conf: timer_config,
+                state: RwLock::new(crate::units::TimerState {
+                    common: CommonState::default(),
+                }),
+            }),
+        };
+
+        // Remove existing timer if stopped
+        let existing_timer = ri
+            .unit_table
+            .values()
+            .find(|u| u.id.name == timer_name)
+            .map(|u| {
+                let status = u.common.status.read_poisoned();
+                let is_done =
+                    matches!(&*status, UnitStatus::NeverStarted | UnitStatus::Stopped(..));
+                (u.id.clone(), is_done)
+            });
+        if let Some((id, true)) = existing_timer {
+            ri.unit_table.remove(&id);
+        }
+        crate::units::insert_new_unit_lenient(timer_unit, &mut ri);
+    }
+
     Ok(unit_id)
+}
+
+/// Parse a memory limit value like "50M", "1G", "infinity", or "80%".
+fn parse_memory_limit(s: &str) -> crate::units::unit_parsing::MemoryLimit {
+    use crate::units::unit_parsing::MemoryLimit;
+    if s == "infinity" {
+        return MemoryLimit::Infinity;
+    }
+    if let Some(pct) = s.strip_suffix('%')
+        && let Ok(p) = pct.parse::<u64>()
+    {
+        return MemoryLimit::Percent(p);
+    }
+    // Try with byte suffixes
+    let (num_str, multiplier) = if let Some(n) = s.strip_suffix('K') {
+        (n, 1024u64)
+    } else if let Some(n) = s.strip_suffix('M') {
+        (n, 1024 * 1024)
+    } else if let Some(n) = s.strip_suffix('G') {
+        (n, 1024 * 1024 * 1024)
+    } else if let Some(n) = s.strip_suffix('T') {
+        (n, 1024u64 * 1024 * 1024 * 1024)
+    } else {
+        (s, 1)
+    };
+    if let Ok(n) = num_str.parse::<u64>() {
+        MemoryLimit::Bytes(n * multiplier)
+    } else {
+        MemoryLimit::Infinity
+    }
+}
+
+/// Parse a TasksMax value like "50", "infinity", or "80%".
+fn parse_tasks_max(s: &str) -> crate::units::unit_parsing::TasksMax {
+    use crate::units::unit_parsing::TasksMax;
+    if s == "infinity" {
+        return TasksMax::Infinity;
+    }
+    if let Some(pct) = s.strip_suffix('%')
+        && let Ok(p) = pct.parse::<u64>()
+    {
+        return TasksMax::Percent(p);
+    }
+    if let Ok(n) = s.parse::<u64>() {
+        TasksMax::Value(n)
+    } else {
+        TasksMax::Infinity
+    }
+}
+
+/// Parse a simple time span like "5min", "30s", "2h 30min", "1d".
+fn parse_timespan(s: &str) -> Option<std::time::Duration> {
+    let s = s.trim();
+    // Try simple number (seconds)
+    if let Ok(secs) = s.parse::<u64>() {
+        return Some(std::time::Duration::from_secs(secs));
+    }
+    // Try with suffix
+    let mut total_secs = 0u64;
+    let mut current = String::new();
+    for c in s.chars() {
+        if c.is_ascii_digit() {
+            current.push(c);
+        } else if c.is_ascii_alphabetic() {
+            let num: u64 = current.parse().ok()?;
+            current.clear();
+            match c {
+                's' => total_secs += num,
+                'm' => {
+                    // Could be "min" or just "m"
+                    total_secs += num * 60;
+                }
+                'h' => total_secs += num * 3600,
+                'd' => total_secs += num * 86400,
+                _ => {}
+            }
+        } else if c == ' ' {
+            // ignore
+        }
+    }
+    if !current.is_empty()
+        && let Ok(num) = current.parse::<u64>()
+    {
+        total_secs += num;
+    }
+    if total_secs > 0 {
+        Some(std::time::Duration::from_secs(total_secs))
+    } else {
+        None
+    }
 }
 
 pub fn execute_command(
@@ -2251,6 +2527,75 @@ pub fn execute_command(
                 unit_name,
                 dropin_path.display()
             );
+
+            // Apply properties to the in-memory unit immediately (like real systemd).
+            {
+                let mut ri = run_info.write_poisoned();
+                let uid = crate::units::UnitId {
+                    name: unit_name.clone(),
+                    kind: if unit_name.ends_with(".service") {
+                        crate::units::UnitIdKind::Service
+                    } else if unit_name.ends_with(".slice") {
+                        crate::units::UnitIdKind::Slice
+                    } else if unit_name.ends_with(".socket") {
+                        crate::units::UnitIdKind::Socket
+                    } else if unit_name.ends_with(".mount") {
+                        crate::units::UnitIdKind::Mount
+                    } else if unit_name.ends_with(".timer") {
+                        crate::units::UnitIdKind::Timer
+                    } else if unit_name.ends_with(".target") {
+                        crate::units::UnitIdKind::Target
+                    } else {
+                        crate::units::UnitIdKind::Service
+                    },
+                };
+                if let Some(unit) = ri.unit_table.get_mut(&uid) {
+                    for prop in &props {
+                        if let Some((key, value)) = prop.split_once('=') {
+                            match &mut unit.specific {
+                                Specific::Slice(sl) => match key {
+                                    "MemoryMax" => {
+                                        sl.conf.memory_max = Some(parse_memory_limit(value));
+                                    }
+                                    "MemoryHigh" => {
+                                        sl.conf.memory_high = Some(parse_memory_limit(value));
+                                    }
+                                    "MemoryMin" => {
+                                        sl.conf.memory_min = Some(parse_memory_limit(value));
+                                    }
+                                    "MemoryLow" => {
+                                        sl.conf.memory_low = Some(parse_memory_limit(value));
+                                    }
+                                    "TasksMax" => {
+                                        sl.conf.tasks_max = Some(parse_tasks_max(value));
+                                    }
+                                    _ => {}
+                                },
+                                Specific::Service(svc) => match key {
+                                    "MemoryMax" => {
+                                        svc.conf.memory_max = Some(parse_memory_limit(value));
+                                    }
+                                    "MemoryHigh" => {
+                                        svc.conf.memory_high = Some(parse_memory_limit(value));
+                                    }
+                                    "MemoryMin" => {
+                                        svc.conf.memory_min = Some(parse_memory_limit(value));
+                                    }
+                                    "MemoryLow" => {
+                                        svc.conf.memory_low = Some(parse_memory_limit(value));
+                                    }
+                                    "TasksMax" => {
+                                        svc.conf.tasks_max = Some(parse_tasks_max(value));
+                                    }
+                                    _ => {}
+                                },
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
+
             return Ok(serde_json::json!({
                 "dropin": dropin_path.display().to_string(),
                 "properties": props,
@@ -2621,13 +2966,12 @@ pub fn execute_command(
             }
             return Ok(serde_json::json!(null));
         }
-        Command::Kill(unit_name, signal) => {
+        Command::Kill(unit_name, signal, whom, kill_value) => {
             let ri = run_info.read_poisoned();
             let units = find_units_with_name(&unit_name, &ri.unit_table);
             if units.is_empty() {
                 return Err(format!("Unit {unit_name} not found."));
             }
-            // Check that the unit is active before attempting to send a signal.
             let unit = &units[0];
             let status = unit.common.status.read_poisoned();
             let is_active = matches!(&*status, UnitStatus::Started(_) | UnitStatus::Starting);
@@ -2637,14 +2981,51 @@ pub fn execute_command(
                 return Err(format!("Unit {unit_name} is not running"));
             }
 
-            // For now, stop the unit to simulate kill. A full implementation
-            // would look up the main PID from the PID table and send the
-            // signal directly.
+            // Look up the main PID to send the signal directly.
+            // Prefer main_pid (from MAINPID= notification) over pid (the forked child).
+            let main_pid = if let Specific::Service(svc) = &unit.specific {
+                let state = svc.state.read_poisoned();
+                state.srvc.main_pid.or(state.srvc.pid).map(i32::from)
+            } else {
+                None
+            };
+
             let id = unit.id.clone();
             drop(ri);
-            if signal == libc::SIGTERM || signal == libc::SIGKILL {
-                let ri = run_info.read_poisoned();
-                crate::units::deactivate_unit(&id, &ri).map_err(|e| format!("{e}"))?;
+
+            // Determine which PIDs to signal based on --kill-whom
+            let pids_to_signal: Vec<i32> = match whom.as_str() {
+                "main" => main_pid.into_iter().collect(),
+                _ => main_pid.into_iter().collect(), // "all" falls back to main for now
+            };
+
+            if pids_to_signal.is_empty() {
+                // No PID to signal — for SIGTERM/SIGKILL, deactivate
+                if signal == libc::SIGTERM || signal == libc::SIGKILL {
+                    let ri = run_info.read_poisoned();
+                    crate::units::deactivate_unit(&id, &ri).map_err(|e| format!("{e}"))?;
+                }
+            } else {
+                for pid in &pids_to_signal {
+                    if let Some(val) = kill_value {
+                        // Use sigqueue to send signal with a value
+                        let sigval = libc::sigval {
+                            sival_ptr: val as *mut libc::c_void,
+                        };
+                        unsafe {
+                            libc::sigqueue(*pid, signal, sigval);
+                        }
+                    } else {
+                        unsafe {
+                            libc::kill(*pid, signal);
+                        }
+                    }
+                }
+                // For SIGTERM/SIGKILL without kill_value, also deactivate
+                if kill_value.is_none() && (signal == libc::SIGTERM || signal == libc::SIGKILL) {
+                    let ri = run_info.read_poisoned();
+                    crate::units::deactivate_unit(&id, &ri).map_err(|e| format!("{e}"))?;
+                }
             }
             return Ok(serde_json::json!(null));
         }
@@ -2877,6 +3258,137 @@ pub fn execute_command(
             }
             let unit = &units[0];
             let mut props = unit_properties::collect_properties(unit);
+
+            // Compute Effective* resource-control properties by traversing
+            // the slice hierarchy and finding the minimum limit.
+            {
+                use crate::units::unit_parsing::{MemoryLimit, TasksMax};
+
+                // Helper: resolve a MemoryLimit to bytes (None = infinity)
+                fn memory_limit_bytes(ml: &Option<MemoryLimit>) -> Option<u64> {
+                    match ml {
+                        Some(MemoryLimit::Bytes(n)) => Some(*n),
+                        Some(MemoryLimit::Infinity) | None => None,
+                        Some(MemoryLimit::Percent(_)) => None, // can't resolve without total mem
+                    }
+                }
+                fn tasks_max_value(tm: &Option<TasksMax>) -> Option<u64> {
+                    match tm {
+                        Some(TasksMax::Value(n)) => Some(*n),
+                        Some(TasksMax::Infinity) | None => None,
+                        Some(TasksMax::Percent(_)) => None,
+                    }
+                }
+                fn effective_min(own: Option<u64>, parent: Option<u64>) -> Option<u64> {
+                    match (own, parent) {
+                        (Some(a), Some(b)) => Some(a.min(b)),
+                        (Some(a), None) => Some(a),
+                        (None, Some(b)) => Some(b),
+                        (None, None) => None,
+                    }
+                }
+
+                // Get the unit's own resource limits and slice name
+                let (own_mem_max, own_mem_high, own_tasks_max, slice_name) = match &unit.specific {
+                    Specific::Service(svc) => (
+                        memory_limit_bytes(&svc.conf.memory_max),
+                        memory_limit_bytes(&svc.conf.memory_high),
+                        tasks_max_value(&svc.conf.tasks_max),
+                        svc.conf.slice.clone(),
+                    ),
+                    Specific::Slice(sl) => (
+                        memory_limit_bytes(&sl.conf.memory_max),
+                        memory_limit_bytes(&sl.conf.memory_high),
+                        tasks_max_value(&sl.conf.tasks_max),
+                        // Parent slice derived from slice name: a-b-c.slice → a-b.slice
+                        {
+                            let name = &unit.id.name;
+                            let base = name.strip_suffix(".slice").unwrap_or(name);
+                            base.rfind('-').map(|pos| format!("{}.slice", &base[..pos]))
+                        },
+                    ),
+                    _ => (None, None, None, None),
+                };
+
+                // Walk up the slice hierarchy
+                let mut eff_mem_max = own_mem_max;
+                let mut eff_mem_high = own_mem_high;
+                let mut eff_tasks_max = own_tasks_max;
+                let mut current_slice = slice_name;
+
+                while let Some(ref sname) = current_slice {
+                    let parent_units = find_units_with_name(sname, &ri.unit_table);
+                    if parent_units.is_empty() {
+                        break;
+                    }
+                    let parent = &parent_units[0];
+                    if let Specific::Slice(sl) = &parent.specific {
+                        eff_mem_max =
+                            effective_min(eff_mem_max, memory_limit_bytes(&sl.conf.memory_max));
+                        eff_mem_high =
+                            effective_min(eff_mem_high, memory_limit_bytes(&sl.conf.memory_high));
+                        eff_tasks_max =
+                            effective_min(eff_tasks_max, tasks_max_value(&sl.conf.tasks_max));
+
+                        // Move to parent slice
+                        let pname = &parent.id.name;
+                        let base = pname.strip_suffix(".slice").unwrap_or(pname);
+                        current_slice =
+                            base.rfind('-').map(|pos| format!("{}.slice", &base[..pos]));
+                    } else {
+                        break;
+                    }
+                }
+
+                props.insert(
+                    "EffectiveMemoryMax".to_string(),
+                    match eff_mem_max {
+                        Some(n) => n.to_string(),
+                        None => "infinity".to_string(),
+                    },
+                );
+                props.insert(
+                    "EffectiveMemoryHigh".to_string(),
+                    match eff_mem_high {
+                        Some(n) => n.to_string(),
+                        None => "infinity".to_string(),
+                    },
+                );
+                props.insert(
+                    "EffectiveTasksMax".to_string(),
+                    match eff_tasks_max {
+                        Some(n) => n.to_string(),
+                        None => "infinity".to_string(),
+                    },
+                );
+            }
+
+            // If service doesn't have LimitNOFILE set, inherit from manager defaults.
+            if !props.contains_key("LimitNOFILE")
+                && let Specific::Service(_) | Specific::Socket(_) = &unit.specific
+            {
+                // Read manager defaults
+                let mut default_hard = "524288".to_string();
+                let mut default_soft = "1024".to_string();
+                if let Ok(content) =
+                    std::fs::read_to_string("/run/systemd/system.conf.d/rlimits.conf")
+                {
+                    for line in content.lines() {
+                        let line = line.trim();
+                        if let Some(val) = line.strip_prefix("DefaultLimitNOFILE=") {
+                            if let Some((soft, hard)) = val.split_once(':') {
+                                default_soft = soft.to_string();
+                                default_hard = hard.to_string();
+                            } else {
+                                default_soft = val.to_string();
+                                default_hard = val.to_string();
+                            }
+                        }
+                    }
+                }
+                props.insert("LimitNOFILE".to_string(), default_hard);
+                props.insert("LimitNOFILESoft".to_string(), default_soft);
+            }
 
             // Dynamically scan .wants/ and .requires/ directories on disk.
             // Real systemd re-evaluates these at access time, so symlinks
@@ -3294,7 +3806,14 @@ pub fn execute_command(
                             .as_array_mut()
                             .unwrap()
                             .push(format_socket(unit, status));
-                    } else if name.ends_with(".target") || name.ends_with(".slice") {
+                    } else if name.ends_with(".target")
+                        || name.ends_with(".slice")
+                        || name.ends_with(".timer")
+                        || name.ends_with(".mount")
+                        || name.ends_with(".swap")
+                        || name.ends_with(".path")
+                        || name.ends_with(".device")
+                    {
                         result_vec
                             .as_array_mut()
                             .unwrap()
@@ -4959,7 +5478,7 @@ mod tests {
         };
         let cmd = parse_command(&call).unwrap();
         match cmd {
-            Command::Kill(name, sig) => {
+            Command::Kill(name, sig, _whom, _val) => {
                 assert_eq!(name, "sshd.service");
                 assert_eq!(sig, 15); // SIGTERM
             }
@@ -4979,7 +5498,7 @@ mod tests {
         };
         let cmd = parse_command(&call).unwrap();
         match cmd {
-            Command::Kill(name, sig) => {
+            Command::Kill(name, sig, _whom, _val) => {
                 assert_eq!(name, "sshd.service");
                 assert_eq!(sig, 9); // SIGKILL
             }
@@ -4998,7 +5517,7 @@ mod tests {
         };
         let cmd = parse_command(&call).unwrap();
         match cmd {
-            Command::Kill(name, sig) => {
+            Command::Kill(name, sig, _whom, _val) => {
                 assert_eq!(name, "nginx.service");
                 assert_eq!(sig, 15); // default SIGTERM
             }
@@ -5028,7 +5547,7 @@ mod tests {
         };
         let cmd = parse_command(&call).unwrap();
         match cmd {
-            Command::Kill(name, sig) => {
+            Command::Kill(name, sig, _whom, _val) => {
                 assert_eq!(name, "test.service");
                 assert_eq!(sig, 15); // fallback to SIGTERM
             }
@@ -5486,6 +6005,9 @@ mod tests {
             environment: Vec::new(),
             scope: false,
             wait: false,
+            on_calendar: None,
+            on_active: None,
+            on_boot: None,
         };
         let debug = format!("{params:?}");
         assert!(debug.contains("run-test.service"));
@@ -5507,6 +6029,9 @@ mod tests {
             environment: Vec::new(),
             scope: false,
             wait: false,
+            on_calendar: None,
+            on_active: None,
+            on_boot: None,
         };
         let cloned = params.clone();
         assert_eq!(cloned.unit_name, params.unit_name);

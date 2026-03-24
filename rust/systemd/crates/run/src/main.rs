@@ -111,7 +111,7 @@ struct Cli {
     setenv: Vec<String>,
 
     /// Keep the unit loaded after the main process exits.
-    #[arg(long)]
+    #[arg(short = 'r', long)]
     remain_after_exit: bool,
 
     /// Send SIGHUP to remaining processes when the main process exits.
@@ -486,6 +486,31 @@ fn try_create_transient_unit(cli: &Cli, unit_name: &str) -> Result<bool, String>
             .map(|s| Value::String(s.clone()))
             .collect();
         properties.insert("environment".into(), Value::Array(envs));
+    }
+
+    // Pass timer properties
+    if let Some(ref on_calendar) = cli.on_calendar {
+        properties.insert("on_calendar".into(), Value::String(on_calendar.clone()));
+    }
+    if let Some(ref on_active) = cli.on_active {
+        properties.insert("on_active".into(), Value::String(on_active.clone()));
+    }
+    if let Some(ref on_boot) = cli.on_boot {
+        properties.insert("on_boot".into(), Value::String(on_boot.clone()));
+    }
+    if cli.on_clock_change {
+        properties.insert("on_clock_change".into(), Value::Bool(true));
+    }
+    if cli.on_timezone_change {
+        properties.insert("on_timezone_change".into(), Value::Bool(true));
+    }
+    if !cli.timer_property.is_empty() {
+        let tprops: Vec<Value> = cli
+            .timer_property
+            .iter()
+            .map(|s| Value::String(s.clone()))
+            .collect();
+        properties.insert("timer_properties".into(), Value::Array(tprops));
     }
 
     let params = Value::Object(properties);
