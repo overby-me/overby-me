@@ -454,6 +454,40 @@ fn print_status(info: &TimeInfo) {
     }
 }
 
+fn cmd_show_property(prop: &str, value_only: bool) {
+    let timezone = detect_timezone();
+    let ntp_enabled = is_ntp_enabled();
+    let ntp_synced = is_ntp_synced();
+    let rtc_local = is_rtc_local();
+
+    let (secs, nsecs) = get_unix_timestamp();
+    let usec = secs as u64 * 1_000_000 + (nsecs / 1000) as u64;
+
+    let val = match prop {
+        "Timezone" => timezone,
+        "LocalRTC" => (if rtc_local { "yes" } else { "no" }).to_string(),
+        "NTP" => (if ntp_enabled { "yes" } else { "no" }).to_string(),
+        "NTPSynchronized" => (if ntp_synced { "yes" } else { "no" }).to_string(),
+        "TimeUSec" => usec.to_string(),
+        "RTCTimeUSec" => "n/a".to_string(),
+        "CanNTP" => {
+            let can = Path::new("/lib/systemd/systemd-timesyncd").exists()
+                || Path::new("/usr/lib/systemd/systemd-timesyncd").exists();
+            (if can { "yes" } else { "no" }).to_string()
+        }
+        _ => {
+            eprintln!("Unknown property: {}", prop);
+            process::exit(1);
+        }
+    };
+
+    if value_only {
+        println!("{}", val);
+    } else {
+        println!("{}={}", prop, val);
+    }
+}
+
 fn cmd_show() {
     let local_tm = get_local_tm();
     let _utc_tm = get_utc_tm();
@@ -560,8 +594,6 @@ fn cmd_set_time(time_str: &str) {
             process::exit(1);
         }
     }
-
-    println!("Set system clock to: {}", time_str);
 }
 
 fn parse_date(s: &str) -> Option<(i32, i32, i32)> {
@@ -639,8 +671,6 @@ fn cmd_set_timezone(tz: &str) {
         // Non-fatal: some systems don't use /etc/timezone
         eprintln!("Warning: Could not write {}: {}", TIMEZONE_PATH, e);
     }
-
-    println!("Set timezone to '{}'.", tz);
 }
 
 fn cmd_set_ntp(enable: bool) {
@@ -679,6 +709,88 @@ fn cmd_set_ntp(enable: bool) {
             process::exit(1);
         }
     }
+}
+
+fn cmd_set_local_rtc(local: bool) {
+    let adjtime_exists = Path::new(ADJTIME_PATH).exists();
+
+    if !local && !adjtime_exists {
+        // Setting to UTC when no adjtime exists — nothing to do.
+        return;
+    }
+
+    // Read raw file content to check if it's well-formed (ends with newline).
+    let raw_content = if adjtime_exists {
+        fs::read_to_string(ADJTIME_PATH).ok().unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let lines: Vec<&str> = raw_content.lines().collect();
+    let well_formed = raw_content.ends_with('\n') && lines.len() >= 3;
+
+    let line0 = lines.first().copied().unwrap_or("0.0 0 0");
+    let line1 = lines.get(1).copied().unwrap_or("0");
+    let line2 = lines.get(2).copied().unwrap_or("");
+    let extra_lines: Vec<&str> = lines.iter().skip(3).copied().collect();
+
+    let is_local = line2.trim().eq_ignore_ascii_case("LOCAL");
+    let is_utc = line2.trim().eq_ignore_ascii_case("UTC");
+    let is_default =
+        (line0.trim() == "0.0 0 0" || line0.trim() == "0.0 0 0.0") && line1.trim() == "0";
+
+    let desired_mode = if local { "LOCAL" } else { "UTC" };
+
+    // Check if file already matches the desired state and is well-formed.
+    // If so, do nothing (matching real timedated behavior).
+    if well_formed && !local && is_utc {
+        return;
+    }
+    if well_formed && local && is_local {
+        return;
+    }
+
+    if !local {
+        // Setting to UTC. Normalize the file.
+        if is_default && extra_lines.is_empty() {
+            // Default drift values, no extra content — remove file entirely.
+            let _ = fs::remove_file(ADJTIME_PATH);
+            return;
+        }
+        // Non-default drift or extra content — rewrite with UTC, preserving extra lines.
+        let mut content = format!("{}\n{}\n{}", line0, line1, desired_mode);
+        for extra in &extra_lines {
+            content.push('\n');
+            content.push_str(extra);
+        }
+        content.push('\n');
+        if let Err(e) = fs::write(ADJTIME_PATH, &content) {
+            eprintln!("Failed to write {}: {}", ADJTIME_PATH, e);
+            process::exit(1);
+        }
+        return;
+    }
+
+    // Setting to LOCAL — always write the file, preserving extra lines.
+    let mut content = format!("{}\n{}\n{}", line0, line1, desired_mode);
+    for extra in &extra_lines {
+        content.push('\n');
+        content.push_str(extra);
+    }
+    content.push('\n');
+
+    if let Err(e) = fs::write(ADJTIME_PATH, &content) {
+        eprintln!("Failed to write {}: {}", ADJTIME_PATH, e);
+        if e.raw_os_error() == Some(libc::EPERM) {
+            eprintln!("Hint: This operation requires root privileges.");
+        }
+        process::exit(1);
+    }
+
+    eprintln!();
+    eprintln!("Warning: The system is configured to read the RTC time in the local time zone.");
+    eprintln!("         This is not recommended. Please set the RTC to UTC with:");
+    eprintln!("         timedatectl set-local-rtc 0");
 }
 
 fn cmd_list_timezones() {
@@ -779,6 +891,7 @@ fn print_usage() {
     eprintln!("  show                Show properties in machine-readable format");
     eprintln!("  set-time TIME       Set system time (YYYY-MM-DD HH:MM:SS)");
     eprintln!("  set-timezone ZONE   Set system timezone");
+    eprintln!("  set-local-rtc BOOL  Control whether RTC uses local time");
     eprintln!("  set-ntp BOOL        Enable/disable NTP synchronization");
     eprintln!("  list-timezones      List available timezones");
     eprintln!("  timesync-status     Show NTP sync status");
@@ -788,7 +901,21 @@ fn print_usage() {
 // ── Main ───────────────────────────────────────────────────────────────────
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
+    // Filter out options that are accepted but ignored
+    let args: Vec<String> = env::args()
+        .filter(|a| {
+            a != "--no-pager"
+                && a != "--no-ask-password"
+                && a != "--all"
+                && !a.starts_with("--machine=")
+        })
+        .collect();
+
+    // Handle --version anywhere in args
+    if args.iter().any(|a| a == "--version") {
+        println!("systemd 258 (rust-systemd)");
+        return;
+    }
 
     if args.len() < 2 {
         cmd_status();
@@ -797,7 +924,20 @@ fn main() {
 
     match args[1].as_str() {
         "status" => cmd_status(),
-        "show" => cmd_show(),
+        "show" => {
+            // Handle -p PROPERTY and --value
+            let prop = args
+                .iter()
+                .position(|a| a == "-p")
+                .and_then(|i| args.get(i + 1).map(|s| s.as_str()));
+            let value_only = args.iter().any(|a| a == "--value");
+            if let Some(prop_name) = prop {
+                cmd_show_property(prop_name, value_only);
+            } else {
+                cmd_show();
+            }
+        }
+        "show-timesync" => cmd_timesync_status(),
         "set-time" => {
             if args.len() < 3 {
                 eprintln!("Error: set-time requires a time argument.");
@@ -833,6 +973,26 @@ fn main() {
                 }
             };
             cmd_set_ntp(enable);
+        }
+        "set-local-rtc" => {
+            if args.len() < 3 {
+                eprintln!(
+                    "Error: set-local-rtc requires a boolean argument (true/false/yes/no/1/0)."
+                );
+                process::exit(1);
+            }
+            let local = match args[2].to_lowercase().as_str() {
+                "true" | "yes" | "1" | "on" => true,
+                "false" | "no" | "0" | "off" => false,
+                _ => {
+                    eprintln!(
+                        "Invalid boolean value '{}'. Use true/false, yes/no, 1/0, or on/off.",
+                        args[2]
+                    );
+                    process::exit(1);
+                }
+            };
+            cmd_set_local_rtc(local);
         }
         "list-timezones" => cmd_list_timezones(),
         "timesync-status" => cmd_timesync_status(),

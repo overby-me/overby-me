@@ -55,7 +55,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 )]
 struct Cli {
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 
     /// When used with list/cat, operate on system credentials instead of
     /// the current execution context.
@@ -73,12 +73,20 @@ struct Cli {
     /// Do not pipe output into a pager.
     #[arg(long, global = true)]
     no_pager: bool,
+
+    /// Credential name (used by encrypt/decrypt).
+    #[arg(long, global = true)]
+    name: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
 enum Command {
     /// List credentials passed into the current execution context.
-    List,
+    List {
+        /// Output format: pretty, short, off.
+        #[arg(long, default_value = "off")]
+        json: String,
+    },
 
     /// Show contents of specified credentials.
     Cat {
@@ -105,10 +113,6 @@ enum Command {
 
         /// Output file path or "-" for stdout.
         output: String,
-
-        /// Credential name to embed (derived from output filename by default).
-        #[arg(long)]
-        name: Option<String>,
 
         /// Encryption key type: host, tpm2, host+tpm2, null, auto, auto-initrd.
         #[arg(long, default_value = "auto")]
@@ -147,10 +151,6 @@ enum Command {
 
         /// Output file path or "-" for stdout (default).
         output: Option<String>,
-
-        /// Credential name to validate against the embedded name.
-        #[arg(long)]
-        name: Option<String>,
 
         /// Transcode output: base64, unbase64, hex, unhex.
         #[arg(long)]
@@ -233,6 +233,14 @@ fn credentials_dir(system: bool) -> Option<PathBuf> {
             .ok()
             .map(PathBuf::from)
     }
+}
+
+/// Get the encrypted credentials directory for the current context.
+fn encrypted_credentials_dir() -> Option<PathBuf> {
+    std::env::var("ENCRYPTED_CREDENTIALS_DIRECTORY")
+        .ok()
+        .map(PathBuf::from)
+        .filter(|p| p.is_dir())
 }
 
 /// Read the host key from disk, or return an error message.
@@ -755,65 +763,112 @@ fn is_secure_boot_enabled() -> bool {
 // ---------------------------------------------------------------------------
 
 /// `systemd-creds list`
-fn cmd_list(system: bool, quiet: bool, no_legend: bool) {
-    let dir = match credentials_dir(system) {
-        Some(d) => d,
-        None => {
-            if !quiet {
-                if system {
-                    eprintln!("No system credentials directory found ({SYSTEM_CREDENTIALS_DIR}).");
-                } else {
-                    eprintln!(
-                        "No credentials directory set.\n\
-                         Hint: $CREDENTIALS_DIRECTORY is not set. This command is intended \
-                         to be run from within a service context."
-                    );
-                }
-            }
-            process::exit(1);
-        }
+fn cmd_list(system: bool, quiet: bool, no_legend: bool, json_mode: &str) {
+    let dir = credentials_dir(system);
+    let enc_dir = if !system {
+        encrypted_credentials_dir()
+    } else {
+        None
     };
 
-    if !dir.is_dir() {
+    if dir.is_none() && enc_dir.is_none() {
+        if system {
+            if !no_legend && !quiet {
+                println!("No credentials.");
+            }
+            return;
+        }
         if !quiet {
-            eprintln!("Credentials directory {dir:?} does not exist or is not a directory.");
+            eprintln!(
+                "No credentials directory set.\n\
+                 Hint: $CREDENTIALS_DIRECTORY is not set. This command is intended \
+                 to be run from within a service context."
+            );
         }
         process::exit(1);
     }
 
     let mut entries: Vec<(String, u64, String)> = Vec::new();
+    let mut seen_names: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    match fs::read_dir(&dir) {
-        Ok(rd) => {
-            for entry in rd.flatten() {
-                let path = entry.path();
-                if !path.is_file() {
-                    continue;
-                }
-                let name = entry.file_name().to_string_lossy().into_owned();
-                let size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-                let security = security_state(&path).to_string();
-                entries.push((name, size, security));
+    // Read plain credentials.
+    if let Some(ref d) = dir
+        && d.is_dir()
+        && let Ok(rd) = fs::read_dir(d)
+    {
+        for entry in rd.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
             }
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            let security = security_state(&path).to_string();
+            seen_names.insert(name.clone());
+            entries.push((name, size, security));
         }
-        Err(e) => {
-            eprintln!("Failed to read credentials directory {dir:?}: {e}");
-            process::exit(1);
+    }
+
+    // Read encrypted credentials.
+    if let Some(ref d) = enc_dir
+        && d.is_dir()
+        && let Ok(rd) = fs::read_dir(d)
+    {
+        for entry in rd.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if seen_names.contains(&name) {
+                continue; // Plain credential takes precedence
+            }
+            let size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            let security = security_state(&path).to_string();
+            entries.push((name, size, security));
         }
     }
 
     entries.sort_by(|a, b| a.0.cmp(&b.0));
 
-    if !no_legend && !entries.is_empty() {
-        println!("{:<40} {:>10} SECURE", "NAME", "SIZE");
-    }
+    match json_mode {
+        "pretty" | "short" => {
+            let json_entries: Vec<String> = entries
+                .iter()
+                .map(|(name, size, security)| {
+                    if json_mode == "pretty" {
+                        format!(
+                            "  {{\n    \"name\" : \"{}\",\n    \"size\" : {},\n    \"secure\" : \"{}\"\n  }}",
+                            name, size, security
+                        )
+                    } else {
+                        format!(
+                            "{{\"name\":\"{}\",\"size\":{},\"secure\":\"{}\"}}",
+                            name, size, security
+                        )
+                    }
+                })
+                .collect();
+            if json_mode == "pretty" {
+                println!("[\n{}\n]", json_entries.join(",\n"));
+            } else {
+                println!("[{}]", json_entries.join(","));
+            }
+        }
+        _ => {
+            // Default table output
+            if !no_legend && !entries.is_empty() {
+                println!("{:<40} {:>10} SECURE", "NAME", "SIZE");
+            }
 
-    for (name, size, security) in &entries {
-        println!("{name:<40} {size:>10} {security}");
-    }
+            for (name, size, security) in &entries {
+                println!("{name:<40} {size:>10} {security}");
+            }
 
-    if !no_legend {
-        println!("\n{} credentials listed.", entries.len());
+            if !no_legend {
+                println!("\n{} credentials listed.", entries.len());
+            }
+        }
     }
 }
 
@@ -824,40 +879,95 @@ fn cmd_cat(
     quiet: bool,
     transcode_mode: Option<&str>,
     newline: &str,
+    global_name: Option<&str>,
 ) {
-    let dir = match credentials_dir(system) {
-        Some(d) => d,
-        None => {
-            if !quiet {
-                if system {
-                    eprintln!("No system credentials directory found ({SYSTEM_CREDENTIALS_DIR}).");
-                } else {
-                    eprintln!(
-                        "No credentials directory set.\n\
-                         Hint: $CREDENTIALS_DIRECTORY is not set."
-                    );
-                }
-            }
-            process::exit(1);
-        }
+    let dir = credentials_dir(system);
+    let enc_dir = if !system {
+        encrypted_credentials_dir()
+    } else {
+        None
     };
+
+    if dir.is_none() && enc_dir.is_none() {
+        if !quiet {
+            if system {
+                eprintln!("No system credentials directory found ({SYSTEM_CREDENTIALS_DIR}).");
+            } else {
+                eprintln!(
+                    "No credentials directory set.\n\
+                     Hint: $CREDENTIALS_DIRECTORY is not set."
+                );
+            }
+        }
+        process::exit(1);
+    }
 
     let mut failed = false;
 
     for cred_name in credentials {
-        let path = dir.join(cred_name);
-        if !path.is_file() {
-            eprintln!("Credential {cred_name:?} not found in {dir:?}.");
+        // Try plain credentials directory first.
+        let plain_path = dir.as_ref().map(|d| d.join(cred_name));
+        let found_plain = plain_path.as_ref().is_some_and(|p| p.is_file());
+
+        // Try encrypted credentials directory.
+        let enc_path = enc_dir.as_ref().map(|d| d.join(cred_name));
+        let found_enc = !found_plain && enc_path.as_ref().is_some_and(|p| p.is_file());
+
+        if !found_plain && !found_enc {
+            eprintln!("Credential {cred_name:?} not found.");
             failed = true;
             continue;
         }
 
-        let mut data = match fs::read(&path) {
-            Ok(d) => d,
-            Err(e) => {
-                eprintln!("Failed to read credential {cred_name:?}: {e}");
-                failed = true;
-                continue;
+        let mut data = if found_plain {
+            match fs::read(plain_path.as_ref().unwrap()) {
+                Ok(d) => d,
+                Err(e) => {
+                    eprintln!("Failed to read credential {cred_name:?}: {e}");
+                    failed = true;
+                    continue;
+                }
+            }
+        } else {
+            // Encrypted credential — read and decrypt.
+            let enc_data = match fs::read(enc_path.as_ref().unwrap()) {
+                Ok(d) => d,
+                Err(e) => {
+                    eprintln!("Failed to read encrypted credential {cred_name:?}: {e}");
+                    failed = true;
+                    continue;
+                }
+            };
+            // The file is base64-encoded.
+            let blob = match BASE64.decode(
+                enc_data
+                    .iter()
+                    .copied()
+                    .filter(|b| !b.is_ascii_whitespace())
+                    .collect::<Vec<u8>>(),
+            ) {
+                Ok(b) => b,
+                Err(e) => {
+                    eprintln!("Failed to decode encrypted credential {cred_name:?}: {e}");
+                    failed = true;
+                    continue;
+                }
+            };
+            // Use global --name if provided, otherwise the credential filename.
+            let decrypt_name = global_name.filter(|n| !n.is_empty()).unwrap_or(cred_name);
+            match decrypt_credential(&blob, Some(decrypt_name), true) {
+                Ok((plaintext, _)) => plaintext,
+                Err(e) => {
+                    // Retry without name constraint (for unnamed credentials).
+                    match decrypt_credential(&blob, None, true) {
+                        Ok((plaintext, _)) => plaintext,
+                        Err(_) => {
+                            eprintln!("Failed to decrypt credential {cred_name:?}: {e}");
+                            failed = true;
+                            continue;
+                        }
+                    }
+                }
             }
         };
 
@@ -1306,9 +1416,13 @@ fn parse_timestamp_usec(s: &str) -> u64 {
 fn main() {
     let cli = Cli::parse();
 
-    match &cli.command {
-        Command::List => {
-            cmd_list(cli.system, cli.quiet, cli.no_legend);
+    let default_list = Command::List {
+        json: "off".to_string(),
+    };
+    let command = cli.command.as_ref().unwrap_or(&default_list);
+    match command {
+        Command::List { json } => {
+            cmd_list(cli.system, cli.quiet, cli.no_legend, json);
         }
 
         Command::Cat {
@@ -1322,6 +1436,7 @@ fn main() {
                 cli.quiet,
                 transcode.as_deref(),
                 newline,
+                cli.name.as_deref(),
             );
         }
 
@@ -1332,7 +1447,6 @@ fn main() {
         Command::Encrypt {
             input,
             output,
-            name,
             with_key,
             host,
             tpm2,
@@ -1351,7 +1465,7 @@ fn main() {
             cmd_encrypt(
                 input,
                 output,
-                name.as_deref(),
+                cli.name.as_deref(),
                 effective_key,
                 tpm2_pcrs,
                 timestamp.as_deref(),
@@ -1364,7 +1478,6 @@ fn main() {
         Command::Decrypt {
             input,
             output,
-            name,
             transcode,
             newline,
             allow_null,
@@ -1372,7 +1485,7 @@ fn main() {
             cmd_decrypt(
                 input,
                 output.as_deref(),
-                name.as_deref(),
+                cli.name.as_deref(),
                 transcode.as_deref(),
                 newline,
                 *allow_null,

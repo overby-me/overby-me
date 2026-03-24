@@ -89,19 +89,33 @@ struct Cli {
     #[arg(long = "exclude-prefix")]
     exclude_prefixes: Vec<PathBuf>,
 
+    /// Only print what would be done, without making any changes
+    #[arg(long = "dry-run")]
+    dry_run: bool,
+
+    /// Remove all items marked with the '$' modifier
+    #[arg(long)]
+    purge: bool,
+
     /// Treat all file system errors as non-fatal
     #[arg(long)]
     graceful: bool,
+
+    /// Use an alternate root filesystem path for all file operations
+    #[arg(long)]
+    root: Option<PathBuf>,
 
     /// Specific tmpfiles.d config files to read (instead of scanning directories)
     files: Vec<PathBuf>,
 }
 
 /// Represents the action type from a tmpfiles.d line.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum ItemType {
-    /// f — Create file
+    /// f — Create file (do not overwrite)
     CreateFile,
+    /// F — Create or truncate file
+    TruncateFile,
     /// w — Write to file
     WriteFile,
     /// d — Create directory
@@ -154,6 +168,7 @@ impl ItemType {
     fn from_char(c: char, _plus: bool) -> Option<Self> {
         match c {
             'f' => Some(ItemType::CreateFile),
+            'F' => Some(ItemType::TruncateFile),
             'w' => Some(ItemType::WriteFile),
             'd' => Some(ItemType::CreateDirectory),
             'D' => Some(ItemType::CreateOrCleanDirectory),
@@ -186,6 +201,7 @@ impl ItemType {
         matches!(
             self,
             ItemType::CreateFile
+                | ItemType::TruncateFile
                 | ItemType::WriteFile
                 | ItemType::CreateDirectory
                 | ItemType::CreateOrCleanDirectory
@@ -245,6 +261,10 @@ struct TmpfilesItem {
     boot_only: bool,
     /// Whether the '-' modifier was specified (ignore errors).
     minus: bool,
+    /// Whether the '$' modifier was specified (purgeable).
+    purgeable: bool,
+    /// Whether the '?' modifier was specified (conditional on target existing).
+    conditional: bool,
     /// The target path.
     path: PathBuf,
     /// File mode (e.g. 0755). None means use default.
@@ -253,8 +273,17 @@ struct TmpfilesItem {
     user: Option<String>,
     /// Owner group name or GID. None means root/default.
     group: Option<String>,
+    /// Whether mode has the ':' prefix (only apply on creation).
+    mode_create_only: bool,
+    /// Whether user has the ':' prefix (only apply on creation).
+    user_create_only: bool,
+    /// Whether group has the ':' prefix (only apply on creation).
+    group_create_only: bool,
     /// Maximum age for cleaning. None means no age limit.
     age: Option<Duration>,
+    /// Which timestamps to check for age (a=atime, m=mtime, c=ctime, b=btime, A/M/C/B=dirs).
+    /// Empty means use the default (most recent of all timestamps).
+    age_by: String,
     /// Argument field (contents for 'f', symlink target for 'L', etc.).
     argument: Option<String>,
     /// Source file for diagnostics.
@@ -284,21 +313,44 @@ fn parse_user(user_str: &str) -> Option<String> {
     }
 }
 
-/// Parse an age specification like "10d", "12h", "1w", etc.
-/// Returns None for "-" or empty.
-fn parse_age(age_str: &str) -> Option<Duration> {
+/// Parse an age specification like "10d", "12h", "1w", "a:1m", etc.
+/// Returns (age_by_flags, duration). age_by contains letters like "a", "m", "c", "b",
+/// "A", "M", "C", "B" indicating which timestamps to use for age comparison.
+/// Returns (String, None) for "-" or empty.
+fn parse_age(age_str: &str) -> (String, Option<Duration>) {
     let s = age_str.trim();
     if s == "-" || s.is_empty() {
-        return None;
+        return (String::new(), None);
     }
 
     // Remove a leading '~' modifier (cleanup only if not accessed)
     let s = s.strip_prefix('~').unwrap_or(s);
 
     if s.is_empty() {
-        return None;
+        return (String::new(), None);
     }
 
+    // Check for "age-by" prefix: "flags:duration" (e.g. "a:1m", "amcb:3h")
+    let (age_by, duration_str) = if let Some(colon_pos) = s.find(':') {
+        let prefix = &s[..colon_pos].trim();
+        let duration = &s[colon_pos + 1..].trim();
+        // Validate that prefix contains only valid age-by chars
+        let valid_age_by = prefix.chars().all(|c| "amcbAMCB ".contains(c));
+        if valid_age_by && !prefix.is_empty() {
+            let flags: String = prefix.chars().filter(|c| !c.is_whitespace()).collect();
+            if duration.is_empty() {
+                return (String::new(), None); // "m:" is invalid
+            }
+            (flags, *duration)
+        } else {
+            // Invalid prefix — the whole thing is invalid
+            return (String::new(), None);
+        }
+    } else {
+        (String::new(), s)
+    };
+
+    let s = duration_str;
     let mut total_secs: u64 = 0;
     let mut num_buf = String::new();
 
@@ -324,7 +376,7 @@ fn parse_age(age_str: &str) -> Option<Duration> {
                 'y' => 31536000, // 365 days
                 _ => {
                     // Unknown suffix, try parsing the whole thing as seconds
-                    return s.parse::<u64>().ok().map(Duration::from_secs);
+                    return (age_by, s.parse::<u64>().ok().map(Duration::from_secs));
                 }
             };
 
@@ -341,10 +393,10 @@ fn parse_age(age_str: &str) -> Option<Duration> {
 
     if total_secs == 0 && !s.contains('0') {
         // If we got 0 and the string doesn't contain '0', parsing probably failed
-        return None;
+        return (age_by, None);
     }
 
-    Some(Duration::from_secs(total_secs))
+    (age_by, Some(Duration::from_secs(total_secs)))
 }
 
 /// Split a tmpfiles.d line into fields, respecting quoting.
@@ -365,7 +417,14 @@ fn split_fields(line: &str) -> Vec<String> {
                 } else if ch == '\\' {
                     if let Some(&next) = chars.peek() {
                         chars.next();
-                        current.push(next);
+                        if next == q || next == '\\' {
+                            // Escaped quote or backslash — consume the escape
+                            current.push(next);
+                        } else {
+                            // Preserve backslash for C-style unescaping later
+                            current.push('\\');
+                            current.push(next);
+                        }
                     } else {
                         current.push(ch);
                     }
@@ -397,8 +456,135 @@ fn split_fields(line: &str) -> Vec<String> {
     fields
 }
 
+/// Expand systemd-tmpfiles specifiers in a string.
+/// Supported: %u (user name), %U (numeric UID), %g (group name), %G (numeric GID),
+/// %h (home directory), %H (hostname), %% (literal %).
+/// Read a key from os-release file(s), optionally under a root prefix.
+fn read_os_release_field(key: &str, root: Option<&Path>) -> String {
+    let paths = if let Some(r) = root {
+        vec![r.join("etc/os-release"), r.join("usr/lib/os-release")]
+    } else {
+        vec![
+            PathBuf::from("/etc/os-release"),
+            PathBuf::from("/usr/lib/os-release"),
+        ]
+    };
+    for p in &paths {
+        if let Ok(content) = fs::read_to_string(p) {
+            for line in content.lines() {
+                if let Some(val) = line
+                    .strip_prefix(key)
+                    .and_then(|rest| rest.strip_prefix('='))
+                {
+                    return val.trim_matches('"').to_string();
+                }
+            }
+        }
+    }
+    String::new()
+}
+
+fn expand_specifiers(s: &str, root: Option<&Path>) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '%' {
+            match chars.peek() {
+                Some('%') => {
+                    chars.next();
+                    result.push('%');
+                }
+                Some('u') => {
+                    chars.next();
+                    // Current user name
+                    result.push_str(
+                        &std::env::var("USER")
+                            .or_else(|_| std::env::var("LOGNAME"))
+                            .unwrap_or_else(|_| "root".to_string()),
+                    );
+                }
+                Some('U') => {
+                    chars.next();
+                    // Current numeric UID
+                    result.push_str(&unsafe { libc::getuid() }.to_string());
+                }
+                Some('g') => {
+                    chars.next();
+                    // Current group name
+                    let gid = unsafe { libc::getgid() };
+                    let gr = unsafe { libc::getgrgid(gid) };
+                    if !gr.is_null() {
+                        let name = unsafe { std::ffi::CStr::from_ptr((*gr).gr_name) };
+                        result.push_str(&name.to_string_lossy());
+                    } else {
+                        result.push_str(&gid.to_string());
+                    }
+                }
+                Some('G') => {
+                    chars.next();
+                    // Current numeric GID
+                    result.push_str(&unsafe { libc::getgid() }.to_string());
+                }
+                Some('h') => {
+                    chars.next();
+                    // Home directory
+                    result.push_str(&std::env::var("HOME").unwrap_or_else(|_| "/root".to_string()));
+                }
+                Some('H') => {
+                    chars.next();
+                    // Hostname
+                    let mut buf = [0u8; 256];
+                    if unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) } == 0 {
+                        let hostname = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr().cast()) };
+                        result.push_str(&hostname.to_string_lossy());
+                    } else {
+                        result.push_str("localhost");
+                    }
+                }
+                // os-release specifiers
+                Some('o') => {
+                    chars.next();
+                    result.push_str(&read_os_release_field("ID", root));
+                }
+                Some('w') => {
+                    chars.next();
+                    result.push_str(&read_os_release_field("VERSION_ID", root));
+                }
+                Some('B') => {
+                    chars.next();
+                    result.push_str(&read_os_release_field("BUILD_ID", root));
+                }
+                Some('W') => {
+                    chars.next();
+                    result.push_str(&read_os_release_field("VARIANT_ID", root));
+                }
+                Some('M') => {
+                    chars.next();
+                    result.push_str(&read_os_release_field("IMAGE_ID", root));
+                }
+                Some('A') => {
+                    chars.next();
+                    result.push_str(&read_os_release_field("IMAGE_VERSION", root));
+                }
+                _ => {
+                    // Unknown specifier — keep as-is
+                    result.push('%');
+                }
+            }
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
 /// Parse a single tmpfiles.d configuration line.
-fn parse_line(line: &str, source: &Path, line_number: usize) -> Option<TmpfilesItem> {
+fn parse_line(
+    line: &str,
+    source: &Path,
+    line_number: usize,
+    root: Option<&Path>,
+) -> Option<TmpfilesItem> {
     let trimmed = line.trim();
 
     // Skip empty lines and comments
@@ -422,12 +608,16 @@ fn parse_line(line: &str, source: &Path, line_number: usize) -> Option<TmpfilesI
     let mut force = false;
     let mut boot_only = false;
     let mut minus = false;
+    let mut purgeable = false;
+    let mut conditional = false;
 
     for c in type_str.chars() {
         match c {
             '+' => force = true,
             '!' => boot_only = true,
             '-' => minus = true,
+            '$' => purgeable = true,
+            '?' => conditional = true,
             '=' => { /* '=' modifier: don't apply to subdirs, we note but don't special-case */ }
             '~' => { /* '~' modifier: masked mode */ }
             _ => {
@@ -464,8 +654,8 @@ fn parse_line(line: &str, source: &Path, line_number: usize) -> Option<TmpfilesI
         }
     };
 
-    // Field 2: Path (required)
-    let path = PathBuf::from(&fields[1]);
+    // Field 2: Path (required) — expand specifiers like %U, %u, %h, etc.
+    let path = PathBuf::from(unescape_c_style(&expand_specifiers(&fields[1], root)));
 
     // Default mode depends on type
     let default_mode = match item_type {
@@ -480,44 +670,108 @@ fn parse_line(line: &str, source: &Path, line_number: usize) -> Option<TmpfilesI
     };
 
     // Field 3: Mode (optional)
-    let mode = if fields.len() > 2 {
-        let m = parse_mode(&fields[2], default_mode);
-        Some(m)
+    // "-" or empty means "use default when creating, don't change when adjusting existing"
+    // ':' prefix means "only apply when creating, not on existing objects"
+    let mode_field = if fields.len() > 2 {
+        fields[2].trim()
     } else {
-        Some(default_mode)
+        ""
     };
-
-    // Field 4: User (optional)
-    let user = if fields.len() > 3 {
-        parse_user(&fields[3])
-    } else {
+    let mode_create_only = mode_field.starts_with(':');
+    let mode_field = mode_field.strip_prefix(':').unwrap_or(mode_field);
+    let mode = if mode_field == "-" || mode_field.is_empty() {
         None
-    };
-
-    // Field 5: Group (optional)
-    let group = if fields.len() > 4 {
-        parse_user(&fields[4])
     } else {
-        None
+        Some(parse_mode(mode_field, default_mode))
     };
 
-    // Field 6: Age (optional)
-    let age = if fields.len() > 5 {
-        parse_age(&fields[5])
+    // Field 4: User (optional) — ':' prefix means "only apply on creation"
+    let user_field = if fields.len() > 3 {
+        fields[3].trim()
     } else {
-        None
+        ""
     };
+    let user_create_only = user_field.starts_with(':');
+    let user_field = user_field.strip_prefix(':').unwrap_or(user_field);
+    let user = parse_user(user_field);
 
-    // Field 7+: Argument (optional, may contain spaces — rest of line)
-    let argument = if fields.len() > 6 {
-        let arg = fields[6..].join(" ");
-        if arg == "-" || arg.is_empty() {
-            None
-        } else {
-            Some(arg)
+    // Field 5: Group (optional) — ':' prefix means "only apply on creation"
+    let group_field = if fields.len() > 4 {
+        fields[4].trim()
+    } else {
+        ""
+    };
+    let group_create_only = group_field.starts_with(':');
+    let group_field = group_field.strip_prefix(':').unwrap_or(group_field);
+    let group = parse_user(group_field);
+
+    // Field 6: Age (optional), may include age-by prefix like "a:1m"
+    let (age_by, age) = if fields.len() > 5 {
+        let age_field = fields[5].trim();
+        let result = parse_age(age_field);
+        // Report invalid age formats (not "-" or empty, but couldn't parse)
+        if result.1.is_none() && age_field != "-" && !age_field.is_empty() {
+            eprintln!(
+                "systemd-tmpfiles: {}:{}: Invalid age '{}', ignoring.",
+                source.display(),
+                line_number,
+                age_field,
+            );
         }
+        result
     } else {
-        None
+        (String::new(), None)
+    };
+
+    // Field 7+: Argument (optional — rest of line after skipping 6 fields)
+    // We extract the raw tail of the line to preserve original spacing and quotes.
+    let argument = {
+        let mut pos = 0;
+        let bytes = trimmed.as_bytes();
+        let len = bytes.len();
+        let mut field_count = 0;
+        while field_count < 6 && pos < len {
+            // Skip whitespace
+            while pos < len && (bytes[pos] as char).is_whitespace() {
+                pos += 1;
+            }
+            if pos >= len {
+                break;
+            }
+            field_count += 1;
+            // Skip field (handle quotes)
+            if bytes[pos] == b'"' || bytes[pos] == b'\'' {
+                let q = bytes[pos];
+                pos += 1;
+                while pos < len && bytes[pos] != q {
+                    if bytes[pos] == b'\\' {
+                        pos += 1;
+                    } // skip escaped char
+                    pos += 1;
+                }
+                if pos < len {
+                    pos += 1;
+                } // skip closing quote
+            } else {
+                while pos < len && !(bytes[pos] as char).is_whitespace() {
+                    pos += 1;
+                }
+            }
+        }
+        if field_count == 6 {
+            // Skip whitespace between field 6 and argument
+            while pos < len && (bytes[pos] as char).is_whitespace() {
+                pos += 1;
+            }
+            let raw_arg = &trimmed[pos..];
+            if raw_arg.is_empty() || raw_arg == "-" {
+                None
+            } else {
+                Some(expand_specifiers(raw_arg, root))
+            }
+        } else {
+            None
+        }
     };
 
     Some(TmpfilesItem {
@@ -525,11 +779,17 @@ fn parse_line(line: &str, source: &Path, line_number: usize) -> Option<TmpfilesI
         force,
         boot_only,
         minus,
+        purgeable,
+        conditional,
         path,
         mode,
+        mode_create_only,
         user,
+        user_create_only,
         group,
+        group_create_only,
         age,
+        age_by,
         argument,
         source: source.to_path_buf(),
         line_number,
@@ -537,7 +797,41 @@ fn parse_line(line: &str, source: &Path, line_number: usize) -> Option<TmpfilesI
 }
 
 /// Parse a tmpfiles.d config file.
-fn parse_config_file(path: &Path) -> io::Result<Vec<TmpfilesItem>> {
+fn parse_config_stdin(root: Option<&Path>) -> io::Result<Vec<TmpfilesItem>> {
+    let stdin = io::stdin();
+    let reader = stdin.lock();
+    let mut items = Vec::new();
+    let mut continuation = String::new();
+    let source = PathBuf::from("<stdin>");
+
+    for (line_idx, line) in reader.lines().enumerate() {
+        let line = line?;
+        let line_number = line_idx + 1;
+
+        if line.ends_with('\\') {
+            continuation.push_str(&line[..line.len() - 1]);
+            continuation.push(' ');
+            continue;
+        }
+
+        let full_line = if !continuation.is_empty() {
+            continuation.push_str(&line);
+            let result = continuation.clone();
+            continuation.clear();
+            result
+        } else {
+            line
+        };
+
+        if let Some(item) = parse_line(&full_line, &source, line_number, root) {
+            items.push(item);
+        }
+    }
+
+    Ok(items)
+}
+
+fn parse_config_file(path: &Path, root: Option<&Path>) -> io::Result<Vec<TmpfilesItem>> {
     let file = fs::File::open(path)?;
     let reader = io::BufReader::new(file);
     let mut items = Vec::new();
@@ -564,7 +858,7 @@ fn parse_config_file(path: &Path) -> io::Result<Vec<TmpfilesItem>> {
             line
         };
 
-        if let Some(item) = parse_line(&full_line, path, line_number) {
+        if let Some(item) = parse_line(&full_line, path, line_number, root) {
             items.push(item);
         }
     }
@@ -578,13 +872,15 @@ fn discover_config_files() -> Vec<PathBuf> {
     let mut seen_names: BTreeSet<String> = BTreeSet::new();
     let mut result = Vec::new();
 
+    // Collect files from directories in priority order (etc > run > usr/lib > lib).
+    // When the same filename exists in multiple directories, the highest-priority one wins.
     for dir in CONFIG_DIRS {
         let dir_path = Path::new(dir);
         if !dir_path.is_dir() {
             continue;
         }
 
-        let mut entries: Vec<PathBuf> = match fs::read_dir(dir_path) {
+        let entries: Vec<PathBuf> = match fs::read_dir(dir_path) {
             Ok(rd) => rd
                 .filter_map(|e| e.ok())
                 .map(|e| e.path())
@@ -595,7 +891,6 @@ fn discover_config_files() -> Vec<PathBuf> {
                 continue;
             }
         };
-        entries.sort();
 
         for path in entries {
             if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
@@ -608,6 +903,10 @@ fn discover_config_files() -> Vec<PathBuf> {
             }
         }
     }
+
+    // Sort globally by filename so that processing order is alphabetical
+    // across all directories (e.g. /usr/lib/L-a.conf before /etc/L-z.conf).
+    result.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
 
     result
 }
@@ -653,22 +952,45 @@ fn resolve_gid(group: &str) -> Option<u32> {
 /// Apply ownership (chown) to a path.
 fn apply_ownership(path: &Path, user: &Option<String>, group: &Option<String>) -> io::Result<()> {
     let uid = match user {
-        Some(u) => resolve_uid(u)
-            .map(|id| id as libc::uid_t)
-            .unwrap_or(libc::uid_t::MAX),
+        Some(u) => match resolve_uid(u) {
+            Some(id) => id as libc::uid_t,
+            None => {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("Unknown user: {}", u),
+                ));
+            }
+        },
         None => libc::uid_t::MAX, // -1 means "don't change"
     };
 
     let gid = match group {
-        Some(g) => resolve_gid(g)
-            .map(|id| id as libc::gid_t)
-            .unwrap_or(libc::gid_t::MAX),
+        Some(g) => match resolve_gid(g) {
+            Some(id) => id as libc::gid_t,
+            None => {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("Unknown group: {}", g),
+                ));
+            }
+        },
         None => libc::gid_t::MAX, // -1 means "don't change"
     };
 
     // If neither needs changing, skip
     if uid == libc::uid_t::MAX && gid == libc::gid_t::MAX {
         return Ok(());
+    }
+
+    // Skip if ownership already matches (avoids EROFS on read-only filesystems)
+    if let Ok(meta) = fs::symlink_metadata(path) {
+        let cur_uid = meta.uid();
+        let cur_gid = meta.gid();
+        let uid_ok = uid == libc::uid_t::MAX || cur_uid == uid;
+        let gid_ok = gid == libc::gid_t::MAX || cur_gid == gid;
+        if uid_ok && gid_ok {
+            return Ok(());
+        }
     }
 
     // Use lchown to avoid following symlinks
@@ -685,6 +1007,12 @@ fn apply_ownership(path: &Path, user: &Option<String>, group: &Option<String>) -
 
 /// Apply file mode (chmod) to a path.
 fn apply_mode(path: &Path, mode: u32) -> io::Result<()> {
+    // Skip if the mode already matches (avoids EROFS on read-only filesystems)
+    if let Ok(meta) = fs::metadata(path)
+        && meta.permissions().mode() & 0o7777 == mode & 0o7777
+    {
+        return Ok(());
+    }
     let permissions = fs::Permissions::from_mode(mode);
     fs::set_permissions(path, permissions)
 }
@@ -704,32 +1032,179 @@ fn excluded_by_prefix(path: &Path, exclude_prefixes: &[PathBuf]) -> bool {
         .any(|prefix| path.starts_with(prefix))
 }
 
+/// Unescape C-style escape sequences in a string (\n, \t, \\, etc.)
+fn unescape_c_style(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.peek() {
+                Some('n') => {
+                    chars.next();
+                    result.push('\n');
+                }
+                Some('t') => {
+                    chars.next();
+                    result.push('\t');
+                }
+                Some('r') => {
+                    chars.next();
+                    result.push('\r');
+                }
+                Some('\\') => {
+                    chars.next();
+                    result.push('\\');
+                }
+                Some('x') => {
+                    chars.next(); // consume 'x'
+                    let mut hex = String::new();
+                    for _ in 0..2 {
+                        if let Some(&h) = chars.peek() {
+                            if h.is_ascii_hexdigit() {
+                                hex.push(h);
+                                chars.next();
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    if let Ok(byte) = u8::from_str_radix(&hex, 16) {
+                        result.push(byte as char);
+                    } else {
+                        result.push('\\');
+                        result.push('x');
+                        result.push_str(&hex);
+                    }
+                }
+                Some('0'..='7') => {
+                    // Octal escape \NNN (up to 3 digits)
+                    let mut oct = String::new();
+                    for _ in 0..3 {
+                        if let Some(&o) = chars.peek() {
+                            if ('0'..='7').contains(&o) {
+                                oct.push(o);
+                                chars.next();
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    if let Ok(byte) = u8::from_str_radix(&oct, 8) {
+                        result.push(byte as char);
+                    } else {
+                        result.push('\\');
+                        result.push_str(&oct);
+                    }
+                }
+                Some(_) => {
+                    result.push('\\');
+                    result.push(chars.next().unwrap());
+                }
+                None => result.push('\\'),
+            }
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
+/// Check if a path traversal is unsafe: any intermediate component is a symlink
+/// owned by a non-root user, or there's an ownership transition from a non-root
+/// directory to a root-owned subdirectory (which could indicate a TOCTOU attack).
+fn path_has_unsafe_transition(path: &Path, root: Option<&Path>) -> bool {
+    let mut check = PathBuf::new();
+    let mut prev_uid: Option<u32> = None;
+    let root_component_count = root.map(|r| r.components().count()).unwrap_or(0);
+    for (i, component) in path.components().enumerate() {
+        check.push(component);
+        // Skip components that are part of the --root prefix (those are trusted)
+        if i < root_component_count {
+            continue;
+        }
+        if let Ok(meta) = fs::symlink_metadata(&check) {
+            let uid = meta.uid();
+            // Symlink owned by non-root user is always unsafe
+            if meta.file_type().is_symlink() && uid != 0 {
+                return true;
+            }
+            // Ownership transition: non-root dir → root-owned subdir is unsafe
+            if meta.file_type().is_dir() {
+                if let Some(prev) = prev_uid
+                    && prev != 0
+                    && uid == 0
+                {
+                    return true;
+                }
+                prev_uid = Some(uid);
+            }
+        }
+    }
+    false
+}
+
 /// Execute a single tmpfiles.d item for --create.
-fn execute_create(item: &TmpfilesItem, graceful: bool) -> bool {
+fn execute_create(item: &TmpfilesItem, graceful: bool, root: Option<&Path>) -> bool {
     let path = &item.path;
+
+    // Refuse to traverse paths with symlinks owned by non-root users
+    if path_has_unsafe_transition(path, root) {
+        if !graceful && !item.minus {
+            eprintln!(
+                "systemd-tmpfiles: Unsafe symlink component in path {}.",
+                path.display(),
+            );
+        }
+        return false;
+    }
 
     match item.item_type {
         ItemType::CreateFile => {
-            if path.exists() && !item.force {
-                // File already exists, just adjust permissions
-                if let Some(mode) = item.mode
-                    && let Err(e) = apply_mode(path, mode)
-                    && !graceful
-                    && !item.minus
-                {
+            // Refuse to follow symlinks — check lstat before anything else
+            if let Ok(meta) = fs::symlink_metadata(path)
+                && (meta.file_type().is_symlink() || !meta.file_type().is_file())
+            {
+                if !graceful && !item.minus {
                     eprintln!(
-                        "systemd-tmpfiles: Failed to set mode on {}: {}",
+                        "systemd-tmpfiles: Existing path {} is not a regular file.",
                         path.display(),
-                        e
                     );
-                    return false;
                 }
+                return false;
+            }
+
+            if path.exists() && !item.force {
+                // File already exists, just adjust permissions.
+                // Apply ownership first, then mode — chown drops suid/sgid bits,
+                // so we must (re)apply mode afterwards to preserve them.
+                let mode_to_apply = item.mode.or_else(|| {
+                    // If no explicit mode, preserve existing mode (chown may drop suid/sgid)
+                    if item.user.is_some() || item.group.is_some() {
+                        fs::metadata(path)
+                            .ok()
+                            .map(|m| m.permissions().mode() & 0o7777)
+                    } else {
+                        None
+                    }
+                });
                 if let Err(e) = apply_ownership(path, &item.user, &item.group)
                     && !graceful
                     && !item.minus
                 {
                     eprintln!(
                         "systemd-tmpfiles: Failed to set ownership on {}: {}",
+                        path.display(),
+                        e
+                    );
+                    return false;
+                }
+                if let Some(mode) = mode_to_apply
+                    && let Err(e) = apply_mode(path, mode)
+                    && !graceful
+                    && !item.minus
+                {
+                    eprintln!(
+                        "systemd-tmpfiles: Failed to set mode on {}: {}",
                         path.display(),
                         e
                     );
@@ -753,13 +1228,15 @@ fn execute_create(item: &TmpfilesItem, graceful: bool) -> bool {
             }
 
             // Create the file
-            let content = item.argument.as_deref().unwrap_or("");
-            match fs::write(path, content) {
+            let raw_content = item.argument.as_deref().unwrap_or("");
+            let content = unescape_c_style(raw_content);
+            match fs::write(path, &content) {
                 Ok(()) => {
+                    // Apply ownership first, then mode — chown drops suid/sgid
+                    let _ = apply_ownership(path, &item.user, &item.group);
                     if let Some(mode) = item.mode {
                         let _ = apply_mode(path, mode);
                     }
-                    let _ = apply_ownership(path, &item.user, &item.group);
                     true
                 }
                 Err(e) => {
@@ -776,9 +1253,105 @@ fn execute_create(item: &TmpfilesItem, graceful: bool) -> bool {
             }
         }
 
+        ItemType::TruncateFile => {
+            // F — Create or truncate file (always writes content)
+            // Refuse to follow symlinks
+            if let Ok(meta) = fs::symlink_metadata(path) {
+                if meta.file_type().is_symlink() || !meta.file_type().is_file() {
+                    if !graceful && !item.minus {
+                        eprintln!(
+                            "systemd-tmpfiles: Existing path {} is not a regular file.",
+                            path.display(),
+                        );
+                    }
+                    return false;
+                }
+                // If file exists, check if we can skip the truncation (mode and content match)
+                if meta.file_type().is_file() {
+                    let content = item.argument.as_deref().unwrap_or("");
+                    let file_empty = meta.len() == 0;
+                    let content_empty = content.is_empty() || content == "-";
+                    // Only skip write if both file and desired content are empty
+                    if file_empty && content_empty {
+                        if let Some(mode) = item.mode
+                            && let Err(e) = apply_mode(path, mode)
+                            && !graceful
+                            && !item.minus
+                        {
+                            eprintln!(
+                                "systemd-tmpfiles: Failed to set mode on {}: {}",
+                                path.display(),
+                                e
+                            );
+                            return false;
+                        }
+                        if let Err(e) = apply_ownership(path, &item.user, &item.group)
+                            && !graceful
+                            && !item.minus
+                        {
+                            eprintln!(
+                                "systemd-tmpfiles: Failed to set ownership on {}: {}",
+                                path.display(),
+                                e
+                            );
+                            return false;
+                        }
+                        return true;
+                    }
+                }
+            }
+
+            // Create parent directories
+            if let Some(parent) = path.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+
+            let raw_content = item.argument.as_deref().unwrap_or("");
+            let content = unescape_c_style(raw_content);
+            match fs::write(path, &content) {
+                Ok(()) => {
+                    // Apply ownership first, then mode — chown drops suid/sgid
+                    let _ = apply_ownership(path, &item.user, &item.group);
+                    if let Some(mode) = item.mode {
+                        let _ = apply_mode(path, mode);
+                    }
+                    true
+                }
+                Err(e) => {
+                    if !graceful && !item.minus {
+                        eprintln!(
+                            "systemd-tmpfiles: Failed to create/truncate file {}: {}",
+                            path.display(),
+                            e
+                        );
+                        return false;
+                    }
+                    true
+                }
+            }
+        }
+
         ItemType::WriteFile => {
-            let content = item.argument.as_deref().unwrap_or("");
-            if item.force || !path.exists() {
+            // 'w' requires a content argument
+            if item.argument.is_none() {
+                if !graceful && !item.minus {
+                    eprintln!(
+                        "systemd-tmpfiles: {}:{}: write requires an argument (content).",
+                        item.source.display(),
+                        item.line_number,
+                    );
+                }
+                return false;
+            }
+            // 'w' only writes to existing files — skip if target doesn't exist
+            if !path.exists() {
+                return true;
+            }
+            let raw_content = item.argument.as_deref().unwrap_or("");
+            let content = unescape_c_style(raw_content);
+            let content = content.as_str();
+            if !item.force {
+                // 'w' (without +) overwrites
                 match fs::write(path, content) {
                     Ok(()) => true,
                     Err(e) => {
@@ -794,7 +1367,7 @@ fn execute_create(item: &TmpfilesItem, graceful: bool) -> bool {
                     }
                 }
             } else {
-                // Append for w (without +)
+                // 'w+' appends
                 match std::fs::OpenOptions::new().append(true).open(path) {
                     Ok(mut f) => {
                         use std::io::Write;
@@ -832,7 +1405,40 @@ fn execute_create(item: &TmpfilesItem, graceful: bool) -> bool {
         | ItemType::CreateSubvolume
         | ItemType::CreateOrCleanSubvolume => {
             if item.item_type == ItemType::AdjustDirectory {
-                // 'e' only adjusts existing directories, doesn't create
+                // 'e' type supports glob patterns — expand and adjust each match.
+                let path_str = path.to_string_lossy();
+                if path_str.contains('*') || path_str.contains('?') || path_str.contains('[') {
+                    if let Ok(entries) = glob::glob(&path_str) {
+                        for entry in entries.flatten() {
+                            if !entry.is_dir() {
+                                continue;
+                            }
+                            if let Some(mode) = item.mode
+                                && let Err(e) = apply_mode(&entry, mode)
+                                && !graceful
+                                && !item.minus
+                            {
+                                eprintln!(
+                                    "systemd-tmpfiles: Failed to set mode on {}: {}",
+                                    entry.display(),
+                                    e
+                                );
+                            }
+                            if let Err(e) = apply_ownership(&entry, &item.user, &item.group)
+                                && !graceful
+                                && !item.minus
+                            {
+                                eprintln!(
+                                    "systemd-tmpfiles: Failed to set ownership on {}: {}",
+                                    entry.display(),
+                                    e
+                                );
+                            }
+                        }
+                    }
+                    return true;
+                }
+                // Non-glob: 'e' only adjusts existing directories, doesn't create
                 if !path.is_dir() {
                     return true;
                 }
@@ -849,9 +1455,48 @@ fn execute_create(item: &TmpfilesItem, graceful: bool) -> bool {
                     }
                     return true;
                 }
+            } else {
+                // Directory already existed — respect ':' create-only modifiers
+                let effective_mode = if item.mode_create_only {
+                    None
+                } else {
+                    item.mode
+                };
+                let effective_user = if item.user_create_only {
+                    &None
+                } else {
+                    &item.user
+                };
+                let effective_group = if item.group_create_only {
+                    &None
+                } else {
+                    &item.group
+                };
+                if let Some(mode) = effective_mode
+                    && let Err(e) = apply_mode(path, mode)
+                    && !graceful
+                    && !item.minus
+                {
+                    eprintln!(
+                        "systemd-tmpfiles: Failed to set mode on {}: {}",
+                        path.display(),
+                        e
+                    );
+                }
+                if let Err(e) = apply_ownership(path, effective_user, effective_group)
+                    && !graceful
+                    && !item.minus
+                {
+                    eprintln!(
+                        "systemd-tmpfiles: Failed to set ownership on {}: {}",
+                        path.display(),
+                        e
+                    );
+                }
+                return true;
             }
 
-            // Apply mode and ownership
+            // Apply mode and ownership (newly created)
             if path.is_dir() {
                 if let Some(mode) = item.mode
                     && let Err(e) = apply_mode(path, mode)
@@ -884,6 +1529,11 @@ fn execute_create(item: &TmpfilesItem, graceful: bool) -> bool {
                 return true;
             }
 
+            // With force (p+), remove existing path first
+            if path.exists() && item.force {
+                let _ = fs::remove_file(path);
+            }
+
             // Create parent directories
             if let Some(parent) = path.parent() {
                 let _ = fs::create_dir_all(parent);
@@ -898,7 +1548,10 @@ fn execute_create(item: &TmpfilesItem, graceful: bool) -> bool {
             };
 
             let mode = item.mode.unwrap_or(0o644);
+            // Temporarily clear umask so mkfifo creates with exact mode
+            let old_umask = unsafe { libc::umask(0) };
             let ret = unsafe { libc::mkfifo(c_path.as_ptr(), mode) };
+            unsafe { libc::umask(old_umask) };
             if ret != 0 {
                 let e = io::Error::last_os_error();
                 if e.kind() != io::ErrorKind::AlreadyExists && !graceful && !item.minus {
@@ -915,12 +1568,30 @@ fn execute_create(item: &TmpfilesItem, graceful: bool) -> bool {
         }
 
         ItemType::CreateSymlink => {
+            // '?' modifier: only create if the target exists (inside root if --root)
+            if item.conditional
+                && let Some(target) = &item.argument
+            {
+                let check_path = if let Some(r) = root {
+                    r.join(target.strip_prefix('/').unwrap_or(target))
+                } else {
+                    PathBuf::from(target)
+                };
+                if !check_path.exists() {
+                    return true;
+                }
+            }
+
             if path.exists() || path.symlink_metadata().is_ok() {
                 if !item.force {
                     return true;
                 }
                 // With '+' force, remove existing and recreate
-                let _ = fs::remove_file(path);
+                if path.is_dir() {
+                    let _ = fs::remove_dir_all(path);
+                } else {
+                    let _ = fs::remove_file(path);
+                }
             }
 
             // Create parent directories
@@ -1058,6 +1729,7 @@ fn execute_create(item: &TmpfilesItem, graceful: bool) -> bool {
             let source = match &item.argument {
                 Some(s) => PathBuf::from(s),
                 None => {
+                    // Default was set in run() before --root prefixing; should not reach here
                     eprintln!(
                         "systemd-tmpfiles: {}:{}: copy requires an argument (source path).",
                         item.source.display(),
@@ -1067,7 +1739,21 @@ fn execute_create(item: &TmpfilesItem, graceful: bool) -> bool {
                 }
             };
 
-            if path.exists() && !item.force {
+            if !source.exists() {
+                if !graceful && !item.minus {
+                    eprintln!(
+                        "systemd-tmpfiles: Failed to copy {} -> {}: No such file or directory (os error 2)",
+                        source.display(),
+                        path.display(),
+                    );
+                }
+                // Missing source is not a fatal error — just skip.
+                return true;
+            }
+
+            if path.exists() && !item.force && !source.is_dir() {
+                // Skip existing files unless forced.
+                // Directories are always merged (contents are copied into existing dir).
                 return true;
             }
 
@@ -1077,7 +1763,8 @@ fn execute_create(item: &TmpfilesItem, graceful: bool) -> bool {
             }
 
             if source.is_dir() {
-                match copy_dir_recursive(&source, path) {
+                let owner_info = Some((&item.user, &item.group, item.mode));
+                match copy_dir_recursive_with_owner(&source, path, false, owner_info) {
                     Ok(()) => true,
                     Err(e) => {
                         if !graceful && !item.minus {
@@ -1118,11 +1805,46 @@ fn execute_create(item: &TmpfilesItem, graceful: bool) -> bool {
         }
 
         ItemType::AdjustPermissions | ItemType::AdjustPermissionsRecursively => {
-            if !path.exists() {
+            let recursive = item.item_type == ItemType::AdjustPermissionsRecursively;
+
+            // Support glob patterns for z/Z types
+            let path_str = path.to_string_lossy();
+            if path_str.contains('*') || path_str.contains('?') || path_str.contains('[') {
+                if let Ok(entries) = glob::glob(&path_str) {
+                    let mut ok = true;
+                    for entry in entries.flatten() {
+                        if let Some(mode) = item.mode
+                            && let Err(e) = apply_mode(&entry, mode)
+                            && !graceful
+                            && !item.minus
+                        {
+                            eprintln!(
+                                "systemd-tmpfiles: Failed to set mode on {}: {}",
+                                entry.display(),
+                                e
+                            );
+                            ok = false;
+                        }
+                        if let Err(e) = apply_ownership(&entry, &item.user, &item.group)
+                            && !graceful
+                            && !item.minus
+                        {
+                            eprintln!(
+                                "systemd-tmpfiles: Failed to set ownership on {}: {}",
+                                entry.display(),
+                                e
+                            );
+                            ok = false;
+                        }
+                    }
+                    return ok;
+                }
                 return true;
             }
 
-            let recursive = item.item_type == ItemType::AdjustPermissionsRecursively;
+            if !path.exists() {
+                return true;
+            }
 
             let apply_to = |p: &Path| -> bool {
                 let mut ok = true;
@@ -1178,13 +1900,62 @@ fn execute_create(item: &TmpfilesItem, graceful: bool) -> bool {
         ItemType::SetExtendedAttributes
         | ItemType::SetExtendedAttributesRecursively
         | ItemType::SetAttributes
-        | ItemType::SetAttributesRecursively
-        | ItemType::SetACL
-        | ItemType::SetACLRecursively => {
-            // These are advanced features (xattrs, chattr flags, POSIX ACLs).
+        | ItemType::SetAttributesRecursively => {
+            // These are advanced features (xattrs, chattr flags).
             // We accept them without error but don't implement the actual
             // kernel interface calls — this is sufficient for most boot scenarios.
             true
+        }
+
+        ItemType::SetACL | ItemType::SetACLRecursively => {
+            let acl_spec = match &item.argument {
+                Some(a) => a.as_str(),
+                None => return true,
+            };
+            if !path.exists() {
+                return true;
+            }
+
+            // 'a' (no +) clears extended ACLs first; 'a+' appends/modifies
+            if !item.force {
+                let _ = std::process::Command::new("setfacl")
+                    .arg("-b")
+                    .arg(path)
+                    .output();
+            }
+
+            let mut cmd = std::process::Command::new("setfacl");
+            if item.item_type == ItemType::SetACLRecursively {
+                cmd.arg("-R");
+            }
+            cmd.arg("-m").arg(acl_spec).arg(path);
+
+            match cmd.output() {
+                Ok(output) if output.status.success() => true,
+                Ok(output) => {
+                    if !graceful && !item.minus {
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        eprintln!(
+                            "systemd-tmpfiles: Failed to set ACL on {}: {}",
+                            path.display(),
+                            stderr.trim()
+                        );
+                        return false;
+                    }
+                    true
+                }
+                Err(e) => {
+                    if !graceful && !item.minus {
+                        eprintln!(
+                            "systemd-tmpfiles: Failed to run setfacl on {}: {}",
+                            path.display(),
+                            e
+                        );
+                        return false;
+                    }
+                    true
+                }
+            }
         }
 
         // Types that are only relevant for --remove or --clean
@@ -1196,7 +1967,83 @@ fn execute_create(item: &TmpfilesItem, graceful: bool) -> bool {
 }
 
 /// Execute a single tmpfiles.d item for --remove.
-fn execute_remove(item: &TmpfilesItem, graceful: bool) -> bool {
+fn execute_remove_with_managed(
+    item: &TmpfilesItem,
+    graceful: bool,
+    managed_paths: &std::collections::HashSet<PathBuf>,
+    exclude_dir_patterns: &[PathBuf],
+) -> bool {
+    execute_remove_inner(item, graceful, managed_paths, exclude_dir_patterns)
+}
+
+fn remove_recursive_with_exclusions(
+    dir: &Path,
+    managed: &std::collections::HashSet<PathBuf>,
+    exclude_dir_patterns: &[PathBuf],
+    graceful: bool,
+    minus: bool,
+) -> bool {
+    let mut ok = true;
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let entry_path = entry.path();
+            // Skip managed paths (but recurse into managed dirs)
+            if managed.contains(&entry_path) {
+                if entry_path.is_dir()
+                    && !remove_recursive_with_exclusions(
+                        &entry_path,
+                        managed,
+                        exclude_dir_patterns,
+                        graceful,
+                        minus,
+                    )
+                {
+                    ok = false;
+                }
+                continue;
+            }
+            // Check X patterns — protect the path but recurse into it
+            if is_excluded_by_patterns(&entry_path, exclude_dir_patterns) {
+                if entry_path.is_dir()
+                    && !remove_recursive_with_exclusions(
+                        &entry_path,
+                        managed,
+                        exclude_dir_patterns,
+                        graceful,
+                        minus,
+                    )
+                {
+                    ok = false;
+                }
+                continue;
+            }
+            let result = if entry_path.is_dir() {
+                fs::remove_dir_all(&entry_path)
+            } else {
+                fs::remove_file(&entry_path)
+            };
+            if let Err(e) = result
+                && !graceful
+                && !minus
+            {
+                eprintln!(
+                    "systemd-tmpfiles: Failed to remove {}: {}",
+                    entry_path.display(),
+                    e
+                );
+                ok = false;
+            }
+        }
+    }
+    ok
+}
+
+fn execute_remove_inner(
+    item: &TmpfilesItem,
+    graceful: bool,
+    managed_paths: &std::collections::HashSet<PathBuf>,
+    exclude_dir_patterns: &[PathBuf],
+) -> bool {
     let path = &item.path;
 
     match item.item_type {
@@ -1207,20 +2054,10 @@ fn execute_remove(item: &TmpfilesItem, graceful: bool) -> bool {
             match fs::remove_file(path) {
                 Ok(()) => true,
                 Err(_) => {
-                    // Try removing as a directory (empty)
+                    // Try removing as a directory (empty) — silently skip non-empty directories
                     match fs::remove_dir(path) {
                         Ok(()) => true,
-                        Err(e) => {
-                            if !graceful && !item.minus {
-                                eprintln!(
-                                    "systemd-tmpfiles: Failed to remove {}: {}",
-                                    path.display(),
-                                    e
-                                );
-                                return false;
-                            }
-                            true
-                        }
+                        Err(_) => true, // Not an error — skip non-empty dirs
                     }
                 }
             }
@@ -1231,20 +2068,14 @@ fn execute_remove(item: &TmpfilesItem, graceful: bool) -> bool {
                 return true;
             }
             if path.is_dir() {
-                match fs::remove_dir_all(path) {
-                    Ok(()) => true,
-                    Err(e) => {
-                        if !graceful && !item.minus {
-                            eprintln!(
-                                "systemd-tmpfiles: Failed to recursively remove {}: {}",
-                                path.display(),
-                                e
-                            );
-                            return false;
-                        }
-                        true
-                    }
-                }
+                // Remove contents of the directory, preserving managed and X-excluded paths
+                remove_recursive_with_exclusions(
+                    path,
+                    managed_paths,
+                    exclude_dir_patterns,
+                    graceful,
+                    item.minus,
+                )
             } else {
                 match fs::remove_file(path) {
                     Ok(()) => true,
@@ -1318,7 +2149,12 @@ fn execute_remove(item: &TmpfilesItem, graceful: bool) -> bool {
 }
 
 /// Execute cleanup for items with an age specification.
-fn execute_clean(item: &TmpfilesItem, exclude_patterns: &[PathBuf], graceful: bool) -> bool {
+fn execute_clean(
+    item: &TmpfilesItem,
+    exclude_patterns: &[PathBuf],
+    exclude_dir_patterns: &[PathBuf],
+    graceful: bool,
+) -> bool {
     let path = &item.path;
     let age = match item.age {
         Some(a) => a,
@@ -1334,21 +2170,75 @@ fn execute_clean(item: &TmpfilesItem, exclude_patterns: &[PathBuf], graceful: bo
             if !path.is_dir() {
                 return true;
             }
-            clean_directory(path, age, exclude_patterns, graceful, item.minus)
+            clean_directory(
+                path,
+                age,
+                &item.age_by,
+                exclude_patterns,
+                exclude_dir_patterns,
+                graceful,
+                item.minus,
+            )
         }
         _ => true,
     }
+}
+
+/// Check if a path matches any exclude pattern (supports glob patterns).
+/// For 'x' patterns, the path matches if it starts with (is under) the pattern.
+/// For direct use, this checks exact match or starts_with for non-glob patterns,
+/// and glob matching for patterns containing wildcards.
+fn is_excluded_by_patterns(path: &Path, patterns: &[PathBuf]) -> bool {
+    for pattern in patterns {
+        let pat_str = pattern.to_string_lossy();
+        if pat_str.contains('*') || pat_str.contains('?') || pat_str.contains('[') {
+            // Glob pattern — match against the path
+            if let Ok(entries) = glob::glob(&pat_str) {
+                for entry in entries.flatten() {
+                    if path.starts_with(&entry) || *path == entry {
+                        return true;
+                    }
+                }
+            }
+        } else if path.starts_with(pattern.as_path()) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Check if a path exactly matches any pattern (for X — exclude only the directory itself).
+fn is_exact_match_by_patterns(path: &Path, patterns: &[PathBuf]) -> bool {
+    for pattern in patterns {
+        let pat_str = pattern.to_string_lossy();
+        if pat_str.contains('*') || pat_str.contains('?') || pat_str.contains('[') {
+            if let Ok(entries) = glob::glob(&pat_str) {
+                for entry in entries.flatten() {
+                    if *path == entry {
+                        return true;
+                    }
+                }
+            }
+        } else if *path == **pattern {
+            return true;
+        }
+    }
+    false
 }
 
 /// Clean files older than the specified age from a directory.
 fn clean_directory(
     dir: &Path,
     max_age: Duration,
+    age_by: &str,
     exclude_patterns: &[PathBuf],
+    exclude_dir_patterns: &[PathBuf],
     graceful: bool,
     ignore_errors: bool,
 ) -> bool {
     let now = SystemTime::now();
+    // Save atime before reading directory (read_dir updates atime on some filesystems)
+    let saved_atime = fs::symlink_metadata(dir).ok().map(|m| m.atime());
     let entries = match fs::read_dir(dir) {
         Ok(rd) => rd,
         Err(e) => {
@@ -1368,45 +2258,114 @@ fn clean_directory(
     for entry in entries.filter_map(|e| e.ok()) {
         let entry_path = entry.path();
 
-        // Check if this path is excluded
-        if exclude_patterns
-            .iter()
-            .any(|excl| entry_path.starts_with(excl))
-        {
+        // Check 'x' patterns — excludes path and everything below
+        if is_excluded_by_patterns(&entry_path, exclude_patterns) {
             continue;
         }
+
+        // Check 'X' patterns — excludes the directory itself (exact match only)
+        let is_x_excluded = is_exact_match_by_patterns(&entry_path, exclude_dir_patterns);
 
         let metadata = match entry_path.symlink_metadata() {
             Ok(m) => m,
             Err(_) => continue,
         };
 
-        // Use the most recent of atime, mtime, ctime
-        let file_age = {
-            let mtime = metadata.mtime() as u64;
-            let atime = metadata.atime() as u64;
-            let ctime = metadata.ctime() as u64;
-            let newest = mtime.max(atime).max(ctime);
+        if is_x_excluded {
+            // X: directory is protected but contents should be cleaned
+            if metadata.is_dir() {
+                let _ = clean_directory(
+                    &entry_path,
+                    max_age,
+                    age_by,
+                    exclude_patterns,
+                    exclude_dir_patterns,
+                    graceful,
+                    ignore_errors,
+                );
+            }
+            continue;
+        }
 
+        // Compute file age based on age_by flags
+        let file_age = {
+            let is_dir = metadata.is_dir();
             let now_secs = now
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs();
 
-            if now_secs > newest {
-                Duration::from_secs(now_secs - newest)
+            if age_by.is_empty() {
+                // Default: use most recent of all timestamps
+                let mtime = metadata.mtime() as u64;
+                let atime = metadata.atime() as u64;
+                let ctime = metadata.ctime() as u64;
+                let newest = mtime.max(atime).max(ctime);
+                if now_secs > newest {
+                    Duration::from_secs(now_secs - newest)
+                } else {
+                    Duration::from_secs(0)
+                }
             } else {
-                Duration::from_secs(0)
+                // age-by: use only specified timestamps. Lowercase = files, uppercase = dirs.
+                // ALL specified timestamps must be older than max_age for the item to be cleaned.
+                // We track the minimum age (newest timestamp) — only clean if even that is old.
+                let mut min_age = Duration::from_secs(u64::MAX);
+                let mut any = false;
+                for flag in age_by.chars() {
+                    let (applies_to_files, applies_to_dirs) = match flag {
+                        'a' => (true, false),
+                        'm' => (true, false),
+                        'c' => (true, false),
+                        'b' => (true, false),
+                        'A' => (false, true),
+                        'M' => (false, true),
+                        'C' => (false, true),
+                        'B' => (false, true),
+                        _ => continue,
+                    };
+                    if (is_dir && !applies_to_dirs) || (!is_dir && !applies_to_files) {
+                        continue;
+                    }
+                    let ts = match flag.to_ascii_lowercase() {
+                        'a' => metadata.atime() as u64,
+                        'm' => metadata.mtime() as u64,
+                        'c' => metadata.ctime() as u64,
+                        'b' => {
+                            // btime (birth/creation time)
+                            metadata
+                                .created()
+                                .ok()
+                                .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
+                                .map(|d| d.as_secs())
+                                .unwrap_or(metadata.ctime() as u64)
+                        }
+                        _ => continue,
+                    };
+                    let age = if now_secs > ts {
+                        Duration::from_secs(now_secs - ts)
+                    } else {
+                        Duration::from_secs(0)
+                    };
+                    if age < min_age {
+                        min_age = age;
+                    }
+                    any = true;
+                }
+                if any { min_age } else { Duration::from_secs(0) }
             }
         };
 
-        if file_age > max_age {
+        // age 0 means "clean everything", otherwise clean files older than or equal to max_age
+        if max_age.is_zero() || file_age >= max_age {
             if metadata.is_dir() {
                 // Recurse into subdirectories first
                 let _ = clean_directory(
                     &entry_path,
                     max_age,
+                    age_by,
                     exclude_patterns,
+                    exclude_dir_patterns,
                     graceful,
                     ignore_errors,
                 );
@@ -1439,15 +2398,48 @@ fn clean_directory(
                 );
                 ok = false;
             }
-        } else if metadata.is_dir() {
-            // Not old enough to remove, but recurse to clean contents
+        } else if metadata.is_dir() && age_by.is_empty() {
+            // Not old enough to remove, but recurse to clean contents.
+            // Only recurse when not using age-by, to avoid updating atimes
+            // (systemd uses O_NOATIME for this).
             let _ = clean_directory(
                 &entry_path,
                 max_age,
+                age_by,
                 exclude_patterns,
+                exclude_dir_patterns,
                 graceful,
                 ignore_errors,
             );
+        }
+    }
+
+    // Restore atime to avoid interfering with subsequent age-based cleaning
+    // (like systemd's O_NOATIME approach)
+    if let Some(orig_atime) = saved_atime {
+        let mtime = fs::symlink_metadata(dir)
+            .ok()
+            .map(|m| m.mtime())
+            .unwrap_or(0);
+        let times = [
+            libc::timespec {
+                tv_sec: orig_atime,
+                tv_nsec: 0,
+            },
+            libc::timespec {
+                tv_sec: mtime,
+                tv_nsec: 0,
+            },
+        ];
+        if let Ok(c_path) = CString::new(dir.as_os_str().as_encoded_bytes()) {
+            unsafe {
+                libc::utimensat(
+                    libc::AT_FDCWD,
+                    c_path.as_ptr(),
+                    times.as_ptr(),
+                    libc::AT_SYMLINK_NOFOLLOW,
+                )
+            };
         }
     }
 
@@ -1455,8 +2447,18 @@ fn clean_directory(
 }
 
 /// Recursively copy a directory.
-fn copy_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {
-    if !dst.exists() {
+/// Copy directory recursively without ownership changes.
+/// Copy directory recursively, optionally applying ownership/mode to newly copied entries.
+/// When `force` is false, existing files are not overwritten.
+/// `owner` provides (user, group, mode) to apply to newly created entries.
+fn copy_dir_recursive_with_owner(
+    src: &Path,
+    dst: &Path,
+    force: bool,
+    owner: Option<(&Option<String>, &Option<String>, Option<u32>)>,
+) -> io::Result<()> {
+    let created_dir = !dst.exists();
+    if created_dir {
         fs::create_dir_all(dst)?;
     }
 
@@ -1467,20 +2469,43 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {
         let dst_path = dst.join(entry.file_name());
 
         if entry_type.is_dir() {
-            copy_dir_recursive(&src_path, &dst_path)?;
+            copy_dir_recursive_with_owner(&src_path, &dst_path, force, owner)?;
         } else if entry_type.is_symlink() {
+            if !force && dst_path.exists() {
+                continue;
+            }
             let target = fs::read_link(&src_path)?;
             let _ = fs::remove_file(&dst_path);
             symlink(&target, &dst_path)?;
+            if let Some((user, group, mode)) = owner {
+                let _ = apply_ownership(&dst_path, user, group);
+                if let Some(m) = mode {
+                    let _ = apply_mode(&dst_path, m);
+                }
+            }
         } else {
+            if !force && dst_path.exists() {
+                continue;
+            }
             fs::copy(&src_path, &dst_path)?;
+            if let Some((user, group, mode)) = owner {
+                let _ = apply_ownership(&dst_path, user, group);
+                if let Some(m) = mode {
+                    let _ = apply_mode(&dst_path, m);
+                }
+            }
         }
     }
 
-    // Copy permissions from source directory
-    let src_meta = fs::metadata(src)?;
-    let permissions = src_meta.permissions();
-    fs::set_permissions(dst, permissions)?;
+    // Apply ownership/mode to the directory itself if we created it or force
+    if (created_dir || force)
+        && let Some((user, group, mode)) = owner
+    {
+        let _ = apply_ownership(dst, user, group);
+        if let Some(m) = mode {
+            let _ = apply_mode(dst, m);
+        }
+    }
 
     Ok(())
 }
@@ -1506,30 +2531,54 @@ fn run() -> u8 {
         .unwrap_or(false);
 
     // Need at least one action
-    if !cli.create && !cli.clean && !cli.remove {
+    if !cli.create && !cli.clean && !cli.remove && !cli.purge {
         eprintln!("systemd-tmpfiles: No action specified. Use --create, --clean, or --remove.");
         return EXIT_FAILURE;
     }
 
     // Collect config files to read
-    let config_files = if !cli.files.is_empty() {
-        cli.files.clone()
+    let has_stdin = cli.files.iter().any(|f| f.as_os_str() == "-");
+    let config_files: Vec<PathBuf> = if !cli.files.is_empty() {
+        cli.files
+            .iter()
+            .filter(|f| f.as_os_str() != "-")
+            .cloned()
+            .collect()
     } else {
         discover_config_files()
     };
 
     if verbose {
         eprintln!(
-            "systemd-tmpfiles: Found {} configuration file(s).",
-            config_files.len()
+            "systemd-tmpfiles: Found {} configuration file(s){}.",
+            config_files.len(),
+            if has_stdin { " (+ stdin)" } else { "" }
         );
     }
 
     // Parse all configuration
     let mut items = Vec::new();
 
+    // Read from stdin if "-" was specified
+    if has_stdin {
+        match parse_config_stdin(cli.root.as_deref()) {
+            Ok(stdin_items) => {
+                if verbose {
+                    eprintln!(
+                        "systemd-tmpfiles: Read {} item(s) from stdin",
+                        stdin_items.len(),
+                    );
+                }
+                items.extend(stdin_items);
+            }
+            Err(e) => {
+                eprintln!("systemd-tmpfiles: Failed to read stdin: {}", e);
+            }
+        }
+    }
+
     for path in &config_files {
-        match parse_config_file(path) {
+        match parse_config_file(path, cli.root.as_deref()) {
             Ok(file_items) => {
                 if verbose {
                     eprintln!(
@@ -1546,22 +2595,114 @@ fn run() -> u8 {
         }
     }
 
+    // Deduplicate items: for types other than w+ (WriteFile with force/append),
+    // only the first entry per (path, type) is kept.  This matches systemd behaviour
+    // where earlier (higher-priority) config files win for the same path and type.
+    {
+        let mut seen: std::collections::HashSet<(PathBuf, ItemType)> =
+            std::collections::HashSet::new();
+        items.retain(|item| {
+            // w+ (WriteFile with force flag) entries are always kept — they append.
+            if item.item_type == ItemType::WriteFile && item.force {
+                return true;
+            }
+            // For all other types, keep only the first entry per (path, type).
+            seen.insert((item.path.clone(), item.item_type))
+        });
+    }
+
+    // Set default symlink/copy source before root prefixing.
+    // When no argument is given, L and C types default to /usr/share/factory/<path>.
+    for item in &mut items {
+        if (item.item_type == ItemType::CopyFiles || item.item_type == ItemType::CreateSymlink)
+            && item.argument.is_none()
+        {
+            let rel = item.path.strip_prefix("/").unwrap_or(&item.path);
+            item.argument = Some(
+                PathBuf::from("/usr/share/factory")
+                    .join(rel)
+                    .to_string_lossy()
+                    .into_owned(),
+            );
+        }
+    }
+
+    // Apply --root prefix to all item paths and arguments
+    if let Some(ref root) = cli.root {
+        for item in &mut items {
+            // Prefix the path: root + path
+            item.path = root.join(item.path.strip_prefix("/").unwrap_or(&item.path));
+            // Prefix the argument if it looks like an absolute path.
+            // Symlink targets are NOT prefixed — they are stored as-is in the symlink
+            // and will resolve correctly when the rootfs is used at boot.
+            if item.item_type != ItemType::CreateSymlink
+                && let Some(ref arg) = item.argument
+                && arg.starts_with('/')
+            {
+                item.argument = Some(
+                    root.join(arg.strip_prefix('/').unwrap_or(arg))
+                        .to_string_lossy()
+                        .into_owned(),
+                );
+            }
+        }
+    }
+
     // Filter by boot-only flag
     if !cli.boot {
         items.retain(|item| !item.boot_only);
     }
 
-    // Collect exclude patterns from 'x' and 'X' items for clean operations
+    // Collect exclude patterns from 'x' and 'X' items for clean operations.
+    // 'x' excludes the path and everything below; 'X' excludes only the directory itself.
     let exclude_patterns: Vec<PathBuf> = items
         .iter()
-        .filter(|item| {
-            item.item_type == ItemType::IgnorePath
-                || item.item_type == ItemType::IgnoreDirectoryPath
-        })
+        .filter(|item| item.item_type == ItemType::IgnorePath)
+        .map(|item| item.path.clone())
+        .collect();
+    let exclude_dir_patterns: Vec<PathBuf> = items
+        .iter()
+        .filter(|item| item.item_type == ItemType::IgnoreDirectoryPath)
         .map(|item| item.path.clone())
         .collect();
 
     let mut any_failed = false;
+
+    // Execute --purge first (before --create, so --create can recreate items)
+    if cli.purge {
+        // Sort deepest-first so children are removed before parents
+        let mut purge_items: Vec<&TmpfilesItem> =
+            items.iter().filter(|item| item.purgeable).collect();
+        purge_items.sort_by(|a, b| {
+            b.path
+                .components()
+                .count()
+                .cmp(&a.path.components().count())
+        });
+        for item in &purge_items {
+            if !matches_prefix(&item.path, &cli.prefixes)
+                || excluded_by_prefix(&item.path, &cli.exclude_prefixes)
+            {
+                continue;
+            }
+            if cli.dry_run {
+                eprintln!(
+                    "Would purge: {} (type {:?}, from {}:{})",
+                    item.path.display(),
+                    item.item_type,
+                    item.source.display(),
+                    item.line_number,
+                );
+            } else {
+                let path = &item.path;
+                if path.is_dir() {
+                    let _ = fs::remove_dir_all(path);
+                } else if path.exists() || path.symlink_metadata().is_ok() {
+                    let _ = fs::remove_file(path);
+                }
+            }
+        }
+    }
 
     // Execute --create
     if cli.create {
@@ -1587,7 +2728,15 @@ fn run() -> u8 {
                 );
             }
 
-            if !execute_create(item, cli.graceful) {
+            if cli.dry_run {
+                eprintln!(
+                    "Would create: {} (type {:?}, from {}:{})",
+                    item.path.display(),
+                    item.item_type,
+                    item.source.display(),
+                    item.line_number,
+                );
+            } else if !execute_create(item, cli.graceful, cli.root.as_deref()) {
                 any_failed = true;
             }
         }
@@ -1595,18 +2744,30 @@ fn run() -> u8 {
 
     // Execute --remove
     if cli.remove {
-        for item in &items {
-            if !item.item_type.is_remove_type() {
-                continue;
-            }
+        // Collect "managed" paths (paths with create-type entries) to protect from removal
+        let managed_paths: std::collections::HashSet<PathBuf> = items
+            .iter()
+            .filter(|item| item.item_type.is_create_type())
+            .map(|item| item.path.clone())
+            .collect();
 
-            if !matches_prefix(&item.path, &cli.prefixes) {
-                continue;
-            }
-            if excluded_by_prefix(&item.path, &cli.exclude_prefixes) {
-                continue;
-            }
+        // Sort remove items deepest-first so children are removed before parents
+        let mut remove_items: Vec<&TmpfilesItem> = items
+            .iter()
+            .filter(|item| {
+                item.item_type.is_remove_type()
+                    && matches_prefix(&item.path, &cli.prefixes)
+                    && !excluded_by_prefix(&item.path, &cli.exclude_prefixes)
+            })
+            .collect();
+        remove_items.sort_by(|a, b| {
+            b.path
+                .components()
+                .count()
+                .cmp(&a.path.components().count())
+        });
 
+        for item in &remove_items {
             if verbose {
                 eprintln!(
                     "systemd-tmpfiles: Removing: {} (from {}:{})",
@@ -1616,7 +2777,20 @@ fn run() -> u8 {
                 );
             }
 
-            if !execute_remove(item, cli.graceful) {
+            if cli.dry_run {
+                eprintln!(
+                    "Would remove: {} (type {:?}, from {}:{})",
+                    item.path.display(),
+                    item.item_type,
+                    item.source.display(),
+                    item.line_number,
+                );
+            } else if !execute_remove_with_managed(
+                item,
+                cli.graceful,
+                &managed_paths,
+                &exclude_dir_patterns,
+            ) {
                 any_failed = true;
             }
         }
@@ -1645,7 +2819,15 @@ fn run() -> u8 {
                 );
             }
 
-            if !execute_clean(item, &exclude_patterns, cli.graceful) {
+            if cli.dry_run {
+                eprintln!(
+                    "Would clean: {} (type {:?}, from {}:{})",
+                    item.path.display(),
+                    item.item_type,
+                    item.source.display(),
+                    item.line_number,
+                );
+            } else if !execute_clean(item, &exclude_patterns, &exclude_dir_patterns, cli.graceful) {
                 any_failed = true;
             }
         }
@@ -1697,46 +2879,46 @@ mod tests {
 
     #[test]
     fn test_parse_age_seconds() {
-        assert_eq!(parse_age("30"), Some(Duration::from_secs(30)));
-        assert_eq!(parse_age("60s"), Some(Duration::from_secs(60)));
+        assert_eq!(parse_age("30").1, Some(Duration::from_secs(30)));
+        assert_eq!(parse_age("60s").1, Some(Duration::from_secs(60)));
     }
 
     #[test]
     fn test_parse_age_minutes() {
-        assert_eq!(parse_age("5m"), Some(Duration::from_secs(300)));
+        assert_eq!(parse_age("5m").1, Some(Duration::from_secs(300)));
     }
 
     #[test]
     fn test_parse_age_hours() {
-        assert_eq!(parse_age("2h"), Some(Duration::from_secs(7200)));
+        assert_eq!(parse_age("2h").1, Some(Duration::from_secs(7200)));
     }
 
     #[test]
     fn test_parse_age_days() {
-        assert_eq!(parse_age("10d"), Some(Duration::from_secs(864000)));
+        assert_eq!(parse_age("10d").1, Some(Duration::from_secs(864000)));
     }
 
     #[test]
     fn test_parse_age_weeks() {
-        assert_eq!(parse_age("1w"), Some(Duration::from_secs(604800)));
+        assert_eq!(parse_age("1w").1, Some(Duration::from_secs(604800)));
     }
 
     #[test]
     fn test_parse_age_default() {
-        assert_eq!(parse_age("-"), None);
-        assert_eq!(parse_age(""), None);
+        assert_eq!(parse_age("-").1, None);
+        assert_eq!(parse_age("").1, None);
     }
 
     #[test]
     fn test_parse_age_tilde() {
         // '~' prefix means "only clean if not accessed"
-        assert_eq!(parse_age("~10d"), Some(Duration::from_secs(864000)));
+        assert_eq!(parse_age("~10d").1, Some(Duration::from_secs(864000)));
     }
 
     #[test]
     fn test_parse_age_compound() {
         // 1d12h = 86400 + 43200 = 129600
-        assert_eq!(parse_age("1d12h"), Some(Duration::from_secs(129600)));
+        assert_eq!(parse_age("1d12h").1, Some(Duration::from_secs(129600)));
     }
 
     #[test]
@@ -1770,7 +2952,13 @@ mod tests {
 
     #[test]
     fn test_parse_line_directory() {
-        let item = parse_line("d /tmp 1777 root root 10d -", Path::new("test.conf"), 1).unwrap();
+        let item = parse_line(
+            "d /tmp 1777 root root 10d -",
+            Path::new("test.conf"),
+            1,
+            None,
+        )
+        .unwrap();
         assert_eq!(item.item_type, ItemType::CreateDirectory);
         assert_eq!(item.path, PathBuf::from("/tmp"));
         assert_eq!(item.mode, Some(0o1777));
@@ -1788,6 +2976,7 @@ mod tests {
             "f /etc/hostname 0644 root root - myhostname",
             Path::new("test.conf"),
             2,
+            None,
         )
         .unwrap();
         assert_eq!(item.item_type, ItemType::CreateFile);
@@ -1802,6 +2991,7 @@ mod tests {
             "L /etc/localtime - - - - /usr/share/zoneinfo/UTC",
             Path::new("test.conf"),
             3,
+            None,
         )
         .unwrap();
         assert_eq!(item.item_type, ItemType::CreateSymlink);
@@ -1815,6 +3005,7 @@ mod tests {
             "L+ /etc/localtime - - - - /usr/share/zoneinfo/UTC",
             Path::new("test.conf"),
             4,
+            None,
         )
         .unwrap();
         assert_eq!(item.item_type, ItemType::CreateSymlink);
@@ -1823,36 +3014,46 @@ mod tests {
 
     #[test]
     fn test_parse_line_boot_only() {
-        let item =
-            parse_line("d! /run/test 0755 root root - -", Path::new("test.conf"), 5).unwrap();
+        let item = parse_line(
+            "d! /run/test 0755 root root - -",
+            Path::new("test.conf"),
+            5,
+            None,
+        )
+        .unwrap();
         assert!(item.boot_only);
     }
 
     #[test]
     fn test_parse_line_minus() {
-        let item =
-            parse_line("d- /run/test 0755 root root - -", Path::new("test.conf"), 6).unwrap();
+        let item = parse_line(
+            "d- /run/test 0755 root root - -",
+            Path::new("test.conf"),
+            6,
+            None,
+        )
+        .unwrap();
         assert!(item.minus);
     }
 
     #[test]
     fn test_parse_line_comment() {
-        assert!(parse_line("# This is a comment", Path::new("test.conf"), 1).is_none());
-        assert!(parse_line("; Another comment", Path::new("test.conf"), 2).is_none());
-        assert!(parse_line("", Path::new("test.conf"), 3).is_none());
-        assert!(parse_line("   ", Path::new("test.conf"), 4).is_none());
+        assert!(parse_line("# This is a comment", Path::new("test.conf"), 1, None).is_none());
+        assert!(parse_line("; Another comment", Path::new("test.conf"), 2, None).is_none());
+        assert!(parse_line("", Path::new("test.conf"), 3, None).is_none());
+        assert!(parse_line("   ", Path::new("test.conf"), 4, None).is_none());
     }
 
     #[test]
     fn test_parse_line_remove() {
-        let item = parse_line("r /tmp/old-files", Path::new("test.conf"), 7).unwrap();
+        let item = parse_line("r /tmp/old-files", Path::new("test.conf"), 7, None).unwrap();
         assert_eq!(item.item_type, ItemType::RemovePath);
         assert_eq!(item.path, PathBuf::from("/tmp/old-files"));
     }
 
     #[test]
     fn test_parse_line_remove_recursive() {
-        let item = parse_line("R /tmp/old-dir", Path::new("test.conf"), 8).unwrap();
+        let item = parse_line("R /tmp/old-dir", Path::new("test.conf"), 8, None).unwrap();
         assert_eq!(item.item_type, ItemType::RemoveRecursively);
     }
 
@@ -1862,6 +3063,7 @@ mod tests {
             "D /tmp/cache 0755 root root 1w -",
             Path::new("test.conf"),
             9,
+            None,
         )
         .unwrap();
         assert_eq!(item.item_type, ItemType::CreateOrCleanDirectory);
@@ -1870,13 +3072,19 @@ mod tests {
 
     #[test]
     fn test_parse_line_adjust_directory() {
-        let item = parse_line("e /var/log 0755 root root - -", Path::new("test.conf"), 10).unwrap();
+        let item = parse_line(
+            "e /var/log 0755 root root - -",
+            Path::new("test.conf"),
+            10,
+            None,
+        )
+        .unwrap();
         assert_eq!(item.item_type, ItemType::AdjustDirectory);
     }
 
     #[test]
     fn test_parse_line_ignore_path() {
-        let item = parse_line("x /tmp/important-*", Path::new("test.conf"), 11).unwrap();
+        let item = parse_line("x /tmp/important-*", Path::new("test.conf"), 11, None).unwrap();
         assert_eq!(item.item_type, ItemType::IgnorePath);
     }
 
@@ -1886,6 +3094,7 @@ mod tests {
             "z /etc/shadow 0640 root shadow - -",
             Path::new("test.conf"),
             12,
+            None,
         )
         .unwrap();
         assert_eq!(item.item_type, ItemType::AdjustPermissions);
@@ -1900,6 +3109,7 @@ mod tests {
             "p /run/my-fifo 0600 root root - -",
             Path::new("test.conf"),
             13,
+            None,
         )
         .unwrap();
         assert_eq!(item.item_type, ItemType::CreateFifo);
@@ -1908,16 +3118,16 @@ mod tests {
 
     #[test]
     fn test_parse_line_unknown_type() {
-        assert!(parse_line("? /tmp/test", Path::new("test.conf"), 14).is_none());
+        assert!(parse_line("? /tmp/test", Path::new("test.conf"), 14, None).is_none());
     }
 
     #[test]
     fn test_parse_line_minimal_fields() {
         // Just type and path (minimum required)
-        let item = parse_line("d /tmp", Path::new("test.conf"), 15).unwrap();
+        let item = parse_line("d /tmp", Path::new("test.conf"), 15, None).unwrap();
         assert_eq!(item.item_type, ItemType::CreateDirectory);
         assert_eq!(item.path, PathBuf::from("/tmp"));
-        assert_eq!(item.mode, Some(0o755)); // default for directories
+        assert_eq!(item.mode, None); // no mode specified
     }
 
     #[test]
@@ -1933,7 +3143,7 @@ mod tests {
         writeln!(f, "L /etc/localtime - - - - /usr/share/zoneinfo/UTC").unwrap();
         drop(f);
 
-        let items = parse_config_file(&path).unwrap();
+        let items = parse_config_file(&path, None).unwrap();
         assert_eq!(items.len(), 3);
         assert_eq!(items[0].item_type, ItemType::CreateDirectory);
         assert_eq!(items[1].item_type, ItemType::CreateFile);
@@ -2007,17 +3217,23 @@ mod tests {
             force: false,
             boot_only: false,
             minus: false,
+            purgeable: false,
+            conditional: false,
             path: dir.clone(),
             mode: Some(0o755),
             user: None,
             group: None,
             age: None,
+            mode_create_only: false,
+            user_create_only: false,
+            group_create_only: false,
+            age_by: String::new(),
             argument: None,
             source: PathBuf::from("test.conf"),
             line_number: 1,
         };
 
-        assert!(execute_create(&item, true));
+        assert!(execute_create(&item, true, None));
         assert!(dir.is_dir());
 
         let _ = fs::remove_dir_all(&dir);
@@ -2034,17 +3250,23 @@ mod tests {
             force: false,
             boot_only: false,
             minus: false,
+            purgeable: false,
+            conditional: false,
             path: file.clone(),
             mode: Some(0o644),
             user: None,
             group: None,
             age: None,
+            mode_create_only: false,
+            user_create_only: false,
+            group_create_only: false,
+            age_by: String::new(),
             argument: Some("hello world".to_string()),
             source: PathBuf::from("test.conf"),
             line_number: 1,
         };
 
-        assert!(execute_create(&item, true));
+        assert!(execute_create(&item, true, None));
         assert!(file.is_file());
         assert_eq!(fs::read_to_string(&file).unwrap(), "hello world");
 
@@ -2063,17 +3285,23 @@ mod tests {
             force: false,
             boot_only: false,
             minus: false,
+            purgeable: false,
+            conditional: false,
             path: link.clone(),
             mode: None,
             user: None,
             group: None,
             age: None,
+            mode_create_only: false,
+            user_create_only: false,
+            group_create_only: false,
+            age_by: String::new(),
             argument: Some("/tmp".to_string()),
             source: PathBuf::from("test.conf"),
             line_number: 1,
         };
 
-        assert!(execute_create(&item, true));
+        assert!(execute_create(&item, true, None));
         assert!(link.symlink_metadata().unwrap().file_type().is_symlink());
         assert_eq!(fs::read_link(&link).unwrap(), PathBuf::from("/tmp"));
 
@@ -2093,17 +3321,28 @@ mod tests {
             force: false,
             boot_only: false,
             minus: false,
+            purgeable: false,
+            conditional: false,
             path: file.clone(),
             mode: None,
             user: None,
             group: None,
             age: None,
+            mode_create_only: false,
+            user_create_only: false,
+            group_create_only: false,
+            age_by: String::new(),
             argument: None,
             source: PathBuf::from("test.conf"),
             line_number: 1,
         };
 
-        assert!(execute_remove(&item, false));
+        assert!(execute_remove_inner(
+            &item,
+            false,
+            &std::collections::HashSet::new(),
+            &[]
+        ));
         assert!(!file.exists());
 
         let _ = fs::remove_dir_all(&dir);
@@ -2121,18 +3360,33 @@ mod tests {
             force: false,
             boot_only: false,
             minus: false,
+            purgeable: false,
+            conditional: false,
             path: dir.clone(),
             mode: None,
             user: None,
             group: None,
             age: None,
+            mode_create_only: false,
+            user_create_only: false,
+            group_create_only: false,
+            age_by: String::new(),
             argument: None,
             source: PathBuf::from("test.conf"),
             line_number: 1,
         };
 
-        assert!(execute_remove(&item, false));
-        assert!(!dir.exists());
+        assert!(execute_remove_inner(
+            &item,
+            false,
+            &std::collections::HashSet::new(),
+            &[]
+        ));
+        // R removes contents, not the directory itself
+        assert!(dir.exists());
+        assert!(!sub.exists());
+
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -2142,18 +3396,29 @@ mod tests {
             force: false,
             boot_only: false,
             minus: false,
+            purgeable: false,
+            conditional: false,
             path: PathBuf::from("/tmp/systemd-tmpfiles-test-nonexistent-xyz"),
             mode: None,
             user: None,
             group: None,
             age: None,
+            mode_create_only: false,
+            user_create_only: false,
+            group_create_only: false,
+            age_by: String::new(),
             argument: None,
             source: PathBuf::from("test.conf"),
             line_number: 1,
         };
 
         // Removing a nonexistent file should succeed silently
-        assert!(execute_remove(&item, false));
+        assert!(execute_remove_inner(
+            &item,
+            false,
+            &std::collections::HashSet::new(),
+            &[]
+        ));
     }
 
     #[test]
@@ -2193,6 +3458,7 @@ mod tests {
             "w /proc/sys/net/ipv4/ip_forward - - - - 1",
             Path::new("test.conf"),
             1,
+            None,
         )
         .unwrap();
         assert_eq!(item.item_type, ItemType::WriteFile);
@@ -2205,6 +3471,7 @@ mod tests {
             "C /etc/skel - - - - /usr/share/skel",
             Path::new("test.conf"),
             1,
+            None,
         )
         .unwrap();
         assert_eq!(item.item_type, ItemType::CopyFiles);
@@ -2217,6 +3484,7 @@ mod tests {
             "c /dev/null 0666 root root - 1:3",
             Path::new("test.conf"),
             1,
+            None,
         )
         .unwrap();
         assert_eq!(item.item_type, ItemType::CreateCharDevice);
@@ -2225,8 +3493,13 @@ mod tests {
 
     #[test]
     fn test_parse_line_block_device() {
-        let item =
-            parse_line("b /dev/sda 0660 root disk - 8:0", Path::new("test.conf"), 1).unwrap();
+        let item = parse_line(
+            "b /dev/sda 0660 root disk - 8:0",
+            Path::new("test.conf"),
+            1,
+            None,
+        )
+        .unwrap();
         assert_eq!(item.item_type, ItemType::CreateBlockDevice);
         assert_eq!(item.argument, Some("8:0".to_string()));
     }
@@ -2287,7 +3560,7 @@ mod tests {
         writeln!(f, "  1777 root root - -").unwrap();
         drop(f);
 
-        let items = parse_config_file(&path).unwrap();
+        let items = parse_config_file(&path, None).unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].item_type, ItemType::CreateDirectory);
         assert_eq!(items[0].path, PathBuf::from("/tmp/test"));

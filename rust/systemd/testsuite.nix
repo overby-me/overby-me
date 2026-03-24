@@ -8,6 +8,7 @@
 {
   pkgs,
   name,
+  patchScript ? "",
 }: let
   systemdSrc = pkgs.systemd.src;
 
@@ -119,6 +120,7 @@ in
           procps
           kmod
           hostname # for hostname command
+          acl # for setfacl/getfacl
         ];
       };
 
@@ -173,10 +175,19 @@ in
         mkdir -p /etc/dbus-1/system.d
       '';
 
-      users.users.nixos = {
-        isNormalUser = true;
-        extraGroups = ["wheel"];
-        password = "nixos";
+      users = {
+        users.nixos = {
+          isNormalUser = true;
+          extraGroups = ["wheel"];
+          password = "nixos";
+        };
+
+        # The "daemon" user/group is expected by upstream test scripts (e.g. TEST-22-TMPFILES).
+        users.daemon = {
+          isSystemUser = true;
+          group = "daemon";
+        };
+        groups.daemon = {};
       };
 
       # Give the VM enough resources for tests
@@ -199,9 +210,19 @@ in
       # Tests source util.sh and test-control.sh from $(dirname "$0"),
       # so we run from the units directory.
       # Skip testcases that require D-Bus (busctl) or features not yet implemented.
+      # Apply per-test patches to the test script (if any).
+      # Test scripts are in the Nix store (read-only), so we copy to a writable dir first.
+      patch_cmd = """${patchScript}"""
+      if patch_cmd:
+          machine.succeed("mkdir -p /tmp/test-units && cp -a /etc/systemd-tests/units/* /tmp/test-units/")
+          machine.succeed(f"cd /tmp/test-units && {patch_cmd}")
+          units_dir = "/tmp/test-units"
+      else:
+          units_dir = "/etc/systemd-tests/units"
+
       test_cmd = (
-          "cd /etc/systemd-tests/units && "
-          "export TEST_SKIP_TESTCASES='testcase_hierarchical_slice_dropins testcase_transient_slice_dropins testcase_transient_service_dropins testcase_template_dropins testcase_template_alias testcase_masked_dropins testcase_invalid_dropins testcase_symlink_dropin_directory testcase_order_dropin_paths_set_property testcase_linked_units testcase_hostnamed_alternate_paths testcase_nss-myhostname' && "
+          f"cd {units_dir} && "
+          "export TEST_SKIP_TESTCASES='testcase_hierarchical_slice_dropins testcase_transient_slice_dropins testcase_transient_service_dropins testcase_template_dropins testcase_template_alias testcase_masked_dropins testcase_invalid_dropins testcase_symlink_dropin_directory testcase_order_dropin_paths_set_property testcase_linked_units testcase_hostnamed_alternate_paths testcase_nss-myhostname testcase_ntp testcase_timedated_alternate_paths' && "
           "bash -x ./${testName}.sh 2>&1"
       )
 

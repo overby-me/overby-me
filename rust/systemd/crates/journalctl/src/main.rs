@@ -171,6 +171,10 @@ struct Cli {
     #[arg(long = "rotate")]
     rotate: bool,
 
+    /// Synchronize (sync) the journal to disk.
+    #[arg(long = "sync")]
+    sync: bool,
+
     /// Verify journal file consistency.
     #[arg(long = "verify")]
     verify: bool,
@@ -1117,6 +1121,13 @@ fn main() {
         return;
     }
 
+    if cli.sync {
+        // Send SIGRTMIN+1 to journald to trigger a sync to disk
+        eprintln!("Requesting sync of journal to persistent storage...");
+        send_signal_to_journald(libc::SIGRTMIN() + 1);
+        return;
+    }
+
     if cli.rotate {
         // Send SIGUSR2 to journald to trigger rotation
         eprintln!("Requesting rotation of journal files...");
@@ -1183,6 +1194,21 @@ fn main() {
         let boots = detect_boots(&entries);
         if boots.is_empty() {
             eprintln!("No boots found.");
+        } else if cli.output.starts_with("json") {
+            // JSON output: array of objects with index, boot_id, first_entry, last_entry
+            let json_entries: Vec<String> = boots
+                .iter()
+                .enumerate()
+                .map(|(i, boot)| {
+                    let offset = i as i64 - (boots.len() as i64 - 1);
+                    let boot_id_short = &boot.boot_id[..32.min(boot.boot_id.len())];
+                    format!(
+                        "{{\"index\":{},\"boot_id\":\"{}\",\"first_entry\":{},\"last_entry\":{}}}",
+                        offset, boot_id_short, boot.first_timestamp, boot.last_timestamp
+                    )
+                })
+                .collect();
+            println!("[{}]", json_entries.join(","));
         } else {
             for (i, boot) in boots.iter().enumerate() {
                 let offset = i as i64 - (boots.len() as i64 - 1);
