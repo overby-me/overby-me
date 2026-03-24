@@ -18,6 +18,8 @@ in {
         controlPath = "~/.ssh/socket/%r@%h:%p";
         controlPersist = "120";
         forwardAgent = true;
+        serverAliveInterval = 5;
+        serverAliveCountMax = 3;
       };
       localhost = {
         hostname = "localhost";
