@@ -394,8 +394,13 @@ fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                         precision = Some(prec_str.parse().unwrap_or(0));
                     }
                 }
-                let w: usize = width_str.parse().unwrap_or(0);
-                let left = flags.contains('-');
+                // Handle negative width (means left-align)
+                let (w, left) = if width_str.starts_with('-') {
+                    let abs_w: usize = width_str[1..].parse().unwrap_or(0);
+                    (abs_w, true)
+                } else {
+                    (width_str.parse().unwrap_or(0), flags.contains('-'))
+                };
                 let zero_pad = flags.contains('0');
                 match chars.next() {
                     Some('(') => {
