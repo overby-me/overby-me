@@ -3983,30 +3983,100 @@ fn builtin_enable(_shell: &mut Shell, _args: &[String]) -> i32 {
 }
 
 fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
-    if args.is_empty() {
-        return 0;
-    }
-
     let mut set = false;
     let mut unset = false;
+    let mut query = false;
+    let mut print = false;
+    let mut set_o = false;
     let mut opts = Vec::new();
 
     for arg in args {
         match arg.as_str() {
             "-s" => set = true,
             "-u" => unset = true,
-            "-q" => {}
+            "-q" => query = true,
+            "-p" => print = true,
+            "-o" => set_o = true,
+            a if a.starts_with('-') => {
+                eprintln!(
+                    "{}: shopt: {}: invalid option",
+                    shell.error_prefix(),
+                    a
+                );
+                eprintln!("shopt: usage: shopt [-pqsu] [-o] [optname ...]");
+                return 2;
+            }
             _ => opts.push(arg.as_str()),
         }
     }
 
-    for opt in opts {
-        match opt {
+    // Handle -o (set -o options) separately
+    if set_o {
+        return 0; // Simplified: just succeed
+    }
+
+    // Known shopt options and their values
+    let shopt_options: Vec<(&str, bool)> = vec![
+        ("expand_aliases", shell.shopt_expand_aliases),
+        ("extglob", shell.shopt_extglob),
+        ("globstar", false),
+        ("inherit_errexit", shell.shopt_inherit_errexit),
+        ("lastpipe", shell.shopt_lastpipe),
+        ("nocasematch", shell.shopt_nocasematch),
+        ("nullglob", shell.shopt_nullglob),
+        ("xpg_echo", false),
+    ];
+
+    if opts.is_empty() && !set && !unset {
+        // List all shopt options
+        for (name, val) in &shopt_options {
+            if print {
+                println!("shopt {} {}", if *val { "-s" } else { "-u" }, name);
+            } else {
+                println!(
+                    "{:<24}{}",
+                    name,
+                    if *val { "on" } else { "off" }
+                );
+            }
+        }
+        return 0;
+    }
+
+    if opts.is_empty() && (set || unset) {
+        // List options that match the set/unset filter
+        for (name, val) in &shopt_options {
+            if (set && *val) || (unset && !*val) {
+                if print || query {
+                    // -p with -s/-u
+                } else {
+                    println!(
+                        "{:<24}{}",
+                        name,
+                        if *val { "on" } else { "off" }
+                    );
+                }
+            }
+        }
+        return 0;
+    }
+
+    let mut status = 0;
+    for opt in &opts {
+        match *opt {
             "nullglob" => {
                 if set {
                     shell.shopt_nullglob = true;
                 } else if unset {
                     shell.shopt_nullglob = false;
+                } else if !query {
+                    println!(
+                        "{:<24}{}",
+                        "nullglob",
+                        if shell.shopt_nullglob { "on" } else { "off" }
+                    );
+                } else if !shell.shopt_nullglob {
+                    status = 1;
                 }
             }
             "extglob" => {
@@ -4014,6 +4084,14 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
                     shell.shopt_extglob = true;
                 } else if unset {
                     shell.shopt_extglob = false;
+                } else if !query {
+                    println!(
+                        "{:<24}{}",
+                        "extglob",
+                        if shell.shopt_extglob { "on" } else { "off" }
+                    );
+                } else if !shell.shopt_extglob {
+                    status = 1;
                 }
             }
             "inherit_errexit" => {
@@ -4044,10 +4122,22 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
                     shell.shopt_expand_aliases = false;
                 }
             }
-            _ => {}
+            "globstar" | "xpg_echo" => {
+                // Known but not implemented — silently accept
+            }
+            _ => {
+                if !query {
+                    eprintln!(
+                        "{}: shopt: {}: invalid shell option name",
+                        shell.error_prefix(),
+                        opt
+                    );
+                }
+                status = 1;
+            }
         }
     }
-    0
+    status
 }
 
 fn builtin_dirs(_shell: &mut Shell, _args: &[String]) -> i32 {
