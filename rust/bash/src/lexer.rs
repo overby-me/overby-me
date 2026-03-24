@@ -1593,8 +1593,9 @@ fn read_param_word_impl(chars: &[char], i: &mut usize, delim: char, in_dquote: b
         match chars[*i] {
             '\\' if *i + 1 < chars.len() => {
                 let next = chars[*i + 1];
-                if in_dquote && !matches!(next, '$' | '`' | '"' | '\\' | '\n') {
+                if in_dquote && !matches!(next, '$' | '`' | '"' | '\\' | '\n' | '\'' | '}' | '/') {
                     // Inside double quotes, preserve backslash for non-special chars
+                    // But strip it for chars special in param expansion: ' } /
                     literal.push('\\');
                     literal.push(next);
                 } else {
