@@ -2882,9 +2882,27 @@ impl Shell {
         if let Some(hash_pos) = expr.find('#') {
             let base_str = &expr[..hash_pos];
             let value_str = expr[hash_pos + 1..].trim();
-            if let Ok(base) = base_str.parse::<u32>()
-                && (2..=64).contains(&base)
-            {
+            if let Ok(base) = base_str.parse::<u32>() {
+                if !(2..=64).contains(&base) {
+                    eprintln!(
+                        "{}: {}: invalid arithmetic base (error token is \"{}\")",
+                        self.arith_error_prefix(),
+                        expr,
+                        expr
+                    );
+                    crate::expand::set_arith_error();
+                    return 0;
+                }
+                if value_str.is_empty() {
+                    eprintln!(
+                        "{}: {}: invalid integer constant (error token is \"{}\")",
+                        self.arith_error_prefix(),
+                        expr,
+                        expr
+                    );
+                    crate::expand::set_arith_error();
+                    return 0;
+                }
                 if base <= 36 {
                     return i64::from_str_radix(value_str, base).unwrap_or_else(|_| {
                         eprintln!(
