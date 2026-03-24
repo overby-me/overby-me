@@ -2153,6 +2153,7 @@ fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
                 if i < args.len() {
                     let option = &args[i];
                     match option.as_str() {
+                        "allexport" => shell.opt_allexport = enable,
                         "pipefail" => shell.opt_pipefail = enable,
                         "errexit" => shell.opt_errexit = enable,
                         "nounset" => shell.opt_nounset = enable,
@@ -2163,39 +2164,46 @@ fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
                         "posix" => shell.opt_posix = enable,
                         _ => {}
                     }
-                } else if enable {
-                    // set -o - print human-readable option listing
-                    let options: Vec<(&str, bool)> = vec![
-                        ("errexit", shell.opt_errexit),
-                        ("hashall", false),
-                        ("keyword", shell.opt_keyword),
-                        ("noclobber", shell.opt_noclobber),
-                        ("noexec", shell.opt_noexec),
-                        ("noglob", shell.opt_noglob),
-                        ("nounset", shell.opt_nounset),
-                        ("pipefail", shell.opt_pipefail),
-                        ("posix", shell.opt_posix),
-                        ("xtrace", shell.opt_xtrace),
-                    ];
-                    for (name, val) in options {
-                        println!("{:<16}{}", name, if val { "on" } else { "off" });
-                    }
                 } else {
-                    // set +o - print settings in reusable format
                     let options: Vec<(&str, bool)> = vec![
+                        ("allexport", shell.opt_allexport),
+                        ("braceexpand", true),
+                        ("emacs", false),
                         ("errexit", shell.opt_errexit),
-                        ("hashall", false),
+                        ("errtrace", false),
+                        ("functrace", false),
+                        ("hashall", true),
+                        ("histexpand", false),
+                        ("history", false),
+                        ("ignoreeof", false),
+                        ("interactive-comments", true),
                         ("keyword", shell.opt_keyword),
+                        ("monitor", false),
                         ("noclobber", shell.opt_noclobber),
                         ("noexec", shell.opt_noexec),
                         ("noglob", shell.opt_noglob),
+                        ("nolog", false),
+                        ("notify", false),
                         ("nounset", shell.opt_nounset),
+                        ("onecmd", false),
+                        ("physical", false),
                         ("pipefail", shell.opt_pipefail),
                         ("posix", shell.opt_posix),
+                        ("privileged", false),
+                        ("verbose", false),
+                        ("vi", false),
                         ("xtrace", shell.opt_xtrace),
                     ];
-                    for (name, val) in options {
-                        println!("set {}o {}", if val { "-" } else { "+" }, name);
+                    if enable {
+                        // set -o: human-readable option listing
+                        for (name, val) in &options {
+                            println!("{:<15}\t{}", name, if *val { "on" } else { "off" });
+                        }
+                    } else {
+                        // set +o: reusable format
+                        for (name, val) in &options {
+                            println!("set {}o {}", if *val { "-" } else { "+" }, name);
+                        }
                     }
                 }
             } else {

@@ -254,6 +254,7 @@ pub struct Shell {
     pub opt_noglob: bool,
     pub opt_noexec: bool,
     pub opt_posix: bool,
+    pub opt_allexport: bool,
 
     // Shell options (shopt)
     pub shopt_nullglob: bool,
@@ -388,6 +389,7 @@ impl Shell {
             opt_noglob: false,
             opt_noexec: false,
             opt_posix: false,
+            opt_allexport: false,
             shopt_nullglob: false,
             shopt_extglob: false,
             shopt_inherit_errexit: false,
