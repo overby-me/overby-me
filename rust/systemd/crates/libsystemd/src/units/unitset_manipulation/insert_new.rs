@@ -50,7 +50,53 @@ fn find_new_unit_path(unit_dirs: &[PathBuf], find_name: &str) -> Result<Option<P
     Ok(None)
 }
 
-/// Loads a unit with a given name. It searches all paths recursively until it finds a file with a matching name
+/// Collect drop-in overrides for a unit from all unit directories.
+/// Scans for type-level, hierarchical prefix, and exact name `.d/` dirs.
+fn collect_dropins_for_unit(
+    unit_dirs: &[PathBuf],
+    unit_name: &str,
+) -> HashMap<String, Vec<(String, String)>> {
+    use crate::units::loading::directory_deps::collect_dropin_entries;
+
+    let mut dropins: HashMap<String, Vec<(String, String)>> = HashMap::new();
+
+    // Build the list of drop-in directory names to search for:
+    // 1. Type-level (e.g., "service.d" for any .service unit)
+    // 2. Hierarchical prefixes (e.g., "a-.service.d", "a-b-.service.d")
+    // 3. Exact unit name (e.g., "a-b-c.service.d")
+    let mut dropin_dir_keys: Vec<String> = Vec::new();
+
+    // Type-level
+    if let Some(dot_pos) = unit_name.rfind('.') {
+        let type_suffix = &unit_name[dot_pos + 1..]; // e.g., "service"
+        dropin_dir_keys.push(type_suffix.to_owned());
+
+        // Hierarchical prefixes
+        let base = &unit_name[..dot_pos]; // e.g., "a-b-c"
+        let suffix = &unit_name[dot_pos..]; // e.g., ".service"
+        let parts: Vec<&str> = base.split('-').collect();
+        for i in 1..parts.len() {
+            let prefix = parts[..i].join("-");
+            dropin_dir_keys.push(format!("{prefix}-{suffix}")); // e.g., "a-.service"
+        }
+    }
+    // Exact name
+    dropin_dir_keys.push(unit_name.to_owned());
+
+    for dir in unit_dirs {
+        for key in &dropin_dir_keys {
+            let dropin_dir = dir.join(format!("{key}.d"));
+            if dropin_dir.is_dir() {
+                collect_dropin_entries(&dropin_dir, key, &mut dropins);
+            }
+        }
+    }
+
+    dropins
+}
+
+/// Loads a unit with a given name. It searches all paths recursively until it finds a file with a matching name.
+/// Also scans for and applies drop-in overrides from `.d/` directories.
 pub fn load_new_unit(unit_dirs: &[PathBuf], find_name: &str) -> Result<units::Unit, String> {
     if let Some(unit_path) = find_new_unit_path(unit_dirs, find_name)? {
         let content = fs::read_to_string(&unit_path).map_err(|e| {
@@ -62,7 +108,27 @@ pub fn load_new_unit(unit_dirs: &[PathBuf], find_name: &str) -> Result<units::Un
                 )
             )
         })?;
-        let parsed = units::parse_file(&content)
+
+        // Collect and apply drop-in overrides
+        let dropins = collect_dropins_for_unit(unit_dirs, find_name);
+        let final_content = if dropins.is_empty() {
+            content
+        } else {
+            use crate::units::loading::directory_deps::collect_applicable_dropins_pub;
+            let overrides = collect_applicable_dropins_pub(find_name, &dropins);
+            if overrides.is_empty() {
+                content
+            } else {
+                trace!(
+                    "Applying {} drop-in(s) to on-demand loaded unit {}",
+                    overrides.len(),
+                    find_name
+                );
+                crate::units::loading::directory_deps::merge_unit_contents_pub(&content, &overrides)
+            }
+        };
+
+        let parsed = units::parse_file(&final_content)
             .map_err(|e| format!("{}", units::ParsingError::new(e, unit_path.clone())))?;
         let unit = if find_name.ends_with(".service") {
             units::parse_service(parsed, &unit_path)

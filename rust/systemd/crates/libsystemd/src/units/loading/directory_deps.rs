@@ -900,6 +900,11 @@ pub fn collect_applicable_dropins_pub(
     collect_applicable_dropins(unit_name, dropins)
 }
 
+/// Public wrapper for `merge_unit_contents` for use by on-demand unit loading.
+pub fn merge_unit_contents_pub(base: &str, overrides: &[(String, String)]) -> String {
+    merge_unit_contents(base, overrides)
+}
+
 /// Scan the dropins map for keys that look like slice units (e.g., "a-b-c.slice")
 /// and create implicit (fragmentless) slice units for any that don't already exist
 /// in the unit table. In systemd, slices exist implicitly without a unit file.

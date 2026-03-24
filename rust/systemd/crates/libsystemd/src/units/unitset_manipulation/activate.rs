@@ -3,7 +3,7 @@
 use crate::lock_ext::{MutexExt, RwLockExt};
 use crate::runtime_info::{ArcMutRuntimeInfo, RuntimeInfo, UnitTable};
 use crate::services::ServiceErrorReason;
-use crate::units::{Specific, StatusStopped, UnitAction, UnitId, UnitStatus};
+use crate::units::{Specific, StatusStarted, StatusStopped, UnitAction, UnitId, UnitStatus};
 
 use log::{debug, error, info, trace, warn};
 use std::sync::{Arc, Mutex};
@@ -394,6 +394,10 @@ pub fn activate_unit(
                 return Ok(StartResult::Started(vec![]));
             }
 
+            // Activate the slice hierarchy for this unit so that
+            // `systemctl is-active <slice>` returns "active".
+            activate_slice_hierarchy(unit, run_info);
+
             if success_action != UnitAction::None {
                 info!(
                     "Unit {} succeeded, triggering SuccessAction={:?}",
@@ -442,6 +446,50 @@ pub fn activate_unit(
             }
 
             Err(e)
+        }
+    }
+}
+
+/// Activate the slice hierarchy for a unit that just started.
+/// In systemd, when a service runs in a slice, the slice and all its
+/// ancestor slices are implicitly activated.
+fn activate_slice_hierarchy(unit: &crate::units::Unit, run_info: &RuntimeInfo) {
+    // Extract the slice name from the unit's specific config
+    let slice_name = match &unit.specific {
+        Specific::Service(svc) => svc.conf.slice.clone(),
+        _ => None,
+    };
+
+    let Some(mut current_slice) = slice_name else {
+        return;
+    };
+
+    // Walk up the slice hierarchy (e.g. "a-b-c.slice" → "a-b.slice" → "a.slice" → "-.slice")
+    loop {
+        if let Some(slice_unit) = run_info
+            .unit_table
+            .values()
+            .find(|u| u.id.name == current_slice)
+        {
+            let mut status = slice_unit.common.status.write_poisoned();
+            if !status.is_started() {
+                trace!("Activating slice {} (member started)", current_slice);
+                *status = UnitStatus::Started(StatusStarted::Running);
+            }
+        }
+
+        // Move to parent slice
+        if current_slice == "-.slice" {
+            break;
+        }
+        let base = current_slice
+            .strip_suffix(".slice")
+            .unwrap_or(&current_slice);
+        if let Some(last_dash) = base.rfind('-') {
+            current_slice = format!("{}.slice", &base[..last_dash]);
+        } else {
+            // Reached a top-level slice, activate -.slice (root)
+            current_slice = "-.slice".to_owned();
         }
     }
 }
