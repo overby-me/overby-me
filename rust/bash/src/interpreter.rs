@@ -2123,23 +2123,23 @@ impl Shell {
     }
 
     pub fn eval_arith_expr(&mut self, expr: &str) -> i64 {
-        // Strip double quotes from arith expressions (bash behavior)
-        let unquoted: String;
-        let expr = {
-            let trimmed = expr.trim_start();
-            if trimmed.contains('"') {
-                unquoted = trimmed.replace('"', "");
-                &unquoted
-            } else {
-                trimmed
-            }
-        };
+        let expr = expr.trim_start();
 
-        // Expand command substitutions $(...) before arithmetic evaluation
+        // Expand command substitutions $(...) BEFORE stripping quotes,
+        // since commands inside $() need their quotes preserved
         let expanded_cs: String;
         let expr = if expr.contains("$(") {
             expanded_cs = self.expand_comsubs_in_arith(expr);
             &expanded_cs
+        } else {
+            expr
+        };
+
+        // Strip double quotes from arith expressions (bash behavior)
+        let unquoted: String;
+        let expr = if expr.contains('"') {
+            unquoted = expr.replace('"', "");
+            &unquoted
         } else {
             expr
         };
