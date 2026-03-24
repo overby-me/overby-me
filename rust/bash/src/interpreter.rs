@@ -271,6 +271,8 @@ pub struct Shell {
     arith_depth: u32,
     /// Whether current arithmetic evaluation is from (( )) command (adds ((: prefix to errors)
     arith_is_command: bool,
+    /// Whether current arithmetic evaluation is from let builtin (adds let: prefix to errors)
+    pub arith_is_let: bool,
 
     pub aliases: HashMap<String, String>,
     builtins: HashMap<&'static str, BuiltinFn>,
@@ -396,6 +398,7 @@ impl Shell {
             arith_top_expr: None,
             arith_depth: 0,
             arith_is_command: false,
+            arith_is_let: false,
             aliases: HashMap::new(),
             builtins: builtins::builtins(),
         };
@@ -1477,9 +1480,15 @@ impl Shell {
     /// Returns the error prefix for runtime error messages (no -c:).
     /// For scripts: "$0: line N:" ; for stdin/interactive: "bash:"
     /// Error prefix for arithmetic errors — uses _BASH_SOURCE_FILE if set.
-    /// Returns the "((: " prefix for error messages when in (( )) command context
+    /// Returns the context prefix for arithmetic error messages
     fn arith_cmd_prefix(&self) -> &str {
-        if self.arith_is_command { "((: " } else { "" }
+        if self.arith_is_command {
+            "((: "
+        } else if self.arith_is_let {
+            "let: "
+        } else {
+            ""
+        }
     }
 
     fn arith_error_prefix(&self) -> String {

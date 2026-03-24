@@ -4196,9 +4196,11 @@ fn builtin_let(shell: &mut Shell, args: &[String]) -> i32 {
     }
 
     let mut result = 0i64;
+    shell.arith_is_let = true;
     for expr in args {
         result = shell.eval_arith_expr(expr);
     }
+    shell.arith_is_let = false;
 
     // let returns 1 if the last expression evaluates to 0, 0 otherwise
     if result == 0 { 1 } else { 0 }
