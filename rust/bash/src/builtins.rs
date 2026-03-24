@@ -3657,8 +3657,10 @@ fn builtin_command(shell: &mut Shell, args: &[String]) -> i32 {
                 );
                 if is_keyword {
                     println!("{} is a shell keyword", name);
-                } else if shell.functions.contains_key(name.as_str()) {
+                } else if let Some(func_body) = shell.functions.get(name.as_str()) {
                     println!("{} is a function", name);
+                    let body = format_compound_command_indent(func_body, 0);
+                    println!("{} () \n{}", name, body);
                 } else if builtin_map.contains_key(name.as_str()) {
                     println!("{} is a shell builtin", name);
                 } else if let Some(path) = find_in_path_opt(name) {
@@ -3670,7 +3672,36 @@ fn builtin_command(shell: &mut Shell, args: &[String]) -> i32 {
                 continue;
             }
             // -v: just print name/path
-            if builtin_map.contains_key(name.as_str()) {
+            let is_keyword = matches!(
+                name.as_str(),
+                "if" | "then"
+                    | "else"
+                    | "elif"
+                    | "fi"
+                    | "case"
+                    | "esac"
+                    | "for"
+                    | "select"
+                    | "while"
+                    | "until"
+                    | "do"
+                    | "done"
+                    | "in"
+                    | "function"
+                    | "time"
+                    | "{"
+                    | "}"
+                    | "!"
+                    | "[["
+                    | "]]"
+                    | "coproc"
+            );
+            if is_keyword || shell.functions.contains_key(name.as_str()) {
+                println!("{}", name);
+            } else if shell.aliases.contains_key(name.as_str()) {
+                let val = &shell.aliases[name.as_str()];
+                println!("alias {}='{}'", name, val);
+            } else if builtin_map.contains_key(name.as_str()) {
                 println!("{}", name);
             } else if let Some(path) = find_in_path_opt(name) {
                 println!("{}", path);
