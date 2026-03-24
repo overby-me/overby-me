@@ -498,6 +498,9 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
         }
         WordPart::BacktickSub(cmd) => {
             let val = cmd_sub(cmd);
+            // Escape backslashes in command substitution results so they
+            // survive quote removal (backslashes are literal, not escapes)
+            let val = val.replace('\\', "\x00\\");
             out.push(Segment::Unquoted(val));
         }
         WordPart::ArithSub(expr) => {
