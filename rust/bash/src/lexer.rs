@@ -255,6 +255,67 @@ impl Lexer {
         // check it for alias expansion
         self.expand_alias_next = true;
 
+        // If the expansion ends with space, the next word from the ORIGINAL
+        // input should also be alias-expanded. We do this here (before re-lexing)
+        // to handle cases like alias c='< ' where the expansion contains a
+        // redirect operator that would prevent the next word from being
+        // alias-expanded during normal tokenization.
+        if ends_with_space {
+            // Skip whitespace after the expansion end to find the next word
+            let mut next_pos = word_start + expansion_len;
+            while next_pos < self.input.len() && matches!(self.input[next_pos], ' ' | '\t') {
+                next_pos += 1;
+            }
+            // Read the next word (simple: just alphanumeric/underscore chars)
+            if next_pos < self.input.len()
+                && !matches!(
+                    self.input[next_pos],
+                    '\n' | ';' | '&' | '|' | '(' | ')' | '<' | '>' | '#'
+                )
+            {
+                let word_start2 = next_pos;
+                while next_pos < self.input.len()
+                    && !matches!(
+                        self.input[next_pos],
+                        ' ' | '\t' | '\n' | ';' | '&' | '|' | '(' | ')' | '<' | '>'
+                    )
+                {
+                    next_pos += 1;
+                }
+                let next_word: String = self.input[word_start2..next_pos].iter().collect();
+                if !next_word.is_empty()
+                    && !self.expanding_aliases.contains(&next_word)
+                    && let Some(next_expansion) = self.aliases.get(&next_word).cloned()
+                {
+                    // Expand the next word too
+                    let old_len2 = next_pos - word_start2;
+                    let next_ends_with_space =
+                        next_expansion.ends_with(' ') || next_expansion.ends_with('\t');
+                    let next_expansion_chars: Vec<char> = next_expansion.chars().collect();
+                    let next_expansion_len = next_expansion_chars.len();
+                    let delta2 = next_expansion_len as isize - old_len2 as isize;
+
+                    self.input
+                        .splice(word_start2..next_pos, next_expansion_chars);
+
+                    // Adjust existing markers
+                    for (_, ep, _) in &mut self.alias_end_markers {
+                        if *ep > word_start2 {
+                            *ep = (*ep as isize + delta2) as usize;
+                        }
+                    }
+
+                    let next_orig_len = next_expansion.chars().count();
+                    self.expanding_aliases.insert(next_word.clone());
+                    self.alias_end_markers.push((
+                        next_word,
+                        word_start2 + next_orig_len,
+                        next_ends_with_space,
+                    ));
+                }
+            }
+        }
+
         // Rewind to start of expansion and re-lex
         self.pos = word_start;
 
