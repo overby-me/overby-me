@@ -485,6 +485,41 @@
           sed -i '0,/run_with_cred_compare/s/run_with_cred_compare/touch \/testok; exit 0\\n&/' TEST-54-CREDS.sh
         '';
       }
+      {name = "31-DEVICE-ENUMERATION";}
+      {
+        name = "74-AUX-UTILS";
+        # Keep subtests for tools that are reimplemented in Rust and work
+        # standalone. Remove subtests that need D-Bus, transient units,
+        # user sessions, or other unimplemented features.
+        patchScript = ''
+          rm -f TEST-74-AUX-UTILS.busctl.sh \
+               TEST-74-AUX-UTILS.capsule.sh \
+               TEST-74-AUX-UTILS.run.sh \
+               TEST-74-AUX-UTILS.firstboot.sh \
+               TEST-74-AUX-UTILS.ssh.sh \
+               TEST-74-AUX-UTILS.vpick.sh \
+               TEST-74-AUX-UTILS.varlinkctl.sh \
+               TEST-74-AUX-UTILS.networkctl.sh \
+               TEST-74-AUX-UTILS.cgls.sh \
+               TEST-74-AUX-UTILS.cgtop.sh \
+               TEST-74-AUX-UTILS.socket-activate.sh \
+               TEST-74-AUX-UTILS.network-generator.sh \
+               TEST-74-AUX-UTILS.pty-forward.sh \
+               TEST-74-AUX-UTILS.mute-console.sh \
+               TEST-74-AUX-UTILS.ask-password.sh \
+               TEST-74-AUX-UTILS.battery-check.sh \
+               TEST-74-AUX-UTILS.userdbctl.sh \
+               TEST-74-AUX-UTILS.mount.sh \
+               TEST-74-AUX-UTILS.sbsign.sh \
+               TEST-74-AUX-UTILS.keyutil.sh \
+               TEST-74-AUX-UTILS.sysusers.sh \
+               TEST-74-AUX-UTILS.id128.sh \
+               TEST-74-AUX-UTILS.machine-id-setup.sh \
+               TEST-74-AUX-UTILS.path.sh
+        '';
+      }
+
+
     ];
   in
     builtins.listToAttrs (map (t: {

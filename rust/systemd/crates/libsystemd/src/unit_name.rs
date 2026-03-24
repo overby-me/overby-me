@@ -39,11 +39,11 @@ fn is_valid_char(c: char) -> bool {
 /// assert_eq!(unit_name_escape("foo bar"), r"foo\x20bar");
 /// assert_eq!(unit_name_escape("foo/bar"), "foo-bar");
 /// assert_eq!(unit_name_escape(".hidden"), r"\x2ehidden");
-/// assert_eq!(unit_name_escape(""), "-");
+/// assert_eq!(unit_name_escape(""), "");
 /// ```
 pub fn unit_name_escape(s: &str) -> String {
     if s.is_empty() {
-        return "-".to_string();
+        return String::new();
     }
 
     let mut result = String::with_capacity(s.len() * 2);
@@ -129,6 +129,33 @@ pub fn unit_name_unescape(s: &str) -> Option<String> {
 /// assert_eq!(unit_name_path_escape("/foo//bar/"), "foo-bar");
 /// assert_eq!(unit_name_path_escape("/foo bar/baz"), r"foo\x20bar-baz");
 /// ```
+/// Escape a filesystem path for use in a systemd unit name.
+/// Returns `None` for invalid paths (relative paths like `.` or `..`,
+/// paths that resolve to nothing meaningful, or paths exceeding length limits).
+pub fn unit_name_path_escape_checked(path: &str) -> Option<String> {
+    // Relative paths (not starting with /) are invalid for path escaping
+    if !path.starts_with('/') {
+        return None;
+    }
+
+    let normalized = normalize_path(path);
+    if normalized.is_empty() {
+        return Some("-".to_string());
+    }
+
+    // Reject paths that still contain `..` after normalization
+    if !is_valid_normalized_path(&normalized) {
+        return None;
+    }
+
+    let escaped = unit_name_escape(&normalized);
+    // Unit names have a length limit (256 chars)
+    if escaped.len() > 256 {
+        return None;
+    }
+    Some(escaped)
+}
+
 pub fn unit_name_path_escape(path: &str) -> String {
     let normalized = normalize_path(path);
     if normalized.is_empty() {
@@ -151,20 +178,104 @@ pub fn unit_name_path_escape(path: &str) -> String {
 /// assert_eq!(unit_name_path_unescape("foo-bar"), Some("/foo/bar".to_string()));
 /// ```
 pub fn unit_name_path_unescape(s: &str) -> Option<String> {
-    let unescaped = unit_name_unescape(s)?;
-    if unescaped == "/" {
+    if s.is_empty() {
+        return None;
+    }
+
+    // Special case: "-" is the escaped form of "/"
+    if s == "-" {
         return Some("/".to_string());
     }
-    if unescaped.starts_with('/') {
-        Some(unescaped)
-    } else {
-        Some(format!("/{unescaped}"))
+
+    let unescaped = unit_name_unescape(s)?;
+
+    if unescaped.is_empty() {
+        return Some("/".to_string());
     }
+
+    // A properly path-escaped string never starts with '/' after unescaping,
+    // because unit_name_path_escape strips the leading '/'. If the unescaped
+    // result starts with '/', it means the input was not validly path-escaped.
+    if unescaped.starts_with('/') {
+        return None;
+    }
+
+    let path = format!("/{unescaped}");
+
+    // Validate: must be a normalized absolute path
+    if !is_normalized_path(&path) {
+        return None;
+    }
+
+    Some(path)
+}
+
+/// Check if a path is normalized (no double slashes, no `.`/`..` components,
+/// no trailing slash except for root).
+fn is_normalized_path(path: &str) -> bool {
+    if path.is_empty() {
+        return false;
+    }
+
+    if path == "/" {
+        return true;
+    }
+
+    // No trailing slash
+    if path.ends_with('/') {
+        return false;
+    }
+
+    // No double slashes
+    if path.contains("//") {
+        return false;
+    }
+
+    // No . or .. components
+    for component in path.split('/') {
+        if component == "." || component == ".." {
+            return false;
+        }
+    }
+
+    true
+}
+
+/// Escape a string for use in a unit name, preserving characters that are
+/// valid in unit names (unlike `unit_name_escape` which also escapes `-`).
+///
+/// This is used by `unit_name_mangle` to escape the name part while
+/// preserving `-` and `@` which are valid in unit names.
+fn unit_name_mangle_escape(s: &str) -> String {
+    if s.is_empty() {
+        return String::new();
+    }
+
+    let mut result = String::with_capacity(s.len() * 2);
+
+    for (i, c) in s.chars().enumerate() {
+        if i == 0 && c == '.' {
+            // Leading dot must be escaped
+            result.push_str(&format!("\\x{:02x}", c as u32));
+        } else if is_valid_char(c) || c == '-' || c == '@' || c == '\\' {
+            result.push(c);
+        } else {
+            // Escape each byte of the UTF-8 encoding
+            let mut buf = [0u8; 4];
+            let encoded = c.encode_utf8(&mut buf);
+            for b in encoded.bytes() {
+                result.push_str(&format!("\\x{:02x}", b));
+            }
+        }
+    }
+
+    result
 }
 
 /// Mangle an arbitrary string into a valid unit name.
 ///
 /// This is similar to `unit_name_escape` but also:
+/// - Preserves `-` and `@` which are valid in unit names
 /// - Appends `.service` suffix if the result doesn't already have a known
 ///   unit suffix
 /// - Handles the case where the input is already a valid unit name
@@ -179,29 +290,30 @@ pub fn unit_name_path_unescape(s: &str) -> Option<String> {
 /// assert_eq!(unit_name_mangle("foo.service"), "foo.service");
 /// assert_eq!(unit_name_mangle("foo bar"), r"foo\x20bar.service");
 /// assert_eq!(unit_name_mangle("/dev/sda"), "dev-sda.device");
+/// assert_eq!(unit_name_mangle("hello-world"), "hello-world.service");
+/// assert_eq!(unit_name_mangle("/mount/this"), "mount-this.mount");
 /// ```
 pub fn unit_name_mangle(s: &str) -> String {
-    // If the string already has a recognized unit suffix, escape the name
-    // part and keep the suffix.
+    // If the string already has a recognized unit suffix, mangle-escape the
+    // name part and keep the suffix.
     if let Some(suffix) = recognized_suffix(s) {
         let name_part = &s[..s.len() - suffix.len()];
-        let escaped = unit_name_escape(name_part);
+        let escaped = unit_name_mangle_escape(name_part);
         return format!("{escaped}{suffix}");
     }
 
-    // If it looks like an absolute path, try to determine the appropriate
-    // unit type. Devices get .device, everything else gets .service.
+    // If it looks like an absolute path, determine the appropriate unit type.
     if s.starts_with('/') {
         if s.starts_with("/dev/") {
             let escaped = unit_name_path_escape(s);
             return format!("{escaped}.device");
         }
         let escaped = unit_name_path_escape(s);
-        return format!("{escaped}.service");
+        return format!("{escaped}.mount");
     }
 
-    // Otherwise, escape and append .service
-    let escaped = unit_name_escape(s);
+    // Otherwise, mangle-escape and append .service
+    let escaped = unit_name_mangle_escape(s);
     format!("{escaped}.service")
 }
 
@@ -213,7 +325,8 @@ pub fn unit_name_template_split(name: &str) -> Option<(&str, &str, &str)> {
     let at_pos = name.find('@')?;
     let dot_pos = name.rfind('.')?;
 
-    if at_pos >= dot_pos {
+    // Must have a non-empty prefix before '@' and '@' must come before the suffix
+    if at_pos == 0 || at_pos >= dot_pos {
         return None;
     }
 
@@ -290,30 +403,48 @@ fn recognized_suffix(name: &str) -> Option<&'static str> {
         .map(|v| v as _)
 }
 
-/// Normalize a filesystem path by stripping leading/trailing slashes
-/// and collapsing consecutive slashes.
+/// Normalize a filesystem path following systemd's `path_simplify` rules:
+/// - Remove `.` components
+/// - Collapse consecutive `/`
+/// - Skip `..` only at the beginning of an absolute path
+/// - After a non-`..`/non-`.` component, `..` is kept (and makes the path invalid)
+///
+/// Returns `None` if the path contains `..` after a real component (invalid path).
+/// Returns `Some(normalized)` with the path stripped of leading/trailing slashes.
 fn normalize_path(path: &str) -> String {
-    let trimmed = path.trim_matches('/');
-    if trimmed.is_empty() {
-        return String::new();
-    }
+    let absolute = path.starts_with('/');
+    let mut components: Vec<&str> = Vec::new();
+    let mut beginning = true;
 
-    let mut result = String::with_capacity(trimmed.len());
-    let mut prev_slash = false;
-
-    for c in trimmed.chars() {
-        if c == '/' {
-            if !prev_slash {
-                result.push('/');
+    for part in path.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                if absolute && beginning {
+                    // Skip leading `..` in absolute paths (can't go above root)
+                    continue;
+                }
+                beginning = false;
+                components.push(part);
             }
-            prev_slash = true;
-        } else {
-            result.push(c);
-            prev_slash = false;
+            other => {
+                beginning = false;
+                components.push(other);
+            }
         }
     }
+    components.join("/")
+}
 
-    result
+/// Check if a normalized path is valid for path escaping.
+/// Returns `false` if the path contains `..` components.
+fn is_valid_normalized_path(path: &str) -> bool {
+    for component in path.split('/') {
+        if component == ".." {
+            return false;
+        }
+    }
+    true
 }
 
 /// Parse a single hex digit character to its numeric value.
@@ -335,7 +466,7 @@ mod tests {
         assert_eq!(unit_name_escape("foobar"), "foobar");
         assert_eq!(unit_name_escape("foo bar"), r"foo\x20bar");
         assert_eq!(unit_name_escape("foo/bar"), "foo-bar");
-        assert_eq!(unit_name_escape(""), "-");
+        assert_eq!(unit_name_escape(""), "");
     }
 
     #[test]
@@ -405,9 +536,9 @@ mod tests {
 
     #[test]
     fn test_escape_empty_string() {
-        // Empty string escapes to "-" (representing the root path).
-        // Unescaping "-" gives "/" — this is a one-way mapping by design.
-        assert_eq!(unit_name_escape(""), "-");
+        // Empty string escapes to empty string.
+        // The path "-" unescapes to "/".
+        assert_eq!(unit_name_escape(""), "");
         assert_eq!(unit_name_unescape("-"), Some("/".to_string()));
     }
 
@@ -459,7 +590,7 @@ mod tests {
     #[test]
     fn test_mangle_path() {
         assert_eq!(unit_name_mangle("/dev/sda"), "dev-sda.device");
-        assert_eq!(unit_name_mangle("/foo/bar"), "foo-bar.service");
+        assert_eq!(unit_name_mangle("/foo/bar"), "foo-bar.mount");
     }
 
     #[test]
@@ -519,5 +650,11 @@ mod tests {
         assert_eq!(normalize_path("/foo/bar"), "foo/bar");
         assert_eq!(normalize_path("/foo//bar/"), "foo/bar");
         assert_eq!(normalize_path("/foo///bar///baz/"), "foo/bar/baz");
+        // Leading `..` in absolute paths are skipped
+        assert_eq!(normalize_path("/.."), "");
+        assert_eq!(normalize_path("/../.././../.././"), "");
+        assert_eq!(normalize_path("/../.././../.././foo"), "foo");
+        // `..` after a real component is kept (making the path invalid)
+        assert_eq!(normalize_path("/../hello/.."), "hello/..");
     }
 }

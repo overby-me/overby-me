@@ -41,7 +41,7 @@ struct Cli {
     filter_type: Vec<String>,
 
     /// Show a unified diff for overridden files.
-    #[arg(long, default_value = "true")]
+    #[arg(long, default_value = "true", num_args = 0..=1, default_missing_value = "true", value_parser = clap::builder::BoolishValueParser::new())]
     diff: bool,
 
     /// Do not pipe output through a pager.
@@ -99,6 +99,7 @@ enum DeltaType {
     Masked,
     Redirected,
     Equivalent,
+    Unchanged,
 }
 
 impl DeltaType {
@@ -109,6 +110,7 @@ impl DeltaType {
             DeltaType::Masked => "[MASKED]",
             DeltaType::Redirected => "[REDIRECTED]",
             DeltaType::Equivalent => "[EQUIVALENT]",
+            DeltaType::Unchanged => "[UNCHANGED]",
         }
     }
 
@@ -119,6 +121,7 @@ impl DeltaType {
             DeltaType::Masked => "\x1b[33m",     // yellow
             DeltaType::Redirected => "\x1b[36m", // cyan
             DeltaType::Equivalent => "\x1b[90m", // gray
+            DeltaType::Unchanged => "\x1b[90m",  // gray
         }
     }
 
@@ -129,6 +132,7 @@ impl DeltaType {
             "masked" => Some(DeltaType::Masked),
             "redirected" => Some(DeltaType::Redirected),
             "equivalent" => Some(DeltaType::Equivalent),
+            "unchanged" => Some(DeltaType::Unchanged),
             _ => None,
         }
     }
@@ -474,7 +478,7 @@ fn main() {
                     Some(dt) => filters.push(dt),
                     None => {
                         eprintln!(
-                            "Unknown type: {part}. Valid types: overridden, extended, masked, redirected, equivalent"
+                            "Unknown type: {part}. Valid types: overridden, extended, masked, redirected, equivalent, unchanged"
                         );
                         process::exit(1);
                     }

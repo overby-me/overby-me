@@ -56,38 +56,42 @@ struct Cli {
     strings: Vec<String>,
 }
 
-fn read_stdin_lines() -> Vec<String> {
-    use std::io::BufRead;
-    let stdin = std::io::stdin();
-    let mut lines = Vec::new();
-    for line in stdin.lock().lines() {
-        match line {
-            Ok(l) => lines.push(l),
-            Err(e) => {
-                eprintln!("Error reading stdin: {e}");
-                process::exit(1);
-            }
-        }
-    }
-    lines
-}
 
-fn normalize_suffix(suffix: &str) -> String {
-    if suffix.starts_with('.') {
-        suffix.to_string()
-    } else {
-        format!(".{suffix}")
+/// Known valid unit type suffixes.
+const VALID_SUFFIXES: &[&str] = &[
+    "service",
+    "socket",
+    "target",
+    "device",
+    "mount",
+    "automount",
+    "swap",
+    "timer",
+    "path",
+    "slice",
+    "scope",
+];
+
+fn normalize_suffix(suffix: &str) -> Result<String, String> {
+    let bare = suffix.strip_prefix('.').unwrap_or(suffix);
+    if bare.is_empty() || !VALID_SUFFIXES.contains(&bare) {
+        return Err(format!("Invalid unit type suffix: {suffix}"));
     }
+    Ok(format!(".{bare}"))
 }
 
 fn do_escape(input: &str, cli: &Cli) -> Result<String, String> {
     if cli.unescape {
         // Unescape mode
-        if cli.instance {
+        if cli.instance || cli.template.is_some() {
             // Extract instance from a template instance name
             let name = input;
             match unit_name::unit_name_template_split(name) {
                 Some((_prefix, instance, _suffix)) => {
+                    // Instance must be non-empty (otherwise it's a template, not an instance)
+                    if instance.is_empty() {
+                        return Err(format!("Not a template instance unit name: {name}"));
+                    }
                     if cli.path {
                         unit_name::unit_name_path_unescape(instance)
                             .ok_or_else(|| format!("Failed to path-unescape instance: {instance}"))
@@ -111,29 +115,56 @@ fn do_escape(input: &str, cli: &Cli) -> Result<String, String> {
             }
         }
     } else if cli.mangle {
-        // Mangle mode
+        // Mangle mode — empty input is invalid
+        if input.is_empty() {
+            return Err("Cannot mangle empty string".to_string());
+        }
         Ok(unit_name::unit_name_mangle(input))
     } else {
         // Escape mode (default)
-        let escaped = if cli.path {
-            unit_name::unit_name_path_escape(input)
-        } else {
-            unit_name::unit_name_escape(input)
-        };
+        if cli.path {
+            // Validate path input
+            let escaped = unit_name::unit_name_path_escape_checked(input)
+                .ok_or_else(|| format!("Invalid path: {input}"))?;
 
-        // Apply --template if given
-        if let Some(template) = &cli.template {
-            if !unit_name::is_template(template) {
-                return Err(format!("Not a valid template unit name: {template}"));
+            // Apply --template if given
+            if let Some(template) = &cli.template {
+                if !unit_name::is_template(template) {
+                    return Err(format!("Not a valid template unit name: {template}"));
+                }
+                unit_name::template_instantiate(template, &escaped)
+                    .ok_or_else(|| {
+                        format!("Failed to instantiate template {template} with {escaped}")
+                    })
+            } else if let Some(suffix) = &cli.suffix {
+                let norm = normalize_suffix(suffix)?;
+                Ok(format!("{escaped}{norm}"))
+            } else {
+                Ok(escaped)
             }
-            unit_name::template_instantiate(template, &escaped)
-                .ok_or_else(|| format!("Failed to instantiate template {template} with {escaped}"))
-        } else if let Some(suffix) = &cli.suffix {
-            // Apply --suffix
-            let norm = normalize_suffix(suffix);
-            Ok(format!("{escaped}{norm}"))
         } else {
-            Ok(escaped)
+            let escaped = unit_name::unit_name_escape(input);
+
+            // For --template, the escaped instance must be non-empty
+            if let Some(template) = &cli.template {
+                if escaped.is_empty() {
+                    return Err(format!(
+                        "Cannot instantiate template {template} with empty instance"
+                    ));
+                }
+                if !unit_name::is_template(template) {
+                    return Err(format!("Not a valid template unit name: {template}"));
+                }
+                unit_name::template_instantiate(template, &escaped)
+                    .ok_or_else(|| {
+                        format!("Failed to instantiate template {template} with {escaped}")
+                    })
+            } else if let Some(suffix) = &cli.suffix {
+                let norm = normalize_suffix(suffix)?;
+                Ok(format!("{escaped}{norm}"))
+            } else {
+                Ok(escaped)
+            }
         }
     }
 }
@@ -176,13 +207,28 @@ fn main() {
         eprintln!("Error: --mangle and --template cannot be used together.");
         process::exit(1);
     }
+    if cli.mangle && cli.suffix.is_some() {
+        eprintln!("Error: --mangle and --suffix cannot be used together.");
+        process::exit(1);
+    }
+    if cli.suffix.is_some() && cli.template.is_some() {
+        eprintln!("Error: --suffix and --template cannot be used together.");
+        process::exit(1);
+    }
     if cli.instance && !cli.unescape {
         eprintln!("Error: --instance can only be used with --unescape.");
         process::exit(1);
     }
+    if let Some(template) = &cli.template {
+        if template.is_empty() || !unit_name::is_template(template) {
+            eprintln!("Error: Not a valid template unit name: {template}");
+            process::exit(1);
+        }
+    }
 
     let inputs = if cli.strings.is_empty() {
-        read_stdin_lines()
+        eprintln!("Error: no input strings provided.");
+        process::exit(1);
     } else {
         cli.strings.clone()
     };
@@ -193,15 +239,20 @@ fn main() {
     }
 
     let mut exit_code = 0;
+    let mut results = Vec::new();
 
     for input in &inputs {
         match do_escape(input, &cli) {
-            Ok(result) => println!("{result}"),
+            Ok(result) => results.push(result),
             Err(e) => {
                 eprintln!("Error: {e}");
                 exit_code = 1;
             }
         }
+    }
+
+    if !results.is_empty() {
+        println!("{}", results.join(" "));
     }
 
     process::exit(exit_code);

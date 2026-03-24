@@ -463,7 +463,10 @@ fn main() {
 
     // --chroot
     if cli.chroot {
-        let in_chroot = detect_chroot();
+        let in_chroot = match std::env::var("SYSTEMD_IN_CHROOT") {
+            Ok(val) => val == "1",
+            Err(_) => detect_chroot(),
+        };
         if !cli.quiet {
             if in_chroot {
                 println!("yes");
