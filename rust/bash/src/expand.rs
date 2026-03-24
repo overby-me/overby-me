@@ -441,7 +441,39 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                 let home = ctx.vars.get("HOME").cloned().unwrap_or_default();
                 val = format!("{}{}", home, &val[1..]);
             }
-            out.push(Segment::Unquoted(val));
+            // Check if the parameter expansion used a default/alt word with
+            // quoted content — if so, the result should be treated as quoted
+            // to prevent field splitting (e.g., ${B:-"$A"} preserves quotes)
+            let has_quoted_word = match &expr.op {
+                ParamOp::Default(_, word) | ParamOp::Assign(_, word) | ParamOp::Alt(_, word) => {
+                    let is_active = match &expr.op {
+                        ParamOp::Default(colon, _) => {
+                            let empty = if *colon { val.is_empty() } else { false };
+                            !ctx.is_param_set(&expr.name) || empty
+                        }
+                        ParamOp::Assign(colon, _) => {
+                            let empty = if *colon { val.is_empty() } else { false };
+                            !ctx.is_param_set(&expr.name) || empty
+                        }
+                        ParamOp::Alt(colon, _) => {
+                            let empty = if *colon { val.is_empty() } else { false };
+                            let unset = !ctx.is_param_set(&expr.name);
+                            !(unset || empty)
+                        }
+                        _ => false,
+                    };
+                    is_active
+                        && word
+                            .iter()
+                            .any(|p| matches!(p, WordPart::DoubleQuoted(_) | WordPart::SingleQuoted(_)))
+                }
+                _ => false,
+            };
+            if has_quoted_word {
+                out.push(Segment::Quoted(val));
+            } else {
+                out.push(Segment::Unquoted(val));
+            }
         }
         WordPart::CommandSub(cmd) => {
             // Optimize $(< file) — read file content directly
