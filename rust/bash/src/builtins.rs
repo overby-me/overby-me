@@ -2413,6 +2413,8 @@ fn builtin_exit(shell: &mut Shell, args: &[String]) -> i32 {
         .first()
         .and_then(|s| s.parse().ok())
         .unwrap_or(shell.last_status);
+    shell.last_status = code;
+    shell.run_exit_trap();
     std::process::exit(code);
 }
 
