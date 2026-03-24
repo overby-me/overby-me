@@ -1055,9 +1055,16 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                         'b' => s.push('\x08'),
                         'c' => {
                             // \cX — control character (X ^ 0x40), like bash
+                            // If next char is \, process the escape first
                             if *i + 1 < chars.len() {
                                 *i += 1;
-                                let ctrl = (chars[*i] as u8) ^ 0x40;
+                                let target_char = if chars[*i] == '\\' && *i + 1 < chars.len() {
+                                    *i += 1;
+                                    chars[*i]
+                                } else {
+                                    chars[*i]
+                                };
+                                let ctrl = (target_char as u8) ^ 0x40;
                                 if ctrl == 0 {
                                     break; // \c@ terminates
                                 }
@@ -1991,8 +1998,14 @@ impl Lexer {
                                     Some('b') => s.push('\x08'),
                                     Some('c') => {
                                         // \cX — control character (X ^ 0x40), like bash
+                                        // If next char is \, process the escape first
                                         if let Some(ch) = self.advance() {
-                                            let ctrl = (ch as u8) ^ 0x40;
+                                            let target_char = if ch == '\\' {
+                                                self.advance().unwrap_or('\\')
+                                            } else {
+                                                ch
+                                            };
+                                            let ctrl = (target_char as u8) ^ 0x40;
                                             if ctrl == 0 {
                                                 nul_terminated = true;
                                                 break;
