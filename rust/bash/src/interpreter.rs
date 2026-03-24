@@ -239,6 +239,7 @@ pub struct Shell {
     /// Stack of local variable scopes. Each scope maps variable names to their
     /// saved values (None if the variable didn't exist before).
     pub local_scopes: Vec<HashMap<String, SavedVar>>,
+    pub saved_opts_stack: Vec<Option<(bool, bool, bool, bool, bool, bool)>>,
 
     // Shell options (set)
     pub opt_errexit: bool,
@@ -364,6 +365,7 @@ impl Shell {
             traps: HashMap::new(),
             namerefs: HashMap::new(),
             local_scopes: Vec::new(),
+            saved_opts_stack: Vec::new(),
             opt_errexit: false,
             opt_nounset: false,
             opt_xtrace: false,
@@ -2268,6 +2270,7 @@ impl Shell {
         self.positional.extend_from_slice(args);
         self.func_names.push(name.to_string());
         self.local_scopes.push(HashMap::new());
+        self.saved_opts_stack.push(None); // Will be set by `local -`
         self.arrays.insert(
             "FUNCNAME".to_string(),
             self.func_names.iter().rev().cloned().collect(),
@@ -2284,6 +2287,18 @@ impl Shell {
         // Restore procsub fds
         for fd in saved_fds {
             crate::expand::register_procsub_fd_pub(fd);
+        }
+
+        // Restore shell options if `local -` was used
+        if let Some(saved) = self.saved_opts_stack.pop() {
+            if let Some((errexit, nounset, xtrace, noclobber, noglob, pipefail)) = saved {
+                self.opt_errexit = errexit;
+                self.opt_nounset = nounset;
+                self.opt_xtrace = xtrace;
+                self.opt_noclobber = noclobber;
+                self.opt_noglob = noglob;
+                self.opt_pipefail = pipefail;
+            }
         }
 
         // Restore local variables

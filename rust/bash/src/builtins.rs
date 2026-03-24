@@ -970,15 +970,26 @@ fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
 
     while i < args.len() {
         let arg = &args[i];
-        if arg.starts_with('-') && arg.len() > 1 {
+        if arg == "-" {
+            // local - : save shell options for restoration on function return
+            if let Some(last) = shell.saved_opts_stack.last_mut() {
+                if last.is_none() {
+                    *last = Some((
+                        shell.opt_errexit,
+                        shell.opt_nounset,
+                        shell.opt_xtrace,
+                        shell.opt_noclobber,
+                        shell.opt_noglob,
+                        shell.opt_pipefail,
+                    ));
+                }
+            }
+        } else if arg.starts_with('-') && arg.len() > 1 {
             for ch in arg[1..].chars() {
                 match ch {
                     'a' => flag_array = true,
                     'r' => _flag_readonly = true,
                     'n' => flag_nameref = true,
-                    '-' => {
-                        // local - : save/restore shell options on function return (stub)
-                    }
                     _ => {}
                 }
             }
