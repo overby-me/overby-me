@@ -2849,6 +2849,9 @@ impl Shell {
             if name == "?" {
                 return self.last_status as i64;
             }
+            if name == "$" || name == "{$}" {
+                return std::process::id() as i64;
+            }
             // Handle ${var} syntax
             let name = if let Some(inner) = name.strip_prefix('{').and_then(|s| s.strip_suffix('}'))
             {
