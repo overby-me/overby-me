@@ -209,7 +209,7 @@ impl Parser {
 
     fn parse_complete_command(&mut self) -> Result<CompleteCommand, String> {
         let line = self.current_line();
-        let list = self.parse_and_or_list()?;
+        let mut list = self.parse_and_or_list()?;
 
         let background = match self.current {
             Token::Amp => {
@@ -223,11 +223,57 @@ impl Parser {
             _ => false,
         };
 
+        // Resolve any deferred heredoc bodies (for pipeline heredocs like cmd <<EOF | cmd2)
+        self.resolve_heredoc_bodies(&mut list);
+
         Ok(CompleteCommand {
             list,
             background,
             line,
         })
+    }
+
+    /// Fill in empty heredoc bodies that couldn't be resolved during parsing
+    /// (happens when heredoc is in a pipeline: cmd <<EOF | cmd2)
+    fn resolve_heredoc_bodies(&mut self, list: &mut AndOrList) {
+        self.resolve_heredoc_in_pipeline(&mut list.first);
+        for (_, pipeline) in &mut list.rest {
+            self.resolve_heredoc_in_pipeline(pipeline);
+        }
+    }
+
+    fn resolve_heredoc_in_pipeline(&mut self, pipeline: &mut Pipeline) {
+        for cmd in &mut pipeline.commands {
+            match cmd {
+                Command::Simple(sc) => {
+                    for redir in &mut sc.redirections {
+                        if matches!(redir.kind, RedirectKind::HereDoc(_))
+                            && (redir.target.is_empty()
+                                || (redir.target.len() == 1
+                                    && matches!(&redir.target[0], WordPart::Literal(s) if s.is_empty())))
+                        {
+                            if let Some(body) = self.lexer.take_heredoc_body() {
+                                redir.target = body;
+                            }
+                        }
+                    }
+                }
+                Command::Compound(_, redirections) => {
+                    for redir in redirections {
+                        if matches!(redir.kind, RedirectKind::HereDoc(_))
+                            && (redir.target.is_empty()
+                                || (redir.target.len() == 1
+                                    && matches!(&redir.target[0], WordPart::Literal(s) if s.is_empty())))
+                        {
+                            if let Some(body) = self.lexer.take_heredoc_body() {
+                                redir.target = body;
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 
     fn parse_and_or_list(&mut self) -> Result<AndOrList, String> {
@@ -1171,6 +1217,8 @@ impl Parser {
             self.advance();
             match &kind {
                 RedirectKind::HereDoc(_) => {
+                    // Heredoc body is read when the next newline is tokenized.
+                    // Use empty placeholder if not available yet (pipeline case).
                     let target = self
                         .lexer
                         .take_heredoc_body()
