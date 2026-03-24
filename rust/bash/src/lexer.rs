@@ -883,8 +883,8 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                 let mut case_depth = 0i32;
                 while *i < chars.len() && depth > 0 {
                     match chars[*i] {
-                        '\'' => {
-                            // Single-quoted string — skip entirely
+                        '\'' if !in_dquote => {
+                            // Single-quoted string — skip entirely (not in dquote context)
                             cmd.push(chars[*i]);
                             *i += 1;
                             while *i < chars.len() && chars[*i] != '\'' {
@@ -945,6 +945,12 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                                 }
                             }
                             // Inside a case block, ) is a pattern delimiter — skip
+                        }
+                        '}' if in_dquote && depth == 1 => {
+                            // In dquote context, } at comsub depth 1 means the
+                            // closing } of the enclosing ${...}. The comsub has
+                            // unmatched ( — stop here without consuming }
+                            break;
                         }
                         _ => {}
                     }
@@ -1610,7 +1616,7 @@ fn read_param_word_impl(chars: &[char], i: &mut usize, delim: char, in_dquote: b
                 *i += 1;
                 parts.push(parse_dollar(chars, i, in_dquote));
             }
-            '\'' => {
+            '\'' if !in_dquote => {
                 if !literal.is_empty() {
                     parts.push(WordPart::Literal(std::mem::take(&mut literal)));
                 }
