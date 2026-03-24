@@ -1054,10 +1054,10 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                         'a' => s.push('\x07'),
                         'b' => s.push('\x08'),
                         'c' => {
-                            // \cX — control character (X & 0x1F)
+                            // \cX — control character (X ^ 0x40), like bash
                             if *i + 1 < chars.len() {
                                 *i += 1;
-                                let ctrl = (chars[*i] as u8) & 0x1F;
+                                let ctrl = (chars[*i] as u8) ^ 0x40;
                                 if ctrl == 0 {
                                     break; // \c@ terminates
                                 }
@@ -1990,9 +1990,9 @@ impl Lexer {
                                     Some('a') => s.push('\x07'),
                                     Some('b') => s.push('\x08'),
                                     Some('c') => {
-                                        // \cX — control character
+                                        // \cX — control character (X ^ 0x40), like bash
                                         if let Some(ch) = self.advance() {
-                                            let ctrl = (ch as u8) & 0x1F;
+                                            let ctrl = (ch as u8) ^ 0x40;
                                             if ctrl == 0 {
                                                 nul_terminated = true;
                                                 break;
