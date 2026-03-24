@@ -2685,8 +2685,25 @@ impl Shell {
                         } else {
                             b' '
                         };
-                        // Skip ++ or -- or after an operator
-                        if !matches!(
+                        // Check if prev is ++ or -- after a variable (post-increment)
+                        // e.g., in "a+++4", the + at position 3 follows ++ which follows 'a'
+                        let is_after_postop = matches!(effective_prev, b'+' | b'-') && {
+                            // Find where the effective_prev is
+                            let mut j = i - 1;
+                            while j > 0 && bytes[j].is_ascii_whitespace() {
+                                j -= 1;
+                            }
+                            // j points to the second +/- of ++/--
+                            // Check if there's a matching +/- before it and a variable before that
+                            j > 0
+                                && bytes[j - 1] == effective_prev
+                                && (j >= 2
+                                    && (bytes[j - 2].is_ascii_alphanumeric()
+                                        || bytes[j - 2] == b'_'
+                                        || bytes[j - 2] == b']'))
+                        };
+                        // Skip ++ or -- or after an operator (but not if after post-increment)
+                        if (!matches!(
                             effective_prev,
                             b'+' | b'-'
                                 | b'*'
@@ -2699,7 +2716,8 @@ impl Shell {
                                 | b'!'
                                 | b'&'
                                 | b'|'
-                        ) && next != bytes[i]
+                        ) || is_after_postop)
+                            && next != bytes[i]
                         {
                             let left = self.eval_arith_expr_impl(&expr[..i]);
                             let right = self.eval_arith_expr_impl(&expr[i + 1..]);
