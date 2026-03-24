@@ -1086,10 +1086,7 @@ fn read_param_word_impl(chars: &[char], i: &mut usize, delim: char, in_dquote: b
     let mut literal = String::new();
     let mut depth = 0;
 
-    while *i < chars.len()
-        && (chars[*i] != delim || depth > 0)
-        && (delim == '}' || chars[*i] != '}' || depth > 0)
-    {
+    while *i < chars.len() && (chars[*i] != delim || depth > 0) && chars[*i] != '}' {
         match chars[*i] {
             '\\' if *i + 1 < chars.len() => {
                 let next = chars[*i + 1];
@@ -1097,13 +1094,7 @@ fn read_param_word_impl(chars: &[char], i: &mut usize, delim: char, in_dquote: b
                     // Inside double quotes, preserve backslash for non-special chars
                     literal.push('\\');
                     literal.push(next);
-                } else if in_dquote {
-                    // In dquote context, just consume the escape (no quote removal later)
-                    literal.push(next);
                 } else {
-                    // Unquoted: mark escaped char with \x00 so it survives
-                    // quote removal in glob expansion stage
-                    literal.push('\x00');
                     literal.push(next);
                 }
                 *i += 2;
@@ -1166,22 +1157,6 @@ fn read_param_word_impl(chars: &[char], i: &mut usize, delim: char, in_dquote: b
                     *i += 1;
                 }
                 parts.push(WordPart::SingleQuoted(s));
-            }
-            '"' if in_dquote => {
-                // Inside double-quoted ${var+word}, a " toggles OUT of double
-                // quoting.  Read the unquoted segment (where single quotes work
-                // normally and protect }) until the next " toggles back in.
-                if !literal.is_empty() {
-                    parts.push(WordPart::Literal(std::mem::take(&mut literal)));
-                }
-                *i += 1; // skip the "
-                // Read unquoted content until " or }
-                let unquoted = read_param_word_impl(chars, i, '"', false);
-                parts.extend(unquoted);
-                // Skip the closing " if present
-                if *i < chars.len() && chars[*i] == '"' {
-                    *i += 1;
-                }
             }
             '"' => {
                 if !literal.is_empty() {
