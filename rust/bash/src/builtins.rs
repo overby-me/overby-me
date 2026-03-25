@@ -3861,7 +3861,8 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
             match nix::unistd::read(read_fd, &mut buf) {
                 Ok(0) => return 1,
                 Ok(bytes_read) => {
-                    line = String::from_utf8_lossy(&buf[..bytes_read]).to_string();
+                    // Convert raw bytes to chars (Latin-1 mapping for 0x80-0xFF)
+                    line = buf[..bytes_read].iter().map(|&b| b as char).collect();
                 }
                 Err(_) => return 1,
             }
@@ -3873,7 +3874,7 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
             match std::io::stdin().read(&mut buf) {
                 Ok(0) => return 1,
                 Ok(bytes_read) => {
-                    line = String::from_utf8_lossy(&buf[..bytes_read]).to_string();
+                    line = buf[..bytes_read].iter().map(|&b| b as char).collect();
                 }
                 Err(_) => return 1,
             }
@@ -3946,10 +3947,30 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
         }
         #[cfg(not(unix))]
         {
-            match std::io::stdin().read_line(&mut line) {
-                Ok(0) => return 1,
-                Err(_) => return 1,
-                _ => {}
+            use std::io::Read as _;
+            let mut buf = [0u8; 1];
+            loop {
+                match std::io::stdin().read(&mut buf) {
+                    Ok(0) => {
+                        if line.is_empty() {
+                            return 1;
+                        }
+                        break;
+                    }
+                    Ok(_) => {
+                        let ch = buf[0] as char;
+                        if ch == '\n' {
+                            break;
+                        }
+                        line.push(ch);
+                    }
+                    Err(_) => {
+                        if line.is_empty() {
+                            return 1;
+                        }
+                        break;
+                    }
+                }
             }
         }
     } else {
