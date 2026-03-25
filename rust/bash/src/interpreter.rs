@@ -1917,7 +1917,16 @@ impl Shell {
         // Expand words, applying assignment-context tilde expansion where appropriate
         let mut expanded_words: Vec<String> = Vec::new();
         for (idx, word) in cmd.words.iter().enumerate() {
-            let fields = self.expand_word_fields(word, &ifs);
+            // For assignment builtins, arguments with = should not be split
+            let is_assign_arg = is_assignment_builtin && idx > 0 && {
+                let raw = crate::ast::word_to_string(word);
+                raw.contains('=') || raw.starts_with('-') || raw.starts_with('+')
+            };
+            let fields = if is_assign_arg {
+                vec![self.expand_word_single(word)]
+            } else {
+                self.expand_word_fields(word, &ifs)
+            };
             // Check for silent incomplete comsub — suppress without error
             if fields
                 .iter()
