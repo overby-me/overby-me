@@ -7,6 +7,19 @@ use std::collections::HashMap;
 
 pub type BuiltinFn = fn(&mut Shell, &[String]) -> i32;
 
+/// Fix Rust's scientific notation (e.g. "4.2e0") to C/bash format ("4.2e+00")
+fn fix_scientific_notation(s: &str, uppercase: bool) -> String {
+    let marker = if uppercase { 'E' } else { 'e' };
+    if let Some(pos) = s.rfind(marker) {
+        let (mantissa, exp_part) = s.split_at(pos);
+        let exp_str = &exp_part[1..]; // skip 'e'/'E'
+        let exp_val: i32 = exp_str.parse().unwrap_or(0);
+        format!("{}{}{:+03}", mantissa, marker, exp_val)
+    } else {
+        s.to_string()
+    }
+}
+
 fn list_all_signals() -> Vec<(i32, &'static str)> {
     vec![
         (1, "SIGHUP"),
@@ -637,18 +650,58 @@ fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                         print!("{:o}", n);
                         arg_idx += 1;
                     }
-                    Some('f') | Some('e') | Some('E') | Some('g') | Some('G') => {
+                    Some(fmt_ch @ ('f' | 'F' | 'e' | 'E' | 'g' | 'G')) => {
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
                         let n: f64 = arg.parse().unwrap_or(0.0);
                         let p = precision.unwrap_or(6);
+                        let formatted = match fmt_ch {
+                            'e' => {
+                                let s = format!("{:.p$e}", n);
+                                // Rust uses e0, bash/C uses e+00
+                                fix_scientific_notation(&s, false)
+                            }
+                            'E' => {
+                                let s = format!("{:.p$E}", n);
+                                fix_scientific_notation(&s, true)
+                            }
+                            'g' | 'G' => {
+                                // %g uses shorter of %e and %f, stripping trailing zeros
+                                let p = if p == 0 { 1 } else { p };
+                                let f_str = format!("{:.prec$}", n, prec = p.saturating_sub(1));
+                                let e_str = if fmt_ch == 'G' {
+                                    fix_scientific_notation(
+                                        &format!("{:.prec$E}", n, prec = p.saturating_sub(1)),
+                                        true,
+                                    )
+                                } else {
+                                    fix_scientific_notation(
+                                        &format!("{:.prec$e}", n, prec = p.saturating_sub(1)),
+                                        false,
+                                    )
+                                };
+                                if e_str.len() < f_str.len() {
+                                    e_str
+                                } else {
+                                    // Strip trailing zeros after decimal point
+                                    if f_str.contains('.') {
+                                        let trimmed = f_str.trim_end_matches('0');
+                                        let trimmed = trimmed.trim_end_matches('.');
+                                        trimmed.to_string()
+                                    } else {
+                                        f_str
+                                    }
+                                }
+                            }
+                            _ => format!("{:.p$}", n), // f, F
+                        };
                         if w > 0 {
                             if left {
-                                print!("{:<w$.p$}", n);
+                                print!("{:<w$}", formatted);
                             } else {
-                                print!("{:>w$.p$}", n);
+                                print!("{:>w$}", formatted);
                             }
                         } else {
-                            print!("{:.p$}", n);
+                            print!("{}", formatted);
                         }
                         arg_idx += 1;
                     }
