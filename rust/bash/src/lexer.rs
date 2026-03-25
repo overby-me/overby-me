@@ -1672,9 +1672,9 @@ fn read_param_word_impl(chars: &[char], i: &mut usize, delim: char, in_dquote: b
                 *i += 1;
                 parts.push(parse_dollar(chars, i, in_dquote));
             }
-            '\'' => {
+            '\'' if !IN_HEREDOC.with(|f| f.get()) => {
                 // Single quotes have quoting effect in parameter expansion words
-                // even inside double quotes (bash behavior)
+                // even inside double quotes (bash behavior), except in heredocs
                 if !literal.is_empty() {
                     parts.push(WordPart::Literal(std::mem::take(&mut literal)));
                 }
