@@ -182,6 +182,8 @@ impl std::fmt::Display for RunCmdError {
 pub enum StartResult {
     Started,
     WaitingForSocket,
+    /// ExecCondition= command exited with 1-254; service is skipped (not failed).
+    ConditionSkipped,
 }
 
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
@@ -287,6 +289,21 @@ impl Service {
             &run_info.config.notification_sockets_dir,
         )
         .map_err(ServiceErrorReason::PreparingFailed)?;
+
+        // ExecCondition= — if any command exits 1-254, skip the service.
+        match self.run_exec_condition(conf, id.clone(), name, run_info) {
+            Ok(true) => {} // conditions met, proceed
+            Ok(false) => return Ok(StartResult::ConditionSkipped),
+            Err(e) => {
+                return Err(match self.run_poststop(conf, id.clone(), name, run_info) {
+                    Ok(()) => ServiceErrorReason::PrestartFailed(e),
+                    Err(poststop_err) => {
+                        ServiceErrorReason::PrestartAndPoststopFailed(e, poststop_err)
+                    }
+                });
+            }
+        }
+
         self.run_prestart(conf, id.clone(), name, run_info)
             .map_err(
                 |prestart_err| match self.run_poststop(conf, id.clone(), name, run_info) {
@@ -692,6 +709,47 @@ impl Service {
             conf.exec_config.working_directory.as_ref(),
         )
     }
+    /// Run ExecCondition= commands. Returns Ok(true) to proceed, Ok(false) to
+    /// skip the service (condition not met), or Err on hard failure (exit 255
+    /// or signal).
+    fn run_exec_condition(
+        &mut self,
+        conf: &ServiceConfig,
+        id: UnitId,
+        name: &str,
+        run_info: &RuntimeInfo,
+    ) -> Result<bool, RunCmdError> {
+        if conf.exec_condition.is_empty() {
+            return Ok(true);
+        }
+        let timeout = self.get_start_timeout(conf);
+        for cmd in &conf.exec_condition.clone() {
+            match self.run_cmd(
+                cmd,
+                id.clone(),
+                name,
+                timeout,
+                run_info,
+                conf.exec_config.working_directory.as_ref(),
+            ) {
+                Ok(()) => {} // exit 0 — condition met, continue
+                Err(RunCmdError::BadExitCode(
+                    _,
+                    crate::signal_handler::ChildTermination::Exit(code),
+                )) if code != 255 => {
+                    // Exit 1-254: condition not met, skip service (not a failure)
+                    trace!("ExecCondition {cmd:?} exited with {code}, skipping service {name}");
+                    return Ok(false);
+                }
+                Err(e) => {
+                    // Exit 255 or signal: hard failure
+                    return Err(e);
+                }
+            }
+        }
+        Ok(true)
+    }
+
     fn run_prestart(
         &mut self,
         conf: &ServiceConfig,

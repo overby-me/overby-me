@@ -212,6 +212,13 @@ impl ServiceState {
                 }
                 Ok(UnitStatus::Started(StatusStarted::Running))
             }
+            Ok(crate::services::StartResult::ConditionSkipped) => {
+                {
+                    let mut status = status.write_poisoned();
+                    *status = UnitStatus::Stopped(StatusStopped::StoppedFinal, vec![]);
+                }
+                Ok(UnitStatus::Stopped(StatusStopped::StoppedFinal, vec![]))
+            }
             Ok(crate::services::StartResult::WaitingForSocket) => {
                 {
                     let mut status = status.write_poisoned();
@@ -306,6 +313,13 @@ impl ServiceState {
                     if !matches!(&*status, UnitStatus::Stopped(..) | UnitStatus::NeverStarted) {
                         *status = UnitStatus::Started(StatusStarted::Running);
                     }
+                }
+                Ok(())
+            }
+            Ok(crate::services::StartResult::ConditionSkipped) => {
+                {
+                    let mut status = status.write_poisoned();
+                    *status = UnitStatus::Stopped(StatusStopped::StoppedFinal, vec![]);
                 }
                 Ok(())
             }
