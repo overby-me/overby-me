@@ -1407,13 +1407,10 @@ fn parse_brace_param(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart
             '}'
         };
         // Check if this is $# with an operation vs ${#name} (length)
-        // ${#:-word}, ${#-word}, ${#+word}, ${#?word} are $# with operations
+        // ${#:...}, ${#-word}, ${#+word}, ${#?word} are $# with operations
         let is_hash_param_op = match next {
             '}' => false,
-            ':' => {
-                // ${#:X} is $# op only if X is -, +, =, ?
-                *i + 2 < chars.len() && matches!(chars[*i + 2], '-' | '+' | '=' | '?')
-            }
+            ':' => true, // ${#:anything} is always $# with operation
             '-' | '+' | '?' => true,
             _ => false, // ${#name} is length
         };
