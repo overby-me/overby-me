@@ -995,8 +995,8 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                         '}' if in_dquote && depth == 1 => {
                             // In dquote context, } at comsub depth 1 means the
                             // closing } of the enclosing ${...}. The comsub has
-                            // unmatched ( — stop here without consuming }
-                            break;
+                            // unmatched ( — suppress the command with error marker.
+                            return WordPart::CommandSub("\x00INCOMPLETE_COMSUB".to_string());
                         }
                         _ => {}
                     }
