@@ -3746,11 +3746,12 @@ fn builtin_exec(shell: &mut Shell, args: &[String]) -> i32 {
             .collect();
 
         nix::unistd::execvp(&c_prog, &c_args).ok();
+        let err = std::io::Error::last_os_error();
         eprintln!(
             "{}: exec: {}: {}",
             shell.error_prefix(),
             program,
-            std::io::Error::last_os_error()
+            io_error_message(&err)
         );
         126
     }
