@@ -4105,7 +4105,40 @@ impl Shell {
     }
 
     /// Execute `[[ conditional expression ]]`
+    fn format_cond_for_xtrace(&mut self, expr: &CondExpr) -> String {
+        match expr {
+            CondExpr::Word(w) => self.expand_word_single(w),
+            CondExpr::Unary(op, w) => {
+                let val = self.expand_word_single(w);
+                format!("{} {}", op, val)
+            }
+            CondExpr::Binary(l, op, r) => {
+                let lv = self.expand_word_single(l);
+                let rv = self.expand_word_single(r);
+                format!("{} {} {}", lv, op, rv)
+            }
+            CondExpr::Not(e) => {
+                let inner = self.format_cond_for_xtrace(e);
+                format!("! {}", inner)
+            }
+            CondExpr::And(a, b) => {
+                let av = self.format_cond_for_xtrace(a);
+                let bv = self.format_cond_for_xtrace(b);
+                format!("{} && {}", av, bv)
+            }
+            CondExpr::Or(a, b) => {
+                let av = self.format_cond_for_xtrace(a);
+                let bv = self.format_cond_for_xtrace(b);
+                format!("{} || {}", av, bv)
+            }
+        }
+    }
+
     fn run_conditional(&mut self, expr: &CondExpr) -> i32 {
+        if self.opt_xtrace {
+            let trace = self.format_cond_for_xtrace(expr);
+            self.xtrace_write(&format!("+ [[ {} ]]", trace));
+        }
         match self.eval_cond(expr) {
             Ok(true) => 0,
             Ok(false) => 1,
