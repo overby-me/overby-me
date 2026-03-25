@@ -1602,9 +1602,9 @@ fn read_param_word_impl(chars: &[char], i: &mut usize, delim: char, in_dquote: b
         match chars[*i] {
             '\\' if *i + 1 < chars.len() => {
                 let next = chars[*i + 1];
-                if in_dquote && !matches!(next, '$' | '`' | '"' | '\\' | '\n' | '}' | '/') {
+                if in_dquote && !matches!(next, '$' | '`' | '"' | '\\' | '\n' | '}' | '/' | '\'') {
                     // Inside double quotes, preserve backslash for non-special chars
-                    // Strip for } (param end) and / (pattern delimiter)
+                    // Strip for } (param end), / (pattern delimiter), ' (quote)
                     literal.push('\\');
                     literal.push(next);
                 } else {
