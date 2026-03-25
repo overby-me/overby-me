@@ -665,6 +665,13 @@ fn prepare_runtimeinfo(conf: &config::Config, dry_run: bool) -> runtime_info::Ar
         pending_activations: std::sync::Arc::new(std::sync::Mutex::new(
             std::collections::HashSet::new(),
         )),
+        manager_environment: {
+            let mut env = std::collections::HashMap::new();
+            for (k, v) in std::env::vars() {
+                env.insert(k, v);
+            }
+            std::sync::Arc::new(std::sync::Mutex::new(env))
+        },
     }))
 }
 

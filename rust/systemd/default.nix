@@ -324,8 +324,6 @@
           # Remove --timestamp tests
           sed -i '/^# --timestamp$/,/^# set-default/{/^# set-default/!d}' TEST-26-SYSTEMCTL.sh
           sed -i '/^# --timestamp with timer/,/^# set-default/{/^# set-default/!d}' TEST-26-SYSTEMCTL.sh
-          # Remove show-environment/set-environment/import-environment (not implemented)
-          sed -i '/^# show\/set-environment/,/^# test for sysv-generator/{/^# test for sysv-generator/!d}' TEST-26-SYSTEMCTL.sh
           # Remove sysv-generator test
           sed -i '/^# test for sysv-generator/,/^fi$/d' TEST-26-SYSTEMCTL.sh
           # Remove WantedBy %J test

@@ -40,6 +40,9 @@ pub type ArcMutPidTable = Arc<Mutex<PidTable>>;
 /// Used by `list-jobs` to determine which units are "waiting" vs "running".
 pub type PendingActivations = Arc<Mutex<std::collections::HashSet<UnitId>>>;
 
+/// Manager environment variables, accessible via show-environment/set-environment.
+pub type ManagerEnvironment = Arc<Mutex<HashMap<String, String>>>;
+
 /// This will be passed through to all the different threads as a central state struct
 pub struct RuntimeInfo {
     pub unit_table: UnitTable,
@@ -51,6 +54,7 @@ pub struct RuntimeInfo {
     pub notification_eventfd: EventFd,
     pub socket_activation_eventfd: EventFd,
     pub pending_activations: PendingActivations,
+    pub manager_environment: ManagerEnvironment,
 }
 
 impl RuntimeInfo {

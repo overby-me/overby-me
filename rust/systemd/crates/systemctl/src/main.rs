@@ -143,6 +143,7 @@ fn main() {
     let mut force = false;
     let mut wait = false;
     let mut root_path: Option<String> = None;
+    let mut output_format: Option<String> = None;
     let mut what_filter: Option<String> = None;
     let mut kill_whom: Option<String> = None;
     let mut kill_value: Option<i32> = None;
@@ -192,6 +193,20 @@ fn main() {
         }
         if let Some(rest) = arg.strip_prefix("--kill-value=") {
             kill_value = rest.parse::<i32>().ok();
+            i += 1;
+            continue;
+        }
+
+        // --output flag (for show-environment --output=json)
+        if arg == "--output" || arg == "-o" {
+            if i + 1 < args.len() {
+                output_format = Some(args[i + 1].clone());
+            }
+            i += 2;
+            continue;
+        }
+        if let Some(rest) = arg.strip_prefix("--output=") {
+            output_format = Some(rest.to_string());
             i += 1;
             continue;
         }
@@ -821,9 +836,39 @@ fn main() {
         || method == "list-paths"
         || method == "list-jobs"
         || method == "is-system-running"
+        || method == "show-environment"
     {
         // These commands take no parameters
         None
+    } else if method == "set-environment" || method == "unset-environment" {
+        // set-environment KEY=VALUE... / unset-environment KEY...
+        if positional.len() < 2 {
+            if !quiet {
+                eprintln!("Error: {method} requires at least one argument.");
+            }
+            std::process::exit(1);
+        }
+        let arr: Vec<Value> = positional[1..].iter().cloned().map(Value::String).collect();
+        Some(Value::Array(arr))
+    } else if method == "import-environment" {
+        // import-environment KEY... — send KEY=VALUE pairs from our own env
+        if positional.len() < 2 {
+            if !quiet {
+                eprintln!("Error: import-environment requires at least one variable name.");
+            }
+            std::process::exit(1);
+        }
+        let arr: Vec<Value> = positional[1..]
+            .iter()
+            .map(|name| {
+                if let Ok(val) = std::env::var(name) {
+                    Value::String(format!("{name}={val}"))
+                } else {
+                    Value::String(name.clone())
+                }
+            })
+            .collect();
+        Some(Value::Array(arr))
     } else if method == "set-property" {
         // set-property <unit> <prop=val>...
         if positional.len() < 2 {
@@ -1028,6 +1073,7 @@ fn main() {
                 quiet,
                 value_only,
                 force,
+                output_format.as_deref(),
                 &property_filter,
             );
         }
@@ -1067,6 +1113,7 @@ fn handle_response(
     quiet: bool,
     value_only: bool,
     force: bool,
+    output_format: Option<&str>,
     property_filter: &[String],
 ) {
     // Check for JSON-RPC error responses.
@@ -1149,6 +1196,34 @@ fn handle_response(
                 "failed" => std::process::exit(0),
                 _ => std::process::exit(1),
             }
+        }
+        "show-environment" => {
+            if let Some(result) = result
+                && let Some(env_lines) = result.get("environment").and_then(|v| v.as_array())
+                && !quiet
+            {
+                if output_format == Some("json") {
+                    // JSON output: {"KEY":"VALUE", ...}
+                    let mut obj = serde_json::Map::new();
+                    for line in env_lines {
+                        if let Some(s) = line.as_str()
+                            && let Some((k, v)) = s.split_once('=')
+                        {
+                            obj.insert(k.to_owned(), Value::String(v.to_owned()));
+                        }
+                    }
+                    println!("{}", serde_json::to_string(&obj).unwrap_or_default());
+                } else {
+                    for line in env_lines {
+                        if let Some(s) = line.as_str() {
+                            println!("{s}");
+                        }
+                    }
+                }
+            }
+        }
+        "set-environment" | "unset-environment" | "import-environment" => {
+            // No output needed on success
         }
         "is-system-running" => {
             let state = result.and_then(|v| v.as_str()).unwrap_or("offline");

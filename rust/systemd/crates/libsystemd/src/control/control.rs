@@ -142,6 +142,14 @@ pub enum Command {
     /// `--what` can be: configuration, runtime, state, cache, logs, all.
     /// Default (no --what) removes runtime + cache.
     Clean(String, Option<String>),
+    /// `show-environment` — list the manager's environment variables.
+    ShowEnvironment,
+    /// `set-environment KEY=VALUE...` — set environment variables.
+    SetEnvironment(Vec<String>),
+    /// `unset-environment KEY...` — remove environment variables.
+    UnsetEnvironment(Vec<String>),
+    /// `import-environment KEY...` — import variables from the calling process.
+    ImportEnvironment(Vec<String>),
 }
 
 /// Parameters for creating a transient (in-memory) service unit.
@@ -765,6 +773,40 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
                     ));
                 }
             }
+        }
+        "show-environment" => Command::ShowEnvironment,
+        "set-environment" => {
+            let vars = match &call.params {
+                Some(Value::Array(arr)) => arr
+                    .iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_owned()))
+                    .collect(),
+                Some(Value::String(s)) => vec![s.clone()],
+                Some(_) | None => vec![],
+            };
+            Command::SetEnvironment(vars)
+        }
+        "unset-environment" => {
+            let vars = match &call.params {
+                Some(Value::Array(arr)) => arr
+                    .iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_owned()))
+                    .collect(),
+                Some(Value::String(s)) => vec![s.clone()],
+                Some(_) | None => vec![],
+            };
+            Command::UnsetEnvironment(vars)
+        }
+        "import-environment" => {
+            let vars = match &call.params {
+                Some(Value::Array(arr)) => arr
+                    .iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_owned()))
+                    .collect(),
+                Some(Value::String(s)) => vec![s.clone()],
+                Some(_) | None => vec![],
+            };
+            Command::ImportEnvironment(vars)
         }
         _ => {
             return Err(ParseError::MethodNotFound(format!(
@@ -2934,6 +2976,57 @@ pub fn execute_command(
 
             info!("clean {}: removed {:?}", unit_name, removed);
             return Ok(serde_json::json!({ "cleaned": unit_name }));
+        }
+        Command::ShowEnvironment => {
+            let ri = run_info.read_poisoned();
+            let env = ri.manager_environment.lock().unwrap();
+            let mut lines: Vec<String> = env.iter().map(|(k, v)| format!("{k}={v}")).collect();
+            lines.sort();
+            return Ok(serde_json::json!({ "environment": lines }));
+        }
+        Command::SetEnvironment(vars) => {
+            let ri = run_info.read_poisoned();
+            let mut env = ri.manager_environment.lock().unwrap();
+            for var in &vars {
+                if let Some((k, v)) = var.split_once('=') {
+                    env.insert(k.to_owned(), v.to_owned());
+                }
+            }
+            return Ok(serde_json::json!(null));
+        }
+        Command::UnsetEnvironment(vars) => {
+            let ri = run_info.read_poisoned();
+            let mut env = ri.manager_environment.lock().unwrap();
+            for var in &vars {
+                // If it contains '=', extract just the key
+                let key = var.split_once('=').map_or(var.as_str(), |(k, _)| k);
+                // Revert to the process's built-in value, or remove if none
+                match std::env::var(key) {
+                    Ok(val) => {
+                        env.insert(key.to_owned(), val);
+                    }
+                    Err(_) => {
+                        env.remove(key);
+                    }
+                }
+            }
+            return Ok(serde_json::json!(null));
+        }
+        Command::ImportEnvironment(vars) => {
+            // import-environment imports from the calling process's environment.
+            // Since the RPC runs in PID 1 context, we use std::env::var() to get
+            // the manager's own environment. The client sends the variable names
+            // along with their values as KEY=VALUE pairs.
+            let ri = run_info.read_poisoned();
+            let mut env = ri.manager_environment.lock().unwrap();
+            for var in &vars {
+                if let Some((k, v)) = var.split_once('=') {
+                    env.insert(k.to_owned(), v.to_owned());
+                } else if let Ok(v) = std::env::var(var) {
+                    env.insert(var.clone(), v);
+                }
+            }
+            return Ok(serde_json::json!(null));
         }
         Command::ListTimers => {
             let ri = run_info.read_poisoned();

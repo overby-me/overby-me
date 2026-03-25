@@ -67,6 +67,9 @@ fn test_service_state_transitions_inner() {
         pending_activations: std::sync::Arc::new(std::sync::Mutex::new(
             std::collections::HashSet::new(),
         )),
+        manager_environment: std::sync::Arc::new(std::sync::Mutex::new(
+            std::collections::HashMap::new(),
+        )),
     }));
 
     let signals = signal_hook::iterator::Signals::new([signal_hook::consts::SIGCHLD]).unwrap();

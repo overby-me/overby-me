@@ -701,6 +701,9 @@ mod tests {
             pending_activations: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashSet::new(),
             )),
+            manager_environment: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
         }));
 
         let tmp = tempfile::NamedTempFile::new().unwrap();
@@ -757,6 +760,9 @@ mod tests {
             socket_activation_eventfd: crate::platform::make_event_fd().unwrap(),
             pending_activations: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashSet::new(),
+            )),
+            manager_environment: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
             )),
         }));
 
@@ -821,6 +827,9 @@ mod tests {
             socket_activation_eventfd: crate::platform::make_event_fd().unwrap(),
             pending_activations: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashSet::new(),
+            )),
+            manager_environment: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
             )),
         }));
 
