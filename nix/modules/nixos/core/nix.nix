@@ -6,7 +6,7 @@
   nix = {
     package = pkgs.pkgsUnstable.nixVersions.latest;
     settings = {
-      max-jobs = 100;
+      max-jobs = "auto";
       connect-timeout = 10;
       stalled-download-timeout = 10;
       trusted-users = ["root" "noverby"];
