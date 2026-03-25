@@ -4623,9 +4623,108 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
         }
     }
 
-    // Handle -o (set -o options) separately
+    // Handle -o (set -o options) separately — delegates to set -o options
     if set_o {
-        return 0; // Simplified: just succeed
+        let set_options: Vec<(&str, bool)> = vec![
+            ("allexport", shell.opt_allexport),
+            ("braceexpand", true),
+            ("emacs", false),
+            ("errexit", shell.opt_errexit),
+            ("errtrace", false),
+            ("functrace", false),
+            ("hashall", true),
+            ("histexpand", false),
+            ("history", false),
+            ("ignoreeof", false),
+            ("interactive-comments", true),
+            ("keyword", shell.opt_keyword),
+            ("monitor", false),
+            ("noclobber", shell.opt_noclobber),
+            ("noexec", shell.opt_noexec),
+            ("noglob", shell.opt_noglob),
+            ("nolog", false),
+            ("notify", false),
+            ("nounset", shell.opt_nounset),
+            ("onecmd", false),
+            ("physical", false),
+            ("pipefail", shell.opt_pipefail),
+            ("posix", shell.opt_posix),
+            ("privileged", false),
+            ("verbose", false),
+            ("vi", false),
+            ("xtrace", shell.opt_xtrace),
+        ];
+
+        if opts.is_empty() {
+            // List all set -o options
+            if !query {
+                for (name, val) in &set_options {
+                    if print_mode {
+                        println!("shopt {} -o {}", if *val { "-s" } else { "-u" }, name);
+                    } else if set {
+                        if *val {
+                            println!("{:<20}\ton", name);
+                        }
+                    } else if unset {
+                        if !*val {
+                            println!("{:<20}\toff", name);
+                        }
+                    } else {
+                        println!("{:<15}\t{}", name, if *val { "on" } else { "off" });
+                    }
+                }
+            }
+            return 0;
+        }
+
+        // Handle specific set -o options
+        let mut status = 0;
+        for opt in &opts {
+            if let Some((_, val)) = set_options.iter().find(|(n, _)| n == opt) {
+                if set {
+                    // set the option via builtin_set logic
+                    match *opt {
+                        "allexport" => shell.opt_allexport = true,
+                        "errexit" => shell.opt_errexit = true,
+                        "nounset" => shell.opt_nounset = true,
+                        "xtrace" => shell.opt_xtrace = true,
+                        "noclobber" => shell.opt_noclobber = true,
+                        "noglob" => shell.opt_noglob = true,
+                        "posix" => shell.opt_posix = true,
+                        "pipefail" => shell.opt_pipefail = true,
+                        _ => {}
+                    }
+                } else if unset {
+                    match *opt {
+                        "allexport" => shell.opt_allexport = false,
+                        "errexit" => shell.opt_errexit = false,
+                        "nounset" => shell.opt_nounset = false,
+                        "xtrace" => shell.opt_xtrace = false,
+                        "noclobber" => shell.opt_noclobber = false,
+                        "noglob" => shell.opt_noglob = false,
+                        "posix" => shell.opt_posix = false,
+                        "pipefail" => shell.opt_pipefail = false,
+                        _ => {}
+                    }
+                } else if !query {
+                    if print_mode {
+                        println!("shopt {} -o {}", if *val { "-s" } else { "-u" }, opt);
+                    } else {
+                        println!("{:<15}\t{}", opt, if *val { "on" } else { "off" });
+                    }
+                } else if !*val {
+                    status = 1;
+                }
+            } else {
+                eprintln!(
+                    "{}: shopt: {}: invalid shell option name",
+                    shell.error_prefix(),
+                    opt
+                );
+                status = 1;
+            }
+        }
+        return status;
     }
 
     // All known shopt option names (accept silently even if not fully implemented)
