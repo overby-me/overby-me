@@ -2951,6 +2951,12 @@ fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
 }
 
 fn builtin_shift(shell: &mut Shell, args: &[String]) -> i32 {
+    // Skip -- if present
+    let args: Vec<&String> = if args.first().map(|s| s.as_str()) == Some("--") {
+        args[1..].iter().collect()
+    } else {
+        args.iter().collect()
+    };
     if args.len() > 1 {
         eprintln!("{}: shift: too many arguments", shell.error_prefix());
         return 1;
@@ -4439,13 +4445,21 @@ fn builtin_exec(shell: &mut Shell, args: &[String]) -> i32 {
 
         nix::unistd::execvp(&c_prog, &c_args).ok();
         let err = std::io::Error::last_os_error();
+        let code = if err.kind() == std::io::ErrorKind::NotFound {
+            127
+        } else {
+            126
+        };
         eprintln!(
             "{}: exec: {}: {}",
             shell.error_prefix(),
             program,
             io_error_message(&err)
         );
-        126
+        // exec failure is fatal — exit the shell/subshell
+        std::io::Write::flush(&mut std::io::stdout()).ok();
+        std::io::Write::flush(&mut std::io::stderr()).ok();
+        std::process::exit(code);
     }
 
     #[cfg(not(unix))]
