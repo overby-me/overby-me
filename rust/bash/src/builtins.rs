@@ -3814,20 +3814,33 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
 
     // Handle -a: read into array
     if let Some(arr_name) = array_name {
-        // Split by IFS, preserving empty fields for non-whitespace IFS chars
-        let ifs_whitespace: String = ifs.chars().filter(|c| c.is_whitespace()).collect();
+        let ifs_ws_chars: Vec<char> = ifs.chars().filter(|c| c.is_whitespace()).collect();
         let ifs_non_ws: String = ifs.chars().filter(|c| !c.is_whitespace()).collect();
-        let fields: Vec<String> = if !ifs_non_ws.is_empty() {
-            line.split(|c: char| ifs.contains(c))
+
+        // Strip leading IFS whitespace
+        let trimmed = line.trim_start_matches(|c: char| ifs_ws_chars.contains(&c));
+
+        let mut fields: Vec<String> = if !ifs_non_ws.is_empty() {
+            trimmed
+                .split(|c: char| ifs.contains(c))
                 .map(|s| s.to_string())
                 .collect()
         } else {
-            line.split(|c: char| ifs.contains(c))
+            trimmed
+                .split(|c: char| ifs.contains(c))
                 .filter(|s| !s.is_empty())
                 .map(|s| s.to_string())
                 .collect()
         };
-        let _ = ifs_whitespace;
+        // Remove trailing empty field produced by trailing IFS delimiter
+        if fields.last().is_some_and(|s| s.is_empty()) && !ifs_non_ws.is_empty() {
+            fields.pop();
+        }
+        // Also strip trailing IFS whitespace from last field
+        if let Some(last) = fields.last_mut() {
+            let new_last = last.trim_end_matches(|c: char| ifs_ws_chars.contains(&c));
+            *last = new_last.to_string();
+        }
         shell.arrays.insert(arr_name, fields);
         return 0;
     }
@@ -3878,15 +3891,16 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
             ci += 1;
         }
     }
-    // Strip trailing IFS whitespace from last field
-    // For single variable: strip all trailing whitespace (even escaped)
-    // For multiple variables: preserve escaped trailing whitespace
+    // Strip trailing IFS characters from last field
+    // For single variable: strip all trailing IFS chars (even escaped)
+    // For multiple variables: strip trailing IFS whitespace, then trailing IFS non-ws
     let trim_limit = if var_names.len() == 1 {
         0
     } else {
         last_escaped_pos.map(|p| p + 1).unwrap_or(0)
     };
     let mut end = current.len();
+    // First strip trailing IFS whitespace
     while end > trim_limit {
         if let Some(c) = current[..end].chars().last() {
             if ifs_ws.contains(&c) {
@@ -3896,6 +3910,33 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
             }
         } else {
             break;
+        }
+    }
+    // Then strip trailing non-whitespace IFS delimiters from the last field
+    // (when there are multiple variables and this is the remainder)
+    if var_names.len() > 1 {
+        while end > trim_limit {
+            if let Some(c) = current[..end].chars().last() {
+                if ifs.contains(c) && !ifs_ws.contains(&c) {
+                    end -= c.len_utf8();
+                    // Also strip IFS whitespace before the non-ws delimiter
+                    while end > trim_limit {
+                        if let Some(c2) = current[..end].chars().last() {
+                            if ifs_ws.contains(&c2) {
+                                end -= c2.len_utf8();
+                            } else {
+                                break;
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
         }
     }
     fields.push(current[..end].to_string());
