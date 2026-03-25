@@ -925,8 +925,9 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                 let mut case_depth = 0i32;
                 while *i < chars.len() && depth > 0 {
                     match chars[*i] {
-                        '\'' => {
-                            // Single-quoted string — always skip in comsub (new quoting context)
+                        '\'' if !in_dquote || PATTERN_WORD.with(|f| f.get()) => {
+                            // Single-quoted string — skip in comsub when not in dquote,
+                            // or when in a pattern word context (where ' quotes even in dquote)
                             cmd.push(chars[*i]);
                             *i += 1;
                             while *i < chars.len() && chars[*i] != '\'' {
@@ -1020,8 +1021,8 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                     *i += 1;
                 }
                 if depth > 0 {
-                    // Incomplete comsub — return empty (bash reports error)
-                    WordPart::Literal(String::new())
+                    // Incomplete comsub — return literal $( + content
+                    WordPart::Literal(format!("$({}", cmd))
                 } else {
                     WordPart::CommandSub(cmd)
                 }
