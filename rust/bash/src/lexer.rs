@@ -1676,6 +1676,13 @@ fn read_param_word_impl(chars: &[char], i: &mut usize, delim: char, in_dquote: b
                     // Strip for } (param end) and / (pattern delimiter)
                     literal.push('\\');
                     literal.push(next);
+                } else if !in_dquote {
+                    // In unquoted context, mark escaped char as SingleQuoted
+                    // so it's treated as quoted in field splitting
+                    if !literal.is_empty() {
+                        parts.push(WordPart::Literal(std::mem::take(&mut literal)));
+                    }
+                    parts.push(WordPart::SingleQuoted(next.to_string()));
                 } else {
                     literal.push(next);
                 }
