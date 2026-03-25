@@ -1127,6 +1127,7 @@ fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
         }
     }
 
+    let mut status = 0;
     for name in names {
         if unset_functions {
             shell.functions.remove(name);
@@ -1163,6 +1164,16 @@ fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
                 }
             }
         } else {
+            let resolved = shell.resolve_nameref(name);
+            if shell.readonly_vars.contains(&resolved) {
+                eprintln!(
+                    "{}: unset: {}: cannot unset: readonly variable",
+                    shell.error_prefix(),
+                    name
+                );
+                status = 1;
+                continue;
+            }
             shell.vars.remove(name);
             shell.exports.remove(name);
             shell.arrays.remove(name);
@@ -1175,7 +1186,7 @@ fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
             unsafe { std::env::remove_var(name) };
         }
     }
-    0
+    status
 }
 
 fn builtin_readonly(shell: &mut Shell, args: &[String]) -> i32 {
