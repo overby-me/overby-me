@@ -4319,6 +4319,15 @@ impl Shell {
                     let fd = self.resolve_redir_fd(&redir.fd, 1);
                     if target_str == "-" {
                         nix::unistd::close(fd).ok();
+                    } else if let Some(src_str) = target_str.strip_suffix('-') {
+                        // Move fd: dup src to fd, then close src
+                        if let Ok(src_fd) = src_str.parse::<i32>() {
+                            if let Ok(saved_fd) = nix::unistd::dup(fd) {
+                                saved.push((fd, saved_fd));
+                            }
+                            nix::unistd::dup2(src_fd, fd).map_err(|e| e.to_string())?;
+                            nix::unistd::close(src_fd).ok();
+                        }
                     } else if let Ok(src_fd) = target_str.parse::<i32>() {
                         if let Ok(saved_fd) = nix::unistd::dup(fd) {
                             saved.push((fd, saved_fd));
@@ -4330,6 +4339,15 @@ impl Shell {
                     let fd = self.resolve_redir_fd(&redir.fd, 0);
                     if target_str == "-" {
                         nix::unistd::close(fd).ok();
+                    } else if let Some(src_str) = target_str.strip_suffix('-') {
+                        // Move fd: dup src to fd, then close src
+                        if let Ok(src_fd) = src_str.parse::<i32>() {
+                            if let Ok(saved_fd) = nix::unistd::dup(fd) {
+                                saved.push((fd, saved_fd));
+                            }
+                            nix::unistd::dup2(src_fd, fd).map_err(|e| e.to_string())?;
+                            nix::unistd::close(src_fd).ok();
+                        }
                     } else if let Ok(src_fd) = target_str.parse::<i32>() {
                         if let Ok(saved_fd) = nix::unistd::dup(fd) {
                             saved.push((fd, saved_fd));
