@@ -2,8 +2,8 @@ use crate::control::unit_properties;
 use crate::lock_ext::RwLockExt;
 use crate::runtime_info::{ArcMutRuntimeInfo, UnitTable};
 use crate::units::{
-    ActivationSource, Specific, Unit, UnitIdKind, UnitStatus, insert_new_units,
-    load_all_units_no_prune, load_new_unit,
+    ActivationSource, Specific, Unit, UnitIdKind, UnitStatus, find_symlink_aliases,
+    insert_new_units, load_all_units_no_prune, load_new_unit,
 };
 
 use std::fmt::Write as _;
@@ -1165,6 +1165,8 @@ fn find_or_load_unit(
 
         // If the file is a symlink, resolve to canonical name and check
         // if that unit is already loaded (e.g., test15-a1.service → test15-a.service).
+        // When an instance symlink points to a template (e.g. bar-alias@2.service → yup@.service),
+        // derive the instance name (yup@2.service) rather than using the template name directly.
         let canonical_name = {
             let mut resolved = load_name.clone();
             for dir in &ri.config.unit_dirs {
@@ -1176,6 +1178,17 @@ fn find_or_load_unit(
                     && let Ok(target) = std::fs::canonicalize(&candidate)
                     && let Some(name) = target.file_name().map(|f| f.to_string_lossy().to_string())
                 {
+                    // If the load name is an instance and the target is a template,
+                    // combine the target's template prefix with the load name's instance.
+                    if let Some((_, instance)) =
+                        crate::units::loading::directory_deps::parse_template_instance(&load_name)
+                        && name.contains("@.")
+                    {
+                        // e.g., load_name="bar-alias@2.service", target="yup@.service"
+                        // → derive "yup@2.service"
+                        resolved = name.replace("@.", &format!("@{instance}."));
+                        break;
+                    }
                     resolved = name;
                     break;
                 }
@@ -1223,12 +1236,23 @@ fn find_or_load_unit(
                             .map(|f| f.to_string_lossy().to_string())
                             .unwrap_or_default();
                         if !target_name.is_empty() && target_name != load_name {
+                            // If target is a template and load_name is an instance,
+                            // derive the instance name from the template.
+                            let effective_target = if target_name.contains("@.")
+                                && let Some((_, inst)) =
+                                    crate::units::loading::directory_deps::parse_template_instance(
+                                        &load_name,
+                                    ) {
+                                target_name.replace("@.", &format!("@{inst}."))
+                            } else {
+                                target_name
+                            };
                             // Check if the target is already loaded
-                            let found = find_units_with_name(&target_name, &ri.unit_table);
+                            let found = find_units_with_name(&effective_target, &ri.unit_table);
                             if let Some(unit) = found.first() {
                                 return Ok(unit.id.clone());
                             }
-                            resolved_load_name = target_name;
+                            resolved_load_name = effective_target;
                             is_alias = true;
                             break;
                         }
@@ -1273,36 +1297,26 @@ fn find_or_load_unit(
                             unit.common.unit.aliases.push(load_name.clone());
                         }
                         // Discover filesystem-level symlink aliases
-                        let primary = &unit.id.name;
-                        for dir in &ri.config.unit_dirs {
-                            let entries = match std::fs::read_dir(dir) {
-                                Ok(e) => e,
-                                Err(_) => continue,
-                            };
-                            for entry in entries.flatten() {
-                                let name = entry.file_name().to_string_lossy().to_string();
-                                if name == *primary || name == load_name {
-                                    continue;
-                                }
-                                let meta = match entry.path().symlink_metadata() {
-                                    Ok(m) => m,
-                                    Err(_) => continue,
-                                };
-                                if !meta.file_type().is_symlink() {
-                                    continue;
-                                }
-                                if let Ok(target) = std::fs::read_link(entry.path()) {
-                                    let target_name = target
-                                        .file_name()
-                                        .map(|f| f.to_string_lossy().to_string())
-                                        .unwrap_or_default();
-                                    if (target_name == *primary
-                                        || target_name == resolved_load_name)
-                                        && !unit.common.unit.aliases.contains(&name)
-                                    {
-                                        unit.common.unit.aliases.push(name);
-                                    }
-                                }
+                        // (includes template-level alias discovery for instances)
+                        let unit_path = ri
+                            .config
+                            .unit_dirs
+                            .iter()
+                            .map(|d| d.join(&unit.id.name))
+                            .find(|p| p.exists())
+                            .or_else(|| {
+                                ri.config
+                                    .unit_dirs
+                                    .iter()
+                                    .map(|d| d.join(&template_name))
+                                    .find(|p| p.exists())
+                            })
+                            .unwrap_or_default();
+                        let discovered =
+                            find_symlink_aliases(&ri.config.unit_dirs, &unit_path, &unit.id.name);
+                        for alias in discovered {
+                            if !unit.common.unit.aliases.contains(&alias) {
+                                unit.common.unit.aliases.push(alias);
                             }
                         }
                         let id = unit.id.clone();
@@ -4372,6 +4386,29 @@ pub fn execute_command(
             let query_full = format!("{unit_name}{query_suffix}");
             if query_full != *unit_file_name && !scan_names.contains(&query_full) {
                 scan_names.push(query_full);
+            }
+            // For template instances (e.g. bar@0.service), also scan
+            // template-level dirs (bar@.service.wants/).
+            for name in scan_names.clone() {
+                if let Some((template, _instance)) =
+                    crate::units::loading::directory_deps::parse_template_instance(&name)
+                    && !scan_names.contains(&template)
+                {
+                    scan_names.push(template);
+                }
+            }
+            // Also scan dirs for all known aliases (including their
+            // template-level forms).
+            for alias in &unit.common.unit.aliases {
+                if !scan_names.contains(alias) {
+                    scan_names.push(alias.clone());
+                    if let Some((template, _instance)) =
+                        crate::units::loading::directory_deps::parse_template_instance(alias)
+                        && !scan_names.contains(&template)
+                    {
+                        scan_names.push(template);
+                    }
+                }
             }
             for scan_name in &scan_names {
                 let effective_deps = crate::units::loading::collect_dir_deps_for_unit(

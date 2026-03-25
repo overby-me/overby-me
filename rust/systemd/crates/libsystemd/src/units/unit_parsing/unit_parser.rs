@@ -66,13 +66,20 @@ pub fn parse_file(content: &str) -> Result<ParsedFile, ParsingErrorReason> {
         let line = lines_left[0];
 
         if line.starts_with('[') {
-            if sections.contains_key(&current_section_name) {
-                return Err(ParsingErrorReason::SectionTooOften(current_section_name));
-            }
-            sections.insert(
-                current_section_name.clone(),
-                parse_section(&current_section_lines),
-            );
+            // Merge with existing section if it already appeared (systemd
+            // merges duplicate section headers).
+            let parsed = parse_section(&current_section_lines);
+            sections
+                .entry(current_section_name.clone())
+                .and_modify(|existing: &mut ParsedSection| {
+                    for (key, values) in &parsed {
+                        existing
+                            .entry(key.clone())
+                            .or_default()
+                            .extend(values.iter().cloned());
+                    }
+                })
+                .or_insert(parsed);
             current_section_name = line.into();
             current_section_lines.clear();
         } else {
@@ -81,14 +88,19 @@ pub fn parse_file(content: &str) -> Result<ParsedFile, ParsingErrorReason> {
         lines_left = &lines_left[1..];
     }
 
-    // insert last section
-    if let std::collections::hash_map::Entry::Vacant(e) =
-        sections.entry(current_section_name.clone())
-    {
-        e.insert(parse_section(&current_section_lines));
-    } else {
-        return Err(ParsingErrorReason::SectionTooOften(current_section_name));
-    }
+    // insert last section (merge if it already exists)
+    let parsed = parse_section(&current_section_lines);
+    sections
+        .entry(current_section_name)
+        .and_modify(|existing: &mut ParsedSection| {
+            for (key, values) in &parsed {
+                existing
+                    .entry(key.clone())
+                    .or_default()
+                    .extend(values.iter().cloned());
+            }
+        })
+        .or_insert(parsed);
 
     Ok(sections)
 }
@@ -4609,5 +4621,28 @@ After=foo.service
         assert_eq!(desc, "hello world");
         let after = &section.get("AFTER").unwrap()[0].1;
         assert_eq!(after, "foo.service");
+    }
+
+    #[test]
+    fn duplicate_unit_sections_are_merged() {
+        let content = "\
+[Unit]
+Description=test
+
+[Service]
+ExecStart=/bin/true
+
+[Unit]
+After=bar-template-after.device
+";
+        let parsed = parse_file(content).unwrap();
+        let unit_section = parsed.get("[Unit]").unwrap();
+        let desc = &unit_section.get("DESCRIPTION").unwrap()[0].1;
+        assert_eq!(desc, "test");
+        let after = &unit_section.get("AFTER").unwrap()[0].1;
+        assert_eq!(after, "bar-template-after.device");
+
+        let svc_section = parsed.get("[Service]").unwrap();
+        assert!(svc_section.contains_key("EXECSTART"));
     }
 }

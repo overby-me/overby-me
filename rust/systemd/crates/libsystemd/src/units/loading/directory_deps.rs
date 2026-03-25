@@ -1391,13 +1391,34 @@ pub fn instantiate_template_units(
             template_name, instance_name, instance_unit_name
         );
 
-        if let Some(unit) = instantiate_template(
+        if let Some(mut unit) = instantiate_template(
             template_name,
             instance_name,
             instance_unit_name,
             unit_dirs,
             dropins,
         ) {
+            // Discover template-level aliases (e.g. bar-alias@0.service
+            // for bar@0.service when bar-alias@.service → bar@.service).
+            let unit_path = unit_dirs
+                .iter()
+                .map(|d| d.join(instance_unit_name))
+                .find(|p| p.exists())
+                .or_else(|| {
+                    unit_dirs
+                        .iter()
+                        .map(|d| d.join(template_name))
+                        .find(|p| p.exists())
+                })
+                .unwrap_or_default();
+            let aliases =
+                crate::units::find_symlink_aliases(unit_dirs, &unit_path, instance_unit_name);
+            for alias in aliases {
+                if !unit.common.unit.aliases.contains(&alias) {
+                    trace!("Template instance {} alias: {}", instance_unit_name, alias);
+                    unit.common.unit.aliases.push(alias);
+                }
+            }
             unit_table.insert(unit.id.clone(), unit);
             trace!("Successfully instantiated {}", instance_unit_name);
         } else {

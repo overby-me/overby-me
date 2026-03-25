@@ -111,9 +111,16 @@ pub fn find_symlink_aliases(
             Ok(e) => e,
             Err(_) => continue,
         };
+        let is_instance = find_name.contains('@') && !find_name.contains("@.");
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
             if name == find_name {
+                continue;
+            }
+            // When looking for aliases of an instance (bar@0.service),
+            // skip template-level symlinks (bar-alias@.service) in this
+            // loop — they are handled by the template-level discovery below.
+            if is_instance && name.contains("@.") {
                 continue;
             }
             // Only consider symlinks
@@ -146,6 +153,96 @@ pub fn find_symlink_aliases(
             }
         }
     }
+
+    // For template instances (e.g., bar@0.service), also discover aliases
+    // from template-level symlinks (e.g., bar-alias@.service → bar@.service
+    // implies bar-alias@0.service is an alias for bar@0.service).
+    if let Some((template_name, instance)) =
+        crate::units::loading::directory_deps::parse_template_instance(find_name)
+    {
+        let template_path = unit_dirs
+            .iter()
+            .map(|d| d.join(&template_name))
+            .find(|p| p.exists());
+        let template_canonical = template_path
+            .as_ref()
+            .and_then(|p| fs::canonicalize(p).ok());
+
+        for dir in unit_dirs {
+            let entries = match fs::read_dir(dir) {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name == template_name {
+                    continue;
+                }
+                // Only consider template symlinks (e.g., bar-alias@.service)
+                if !name.contains("@.") {
+                    continue;
+                }
+                let meta = match entry.path().symlink_metadata() {
+                    Ok(m) => m,
+                    Err(_) => continue,
+                };
+                if !meta.file_type().is_symlink() {
+                    continue;
+                }
+                // Check if this template symlink points to our template
+                let is_template_alias = if let Some(ref tc) = template_canonical
+                    && let Ok(c) = fs::canonicalize(entry.path())
+                {
+                    c == *tc
+                } else if let Ok(target) = fs::read_link(entry.path()) {
+                    let target_name = target
+                        .file_name()
+                        .map(|f| f.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    target_name == template_name
+                } else {
+                    false
+                };
+
+                if !is_template_alias {
+                    continue;
+                }
+
+                // Derive instance alias: bar-alias@.service + instance "0" → bar-alias@0.service
+                if let Some(at_pos) = name.find("@.")
+                    && let Some(dot_pos) = name.rfind('.')
+                {
+                    let derived = format!("{}@{}{}", &name[..at_pos], instance, &name[dot_pos..]);
+                    // Check for instance-level override: if bar-alias@0.service
+                    // exists as its own symlink to a DIFFERENT unit, don't add it
+                    let has_override = unit_dirs.iter().any(|d| {
+                        let candidate = d.join(&derived);
+                        if let Ok(m) = candidate.symlink_metadata()
+                            && m.file_type().is_symlink()
+                            && let Ok(target) = fs::read_link(&candidate)
+                        {
+                            let target_name = target
+                                .file_name()
+                                .map(|f| f.to_string_lossy().to_string())
+                                .unwrap_or_default();
+                            // It's an override if it points to a different template
+                            target_name != find_name && target_name != template_name
+                        } else {
+                            false
+                        }
+                    });
+                    if !has_override && !aliases.contains(&derived) {
+                        trace!(
+                            "Template alias for {}: {} (via {} → {})",
+                            find_name, derived, name, template_name
+                        );
+                        aliases.push(derived);
+                    }
+                }
+            }
+        }
+    }
+
     aliases
 }
 
