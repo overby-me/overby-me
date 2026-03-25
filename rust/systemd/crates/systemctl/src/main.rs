@@ -1016,7 +1016,7 @@ fn main() {
         // Sleep commands take no parameters.
         None
     } else if method == "enable" || method == "reenable" {
-        // enable <unit>... [--runtime]
+        // enable <unit>... [--runtime] [--root=PATH]
         if positional.len() < 2 {
             if !quiet {
                 eprintln!("Error: enable requires at least one unit name.");
@@ -1027,9 +1027,12 @@ fn main() {
         if runtime {
             arr.push(Value::String("--runtime".to_string()));
         }
+        if let Some(ref root) = root_path {
+            arr.push(Value::String(format!("--root={root}")));
+        }
         Some(Value::Array(arr))
     } else if method == "disable" {
-        // disable <unit>... [--runtime]
+        // disable <unit>... [--runtime] [--root=PATH]
         if positional.len() < 2 {
             if !quiet {
                 eprintln!("Error: disable requires at least one unit name.");
@@ -1040,9 +1043,12 @@ fn main() {
         if runtime {
             arr.push(Value::String("--runtime".to_string()));
         }
+        if let Some(ref root) = root_path {
+            arr.push(Value::String(format!("--root={root}")));
+        }
         Some(Value::Array(arr))
     } else if method == "preset" {
-        // preset <unit>... [--preset-mode=MODE] [--runtime]
+        // preset <unit>... [--preset-mode=MODE] [--runtime] [--root=PATH]
         if positional.len() < 2 {
             if !quiet {
                 eprintln!("Error: preset requires at least one unit name.");
@@ -1055,6 +1061,9 @@ fn main() {
         }
         if let Some(ref mode) = preset_mode {
             arr.push(Value::String(format!("--preset-mode={mode}")));
+        }
+        if let Some(ref root) = root_path {
+            arr.push(Value::String(format!("--root={root}")));
         }
         Some(Value::Array(arr))
     } else if method == "reset-failed" {
@@ -1106,10 +1115,22 @@ fn main() {
         if runtime {
             arr.push(Value::String("--runtime".to_string()));
         }
+        if let Some(ref root) = root_path {
+            arr.push(Value::String(format!("--root={root}")));
+        }
         Some(Value::Array(arr))
     } else if marked && (method == "reload-or-restart" || method == "restart") {
         // --marked: operate on all units with needs-restart marker
         Some(Value::String("--marked".to_string()))
+    } else if root_path.is_some()
+        && (method == "is-enabled" || method == "list-unit-files" || method == "revert")
+    {
+        // Commands that need --root passed to the server
+        let mut arr: Vec<Value> = positional[1..].iter().cloned().map(Value::String).collect();
+        if let Some(ref root) = root_path {
+            arr.push(Value::String(format!("--root={root}")));
+        }
+        Some(Value::Array(arr))
     } else if positional.len() == 2 {
         Some(Value::String(positional[1].clone()))
     } else if positional.len() > 2 {

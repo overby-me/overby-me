@@ -305,14 +305,6 @@
         patchScript = ''
           # Remove 'systemctl edit' tests (need EDITOR + script command)
           sed -i '/^EDITOR=/,/^# Argument help/{ /^# Argument help/!d }' TEST-26-SYSTEMCTL.sh
-          # Remove --root=/ variants (--root path prefix not yet implemented)
-          sed -i '/^test_enable_disable_preset --root=/d' TEST-26-SYSTEMCTL.sh
-          sed -i '/^test_mask_unmask_revert --root=/d' TEST-26-SYSTEMCTL.sh
-          sed -i '/^test_list_unit_files --root=/d' TEST-26-SYSTEMCTL.sh
-          # Remove sysv-generator test
-          sed -i '/^# test for sysv-generator/,/^fi$/d' TEST-26-SYSTEMCTL.sh
-          # Remove WantedBy %J test (specifier expansion in WantedBy not implemented)
-          sed -i '/^# %J in WantedBy/,/^systemctl daemon-reload$/d' TEST-26-SYSTEMCTL.sh
           # Remove global unit tests (--global flag not implemented)
           sed -i '/^# Test systemctl edit --global/,/^rm -f.*GLOBAL_MASKED_UNIT/d' TEST-26-SYSTEMCTL.sh
           # Remove Failed-unit section (systemd-run --wait hangs for transient units)

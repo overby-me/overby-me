@@ -291,6 +291,9 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
         "is-enabled" => {
             let name = match &call.params {
                 Some(Value::String(s)) => s.clone(),
+                Some(Value::Array(arr)) if !arr.is_empty() => {
+                    arr[0].as_str().unwrap_or("").to_owned()
+                }
                 Some(_) | None => {
                     return Err(ParseError::ParamsInvalid(
                         "Params must be a single string".to_string(),
@@ -675,8 +678,14 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
         }
         "list-unit-files" => {
             // Optional param: type filter string (e.g. "service", "target")
+            // Also accept array params (when --root or other flags are passed)
             let type_filter = match &call.params {
-                Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
+                Some(Value::String(s)) if !s.is_empty() && !s.starts_with("--") => Some(s.clone()),
+                Some(Value::Array(arr)) => arr
+                    .iter()
+                    .filter_map(|v| v.as_str())
+                    .find(|s| !s.starts_with("--"))
+                    .map(|s| s.to_owned()),
                 _ => None,
             };
             Command::ListUnitFiles(type_filter)
@@ -2593,12 +2602,20 @@ pub fn execute_command(
         }
         Command::Enable(names) => {
             let is_runtime = names.iter().any(|n| n == "--runtime");
-            let names: Vec<String> = names.into_iter().filter(|n| n != "--runtime").collect();
-            let base_dir = if is_runtime {
-                std::path::Path::new("/run/systemd/system")
+            let root_prefix: String = names
+                .iter()
+                .find_map(|n| n.strip_prefix("--root=").map(|s| s.to_string()))
+                .unwrap_or_default();
+            let names: Vec<String> = names
+                .into_iter()
+                .filter(|n| n != "--runtime" && !n.starts_with("--root="))
+                .collect();
+            let base_dir_str = if is_runtime {
+                format!("{root_prefix}/run/systemd/system")
             } else {
-                std::path::Path::new("/etc/systemd/system")
+                format!("{root_prefix}/etc/systemd/system")
             };
+            let base_dir = std::path::Path::new(&base_dir_str);
 
             let ri = run_info.read_poisoned();
             let mut enabled = Vec::new();
@@ -2669,6 +2686,36 @@ pub fn execute_command(
                         }
                     }
                 }
+                // Expand Install specifiers (%i, %j/%J, %n, %p, %N)
+                let instance = if let Some(at_pos) = full_name.find('@') {
+                    if let Some(dot_pos) = full_name[at_pos..].find('.') {
+                        &full_name[at_pos + 1..at_pos + dot_pos]
+                    } else {
+                        &full_name[at_pos + 1..]
+                    }
+                } else {
+                    ""
+                };
+                let prefix = full_name.split('@').next().unwrap_or(&full_name);
+                let prefix = prefix.split('.').next().unwrap_or(prefix);
+                let expand_specifiers = |s: &str| -> String {
+                    s.replace("%i", instance)
+                        .replace("%I", instance)
+                        .replace("%j", instance)
+                        .replace("%J", instance)
+                        .replace("%n", &full_name)
+                        .replace("%N", &full_name)
+                        .replace("%p", prefix)
+                        .replace("%P", prefix)
+                };
+                let wanted_by: Vec<String> = wanted_by
+                    .into_iter()
+                    .map(|s| expand_specifiers(&s))
+                    .collect();
+                let required_by: Vec<String> = required_by
+                    .into_iter()
+                    .map(|s| expand_specifiers(&s))
+                    .collect();
                 // Create .wants symlinks
                 for target in &wanted_by {
                     let wants_dir = base_dir.join(format!("{target}.wants"));
@@ -2721,12 +2768,20 @@ pub fn execute_command(
         }
         Command::Disable(names) => {
             let is_runtime = names.iter().any(|n| n == "--runtime");
-            let names: Vec<String> = names.into_iter().filter(|n| n != "--runtime").collect();
-            let base_dir = if is_runtime {
-                std::path::Path::new("/run/systemd/system")
+            let root_prefix: String = names
+                .iter()
+                .find_map(|n| n.strip_prefix("--root=").map(|s| s.to_string()))
+                .unwrap_or_default();
+            let names: Vec<String> = names
+                .into_iter()
+                .filter(|n| n != "--runtime" && !n.starts_with("--root="))
+                .collect();
+            let base_dir_str = if is_runtime {
+                format!("{root_prefix}/run/systemd/system")
             } else {
-                std::path::Path::new("/etc/systemd/system")
+                format!("{root_prefix}/etc/systemd/system")
             };
+            let base_dir = std::path::Path::new(&base_dir_str);
             let mut disabled = Vec::new();
             for name in &names {
                 let full_name = if name.contains('.') {
@@ -2782,6 +2837,10 @@ pub fn execute_command(
         }
         Command::Preset(names) => {
             let is_runtime = names.iter().any(|n| n == "--runtime");
+            let root_prefix: String = names
+                .iter()
+                .find_map(|n| n.strip_prefix("--root=").map(|s| s.to_string()))
+                .unwrap_or_default();
             let preset_mode = if names.iter().any(|n| n == "--preset-mode=enable-only") {
                 "enable-only"
             } else if names.iter().any(|n| n == "--preset-mode=disable-only") {
@@ -2791,19 +2850,24 @@ pub fn execute_command(
             };
             let names: Vec<String> = names
                 .into_iter()
-                .filter(|n| n != "--runtime" && !n.starts_with("--preset-mode="))
+                .filter(|n| {
+                    n != "--runtime"
+                        && !n.starts_with("--preset-mode=")
+                        && !n.starts_with("--root=")
+                })
                 .collect();
-            let base_dir = if is_runtime {
-                std::path::Path::new("/run/systemd/system")
+            let base_dir_str = if is_runtime {
+                format!("{root_prefix}/run/systemd/system")
             } else {
-                std::path::Path::new("/etc/systemd/system")
+                format!("{root_prefix}/etc/systemd/system")
             };
+            let base_dir = std::path::Path::new(&base_dir_str);
 
             // Read preset files
             let preset_dirs = [
-                "/etc/systemd/system-preset",
-                "/run/systemd/system-preset",
-                "/usr/lib/systemd/system-preset",
+                format!("{root_prefix}/etc/systemd/system-preset"),
+                format!("{root_prefix}/run/systemd/system-preset"),
+                format!("{root_prefix}/usr/lib/systemd/system-preset"),
             ];
             let mut preset_rules: Vec<(String, String)> = Vec::new(); // (action, pattern)
             for dir in &preset_dirs {
@@ -4801,14 +4865,22 @@ pub fn execute_command(
                 .push(Value::Object(response_object));
         }
         Command::Mask(names) => {
-            // Check for --runtime flag in names
+            // Check for --runtime and --root flags
             let is_runtime = names.iter().any(|n| n == "--runtime");
-            let names: Vec<String> = names.into_iter().filter(|n| n != "--runtime").collect();
-            let mask_dir = if is_runtime {
-                std::path::Path::new("/run/systemd/system")
+            let root_prefix: String = names
+                .iter()
+                .find_map(|n| n.strip_prefix("--root=").map(|s| s.to_string()))
+                .unwrap_or_default();
+            let names: Vec<String> = names
+                .into_iter()
+                .filter(|n| n != "--runtime" && !n.starts_with("--root="))
+                .collect();
+            let mask_dir_str = if is_runtime {
+                format!("{root_prefix}/run/systemd/system")
             } else {
-                std::path::Path::new("/etc/systemd/system")
+                format!("{root_prefix}/etc/systemd/system")
             };
+            let mask_dir = std::path::Path::new(&mask_dir_str);
             std::fs::create_dir_all(mask_dir)
                 .map_err(|e| format!("Failed to create {}: {e}", mask_dir.display()))?;
             let mut masked = Vec::new();
@@ -4832,14 +4904,22 @@ pub fn execute_command(
             return Ok(serde_json::json!({ "masked": masked }));
         }
         Command::Unmask(names) => {
-            // Check for --runtime flag in names
+            // Check for --runtime and --root flags
             let is_runtime = names.iter().any(|n| n == "--runtime");
-            let names: Vec<String> = names.into_iter().filter(|n| n != "--runtime").collect();
-            let mask_dir = if is_runtime {
-                std::path::Path::new("/run/systemd/system")
+            let root_prefix: String = names
+                .iter()
+                .find_map(|n| n.strip_prefix("--root=").map(|s| s.to_string()))
+                .unwrap_or_default();
+            let names: Vec<String> = names
+                .into_iter()
+                .filter(|n| n != "--runtime" && !n.starts_with("--root="))
+                .collect();
+            let mask_dir_str = if is_runtime {
+                format!("{root_prefix}/run/systemd/system")
             } else {
-                std::path::Path::new("/etc/systemd/system")
+                format!("{root_prefix}/etc/systemd/system")
             };
+            let mask_dir = std::path::Path::new(&mask_dir_str);
             let mut unmasked = Vec::new();
             for name in &names {
                 let link_path = mask_dir.join(name);
