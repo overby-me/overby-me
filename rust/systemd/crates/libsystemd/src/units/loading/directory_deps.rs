@@ -25,6 +25,11 @@ pub struct DirectoryDependency {
     pub child_unit: String,
     /// Whether this is a Wants (false) or Requires (true) dependency
     pub is_requires: bool,
+    /// Priority of the search path this was found in (lower = higher priority).
+    /// E.g., /etc = 0, /run = 1, /usr/lib = 3.
+    pub priority: usize,
+    /// True if the symlink points to /dev/null (masking this dep at this priority).
+    pub is_mask: bool,
 }
 
 /// Check if a directory name represents a `.wants` or `.requires` dependency directory.
@@ -757,6 +762,7 @@ pub fn collect_dep_dir_entries(
     dir_path: &Path,
     parent_unit: &str,
     is_requires: bool,
+    priority: usize,
     dir_deps: &mut Vec<DirectoryDependency>,
 ) {
     let entries = match std::fs::read_dir(dir_path) {
@@ -770,19 +776,54 @@ pub fn collect_dep_dir_entries(
     for entry in entries.flatten() {
         let child_name = entry.file_name().to_string_lossy().to_string();
         if is_unit_file(&child_name) {
+            // Check if this symlink points to /dev/null (masking)
+            let is_mask = entry
+                .path()
+                .symlink_metadata()
+                .map(|m| m.file_type().is_symlink())
+                .unwrap_or(false)
+                && std::fs::read_link(entry.path())
+                    .map(|target| target == std::path::Path::new("/dev/null"))
+                    .unwrap_or(false);
+
             trace!(
-                "Directory dependency: {} {} {}",
+                "Directory dependency: {} {} {}{} (priority={})",
                 parent_unit,
                 if is_requires { "Requires" } else { "Wants" },
-                child_name
+                child_name,
+                if is_mask { " [MASKED]" } else { "" },
+                priority
             );
             dir_deps.push(DirectoryDependency {
                 parent_unit: parent_unit.to_owned(),
                 child_unit: child_name,
                 is_requires,
+                priority,
+                is_mask,
             });
         }
     }
+}
+
+/// Collect directory-based dependencies for a specific unit from all unit dirs.
+/// Scans `{unit_name}.wants/` and `{unit_name}.requires/` in each search path,
+/// applies priority-based `/dev/null` masking, and returns the effective deps.
+pub fn collect_dir_deps_for_unit(
+    unit_dirs: &[std::path::PathBuf],
+    unit_name: &str,
+) -> Vec<DirectoryDependency> {
+    let mut dir_deps = Vec::new();
+    for (priority, dir) in unit_dirs.iter().enumerate() {
+        let wants_dir = dir.join(format!("{unit_name}.wants"));
+        if wants_dir.is_dir() {
+            collect_dep_dir_entries(&wants_dir, unit_name, false, priority, &mut dir_deps);
+        }
+        let requires_dir = dir.join(format!("{unit_name}.requires"));
+        if requires_dir.is_dir() {
+            collect_dep_dir_entries(&requires_dir, unit_name, true, priority, &mut dir_deps);
+        }
+    }
+    resolve_masked_dir_deps(&dir_deps)
 }
 
 /// Collect entries from a `.d/` drop-in directory and store their contents.
@@ -1047,12 +1088,18 @@ pub fn apply_dropins(
 
 /// Apply directory-based dependencies to the unit table.
 /// For each .wants/ and .requires/ relationship discovered, add the appropriate
-/// dependency to the parent unit.
+/// dependency to the parent unit. Respects priority-based masking: if the
+/// highest-priority entry for a (parent, child, dep_type) triple is a
+/// `/dev/null` symlink, the dependency is suppressed.
 pub fn apply_directory_dependencies(
     unit_table: &mut HashMap<UnitId, Unit>,
     dir_deps: &[DirectoryDependency],
 ) {
-    for dep in dir_deps {
+    // Resolve masking: for each (parent, child, is_requires) triple, find the
+    // highest-priority (lowest priority value) entry. If it's a mask, skip it.
+    let effective_deps = resolve_masked_dir_deps(dir_deps);
+
+    for dep in &effective_deps {
         // Find the parent unit
         let parent_id = match unit_table.keys().find(|id| id.name == dep.parent_unit) {
             Some(id) => id.clone(),
@@ -1103,6 +1150,49 @@ pub fn apply_directory_dependencies(
             );
         }
     }
+}
+
+/// Resolve priority-based masking for directory dependencies.
+/// For each unique (parent, child, is_requires) triple, the highest-priority
+/// entry (lowest priority number) wins. If that entry is a mask (`/dev/null`
+/// symlink), the dependency is suppressed entirely.
+pub fn resolve_masked_dir_deps(dir_deps: &[DirectoryDependency]) -> Vec<DirectoryDependency> {
+    // Key: (parent_unit, child_unit, is_requires) -> best (lowest priority) entry
+    let mut best: HashMap<(String, String, bool), &DirectoryDependency> = HashMap::new();
+
+    for dep in dir_deps {
+        let key = (
+            dep.parent_unit.clone(),
+            dep.child_unit.clone(),
+            dep.is_requires,
+        );
+        match best.get(&key) {
+            Some(existing) if existing.priority <= dep.priority => {
+                // Existing entry has equal or higher priority; keep it
+            }
+            _ => {
+                best.insert(key, dep);
+            }
+        }
+    }
+
+    best.into_values()
+        .filter(|dep| {
+            if dep.is_mask {
+                trace!(
+                    "Masking directory dependency: {} {} {} (priority={})",
+                    dep.parent_unit,
+                    if dep.is_requires { "Requires" } else { "Wants" },
+                    dep.child_unit,
+                    dep.priority
+                );
+                false
+            } else {
+                true
+            }
+        })
+        .cloned()
+        .collect()
 }
 
 /// Extract the template name and instance from a unit name like "serial-getty@ttyS0.service".

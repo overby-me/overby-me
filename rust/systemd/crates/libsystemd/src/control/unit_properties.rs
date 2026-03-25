@@ -276,7 +276,13 @@ pub fn collect_properties(unit: &Unit) -> BTreeMap<String, String> {
         }
     };
     insert(&mut props, "LoadState", load_state);
-    insert(&mut props, "UnitFileState", "enabled");
+    // UnitFileState reflects whether the unit file is masked, enabled, etc.
+    let unit_file_state = if load_state == "masked" {
+        "masked"
+    } else {
+        "enabled"
+    };
+    insert(&mut props, "UnitFileState", unit_file_state);
 
     // NeedDaemonReload — stub value, overridden by control.rs with real check
     // when unit_dirs are available.

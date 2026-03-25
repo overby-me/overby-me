@@ -6,6 +6,7 @@ use log::{info, trace, warn};
 use crate::runtime_info::UnitTable;
 use crate::units::{ParsingError, Specific, Unit, UnitId, get_file_list, parse_file};
 
+pub use directory_deps::collect_dir_deps_for_unit;
 use directory_deps::{
     DirectoryDependency, apply_directory_dependencies, apply_dropins, collect_dep_dir_entries,
     collect_dropin_entries, create_implicit_slices_from_dropins, generate_fstab_mount_units,
@@ -86,13 +87,14 @@ fn load_all_units_inner(
     // Collect drop-in overrides: unit_name -> Vec<(filename, content)>
     let mut dropins: HashMap<String, Vec<(String, String)>> = HashMap::new();
 
-    for path in paths {
+    for (priority, path) in paths.iter().enumerate() {
         parse_all_units(
             &mut service_unit_table,
             &mut socket_unit_table,
             &mut target_unit_table,
             &mut slice_unit_table,
             path,
+            priority,
             &mut dir_deps,
             &mut dropins,
         )?;
@@ -409,12 +411,14 @@ fn prune_unused_sockets(sockets: &mut UnitTable) -> Vec<UnitId> {
     ids_to_remove
 }
 
+#[allow(clippy::too_many_arguments)]
 fn parse_all_units(
     services: &mut std::collections::HashMap<UnitId, Unit>,
     sockets: &mut std::collections::HashMap<UnitId, Unit>,
     targets: &mut std::collections::HashMap<UnitId, Unit>,
     slices: &mut std::collections::HashMap<UnitId, Unit>,
     path: &PathBuf,
+    priority: usize,
     dir_deps: &mut Vec<DirectoryDependency>,
     dropins: &mut HashMap<String, Vec<(String, String)>>,
 ) -> Result<(), ParsingError> {
@@ -426,7 +430,7 @@ fn parse_all_units(
 
             // Handle .wants/ and .requires/ directories
             if let Some((parent_unit, is_requires)) = parse_dep_dir_name(&dir_name) {
-                collect_dep_dir_entries(&entry_path, &parent_unit, is_requires, dir_deps);
+                collect_dep_dir_entries(&entry_path, &parent_unit, is_requires, priority, dir_deps);
                 continue;
             }
 
@@ -443,6 +447,7 @@ fn parse_all_units(
                 targets,
                 slices,
                 &entry_path,
+                priority,
                 dir_deps,
                 dropins,
             )?;

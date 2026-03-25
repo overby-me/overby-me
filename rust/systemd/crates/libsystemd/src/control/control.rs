@@ -4306,9 +4306,60 @@ pub fn execute_command(
                 props.insert("LimitNOFILESoft".to_string(), default_soft);
             }
 
+            // Re-read drop-in overrides from disk to pick up changes since
+            // the unit was loaded (real systemd re-evaluates on access).
+            {
+                let unit_file_name = &unit.id.name;
+                for dir in &ri.config.unit_dirs {
+                    let dropin_dir = dir.join(format!("{unit_file_name}.d"));
+                    if dropin_dir.is_dir()
+                        && let Ok(entries) = std::fs::read_dir(&dropin_dir)
+                    {
+                        let mut files: Vec<_> = entries
+                            .flatten()
+                            .filter(|e| e.path().extension().is_some_and(|ext| ext == "conf"))
+                            .collect();
+                        files.sort_by_key(|e| e.file_name());
+                        for entry in files {
+                            if let Ok(content) = std::fs::read_to_string(entry.path()) {
+                                // Extract Wants= and Requires= from the drop-in
+                                for line in content.lines() {
+                                    let line = line.trim();
+                                    for (prefix, prop_key) in
+                                        &[("Wants=", "Wants"), ("Requires=", "Requires")]
+                                    {
+                                        if let Some(val) = line.strip_prefix(prefix) {
+                                            let current =
+                                                props.get(*prop_key).cloned().unwrap_or_default();
+                                            let mut parts: Vec<String> = if current.is_empty() {
+                                                Vec::new()
+                                            } else {
+                                                current
+                                                    .split_whitespace()
+                                                    .map(String::from)
+                                                    .collect()
+                                            };
+                                            for unit_ref in val.split_whitespace() {
+                                                let unit_ref = unit_ref.to_string();
+                                                if !parts.contains(&unit_ref) {
+                                                    parts.push(unit_ref);
+                                                }
+                                            }
+                                            props.insert(prop_key.to_string(), parts.join(" "));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // Dynamically scan .wants/ and .requires/ directories on disk.
             // Real systemd re-evaluates these at access time, so symlinks
             // created after daemon-reload are still visible.
+            // Respects priority-based /dev/null masking: a symlink to /dev/null
+            // at a higher-priority path masks the same dep at lower-priority paths.
             // Scan both the canonical name and the queried alias name.
             let unit_file_name = &unit.id.name;
             let mut scan_names = vec![unit_file_name.clone()];
@@ -4323,37 +4374,38 @@ pub fn execute_command(
                 scan_names.push(query_full);
             }
             for scan_name in &scan_names {
-                for dir in &ri.config.unit_dirs {
-                    for (suffix, prop_key) in &[("wants", "Wants"), ("requires", "Requires")] {
-                        let dep_dir = dir.join(format!("{scan_name}.{suffix}"));
-                        if dep_dir.is_dir()
-                            && let Ok(entries) = std::fs::read_dir(&dep_dir)
-                        {
-                            let current = props.get(*prop_key).cloned().unwrap_or_default();
-                            let mut parts: Vec<String> = if current.is_empty() {
-                                Vec::new()
-                            } else {
-                                current.split_whitespace().map(String::from).collect()
-                            };
-                            for entry in entries.flatten() {
-                                let entry_path = entry.path();
-                                let name = std::fs::canonicalize(&entry_path)
-                                    .ok()
-                                    .and_then(|p| {
-                                        p.file_name().map(|f| f.to_string_lossy().to_string())
-                                    })
-                                    .unwrap_or_else(|| {
-                                        entry.file_name().to_string_lossy().to_string()
-                                    });
-                                if crate::units::loading::directory_deps::is_unit_file(&name)
-                                    && !parts.contains(&name)
-                                {
-                                    parts.push(name);
-                                }
+                let effective_deps = crate::units::loading::collect_dir_deps_for_unit(
+                    &ri.config.unit_dirs,
+                    scan_name,
+                );
+                for dep in &effective_deps {
+                    let prop_key = if dep.is_requires { "Requires" } else { "Wants" };
+                    // Resolve symlink aliases to canonical unit names
+                    let child_name = {
+                        let mut resolved = dep.child_unit.clone();
+                        for dir in &ri.config.unit_dirs {
+                            let candidate = dir.join(&dep.child_unit);
+                            if let Ok(canonical) = std::fs::canonicalize(&candidate)
+                                && let Some(name) = canonical
+                                    .file_name()
+                                    .map(|f| f.to_string_lossy().to_string())
+                            {
+                                resolved = name;
+                                break;
                             }
-                            props.insert(prop_key.to_string(), parts.join(" "));
                         }
+                        resolved
+                    };
+                    let current = props.get(prop_key).cloned().unwrap_or_default();
+                    let mut parts: Vec<String> = if current.is_empty() {
+                        Vec::new()
+                    } else {
+                        current.split_whitespace().map(String::from).collect()
+                    };
+                    if !parts.contains(&child_name) {
+                        parts.push(child_name);
                     }
+                    props.insert(prop_key.to_string(), parts.join(" "));
                 }
             }
 
@@ -4361,6 +4413,8 @@ pub fn execute_command(
             return Ok(serde_json::json!({ "show": text }));
         }
         Command::Cat(unit_name) => {
+            // Try to load the unit on demand (handles symlink aliases)
+            let _ = find_or_load_unit(&unit_name, &run_info);
             let ri = run_info.read_poisoned();
             let units = find_units_with_name(&unit_name, &ri.unit_table);
             if units.is_empty() {
