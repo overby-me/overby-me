@@ -236,14 +236,24 @@ fn expand_word_to_segments(word: &Word, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> Vec<
     for part in word {
         expand_part(part, ctx, &mut segments, cmd_sub);
     }
-    // If any segment came from an incomplete comsub, clear preceding segments
-    // to suppress output (matching bash behavior for incomplete $())
-    let has_incomplete = segments.iter().any(|s| match s {
-        Segment::Unquoted(t) | Segment::Quoted(t) => t == "\x00INCOMPLETE_COMSUB",
+    // If any segment came from an incomplete comsub, suppress output
+    let has_any_incomplete = segments.iter().any(|s| match s {
+        Segment::Unquoted(t) | Segment::Quoted(t) => {
+            t == "\x00INCOMPLETE_COMSUB" || t == "\x00SILENT_COMSUB"
+        }
         _ => false,
     });
-    if has_incomplete {
-        return vec![Segment::Unquoted("\x00INCOMPLETE_COMSUB".to_string())];
+    if has_any_incomplete {
+        // Check if it's a noisy (error) or silent suppression
+        let is_error = segments.iter().any(|s| match s {
+            Segment::Unquoted(t) | Segment::Quoted(t) => t == "\x00INCOMPLETE_COMSUB",
+            _ => false,
+        });
+        if is_error {
+            return vec![Segment::Unquoted("\x00INCOMPLETE_COMSUB".to_string())];
+        }
+        // Silent — just suppress (no marker → empty expansion → no output)
+        return Vec::new();
     }
     segments
 }
@@ -354,7 +364,7 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                             if !s.is_empty() {
                                 out.push(Segment::Quoted(std::mem::take(&mut s)));
                             }
-                            out.push(Segment::Unquoted("\x00INCOMPLETE_COMSUB".to_string()));
+                            out.push(Segment::Unquoted(cmd.clone()));
                             continue;
                         }
                         let trimmed = cmd.trim();
@@ -542,7 +552,7 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
         WordPart::CommandSub(cmd) => {
             // Check for incomplete comsub marker
             if cmd.starts_with('\x00') {
-                out.push(Segment::Unquoted("\x00INCOMPLETE_COMSUB".to_string()));
+                out.push(Segment::Unquoted(cmd.clone()));
                 return;
             }
             // Optimize $(< file) — read file content directly
