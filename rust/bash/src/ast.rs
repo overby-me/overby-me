@@ -42,6 +42,7 @@ pub enum Command {
     Simple(SimpleCommand),
     Compound(CompoundCommand, Vec<Redirection>),
     FunctionDef(String, Box<CompoundCommand>),
+    Coproc(Option<String>, Box<Command>),
 }
 
 /// A simple command: assignments, words, and redirections.

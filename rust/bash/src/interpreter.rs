@@ -1241,7 +1241,85 @@ impl Shell {
                 self.functions.insert(name.clone(), *body.clone());
                 0
             }
+            Command::Coproc(name, inner_cmd) => self.run_coproc(name.as_deref(), inner_cmd),
         }
+    }
+
+    #[cfg(unix)]
+    fn run_coproc(&mut self, name: Option<&str>, cmd: &Command) -> i32 {
+        use nix::unistd::{ForkResult, dup2, fork, pipe};
+        use std::os::unix::io::IntoRawFd;
+
+        let coproc_name = name.unwrap_or("COPROC");
+
+        // Create two pipes: one for parent→child stdin, one for child→parent stdout
+        let (child_read, parent_write) = match pipe() {
+            Ok(p) => (p.0.into_raw_fd(), p.1.into_raw_fd()),
+            Err(e) => {
+                eprintln!("{}: coproc: {}", self.error_prefix(), e);
+                return 1;
+            }
+        };
+        let (parent_read, child_write) = match pipe() {
+            Ok(p) => (p.0.into_raw_fd(), p.1.into_raw_fd()),
+            Err(e) => {
+                eprintln!("{}: coproc: {}", self.error_prefix(), e);
+                return 1;
+            }
+        };
+
+        match unsafe { fork() } {
+            Ok(ForkResult::Child) => {
+                // Child: redirect stdin/stdout to pipes
+                let _ = dup2(child_read, 0);
+                let _ = dup2(child_write, 1);
+                unsafe {
+                    libc::close(parent_read);
+                    libc::close(parent_write);
+                    libc::close(child_read);
+                    libc::close(child_write);
+                }
+
+                let status = self.run_command(cmd);
+                std::process::exit(status);
+            }
+            Ok(ForkResult::Parent { child }) => {
+                // Parent: close child ends, keep parent ends
+                unsafe {
+                    libc::close(child_read);
+                    libc::close(child_write);
+                }
+
+                // Set COPROC array: [0]=read_fd, [1]=write_fd
+                self.arrays.insert(
+                    coproc_name.to_string(),
+                    vec![parent_read.to_string(), parent_write.to_string()],
+                );
+
+                // Set COPROC_PID
+                let pid = child.as_raw();
+                self.vars
+                    .insert(format!("{}_PID", coproc_name), pid.to_string());
+
+                // Track the background job
+                self.last_bg_pid = pid;
+
+                0
+            }
+            Err(e) => {
+                eprintln!("{}: coproc: fork: {}", self.error_prefix(), e);
+                1
+            }
+        }
+    }
+
+    #[cfg(not(unix))]
+    fn run_coproc(&mut self, _name: Option<&str>, _cmd: &Command) -> i32 {
+        eprintln!(
+            "{}: coproc: not supported on this platform",
+            self.error_prefix()
+        );
+        1
     }
 
     /// Apply ${var:=default} assignments from a word's param expansions.

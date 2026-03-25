@@ -456,6 +456,43 @@ impl Parser {
             return Ok(Command::FunctionDef(name, Box::new(body)));
         }
 
+        // Check for coproc
+        if self.is_keyword("coproc") {
+            self.advance();
+            // Check if next token is a name (not a command keyword)
+            let name = if let Some(n) = self.word_text()
+                && !is_reserved_word(&n)
+                && !n.contains('=')
+                && !matches!(self.current, Token::LParen)
+            {
+                // Peek ahead to see if this is a name followed by a command
+                let saved_pos = self.lexer.save_position();
+                let saved_cur = self.current.clone();
+                self.advance();
+                let is_name = self.is_keyword("{")
+                    || self.is_keyword("if")
+                    || self.is_keyword("for")
+                    || self.is_keyword("while")
+                    || self.is_keyword("until")
+                    || self.is_keyword("case")
+                    || self.current == Token::LParen;
+                if is_name {
+                    Some(n)
+                } else {
+                    // Not a name — restore and parse as command
+                    self.lexer.restore_position(saved_pos);
+                    self.current = saved_cur;
+                    None
+                }
+            } else {
+                None
+            };
+            let name = name.or_else(|| Some("COPROC".to_string()));
+            self.skip_newlines();
+            let inner = self.parse_command()?;
+            return Ok(Command::Coproc(name, Box::new(inner)));
+        }
+
         // Check for compound command
         if self.is_keyword("{")
             || self.is_keyword("if")
