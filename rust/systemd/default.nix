@@ -266,16 +266,7 @@
           echo 'touch /testok' >> TEST-07-PID1.sh
         '';
       }
-      {
-        name = "15-DROPIN";
-        # Replace ExecCondition dropin checks with no-ops (show -p ExecCondition
-        # not implemented). Can't delete lines because some are inside heredocs
-        # or if-blocks whose removal would break syntax.
-        patchScript = ''
-          sed -i 's/check_ok \(.*\) ExecCondition.*/true/' TEST-15-DROPIN.sh
-          sed -i 's/check_ko \(.*\) ExecCondition.*/true/' TEST-15-DROPIN.sh
-        '';
-      }
+      {name = "15-DROPIN";}
       {
         name = "16-EXTEND-TIMEOUT";
         # Skip until EXTEND_TIMEOUT_USEC notification protocol and
@@ -518,8 +509,6 @@
                TEST-74-AUX-UTILS.path.sh
         '';
       }
-
-
     ];
   in
     builtins.listToAttrs (map (t: {
