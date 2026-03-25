@@ -975,6 +975,7 @@ impl Parser {
         // Consume tokens and raw text until ]], &&, ||
         // This handles extglob patterns like +(foo|bar) and regex patterns
         // Preserve word parts for proper variable expansion
+        let mut first = true;
         loop {
             if self.is_keyword("]]") || self.current == Token::Eof {
                 break;
@@ -982,6 +983,11 @@ impl Parser {
             if matches!(self.current, Token::AndIf | Token::OrIf) {
                 break;
             }
+            // Add space between tokens if the lexer had whitespace before this token
+            if !first && self.lexer.had_whitespace_before_token {
+                parts.push(WordPart::Literal(" ".to_string()));
+            }
+            first = false;
             match &self.current {
                 Token::Word(word_parts) => {
                     parts.extend(word_parts.clone());
@@ -997,6 +1003,14 @@ impl Parser {
                 }
                 Token::Pipe => {
                     parts.push(WordPart::Literal("|".to_string()));
+                    self.advance();
+                }
+                Token::Less => {
+                    parts.push(WordPart::Literal("<".to_string()));
+                    self.advance();
+                }
+                Token::Great => {
+                    parts.push(WordPart::Literal(">".to_string()));
                     self.advance();
                 }
                 _ => break,
