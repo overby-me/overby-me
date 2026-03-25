@@ -445,8 +445,7 @@
                TEST-74-AUX-UTILS.sbsign.sh \
                TEST-74-AUX-UTILS.keyutil.sh \
                TEST-74-AUX-UTILS.sysusers.sh \
-               TEST-74-AUX-UTILS.id128.sh \
-               TEST-74-AUX-UTILS.machine-id-setup.sh
+               TEST-74-AUX-UTILS.id128.sh
         '';
       }
     ];

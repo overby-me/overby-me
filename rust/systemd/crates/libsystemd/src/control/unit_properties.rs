@@ -199,7 +199,44 @@ pub fn collect_properties(unit: &Unit) -> BTreeMap<String, String> {
     }
 
     // ── LoadState / UnitFileState (synthetic) ─────────────────────────
-    insert(&mut props, "LoadState", "loaded");
+    // Determine LoadState from the unit's fragment path:
+    // - "masked" if the unit file is a symlink to /dev/null
+    // - "loaded" otherwise
+    let load_state = match &unit.common.unit.fragment_path {
+        Some(p) => {
+            if let Ok(target) = std::fs::read_link(p) {
+                if target == std::path::Path::new("/dev/null") {
+                    "masked"
+                } else {
+                    "loaded"
+                }
+            } else {
+                "loaded"
+            }
+        }
+        None => {
+            // No fragment path — check runtime and persistent paths for mask
+            let name = &unit.id.name;
+            let runtime = std::path::Path::new("/run/systemd/system").join(name);
+            let persistent = std::path::Path::new("/etc/systemd/system").join(name);
+            if let Ok(target) = std::fs::read_link(&runtime) {
+                if target == std::path::Path::new("/dev/null") {
+                    "masked"
+                } else {
+                    "loaded"
+                }
+            } else if let Ok(target) = std::fs::read_link(&persistent) {
+                if target == std::path::Path::new("/dev/null") {
+                    "masked"
+                } else {
+                    "loaded"
+                }
+            } else {
+                "loaded"
+            }
+        }
+    };
+    insert(&mut props, "LoadState", load_state);
     insert(&mut props, "UnitFileState", "enabled");
 
     props

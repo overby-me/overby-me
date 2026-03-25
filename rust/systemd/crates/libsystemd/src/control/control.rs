@@ -1208,8 +1208,7 @@ fn find_or_load_unit(
 
                 // If we resolved an alias, try loading the resolved name
                 if is_alias
-                    && let Ok(mut unit) =
-                        load_new_unit(&ri.config.unit_dirs, &resolved_load_name)
+                    && let Ok(mut unit) = load_new_unit(&ri.config.unit_dirs, &resolved_load_name)
                 {
                     // Add the original name as an alias
                     if !unit.common.unit.aliases.contains(&load_name) {
@@ -4101,7 +4100,18 @@ pub fn execute_command(
             }
 
             if units.is_empty() {
-                return Err(format!("Unit {unit_name} not found."));
+                // Real systemd returns a stub property set with LoadState=not-found
+                // instead of an error for unknown units.
+                let mut props = std::collections::BTreeMap::new();
+                props.insert("Id".to_string(), unit_name.clone());
+                props.insert("LoadState".to_string(), "not-found".to_string());
+                props.insert("ActiveState".to_string(), "inactive".to_string());
+                props.insert("SubState".to_string(), "dead".to_string());
+                props.insert("UnitFileState".to_string(), String::new());
+                props.insert("FragmentPath".to_string(), String::new());
+                props.insert("Description".to_string(), unit_name.clone());
+                let text = unit_properties::format_properties(&props, filter.as_deref());
+                return Ok(serde_json::json!({ "show": text }));
             }
             let unit = &units[0];
             let mut props = unit_properties::collect_properties(unit);

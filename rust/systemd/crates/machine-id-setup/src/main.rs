@@ -314,8 +314,17 @@ fn run(args: &[String]) -> i32 {
                 usage();
                 return 0;
             }
+            "--version" => {
+                println!("systemd-machine-id-setup 258");
+                return 0;
+            }
             arg if arg.starts_with("--root=") => {
-                root = PathBuf::from(&arg["--root=".len()..]);
+                let r = &arg["--root=".len()..];
+                root = if r.is_empty() {
+                    PathBuf::from("/")
+                } else {
+                    PathBuf::from(r)
+                };
             }
             "--root" => {
                 i += 1;
