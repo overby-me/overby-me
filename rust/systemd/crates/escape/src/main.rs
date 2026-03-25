@@ -56,7 +56,6 @@ struct Cli {
     strings: Vec<String>,
 }
 
-
 /// Known valid unit type suffixes.
 const VALID_SUFFIXES: &[&str] = &[
     "service",
@@ -132,10 +131,9 @@ fn do_escape(input: &str, cli: &Cli) -> Result<String, String> {
                 if !unit_name::is_template(template) {
                     return Err(format!("Not a valid template unit name: {template}"));
                 }
-                unit_name::template_instantiate(template, &escaped)
-                    .ok_or_else(|| {
-                        format!("Failed to instantiate template {template} with {escaped}")
-                    })
+                unit_name::template_instantiate(template, &escaped).ok_or_else(|| {
+                    format!("Failed to instantiate template {template} with {escaped}")
+                })
             } else if let Some(suffix) = &cli.suffix {
                 let norm = normalize_suffix(suffix)?;
                 Ok(format!("{escaped}{norm}"))
@@ -155,10 +153,9 @@ fn do_escape(input: &str, cli: &Cli) -> Result<String, String> {
                 if !unit_name::is_template(template) {
                     return Err(format!("Not a valid template unit name: {template}"));
                 }
-                unit_name::template_instantiate(template, &escaped)
-                    .ok_or_else(|| {
-                        format!("Failed to instantiate template {template} with {escaped}")
-                    })
+                unit_name::template_instantiate(template, &escaped).ok_or_else(|| {
+                    format!("Failed to instantiate template {template} with {escaped}")
+                })
             } else if let Some(suffix) = &cli.suffix {
                 let norm = normalize_suffix(suffix)?;
                 Ok(format!("{escaped}{norm}"))
@@ -219,11 +216,11 @@ fn main() {
         eprintln!("Error: --instance can only be used with --unescape.");
         process::exit(1);
     }
-    if let Some(template) = &cli.template {
-        if template.is_empty() || !unit_name::is_template(template) {
-            eprintln!("Error: Not a valid template unit name: {template}");
-            process::exit(1);
-        }
+    if let Some(template) = &cli.template
+        && (template.is_empty() || !unit_name::is_template(template))
+    {
+        eprintln!("Error: Not a valid template unit name: {template}");
+        process::exit(1);
     }
 
     let inputs = if cli.strings.is_empty() {

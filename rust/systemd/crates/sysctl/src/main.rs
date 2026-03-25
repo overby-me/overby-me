@@ -50,9 +50,13 @@ const PROC_SYS: &str = "/proc/sys";
 #[command(name = "systemd-sysctl", version, about)]
 struct Cli {
     /// Only apply settings for the given prefix(es)
-    /// (e.g. "net.ipv4" to only apply net.ipv4.* settings)
+    /// (e.g. "net.ipv4" or "/net/ipv4" to only apply net.ipv4.* settings)
     #[arg(long = "prefix")]
     prefixes: Vec<String>,
+
+    /// Return non-zero exit code on failure even for unknown sysctl parameters
+    #[arg(long)]
+    strict: bool,
 
     /// Specific sysctl.d config files to read (instead of scanning directories)
     files: Vec<PathBuf>,
@@ -328,12 +332,22 @@ fn parse_config_file(path: &Path) -> io::Result<Vec<SysctlEntry>> {
     Ok(entries)
 }
 
+/// Normalize a prefix from /path/style to dot.style.
+/// e.g. "/net/ipv4/conf/hoge" -> "net.ipv4.conf.hoge"
+fn normalize_prefix(prefix: &str) -> String {
+    let stripped = prefix.strip_prefix('/').unwrap_or(prefix);
+    stripped.replace('/', ".")
+}
+
 /// Apply a single sysctl setting by writing to /proc/sys.
-fn apply_sysctl(entry: &SysctlEntry, verbose: bool) -> bool {
+/// When `strict` is false, write errors for non-existent parameters are
+/// treated as warnings (return true). When `strict` is true, they cause
+/// failure (return false), unless the entry has `ignore_error` set.
+fn apply_sysctl(entry: &SysctlEntry, verbose: bool, strict: bool, prefixes: &[String]) -> bool {
     let keys_to_apply: Vec<String> = if is_glob_pattern(&entry.key) {
         let expanded = expand_glob(&entry.key);
         if expanded.is_empty() {
-            if !entry.ignore_error {
+            if !entry.ignore_error && strict {
                 eprintln!(
                     "systemd-sysctl: {}:{}: glob pattern '{}' matched no sysctl parameters.",
                     entry.source.display(),
@@ -341,7 +355,7 @@ fn apply_sysctl(entry: &SysctlEntry, verbose: bool) -> bool {
                     entry.key,
                 );
             }
-            return entry.ignore_error;
+            return true;
         }
         expanded
     } else {
@@ -351,6 +365,11 @@ fn apply_sysctl(entry: &SysctlEntry, verbose: bool) -> bool {
     let mut all_ok = true;
 
     for key in &keys_to_apply {
+        // Apply prefix filter after glob expansion
+        if !prefixes.is_empty() && !prefixes.iter().any(|p| key.starts_with(p.as_str())) {
+            continue;
+        }
+
         let proc_path = key_to_proc_path(key);
 
         if verbose {
@@ -368,7 +387,7 @@ fn apply_sysctl(entry: &SysctlEntry, verbose: bool) -> bool {
                     if verbose {
                         eprintln!("systemd-sysctl: Failed to set '{}' (ignored): {}", key, e);
                     }
-                } else {
+                } else if strict {
                     eprintln!(
                         "systemd-sysctl: {}:{}: Failed to set '{}' to '{}': {}",
                         entry.source.display(),
@@ -440,19 +459,13 @@ fn run() -> u8 {
         return EXIT_SUCCESS;
     }
 
-    // Filter by prefix if specified
-    let entries_to_apply: Vec<&SysctlEntry> = if !cli.prefixes.is_empty() {
-        settings
-            .values()
-            .filter(|e| {
-                cli.prefixes
-                    .iter()
-                    .any(|prefix| e.key.starts_with(prefix.as_str()))
-            })
-            .collect()
-    } else {
-        settings.values().collect()
-    };
+    // Normalize prefixes: convert /path/style to dot.style
+    let normalized_prefixes: Vec<String> =
+        cli.prefixes.iter().map(|p| normalize_prefix(p)).collect();
+
+    // Prefix filtering now happens inside apply_sysctl (after glob expansion),
+    // but we can still skip entries whose non-glob keys clearly don't match.
+    let entries_to_apply: Vec<&SysctlEntry> = settings.values().collect();
 
     if verbose {
         eprintln!(
@@ -463,7 +476,7 @@ fn run() -> u8 {
 
     let mut any_failed = false;
     for entry in entries_to_apply {
-        if !apply_sysctl(entry, verbose) {
+        if !apply_sysctl(entry, verbose, cli.strict, &normalized_prefixes) {
             any_failed = true;
         }
     }

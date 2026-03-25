@@ -99,6 +99,10 @@ pub enum Command {
     SuspendThenHibernate,
     /// `list-timers` — list active timer units with next elapse times.
     ListTimers,
+    /// `list-sockets` — list socket units.
+    ListSockets,
+    /// `list-paths` — list path units.
+    ListPaths,
     /// `list-jobs` — list currently running/waiting jobs.
     ListJobs,
     /// `set-property <unit> <property>=<value>...` — set runtime properties on a unit.
@@ -687,6 +691,8 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
             Command::Unmask(names)
         }
         "list-timers" => Command::ListTimers,
+        "list-sockets" => Command::ListSockets,
+        "list-paths" => Command::ListPaths,
         "list-jobs" => Command::ListJobs,
         "set-property" => {
             // set-property <unit> <prop=val>...
@@ -2930,6 +2936,16 @@ pub fn execute_command(
                     .cmp(b.get("UNIT").and_then(|v| v.as_str()).unwrap_or(""))
             });
             return Ok(Value::Array(timers));
+        }
+        Command::ListSockets => {
+            // Return socket units. Currently returns an empty list since
+            // socket activation is not yet implemented.
+            return Ok(Value::Array(Vec::new()));
+        }
+        Command::ListPaths => {
+            // Return path units. Currently returns an empty list since
+            // path monitoring is not yet implemented.
+            return Ok(Value::Array(Vec::new()));
         }
         Command::ListJobs => {
             // Return units currently being activated as jobs. Units in the

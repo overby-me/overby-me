@@ -320,10 +320,6 @@
           sed -i '/^# --marked/,/^# --dry-run/{/^# --dry-run/!d}' TEST-26-SYSTEMCTL.sh
           # Remove --dry-run tests (not implemented)
           sed -i '/^# --dry-run/,/^# Aux verbs/{/^# Aux verbs/!d}' TEST-26-SYSTEMCTL.sh
-          # Remove systemctl help (not implemented)
-          sed -i '/^systemctl help/d' TEST-26-SYSTEMCTL.sh
-          # Remove service-watchdogs (not implemented)
-          sed -i '/^systemctl service-watchdogs/d' TEST-26-SYSTEMCTL.sh
           # Remove is-system-running (not implemented)
           sed -i '/^assert_eq.*is-system-running/d' TEST-26-SYSTEMCTL.sh
           # Remove --timestamp tests
@@ -339,10 +335,6 @@
           sed -i '/^# %J in WantedBy/,/^systemctl daemon-reload$/d' TEST-26-SYSTEMCTL.sh
           # Remove global unit tests
           sed -i '/^# Test systemctl edit --global/,/^rm -f.*GLOBAL_MASKED_UNIT/d' TEST-26-SYSTEMCTL.sh
-          # Remove list-sockets/list-timers/list-paths (need socket/timer/path units)
-          sed -i '/^systemctl list-sockets/d' TEST-26-SYSTEMCTL.sh
-          sed -i '/^systemctl list-timers/d' TEST-26-SYSTEMCTL.sh
-          sed -i '/^systemctl list-paths/d' TEST-26-SYSTEMCTL.sh
           # Remove --with-dependencies (not implemented)
           sed -i '/--with-dependencies/d' TEST-26-SYSTEMCTL.sh
           # Remove systemctl cat --force (not implemented)
@@ -477,6 +469,7 @@
         '';
       }
       {name = "31-DEVICE-ENUMERATION";}
+      {name = "76-SYSCTL";}
       {
         name = "74-AUX-UTILS";
         # Keep subtests for tools that are reimplemented in Rust and work
@@ -505,8 +498,7 @@
                TEST-74-AUX-UTILS.keyutil.sh \
                TEST-74-AUX-UTILS.sysusers.sh \
                TEST-74-AUX-UTILS.id128.sh \
-               TEST-74-AUX-UTILS.machine-id-setup.sh \
-               TEST-74-AUX-UTILS.path.sh
+               TEST-74-AUX-UTILS.machine-id-setup.sh
         '';
       }
     ];

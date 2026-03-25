@@ -295,6 +295,24 @@ enum Commands {
         timeout: u64,
     },
 
+    /// Wait for devices to be processed by udev
+    Wait {
+        /// Maximum time to wait in seconds
+        #[arg(long, short = 't', default_value = "120")]
+        timeout: u64,
+
+        /// Wait until devices are initialized (default), added, or removed
+        #[arg(long, default_value = "initialized")]
+        wait_until: String,
+
+        /// Wait for udev event queue to settle first
+        #[arg(long)]
+        settle: bool,
+
+        /// Device paths to wait for
+        devices: Vec<String>,
+    },
+
     /// Show version
     Version,
 }
@@ -1596,6 +1614,75 @@ fn make_dev_id_from_syspath(syspath: &Path, subsystem: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// udevadm wait
+// ---------------------------------------------------------------------------
+
+/// Wait for devices to be processed by udev.
+///
+/// Polls the specified device paths until they satisfy the wait condition
+/// (initialized, added, or removed) or the timeout expires.
+fn cmd_wait(timeout: u64, wait_until: &str, _settle: bool, devices: &[String]) -> i32 {
+    let deadline = Instant::now() + Duration::from_secs(timeout);
+
+    let check_device = |path: &str| -> bool {
+        match wait_until {
+            "removed" => !Path::new(path).exists(),
+            "added" => Path::new(path).exists(),
+            // "initialized" — check that the device exists and has a udev db entry
+            // For simplicity, we just check existence + the uevent file (which
+            // indicates the kernel has finished creating the device node).
+            _ => {
+                let p = Path::new(path);
+                if !p.exists() {
+                    return false;
+                }
+                // If it's a sysfs path, check for the "uevent" file which
+                // indicates the device is initialized by the kernel.
+                // For /dev/ paths, existence is sufficient.
+                if path.starts_with("/sys/") {
+                    // Check for udev database entry
+                    let db_path = if let Ok(_md) = fs::metadata(p) {
+                        // For sysfs directories, the udev db key is based on the
+                        // sysfs path relative to /sys/
+                        let sys_relative = path.strip_prefix("/sys/").unwrap_or(path);
+                        let db_key = sys_relative.replace('/', "\\x2f");
+                        PathBuf::from(DB_DIR).join(db_key)
+                    } else {
+                        return false;
+                    };
+                    // If there's a udev db entry, the device is fully initialized.
+                    // Otherwise, just check uevent exists (kernel has created it).
+                    if db_path.exists() {
+                        return true;
+                    }
+                    p.join("uevent").exists() || p.is_file()
+                } else {
+                    true
+                }
+            }
+        }
+    };
+
+    loop {
+        let all_ready = devices.iter().all(|d| check_device(d));
+        if all_ready {
+            return 0;
+        }
+
+        if Instant::now() >= deadline {
+            for d in devices {
+                if !check_device(d) {
+                    eprintln!("udevadm wait: timeout waiting for device '{}'", d);
+                }
+            }
+            return 1;
+        }
+
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -1740,6 +1827,13 @@ fn main() -> ExitCode {
             ping,
             timeout,
         ),
+
+        Commands::Wait {
+            timeout,
+            ref wait_until,
+            settle,
+            ref devices,
+        } => cmd_wait(timeout, wait_until, settle, devices),
 
         Commands::Version => {
             println!("udevadm (rust-systemd)");

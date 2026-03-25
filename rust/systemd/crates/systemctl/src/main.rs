@@ -440,13 +440,57 @@ fn main() {
         // Sleep commands — pass through as-is to PID 1
         "suspend" | "hibernate" | "hybrid-sleep" | "suspend-then-hibernate" => &positional[0],
         // Timer, property, edit, revert, clean commands — pass through
-        "list-timers" | "list-jobs" | "set-property" | "edit" | "revert" | "clean" => {
-            &positional[0]
-        }
+        "list-timers" | "list-sockets" | "list-paths" | "list-jobs" | "set-property" | "edit"
+        | "revert" | "clean" => &positional[0],
         // log-level, log-target, service-watchdogs — get or set manager properties
         "log-level" | "log-target" | "service-watchdogs" => &positional[0],
         _ => &positional[0],
     };
+
+    // Handle `help` client-side: try to open the man page for the unit type.
+    if positional[0] == "help" {
+        if positional.len() < 2 {
+            if !quiet {
+                eprintln!("Error: help requires a unit name.");
+            }
+            std::process::exit(1);
+        }
+        let unit_name = &positional[1];
+        // Determine man page from unit suffix
+        let man_page = if unit_name.ends_with(".service") || !unit_name.contains('.') {
+            "systemd.service"
+        } else if unit_name.ends_with(".socket") {
+            "systemd.socket"
+        } else if unit_name.ends_with(".timer") {
+            "systemd.timer"
+        } else if unit_name.ends_with(".mount") {
+            "systemd.mount"
+        } else if unit_name.ends_with(".target") {
+            "systemd.target"
+        } else if unit_name.ends_with(".path") {
+            "systemd.path"
+        } else if unit_name.ends_with(".slice") {
+            "systemd.slice"
+        } else if unit_name.ends_with(".scope") {
+            "systemd.scope"
+        } else if unit_name.ends_with(".swap") {
+            "systemd.swap"
+        } else if unit_name.ends_with(".automount") {
+            "systemd.automount"
+        } else if unit_name.ends_with(".device") {
+            "systemd.device"
+        } else {
+            "systemd.service"
+        };
+        let status = std::process::Command::new("man").arg(man_page).status();
+        match status {
+            Ok(s) if s.success() => {}
+            _ => {
+                // man not available or failed; not an error for our purposes
+            }
+        }
+        return;
+    }
 
     // Handle `edit` client-side: query PID 1 for unit info, open editor, then daemon-reload.
     if positional[0] == "edit" {
@@ -670,8 +714,12 @@ fn main() {
         } else {
             Some(Value::Object(obj))
         }
-    } else if method == "list-timers" || method == "list-jobs" {
-        // list-timers/list-jobs take no parameters
+    } else if method == "list-timers"
+        || method == "list-sockets"
+        || method == "list-paths"
+        || method == "list-jobs"
+    {
+        // list-timers/list-sockets/list-paths/list-jobs take no parameters
         None
     } else if method == "set-property" {
         // set-property <unit> <prop=val>...
@@ -1069,6 +1117,48 @@ fn handle_response(
                 format_timer_table(arr);
             }
         }
+        "list-sockets" => {
+            if let Some(result) = result
+                && let Some(arr) = result.as_array()
+                && !quiet
+            {
+                if arr.is_empty() {
+                    println!("0 sockets listed.");
+                } else {
+                    println!("{:<40} {:<8} {:<40}", "LISTEN", "TYPE", "UNIT");
+                    for socket in arr {
+                        let listen = socket.get("LISTEN").and_then(|v| v.as_str()).unwrap_or("");
+                        let stype = socket.get("TYPE").and_then(|v| v.as_str()).unwrap_or("");
+                        let unit = socket.get("UNIT").and_then(|v| v.as_str()).unwrap_or("");
+                        println!("{:<40} {:<8} {:<40}", listen, stype, unit);
+                    }
+                    println!("\n{} sockets listed.", arr.len());
+                }
+            }
+        }
+        "list-paths" => {
+            if let Some(result) = result
+                && let Some(arr) = result.as_array()
+                && !quiet
+            {
+                if arr.is_empty() {
+                    println!("0 paths listed.");
+                } else {
+                    for path_entry in arr {
+                        let path = path_entry
+                            .get("PATH")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        let unit = path_entry
+                            .get("UNIT")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        println!("{:<40} {:<40}", path, unit);
+                    }
+                    println!("\n{} paths listed.", arr.len());
+                }
+            }
+        }
         "list-jobs" => {
             if let Some(result) = result
                 && let Some(arr) = result.as_array()
@@ -1109,6 +1199,18 @@ fn handle_response(
             {
                 print!("{text}");
             }
+        }
+        "service-watchdogs" | "log-level" | "log-target" => {
+            // Manager property get/set: print raw string value
+            if let Some(result) = result
+                && !quiet
+                && let Some(s) = result.as_str()
+            {
+                println!("{s}");
+            }
+        }
+        "help" => {
+            // systemctl help <unit> — success, nothing to print
         }
         "mask" => {
             if let Some(result) = result

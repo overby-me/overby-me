@@ -166,6 +166,13 @@ in
         # Create writable /usr/lib/systemd/system/ for tests that write units there
         mkdir -p /usr/lib/systemd/system
 
+        # Symlink helper binaries (systemd-sysctl, etc.) so tests referencing
+        # /usr/lib/systemd/systemd-* can find them (NixOS puts them in the store)
+        for bin in ${config.systemd.package}/lib/systemd/systemd-*; do
+          name=$(basename "$bin")
+          [ -e "/usr/lib/systemd/$name" ] || ln -sfn "$bin" "/usr/lib/systemd/$name"
+        done
+
         # Create standard systemd testdata path so unit files referencing
         # /usr/lib/systemd/tests/testdata/ can find helper scripts
         mkdir -p /usr/lib/systemd/tests
