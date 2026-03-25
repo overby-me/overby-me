@@ -67,6 +67,8 @@ pub enum Command {
     Remove(String),
     Restart(String),
     TryRestart(String),
+    /// `reload <unit>` — run the ExecReload= commands for a service.
+    Reload(String),
     ReloadOrRestart(String),
     Start(Vec<String>),
     StartNoBlock(Vec<String>),
@@ -469,7 +471,15 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
         "hibernate" => Command::Hibernate,
         "hybrid-sleep" => Command::HybridSleep,
         "suspend-then-hibernate" => Command::SuspendThenHibernate,
-        "reload" | "daemon-reload" => Command::LoadAllNew,
+        "daemon-reload" => Command::LoadAllNew,
+        "reload" => {
+            // "reload" without params = daemon-reload;
+            // "reload" with a unit name = unit reload (ExecReload=)
+            match &call.params {
+                Some(Value::String(s)) if !s.is_empty() => Command::Reload(s.clone()),
+                _ => Command::LoadAllNew,
+            }
+        }
         "daemon-reexec" => Command::DaemonReexec,
         "log-level" => {
             let level = match &call.params {
@@ -4541,6 +4551,104 @@ pub fn execute_command(
                 ));
             }
         }
+        Command::Reload(unit_name) => {
+            let id = find_or_load_unit(&unit_name, &run_info)?;
+            let ri = run_info.read_poisoned();
+            let unit = ri
+                .unit_table
+                .get(&id)
+                .ok_or_else(|| format!("Unit {unit_name} not found"))?;
+
+            // Verify the unit is active
+            {
+                let status = unit.common.status.read_poisoned();
+                if !matches!(&*status, UnitStatus::Started(_) | UnitStatus::Starting) {
+                    return Err(format!("Unit {unit_name} is not active, cannot reload."));
+                }
+            }
+
+            // Get ExecReload commands and the main PID for $MAINPID substitution
+            let (reload_cmds, main_pid, working_dir) =
+                if let Specific::Service(svc) = &unit.specific {
+                    let state = svc.state.read_poisoned();
+                    let pid = state.srvc.main_pid.or(state.srvc.pid);
+                    (
+                        svc.conf.reload.clone(),
+                        pid.map(i32::from),
+                        svc.conf.exec_config.working_directory.clone(),
+                    )
+                } else {
+                    return Err(format!("Unit {unit_name} is not a service, cannot reload."));
+                };
+
+            if reload_cmds.is_empty() {
+                return Err(format!(
+                    "Job for {unit_name} failed because the unit does not support reload."
+                ));
+            }
+
+            drop(ri);
+
+            // Run each ExecReload command synchronously
+            let mut last_error: Option<String> = None;
+            for cmd in &reload_cmds {
+                let program = &cmd.cmd;
+                let args: Vec<String> = cmd
+                    .args
+                    .iter()
+                    .map(|a| {
+                        if let Some(pid) = main_pid {
+                            a.replace("$MAINPID", &pid.to_string())
+                        } else {
+                            a.clone()
+                        }
+                    })
+                    .collect();
+
+                let mut child_cmd = std::process::Command::new(program);
+                child_cmd.args(&args);
+                child_cmd.stdin(std::process::Stdio::null());
+                child_cmd.stdout(std::process::Stdio::null());
+                child_cmd.stderr(std::process::Stdio::null());
+                if let Some(ref wd) = working_dir {
+                    child_cmd.current_dir(wd);
+                }
+                if let Some(pid) = main_pid {
+                    child_cmd.env("MAINPID", pid.to_string());
+                }
+
+                match child_cmd.status() {
+                    Ok(status) => {
+                        if !status.success()
+                            && !cmd
+                                .prefixes
+                                .contains(&crate::units::CommandlinePrefix::Minus)
+                        {
+                            last_error = Some(format!(
+                                "ExecReload command '{program}' failed with {}",
+                                status
+                            ));
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        if !cmd
+                            .prefixes
+                            .contains(&crate::units::CommandlinePrefix::Minus)
+                        {
+                            last_error = Some(format!(
+                                "Failed to execute ExecReload command '{program}': {e}"
+                            ));
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if let Some(err) = last_error {
+                return Err(err);
+            }
+        }
         Command::Restart(unit_name) => {
             let id = find_or_load_unit(&unit_name, &run_info)?;
             let ri = run_info.read_poisoned();
@@ -4583,7 +4691,6 @@ pub fn execute_command(
         }
         Command::ReloadOrRestart(unit_name) => {
             // reload-or-restart: try to reload, fall back to restart.
-            // Since we don't support reload yet, just restart.
             if unit_name == "--marked" {
                 // --marked: restart all units with needs-restart marker, then clear markers
                 let units_to_restart: Vec<String> = {

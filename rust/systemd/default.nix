@@ -307,12 +307,28 @@
       }
       {
         name = "23-UNIT-FILE";
-        # Skip all subtests until reload, oneshot restart, RuntimeDirectory,
-        # StandardOutput, and other advanced unit-file features are implemented.
+        # Keep ExecReload subtest. Remove subtests requiring systemd-run,
+        # busctl, systemd-analyze, or other unimplemented features.
         patchScript = ''
-          echo '#!/bin/bash' > TEST-23-UNIT-FILE.sh
-          echo 'echo "Skipped: unit-file subtests need further feature work"' >> TEST-23-UNIT-FILE.sh
-          echo 'touch /testok' >> TEST-23-UNIT-FILE.sh
+          rm -f TEST-23-UNIT-FILE.clean-unit.sh \
+               TEST-23-UNIT-FILE.exec-command-ex.sh \
+               TEST-23-UNIT-FILE.ExecStopPost.sh \
+               TEST-23-UNIT-FILE.ExtraFileDescriptors.sh \
+               TEST-23-UNIT-FILE.JoinsNamespaceOf.sh \
+               TEST-23-UNIT-FILE.oneshot-restart.sh \
+               TEST-23-UNIT-FILE.openfile.sh \
+               TEST-23-UNIT-FILE.percentj-wantedby.sh \
+               TEST-23-UNIT-FILE.runtime-bind-paths.sh \
+               TEST-23-UNIT-FILE.RuntimeDirectory.sh \
+               TEST-23-UNIT-FILE.StandardOutput.sh \
+               TEST-23-UNIT-FILE.start-stop-no-reload.sh \
+               TEST-23-UNIT-FILE.statedir.sh \
+               TEST-23-UNIT-FILE.success-failure.sh \
+               TEST-23-UNIT-FILE.type-exec.sh \
+               TEST-23-UNIT-FILE.Upholds.sh \
+               TEST-23-UNIT-FILE.utmp.sh \
+               TEST-23-UNIT-FILE.verify-unit-files.sh \
+               TEST-23-UNIT-FILE.whoami.sh
         '';
       }
       {
