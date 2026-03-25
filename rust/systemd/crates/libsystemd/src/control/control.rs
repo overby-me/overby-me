@@ -71,6 +71,8 @@ pub enum Command {
     Reload(String),
     ReloadOrRestart(String),
     Start(Vec<String>),
+    /// `start --wait` — start units and block until they deactivate.
+    StartWait(Vec<String>),
     StartNoBlock(Vec<String>),
     StopNoBlock(Vec<String>),
     RestartNoBlock(String),
@@ -332,6 +334,21 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
                 }
             };
             Command::Start(names)
+        }
+        "start-wait" => {
+            let names = match &call.params {
+                Some(Value::String(s)) => vec![s.clone()],
+                Some(Value::Array(arr)) => arr
+                    .iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect(),
+                Some(_) | None => {
+                    return Err(ParseError::ParamsInvalid(
+                        "Params must be a string or array of strings".to_string(),
+                    ));
+                }
+            };
+            Command::StartWait(names)
         }
         "start-noblock" => {
             let names = match &call.params {
@@ -4865,6 +4882,78 @@ pub fn execute_command(
                     }
                     return Err(errstr);
                 }
+            }
+        }
+        Command::StartWait(unit_names) => {
+            // Start units, then block until they all reach a terminal state.
+            let mut unit_ids = Vec::new();
+            for unit_name in &unit_names {
+                let id = find_or_load_unit(unit_name, &run_info)?;
+                load_dependency_units(&id, &run_info);
+                refresh_directory_deps(&id.name, &run_info);
+                {
+                    let ri = run_info.read_poisoned();
+                    let mut ids_to_reset = vec![id.clone()];
+                    if let Some(unit) = ri.unit_table.get(&id) {
+                        for dep_id in unit
+                            .common
+                            .dependencies
+                            .wants
+                            .iter()
+                            .chain(unit.common.dependencies.requires.iter())
+                        {
+                            ids_to_reset.push(dep_id.clone());
+                        }
+                    }
+                    for reset_id in &ids_to_reset {
+                        if let Some(u) = ri.unit_table.get(reset_id) {
+                            let mut status = u.common.status.write_poisoned();
+                            if let crate::units::UnitStatus::Stopped(_, _) = &*status {
+                                *status = crate::units::UnitStatus::NeverStarted;
+                            }
+                        }
+                    }
+                }
+                let errs = crate::units::activate_needed_units(id.clone(), run_info.clone());
+                if !errs.is_empty() {
+                    let mut errstr = String::from("Errors while starting the unit:");
+                    for err in errs {
+                        let _ = write!(errstr, "\n{err:?}");
+                    }
+                    return Err(errstr);
+                }
+                unit_ids.push(id);
+            }
+
+            // Poll until all specified units reach a terminal state.
+            let mut any_failed = false;
+            loop {
+                let mut all_done = true;
+                let ri = run_info.read_poisoned();
+                for id in &unit_ids {
+                    if let Some(unit) = ri.unit_table.get(id) {
+                        let status = unit.common.status.read_poisoned();
+                        match &*status {
+                            crate::units::UnitStatus::Stopped(_, errors) => {
+                                if !errors.is_empty() {
+                                    any_failed = true;
+                                }
+                            }
+                            crate::units::UnitStatus::NeverStarted => {}
+                            _ => {
+                                all_done = false;
+                            }
+                        }
+                    }
+                }
+                drop(ri);
+                if all_done {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            if any_failed {
+                return Err("One or more units failed.".to_string());
             }
         }
         Command::StartNoBlock(unit_names) => {

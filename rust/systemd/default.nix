@@ -217,13 +217,65 @@
       {name = "01-BASIC";}
       {
         name = "03-JOBS";
-        # Skip until PID 1 job management (job merging, --job-mode,
-        # --show-transaction, --wait, InvocationID, RuntimeMaxSec
-        # enforcement, PropagatesStopTo=) is implemented.
+        # Keep: daemon-reexec, job merging, JOB_NOP, --wait.
+        # Remove: --show-transaction, InvocationID, unstoppable (ExecStop),
+        # systemd-run, varlinkctl, PropagatesStopTo,
+        # RestartMode=direct, shortcut restart (SubState=auto-restart).
         patchScript = ''
-          echo '#!/bin/bash' > TEST-03-JOBS.sh
-          echo 'echo "Skipped: PID 1 job management not yet implemented"' >> TEST-03-JOBS.sh
-          echo 'touch /testok' >> TEST-03-JOBS.sh
+          cat > TEST-03-JOBS.sh << 'TESTEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+          . "$(dirname "$0")"/util.sh
+
+          # daemon-reexec
+          systemctl daemon-reexec
+
+          # Test merging of a --job-mode=ignore-dependencies job
+          systemctl start --no-block hello-after-sleep.target
+          timeout 10 bash -c "until systemctl list-jobs | tee /root/list-jobs.txt | grep 'sleep\.service.*running'; do sleep .1; done"
+          grep 'hello\.service.*waiting' /root/list-jobs.txt
+          timeout 10 systemctl start --job-mode=ignore-dependencies hello
+          systemctl list-jobs >/root/list-jobs.txt
+          grep 'sleep\.service.*running' /root/list-jobs.txt
+          (! grep 'hello\.service' /root/list-jobs.txt)
+          systemctl stop sleep.service hello-after-sleep.target
+
+          # Test for a crash when enqueuing a JOB_NOP when other job already exists
+          systemctl start --no-block hello-after-sleep.target
+          systemctl try-restart --job-mode=fail hello.service
+          systemctl try-restart hello.service
+          systemctl stop hello.service sleep.service hello-after-sleep.target
+
+          # Test waiting for a started units to terminate again
+          cat <<EOF >/run/systemd/system/wait2.service
+          [Unit]
+          Description=Wait for 2 seconds
+          [Service]
+          ExecStart=bash -ec 'sleep 2'
+          EOF
+          cat <<EOF >/run/systemd/system/wait5fail.service
+          [Unit]
+          Description=Wait for 5 seconds and fail
+          [Service]
+          ExecStart=bash -ec 'sleep 5; false'
+          EOF
+
+          START_SEC=$(date -u '+%s')
+          timeout 10 systemctl start --wait wait2.service
+          END_SEC=$(date -u '+%s')
+          ELAPSED=$((END_SEC-START_SEC))
+          [[ "$ELAPSED" -ge 2 ]]
+
+          START_SEC=$(date -u '+%s')
+          (! systemctl start --wait wait2.service wait5fail.service)
+          END_SEC=$(date -u '+%s')
+          ELAPSED=$((END_SEC-START_SEC))
+          [[ "$ELAPSED" -ge 5 ]]
+
+          touch /testok
+          TESTEOF
+          chmod +x TEST-03-JOBS.sh
         '';
       }
       {
