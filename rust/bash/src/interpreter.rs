@@ -2549,6 +2549,33 @@ impl Shell {
             expr
         };
 
+        // Check for trailing operators (e.g., "4+" → syntax error)
+        {
+            let trimmed = expr.trim();
+            if !trimmed.is_empty() {
+                let last = trimmed.as_bytes()[trimmed.len() - 1];
+                if matches!(last, b'+' | b'-' | b'*' | b'/' | b'%' | b'^' | b'~')
+                    && !trimmed.ends_with("++")
+                    && !trimmed.ends_with("--")
+                {
+                    // Find the operator token for error message
+                    let op_char = last as char;
+                    let top_expr = self
+                        .arith_top_expr
+                        .clone()
+                        .unwrap_or_else(|| trimmed.to_string());
+                    eprintln!(
+                        "{}: {}: arithmetic syntax error: operand expected (error token is \"{}\")",
+                        self.arith_error_prefix(),
+                        top_expr,
+                        op_char
+                    );
+                    crate::expand::set_arith_error();
+                    return 0;
+                }
+            }
+        }
+
         // Handle comma operator (only at top level, not inside parens)
         {
             let mut depth = 0i32;
@@ -4532,10 +4559,8 @@ impl Shell {
                     None => {
                         // Try arithmetic evaluation
                         let n = self.eval_arith_expr(left);
-                        // If the expression was completely non-numeric, report error
-                        if left.chars().next().is_some_and(|c| c.is_alphabetic()) && n == 0 {
-                            eprintln!("{}: [[: {}: integer expected", self.error_prefix(), left);
-                            return Err(());
+                        if crate::expand::take_arith_error() {
+                            return Ok(false);
                         }
                         n
                     }
@@ -4544,9 +4569,8 @@ impl Shell {
                     Some(n) => n,
                     None => {
                         let n = self.eval_arith_expr(right);
-                        if right.chars().next().is_some_and(|c| c.is_alphabetic()) && n == 0 {
-                            eprintln!("{}: [[: {}: integer expected", self.error_prefix(), right);
-                            return Err(());
+                        if crate::expand::take_arith_error() {
+                            return Ok(false);
                         }
                         n
                     }
