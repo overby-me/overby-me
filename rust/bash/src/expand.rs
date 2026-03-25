@@ -236,6 +236,15 @@ fn expand_word_to_segments(word: &Word, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> Vec<
     for part in word {
         expand_part(part, ctx, &mut segments, cmd_sub);
     }
+    // If any segment came from an incomplete comsub, clear preceding segments
+    // to suppress output (matching bash behavior for incomplete $())
+    let has_incomplete = segments.iter().any(|s| match s {
+        Segment::Unquoted(t) | Segment::Quoted(t) => t == "\x00INCOMPLETE_COMSUB",
+        _ => false,
+    });
+    if has_incomplete {
+        return vec![Segment::Unquoted("\x00INCOMPLETE_COMSUB".to_string())];
+    }
     segments
 }
 
@@ -340,6 +349,14 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                         s.push_str(&expand_param(expr, ctx, cmd_sub));
                     }
                     WordPart::CommandSub(cmd) => {
+                        if cmd.starts_with('\x00') {
+                            // Incomplete comsub — mark for suppression
+                            if !s.is_empty() {
+                                out.push(Segment::Quoted(std::mem::take(&mut s)));
+                            }
+                            out.push(Segment::Unquoted("\x00INCOMPLETE_COMSUB".to_string()));
+                            continue;
+                        }
                         let trimmed = cmd.trim();
                         if let Some(file) = trimmed
                             .strip_prefix("< ")
@@ -523,6 +540,11 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
             }
         }
         WordPart::CommandSub(cmd) => {
+            // Check for incomplete comsub marker
+            if cmd.starts_with('\x00') {
+                out.push(Segment::Unquoted("\x00INCOMPLETE_COMSUB".to_string()));
+                return;
+            }
             // Optimize $(< file) — read file content directly
             let trimmed = cmd.trim();
             let val = if let Some(file) = trimmed
