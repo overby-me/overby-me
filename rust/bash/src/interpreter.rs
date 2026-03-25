@@ -539,6 +539,10 @@ impl Shell {
         {
             self.random_seed = seed;
         }
+        // Resetting OPTIND also resets the getopts internal offset
+        if resolved == "OPTIND" {
+            self.vars.remove("_GETOPTS_OPTOFS");
+        }
         // Integer variables: evaluate value as arithmetic expression
         let value = if self.integer_vars.contains(&resolved) {
             self.eval_arith_expr(&value).to_string()
