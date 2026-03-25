@@ -120,7 +120,14 @@ impl Lexer {
         let ch = self.input.get(self.pos).copied();
         if let Some(c) = ch {
             if c == '\n' {
-                self.line += 1;
+                // Don't count newlines that are inside alias expansions
+                let in_alias = self
+                    .alias_end_markers
+                    .iter()
+                    .any(|(_, end_pos, _, nl)| *nl > 0 && self.pos < *end_pos);
+                if !in_alias {
+                    self.line += 1;
+                }
             }
             self.pos += 1;
         }
@@ -183,11 +190,9 @@ impl Lexer {
                 if ends_with_space {
                     self.expand_alias_next = true;
                 }
-                // Adjust line counter: newlines in the expansion text were
-                // counted by the lexer but shouldn't affect source line numbers
-                if newline_count > 0 {
-                    self.line = self.line.saturating_sub(newline_count);
-                }
+                // Newlines in alias expansions are no longer counted during advance(),
+                // so no post-adjustment needed
+                let _ = newline_count;
             } else {
                 i += 1;
             }
