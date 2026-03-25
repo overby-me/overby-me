@@ -706,8 +706,11 @@ impl Shell {
             last_pos = cur_pos;
 
             // Update LINENO to current parser line
-            self.vars
-                .insert("LINENO".to_string(), parser.current_line().to_string());
+            // (but not inside trap handlers — they preserve the calling context's LINENO)
+            if !self.in_debug_trap {
+                self.vars
+                    .insert("LINENO".to_string(), parser.current_line().to_string());
+            }
 
             match parser.parse_complete_command_pub() {
                 Ok(cmd) => {
@@ -832,7 +835,13 @@ impl Shell {
             self.in_debug_trap = true;
             let saved_status = self.last_status;
             let saved_cmd = self.vars.get("BASH_COMMAND").cloned();
+            // Don't let the trap handler's parser overwrite LINENO —
+            // LINENO should reflect the command being debugged
+            let saved_lineno = self.vars.get("LINENO").cloned();
             let trap_status = self.run_string(&handler);
+            if let Some(ln) = saved_lineno {
+                self.vars.insert("LINENO".to_string(), ln);
+            }
             // Restore BASH_COMMAND (trap shouldn't overwrite it)
             if let Some(cmd) = saved_cmd {
                 self.vars.insert("BASH_COMMAND".to_string(), cmd);
@@ -895,8 +904,10 @@ impl Shell {
         #[cfg(unix)]
         self.reap_coprocs();
 
-        // Update LINENO
-        self.vars.insert("LINENO".to_string(), cmd.line.to_string());
+        // Update LINENO (skip inside trap handlers)
+        if !self.in_debug_trap {
+            self.vars.insert("LINENO".to_string(), cmd.line.to_string());
+        }
 
         if cmd.background {
             #[cfg(unix)]
