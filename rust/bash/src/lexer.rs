@@ -1043,7 +1043,58 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
         }
         '{' => {
             *i += 1;
-            parse_brace_param(chars, i, in_dquote)
+            // Check for funsub: ${ cmd; } — space/tab/newline/| after {
+            if *i < chars.len() && matches!(chars[*i], ' ' | '\t' | '\n' | '|') {
+                // Parse as command substitution delimited by }
+                let mut depth = 1;
+                let mut cmd = String::new();
+                while *i < chars.len() && depth > 0 {
+                    match chars[*i] {
+                        '{' => {
+                            depth += 1;
+                            cmd.push(chars[*i]);
+                        }
+                        '}' => {
+                            depth -= 1;
+                            if depth > 0 {
+                                cmd.push(chars[*i]);
+                            }
+                        }
+                        '\'' => {
+                            cmd.push(chars[*i]);
+                            *i += 1;
+                            while *i < chars.len() && chars[*i] != '\'' {
+                                cmd.push(chars[*i]);
+                                *i += 1;
+                            }
+                            if *i < chars.len() {
+                                cmd.push(chars[*i]);
+                            }
+                        }
+                        '"' => {
+                            cmd.push(chars[*i]);
+                            *i += 1;
+                            while *i < chars.len() && chars[*i] != '"' {
+                                if chars[*i] == '\\' && *i + 1 < chars.len() {
+                                    cmd.push(chars[*i]);
+                                    *i += 1;
+                                }
+                                cmd.push(chars[*i]);
+                                *i += 1;
+                            }
+                            if *i < chars.len() {
+                                cmd.push(chars[*i]);
+                            }
+                        }
+                        _ => cmd.push(chars[*i]),
+                    }
+                    *i += 1;
+                }
+                // Treat funsub as command substitution for now
+                WordPart::CommandSub(cmd)
+            } else {
+                parse_brace_param(chars, i, in_dquote)
+            }
         }
         ch if ch == '_' || ch.is_alphabetic() => {
             let mut name = String::new();
