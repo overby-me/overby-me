@@ -140,6 +140,8 @@ fn main() {
     let mut value_only = false;
     let mut state_filter: Option<String> = None;
 
+    let mut force = false;
+    let mut wait = false;
     let mut what_filter: Option<String> = None;
     let mut kill_whom: Option<String> = None;
     let mut kill_value: Option<i32> = None;
@@ -208,6 +210,12 @@ fn main() {
             if arg == "--no-block" {
                 no_block = true;
             }
+            if arg == "--force" {
+                force = true;
+            }
+            if arg == "--wait" {
+                wait = true;
+            }
             i += 1;
             continue;
         }
@@ -216,6 +224,9 @@ fn main() {
         if KNOWN_SHORT_FLAGS.contains(&arg.as_str()) {
             if arg == "-q" {
                 quiet = true;
+            }
+            if arg == "-f" {
+                force = true;
             }
             i += 1;
             continue;
@@ -799,6 +810,9 @@ fn main() {
         if let Some(val) = kill_value {
             arr.push(Value::String(val.to_string()));
         }
+        if wait {
+            arr.push(Value::String("--wait".to_string()));
+        }
         Some(Value::Array(arr))
     } else if method == "suspend"
         || method == "hibernate"
@@ -917,7 +931,14 @@ fn main() {
 
     match result {
         Ok(resp) => {
-            handle_response(&positional[0], &resp, quiet, value_only, &property_filter);
+            handle_response(
+                &positional[0],
+                &resp,
+                quiet,
+                value_only,
+                force,
+                &property_filter,
+            );
         }
         Err(e) => {
             // daemon-reexec causes the server to execve(), dropping the connection.
@@ -954,6 +975,7 @@ fn handle_response(
     resp: &Value,
     quiet: bool,
     value_only: bool,
+    force: bool,
     property_filter: &[String],
 ) {
     // Check for JSON-RPC error responses.
@@ -987,6 +1009,10 @@ fn handle_response(
                     println!("inactive");
                 }
                 std::process::exit(code);
+            }
+            "cat" if force => {
+                // --force suppresses errors for missing units
+                std::process::exit(0);
             }
             _ => {
                 if !quiet {

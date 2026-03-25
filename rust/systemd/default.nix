@@ -335,12 +335,8 @@
           sed -i '/^# %J in WantedBy/,/^systemctl daemon-reload$/d' TEST-26-SYSTEMCTL.sh
           # Remove global unit tests
           sed -i '/^# Test systemctl edit --global/,/^rm -f.*GLOBAL_MASKED_UNIT/d' TEST-26-SYSTEMCTL.sh
-          # Remove systemctl cat --force (not implemented)
-          sed -i '/^systemctl cat --force/d' TEST-26-SYSTEMCTL.sh
           # Remove Ensure that the enablement symlinks section
           sed -i '/^# Ensure that the enablement symlinks/,/^systemctl disable/d' TEST-26-SYSTEMCTL.sh
-          # Remove kill --wait (service may not be running after try-reload-or-restart)
-          sed -i '/systemctl kill --wait/d' TEST-26-SYSTEMCTL.sh
           # Remove test_enable_disable_preset function and calls (enable doesn't create symlinks yet)
           sed -i '/^test_enable_disable_preset() {/,/^}/d' TEST-26-SYSTEMCTL.sh
           sed -i '/test_enable_disable_preset/d' TEST-26-SYSTEMCTL.sh

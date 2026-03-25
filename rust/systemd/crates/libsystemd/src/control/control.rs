@@ -89,7 +89,7 @@ pub enum Command {
     /// `kill <unit> [--signal=SIG] [--kill-whom=WHO] [--kill-value=N]`
     /// Send a signal to a unit's processes.
     /// Fields: unit_name, signal, kill_whom ("main"/"control"/"all"), kill_value
-    Kill(String, i32, String, Option<i32>),
+    Kill(String, i32, String, Option<i32>, bool),
     Shutdown(crate::shutdown::ShutdownAction),
     /// `suspend` — put the system to sleep (suspend to RAM).
     Suspend,
@@ -613,7 +613,9 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
         "kill" => {
             // Params: String (unit name) or Array [unit_name, signal, kill_whom, kill_value]
             match &call.params {
-                Some(Value::String(s)) => Command::Kill(s.clone(), 15, "all".to_string(), None),
+                Some(Value::String(s)) => {
+                    Command::Kill(s.clone(), 15, "all".to_string(), None, false)
+                }
                 Some(Value::Array(arr)) if !arr.is_empty() => {
                     let name = arr[0].as_str().unwrap_or("").to_owned();
                     let sig = arr
@@ -630,7 +632,8 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
                         .get(3)
                         .and_then(|v| v.as_str())
                         .and_then(|s| s.parse::<i32>().ok());
-                    Command::Kill(name, sig, whom, value)
+                    let has_wait = arr.iter().any(|v| v.as_str() == Some("--wait"));
+                    Command::Kill(name, sig, whom, value, has_wait)
                 }
                 Some(_) | None => {
                     return Err(ParseError::ParamsInvalid(
@@ -3044,7 +3047,7 @@ pub fn execute_command(
             }
             return Ok(serde_json::json!(null));
         }
-        Command::Kill(unit_name, signal, whom, kill_value) => {
+        Command::Kill(unit_name, signal, whom, kill_value, wait_for_stop) => {
             let ri = run_info.read_poisoned();
             let units = find_units_with_name(&unit_name, &ri.unit_table);
             if units.is_empty() {
@@ -3056,7 +3059,9 @@ pub fn execute_command(
             drop(status);
 
             if !is_active {
-                return Err(format!("Unit {unit_name} is not running"));
+                // Unit has no running processes — nothing to signal.
+                // Real systemd returns success here (sends to empty cgroup).
+                return Ok(serde_json::json!(null));
             }
 
             // Look up the main PID to send the signal directly.
@@ -3105,6 +3110,27 @@ pub fn execute_command(
                     crate::units::deactivate_unit(&id, &ri).map_err(|e| format!("{e}"))?;
                 }
             }
+
+            // Wait for the unit to become inactive before returning.
+            if wait_for_stop {
+                for _ in 0..100 {
+                    let ri = run_info.read_poisoned();
+                    if let Some(unit) = ri.unit_table.get(&id) {
+                        let status = unit.common.status.read_poisoned();
+                        if matches!(
+                            &*status,
+                            UnitStatus::Stopped(_, _) | UnitStatus::NeverStarted
+                        ) {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                    drop(ri);
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+            }
+
             return Ok(serde_json::json!(null));
         }
         Command::ListUnitFiles(type_filter) => {
@@ -5612,7 +5638,7 @@ mod tests {
         };
         let cmd = parse_command(&call).unwrap();
         match cmd {
-            Command::Kill(name, sig, _whom, _val) => {
+            Command::Kill(name, sig, _whom, _val, _wait) => {
                 assert_eq!(name, "sshd.service");
                 assert_eq!(sig, 15); // SIGTERM
             }
@@ -5632,7 +5658,7 @@ mod tests {
         };
         let cmd = parse_command(&call).unwrap();
         match cmd {
-            Command::Kill(name, sig, _whom, _val) => {
+            Command::Kill(name, sig, _whom, _val, _wait) => {
                 assert_eq!(name, "sshd.service");
                 assert_eq!(sig, 9); // SIGKILL
             }
@@ -5651,7 +5677,7 @@ mod tests {
         };
         let cmd = parse_command(&call).unwrap();
         match cmd {
-            Command::Kill(name, sig, _whom, _val) => {
+            Command::Kill(name, sig, _whom, _val, _wait) => {
                 assert_eq!(name, "nginx.service");
                 assert_eq!(sig, 15); // default SIGTERM
             }
@@ -5681,7 +5707,7 @@ mod tests {
         };
         let cmd = parse_command(&call).unwrap();
         match cmd {
-            Command::Kill(name, sig, _whom, _val) => {
+            Command::Kill(name, sig, _whom, _val, _wait) => {
                 assert_eq!(name, "test.service");
                 assert_eq!(sig, 15); // fallback to SIGTERM
             }
