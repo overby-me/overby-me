@@ -3767,6 +3767,66 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
     let mut i = 0;
 
     while i < args.len() {
+        // Handle combined flags like -rd, -rn, etc.
+        if args[i].starts_with('-') && args[i].len() > 1 && !args[i].starts_with("--") {
+            let flags = &args[i][1..];
+            let mut j = 0;
+            let fchars: Vec<char> = flags.chars().collect();
+            while j < fchars.len() {
+                match fchars[j] {
+                    'r' => raw = true,
+                    's' | 'e' => {}
+                    'p' => {
+                        // -p takes next arg (or rest of combined flag)
+                        i += 1;
+                        if i < args.len() {
+                            prompt = args[i].clone();
+                        }
+                        break;
+                    }
+                    'd' => {
+                        // -d takes next arg
+                        i += 1;
+                        if i < args.len() {
+                            delim = Some(args[i].chars().next().unwrap_or('\0'));
+                        }
+                        break;
+                    }
+                    'a' => {
+                        i += 1;
+                        if i < args.len() {
+                            array_name = Some(args[i].clone());
+                        }
+                        break;
+                    }
+                    'n' => {
+                        i += 1;
+                        if i < args.len() {
+                            nchars = args[i].parse().ok();
+                        }
+                        break;
+                    }
+                    'u' => {
+                        i += 1;
+                        if i < args.len() {
+                            fd = args[i].parse().ok();
+                        }
+                        break;
+                    }
+                    't' => {
+                        i += 1;
+                        if i < args.len() {
+                            timeout_secs = args[i].parse().ok();
+                        }
+                        break;
+                    }
+                    _ => break,
+                }
+                j += 1;
+            }
+            i += 1;
+            continue;
+        }
         match args[i].as_str() {
             "-r" => raw = true,
             "-s" | "-e" => {}
@@ -3835,6 +3895,7 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
     }
 
     let mut line = String::new();
+    let mut eof_reached = false;
 
     // Determine which fd to read from
     let read_fd = fd.unwrap_or(0); // 0 = stdin
@@ -3903,9 +3964,13 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
         #[cfg(unix)]
         {
             let mut buf = [0u8; 1];
+            let mut hit_eof = false;
             loop {
                 match nix::unistd::read(read_fd, &mut buf) {
-                    Ok(0) => break,
+                    Ok(0) => {
+                        hit_eof = true;
+                        break;
+                    }
                     Ok(_) => {
                         let ch = buf[0] as char;
                         if ch == delim_char {
@@ -3913,8 +3978,17 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
                         }
                         line.push(ch);
                     }
-                    Err(_) => break,
+                    Err(_) => {
+                        hit_eof = true;
+                        break;
+                    }
                 }
+            }
+            if hit_eof && line.is_empty() {
+                return 1; // EOF with no data
+            }
+            if hit_eof {
+                eof_reached = true;
             }
         }
         #[cfg(not(unix))]
@@ -4199,7 +4273,7 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
     fields.push(current[..end].to_string());
 
     // Assign to variables
-    let mut read_status = 0;
+    let mut read_status = if eof_reached { 1 } else { 0 };
     for (j, name) in var_names.iter().enumerate() {
         let value = fields.get(j).cloned().unwrap_or_default();
         if shell.readonly_vars.contains(name.as_str())
