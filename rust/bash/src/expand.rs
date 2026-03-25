@@ -1318,19 +1318,19 @@ fn apply_param_op(val: &str, op: &ParamOp, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> S
                 .collect()
         }
         ParamOp::TrimSmallLeft(pattern) => {
-            let pat = expand_word_nosplit_ctx(pattern, ctx, cmd_sub);
+            let pat = expand_pattern_word(pattern, ctx, cmd_sub);
             trim_pattern(val, &pat, TrimMode::SmallLeft)
         }
         ParamOp::TrimLargeLeft(pattern) => {
-            let pat = expand_word_nosplit_ctx(pattern, ctx, cmd_sub);
+            let pat = expand_pattern_word(pattern, ctx, cmd_sub);
             trim_pattern(val, &pat, TrimMode::LargeLeft)
         }
         ParamOp::TrimSmallRight(pattern) => {
-            let pat = expand_word_nosplit_ctx(pattern, ctx, cmd_sub);
+            let pat = expand_pattern_word(pattern, ctx, cmd_sub);
             trim_pattern(val, &pat, TrimMode::SmallRight)
         }
         ParamOp::TrimLargeRight(pattern) => {
-            let pat = expand_word_nosplit_ctx(pattern, ctx, cmd_sub);
+            let pat = expand_pattern_word(pattern, ctx, cmd_sub);
             trim_pattern(val, &pat, TrimMode::LargeRight)
         }
         ParamOp::Replace(pattern, replacement)
@@ -1618,7 +1618,7 @@ fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
                 pattern,
                 ctx.vars.get("LINENO").map(|s| s.as_str()).unwrap_or("0"),
             );
-            let pat = expand_word_nosplit_ctx(pattern, ctx, cmd_sub);
+            let pat = expand_pattern_word(pattern, ctx, cmd_sub);
             let mode = if matches!(&expr.op, ParamOp::TrimSmallLeft(_)) {
                 TrimMode::SmallLeft
             } else {
@@ -1631,7 +1631,7 @@ fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
                 pattern,
                 ctx.vars.get("LINENO").map(|s| s.as_str()).unwrap_or("0"),
             );
-            let pat = expand_word_nosplit_ctx(pattern, ctx, cmd_sub);
+            let pat = expand_pattern_word(pattern, ctx, cmd_sub);
             trim_pattern(&val, &pat, TrimMode::SmallRight)
         }
         ParamOp::TrimLargeRight(pattern) => {
@@ -1639,7 +1639,7 @@ fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
                 pattern,
                 ctx.vars.get("LINENO").map(|s| s.as_str()).unwrap_or("0"),
             );
-            let pat = expand_word_nosplit_ctx(pattern, ctx, cmd_sub);
+            let pat = expand_pattern_word(pattern, ctx, cmd_sub);
             trim_pattern(&val, &pat, TrimMode::LargeRight)
         }
         ParamOp::Replace(pattern, replacement)
