@@ -626,7 +626,13 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                 eprintln!("{}: line {}: {}: unbound variable", sname, lineno, name);
                 set_arith_error();
             }
-            out.push(Segment::Unquoted(val));
+            // Protect backslashes in expanded values from quote removal
+            // (they're literal data, not quoting characters)
+            if val.contains('\\') {
+                out.push(Segment::Unquoted(val.replace('\\', "\x00\\")));
+            } else {
+                out.push(Segment::Unquoted(val));
+            }
         }
         WordPart::Param(expr) => {
             // Handle unquoted ${@%pattern}, ${@#pattern}, ${@/pat/rep} etc.
