@@ -2608,13 +2608,31 @@ pub fn execute_command(
                 } else {
                     format!("{name}.service")
                 };
-                // Find the unit file on disk
+                // Find the unit file on disk (try instance, then template)
                 let mut unit_path = None;
                 for dir in &ri.config.unit_dirs {
                     let candidate = dir.join(&full_name);
                     if candidate.exists() {
                         unit_path = Some(candidate);
                         break;
+                    }
+                }
+                // For template instances (e.g. foo@1.service), try the template (foo@.service)
+                if unit_path.is_none()
+                    && let Some(at_pos) = full_name.find('@')
+                    && let Some(dot_pos) = full_name[at_pos..].find('.')
+                {
+                    let template = format!(
+                        "{}@{}",
+                        &full_name[..at_pos],
+                        &full_name[at_pos + dot_pos..]
+                    );
+                    for dir in &ri.config.unit_dirs {
+                        let candidate = dir.join(&template);
+                        if candidate.exists() {
+                            unit_path = Some(candidate);
+                            break;
+                        }
                     }
                 }
                 let unit_path = match unit_path {
@@ -2717,14 +2735,43 @@ pub fn execute_command(
                     format!("{name}.service")
                 };
                 // Scan .wants/ and .requires/ directories for symlinks to this unit
+                // For template units (foo@.service), match all instances (foo@*.service)
+                let is_template = full_name.contains("@.");
+                let template_prefix = if is_template {
+                    full_name.split("@.").next().map(|p| format!("{p}@"))
+                } else {
+                    None
+                };
+                let template_suffix = if is_template {
+                    full_name.find("@.").map(|pos| &full_name[pos + 2..])
+                } else {
+                    None
+                };
                 if let Ok(entries) = std::fs::read_dir(base_dir) {
                     for entry in entries.flatten() {
                         let entry_name = entry.file_name();
                         let entry_str = entry_name.to_string_lossy();
                         if entry_str.ends_with(".wants") || entry_str.ends_with(".requires") {
-                            let link = entry.path().join(&full_name);
-                            if link.symlink_metadata().is_ok() {
-                                let _ = std::fs::remove_file(&link);
+                            if is_template {
+                                // Remove all instance symlinks matching the template
+                                if let Ok(links) = std::fs::read_dir(entry.path()) {
+                                    for link_entry in links.flatten() {
+                                        let link_name =
+                                            link_entry.file_name().to_string_lossy().to_string();
+                                        if let (Some(pfx), Some(sfx)) =
+                                            (&template_prefix, template_suffix)
+                                            && link_name.starts_with(pfx.as_str())
+                                            && link_name.ends_with(sfx)
+                                        {
+                                            let _ = std::fs::remove_file(link_entry.path());
+                                        }
+                                    }
+                                }
+                            } else {
+                                let link = entry.path().join(&full_name);
+                                if link.symlink_metadata().is_ok() {
+                                    let _ = std::fs::remove_file(&link);
+                                }
                             }
                         }
                     }

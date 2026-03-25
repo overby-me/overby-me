@@ -148,6 +148,7 @@ fn main() {
     let mut marked = false;
     let mut output_format: Option<String> = None;
     let mut what_filter: Option<String> = None;
+    let mut now = false;
     let mut preset_mode: Option<String> = None;
     let mut kill_whom: Option<String> = None;
     let mut kill_value: Option<i32> = None;
@@ -269,6 +270,9 @@ fn main() {
             }
             if arg == "--dry-run" {
                 dry_run = true;
+            }
+            if arg == "--now" {
+                now = true;
             }
             if arg == "--failed" {
                 state_filter = Some("failed".to_string());
@@ -1120,6 +1124,7 @@ fn main() {
     } else {
         method.to_string()
     };
+    let method_name = method.clone();
     let call = Call {
         method,
         params,
@@ -1162,6 +1167,55 @@ fn main() {
                 output_format.as_deref(),
                 &property_filter,
             );
+            // --now: after enable → start units, after disable → stop units
+            if now
+                && (method_name == "enable"
+                    || method_name == "reenable"
+                    || method_name == "disable")
+            {
+                let action = if method_name == "disable" {
+                    "stop"
+                } else {
+                    "start"
+                };
+                // For template units (e.g. foo@.service), find and act on all instances
+                let mut units_to_act_on: Vec<String> = Vec::new();
+                for unit in &positional[1..] {
+                    if unit.contains("@.") {
+                        // Template unit — query for active instances by listing units
+                        let prefix = unit.split("@.").next().unwrap_or("");
+                        let list_call = serde_json::json!({
+                            "method": "list-units",
+                        });
+                        if let Ok(list_resp) = send_unix(&addr, &list_call.to_string())
+                            && let Some(result) = list_resp.get("result")
+                            && let Some(arr) = result.as_array()
+                        {
+                            for entry in arr {
+                                // list-units returns plain strings or objects with "UNIT" key
+                                let name = entry
+                                    .as_str()
+                                    .or_else(|| entry.get("UNIT").and_then(|v| v.as_str()));
+                                if let Some(name) = name
+                                    && name.starts_with(&format!("{prefix}@"))
+                                    && !name.contains("@.")
+                                {
+                                    units_to_act_on.push(name.to_string());
+                                }
+                            }
+                        }
+                    } else {
+                        units_to_act_on.push(unit.clone());
+                    }
+                }
+                for unit in &units_to_act_on {
+                    let call = serde_json::json!({
+                        "method": action,
+                        "params": unit,
+                    });
+                    let _ = send_unix(&addr, &call.to_string());
+                }
+            }
         }
         Err(e) => {
             // daemon-reexec causes the server to execve(), dropping the connection.

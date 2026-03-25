@@ -309,16 +309,12 @@
           sed -i '/^test_enable_disable_preset --root=/d' TEST-26-SYSTEMCTL.sh
           sed -i '/^test_mask_unmask_revert --root=/d' TEST-26-SYSTEMCTL.sh
           sed -i '/^test_list_unit_files --root=/d' TEST-26-SYSTEMCTL.sh
-          # Remove template unit disable --now (enable --now not yet implemented)
-          sed -i '/^# disable --now with template unit/,/^# add-wants\/add-requires/{/^# add-wants\/add-requires/!d}' TEST-26-SYSTEMCTL.sh
           # Remove sysv-generator test
           sed -i '/^# test for sysv-generator/,/^fi$/d' TEST-26-SYSTEMCTL.sh
           # Remove WantedBy %J test (specifier expansion in WantedBy not implemented)
           sed -i '/^# %J in WantedBy/,/^systemctl daemon-reload$/d' TEST-26-SYSTEMCTL.sh
           # Remove global unit tests (--global flag not implemented)
           sed -i '/^# Test systemctl edit --global/,/^rm -f.*GLOBAL_MASKED_UNIT/d' TEST-26-SYSTEMCTL.sh
-          # Remove Ensure that the enablement symlinks section (checks symlink targets)
-          sed -i '/^# Ensure that the enablement symlinks/,/^systemctl disable/d' TEST-26-SYSTEMCTL.sh
           # Remove Failed-unit section (systemd-run --wait hangs for transient units)
           sed -i '/^# Failed-unit/,/^# Aux verbs/{/^# Aux verbs/!d}' TEST-26-SYSTEMCTL.sh
         '';
