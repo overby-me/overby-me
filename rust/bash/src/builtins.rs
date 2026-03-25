@@ -2118,6 +2118,7 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
     let mut flag_func_body = false;
     let mut flag_nameref = false;
     let mut flag_readonly = false;
+    let mut flag_unset_readonly = false;
     let mut flag_export = false;
     let mut flag_integer = false;
     let mut flag_uppercase = false;
@@ -2164,7 +2165,12 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 }
             }
         } else if arg.starts_with('+') && arg.len() > 1 {
-            // +<flag> unsets attribute — skip flags but don't treat as name
+            // +<flag> unsets attribute
+            for ch in arg[1..].chars() {
+                if ch == 'r' {
+                    flag_unset_readonly = true;
+                }
+            }
         } else {
             names.push(arg.clone());
         }
@@ -2526,6 +2532,7 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
     // In a function context, declare/typeset creates local variables (unless -g)
     let make_local = !flag_global && !shell.local_scopes.is_empty();
 
+    let mut status = 0;
     for name_arg in &names {
         if let Some(eq_pos) = name_arg.find('=') {
             let (name, value, is_append) = if eq_pos > 0 && name_arg.as_bytes()[eq_pos - 1] == b'+'
@@ -2534,6 +2541,17 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             } else {
                 (&name_arg[..eq_pos], &name_arg[eq_pos + 1..], false)
             };
+
+            // Check if variable is readonly
+            if shell.readonly_vars.contains(name) && !make_local {
+                eprintln!(
+                    "{}: declare: {}: readonly variable",
+                    shell.error_prefix(),
+                    name
+                );
+                status = 1;
+                continue;
+            }
 
             if make_local {
                 shell.declare_local(name);
@@ -2617,6 +2635,17 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             }
         } else {
             let name = name_arg.as_str();
+            // Can't remove readonly attribute
+            if flag_unset_readonly && shell.readonly_vars.contains(name) {
+                eprintln!(
+                    "{}: declare: {}: readonly variable",
+                    shell.error_prefix(),
+                    name
+                );
+                status = 1;
+                continue;
+            }
+
             if make_local {
                 shell.declare_local(name);
             }
@@ -2657,7 +2686,7 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             }
         }
     }
-    0
+    status
 }
 
 /// Parse an associative array literal: `([key1]=val1 [key2]=val2 ...)`
@@ -6106,7 +6135,7 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
                 }
             } else {
                 eprintln!(
-                    "{}: shopt: {}: invalid option name",
+                    "{}: shopt: {}: invalid shell option name",
                     shell.error_prefix(),
                     opt
                 );
@@ -6370,7 +6399,7 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
             _ => {
                 if !query {
                     eprintln!(
-                        "{}: shopt: {}: invalid option name",
+                        "{}: shopt: {}: invalid shell option name",
                         shell.error_prefix(),
                         opt
                     );
