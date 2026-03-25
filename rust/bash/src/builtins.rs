@@ -473,13 +473,27 @@ fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                                 _ => break,
                             }
                         }
-                        if val == 0 {
-                            break; // NUL terminates
-                        }
-                        print!("{}", val as char);
+                        // Write raw byte (including NUL)
+                        use std::io::Write;
+                        std::io::stdout().write_all(&[val]).ok();
                     }
                     Some('\'') => print!("'"),
                     Some('"') => print!("\""),
+                    Some('x') => {
+                        // \xNN hex escape
+                        let mut val = 0u8;
+                        for _ in 0..2 {
+                            match chars.peek() {
+                                Some(d) if d.is_ascii_hexdigit() => {
+                                    val = val * 16 + d.to_digit(16).unwrap() as u8;
+                                    chars.next();
+                                }
+                                _ => break,
+                            }
+                        }
+                        use std::io::Write;
+                        std::io::stdout().write_all(&[val]).ok();
+                    }
                     Some(c) => print!("\\{}", c),
                     None => print!("\\"),
                 }
@@ -804,7 +818,11 @@ fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                     Some('b') => {
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("");
                         let expanded = interpret_echo_escapes(arg);
-                        print!("{}", expanded);
+                        // Use raw byte output for %b (supports NUL bytes and raw bytes)
+                        use std::io::Write;
+                        std::io::stdout()
+                            .write_all(&string_to_raw_bytes(&expanded))
+                            .ok();
                         arg_idx += 1;
                     }
                     Some('q') => {
