@@ -1464,6 +1464,31 @@ fn read_param_name(chars: &[char], i: &mut usize) -> String {
     name
 }
 
+/// Warn when a pattern word has $( inside single quotes (would be comsub without quoting)
+fn warn_incomplete_comsub_in_pattern(word: &Word) {
+    // Check if a SingleQuoted part contains $( with content after it but no )
+    // AND there's a ) in the following Literal parts (consumed by quoting boundary)
+    let parts: Vec<&WordPart> = word.iter().collect();
+    for (idx, part) in parts.iter().enumerate() {
+        if let WordPart::SingleQuoted(s) = part
+            && let Some(pos) = s.find("$(")
+        {
+            let after_dollar = &s[pos + 2..];
+            if !after_dollar.is_empty() && !s[pos..].contains(')') {
+                let has_paren_after = parts[idx + 1..]
+                    .iter()
+                    .any(|p| matches!(p, WordPart::Literal(t) if t.contains(')')));
+                if has_paren_after {
+                    eprintln!(
+                        "command substitution: unexpected EOF while looking for matching `)'"
+                    );
+                    return;
+                }
+            }
+        }
+    }
+}
+
 fn read_param_op(chars: &[char], i: &mut usize, _name: &str, in_dquote: bool) -> ParamOp {
     // For pattern operations (#, %, /), $'...' should still be expanded even in heredoc
     let read_word =
@@ -1567,9 +1592,12 @@ fn read_param_op(chars: &[char], i: &mut usize, _name: &str, in_dquote: bool) ->
             if *i < chars.len() && chars[*i] == '#' {
                 *i += 1;
                 let word = read_pattern_word(chars, i);
+                // Warn about $(  inside single-quoted pattern parts
+                warn_incomplete_comsub_in_pattern(&word);
                 ParamOp::TrimLargeLeft(word)
             } else {
                 let word = read_pattern_word(chars, i);
+                warn_incomplete_comsub_in_pattern(&word);
                 ParamOp::TrimSmallLeft(word)
             }
         }
@@ -1578,9 +1606,11 @@ fn read_param_op(chars: &[char], i: &mut usize, _name: &str, in_dquote: bool) ->
             if *i < chars.len() && chars[*i] == '%' {
                 *i += 1;
                 let word = read_pattern_word(chars, i);
+                warn_incomplete_comsub_in_pattern(&word);
                 ParamOp::TrimLargeRight(word)
             } else {
                 let word = read_pattern_word(chars, i);
+                warn_incomplete_comsub_in_pattern(&word);
                 ParamOp::TrimSmallRight(word)
             }
         }
