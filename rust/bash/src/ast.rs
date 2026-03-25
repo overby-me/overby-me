@@ -393,3 +393,29 @@ pub fn word_to_string(word: &Word) -> String {
     }
     s
 }
+
+/// Convert a word to its raw string representation (preserving backslashes for escaped chars)
+pub fn word_to_raw_string(word: &Word) -> String {
+    let mut s = String::new();
+    for part in word {
+        match part {
+            WordPart::Literal(t) | WordPart::Tilde(t) => s.push_str(t),
+            WordPart::SingleQuoted(t) => {
+                // SingleQuoted from backslash escape: show as \char
+                if t.len() == 1 {
+                    s.push('\\');
+                }
+                s.push_str(t);
+            }
+            WordPart::DoubleQuoted(parts) => {
+                s.push_str(&word_to_raw_string(parts));
+            }
+            WordPart::Variable(name) => {
+                s.push('$');
+                s.push_str(name);
+            }
+            _ => {}
+        }
+    }
+    s
+}

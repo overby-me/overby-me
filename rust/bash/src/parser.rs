@@ -644,15 +644,20 @@ impl Parser {
             self.current = saved_tok;
         }
 
-        let var = self.word_text().ok_or_else(|| {
+        let (var, var_raw) = if let Token::Word(parts) = &self.current {
+            let text = word_to_string(parts);
+            // Reconstruct raw form: if any part is not Literal, it was quoted/escaped
+            let raw = word_to_raw_string(parts);
+            (text, raw)
+        } else {
             let token = self.token_to_str();
-            format!("syntax error near unexpected token `{}'", token)
-        })?;
-        // Validate variable name
-        if !var.chars().all(|c| c.is_alphanumeric() || c == '_')
-            || var.chars().next().is_none_or(|c| c.is_ascii_digit())
+            return Err(format!("syntax error near unexpected token `{}'", token));
+        };
+        // Validate variable name using raw form (preserves backslashes etc.)
+        if !var_raw.chars().all(|c| c.is_alphanumeric() || c == '_')
+            || var_raw.chars().next().is_none_or(|c| c.is_ascii_digit())
         {
-            return Err(format!("RUNTIME:`{}': not a valid identifier", var));
+            return Err(format!("RUNTIME:`{}': not a valid identifier", var_raw));
         }
         self.advance();
 
