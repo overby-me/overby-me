@@ -145,6 +145,7 @@ fn main() {
     let mut root_path: Option<String> = None;
     let mut runtime = false;
     let mut dry_run = false;
+    let mut marked = false;
     let mut output_format: Option<String> = None;
     let mut what_filter: Option<String> = None;
     let mut kill_whom: Option<String> = None;
@@ -442,6 +443,16 @@ fn main() {
             false
         }
         _ => true,
+    });
+
+    // Extract --marked flag
+    positional.retain(|arg| {
+        if arg == "--marked" {
+            marked = true;
+            false
+        } else {
+            true
+        }
     });
 
     // Extract --full flag for edit
@@ -1040,6 +1051,9 @@ fn main() {
             }
             Some(Value::Array(arr))
         }
+    } else if marked && (method == "reload-or-restart" || method == "restart") {
+        // --marked: operate on all units with needs-restart marker
+        Some(Value::String("--marked".to_string()))
     } else if positional.len() == 2 {
         Some(Value::String(positional[1].clone()))
     } else if positional.len() > 2 {

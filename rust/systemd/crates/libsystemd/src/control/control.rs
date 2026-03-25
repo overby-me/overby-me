@@ -2558,6 +2558,38 @@ pub fn execute_command(
                 }
             }
 
+            // Handle Markers property specially (transient, not persisted)
+            let markers_prop = props
+                .iter()
+                .find(|p| p.starts_with("Markers="))
+                .map(|p| p.strip_prefix("Markers=").unwrap_or("").to_owned());
+            if let Some(markers_val) = &markers_prop {
+                let ri = run_info.read_poisoned();
+                let mut unit_markers = ri.unit_markers.lock().unwrap();
+                let markers: Vec<String> = markers_val
+                    .split_whitespace()
+                    .map(|s| s.to_owned())
+                    .collect();
+                if markers.is_empty() {
+                    unit_markers.remove(&unit_name);
+                } else {
+                    unit_markers.insert(unit_name.clone(), markers);
+                }
+            }
+            // Filter out Markers from props for disk persistence
+            let props: Vec<String> = if markers_prop.is_some() {
+                let filtered: Vec<String> = props
+                    .into_iter()
+                    .filter(|p| !p.starts_with("Markers="))
+                    .collect();
+                if filtered.is_empty() {
+                    return Ok(serde_json::json!(null));
+                }
+                filtered
+            } else {
+                props
+            };
+
             // Group properties by section.
             // Properties like CPUWeight, MemoryMax, etc. belong to [Service],
             // [Slice], [Socket], [Mount], or [Swap] sections. For simplicity
@@ -3510,6 +3542,16 @@ pub fn execute_command(
             let unit = &units[0];
             let mut props = unit_properties::collect_properties(unit);
 
+            // Add Markers property
+            {
+                let markers = ri.unit_markers.lock().unwrap();
+                let unit_markers = markers.get(&unit.id.name);
+                let markers_val = unit_markers
+                    .map(|m| m.join(" "))
+                    .unwrap_or_default();
+                props.insert("Markers".to_string(), markers_val);
+            }
+
             // Compute Effective* resource-control properties by traversing
             // the slice hierarchy and finding the minimum limit.
             {
@@ -3828,9 +3870,41 @@ pub fn execute_command(
         Command::ReloadOrRestart(unit_name) => {
             // reload-or-restart: try to reload, fall back to restart.
             // Since we don't support reload yet, just restart.
-            let id = find_or_load_unit(&unit_name, &run_info)?;
-            let ri = run_info.read_poisoned();
-            crate::units::reactivate_unit(id, &ri).map_err(|e| format!("{e}"))?;
+            if unit_name == "--marked" {
+                // --marked: restart all units with needs-restart marker, then clear markers
+                let units_to_restart: Vec<String> = {
+                    let ri = run_info.read_poisoned();
+                    let markers = ri.unit_markers.lock().unwrap();
+                    markers
+                        .iter()
+                        .filter(|(_, v)| v.iter().any(|m| m == "needs-restart"))
+                        .map(|(k, _)| k.clone())
+                        .collect()
+                };
+                for name in &units_to_restart {
+                    if let Ok(id) = find_or_load_unit(name, &run_info) {
+                        let ri = run_info.read_poisoned();
+                        let _ = crate::units::reactivate_unit(id, &ri);
+                    }
+                }
+                // Clear needs-restart markers
+                {
+                    let ri = run_info.read_poisoned();
+                    let mut markers = ri.unit_markers.lock().unwrap();
+                    for name in &units_to_restart {
+                        if let Some(m) = markers.get_mut(name) {
+                            m.retain(|v| v != "needs-restart");
+                            if m.is_empty() {
+                                markers.remove(name);
+                            }
+                        }
+                    }
+                }
+            } else {
+                let id = find_or_load_unit(&unit_name, &run_info)?;
+                let ri = run_info.read_poisoned();
+                crate::units::reactivate_unit(id, &ri).map_err(|e| format!("{e}"))?;
+            }
         }
         Command::IsActive(unit_name) => {
             // For glob patterns, check all matching units

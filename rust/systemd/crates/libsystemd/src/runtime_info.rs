@@ -43,6 +43,9 @@ pub type PendingActivations = Arc<Mutex<std::collections::HashSet<UnitId>>>;
 /// Manager environment variables, accessible via show-environment/set-environment.
 pub type ManagerEnvironment = Arc<Mutex<HashMap<String, String>>>;
 
+/// Per-unit markers (e.g. "needs-restart"), keyed by unit name.
+pub type UnitMarkers = Arc<Mutex<HashMap<String, Vec<String>>>>;
+
 /// This will be passed through to all the different threads as a central state struct
 pub struct RuntimeInfo {
     pub unit_table: UnitTable,
@@ -55,6 +58,7 @@ pub struct RuntimeInfo {
     pub socket_activation_eventfd: EventFd,
     pub pending_activations: PendingActivations,
     pub manager_environment: ManagerEnvironment,
+    pub unit_markers: UnitMarkers,
 }
 
 impl RuntimeInfo {

@@ -704,6 +704,9 @@ mod tests {
             manager_environment: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),
             )),
+            unit_markers: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
         }));
 
         let tmp = tempfile::NamedTempFile::new().unwrap();
@@ -762,6 +765,9 @@ mod tests {
                 std::collections::HashSet::new(),
             )),
             manager_environment: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
+            unit_markers: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),
             )),
         }));
@@ -829,6 +835,9 @@ mod tests {
                 std::collections::HashSet::new(),
             )),
             manager_environment: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
+            unit_markers: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),
             )),
         }));
