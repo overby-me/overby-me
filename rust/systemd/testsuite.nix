@@ -130,6 +130,11 @@ in
         # Always create /run/systemd/system so tests can write unit files there
         mkdir -p /run/systemd/system
 
+        # Mask debug-shell.service — it fails in the test VM because there's
+        # no serial/tty available, causing TEST-01-BASIC's "no failed units"
+        # assertion to trip.
+        ln -sfn /dev/null /run/systemd/system/debug-shell.service
+
         # Make /etc/systemd/system writable for tests that create drop-ins
         # NixOS normally makes this read-only via etc activation
         if [ -L /etc/systemd/system ] || [ ! -w /etc/systemd/system ]; then

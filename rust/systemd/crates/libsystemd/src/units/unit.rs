@@ -1894,6 +1894,14 @@ pub struct UnitConfig {
     /// Uses the same action values as `SuccessAction=`/`FailureAction=`.
     /// Parsed and stored; no runtime enforcement yet.
     pub start_limit_action: UnitAction,
+
+    /// Timestamp when this unit's configuration was last loaded (parsed from disk).
+    /// Used by `NeedDaemonReload` to detect on-disk changes since the last reload.
+    pub loaded_at: std::time::SystemTime,
+
+    /// Paths to drop-in `.conf` files that were applied when this unit was loaded.
+    /// Used by `NeedDaemonReload` to detect added or removed drop-in files.
+    pub loaded_dropin_files: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone)]

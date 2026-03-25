@@ -222,15 +222,18 @@ pub fn service_exit_handler(
 
     let success_exit_status = get_success_exit_status(unit);
 
-    // kill oneshot service processes. There should be none but just in case...
+    // Handle oneshot service exit: clean up remaining processes and decide
+    // whether to keep the service active (RemainAfterExit=yes) or deactivate it.
     {
         if let Specific::Service(srvc) = &unit.specific
             && srvc.conf.srcv_type == ServiceType::OneShot
         {
-            let mut_state = &mut *srvc.state.write_poisoned();
-            mut_state
-                .srvc
-                .kill_all_remaining_processes(&srvc.conf, &unit.id.name);
+            {
+                let mut_state = &mut *srvc.state.write_poisoned();
+                mut_state
+                    .srvc
+                    .kill_all_remaining_processes(&srvc.conf, &unit.id.name);
+            }
 
             // RemainAfterExit=yes: keep the unit in Started status after a
             // clean exit, matching systemd's behaviour for oneshot services
@@ -239,6 +242,58 @@ pub fn service_exit_handler(
                 trace!(
                     "Oneshot service {} exited cleanly with RemainAfterExit=yes, staying active",
                     unit.id.name
+                );
+                return Ok(());
+            }
+
+            // RemainAfterExit=no (default): deactivate the oneshot service
+            // after its main process exits. This ensures `systemctl is-active`
+            // correctly reports "inactive" (issue #27953).
+            let name = &unit.id.name;
+            trace!("Oneshot service {name} exited, deactivating (RemainAfterExit=no)");
+
+            // Check SuccessAction/FailureAction for oneshot services too.
+            let success_action = &unit.common.unit.success_action;
+            let failure_action = &unit.common.unit.failure_action;
+            if success_exit_status.is_success(&code) {
+                if *success_action != UnitAction::None {
+                    info!(
+                        "Service {} exited successfully, triggering SuccessAction={:?}",
+                        name, success_action
+                    );
+                    crate::units::execute_unit_action(success_action, name);
+                }
+            } else if *failure_action != UnitAction::None {
+                info!(
+                    "Service {} failed ({:?}), triggering FailureAction={:?}",
+                    name, code, failure_action
+                );
+                crate::units::execute_unit_action(failure_action, name);
+            }
+
+            crate::units::deactivate_unit_recursive(&srvc_id, run_info)
+                .map_err(|e| format!("{e}"))?;
+
+            // Mark as failed if the exit was not clean.
+            if !success_exit_status.is_success(&code)
+                && let Some(unit) = run_info.unit_table.get(&srvc_id)
+            {
+                let mut status = unit.common.status.write_poisoned();
+                let reason = match &code {
+                    ChildTermination::Exit(c) => UnitOperationErrorReason::GenericStartError(
+                        format!("process exited with status {c}"),
+                    ),
+                    ChildTermination::Signal(s) => UnitOperationErrorReason::GenericStartError(
+                        format!("process killed by signal {s}"),
+                    ),
+                };
+                *status = UnitStatus::Stopped(
+                    crate::units::StatusStopped::StoppedUnexpected,
+                    vec![reason],
+                );
+                info!(
+                    "Oneshot service {name} failed with {:?}, marked as failed",
+                    code
                 );
             }
             return Ok(());

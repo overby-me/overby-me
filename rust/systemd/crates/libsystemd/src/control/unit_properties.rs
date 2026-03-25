@@ -278,11 +278,80 @@ pub fn collect_properties(unit: &Unit) -> BTreeMap<String, String> {
     insert(&mut props, "LoadState", load_state);
     insert(&mut props, "UnitFileState", "enabled");
 
-    // NeedDaemonReload — check if unit file on disk differs from loaded config.
-    // For now, always return "no" since we reload units on daemon-reload.
+    // NeedDaemonReload — stub value, overridden by control.rs with real check
+    // when unit_dirs are available.
     insert(&mut props, "NeedDaemonReload", "no");
 
     props
+}
+
+/// Check whether a unit's on-disk configuration has changed since it was loaded.
+///
+/// Returns `true` (need reload) when:
+/// - The main unit file (`fragment_path`) has been modified since `loaded_at`
+/// - Drop-in `.conf` files have been added or removed in any `{unit_name}.d/`
+///   directory under the unit search paths
+pub fn need_daemon_reload(unit: &Unit, unit_dirs: &[std::path::PathBuf]) -> bool {
+    let cfg = &unit.common.unit;
+    let loaded_at = cfg.loaded_at;
+
+    // Check if the main fragment file has been modified.
+    if let Some(ref fpath) = cfg.fragment_path {
+        match std::fs::metadata(fpath) {
+            Ok(meta) => {
+                if let Ok(mtime) = meta.modified()
+                    && mtime > loaded_at
+                {
+                    return true;
+                }
+            }
+            Err(_) => {
+                // File no longer exists — need reload to detect removal
+                return true;
+            }
+        }
+    }
+
+    // Collect current set of drop-in .conf file paths across all unit dirs.
+    let mut current_dropins: Vec<std::path::PathBuf> = Vec::new();
+    let dropin_dirname = format!("{}.d", unit.id.name);
+    for dir in unit_dirs {
+        let dropin_dir = dir.join(&dropin_dirname);
+        if let Ok(entries) = std::fs::read_dir(&dropin_dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                if name.to_string_lossy().ends_with(".conf") {
+                    current_dropins.push(entry.path());
+                }
+            }
+        }
+    }
+
+    // Compare current drop-in set with what was loaded.
+    let mut loaded_set: Vec<&std::path::Path> = cfg
+        .loaded_dropin_files
+        .iter()
+        .map(|p| p.as_path())
+        .collect();
+    loaded_set.sort();
+    current_dropins.sort();
+    let current_set: Vec<&std::path::Path> = current_dropins.iter().map(|p| p.as_path()).collect();
+
+    if loaded_set != current_set {
+        return true;
+    }
+
+    // Check if any existing drop-in file has been modified since load.
+    for path in &current_dropins {
+        if let Ok(meta) = std::fs::metadata(path)
+            && let Ok(mtime) = meta.modified()
+            && mtime > loaded_at
+        {
+            return true;
+        }
+    }
+
+    false
 }
 
 /// Compute the next calendar elapse time from a list of OnCalendar= specs.

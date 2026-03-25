@@ -822,6 +822,8 @@ fn make_common_from_parsed(
             start_limit_action: unit.start_limit_action,
             aliases: install.alias,
             default_instance: install.default_instance,
+            loaded_at: std::time::SystemTime::now(),
+            loaded_dropin_files: Vec::new(),
         },
         dependencies: Dependencies {
             wants,

@@ -2340,6 +2340,8 @@ fn create_transient_unit(
                 start_limit_interval_sec: None,
                 start_limit_burst: None,
                 start_limit_action: crate::units::UnitAction::None,
+                loaded_at: std::time::SystemTime::now(),
+                loaded_dropin_files: Vec::new(),
             },
             dependencies: Dependencies {
                 wants: vec![],
@@ -2505,6 +2507,8 @@ fn create_transient_unit(
                     start_limit_interval_sec: None,
                     start_limit_burst: None,
                     start_limit_action: crate::units::UnitAction::None,
+                    loaded_at: std::time::SystemTime::now(),
+                    loaded_dropin_files: Vec::new(),
                 },
                 dependencies: Dependencies {
                     wants: vec![],
@@ -4118,6 +4122,15 @@ pub fn execute_command(
             let unit = &units[0];
             let mut props = unit_properties::collect_properties(unit);
 
+            // NeedDaemonReload — override the stub with a real check
+            {
+                let need_reload = unit_properties::need_daemon_reload(unit, &ri.config.unit_dirs);
+                props.insert(
+                    "NeedDaemonReload".to_string(),
+                    if need_reload { "yes" } else { "no" }.to_string(),
+                );
+            }
+
             // Add Markers property
             {
                 let markers = ri.unit_markers.lock().unwrap();
@@ -5284,6 +5297,8 @@ mod tests {
                     start_limit_interval_sec: None,
                     start_limit_burst: None,
                     start_limit_action: crate::units::UnitAction::None,
+                    loaded_at: std::time::SystemTime::now(),
+                    loaded_dropin_files: Vec::new(),
                 },
                 dependencies: Dependencies {
                     wants: vec![],

@@ -1017,7 +1017,23 @@ pub fn apply_dropins(
         };
 
         match new_unit {
-            Ok(unit) => {
+            Ok(mut unit) => {
+                // Record the drop-in file paths for NeedDaemonReload detection.
+                let dropin_dirname = format!("{}.d", unit_name);
+                let mut dropin_files = Vec::new();
+                for dir in unit_dirs {
+                    let dropin_dir = dir.join(&dropin_dirname);
+                    if let Ok(entries) = std::fs::read_dir(&dropin_dir) {
+                        for entry in entries.flatten() {
+                            if entry.file_name().to_string_lossy().ends_with(".conf") {
+                                dropin_files.push(entry.path());
+                            }
+                        }
+                    }
+                }
+                dropin_files.sort();
+                unit.common.unit.loaded_dropin_files = dropin_files;
+
                 trace!("Applied drop-in overrides to {}", unit_name);
                 units.remove(&unit_id);
                 units.insert(unit.id.clone(), unit);
@@ -1575,6 +1591,8 @@ pub fn generate_fstab_mount_units(unit_table: &mut HashMap<UnitId, Unit>) {
                         start_limit_action: Default::default(),
                         aliases: Vec::new(),
                         default_instance: None,
+                        loaded_at: std::time::SystemTime::now(),
+                        loaded_dropin_files: Vec::new(),
                     },
                     dependencies: Dependencies {
                         wants: Vec::new(),
@@ -1732,6 +1750,8 @@ pub fn generate_fstab_mount_units(unit_table: &mut HashMap<UnitId, Unit>) {
                     start_limit_action: Default::default(),
                     aliases: Vec::new(),
                     default_instance: None,
+                    loaded_at: std::time::SystemTime::now(),
+                    loaded_dropin_files: Vec::new(),
                 },
                 dependencies: Dependencies {
                     wants: Vec::new(),
@@ -2346,6 +2366,8 @@ mod tests {
                     start_limit_interval_sec: None,
                     start_limit_burst: None,
                     start_limit_action: crate::units::UnitAction::None,
+                    loaded_at: std::time::SystemTime::now(),
+                    loaded_dropin_files: Vec::new(),
                 },
                 dependencies: Dependencies {
                     wants: vec![],
