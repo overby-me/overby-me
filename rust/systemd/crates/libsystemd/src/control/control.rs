@@ -4868,19 +4868,43 @@ pub fn execute_command(
                     for reset_id in &ids_to_reset {
                         if let Some(u) = ri.unit_table.get(reset_id) {
                             let mut status = u.common.status.write_poisoned();
-                            if let crate::units::UnitStatus::Stopped(_, _) = &*status {
-                                *status = crate::units::UnitStatus::NeverStarted;
+                            match &*status {
+                                crate::units::UnitStatus::Stopped(_, _)
+                                | crate::units::UnitStatus::Restarting => {
+                                    *status = crate::units::UnitStatus::NeverStarted;
+                                }
+                                _ => {}
                             }
                         }
                     }
                 }
-                let errs = crate::units::activate_needed_units(id, run_info.clone());
+                let errs = crate::units::activate_needed_units(id.clone(), run_info.clone());
                 if !errs.is_empty() {
                     let mut errstr = String::from("Errors while starting the unit:");
                     for err in errs {
                         let _ = write!(errstr, "\n{err:?}");
                     }
                     return Err(errstr);
+                }
+                // For oneshot services the activation graph swallows errors
+                // (to let After= units proceed), so check the target unit's
+                // final status explicitly. Also check Restarting state since
+                // the exit handler may have already transitioned from
+                // StoppedUnexpected to Restarting for auto-restart.
+                {
+                    let ri = run_info.read_poisoned();
+                    if let Some(unit) = ri.unit_table.get(&id) {
+                        let status = unit.common.status.read_poisoned();
+                        match &*status {
+                            UnitStatus::Stopped(_, errors) if !errors.is_empty() => {
+                                return Err(format!("Unit {} failed to start", id.name));
+                            }
+                            UnitStatus::Restarting => {
+                                return Err(format!("Unit {} failed to start", id.name));
+                            }
+                            _ => {}
+                        }
+                    }
                 }
             }
         }
@@ -4908,8 +4932,12 @@ pub fn execute_command(
                     for reset_id in &ids_to_reset {
                         if let Some(u) = ri.unit_table.get(reset_id) {
                             let mut status = u.common.status.write_poisoned();
-                            if let crate::units::UnitStatus::Stopped(_, _) = &*status {
-                                *status = crate::units::UnitStatus::NeverStarted;
+                            match &*status {
+                                crate::units::UnitStatus::Stopped(_, _)
+                                | crate::units::UnitStatus::Restarting => {
+                                    *status = crate::units::UnitStatus::NeverStarted;
+                                }
+                                _ => {}
                             }
                         }
                     }

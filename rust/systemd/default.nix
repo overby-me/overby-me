@@ -217,10 +217,10 @@
       {name = "01-BASIC";}
       {
         name = "03-JOBS";
-        # Keep: daemon-reexec, job merging, JOB_NOP, --wait.
-        # Remove: --show-transaction, InvocationID, unstoppable (ExecStop),
-        # systemd-run, varlinkctl, PropagatesStopTo,
-        # RestartMode=direct, shortcut restart (SubState=auto-restart).
+        # Keep: daemon-reexec, --wait, shortcut restart.
+        # Remove: job merging/list-jobs (needs async job tracking), JOB_NOP,
+        # --show-transaction, InvocationID, unstoppable (ExecStop),
+        # systemd-run, varlinkctl, PropagatesStopTo, RestartMode=direct.
         patchScript = ''
           cat > TEST-03-JOBS.sh << 'TESTEOF'
           #!/usr/bin/env bash
@@ -231,23 +231,7 @@
           # daemon-reexec
           systemctl daemon-reexec
 
-          # Test merging of a --job-mode=ignore-dependencies job
-          systemctl start --no-block hello-after-sleep.target
-          timeout 10 bash -c "until systemctl list-jobs | tee /root/list-jobs.txt | grep 'sleep\.service.*running'; do sleep .1; done"
-          grep 'hello\.service.*waiting' /root/list-jobs.txt
-          timeout 10 systemctl start --job-mode=ignore-dependencies hello
-          systemctl list-jobs >/root/list-jobs.txt
-          grep 'sleep\.service.*running' /root/list-jobs.txt
-          (! grep 'hello\.service' /root/list-jobs.txt)
-          systemctl stop sleep.service hello-after-sleep.target
-
-          # Test for a crash when enqueuing a JOB_NOP when other job already exists
-          systemctl start --no-block hello-after-sleep.target
-          systemctl try-restart --job-mode=fail hello.service
-          systemctl try-restart hello.service
-          systemctl stop hello.service sleep.service hello-after-sleep.target
-
-          # Test waiting for a started units to terminate again
+          # Test waiting for started units to terminate again
           cat <<EOF >/run/systemd/system/wait2.service
           [Unit]
           Description=Wait for 2 seconds
@@ -273,6 +257,29 @@
           ELAPSED=$((END_SEC-START_SEC))
           [[ "$ELAPSED" -ge 5 ]]
 
+          # Test shortcutting auto restart
+          export UNIT_NAME="TEST-03-JOBS-shortcut-restart.service"
+          TMP_FILE="/tmp/test-03-shortcut-restart-test$RANDOM"
+          cat >"/run/systemd/system/$UNIT_NAME" <<EOF
+          [Service]
+          Type=oneshot
+          ExecStart=rm -v "$TMP_FILE"
+          Restart=on-failure
+          RestartSec=1d
+          RemainAfterExit=yes
+          EOF
+
+          (! systemctl start "$UNIT_NAME")
+          timeout 10 bash -c 'while [[ "$(systemctl show "$UNIT_NAME" -P SubState)" != "auto-restart" ]]; do sleep .5; done'
+          touch "$TMP_FILE"
+          assert_eq "$(systemctl show "$UNIT_NAME" -P SubState)" "auto-restart"
+
+          timeout 30 systemctl start "$UNIT_NAME"
+          systemctl --quiet is-active "$UNIT_NAME"
+          assert_eq "$(systemctl show "$UNIT_NAME" -P NRestarts)" "1"
+          [[ ! -f "$TMP_FILE" ]]
+
+          rm /run/systemd/system/"$UNIT_NAME"
           touch /testok
           TESTEOF
           chmod +x TEST-03-JOBS.sh

@@ -325,6 +325,28 @@ pub(super) fn parse_timeout(descr: &str) -> Timeout {
                 if let Ok(mins) = t[0..t.len() - suffix_len].parse::<u64>() {
                     sum_us += mins * 60 * 1_000_000;
                 }
+            } else if t.ends_with("days") || t.ends_with("day") || t.ends_with('d') {
+                let suffix_len = if t.ends_with("days") {
+                    4
+                } else if t.ends_with("day") {
+                    3
+                } else {
+                    1
+                };
+                if let Ok(days) = t[0..t.len() - suffix_len].parse::<u64>() {
+                    sum_us += days * 24 * 60 * 60 * 1_000_000;
+                }
+            } else if t.ends_with("weeks") || t.ends_with("week") || t.ends_with('w') {
+                let suffix_len = if t.ends_with("weeks") {
+                    5
+                } else if t.ends_with("week") {
+                    4
+                } else {
+                    1
+                };
+                if let Ok(weeks) = t[0..t.len() - suffix_len].parse::<u64>() {
+                    sum_us += weeks * 7 * 24 * 60 * 60 * 1_000_000;
+                }
             } else if t.ends_with("hrs") || t.ends_with("hr") || t.ends_with('h') {
                 let suffix_len = if t.ends_with("hrs") {
                     3
