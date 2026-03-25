@@ -283,6 +283,7 @@ pub struct Shell {
     pub loop_depth: i32,
     /// Original top-level arithmetic expression for error reporting
     arith_top_expr: Option<String>,
+    arith_context: Option<String>,
     /// Arithmetic evaluation recursion depth
     arith_depth: u32,
     /// Whether current arithmetic evaluation is from (( )) command (adds ((: prefix to errors)
@@ -420,6 +421,7 @@ impl Shell {
             dash_c_mode: false,
             loop_depth: 0,
             arith_top_expr: None,
+            arith_context: None,
             arith_depth: 0,
             arith_is_command: false,
             arith_is_let: false,
@@ -1703,7 +1705,11 @@ impl Shell {
             .get("LINENO")
             .and_then(|s| s.parse::<i64>().ok())
             .unwrap_or(0);
-        format!("{}: line {}", name, lineno)
+        if let Some(ctx) = &self.arith_context {
+            format!("{}: line {}: {}", name, lineno, ctx)
+        } else {
+            format!("{}: line {}", name, lineno)
+        }
     }
 
     pub fn error_prefix(&self) -> String {
@@ -4587,8 +4593,10 @@ impl Shell {
                 let a = match parse_cond_int(left) {
                     Some(n) => n,
                     None => {
-                        // Try arithmetic evaluation
+                        // Try arithmetic evaluation with [[ context
+                        self.arith_context = Some("[[".to_string());
                         let n = self.eval_arith_expr(left);
+                        self.arith_context = None;
                         if crate::expand::take_arith_error() {
                             return Ok(false);
                         }
@@ -4598,7 +4606,9 @@ impl Shell {
                 let b = match parse_cond_int(right) {
                     Some(n) => n,
                     None => {
+                        self.arith_context = Some("[[".to_string());
                         let n = self.eval_arith_expr(right);
+                        self.arith_context = None;
                         if crate::expand::take_arith_error() {
                             return Ok(false);
                         }
