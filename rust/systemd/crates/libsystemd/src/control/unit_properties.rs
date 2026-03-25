@@ -103,6 +103,16 @@ pub fn collect_properties(unit: &Unit) -> BTreeMap<String, String> {
                 },
             );
 
+            // Result — "success" if stopped cleanly, "exit-code" / "signal" on failure
+            {
+                let status = unit.common.status.read_poisoned();
+                let result = match &*status {
+                    UnitStatus::Stopped(_, errors) if !errors.is_empty() => "exit-code",
+                    _ => "success",
+                };
+                insert(&mut props, "Result", result);
+            }
+
             // ── sd_notify reported fields ─────────────────────────────
             if let Some(errno) = state.srvc.notify_errno {
                 insert(&mut props, "StatusErrno", &errno.to_string());
@@ -247,6 +257,10 @@ pub fn collect_properties(unit: &Unit) -> BTreeMap<String, String> {
     };
     insert(&mut props, "LoadState", load_state);
     insert(&mut props, "UnitFileState", "enabled");
+
+    // NeedDaemonReload — check if unit file on disk differs from loaded config.
+    // For now, always return "no" since we reload units on daemon-reload.
+    insert(&mut props, "NeedDaemonReload", "no");
 
     props
 }
