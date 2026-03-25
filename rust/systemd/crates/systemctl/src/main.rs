@@ -143,6 +143,7 @@ fn main() {
     let mut force = false;
     let mut wait = false;
     let mut root_path: Option<String> = None;
+    let mut runtime = false;
     let mut output_format: Option<String> = None;
     let mut what_filter: Option<String> = None;
     let mut kill_whom: Option<String> = None;
@@ -245,6 +246,9 @@ fn main() {
             }
             if arg == "--wait" {
                 wait = true;
+            }
+            if arg == "--runtime" {
+                runtime = true;
             }
             i += 1;
             continue;
@@ -885,7 +889,10 @@ fn main() {
             }
             std::process::exit(1);
         }
-        let arr: Vec<Value> = positional[1..].iter().cloned().map(Value::String).collect();
+        let mut arr: Vec<Value> = positional[1..].iter().cloned().map(Value::String).collect();
+        if runtime {
+            arr.push(Value::String("--runtime".to_string()));
+        }
         Some(Value::Array(arr))
     } else if method == "revert" {
         // revert <unit>

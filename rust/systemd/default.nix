@@ -313,8 +313,6 @@
           sed -i '/^# disable --now with template unit/,/^# add-wants\/add-requires/{/^# add-wants\/add-requires/!d}' TEST-26-SYSTEMCTL.sh
           # Remove add-wants/add-requires (not implemented)
           sed -i '/^# add-wants\/add-requires/,/^# set-property/{/^# set-property/!d}' TEST-26-SYSTEMCTL.sh
-          # Remove set-property persistent storage
-          sed -i '/^# set-property/,/^# Failed-unit/{/^# Failed-unit/!d}' TEST-26-SYSTEMCTL.sh
           # Remove --marked tests
           sed -i '/^# --marked/,/^# --dry-run/{/^# --dry-run/!d}' TEST-26-SYSTEMCTL.sh
           # Remove --dry-run tests (not implemented)

@@ -2540,6 +2540,10 @@ pub fn execute_command(
             return Ok(serde_json::json!({ "disabled": disabled }));
         }
         Command::SetProperty(unit_name, props) => {
+            // Check for --runtime flag in props
+            let is_runtime = props.iter().any(|p| p == "--runtime");
+            let props: Vec<String> = props.into_iter().filter(|p| p != "--runtime").collect();
+
             if props.is_empty() {
                 log::debug!("set-property {}: no properties specified", unit_name);
                 return Ok(serde_json::json!(null));
@@ -2567,6 +2571,21 @@ pub fn execute_command(
                 "After",
                 "Before",
             ];
+            // Normalize properties (e.g. CPUQuota=10% -> CPUQuota=10.00%)
+            let props: Vec<String> = props
+                .into_iter()
+                .map(|prop| {
+                    if let Some((key, val)) = prop.split_once('=')
+                        && key == "CPUQuota"
+                        && let Some(pct) = val.strip_suffix('%')
+                        && let Ok(n) = pct.parse::<f64>()
+                    {
+                        return format!("{key}={n:.2}%");
+                    }
+                    prop
+                })
+                .collect();
+
             let mut unit_section_lines = Vec::new();
             let mut specific_section_lines = Vec::new();
             for prop in &props {
@@ -2620,8 +2639,13 @@ pub fn execute_command(
             }
 
             // Write the drop-in file.
-            let dropin_dir =
-                std::path::Path::new("/etc/systemd/system").join(format!("{unit_name}.d"));
+            // Use system.control directory (matches systemd behavior for set-property)
+            let base_dir = if is_runtime {
+                "/run/systemd/system.control"
+            } else {
+                "/etc/systemd/system.control"
+            };
+            let dropin_dir = std::path::Path::new(base_dir).join(format!("{unit_name}.d"));
             if let Err(e) = std::fs::create_dir_all(&dropin_dir) {
                 return Err(format!(
                     "Failed to create drop-in directory {}: {e}",
@@ -2814,6 +2838,20 @@ pub fn execute_command(
                     return Err(format!("Failed to remove {}: {e}", run_dropin.display()));
                 }
                 removed.push(run_dropin.display().to_string());
+            }
+
+            // Remove system.control directories (created by set-property)
+            for base in &["/etc/systemd/system.control", "/run/systemd/system.control"] {
+                let control_dropin = std::path::Path::new(base).join(format!("{unit_name}.d"));
+                if control_dropin.is_dir() {
+                    if let Err(e) = std::fs::remove_dir_all(&control_dropin) {
+                        return Err(format!(
+                            "Failed to remove {}: {e}",
+                            control_dropin.display()
+                        ));
+                    }
+                    removed.push(control_dropin.display().to_string());
+                }
             }
 
             if removed.is_empty() {
@@ -3675,6 +3713,34 @@ pub fn execute_command(
                     }
                     out.push_str(&format!("# {}\n", path.display()));
                     out.push_str(&content);
+                }
+
+                // Also include drop-in files from .d and system.control directories
+                let name = &unit.id.name;
+                let dropin_dirs = [
+                    format!("/etc/systemd/system/{name}.d"),
+                    format!("/run/systemd/system/{name}.d"),
+                    format!("/etc/systemd/system.control/{name}.d"),
+                    format!("/run/systemd/system.control/{name}.d"),
+                ];
+                for dir in &dropin_dirs {
+                    let dir_path = std::path::Path::new(dir);
+                    if dir_path.is_dir() {
+                        let mut files: Vec<_> = std::fs::read_dir(dir_path)
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|e| e.ok())
+                            .filter(|e| e.path().extension().is_some_and(|ext| ext == "conf"))
+                            .collect();
+                        files.sort_by_key(|e| e.file_name());
+                        for entry in files {
+                            if let Ok(content) = std::fs::read_to_string(entry.path()) {
+                                out.push('\n');
+                                out.push_str(&format!("# {}\n", entry.path().display()));
+                                out.push_str(&content);
+                            }
+                        }
+                    }
                 }
             }
             if out.is_empty() {
