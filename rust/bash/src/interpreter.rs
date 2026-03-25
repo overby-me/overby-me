@@ -2535,7 +2535,7 @@ impl Shell {
         // Expand command substitutions $(...) and parameter expansions ${...}
         // BEFORE stripping quotes, since commands inside $() need their quotes preserved
         let expanded_cs: String;
-        let expr = if expr.contains("$(") || expr.contains("${ ") || expr.contains("${") {
+        let expr = if expr.contains('$') {
             expanded_cs = self.expand_comsubs_in_arith(expr);
             &expanded_cs
         } else {
@@ -3535,6 +3535,28 @@ impl Shell {
                 let expanded =
                     self.expand_word_single(&crate::lexer::parse_word_string(&param_text));
                 result.push_str(&expanded);
+            } else if chars[i] == '$'
+                && i + 1 < chars.len()
+                && matches!(chars[i + 1], '#' | '?' | '$' | '!' | '-' | '@' | '*')
+            {
+                // Special parameter: $#, $?, $$, $!, $-, $@, $*
+                let val = match chars[i + 1] {
+                    '#' => (self.positional.len().saturating_sub(1)).to_string(),
+                    '?' => self.last_status.to_string(),
+                    '$' => std::process::id().to_string(),
+                    '!' => self.last_bg_pid.to_string(),
+                    '-' => self.get_opt_flags().to_string(),
+                    '@' | '*' => self.positional[1..].join(" "),
+                    _ => String::new(),
+                };
+                result.push_str(&val);
+                i += 2;
+            } else if chars[i] == '$' && i + 1 < chars.len() && chars[i + 1].is_ascii_digit() {
+                // Positional parameter: $0, $1, etc.
+                let idx = (chars[i + 1] as u8 - b'0') as usize;
+                let val = self.positional.get(idx).cloned().unwrap_or_default();
+                result.push_str(&val);
+                i += 2;
             } else {
                 result.push(chars[i]);
                 i += 1;

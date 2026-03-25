@@ -1889,24 +1889,40 @@ fn resolve_arith_vars(
     while i < chars.len() {
         if chars[i] == '$' {
             i += 1;
-            let mut name = String::new();
-            while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') {
-                name.push(chars[i]);
+            // Handle special parameters: $#, $?, $$, $!, $-
+            if i < chars.len() && matches!(chars[i], '#' | '?' | '-' | '!') {
+                let val = match chars[i] {
+                    '#' => (positional.len().saturating_sub(1)).to_string(),
+                    '?' => last_status.to_string(),
+                    '-' => String::new(),
+                    '!' => "0".to_string(),
+                    _ => "0".to_string(),
+                };
+                result.push_str(&val);
                 i += 1;
+            } else if i < chars.len() && chars[i] == '$' {
+                result.push_str(&std::process::id().to_string());
+                i += 1;
+            } else {
+                let mut name = String::new();
+                while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') {
+                    name.push(chars[i]);
+                    i += 1;
+                }
+                let ctx_dummy = ExpCtx {
+                    vars,
+                    arrays: &HashMap::new(),
+                    assoc_arrays: &HashMap::new(),
+                    namerefs: &HashMap::new(),
+                    positional,
+                    last_status,
+                    last_bg_pid: 0,
+                    opt_flags: "",
+                };
+                let val = lookup_var(&name, &ctx_dummy);
+                let val = if val.is_empty() { "0".to_string() } else { val };
+                result.push_str(&val);
             }
-            let ctx_dummy = ExpCtx {
-                vars,
-                arrays: &HashMap::new(),
-                assoc_arrays: &HashMap::new(),
-                namerefs: &HashMap::new(),
-                positional,
-                last_status,
-                last_bg_pid: 0,
-                opt_flags: "",
-            };
-            let val = lookup_var(&name, &ctx_dummy);
-            let val = if val.is_empty() { "0".to_string() } else { val };
-            result.push_str(&val);
         } else if chars[i].is_alphabetic() || chars[i] == '_' {
             let mut name = String::new();
             while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') {
