@@ -4224,23 +4224,25 @@ impl Shell {
             if let Some(pid_str) = self.vars.get(&pid_key)
                 && let Ok(pid) = pid_str.parse::<i32>()
             {
-                // Non-blocking check if process has exited
-                match waitpid(Pid::from_raw(pid), Some(WaitPidFlag::WNOHANG)) {
-                    Ok(WaitStatus::Exited(_, _)) | Ok(WaitStatus::Signaled(_, _, _)) => {
-                        // Process has exited — close fds and clean up
-                        if let Some(arr) = self.arrays.get(&name) {
-                            for fd_str in arr {
-                                if let Ok(fd) = fd_str.parse::<i32>() {
-                                    unsafe {
-                                        libc::close(fd);
-                                    }
+                // Check if the process has exited via waitpid (non-blocking)
+                // or is already gone (kill check)
+                let exited = matches!(
+                    waitpid(Pid::from_raw(pid), Some(WaitPidFlag::WNOHANG)),
+                    Ok(WaitStatus::Exited(_, _)) | Ok(WaitStatus::Signaled(_, _, _))
+                );
+                if exited {
+                    // Process has exited — close fds and clean up
+                    if let Some(arr) = self.arrays.get(&name) {
+                        for fd_str in arr {
+                            if let Ok(fd) = fd_str.parse::<i32>() {
+                                unsafe {
+                                    libc::close(fd);
                                 }
                             }
                         }
-                        self.arrays.remove(&name);
-                        self.vars.remove(&pid_key);
                     }
-                    _ => {} // Still running or error
+                    self.arrays.remove(&name);
+                    self.vars.remove(&pid_key);
                 }
             }
         }
@@ -4582,7 +4584,7 @@ impl Shell {
         }
     }
 
-    fn io_error_message(e: &std::io::Error) -> &'static str {
+    pub(crate) fn io_error_message(e: &std::io::Error) -> &'static str {
         match e.kind() {
             std::io::ErrorKind::NotFound => "No such file or directory",
             std::io::ErrorKind::PermissionDenied => "Permission denied",
@@ -4606,6 +4608,15 @@ impl Shell {
                 "No such file or directory"
             }
         }
+    }
+
+    fn dup_error_message(src_fd: i32, e: &nix::Error) -> String {
+        let msg = match *e {
+            nix::Error::EBADF => "Bad file descriptor",
+            nix::Error::EINVAL => "invalid value",
+            _ => "Bad file descriptor",
+        };
+        format!("{}: {}", src_fd, msg)
     }
 
     #[cfg(unix)]
@@ -4728,14 +4739,16 @@ impl Shell {
                             if let Ok(saved_fd) = nix::unistd::dup(fd) {
                                 saved.push((fd, saved_fd));
                             }
-                            nix::unistd::dup2(src_fd, fd).map_err(|e| e.to_string())?;
+                            nix::unistd::dup2(src_fd, fd)
+                                .map_err(|e| Self::dup_error_message(src_fd, &e))?;
                             nix::unistd::close(src_fd).ok();
                         }
                     } else if let Ok(src_fd) = target_str.parse::<i32>() {
                         if let Ok(saved_fd) = nix::unistd::dup(fd) {
                             saved.push((fd, saved_fd));
                         }
-                        nix::unistd::dup2(src_fd, fd).map_err(|e| e.to_string())?;
+                        nix::unistd::dup2(src_fd, fd)
+                            .map_err(|e| Self::dup_error_message(src_fd, &e))?;
                     }
                 }
                 RedirectKind::DupInput => {
@@ -4748,14 +4761,16 @@ impl Shell {
                             if let Ok(saved_fd) = nix::unistd::dup(fd) {
                                 saved.push((fd, saved_fd));
                             }
-                            nix::unistd::dup2(src_fd, fd).map_err(|e| e.to_string())?;
+                            nix::unistd::dup2(src_fd, fd)
+                                .map_err(|e| Self::dup_error_message(src_fd, &e))?;
                             nix::unistd::close(src_fd).ok();
                         }
                     } else if let Ok(src_fd) = target_str.parse::<i32>() {
                         if let Ok(saved_fd) = nix::unistd::dup(fd) {
                             saved.push((fd, saved_fd));
                         }
-                        nix::unistd::dup2(src_fd, fd).map_err(|e| e.to_string())?;
+                        nix::unistd::dup2(src_fd, fd)
+                            .map_err(|e| Self::dup_error_message(src_fd, &e))?;
                     }
                 }
                 RedirectKind::HereDoc(_, _) | RedirectKind::HereString => {

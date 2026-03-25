@@ -235,11 +235,9 @@ fn builtin_echo(shell: &mut Shell, args: &[String]) -> i32 {
             }
             1
         }
-        Err(_e) => {
-            eprintln!(
-                "{}: echo: write error: Input/output error",
-                shell.error_prefix()
-            );
+        Err(e) => {
+            let msg = Shell::io_error_message(&e);
+            eprintln!("{}: echo: write error: {}", shell.error_prefix(), msg);
             1
         }
     }

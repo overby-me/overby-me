@@ -512,7 +512,10 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                 let idx = &expr.name[bracket + 1..expr.name.len().saturating_sub(1)];
                 let resolved = ctx.resolve_nameref(base);
                 if (idx == "@" || idx == "*")
-                    && !matches!(expr.op, ParamOp::None | ParamOp::Length)
+                    && !matches!(
+                        expr.op,
+                        ParamOp::None | ParamOp::Length | ParamOp::Substring(..)
+                    )
                     && let Some(arr) = ctx.arrays.get(&resolved)
                 {
                     // Apply operation to each element separately
@@ -541,6 +544,56 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                         out.push(Segment::Unquoted(result));
                     }
                     return;
+                }
+                // Handle ${arr[@]:offset:length} — array slice
+                if (idx == "@" || idx == "*") && matches!(expr.op, ParamOp::Substring(..)) {
+                    let elements: Option<Vec<String>> = if let Some(arr) = ctx.arrays.get(&resolved)
+                    {
+                        Some(arr.clone())
+                    } else {
+                        ctx.assoc_arrays
+                            .get(&resolved)
+                            .map(|a| a.values().cloned().collect())
+                    };
+                    if let Some(arr) = elements {
+                        if let ParamOp::Substring(offset_str, length_str) = &expr.op {
+                            let offset: i64 = offset_str.trim().parse().unwrap_or(0);
+                            let count = arr.len();
+                            let start = if offset < 0 {
+                                (count as i64 + offset).max(0) as usize
+                            } else {
+                                (offset as usize).min(count)
+                            };
+                            let end = if let Some(len_str) = length_str {
+                                let len: i64 = len_str.trim().parse().unwrap_or(count as i64);
+                                if len < 0 {
+                                    (count as i64 + len).max(start as i64) as usize
+                                } else {
+                                    (start + len as usize).min(count)
+                                }
+                            } else {
+                                count
+                            };
+                            let mut first = true;
+                            for elem in &arr[start..end] {
+                                if !first {
+                                    out.push(if idx == "@" {
+                                        Segment::SplitHere
+                                    } else {
+                                        let ifs_char = ctx
+                                            .vars
+                                            .get("IFS")
+                                            .and_then(|s| s.chars().next())
+                                            .unwrap_or(' ');
+                                        Segment::Unquoted(ifs_char.to_string())
+                                    });
+                                }
+                                first = false;
+                                out.push(Segment::Unquoted(elem.clone()));
+                            }
+                        }
+                        return;
+                    }
                 }
             }
             // Save original variable value before expansion (needed for quoting check)
@@ -970,6 +1023,12 @@ fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
                 .or_else(|| {
                     // If it's also an array, return element 0
                     ctx.arrays.get(&resolved).and_then(|a| a.first().cloned())
+                })
+                .or_else(|| {
+                    // For associative arrays, $var returns element with key "0"
+                    ctx.assoc_arrays
+                        .get(&resolved)
+                        .and_then(|a| a.get("0").cloned())
                 })
                 .or_else(|| std::env::var(&resolved).ok())
                 .unwrap_or_default()
