@@ -1252,14 +1252,16 @@ impl Shell {
 
         let coproc_name = name.unwrap_or("COPROC");
 
-        // Close previous coproc fds if any
-        if let Some(arr) = self.arrays.get(coproc_name) {
-            for fd_str in arr {
-                if let Ok(fd) = fd_str.parse::<i32>() {
+        // Close previous coproc fds if any (check both named and default COPROC)
+        for check_name in [coproc_name, "COPROC"] {
+            if let Some(arr) = self.arrays.get(check_name) {
+                let fds: Vec<i32> = arr.iter().filter_map(|s| s.parse().ok()).collect();
+                for fd in fds {
                     unsafe {
                         libc::close(fd);
                     }
                 }
+                self.arrays.remove(check_name);
             }
         }
 
