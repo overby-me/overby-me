@@ -1892,9 +1892,16 @@ impl Shell {
             let fields = self.expand_word_fields(word, &ifs);
             // Check for expansion errors (incomplete comsub, etc.)
             if crate::expand::take_expansion_error() {
+                let name = self
+                    .vars
+                    .get("_BASH_SOURCE_FILE")
+                    .or_else(|| self.positional.first())
+                    .map(|s| s.as_str())
+                    .unwrap_or("bash");
+                let lineno = self.vars.get("LINENO").map(|s| s.as_str()).unwrap_or("0");
                 eprintln!(
-                    "{}: command substitution: unexpected EOF while looking for matching `)'",
-                    self.error_prefix()
+                    "{}: command substitution: line {}: unexpected EOF while looking for matching `)'",
+                    name, lineno
                 );
                 return 1;
             }
