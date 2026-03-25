@@ -166,6 +166,7 @@ fn run() -> i32 {
     shell
         .vars
         .insert("_BASH_SOURCE_FILE".to_string(), shell.script_name.clone());
+    crate::expand::set_script_name(&shell.script_name);
 
     // Set BASH_SOURCE array
     if !shell.script_name.is_empty() {

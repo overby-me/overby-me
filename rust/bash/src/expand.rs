@@ -9,8 +9,45 @@ thread_local! {
     /// File descriptors opened by process substitutions that need to be closed
     /// after the command using them completes.
     static PROCSUB_FDS: RefCell<Vec<i32>> = const { RefCell::new(Vec::new()) };
+    /// Current script name for error messages from expansion code
+    static SCRIPT_NAME: RefCell<String> = const { RefCell::new(String::new()) };
     /// Flag set when arithmetic evaluation encounters an error.
     static ARITH_ERROR: RefCell<bool> = const { RefCell::new(false) };
+}
+
+pub fn set_script_name(name: &str) {
+    SCRIPT_NAME.with(|f| *f.borrow_mut() = name.to_string());
+}
+
+pub fn warn_incomplete_comsub_in_pattern_impl(word: &Word, lineno: &str) {
+    let parts: Vec<&WordPart> = word.iter().collect();
+    for (idx, part) in parts.iter().enumerate() {
+        if let WordPart::SingleQuoted(s) = part
+            && let Some(pos) = s.find("$(")
+        {
+            let after_dollar = &s[pos + 2..];
+            if !after_dollar.is_empty() && !s[pos..].contains(')') {
+                let has_paren_after = parts[idx + 1..]
+                    .iter()
+                    .any(|p| matches!(p, WordPart::Literal(t) if t.contains(')')));
+                if has_paren_after {
+                    let name = SCRIPT_NAME.with(|f| f.borrow().clone());
+                    if name.is_empty() {
+                        eprintln!(
+                            "command substitution: line {}: unexpected EOF while looking for matching `)'",
+                            lineno
+                        );
+                    } else {
+                        eprintln!(
+                            "{}: command substitution: line {}: unexpected EOF while looking for matching `)'",
+                            name, lineno
+                        );
+                    }
+                    return;
+                }
+            }
+        }
+    }
 }
 
 /// Check and clear the arithmetic error flag.
@@ -1335,19 +1372,32 @@ fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
                 expand_word_nosplit_ctx(word, ctx, cmd_sub)
             }
         }
-        ParamOp::TrimSmallLeft(pattern) => {
+        ParamOp::TrimSmallLeft(pattern) | ParamOp::TrimLargeLeft(pattern) => {
+            crate::lexer::warn_incomplete_comsub_in_pattern(
+                pattern,
+                ctx.vars.get("LINENO").map(|s| s.as_str()).unwrap_or("0"),
+            );
             let pat = expand_word_nosplit_ctx(pattern, ctx, cmd_sub);
-            trim_pattern(&val, &pat, TrimMode::SmallLeft)
-        }
-        ParamOp::TrimLargeLeft(pattern) => {
-            let pat = expand_word_nosplit_ctx(pattern, ctx, cmd_sub);
-            trim_pattern(&val, &pat, TrimMode::LargeLeft)
+            let mode = if matches!(&expr.op, ParamOp::TrimSmallLeft(_)) {
+                TrimMode::SmallLeft
+            } else {
+                TrimMode::LargeLeft
+            };
+            trim_pattern(&val, &pat, mode)
         }
         ParamOp::TrimSmallRight(pattern) => {
+            crate::lexer::warn_incomplete_comsub_in_pattern(
+                pattern,
+                ctx.vars.get("LINENO").map(|s| s.as_str()).unwrap_or("0"),
+            );
             let pat = expand_word_nosplit_ctx(pattern, ctx, cmd_sub);
             trim_pattern(&val, &pat, TrimMode::SmallRight)
         }
         ParamOp::TrimLargeRight(pattern) => {
+            crate::lexer::warn_incomplete_comsub_in_pattern(
+                pattern,
+                ctx.vars.get("LINENO").map(|s| s.as_str()).unwrap_or("0"),
+            );
             let pat = expand_word_nosplit_ctx(pattern, ctx, cmd_sub);
             trim_pattern(&val, &pat, TrimMode::LargeRight)
         }
