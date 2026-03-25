@@ -277,17 +277,25 @@ fn interpret_echo_escapes(s: &str) -> String {
                 }
                 Some('x') => {
                     let mut val = 0u8;
+                    let mut count = 0;
                     for _ in 0..2 {
                         let mut peek = chars.clone();
                         match peek.next() {
                             Some(c) if c.is_ascii_hexdigit() => {
                                 val = val * 16 + c.to_digit(16).unwrap() as u8;
                                 chars = peek;
+                                count += 1;
                             }
                             _ => break,
                         }
                     }
-                    result.push(val as char);
+                    if count == 0 {
+                        // No hex digits: output literal \x
+                        result.push('\\');
+                        result.push('x');
+                    } else {
+                        result.push(val as char);
+                    }
                 }
                 Some('u') => {
                     let mut val = 0u32;
@@ -402,6 +410,11 @@ fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
     } else {
         args
     };
+    // After processing options, format is required
+    if args.is_empty() {
+        eprintln!("printf: usage: printf [-v var] format [arguments]");
+        return 2;
+    }
     if args.is_empty() {
         return 0;
     }
