@@ -1043,7 +1043,7 @@ impl Parser {
                     last.push(WordPart::Literal("(".to_string()));
                     for (i, elem) in elements.iter().enumerate() {
                         if i > 0 {
-                            last.push(WordPart::Literal("\x01".to_string()));
+                            last.push(WordPart::Literal("\x1F".to_string()));
                         }
                         // Include [key]= prefix for associative array elements
                         if let Some(idx) = &elem.index {

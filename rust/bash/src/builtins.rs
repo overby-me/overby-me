@@ -2114,9 +2114,9 @@ fn parse_assoc_literal(s: &str) -> crate::interpreter::AssocArray {
         trimmed
     };
     let mut map = crate::interpreter::AssocArray::default();
-    // Split on \x01 separator (from inline array parser) or whitespace
-    let entries: Vec<&str> = if inner.contains('\x01') {
-        inner.split('\x01').collect()
+    // Split on \x1F separator (from inline array parser) or whitespace
+    let entries: Vec<&str> = if inner.contains('\x1F') {
+        inner.split('\x1F').collect()
     } else {
         vec![inner]
     };
@@ -2169,9 +2169,9 @@ fn parse_array_literal(s: &str) -> Vec<String> {
         return Vec::new();
     }
 
-    // Check for \x01 separator (from parser's inline array handling)
-    if inner.contains('\x01') {
-        return inner.split('\x01').map(|s| s.to_string()).collect();
+    // Check for \x1F separator (from parser's inline array handling)
+    if inner.contains('\x1F') {
+        return inner.split('\x1F').map(|s| s.to_string()).collect();
     }
 
     // Simple word splitting, respecting quotes
