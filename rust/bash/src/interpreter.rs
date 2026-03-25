@@ -4995,10 +4995,13 @@ impl Shell {
                         saved.push((fd, saved_fd));
                     }
 
-                    let content = format!("{}\n", target_str);
+                    // Use raw byte conversion for heredoc/herestring content
+                    // so that chars like U+00CD (from $'\315') produce single bytes
+                    let mut content_bytes = crate::builtins::string_to_raw_bytes(&target_str);
+                    content_bytes.push(b'\n');
 
                     let (pipe_r, pipe_w) = nix::unistd::pipe().map_err(|e| e.to_string())?;
-                    nix::unistd::write(&pipe_w, content.as_bytes()).map_err(|e| e.to_string())?;
+                    nix::unistd::write(&pipe_w, &content_bytes).map_err(|e| e.to_string())?;
                     let pipe_r_raw = pipe_r.as_raw_fd();
                     drop(pipe_w);
                     nix::unistd::dup2(pipe_r_raw, fd).map_err(|e| e.to_string())?;
