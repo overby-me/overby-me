@@ -4120,6 +4120,7 @@ impl Shell {
                         false
                     }
                 } else {
+                    eprintln!("{}: [[: {}: integer expected", self.error_prefix(), val);
                     false
                 }
             }
