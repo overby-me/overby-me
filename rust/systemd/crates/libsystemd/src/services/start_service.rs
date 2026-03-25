@@ -281,6 +281,15 @@ fn start_service_with_filedescriptors(
             }
             env.push(("NOTIFY_SOCKET".to_owned(), notifications_path));
 
+            // TRIGGER_PATH / TRIGGER_UNIT — set by path watcher when a .path
+            // unit triggers this service. Cleared after use (one-shot).
+            if let Some(ref tp) = srvc.trigger_path {
+                env.push(("TRIGGER_PATH".to_owned(), tp.clone()));
+            }
+            if let Some(ref tu) = srvc.trigger_unit {
+                env.push(("TRIGGER_UNIT".to_owned(), tu.clone()));
+            }
+
             // UnsetEnvironment= is applied as the final step (see systemd.exec(5)).
             // It can undo assignments from any source, including Environment=,
             // EnvironmentFile=, PassEnvironment=, and even internal variables.

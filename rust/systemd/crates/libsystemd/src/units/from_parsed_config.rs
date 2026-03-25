@@ -196,6 +196,8 @@ pub fn unit_from_parsed_service(conf: ParsedServiceConfig) -> Result<Unit, Strin
                     watchdog_timeout_fired: false,
                     main_exit_status: None,
                     main_exit_pid: None,
+                    trigger_path: None,
+                    trigger_unit: None,
                 },
             }),
         }),
@@ -486,6 +488,7 @@ pub fn unit_from_parsed_path(conf: ParsedPathConfig) -> Result<Unit, String> {
             conf: path_conf,
             state: RwLock::new(PathState {
                 common: CommonState::default(),
+                result: crate::units::PathResult::default(),
             }),
         }),
     })

@@ -9,6 +9,7 @@
   pkgs,
   name,
   patchScript ? "",
+  extraPackages ? [],
 }: let
   systemdSrc = pkgs.systemd.src;
 
@@ -107,22 +108,24 @@ in
         etc."systemd-tests/testdata".source = "${testScripts}/testdata";
 
         # Packages needed by test scripts
-        systemPackages = with pkgs; [
-          bash
-          coreutils
-          diffutils
-          gnugrep
-          gnused
-          gawk
-          findutils
-          iproute2
-          util-linux
-          jq
-          procps
-          kmod
-          hostname # for hostname command
-          acl # for setfacl/getfacl
-        ];
+        systemPackages = with pkgs;
+          [
+            bash
+            coreutils
+            diffutils
+            gnugrep
+            gnused
+            gawk
+            findutils
+            iproute2
+            util-linux
+            jq
+            procps
+            kmod
+            hostname # for hostname command
+            acl # for setfacl/getfacl
+          ]
+          ++ extraPackages;
       };
 
       # Install test-specific unit files into systemd unit path if they exist

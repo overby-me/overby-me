@@ -834,6 +834,8 @@ mod tests {
             watchdog_timeout_fired: false,
             main_exit_status: None,
             main_exit_pid: None,
+            trigger_path: None,
+            trigger_unit: None,
         }
     }
 

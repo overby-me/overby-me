@@ -151,6 +151,12 @@ pub struct Service {
     /// The PID of the main service process at the time it was started.
     /// Unlike `pid` (which is cleared on stop), this persists for `ExecMainPID`.
     pub main_exit_pid: Option<nix::unistd::Pid>,
+    /// TRIGGER_PATH — set by the path watcher when a path unit triggers this
+    /// service. Contains the filesystem path that matched the path condition.
+    pub trigger_path: Option<String>,
+    /// TRIGGER_UNIT — set by the path watcher when a path unit triggers this
+    /// service. Contains the name of the .path unit that fired the trigger.
+    pub trigger_unit: Option<String>,
 }
 
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
@@ -614,6 +620,15 @@ impl Service {
         cmd.stdout(stdout);
         cmd.stderr(stderr);
         cmd.stdin(Stdio::null());
+
+        // Pass TRIGGER_PATH / TRIGGER_UNIT env vars for path-activated services
+        if let Some(ref tp) = self.trigger_path {
+            cmd.env("TRIGGER_PATH", tp);
+        }
+        if let Some(ref tu) = self.trigger_unit {
+            cmd.env("TRIGGER_UNIT", tu);
+        }
+
         trace!("Run {cmdline:?} for service: {name}");
         let spawn_result = {
             let mut pid_table_locked = run_info.pid_table.lock_poisoned();

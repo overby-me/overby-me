@@ -1025,6 +1025,23 @@ fn unit_name_glob_inner(pattern: &[char], text: &[char]) -> bool {
     }
 }
 
+/// Clear the failed state of a unit, resetting it to NeverStarted.
+/// Also resets unit-type-specific result fields (e.g. PathResult).
+fn reset_failed_unit(unit: &Unit) {
+    let mut status = unit.common.status.write_poisoned();
+    if let UnitStatus::Stopped(_, ref errors) = *status
+        && !errors.is_empty()
+    {
+        *status = UnitStatus::NeverStarted;
+    }
+    drop(status);
+    // Reset path-specific result.
+    if let Specific::Path(path_specific) = &unit.specific {
+        let mut state = path_specific.state.write_poisoned();
+        state.result = crate::units::PathResult::Success;
+    }
+}
+
 /// Check if a string contains glob characters.
 fn is_glob_pattern(s: &str) -> bool {
     s.contains('*') || s.contains('?')
@@ -2443,6 +2460,8 @@ fn create_transient_unit(
                     watchdog_timeout_fired: false,
                     main_exit_status: None,
                     main_exit_pid: None,
+                    trigger_path: None,
+                    trigger_unit: None,
                 },
             }),
         }),
@@ -3812,22 +3831,12 @@ pub fn execute_command(
                     return Err(format!("Unit {name} not found."));
                 }
                 for unit in &units {
-                    let mut status = unit.common.status.write_poisoned();
-                    if let UnitStatus::Stopped(_, ref errors) = *status
-                        && !errors.is_empty()
-                    {
-                        *status = UnitStatus::NeverStarted;
-                    }
+                    reset_failed_unit(unit);
                 }
             } else {
                 // Reset all failed units
                 for unit in ri.unit_table.values() {
-                    let mut status = unit.common.status.write_poisoned();
-                    if let UnitStatus::Stopped(_, ref errors) = *status
-                        && !errors.is_empty()
-                    {
-                        *status = UnitStatus::NeverStarted;
-                    }
+                    reset_failed_unit(unit);
                 }
             }
             return Ok(serde_json::json!(null));

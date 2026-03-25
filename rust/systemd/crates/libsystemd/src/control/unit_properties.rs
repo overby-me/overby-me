@@ -228,6 +228,16 @@ pub fn collect_properties(unit: &Unit) -> BTreeMap<String, String> {
                 "DirectoryMode",
                 &format!("{:04o}", path.conf.directory_mode),
             );
+            // Result — "success" normally, "trigger-limit-hit" on rate limit
+            let state = path.state.read_poisoned();
+            insert(
+                &mut props,
+                "Result",
+                match state.result {
+                    crate::units::PathResult::Success => "success",
+                    crate::units::PathResult::TriggerLimitHit => "trigger-limit-hit",
+                },
+            );
         }
         Specific::Device(dev) => {
             // Device-specific properties

@@ -610,6 +610,17 @@ pub struct TimerState {
 
 pub struct PathState {
     pub common: CommonState,
+    /// Result of the path unit — "success" normally, "trigger-limit-hit" when
+    /// the unit has been triggered too many times within the rate limit window.
+    pub result: PathResult,
+}
+
+/// The result state of a path unit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PathResult {
+    #[default]
+    Success,
+    TriggerLimitHit,
 }
 
 pub struct DeviceState {

@@ -18,7 +18,7 @@
 //! | `DirectoryNotEmpty=`| Dir for `IN_CREATE \| IN_MOVED_TO`                 |
 
 use log::{debug, info, trace, warn};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::os::fd::{AsFd, AsRawFd};
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -26,7 +26,8 @@ use std::time::{Duration, Instant};
 use crate::lock_ext::RwLockExt;
 use crate::runtime_info::ArcMutRuntimeInfo;
 use crate::units::{
-    ActivationSource, PathCondition, PathConfig, Specific, StatusStarted, UnitId, UnitStatus,
+    ActivationSource, PathCondition, PathConfig, Specific, StatusStarted, StatusStopped, UnitId,
+    UnitStatus,
 };
 
 /// How often the path watcher thread does a full poll-based scan as a
@@ -410,9 +411,20 @@ pub fn start_path_watcher_thread(run_info: ArcMutRuntimeInfo) {
             // Track which path units are currently being watched via inotify.
             let mut watched_units: HashMap<String, bool> = HashMap::new();
 
+            // Path units that fired on the previous cycle.  Re-check them
+            // immediately so that level-triggered conditions (PathExists,
+            // DirectoryNotEmpty) that remain true can re-trigger quickly,
+            // enabling proper rate-limit enforcement.
+            let mut recheck_units: HashSet<String> = HashSet::new();
+
             loop {
                 let now = Instant::now();
                 let mut units_to_check: HashMap<String, bool> = HashMap::new();
+
+                // Re-check units that fired on the previous cycle.
+                for name in recheck_units.drain() {
+                    units_to_check.insert(name, true);
+                }
 
                 // --- Phase 1: Ensure inotify watches are up to date ---
                 if let Some(ref mut ino) = inotify_state {
@@ -471,7 +483,7 @@ pub fn start_path_watcher_thread(run_info: ArcMutRuntimeInfo) {
 
                 // --- Phase 4: Check conditions and trigger ---
                 if !units_to_check.is_empty() {
-                    check_and_trigger_paths(
+                    recheck_units = check_and_trigger_paths(
                         &run_info,
                         &units_to_check,
                         &mut trigger_history,
@@ -533,14 +545,18 @@ fn sync_inotify_watches(
 // ---------------------------------------------------------------------------
 
 /// Check path conditions for the given set of unit names and fire triggers.
+/// Returns the set of path unit names that fired a trigger (so the caller
+/// can re-check them on the next cycle — the condition may still be true).
 fn check_and_trigger_paths(
     run_info: &ArcMutRuntimeInfo,
     units_to_check: &HashMap<String, bool>,
     trigger_history: &mut HashMap<String, Vec<Instant>>,
     last_state: &mut HashMap<String, PathSnapshot>,
-) {
+) -> HashSet<String> {
+    let mut fired = HashSet::new();
     let now = Instant::now();
-    let mut paths_to_trigger: Vec<(UnitId, String)> = Vec::new();
+    // (path_unit_id, target_unit_name, trigger_path)
+    let mut paths_to_trigger: Vec<(UnitId, String, String)> = Vec::new();
 
     {
         let ri = run_info.read_poisoned();
@@ -559,17 +575,37 @@ fn check_and_trigger_paths(
                 let path_name = &unit.id.name;
                 let target_unit = &conf.unit;
 
-                if should_trigger_path(conf, path_name, now, trigger_history, last_state) {
-                    paths_to_trigger.push((unit.id.clone(), target_unit.clone()));
+                match should_trigger_path(conf, path_name, now, trigger_history, last_state) {
+                    TriggerResult::Fire(trigger_path) => {
+                        paths_to_trigger.push((unit.id.clone(), target_unit.clone(), trigger_path));
+                    }
+                    TriggerResult::RateLimited => {
+                        // Transition to failed with trigger-limit-hit
+                        info!(
+                            "Path unit {} hit trigger rate limit, transitioning to failed",
+                            path_name
+                        );
+                        {
+                            let mut state = path_specific.state.write_poisoned();
+                            state.result = crate::units::PathResult::TriggerLimitHit;
+                        }
+                        *unit.common.status.write_poisoned() = UnitStatus::Stopped(
+                            StatusStopped::StoppedFinal,
+                            vec![crate::units::UnitOperationErrorReason::GenericStartError(
+                                "trigger-limit-hit".to_string(),
+                            )],
+                        );
+                    }
+                    TriggerResult::NoMatch => {}
                 }
             }
         }
     }
 
-    for (path_id, target_unit_name) in paths_to_trigger {
+    for (path_id, target_unit_name, trigger_path) in paths_to_trigger {
         info!(
-            "Path unit {} triggered, activating {}",
-            path_id.name, target_unit_name
+            "Path unit {} triggered (path={}), activating {}",
+            path_id.name, trigger_path, target_unit_name
         );
 
         trigger_history
@@ -577,8 +613,21 @@ fn check_and_trigger_paths(
             .or_default()
             .push(now);
 
-        fire_path_target(run_info, &target_unit_name);
+        fired.insert(path_id.name.clone());
+        fire_path_target(run_info, &target_unit_name, &path_id.name, &trigger_path);
     }
+
+    fired
+}
+
+/// Result of checking path trigger conditions.
+enum TriggerResult {
+    /// A condition matched; contains the trigger path.
+    Fire(String),
+    /// Conditions matched but the unit has been triggered too many times.
+    RateLimited,
+    /// No conditions matched.
+    NoMatch,
 }
 
 /// Check if a path unit's conditions are met and it should trigger.
@@ -588,49 +637,61 @@ fn should_trigger_path(
     now: Instant,
     trigger_history: &mut HashMap<String, Vec<Instant>>,
     last_state: &mut HashMap<String, PathSnapshot>,
-) -> bool {
-    if is_rate_limited(conf, path_name, now, trigger_history) {
-        trace!(
-            "Path unit {} rate-limited, skipping trigger check",
-            path_name
-        );
-        return false;
-    }
-
+) -> TriggerResult {
+    // Check conditions first — we need to know if there's a match
+    // before deciding whether to fire or rate-limit.
+    let mut matched_path = None;
     for condition in &conf.conditions {
-        if check_condition(condition, path_name, last_state) {
-            return true;
+        if let Some(trigger_path) = check_condition(condition, path_name, last_state) {
+            matched_path = Some(trigger_path);
+            break;
         }
     }
 
-    false
+    let Some(trigger_path) = matched_path else {
+        return TriggerResult::NoMatch;
+    };
+
+    if is_rate_limited(conf, path_name, now, trigger_history) {
+        trace!(
+            "Path unit {} rate-limited, transitioning to failed",
+            path_name
+        );
+        return TriggerResult::RateLimited;
+    }
+
+    TriggerResult::Fire(trigger_path)
 }
 
 /// Check if a single path condition is met.
+/// Returns the trigger path if the condition matched, or None.
 fn check_condition(
     condition: &PathCondition,
     path_name: &str,
     last_state: &mut HashMap<String, PathSnapshot>,
-) -> bool {
+) -> Option<String> {
     match condition {
         PathCondition::PathExists(path) => {
             let exists = Path::new(path).exists();
             if exists {
                 trace!("Path unit {}: PathExists={} satisfied", path_name, path);
+                Some(path.clone())
+            } else {
+                None
             }
-            exists
         }
 
-        PathCondition::PathExistsGlob(pattern) => match glob_match_any(pattern) {
-            true => {
+        PathCondition::PathExistsGlob(pattern) => {
+            if let Some(matched) = glob_match_first(pattern) {
                 trace!(
-                    "Path unit {}: PathExistsGlob={} satisfied",
-                    path_name, pattern
+                    "Path unit {}: PathExistsGlob={} satisfied (matched {})",
+                    path_name, pattern, matched
                 );
-                true
+                Some(matched)
+            } else {
+                None
             }
-            false => false,
-        },
+        }
 
         PathCondition::PathChanged(path) => {
             let key = format!("{path_name}:changed:{path}");
@@ -640,14 +701,16 @@ fn check_condition(
                 None => {
                     // First check — record state but don't trigger.
                     last_state.insert(key, current);
-                    return false;
+                    return None;
                 }
             };
             last_state.insert(key, current);
             if changed {
                 trace!("Path unit {}: PathChanged={} satisfied", path_name, path);
+                Some(path.clone())
+            } else {
+                None
             }
-            changed
         }
 
         PathCondition::PathModified(path) => {
@@ -658,14 +721,16 @@ fn check_condition(
                 None => {
                     // First check — record state but don't trigger.
                     last_state.insert(key, current);
-                    return false;
+                    return None;
                 }
             };
             last_state.insert(key, current);
             if modified {
                 trace!("Path unit {}: PathModified={} satisfied", path_name, path);
+                Some(path.clone())
+            } else {
+                None
             }
-            modified
         }
 
         PathCondition::DirectoryNotEmpty(path) => {
@@ -675,8 +740,10 @@ fn check_condition(
                     "Path unit {}: DirectoryNotEmpty={} satisfied",
                     path_name, path
                 );
+                Some(path.clone())
+            } else {
+                None
             }
-            not_empty
         }
     }
 }
@@ -712,8 +779,8 @@ fn is_directory_not_empty(path: &str) -> bool {
 }
 
 /// Simple glob matching for `PathExistsGlob=`.
-/// Returns true if any filesystem entry matches the glob pattern.
-fn glob_match_any(pattern: &str) -> bool {
+/// Returns the first matching filesystem path, or None.
+fn glob_match_first(pattern: &str) -> Option<String> {
     let path = Path::new(pattern);
     let parent = match path.parent() {
         Some(p) if !p.as_os_str().is_empty() => p,
@@ -721,21 +788,21 @@ fn glob_match_any(pattern: &str) -> bool {
     };
     let file_pattern = match path.file_name() {
         Some(f) => f.to_string_lossy().to_string(),
-        None => return false,
+        None => return None,
     };
 
     let entries = match std::fs::read_dir(parent) {
         Ok(e) => e,
-        Err(_) => return false,
+        Err(_) => return None,
     };
 
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
         if simple_glob_match(&file_pattern, &name) {
-            return true;
+            return Some(parent.join(&name).to_string_lossy().to_string());
         }
     }
-    false
+    None
 }
 
 /// Simple glob matching supporting `*` and `?` wildcards.
@@ -770,8 +837,22 @@ fn glob_match_recursive(pat: &[char], txt: &[char], pi: usize, ti: usize) -> boo
     }
 }
 
+/// Set TRIGGER_PATH and TRIGGER_UNIT on the target service's state.
+fn set_trigger_info(unit: &crate::units::Unit, trigger_unit_name: &str, trigger_path: &str) {
+    if let Specific::Service(specific) = &unit.specific {
+        let mut state = specific.state.write_poisoned();
+        state.srvc.trigger_path = Some(trigger_path.to_owned());
+        state.srvc.trigger_unit = Some(trigger_unit_name.to_owned());
+    }
+}
+
 /// Activate the target unit for a path trigger.
-fn fire_path_target(run_info: &ArcMutRuntimeInfo, target_unit_name: &str) {
+fn fire_path_target(
+    run_info: &ArcMutRuntimeInfo,
+    target_unit_name: &str,
+    path_unit_name: &str,
+    trigger_path: &str,
+) {
     let ri = run_info.read_poisoned();
 
     let target_unit = ri
@@ -781,6 +862,7 @@ fn fire_path_target(run_info: &ArcMutRuntimeInfo, target_unit_name: &str) {
 
     match target_unit {
         Some(unit) => {
+            set_trigger_info(unit, path_unit_name, trigger_path);
             let status = unit.common.status.read_poisoned().clone();
             match status {
                 UnitStatus::Started(_) => {
@@ -828,6 +910,7 @@ fn fire_path_target(run_info: &ArcMutRuntimeInfo, target_unit_name: &str) {
                 .values()
                 .find(|u| u.id.name == target_unit_name)
             {
+                set_trigger_info(unit, path_unit_name, trigger_path);
                 let id = unit.id.clone();
                 drop(ri);
                 match crate::units::activate_unit(
@@ -961,11 +1044,11 @@ mod tests {
 
         // File doesn't exist yet.
         let cond = PathCondition::PathExists(file.to_str().unwrap().to_owned());
-        assert!(!check_condition(&cond, "test.path", &mut last_state));
+        assert!(check_condition(&cond, "test.path", &mut last_state).is_none());
 
         // Create the file.
         fs::write(&file, "").unwrap();
-        assert!(check_condition(&cond, "test.path", &mut last_state));
+        assert!(check_condition(&cond, "test.path", &mut last_state).is_some());
     }
 
     #[test]
@@ -978,11 +1061,11 @@ mod tests {
         let cond = PathCondition::DirectoryNotEmpty(watch_dir.to_str().unwrap().to_owned());
 
         // Empty directory.
-        assert!(!check_condition(&cond, "test.path", &mut last_state));
+        assert!(check_condition(&cond, "test.path", &mut last_state).is_none());
 
         // Add a file.
         fs::write(watch_dir.join("file.txt"), "data").unwrap();
-        assert!(check_condition(&cond, "test.path", &mut last_state));
+        assert!(check_condition(&cond, "test.path", &mut last_state).is_some());
     }
 
     #[test]
@@ -995,17 +1078,17 @@ mod tests {
         let cond = PathCondition::PathChanged(file.to_str().unwrap().to_owned());
 
         // First check records state, doesn't trigger.
-        assert!(!check_condition(&cond, "test.path", &mut last_state));
+        assert!(check_condition(&cond, "test.path", &mut last_state).is_none());
 
         // No change.
-        assert!(!check_condition(&cond, "test.path", &mut last_state));
+        assert!(check_condition(&cond, "test.path", &mut last_state).is_none());
 
         // Change file content.
         fs::write(&file, "modified content").unwrap();
-        assert!(check_condition(&cond, "test.path", &mut last_state));
+        assert!(check_condition(&cond, "test.path", &mut last_state).is_some());
 
         // No further change.
-        assert!(!check_condition(&cond, "test.path", &mut last_state));
+        assert!(check_condition(&cond, "test.path", &mut last_state).is_none());
     }
 
     #[test]
@@ -1018,11 +1101,11 @@ mod tests {
         let cond = PathCondition::PathModified(file.to_str().unwrap().to_owned());
 
         // First check records state.
-        assert!(!check_condition(&cond, "test.path", &mut last_state));
+        assert!(check_condition(&cond, "test.path", &mut last_state).is_none());
 
         // Modify.
         fs::write(&file, "changed!").unwrap();
-        assert!(check_condition(&cond, "test.path", &mut last_state));
+        assert!(check_condition(&cond, "test.path", &mut last_state).is_some());
     }
 
     #[test]
@@ -1034,11 +1117,11 @@ mod tests {
         let cond = PathCondition::PathExistsGlob(pattern.clone());
 
         // No .conf files yet.
-        assert!(!check_condition(&cond, "test.path", &mut last_state));
+        assert!(check_condition(&cond, "test.path", &mut last_state).is_none());
 
         // Create one.
         fs::write(dir.path().join("test.conf"), "data").unwrap();
-        assert!(check_condition(&cond, "test.path", &mut last_state));
+        assert!(check_condition(&cond, "test.path", &mut last_state).is_some());
     }
 
     // -- Rate limiting tests -------------------------------------------------
@@ -1181,13 +1264,10 @@ mod tests {
         };
         let mut history = HashMap::new();
         let mut state = HashMap::new();
-        assert!(!should_trigger_path(
-            &conf,
-            "test.path",
-            Instant::now(),
-            &mut history,
-            &mut state
-        ));
+        assert!(
+            should_trigger_path(&conf, "test.path", Instant::now(), &mut history, &mut state)
+                .is_none()
+        );
     }
 
     #[test]
@@ -1206,13 +1286,10 @@ mod tests {
         };
         let mut history = HashMap::new();
         let mut state = HashMap::new();
-        assert!(should_trigger_path(
-            &conf,
-            "test.path",
-            Instant::now(),
-            &mut history,
-            &mut state
-        ));
+        assert!(
+            should_trigger_path(&conf, "test.path", Instant::now(), &mut history, &mut state)
+                .is_some()
+        );
     }
 
     #[test]
@@ -1229,13 +1306,10 @@ mod tests {
         };
         let mut history = HashMap::new();
         let mut state = HashMap::new();
-        assert!(!should_trigger_path(
-            &conf,
-            "test.path",
-            Instant::now(),
-            &mut history,
-            &mut state
-        ));
+        assert!(
+            should_trigger_path(&conf, "test.path", Instant::now(), &mut history, &mut state)
+                .is_none()
+        );
     }
 
     // -- Inotify-specific tests ----------------------------------------------

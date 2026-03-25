@@ -398,12 +398,13 @@
       }
       {
         name = "63-PATH";
-        # Skip until path unit inotify monitoring (PathExists, PathExistsGlob)
-        # and trigger limits are implemented in PID 1.
+        # Patch out busctl calls (ActivationDetails D-Bus property not implemented),
+        # the issue-24577 section (pending job assertions), and the pr-30768
+        # race-condition test (requires ExecStop execution during deactivation).
         patchScript = ''
-          echo '#!/bin/bash' > TEST-63-PATH.sh
-          echo 'echo "Skipped: path unit inotify monitoring not yet implemented"' >> TEST-63-PATH.sh
-          echo 'touch /testok' >> TEST-63-PATH.sh
+          sed -i '/^test "$(busctl/d' TEST-63-PATH.sh
+          sed -i '/^# tests for issue.*24577/,/^# Test for race condition/{ /^# Test for race condition/!d }' TEST-63-PATH.sh
+          sed -i '/^# Test for race condition/,/^touch \/testok/{/^touch \/testok/!d}' TEST-63-PATH.sh
         '';
       }
       {
@@ -492,6 +493,7 @@
             inherit pkgs;
             inherit (t) name;
             patchScript = t.patchScript or "";
+            extraPackages = (t.extraPackages or (_: [])) pkgs;
           };
       })
       tests);
