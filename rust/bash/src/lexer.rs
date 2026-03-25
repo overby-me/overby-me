@@ -1687,7 +1687,7 @@ fn read_param_word_impl(chars: &[char], i: &mut usize, delim: char, in_dquote: b
             '\\' if *i + 1 < chars.len() => {
                 let next = chars[*i + 1];
                 if in_dquote && !matches!(next, '$' | '`' | '"' | '\\' | '\n' | '}' | '/') {
-                    // Inside double quotes, preserve backslash for non-special chars
+                    // At top level of param word in dquote, preserve backslash
                     literal.push('\\');
                     literal.push(next);
                 } else if !in_dquote {
@@ -1754,6 +1754,13 @@ fn read_param_word_impl(chars: &[char], i: &mut usize, delim: char, in_dquote: b
                                 dq_lit.push(next);
                             } else if next == '\n' {
                                 // \<newline> is line continuation — discard both
+                            } else if in_dquote
+                                && !PATTERN_WORD.with(|f| f.get())
+                                && !IN_HEREDOC.with(|f| f.get())
+                            {
+                                // In nested dquote inside outer-dquoted Default/Alt words,
+                                // strip backslash for non-special chars (\' → ')
+                                dq_lit.push(next);
                             } else {
                                 dq_lit.push('\\');
                                 dq_lit.push(next);
