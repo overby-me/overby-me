@@ -9,4 +9,4 @@ name = "systemd"
 path = "src/main.rs"
 
 [dependencies]
-libsystemd = { path = "../libsystemd" }
+libsystemd = { path = "../libsystemd", features = ["cgroups"] }

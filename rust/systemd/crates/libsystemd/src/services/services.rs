@@ -327,6 +327,14 @@ impl Service {
                 },
             )?;
 
+        // Re-open stdout/stderr after ExecStartPre, which may have deleted
+        // the output file (e.g. ExecStartPre=rm -f ...). In real systemd,
+        // each process invocation gets fresh file descriptors.
+        self.stdout = None;
+        self.stderr = None;
+        super::prepare_service::reopen_stdio(self, conf)
+            .map_err(ServiceErrorReason::PreparingFailed)?;
+
         if conf.exec.is_some() {
             // Service has an ExecStart command — fork and wait for it.
             let has_minus_prefix = conf

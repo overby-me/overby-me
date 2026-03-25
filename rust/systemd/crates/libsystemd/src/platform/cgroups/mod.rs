@@ -9,8 +9,9 @@ use std::io::Read;
 
 use log::trace;
 
+pub(crate) mod bpf_devices;
 mod cgroup1;
-mod cgroup2;
+pub(crate) mod cgroup2;
 
 #[derive(Debug)]
 pub enum CgroupError {

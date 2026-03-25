@@ -2,7 +2,7 @@ use super::StdIo;
 use crate::services::Service;
 use crate::units::ServiceConfig;
 use crate::units::StdIoOption;
-use std::os::unix::io::{AsRawFd, BorrowedFd, IntoRawFd};
+use std::os::unix::io::{AsRawFd, BorrowedFd, FromRawFd, IntoRawFd};
 use std::os::unix::net::UnixDatagram;
 
 fn open_stdio(setting: &Option<StdIoOption>) -> Result<StdIo, String> {
@@ -104,11 +104,52 @@ pub fn prepare_service(
     if srvc.stdout.is_none() {
         srvc.stdout = Some(open_stdio(&conf.exec_config.stdout_path)?);
     }
-    if srvc.stderr.is_none() {
-        srvc.stderr = Some(open_stdio(&conf.exec_config.stderr_path)?);
-    }
+    open_stderr_inherit_stdout(srvc, conf)?;
 
     srvc.notifications_path = Some(notify_socket_env_var);
 
+    Ok(())
+}
+
+/// Re-open stdout/stderr file descriptors after ExecStartPre may have
+/// modified or deleted the output files.
+pub fn reopen_stdio(srvc: &mut Service, conf: &ServiceConfig) -> Result<(), String> {
+    if srvc.stdout.is_none() {
+        srvc.stdout = Some(open_stdio(&conf.exec_config.stdout_path)?);
+    }
+    open_stderr_inherit_stdout(srvc, conf)?;
+    Ok(())
+}
+
+/// Open stderr, using stdout's fd when StandardError defaults to inherit.
+/// In systemd, `StandardError=` defaults to `inherit` which means stderr
+/// duplicates stdout's file descriptor.
+fn open_stderr_inherit_stdout(srvc: &mut Service, conf: &ServiceConfig) -> Result<(), String> {
+    if srvc.stderr.is_some() {
+        return Ok(());
+    }
+    match &conf.exec_config.stderr_path {
+        // No explicit StandardError= or StandardError=inherit: dup stdout
+        None | Some(StdIoOption::Inherit) => {
+            if let Some(ref stdout) = srvc.stdout {
+                let write_fd = stdout.write_fd();
+                let dup_fd = unsafe { libc::dup(write_fd) };
+                if dup_fd < 0 {
+                    return Err(format!(
+                        "Failed to dup stdout fd for stderr: {}",
+                        std::io::Error::last_os_error()
+                    ));
+                }
+                // Wrap the duped fd in a File so it gets closed on drop
+                let file = unsafe { std::fs::File::from_raw_fd(dup_fd) };
+                srvc.stderr = Some(StdIo::File(file));
+            } else {
+                srvc.stderr = Some(open_stdio(&conf.exec_config.stderr_path)?);
+            }
+        }
+        _ => {
+            srvc.stderr = Some(open_stdio(&conf.exec_config.stderr_path)?);
+        }
+    }
     Ok(())
 }

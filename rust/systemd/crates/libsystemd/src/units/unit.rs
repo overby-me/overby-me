@@ -2834,15 +2834,15 @@ pub struct ServiceConfig {
     /// Each entry is a device node path (or class like "char-*", "block-*")
     /// optionally followed by access characters (r=read, w=write, m=mknod).
     /// Multiple directives accumulate; an empty assignment resets the list.
-    /// Parsed and stored; no runtime enforcement yet (requires cgroup device
-    /// controller). See systemd.resource-control(5).
+    /// Enforced via BPF cgroup device controller on cgroup v2.
+    /// See systemd.resource-control(5).
     pub device_allow: Vec<String>,
 
     /// DevicePolicy= — controls the policy for device access for the unit.
     /// Takes "auto" (default, no restrictions), "closed" (only standard
     /// pseudo devices plus DeviceAllow= entries), or "strict" (only
-    /// DeviceAllow= entries). Parsed and stored; no runtime enforcement
-    /// yet (requires cgroup device controller). See systemd.resource-control(5).
+    /// DeviceAllow= entries). Enforced via BPF cgroup device controller
+    /// on cgroup v2. See systemd.resource-control(5).
     pub device_policy: DevicePolicy,
 
     /// WatchdogSec= — configures the watchdog timeout for the service. The

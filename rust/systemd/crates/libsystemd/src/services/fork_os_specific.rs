@@ -96,7 +96,7 @@ pub fn pre_fork_os_specific(srvc: &ServiceConfig) -> Result<(), String> {
         // Apply TasksMax limit via the pids cgroup controller
         if let Some(ref tasks_max) = srvc.tasks_max {
             let pids_max_path = srvc.platform_specific.cgroup_path.join("pids.max");
-            if pids_max_path.exists() || pids_max_path.parent().map_or(false, |p| p.exists()) {
+            if pids_max_path.exists() || pids_max_path.parent().is_some_and(|p| p.exists()) {
                 let value = match tasks_max {
                     TasksMax::Value(n) => n.to_string(),
                     TasksMax::Percent(pct) => {
@@ -237,10 +237,9 @@ pub fn pre_fork_os_specific(srvc: &ServiceConfig) -> Result<(), String> {
         // Per-device bandwidth and IOPS limits — group by device to write
         // a single io.max line per device with all applicable limits.
         {
-            let mut io_max_devices: std::collections::HashMap<
-                String,
-                (Option<u64>, Option<u64>, Option<u64>, Option<u64>),
-            > = std::collections::HashMap::new();
+            type IoMaxLimits = (Option<u64>, Option<u64>, Option<u64>, Option<u64>);
+            let mut io_max_devices: std::collections::HashMap<String, IoMaxLimits> =
+                std::collections::HashMap::new();
 
             for entry in &srvc.io_read_bandwidth_max {
                 io_max_devices
@@ -284,12 +283,39 @@ pub fn pre_fork_os_specific(srvc: &ServiceConfig) -> Result<(), String> {
                 }
             }
         }
+        // ── Device access policy (BPF device controller) ─────────────────
+        {
+            use crate::units::unit_parsing::DevicePolicy;
+            if srvc.device_policy != DevicePolicy::Auto || !srvc.device_allow.is_empty() {
+                trace!(
+                    "Applying DevicePolicy={:?} with {} DeviceAllow rules for cgroup {:?}",
+                    srvc.device_policy,
+                    srvc.device_allow.len(),
+                    &srvc.platform_specific.cgroup_path
+                );
+                match cgroups::bpf_devices::apply_device_policy(
+                    &srvc.platform_specific.cgroup_path,
+                    &srvc.device_policy,
+                    &srvc.device_allow,
+                ) {
+                    Ok(()) => {
+                        trace!(
+                            "Device policy applied for cgroup {:?}",
+                            &srvc.platform_specific.cgroup_path
+                        );
+                    }
+                    Err(e) => {
+                        trace!("Could not apply device policy: {}", e);
+                    }
+                }
+            }
+        }
     }
     let _ = srvc;
     Ok(())
 }
 
-pub const fn post_fork_os_specific(conf: &PlatformSpecificServiceFields) -> Result<(), String> {
+pub fn post_fork_os_specific(conf: &PlatformSpecificServiceFields) -> Result<(), String> {
     #[cfg(feature = "cgroups")]
     {
         use log::trace;
