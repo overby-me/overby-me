@@ -1691,12 +1691,15 @@ fn read_param_word_impl(chars: &[char], i: &mut usize, delim: char, in_dquote: b
                     literal.push('\\');
                     literal.push(next);
                 } else if !in_dquote {
-                    // In unquoted context, mark escaped char as SingleQuoted
-                    // so it's treated as quoted in field splitting
-                    if !literal.is_empty() {
-                        parts.push(WordPart::Literal(std::mem::take(&mut literal)));
+                    if next == '\n' {
+                        // \<newline> is line continuation — discard both
+                    } else {
+                        // Mark escaped char as SingleQuoted for field splitting
+                        if !literal.is_empty() {
+                            parts.push(WordPart::Literal(std::mem::take(&mut literal)));
+                        }
+                        parts.push(WordPart::SingleQuoted(next.to_string()));
                     }
-                    parts.push(WordPart::SingleQuoted(next.to_string()));
                 } else if next == '\\' {
                     // \\ in dquote: produces a quoted literal backslash
                     // Mark as SingleQuoted so pattern matching doesn't treat
@@ -1705,6 +1708,8 @@ fn read_param_word_impl(chars: &[char], i: &mut usize, delim: char, in_dquote: b
                         parts.push(WordPart::Literal(std::mem::take(&mut literal)));
                     }
                     parts.push(WordPart::SingleQuoted("\\".to_string()));
+                } else if next == '\n' {
+                    // \<newline> is line continuation — discard both chars
                 } else {
                     literal.push(next);
                 }
