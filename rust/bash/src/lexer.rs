@@ -934,7 +934,10 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                             continue;
                         }
                         '(' => {
-                            depth += 1;
+                            // Don't count ( inside case blocks as it's a pattern delimiter
+                            if case_depth <= 0 {
+                                depth += 1;
+                            }
                         }
                         ')' => {
                             if case_depth <= 0 {
