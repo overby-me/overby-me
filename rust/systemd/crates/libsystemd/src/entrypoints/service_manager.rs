@@ -672,9 +672,7 @@ fn prepare_runtimeinfo(conf: &config::Config, dry_run: bool) -> runtime_info::Ar
             }
             std::sync::Arc::new(std::sync::Mutex::new(env))
         },
-        unit_markers: std::sync::Arc::new(std::sync::Mutex::new(
-            std::collections::HashMap::new(),
-        )),
+        unit_markers: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     }))
 }
 

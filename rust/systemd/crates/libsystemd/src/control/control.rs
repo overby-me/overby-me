@@ -82,8 +82,12 @@ pub enum Command {
     Mask(Vec<String>),
     /// `unmask <unit>...` — remove /dev/null symlinks for units.
     Unmask(Vec<String>),
-    /// `disable <unit>...` — no-op for now (prevents "Unknown method" errors).
+    /// `enable <unit>...` — create .wants/.requires symlinks per [Install] section.
+    Enable(Vec<String>),
+    /// `disable <unit>...` — remove .wants/.requires symlinks.
     Disable(Vec<String>),
+    /// `preset <unit>...` — enable/disable units based on preset files.
+    Preset(Vec<String>),
     /// `add-wants <unit> <target>` — create a `.wants` symlink.
     AddWants(String, String),
     /// `add-requires <unit> <target>` — create a `.requires` symlink.
@@ -569,7 +573,7 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
             }
         }
         "reload-dry" => Command::LoadAllNewDry,
-        "enable" => {
+        "enable" | "reenable" => {
             let names = match &call.params {
                 Some(params) => match params {
                     Value::String(s) => vec![s.clone()],
@@ -598,7 +602,7 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
                     ));
                 }
             };
-            Command::LoadNew(names)
+            Command::Enable(names)
         }
         "disable" => {
             let names = match &call.params {
@@ -614,6 +618,21 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
                 }
             };
             Command::Disable(names)
+        }
+        "preset" => {
+            let names = match &call.params {
+                Some(Value::String(s)) => vec![s.clone()],
+                Some(Value::Array(arr)) => arr
+                    .iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_owned()))
+                    .collect(),
+                Some(_) | None => {
+                    return Err(ParseError::ParamsInvalid(
+                        "preset requires at least one unit name".to_string(),
+                    ));
+                }
+            };
+            Command::Preset(names)
         }
         "reset-failed" => {
             let name = match &call.params {
@@ -1309,17 +1328,17 @@ fn unit_file_state(
     // Check if masked: the file is a symlink pointing to /dev/null
     // Check runtime mask first (/run/systemd/system/)
     let runtime_path = std::path::Path::new("/run/systemd/system").join(name);
-    if let Ok(target) = std::fs::read_link(&runtime_path) {
-        if target == std::path::Path::new("/dev/null") {
-            return "masked-runtime";
-        }
+    if let Ok(target) = std::fs::read_link(&runtime_path)
+        && target == std::path::Path::new("/dev/null")
+    {
+        return "masked-runtime";
     }
     // Check persistent mask (/etc/systemd/system/)
     let persistent_path = std::path::Path::new("/etc/systemd/system").join(name);
-    if let Ok(target) = std::fs::read_link(&persistent_path) {
-        if target == std::path::Path::new("/dev/null") {
-            return "masked";
-        }
+    if let Ok(target) = std::fs::read_link(&persistent_path)
+        && target == std::path::Path::new("/dev/null")
+    {
+        return "masked";
     }
 
     // Check if the unit has an [Install] section by looking for WantedBy=/RequiredBy=
@@ -2572,12 +2591,289 @@ pub fn execute_command(
                 .map_err(|e| format!("Failed to start transient unit {unit_name}: {e}"))?;
             return Ok(serde_json::json!({ "started": unit_name }));
         }
+        Command::Enable(names) => {
+            let is_runtime = names.iter().any(|n| n == "--runtime");
+            let names: Vec<String> = names.into_iter().filter(|n| n != "--runtime").collect();
+            let base_dir = if is_runtime {
+                std::path::Path::new("/run/systemd/system")
+            } else {
+                std::path::Path::new("/etc/systemd/system")
+            };
+
+            let ri = run_info.read_poisoned();
+            let mut enabled = Vec::new();
+            for name in &names {
+                let full_name = if name.contains('.') {
+                    name.clone()
+                } else {
+                    format!("{name}.service")
+                };
+                // Find the unit file on disk
+                let mut unit_path = None;
+                for dir in &ri.config.unit_dirs {
+                    let candidate = dir.join(&full_name);
+                    if candidate.exists() {
+                        unit_path = Some(candidate);
+                        break;
+                    }
+                }
+                let unit_path = match unit_path {
+                    Some(p) => p,
+                    None => return Err(format!("Unit {full_name} not found.")),
+                };
+                // Read [Install] section
+                let content = std::fs::read_to_string(&unit_path)
+                    .map_err(|e| format!("Failed to read {}: {e}", unit_path.display()))?;
+                let mut in_install = false;
+                let mut wanted_by = Vec::new();
+                let mut required_by = Vec::new();
+                for line in content.lines() {
+                    let trimmed = line.trim();
+                    if trimmed == "[Install]" {
+                        in_install = true;
+                        continue;
+                    }
+                    if trimmed.starts_with('[') {
+                        in_install = false;
+                        continue;
+                    }
+                    if !in_install {
+                        continue;
+                    }
+                    if let Some(val) = trimmed.strip_prefix("WantedBy=") {
+                        for target in val.split_whitespace() {
+                            wanted_by.push(target.to_string());
+                        }
+                    }
+                    if let Some(val) = trimmed.strip_prefix("RequiredBy=") {
+                        for target in val.split_whitespace() {
+                            required_by.push(target.to_string());
+                        }
+                    }
+                }
+                // Create .wants symlinks
+                for target in &wanted_by {
+                    let wants_dir = base_dir.join(format!("{target}.wants"));
+                    std::fs::create_dir_all(&wants_dir)
+                        .map_err(|e| format!("Failed to create {}: {e}", wants_dir.display()))?;
+                    let link = wants_dir.join(&full_name);
+                    let _ = std::fs::remove_file(&link);
+                    std::os::unix::fs::symlink(&unit_path, &link)
+                        .map_err(|e| format!("Failed to create symlink {}: {e}", link.display()))?;
+                }
+                // Create .requires symlinks
+                for target in &required_by {
+                    let req_dir = base_dir.join(format!("{target}.requires"));
+                    std::fs::create_dir_all(&req_dir)
+                        .map_err(|e| format!("Failed to create {}: {e}", req_dir.display()))?;
+                    let link = req_dir.join(&full_name);
+                    let _ = std::fs::remove_file(&link);
+                    std::os::unix::fs::symlink(&unit_path, &link)
+                        .map_err(|e| format!("Failed to create symlink {}: {e}", link.display()))?;
+                }
+                enabled.push(Value::String(full_name));
+            }
+            drop(ri);
+            // Also load units into memory (old enable behavior)
+            {
+                let run_info_w = &mut *run_info.write_poisoned();
+                let mut map = std::collections::HashMap::new();
+                for name in &names {
+                    let full_name = if name.contains('.') {
+                        name.clone()
+                    } else {
+                        format!("{name}.service")
+                    };
+                    let already_loaded = run_info_w
+                        .unit_table
+                        .values()
+                        .any(|u| u.id.name == full_name || u.id.name == *name);
+                    if already_loaded {
+                        continue;
+                    }
+                    if let Ok(unit) = load_new_unit(&run_info_w.config.unit_dirs, name) {
+                        map.insert(unit.id.clone(), unit);
+                    }
+                }
+                if !map.is_empty() {
+                    let _ = insert_new_units(map, run_info_w);
+                }
+            }
+            return Ok(serde_json::json!({ "enabled": enabled }));
+        }
         Command::Disable(names) => {
-            // No-op for now — real systemd removes .wants/.requires symlinks.
-            // We just silently succeed to prevent "Unknown method" errors when
-            // NixOS activation scripts call `systemctl disable`.
-            let disabled: Vec<Value> = names.into_iter().map(Value::String).collect();
+            let is_runtime = names.iter().any(|n| n == "--runtime");
+            let names: Vec<String> = names.into_iter().filter(|n| n != "--runtime").collect();
+            let base_dir = if is_runtime {
+                std::path::Path::new("/run/systemd/system")
+            } else {
+                std::path::Path::new("/etc/systemd/system")
+            };
+            let mut disabled = Vec::new();
+            for name in &names {
+                let full_name = if name.contains('.') {
+                    name.clone()
+                } else {
+                    format!("{name}.service")
+                };
+                // Scan .wants/ and .requires/ directories for symlinks to this unit
+                if let Ok(entries) = std::fs::read_dir(base_dir) {
+                    for entry in entries.flatten() {
+                        let entry_name = entry.file_name();
+                        let entry_str = entry_name.to_string_lossy();
+                        if entry_str.ends_with(".wants") || entry_str.ends_with(".requires") {
+                            let link = entry.path().join(&full_name);
+                            if link.symlink_metadata().is_ok() {
+                                let _ = std::fs::remove_file(&link);
+                            }
+                        }
+                    }
+                }
+                disabled.push(Value::String(full_name));
+            }
             return Ok(serde_json::json!({ "disabled": disabled }));
+        }
+        Command::Preset(names) => {
+            let is_runtime = names.iter().any(|n| n == "--runtime");
+            let preset_mode = if names.iter().any(|n| n == "--preset-mode=enable-only") {
+                "enable-only"
+            } else if names.iter().any(|n| n == "--preset-mode=disable-only") {
+                "disable-only"
+            } else {
+                "full"
+            };
+            let names: Vec<String> = names
+                .into_iter()
+                .filter(|n| n != "--runtime" && !n.starts_with("--preset-mode="))
+                .collect();
+            let base_dir = if is_runtime {
+                std::path::Path::new("/run/systemd/system")
+            } else {
+                std::path::Path::new("/etc/systemd/system")
+            };
+
+            // Read preset files
+            let preset_dirs = [
+                "/etc/systemd/system-preset",
+                "/run/systemd/system-preset",
+                "/usr/lib/systemd/system-preset",
+            ];
+            let mut preset_rules: Vec<(String, String)> = Vec::new(); // (action, pattern)
+            for dir in &preset_dirs {
+                let dir_path = std::path::Path::new(dir);
+                if !dir_path.is_dir() {
+                    continue;
+                }
+                let mut files: Vec<_> = std::fs::read_dir(dir_path)
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .filter(|e| e.file_name().to_string_lossy().ends_with(".preset"))
+                    .collect();
+                files.sort_by_key(|e| e.file_name());
+                for file in files {
+                    if let Ok(content) = std::fs::read_to_string(file.path()) {
+                        for line in content.lines() {
+                            let trimmed = line.trim();
+                            if trimmed.is_empty() || trimmed.starts_with('#') {
+                                continue;
+                            }
+                            let mut parts = trimmed.splitn(2, char::is_whitespace);
+                            if let (Some(action), Some(pattern)) = (parts.next(), parts.next()) {
+                                let action = action.to_lowercase();
+                                if action == "enable" || action == "disable" {
+                                    preset_rules.push((action, pattern.trim().to_string()));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            let ri = run_info.read_poisoned();
+            for name in &names {
+                let full_name = if name.contains('.') {
+                    name.clone()
+                } else {
+                    format!("{name}.service")
+                };
+                // Find matching preset rule (first match wins)
+                let mut action = "enable"; // default is enable if no rule matches
+                for (rule_action, pattern) in &preset_rules {
+                    if unit_name_glob_match(pattern, &full_name) {
+                        action = rule_action;
+                        break;
+                    }
+                }
+                match (action, preset_mode) {
+                    ("enable", "full" | "enable-only") => {
+                        // Find unit and create symlinks
+                        let mut unit_path = None;
+                        for dir in &ri.config.unit_dirs {
+                            let candidate = dir.join(&full_name);
+                            if candidate.exists() {
+                                unit_path = Some(candidate);
+                                break;
+                            }
+                        }
+                        if let Some(unit_path) = unit_path
+                            && let Ok(content) = std::fs::read_to_string(&unit_path)
+                        {
+                            let mut in_install = false;
+                            for line in content.lines() {
+                                let trimmed = line.trim();
+                                if trimmed == "[Install]" {
+                                    in_install = true;
+                                    continue;
+                                }
+                                if trimmed.starts_with('[') {
+                                    in_install = false;
+                                    continue;
+                                }
+                                if !in_install {
+                                    continue;
+                                }
+                                if let Some(val) = trimmed.strip_prefix("WantedBy=") {
+                                    for target in val.split_whitespace() {
+                                        let wants_dir = base_dir.join(format!("{target}.wants"));
+                                        let _ = std::fs::create_dir_all(&wants_dir);
+                                        let link = wants_dir.join(&full_name);
+                                        let _ = std::fs::remove_file(&link);
+                                        let _ = std::os::unix::fs::symlink(&unit_path, &link);
+                                    }
+                                }
+                                if let Some(val) = trimmed.strip_prefix("RequiredBy=") {
+                                    for target in val.split_whitespace() {
+                                        let req_dir = base_dir.join(format!("{target}.requires"));
+                                        let _ = std::fs::create_dir_all(&req_dir);
+                                        let link = req_dir.join(&full_name);
+                                        let _ = std::fs::remove_file(&link);
+                                        let _ = std::os::unix::fs::symlink(&unit_path, &link);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    ("disable", "full" | "disable-only") => {
+                        // Remove symlinks
+                        if let Ok(entries) = std::fs::read_dir(base_dir) {
+                            for entry in entries.flatten() {
+                                let entry_name = entry.file_name();
+                                let entry_str = entry_name.to_string_lossy();
+                                if entry_str.ends_with(".wants") || entry_str.ends_with(".requires")
+                                {
+                                    let link = entry.path().join(&full_name);
+                                    if link.symlink_metadata().is_ok() {
+                                        let _ = std::fs::remove_file(&link);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    _ => {} // action doesn't match preset_mode, skip
+                }
+            }
+            return Ok(serde_json::json!(null));
         }
         Command::SetProperty(unit_name, props) => {
             // Check for --runtime flag in props
@@ -2874,9 +3170,13 @@ pub fn execute_command(
             ];
             let has_vendor = vendor_paths.iter().any(|p| p.exists());
 
-            // Remove /etc/systemd/system/<unit> only if vendor copy exists.
+            // Remove /etc/systemd/system/<unit> if it's a mask symlink (-> /dev/null)
+            // or an admin override (regular file when vendor copy exists).
             let etc_override = std::path::Path::new("/etc/systemd/system").join(&unit_name);
-            if has_vendor && etc_override.is_file() {
+            let is_mask = std::fs::read_link(&etc_override)
+                .map(|t| t == std::path::Path::new("/dev/null"))
+                .unwrap_or(false);
+            if is_mask || (has_vendor && etc_override.is_file()) {
                 if let Err(e) = std::fs::remove_file(&etc_override) {
                     return Err(format!("Failed to remove {}: {e}", etc_override.display()));
                 }
@@ -2893,9 +3193,12 @@ pub fn execute_command(
                 removed.push(etc_dropin.display().to_string());
             }
 
-            // Remove /run/systemd/system/<unit>
+            // Remove /run/systemd/system/<unit> (mask or override)
             let run_override = std::path::Path::new("/run/systemd/system").join(&unit_name);
-            if run_override.is_file() {
+            let is_run_mask = std::fs::read_link(&run_override)
+                .map(|t| t == std::path::Path::new("/dev/null"))
+                .unwrap_or(false);
+            if is_run_mask || run_override.is_file() {
                 if let Err(e) = std::fs::remove_file(&run_override) {
                     return Err(format!("Failed to remove {}: {e}", run_override.display()));
                 }
@@ -3586,9 +3889,7 @@ pub fn execute_command(
             {
                 let markers = ri.unit_markers.lock().unwrap();
                 let unit_markers = markers.get(&unit.id.name);
-                let markers_val = unit_markers
-                    .map(|m| m.join(" "))
-                    .unwrap_or_default();
+                let markers_val = unit_markers.map(|m| m.join(" ")).unwrap_or_default();
                 props.insert("Markers".to_string(), markers_val);
             }
 
@@ -4520,12 +4821,8 @@ pub fn execute_command(
             let link_path = dep_dir.join(&target);
             let target_path = format!("/usr/lib/systemd/system/{target}");
             let _ = std::fs::remove_file(&link_path);
-            std::os::unix::fs::symlink(&target_path, &link_path).map_err(|e| {
-                format!(
-                    "Failed to create symlink {}: {e}",
-                    link_path.display()
-                )
-            })?;
+            std::os::unix::fs::symlink(&target_path, &link_path)
+                .map_err(|e| format!("Failed to create symlink {}: {e}", link_path.display()))?;
             return Ok(serde_json::json!(null));
         }
         Command::AddRequires(unit, target) => {
@@ -4539,12 +4836,8 @@ pub fn execute_command(
             let target_path = format!("/usr/lib/systemd/system/{target}");
             // Remove existing symlink if present
             let _ = std::fs::remove_file(&link_path);
-            std::os::unix::fs::symlink(&target_path, &link_path).map_err(|e| {
-                format!(
-                    "Failed to create symlink {}: {e}",
-                    link_path.display()
-                )
-            })?;
+            std::os::unix::fs::symlink(&target_path, &link_path)
+                .map_err(|e| format!("Failed to create symlink {}: {e}", link_path.display()))?;
             return Ok(serde_json::json!(null));
         }
     }

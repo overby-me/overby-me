@@ -148,6 +148,7 @@ fn main() {
     let mut marked = false;
     let mut output_format: Option<String> = None;
     let mut what_filter: Option<String> = None;
+    let mut preset_mode: Option<String> = None;
     let mut kill_whom: Option<String> = None;
     let mut kill_value: Option<i32> = None;
 
@@ -224,6 +225,20 @@ fn main() {
         }
         if let Some(rest) = arg.strip_prefix("--root=") {
             root_path = Some(rest.to_string());
+            i += 1;
+            continue;
+        }
+
+        // --preset-mode flag (for preset command)
+        if arg == "--preset-mode" {
+            if i + 1 < args.len() {
+                preset_mode = Some(args[i + 1].clone());
+            }
+            i += 2;
+            continue;
+        }
+        if let Some(rest) = arg.strip_prefix("--preset-mode=") {
+            preset_mode = Some(rest.to_string());
             i += 1;
             continue;
         }
@@ -996,38 +1011,54 @@ fn main() {
     {
         // Sleep commands take no parameters.
         None
+    } else if method == "enable" || method == "reenable" {
+        // enable <unit>... [--runtime]
+        if positional.len() < 2 {
+            if !quiet {
+                eprintln!("Error: enable requires at least one unit name.");
+            }
+            std::process::exit(1);
+        }
+        let mut arr: Vec<Value> = positional[1..].iter().cloned().map(Value::String).collect();
+        if runtime {
+            arr.push(Value::String("--runtime".to_string()));
+        }
+        Some(Value::Array(arr))
     } else if method == "disable" {
-        // disable <unit>...
+        // disable <unit>... [--runtime]
         if positional.len() < 2 {
             if !quiet {
                 eprintln!("Error: disable requires at least one unit name.");
             }
             std::process::exit(1);
         }
-        if positional.len() == 2 {
-            Some(Value::String(positional[1].clone()))
-        } else {
-            Some(positional[1..].iter().cloned().map(Value::String).collect())
+        let mut arr: Vec<Value> = positional[1..].iter().cloned().map(Value::String).collect();
+        if runtime {
+            arr.push(Value::String("--runtime".to_string()));
         }
+        Some(Value::Array(arr))
+    } else if method == "preset" {
+        // preset <unit>... [--preset-mode=MODE] [--runtime]
+        if positional.len() < 2 {
+            if !quiet {
+                eprintln!("Error: preset requires at least one unit name.");
+            }
+            std::process::exit(1);
+        }
+        let mut arr: Vec<Value> = positional[1..].iter().cloned().map(Value::String).collect();
+        if runtime {
+            arr.push(Value::String("--runtime".to_string()));
+        }
+        if let Some(ref mode) = preset_mode {
+            arr.push(Value::String(format!("--preset-mode={mode}")));
+        }
+        Some(Value::Array(arr))
     } else if method == "reset-failed" {
         // reset-failed [unit] — optional unit name
         if positional.len() >= 2 {
             Some(Value::String(positional[1].clone()))
         } else {
             None
-        }
-    } else if method == "mask" || method == "unmask" {
-        // mask/unmask <unit>...
-        if positional.len() < 2 {
-            if !quiet {
-                eprintln!("Error: {} requires at least one unit name.", method);
-            }
-            std::process::exit(1);
-        }
-        if positional.len() == 2 {
-            Some(Value::String(positional[1].clone()))
-        } else {
-            Some(positional[1..].iter().cloned().map(Value::String).collect())
         }
     } else if method == "clean" {
         // clean <unit> [--what=WHAT]
@@ -1323,6 +1354,18 @@ fn handle_response(
                 && !quiet
             {
                 print!("{text}");
+            }
+        }
+        "enable" | "reenable" => {
+            if let Some(result) = result
+                && let Some(arr) = result.get("enabled").and_then(|v| v.as_array())
+                && !quiet
+            {
+                for name in arr {
+                    if let Some(s) = name.as_str() {
+                        println!("Created symlink for {s}.");
+                    }
+                }
             }
         }
         "disable" => {
