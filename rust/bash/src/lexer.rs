@@ -1,5 +1,11 @@
 use crate::ast::*;
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
+
+thread_local! {
+    /// Set when parsing heredoc body — suppresses $'...' processing in nested contexts
+    static IN_HEREDOC: Cell<bool> = const { Cell::new(false) };
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
@@ -750,6 +756,7 @@ impl Lexer {
 }
 
 fn parse_double_quoted_content(s: &str) -> Word {
+    IN_HEREDOC.with(|f| f.set(true));
     let chars: Vec<char> = s.chars().collect();
     let mut parts = Vec::new();
     let mut literal = String::new();
@@ -819,6 +826,7 @@ fn parse_double_quoted_content(s: &str) -> Word {
     if !literal.is_empty() {
         parts.push(WordPart::Literal(literal));
     }
+    IN_HEREDOC.with(|f| f.set(false));
     parts
 }
 
@@ -1050,8 +1058,8 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
             }
             WordPart::DoubleQuoted(dq_parts)
         }
-        '\'' => {
-            // $'...' ANSI-C quoting
+        '\'' if !IN_HEREDOC.with(|f| f.get()) => {
+            // $'...' ANSI-C quoting (not in heredoc context)
             *i += 1; // skip '
             let mut s = String::new();
             while *i < chars.len() && chars[*i] != '\'' {
