@@ -1019,7 +1019,12 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                     cmd.push(chars[*i]);
                     *i += 1;
                 }
-                WordPart::CommandSub(cmd)
+                if depth > 0 {
+                    // Incomplete comsub — return empty (bash reports error)
+                    WordPart::Literal(String::new())
+                } else {
+                    WordPart::CommandSub(cmd)
+                }
             }
         }
         '{' => {
