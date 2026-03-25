@@ -142,6 +142,7 @@ fn main() {
 
     let mut force = false;
     let mut wait = false;
+    let mut root_path: Option<String> = None;
     let mut what_filter: Option<String> = None;
     let mut kill_whom: Option<String> = None;
     let mut kill_value: Option<i32> = None;
@@ -191,6 +192,20 @@ fn main() {
         }
         if let Some(rest) = arg.strip_prefix("--kill-value=") {
             kill_value = rest.parse::<i32>().ok();
+            i += 1;
+            continue;
+        }
+
+        // --root flag (for filesystem operations like get-default, set-default)
+        if arg == "--root" {
+            if i + 1 < args.len() {
+                root_path = Some(args[i + 1].clone());
+            }
+            i += 2;
+            continue;
+        }
+        if let Some(rest) = arg.strip_prefix("--root=") {
+            root_path = Some(rest.to_string());
             i += 1;
             continue;
         }
@@ -706,6 +721,82 @@ fn main() {
         } else {
             send_tcp(&addr, &reload_str)
         };
+        return;
+    }
+
+    // Handle get-default/set-default locally (filesystem operations).
+    if positional[0] == "get-default" {
+        let root = root_path.as_deref().unwrap_or("");
+        let link_path = format!("{root}/etc/systemd/system/default.target");
+        match std::fs::read_link(&link_path) {
+            Ok(target) => {
+                let name = target
+                    .file_name()
+                    .unwrap_or(target.as_os_str())
+                    .to_string_lossy();
+                println!("{name}");
+            }
+            Err(_) => {
+                // Fallback: check /usr/lib/systemd/system/default.target
+                let fallback = format!("{root}/usr/lib/systemd/system/default.target");
+                match std::fs::read_link(&fallback) {
+                    Ok(target) => {
+                        let name = target
+                            .file_name()
+                            .unwrap_or(target.as_os_str())
+                            .to_string_lossy();
+                        println!("{name}");
+                    }
+                    Err(_) => {
+                        // Default to multi-user.target if no symlink exists
+                        println!("multi-user.target");
+                    }
+                }
+            }
+        }
+        return;
+    }
+
+    if positional[0] == "set-default" {
+        if positional.len() < 2 {
+            if !quiet {
+                eprintln!("Error: set-default requires a target unit name.");
+            }
+            std::process::exit(1);
+        }
+        let target_name = &positional[1];
+        let root = root_path.as_deref().unwrap_or("");
+        let dir_path = format!("{root}/etc/systemd/system");
+        let link_path = format!("{dir_path}/default.target");
+
+        // Ensure the directory exists
+        if let Err(e) = std::fs::create_dir_all(&dir_path) {
+            if !quiet {
+                eprintln!("Failed to create directory {dir_path}: {e}");
+            }
+            std::process::exit(1);
+        }
+
+        // Remove existing symlink
+        let _ = std::fs::remove_file(&link_path);
+
+        // Resolve to full path if not absolute
+        let target_path = if target_name.contains('/') {
+            target_name.to_string()
+        } else {
+            format!("/usr/lib/systemd/system/{target_name}")
+        };
+
+        if let Err(e) = std::os::unix::fs::symlink(&target_path, &link_path) {
+            if !quiet {
+                eprintln!("Failed to create symlink {link_path} -> {target_path}: {e}");
+            }
+            std::process::exit(1);
+        }
+
+        if !quiet {
+            eprintln!("Created symlink {link_path} -> {target_path}.");
+        }
         return;
     }
 

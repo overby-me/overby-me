@@ -309,7 +309,6 @@
           sed -i '/^test_enable_disable_preset --root=/d' TEST-26-SYSTEMCTL.sh
           sed -i '/^test_mask_unmask_revert --root=/d' TEST-26-SYSTEMCTL.sh
           sed -i '/^test_list_unit_files --root=/d' TEST-26-SYSTEMCTL.sh
-          sed -i '/^test_get_set_default --root=/d' TEST-26-SYSTEMCTL.sh
           # Remove template unit disable --now
           sed -i '/^# disable --now with template unit/,/^# add-wants\/add-requires/{/^# add-wants\/add-requires/!d}' TEST-26-SYSTEMCTL.sh
           # Remove add-wants/add-requires (not implemented)
@@ -325,8 +324,6 @@
           # Remove --timestamp tests
           sed -i '/^# --timestamp$/,/^# set-default/{/^# set-default/!d}' TEST-26-SYSTEMCTL.sh
           sed -i '/^# --timestamp with timer/,/^# set-default/{/^# set-default/!d}' TEST-26-SYSTEMCTL.sh
-          # Remove set-default/get-default (not implemented)
-          sed -i '/^# set-default/,/^# show\/status/{/^# show\/status/!d}' TEST-26-SYSTEMCTL.sh
           # Remove show-environment/set-environment/import-environment (not implemented)
           sed -i '/^# show\/set-environment/,/^# test for sysv-generator/{/^# test for sysv-generator/!d}' TEST-26-SYSTEMCTL.sh
           # Remove sysv-generator test
