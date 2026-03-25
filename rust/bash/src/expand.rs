@@ -707,7 +707,9 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
             let has_mixed_quoting =
                 if let ParamOp::Default(_, word) | ParamOp::Alt(_, word) = &expr.op {
                     let has_literal = word.iter().any(|p| matches!(p, WordPart::Literal(_)));
-                    let has_quoted = word.iter().any(|p| matches!(p, WordPart::SingleQuoted(_)));
+                    let has_quoted = word.iter().any(|p| {
+                        matches!(p, WordPart::SingleQuoted(_) | WordPart::DoubleQuoted(_))
+                    });
                     has_literal && has_quoted
                 } else {
                     false

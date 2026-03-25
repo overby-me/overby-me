@@ -1752,6 +1752,8 @@ fn read_param_word_impl(chars: &[char], i: &mut usize, delim: char, in_dquote: b
                             let next = chars[*i + 1];
                             if matches!(next, '$' | '`' | '"' | '\\') {
                                 dq_lit.push(next);
+                            } else if next == '\n' {
+                                // \<newline> is line continuation — discard both
                             } else {
                                 dq_lit.push('\\');
                                 dq_lit.push(next);
