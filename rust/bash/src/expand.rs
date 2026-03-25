@@ -412,21 +412,47 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                                 elements = elements[start..end].to_vec();
                             }
                         }
-                        if !s.is_empty() {
-                            out.push(Segment::Quoted(std::mem::take(&mut s)));
-                        }
-                        for (i, elem) in elements.iter().enumerate() {
-                            if i > 0 {
-                                out.push(Segment::SplitHere);
+                        // Determine if this is $* (join with IFS) or $@ (split)
+                        let is_star = if let Some(bracket) = expr.name.find('[') {
+                            &expr.name[bracket + 1..expr.name.len() - 1] == "*"
+                        } else {
+                            expr.name == "*"
+                        };
+                        if is_star {
+                            // "${*:...}" or "${arr[*]:...}" — join with IFS[0]
+                            let ifs_char = ctx
+                                .vars
+                                .get("IFS")
+                                .and_then(|s| s.chars().next())
+                                .unwrap_or(' ');
+                            for (i, elem) in elements.iter().enumerate() {
+                                if i > 0 {
+                                    s.push(ifs_char);
+                                }
+                                let modified = if matches!(&expr.op, ParamOp::Substring(..)) {
+                                    elem.clone()
+                                } else {
+                                    apply_param_op(elem, &expr.op, ctx, cmd_sub)
+                                };
+                                s.push_str(&modified);
                             }
-                            // Apply param operation (^, ^^, ,, etc.) to each element
-                            // (but not Substring, which was already handled as array slice)
-                            let modified = if matches!(&expr.op, ParamOp::Substring(..)) {
-                                elem.clone()
-                            } else {
-                                apply_param_op(elem, &expr.op, ctx, cmd_sub)
-                            };
-                            out.push(Segment::Quoted(modified));
+                        } else {
+                            if !s.is_empty() {
+                                out.push(Segment::Quoted(std::mem::take(&mut s)));
+                            }
+                            for (i, elem) in elements.iter().enumerate() {
+                                if i > 0 {
+                                    out.push(Segment::SplitHere);
+                                }
+                                // Apply param operation (^, ^^, ,, etc.) to each element
+                                // (but not Substring, which was already handled as array slice)
+                                let modified = if matches!(&expr.op, ParamOp::Substring(..)) {
+                                    elem.clone()
+                                } else {
+                                    apply_param_op(elem, &expr.op, ctx, cmd_sub)
+                                };
+                                out.push(Segment::Quoted(modified));
+                            }
                         }
                     }
                     WordPart::Param(expr) => {
