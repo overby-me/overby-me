@@ -925,9 +925,8 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                 let mut case_depth = 0i32;
                 while *i < chars.len() && depth > 0 {
                     match chars[*i] {
-                        '\'' if !in_dquote || PATTERN_WORD.with(|f| f.get()) => {
-                            // Single-quoted string — skip in comsub when not in dquote,
-                            // or when in a pattern word context (where ' quotes even in dquote)
+                        '\'' => {
+                            // Single-quoted string — always track in comsub (fresh quoting context)
                             cmd.push(chars[*i]);
                             *i += 1;
                             while *i < chars.len() && chars[*i] != '\'' {
@@ -994,7 +993,14 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                         }
                         '}' if in_dquote && depth == 1 => {
                             // In dquote context, } at comsub depth 1 means the
-                            // closing } of the enclosing ${...}. Suppress silently.
+                            // closing } of the enclosing ${...}.
+                            // In pattern context: error (bash reports this)
+                            // In non-pattern context: silent suppression
+                            // Only report error if the comsub content had ) consumed
+                            // by quoting (indicating genuine incomplete comsub)
+                            if PATTERN_WORD.with(|f| f.get()) && cmd.contains(')') {
+                                return WordPart::CommandSub("\x00INCOMPLETE_COMSUB".to_string());
+                            }
                             return WordPart::CommandSub("\x00SILENT_COMSUB".to_string());
                         }
                         _ => {}
@@ -1683,9 +1689,8 @@ fn read_param_word_impl(chars: &[char], i: &mut usize, delim: char, in_dquote: b
                 *i += 1;
                 parts.push(parse_dollar(chars, i, in_dquote));
             }
-            '\'' if !in_dquote || PATTERN_WORD.with(|f| f.get()) => {
-                // Single quotes have quoting effect in unquoted context
-                // and in pattern words (#, %, /) even inside double quotes
+            '\'' if !in_dquote => {
+                // Single quotes have quoting effect in unquoted context only
                 if !literal.is_empty() {
                     parts.push(WordPart::Literal(std::mem::take(&mut literal)));
                 }

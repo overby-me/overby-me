@@ -1337,10 +1337,18 @@ fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
         }
         ParamOp::TrimSmallLeft(pattern) => {
             let pat = expand_word_nosplit_ctx(pattern, ctx, cmd_sub);
+            if pat.contains("INCOMPLETE_COMSUB") {
+                eprintln!("command substitution: unexpected EOF while looking for matching `)'");
+                return val.to_string();
+            }
             trim_pattern(&val, &pat, TrimMode::SmallLeft)
         }
         ParamOp::TrimLargeLeft(pattern) => {
             let pat = expand_word_nosplit_ctx(pattern, ctx, cmd_sub);
+            if pat.contains("INCOMPLETE_COMSUB") {
+                eprintln!("command substitution: unexpected EOF while looking for matching `)'");
+                return val.to_string();
+            }
             trim_pattern(&val, &pat, TrimMode::LargeLeft)
         }
         ParamOp::TrimSmallRight(pattern) => {
