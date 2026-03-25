@@ -1247,7 +1247,7 @@ fn apply_param_op(val: &str, op: &ParamOp, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> S
         | ParamOp::ReplaceAll(pattern, replacement)
         | ParamOp::ReplacePrefix(pattern, replacement)
         | ParamOp::ReplaceSuffix(pattern, replacement) => {
-            let pat = expand_word_nosplit_ctx(pattern, ctx, cmd_sub);
+            let pat = expand_pattern_word(pattern, ctx, cmd_sub);
             let raw_rep = expand_word_nosplit_ctx(replacement, ctx, cmd_sub);
             // In replacement strings, \' produces literal '
             let rep = raw_rep.replace("\\'", "'");
@@ -1556,7 +1556,7 @@ fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
         | ParamOp::ReplaceAll(pattern, replacement)
         | ParamOp::ReplacePrefix(pattern, replacement)
         | ParamOp::ReplaceSuffix(pattern, replacement) => {
-            let pat = expand_word_nosplit_ctx(pattern, ctx, cmd_sub);
+            let pat = expand_pattern_word(pattern, ctx, cmd_sub);
             let raw_rep = expand_word_nosplit_ctx(replacement, ctx, cmd_sub);
             let rep = raw_rep.replace("\\'", "'");
             match &expr.op {
@@ -1802,6 +1802,25 @@ fn expand_word_nosplit_ctx(word: &Word, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> Stri
         .collect();
     // Strip any \x00 escape markers from backtick results
     result.replace('\x00', "")
+}
+
+/// Like expand_word_nosplit_ctx but adds \x00 quoting prefix before glob metacharacters
+/// in quoted content. This lets the pattern matcher distinguish literal characters
+/// from glob metacharacters in ${var//pat/rep} patterns.
+fn expand_pattern_word(word: &Word, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
+    let segments = expand_word_to_segments(word, ctx, cmd_sub);
+    let mut result = String::new();
+    for s in &segments {
+        match s {
+            Segment::Quoted(t) => {
+                // Use quote_glob_chars to protect glob metacharacters
+                result.push_str(&quote_glob_chars(t));
+            }
+            Segment::Unquoted(t) | Segment::Literal(t) => result.push_str(t),
+            Segment::SplitHere => result.push(' '),
+        }
+    }
+    result
 }
 
 fn expand_arith(expr: &str, ctx: &ExpCtx) -> String {

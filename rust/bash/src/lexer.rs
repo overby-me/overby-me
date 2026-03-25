@@ -1697,6 +1697,14 @@ fn read_param_word_impl(chars: &[char], i: &mut usize, delim: char, in_dquote: b
                         parts.push(WordPart::Literal(std::mem::take(&mut literal)));
                     }
                     parts.push(WordPart::SingleQuoted(next.to_string()));
+                } else if next == '\\' {
+                    // \\ in dquote: produces a quoted literal backslash
+                    // Mark as SingleQuoted so pattern matching doesn't treat
+                    // it as an escape character (e.g., \\* = literal \ + wildcard *)
+                    if !literal.is_empty() {
+                        parts.push(WordPart::Literal(std::mem::take(&mut literal)));
+                    }
+                    parts.push(WordPart::SingleQuoted("\\".to_string()));
                 } else {
                     literal.push(next);
                 }
