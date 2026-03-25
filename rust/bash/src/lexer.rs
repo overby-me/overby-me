@@ -1399,14 +1399,15 @@ fn parse_brace_param(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart
         });
     }
 
-    // ${#name} - length
+    // ${#name} - length, but ${#} ${#:...} ${#-...} etc. are $# with operations
     if *i < chars.len() && chars[*i] == '#' {
         let next = if *i + 1 < chars.len() {
             chars[*i + 1]
         } else {
             '}'
         };
-        if next != '}' {
+        // If next char is an operator or }, treat # as $# (param count), not length
+        if next != '}' && !matches!(next, ':' | '-' | '+' | '=' | '%' | '/' | '?' | '#') {
             *i += 1;
             let name = read_param_name_with_subscript(chars, i);
             if *i < chars.len() && chars[*i] == '}' {

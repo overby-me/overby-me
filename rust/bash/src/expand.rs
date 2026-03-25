@@ -250,9 +250,10 @@ impl ExpCtx<'_> {
     /// Check whether a parameter name is "set" (exists), considering
     /// positional parameters, special variables, shell variables, and env.
     fn is_param_set(&self, name: &str) -> bool {
-        // Special variables are always "set"
+        // Special variables are always "set" (except $@ and $* with no args)
         match name {
-            "#" | "?" | "-" | "$" | "!" | "0" | "@" | "*" => return true,
+            "#" | "?" | "-" | "$" | "!" | "0" => return true,
+            "@" | "*" => return self.positional.len() > 1,
             _ => {}
         }
         // Positional parameters ($1, $2, ...)
