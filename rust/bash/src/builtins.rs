@@ -5022,6 +5022,7 @@ fn builtin_mapfile(shell: &mut Shell, args: &[String]) -> i32 {
     let mut strip_trailing = false;
     let mut count: Option<usize> = None;
     let mut origin: usize = 0;
+    let mut has_origin = false;
     let mut skip: usize = 0;
     let mut delim: u8 = b'\n';
     let mut callback: Option<String> = None;
@@ -5043,6 +5044,7 @@ fn builtin_mapfile(shell: &mut Shell, args: &[String]) -> i32 {
                 i += 1;
                 if i < args.len() {
                     origin = args[i].parse().unwrap_or(0);
+                    has_origin = true;
                 }
             }
             "-s" => {
@@ -5149,7 +5151,7 @@ fn builtin_mapfile(shell: &mut Shell, args: &[String]) -> i32 {
     // Execute callback if specified
     if let Some(ref cb) = callback {
         for (idx, line) in lines.iter().enumerate() {
-            if (idx + 1) % quantum == 0 || idx == lines.len() - 1 {
+            if (idx + 1) % quantum == 0 {
                 let cmd = format!("{} {} {}", cb, origin + idx, shell_quote(line));
                 shell.run_string(&cmd);
             }
@@ -5157,6 +5159,10 @@ fn builtin_mapfile(shell: &mut Shell, args: &[String]) -> i32 {
     }
 
     // Store as array starting at origin
+    // Without -O, clear the array first. With -O, preserve existing elements.
+    if !has_origin {
+        shell.arrays.insert(varname.clone(), Vec::new());
+    }
     let arr = shell.arrays.entry(varname.clone()).or_default();
     // Extend array to fit origin + lines
     while arr.len() < origin {
