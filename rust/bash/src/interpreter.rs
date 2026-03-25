@@ -4255,6 +4255,34 @@ impl Shell {
         }
     }
 
+    /// Check if a closed fd matches a coproc fd and update the COPROC array.
+    /// Like bash's coproc_checkfd().
+    fn coproc_checkfd(&mut self, fd: i32) {
+        let fd_str = fd.to_string();
+        let coproc_names: Vec<String> = self
+            .vars
+            .keys()
+            .filter(|k| k.ends_with("_PID"))
+            .map(|k| k[..k.len() - 4].to_string())
+            .filter(|name| self.arrays.contains_key(name))
+            .collect();
+        for name in coproc_names {
+            if let Some(arr) = self.arrays.get_mut(&name) {
+                let mut updated = false;
+                for elem in arr.iter_mut() {
+                    if *elem == fd_str {
+                        *elem = "-1".to_string();
+                        updated = true;
+                    }
+                }
+                if updated {
+                    // Re-export the array variable (COPROC[0], COPROC[1])
+                    // This is implicit since we modified the array in place
+                }
+            }
+        }
+    }
+
     fn run_conditional(&mut self, expr: &CondExpr) -> i32 {
         // For And/Or, xtrace is output per sub-expression during eval_cond
         if self.opt_xtrace && !matches!(expr, CondExpr::And(_, _) | CondExpr::Or(_, _)) {
@@ -4849,6 +4877,7 @@ impl Shell {
                 RedirectKind::DupOutput => {
                     let fd = self.resolve_redir_fd(&redir.fd, 1);
                     if target_str == "-" {
+                        self.coproc_checkfd(fd);
                         nix::unistd::close(fd).ok();
                     } else if let Some(src_str) = target_str.strip_suffix('-') {
                         // Move fd: dup src to fd, then close src
@@ -4858,6 +4887,7 @@ impl Shell {
                             }
                             nix::unistd::dup2(src_fd, fd)
                                 .map_err(|e| Self::dup_error_message(src_fd, &e))?;
+                            self.coproc_checkfd(src_fd);
                             nix::unistd::close(src_fd).ok();
                         }
                     } else if let Ok(src_fd) = target_str.parse::<i32>() {
@@ -4871,6 +4901,7 @@ impl Shell {
                 RedirectKind::DupInput => {
                     let fd = self.resolve_redir_fd(&redir.fd, 0);
                     if target_str == "-" {
+                        self.coproc_checkfd(fd);
                         nix::unistd::close(fd).ok();
                     } else if let Some(src_str) = target_str.strip_suffix('-') {
                         // Move fd: dup src to fd, then close src
@@ -4880,6 +4911,7 @@ impl Shell {
                             }
                             nix::unistd::dup2(src_fd, fd)
                                 .map_err(|e| Self::dup_error_message(src_fd, &e))?;
+                            self.coproc_checkfd(src_fd);
                             nix::unistd::close(src_fd).ok();
                         }
                     } else if let Ok(src_fd) = target_str.parse::<i32>() {
