@@ -1672,7 +1672,9 @@ fn read_param_word_impl(chars: &[char], i: &mut usize, delim: char, in_dquote: b
                 *i += 1;
                 parts.push(parse_dollar(chars, i, in_dquote));
             }
-            '\'' if !in_dquote => {
+            '\'' => {
+                // Single quotes have quoting effect in parameter expansion words
+                // even inside double quotes (bash behavior)
                 if !literal.is_empty() {
                     parts.push(WordPart::Literal(std::mem::take(&mut literal)));
                 }
