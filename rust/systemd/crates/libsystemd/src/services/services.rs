@@ -8,6 +8,23 @@ use crate::units::{
     ServiceType, Timeout, UnitId, UnitStatus,
 };
 
+/// Check if a unit is masked (symlink to /dev/null) on disk.
+fn is_unit_masked(name: &str) -> bool {
+    let runtime = std::path::Path::new("/run/systemd/system").join(name);
+    if let Ok(target) = std::fs::read_link(&runtime)
+        && target == std::path::Path::new("/dev/null")
+    {
+        return true;
+    }
+    let persistent = std::path::Path::new("/etc/systemd/system").join(name);
+    if let Ok(target) = std::fs::read_link(&persistent)
+        && target == std::path::Path::new("/dev/null")
+    {
+        return true;
+    }
+    false
+}
+
 /// Returns the effective `NotifyAccess` given an optional runtime override and
 /// the unit file's configured value.
 ///
@@ -438,6 +455,17 @@ impl Service {
         name: &str,
         run_info: &RuntimeInfo,
     ) -> Result<(), ServiceErrorReason> {
+        // When a unit is masked (symlink to /dev/null), skip ExecStop and
+        // ExecStopPost commands — just kill the processes directly.
+        // See systemd issue #38802.
+        if is_unit_masked(name) {
+            trace!("Unit {name} is masked, skipping ExecStop/ExecStopPost");
+            self.kill_all_remaining_processes(conf, name);
+            self.pid = None;
+            self.process_group = None;
+            return Ok(());
+        }
+
         self.stop(conf, id.clone(), name, run_info)
             .map_err(|stop_err| {
                 trace!(

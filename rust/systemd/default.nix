@@ -237,33 +237,56 @@
       }
       {
         name = "07-PID1";
-        # Skip subtests requiring unimplemented PID 1 features:
-        # - concurrency: ConcurrencySoftMax/HardMax slice properties
-        # - attach_processes, issue-34104, issue-35882: busctl D-Bus calls
-        # - delegate-namespaces, private-network, private-users, private-pids,
-        #   private-bpf, protect-control-groups, protect-hostname,
-        #   user-namespace-path: namespace/sandboxing features
-        # - main-PID-change: systemd-notify --uid
-        # - mount-invalid-chars: mount unit support
-        # - mqueue-ownership: mqueue features
-        # - nft: nftables integration
-        # - poll-limit, socket-defer, socket-max-connection, socket-on-failure,
-        #   socket-pass-fds: advanced socket unit features
-        # - quota: StateDirectoryQuota
-        # - subgroup-kill: systemctl kill --kill-subgroup
-        # - transient, transient-unit-container: transient unit via D-Bus
-        # - type-exec-parallel: Type=exec parallel
-        # - DeferReactivation: timer defer reactivation
-        # - issue-2467: socket trigger
-        # - issue-30412: socket FD handling
-        # - issue-38320: fdstore
-        # - startv: systemd-run -v flag
-        # Skip entirely: all subtests need features not yet implemented
-        # (NRestarts, socket activation, exec context, transient units, etc.)
+        # Patch main script to remove mountpoint check and exit, keep run_subtests.
+        # Enable mask.sh; remove all other subtests requiring unimplemented features.
         patchScript = ''
-          echo '#!/bin/bash' > TEST-07-PID1.sh
-          echo 'echo "Skipped: PID1 subtests require unimplemented features"' >> TEST-07-PID1.sh
-          echo 'touch /testok' >> TEST-07-PID1.sh
+          sed -i '/mountpoint \/issue2730/d; /systemctl --no-block exit 123/d' TEST-07-PID1.sh
+          rm -f TEST-07-PID1.attach_processes.sh \
+               TEST-07-PID1.concurrency.sh \
+               TEST-07-PID1.DeferReactivation.sh \
+               TEST-07-PID1.delegate-namespaces.sh \
+               TEST-07-PID1.exec-context.sh \
+               TEST-07-PID1.exec-deserialization.sh \
+               TEST-07-PID1.exec-timestamps.sh \
+               TEST-07-PID1.issue-14566.sh \
+               TEST-07-PID1.issue-16115.sh \
+               TEST-07-PID1.issue-1981.sh \
+               TEST-07-PID1.issue-2467.sh \
+               TEST-07-PID1.issue-27953.sh \
+               TEST-07-PID1.issue-30412.sh \
+               TEST-07-PID1.issue-3166.sh \
+               TEST-07-PID1.issue-3171.sh \
+               TEST-07-PID1.issue-31752.sh \
+               TEST-07-PID1.issue-33672.sh \
+               TEST-07-PID1.issue-34104.sh \
+               TEST-07-PID1.issue-35882.sh \
+               TEST-07-PID1.issue-38320.sh \
+               TEST-07-PID1.main-PID-change.sh \
+               TEST-07-PID1.mount-invalid-chars.sh \
+               TEST-07-PID1.mqueue-ownership.sh \
+               TEST-07-PID1.nft.sh \
+               TEST-07-PID1.poll-limit.sh \
+               TEST-07-PID1.pr-31351.sh \
+               TEST-07-PID1.prefix-shell.sh \
+               TEST-07-PID1.private-bpf.sh \
+               TEST-07-PID1.private-network.sh \
+               TEST-07-PID1.private-pids.sh \
+               TEST-07-PID1.private-users.sh \
+               TEST-07-PID1.protect-control-groups.sh \
+               TEST-07-PID1.protect-hostname.sh \
+               TEST-07-PID1.quota.sh \
+               TEST-07-PID1.socket-defer.sh \
+               TEST-07-PID1.socket-max-connection.sh \
+               TEST-07-PID1.socket-on-failure.sh \
+               TEST-07-PID1.socket-pass-fds.sh \
+               TEST-07-PID1.start-limit.sh \
+               TEST-07-PID1.startv.sh \
+               TEST-07-PID1.subgroup-kill.sh \
+               TEST-07-PID1.transient.sh \
+               TEST-07-PID1.transient-unit-container.sh \
+               TEST-07-PID1.type-exec-parallel.sh \
+               TEST-07-PID1.user-namespace-path.sh \
+               TEST-07-PID1.working-directory.sh
         '';
       }
       {name = "15-DROPIN";}
