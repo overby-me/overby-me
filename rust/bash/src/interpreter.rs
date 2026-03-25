@@ -259,6 +259,7 @@ pub struct Shell {
     // Shell options (shopt)
     pub shopt_nullglob: bool,
     pub shopt_extglob: bool,
+    pub shopt_globstar: bool,
     pub shopt_inherit_errexit: bool,
     pub shopt_nocasematch: bool,
     pub shopt_lastpipe: bool,
@@ -392,6 +393,7 @@ impl Shell {
             opt_allexport: false,
             shopt_nullglob: false,
             shopt_extglob: false,
+            shopt_globstar: false,
             shopt_inherit_errexit: false,
             shopt_nocasematch: false,
             shopt_lastpipe: false,

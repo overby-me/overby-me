@@ -4703,12 +4703,78 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
         ("xpg_echo", false),
     ];
 
+    // Build the full options table with current values
+    let all_options: Vec<(&str, bool)> = vec![
+        ("array_expand_once", false),
+        ("assoc_expand_once", false),
+        ("autocd", false),
+        ("bash_source_fullpath", false),
+        ("cdable_vars", false),
+        ("cdspell", false),
+        ("checkhash", false),
+        ("checkjobs", false),
+        ("checkwinsize", true),
+        ("cmdhist", true),
+        ("compat31", false),
+        ("compat32", false),
+        ("compat40", false),
+        ("compat41", false),
+        ("compat42", false),
+        ("compat43", false),
+        ("compat44", false),
+        ("dotglob", false),
+        ("execfail", false),
+        ("expand_aliases", shell.shopt_expand_aliases),
+        ("extdebug", false),
+        ("extglob", shell.shopt_extglob),
+        ("extquote", true),
+        ("failglob", false),
+        ("globasciiranges", true),
+        ("globskipdots", true),
+        ("globstar", shell.shopt_globstar),
+        ("gnu_errfmt", false),
+        ("histappend", false),
+        ("huponexit", false),
+        ("inherit_errexit", shell.shopt_inherit_errexit),
+        ("interactive_comments", true),
+        ("lastpipe", shell.shopt_lastpipe),
+        ("lithist", false),
+        ("localvar_inherit", false),
+        ("localvar_unset", false),
+        ("login_shell", false),
+        ("mailwarn", false),
+        ("nocaseglob", false),
+        ("nocasematch", shell.shopt_nocasematch),
+        ("noexpand_translation", false),
+        ("nullglob", shell.shopt_nullglob),
+        ("patsub_replacement", true),
+        ("promptvars", true),
+        ("restricted_shell", false),
+        ("shift_verbose", false),
+        ("sourcepath", true),
+        ("varredir_close", false),
+        ("xpg_echo", false),
+    ];
+
     if opts.is_empty() && !set && !unset {
-        // List all shopt options — currently not fully implemented
+        // List all shopt options
+        if !query {
+            for (name, val) in &all_options {
+                println!("{:<20}\t{}", name, if *val { "on" } else { "off" });
+            }
+        }
         return 0;
     }
 
     if opts.is_empty() && (set || unset) {
+        // List options that are set (-s) or unset (-u)
+        if !query {
+            for (name, val) in &all_options {
+                if (set && *val) || (unset && !*val) {
+                    println!("{:<20}\t{}", name, if *val { "on" } else { "off" });
+                }
+            }
+        }
         return 0;
     }
 
@@ -4727,6 +4793,21 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
                         if shell.shopt_nullglob { "on" } else { "off" }
                     );
                 } else if !shell.shopt_nullglob {
+                    status = 1;
+                }
+            }
+            "globstar" => {
+                if set {
+                    shell.shopt_globstar = true;
+                } else if unset {
+                    shell.shopt_globstar = false;
+                } else if !query {
+                    println!(
+                        "{:<24}{}",
+                        "globstar",
+                        if shell.shopt_globstar { "on" } else { "off" }
+                    );
+                } else if !shell.shopt_globstar {
                     status = 1;
                 }
             }
