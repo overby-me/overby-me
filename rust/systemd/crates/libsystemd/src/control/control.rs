@@ -4761,6 +4761,12 @@ pub fn execute_command(
             let run_info = &*run_info.read_poisoned();
             let unit_table = &run_info.unit_table;
             if let Some(name) = unit_name {
+                // Default to .service if no recognized suffix
+                let name = if !name.contains('.') {
+                    format!("{name}.service")
+                } else {
+                    name
+                };
                 //list specific
                 let units = find_units_with_pattern(&name, unit_table);
                 for unit in units {
