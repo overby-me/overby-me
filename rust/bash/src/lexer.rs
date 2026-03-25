@@ -921,12 +921,14 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                 // Command substitution: $( ... )
                 // Must handle case...esac, quotes, nested $(...)
                 let mut depth = 1;
+                let mut brace_depth = 0i32; // track ${...} nesting
                 let mut cmd = String::new();
                 let mut case_depth = 0i32;
                 while *i < chars.len() && depth > 0 {
                     match chars[*i] {
-                        '\'' if !in_dquote => {
-                            // Single-quoted string — only track in non-dquote comsub
+                        '\'' if !in_dquote || brace_depth > 0 => {
+                            // Single-quoted string — track in non-dquote comsub
+                            // OR when inside ${...} (where single quotes are always active)
                             cmd.push(chars[*i]);
                             *i += 1;
                             while *i < chars.len() && chars[*i] != '\'' {
@@ -991,10 +993,23 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                             }
                             // Inside a case block, ) is a pattern delimiter — skip
                         }
+                        '}' if brace_depth > 0 => {
+                            // Inside a ${...} block — this } closes that block
+                            brace_depth -= 1;
+                        }
                         '}' if in_dquote && depth == 1 => {
                             // In dquote context, } at comsub depth 1 means the
                             // closing } of the enclosing ${...}. Silent suppression.
                             return WordPart::CommandSub("\x00SILENT_COMSUB".to_string());
+                        }
+                        '$' if *i + 1 < chars.len() && chars[*i + 1] == '{' => {
+                            // Track ${...} nesting
+                            cmd.push(chars[*i]);
+                            *i += 1;
+                            cmd.push(chars[*i]);
+                            *i += 1;
+                            brace_depth += 1;
+                            continue;
                         }
                         _ => {}
                     }
