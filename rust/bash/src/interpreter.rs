@@ -883,6 +883,10 @@ impl Shell {
     }
 
     fn run_complete_command(&mut self, cmd: &CompleteCommand) -> i32 {
+        // Reap any finished coproc processes
+        #[cfg(unix)]
+        self.reap_coprocs();
+
         // Update LINENO
         self.vars.insert("LINENO".to_string(), cmd.line.to_string());
 
@@ -4173,6 +4177,48 @@ impl Shell {
             }
         }
         result
+    }
+
+    /// Check if any coproc process has exited and clean up its fds/variables
+    #[cfg(unix)]
+    fn reap_coprocs(&mut self) {
+        use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
+        use nix::unistd::Pid;
+
+        // Find coproc arrays (they have corresponding _PID variables)
+        let coproc_names: Vec<String> = self
+            .vars
+            .keys()
+            .filter(|k| k.ends_with("_PID"))
+            .map(|k| k[..k.len() - 4].to_string())
+            .filter(|name| self.arrays.contains_key(name))
+            .collect();
+
+        for name in coproc_names {
+            let pid_key = format!("{}_PID", name);
+            if let Some(pid_str) = self.vars.get(&pid_key)
+                && let Ok(pid) = pid_str.parse::<i32>()
+            {
+                // Non-blocking check if process has exited
+                match waitpid(Pid::from_raw(pid), Some(WaitPidFlag::WNOHANG)) {
+                    Ok(WaitStatus::Exited(_, _)) | Ok(WaitStatus::Signaled(_, _, _)) => {
+                        // Process has exited — close fds and clean up
+                        if let Some(arr) = self.arrays.get(&name) {
+                            for fd_str in arr {
+                                if let Ok(fd) = fd_str.parse::<i32>() {
+                                    unsafe {
+                                        libc::close(fd);
+                                    }
+                                }
+                            }
+                        }
+                        self.arrays.remove(&name);
+                        self.vars.remove(&pid_key);
+                    }
+                    _ => {} // Still running or error
+                }
+            }
+        }
     }
 
     fn run_conditional(&mut self, expr: &CondExpr) -> i32 {
