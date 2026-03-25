@@ -3996,6 +3996,25 @@ impl Shell {
             CondExpr::Binary(left, op, right) => {
                 let lval = self.expand_word_single(left);
                 // For = and != operators, the right side is a pattern
+                if op == "=~" {
+                    // For =~, check if pattern is quoted (any SingleQuoted/DoubleQuoted part)
+                    let is_quoted = right.iter().any(|p| {
+                        matches!(p, WordPart::SingleQuoted(_) | WordPart::DoubleQuoted(_))
+                    });
+                    let rval = self.expand_word_single(right);
+                    if is_quoted {
+                        // Quoted: literal string match (not regex)
+                        let matched = lval.contains(&rval);
+                        if matched {
+                            self.arrays
+                                .insert("BASH_REMATCH".to_string(), vec![rval.clone()]);
+                        } else {
+                            self.arrays.insert("BASH_REMATCH".to_string(), Vec::new());
+                        }
+                        return Ok(matched);
+                    }
+                    return self.eval_cond_binary(&lval, op, &rval);
+                }
                 let rval = if matches!(op.as_str(), "=" | "==" | "!=") {
                     self.expand_word_pattern(right)
                 } else {
