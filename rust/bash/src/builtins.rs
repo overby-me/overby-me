@@ -1221,7 +1221,17 @@ fn format_word_part(part: &WordPart) -> String {
         WordPart::Tilde(user) => format!("~{}", user),
         WordPart::Variable(name) => format!("${}", name),
         WordPart::Param(expr) => format_param_expr(&expr.name, &expr.op),
-        WordPart::CommandSub(cmd) => format!("$({})", cmd.trim()),
+        WordPart::CommandSub(cmd) => {
+            let trimmed = cmd.trim();
+            // Normalize $(< file) — ensure space after <
+            if let Some(rest) = trimmed.strip_prefix('<')
+                && !rest.starts_with(' ')
+                && !rest.starts_with('<')
+            {
+                return format!("$(< {})", rest.trim_start());
+            }
+            format!("$({})", trimmed)
+        }
         WordPart::BacktickSub(cmd) => format!("`{}`", cmd),
         WordPart::ArithSub(expr) => format!("$(({}))", expr),
         WordPart::ProcessSub(kind, cmd) => match kind {
@@ -1326,7 +1336,13 @@ fn format_redirection(redir: &Redirection) -> String {
         RedirectKind::DupInput => s.push_str("<&"),
         RedirectKind::DupOutput => s.push_str(">&"),
         RedirectKind::ReadWrite => s.push_str("<> "),
-        RedirectKind::HereDoc(_) => s.push_str("<< "),
+        RedirectKind::HereDoc(strip) => {
+            if strip {
+                s.push_str("<<-");
+            } else {
+                s.push_str("<<");
+            }
+        }
         RedirectKind::HereString => s.push_str("<<< "),
         RedirectKind::OutputAll => s.push_str("&> "),
         RedirectKind::AppendAll => s.push_str("&>> "),
