@@ -4540,6 +4540,9 @@ impl Shell {
             }
             "=~" => {
                 // Regex matching with BASH_REMATCH capture groups
+                // Preprocess: convert \X (non-special escapes) to X for regex_lite
+                let fixed_pattern = Self::fix_regex_escapes(right);
+                let right = &fixed_pattern;
                 match regex_lite::Regex::new(right) {
                     Ok(re) => {
                         if let Some(caps) = re.captures(left) {
@@ -4572,6 +4575,48 @@ impl Shell {
             }
             _ => Ok(false),
         }
+    }
+
+    /// Fix regex escape sequences for regex_lite compatibility.
+    /// POSIX/bash regex treats `\X` where X is non-special as literal X.
+    /// regex_lite rejects unknown escapes, so convert them to literal chars.
+    fn fix_regex_escapes(pattern: &str) -> String {
+        let mut result = String::with_capacity(pattern.len());
+        let chars: Vec<char> = pattern.chars().collect();
+        let mut i = 0;
+        while i < chars.len() {
+            if chars[i] == '\\' && i + 1 < chars.len() {
+                let next = chars[i + 1];
+                let keep = match next {
+                    // Regex metacharacters — keep escaped
+                    '.' | '*' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '|' | '^' | '$'
+                    | '\\' | '/' => true,
+                    // Note: \d, \w, \s etc. are NOT POSIX regex — they're Perl extensions.
+                    // In bash's POSIX regex, \d means literal 'd'. Don't keep these.
+                    // Whitespace escapes
+                    'n' | 'r' | 't' | 'a' | 'f' | 'v' => true,
+                    // Backreferences
+                    '0'..='9' => true,
+                    // \x only valid with following hex digits
+                    'x' => i + 2 < chars.len() && chars[i + 2].is_ascii_hexdigit(),
+                    // \p only valid with following { for unicode properties
+                    'p' | 'P' => i + 2 < chars.len() && chars[i + 2] == '{',
+                    _ => false,
+                };
+                if keep {
+                    result.push('\\');
+                    result.push(next);
+                } else {
+                    // Convert to literal char (escape it if it's a regex metachar)
+                    result.push(next);
+                }
+                i += 2;
+            } else {
+                result.push(chars[i]);
+                i += 1;
+            }
+        }
+        result
     }
 
     /// Execute `(( arithmetic expression ))` — exit status 0 if result != 0.
