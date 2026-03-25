@@ -827,19 +827,39 @@ fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
                             return assoc.get(idx_str).cloned().unwrap_or_default();
                         }
                         // Numeric index for indexed arrays (supports negative)
-                        // Expand $var references in subscript
+                        // Expand $var and ${var} references in subscript
                         let expanded_idx = if idx_str.contains('$') {
                             let mut expanded = idx_str.to_string();
-                            // Simple $var expansion (not full arith eval)
                             while let Some(pos) = expanded.find('$') {
                                 let rest = &expanded[pos + 1..];
-                                let var_end = rest
-                                    .find(|c: char| !c.is_alphanumeric() && c != '_')
-                                    .unwrap_or(rest.len());
-                                let var_name = &rest[..var_end];
-                                let var_val = ctx.vars.get(var_name).cloned().unwrap_or_default();
-                                expanded =
-                                    format!("{}{}{}", &expanded[..pos], var_val, &rest[var_end..]);
+                                if rest.starts_with('{') {
+                                    if let Some(close) = rest.find('}') {
+                                        let var_name = &rest[1..close];
+                                        let var_val =
+                                            ctx.vars.get(var_name).cloned().unwrap_or_default();
+                                        expanded = format!(
+                                            "{}{}{}",
+                                            &expanded[..pos],
+                                            var_val,
+                                            &rest[close + 1..]
+                                        );
+                                    } else {
+                                        break;
+                                    }
+                                } else {
+                                    let var_end = rest
+                                        .find(|c: char| !c.is_alphanumeric() && c != '_')
+                                        .unwrap_or(rest.len());
+                                    let var_name = &rest[..var_end];
+                                    let var_val =
+                                        ctx.vars.get(var_name).cloned().unwrap_or_default();
+                                    expanded = format!(
+                                        "{}{}{}",
+                                        &expanded[..pos],
+                                        var_val,
+                                        &rest[var_end..]
+                                    );
+                                }
                             }
                             expanded
                         } else {
