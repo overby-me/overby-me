@@ -968,8 +968,10 @@ fn shell_escape(s: &str) -> String {
     if !needs_quoting {
         return s.to_string();
     }
-    // Check if we can use simple backslash quoting (no control chars)
-    let has_control = s.chars().any(|c| c.is_ascii_control());
+    // Check if we can use simple backslash quoting (no control/non-ASCII chars)
+    let has_control = s
+        .chars()
+        .any(|c| c.is_ascii_control() || (c as u32) >= 0x80);
     if !has_control {
         let mut result = String::new();
         for ch in s.chars() {
@@ -996,10 +998,17 @@ fn shell_escape(s: &str) -> String {
             '\x1b' => result.push_str("\\E"),
             c if c.is_ascii_graphic() || c == ' ' => result.push(c),
             c => {
-                // Use octal format like bash for control/non-printable chars
-                let bytes = c.to_string();
-                for b in bytes.as_bytes() {
-                    result.push_str(&format!("\\{:03o}", b));
+                // Use octal format: for Latin-1 range (U+0080..U+00FF),
+                // output as single byte; for others, use UTF-8 bytes
+                let cp = c as u32;
+                if cp <= 0xFF {
+                    result.push_str(&format!("\\{:03o}", cp));
+                } else {
+                    let mut buf = [0u8; 4];
+                    let encoded = c.encode_utf8(&mut buf);
+                    for b in encoded.as_bytes() {
+                        result.push_str(&format!("\\{:03o}", b));
+                    }
                 }
             }
         }
