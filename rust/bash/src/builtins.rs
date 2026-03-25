@@ -966,6 +966,15 @@ fn shell_escape(s: &str) -> String {
 }
 
 fn builtin_cd(shell: &mut Shell, args: &[String]) -> i32 {
+    // Skip -P and -L flags
+    let args: Vec<&String> = args
+        .iter()
+        .filter(|a| !matches!(a.as_str(), "-P" | "-L" | "-e"))
+        .collect();
+    if args.len() > 1 {
+        eprintln!("{}: cd: too many arguments", shell.error_prefix());
+        return 1;
+    }
     let target = if args.is_empty() {
         shell
             .vars
@@ -973,7 +982,7 @@ fn builtin_cd(shell: &mut Shell, args: &[String]) -> i32 {
             .cloned()
             .or_else(|| std::env::var("HOME").ok())
             .unwrap_or_else(|| "/".to_string())
-    } else if args[0] == "-" {
+    } else if args[0].as_str() == "-" {
         shell
             .vars
             .get("OLDPWD")
@@ -981,7 +990,7 @@ fn builtin_cd(shell: &mut Shell, args: &[String]) -> i32 {
             .or_else(|| std::env::var("OLDPWD").ok())
             .unwrap_or_else(|| ".".to_string())
     } else {
-        args[0].clone()
+        (*args[0]).clone()
     };
 
     let old = std::env::current_dir()
@@ -2790,7 +2799,7 @@ fn builtin_return(shell: &mut Shell, args: &[String]) -> i32 {
     // return is only valid in functions and sourced scripts
     if shell.local_scopes.is_empty() && !shell.sourcing {
         eprintln!(
-            "{}: line 1: return: can only `return' from a function or sourced script",
+            "{}: return: can only `return' from a function or sourced script",
             shell.error_prefix()
         );
         return 1;
@@ -4055,6 +4064,13 @@ fn builtin_exec(shell: &mut Shell, args: &[String]) -> i32 {
                 // Login shell — prefix argv[0] with -
                 // Will be applied below
             }
+            s if s.starts_with('-') && s.len() > 1 => {
+                eprintln!("{}: exec: {}: invalid option", shell.error_prefix(), s);
+                eprintln!(
+                    "exec: usage: exec [-cl] [-a name] [command [argument ...]] [redirection ...]"
+                );
+                return 2;
+            }
             _ => {
                 cmd_start = i;
                 break;
@@ -4122,6 +4138,7 @@ fn builtin_source(shell: &mut Shell, args: &[String]) -> i32 {
             "{}: source: filename argument required",
             shell.error_prefix()
         );
+        eprintln!("source: usage: source filename [arguments]");
         return 2;
     }
 
