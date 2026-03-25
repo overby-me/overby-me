@@ -241,6 +241,7 @@ pub struct Shell {
     pub breaking: i32,
     pub continuing: i32,
     pub in_condition: bool,
+    pub in_debug_trap: bool,
     pub errexit_suppressed: bool,
     pub sourcing: bool,
     /// The original script file name for error messages (doesn't change with BASH_ARGV0)
@@ -382,6 +383,7 @@ impl Shell {
             breaking: 0,
             continuing: 0,
             in_condition: false,
+            in_debug_trap: false,
             errexit_suppressed: false,
             sourcing: false,
             script_name: String::new(),
@@ -802,6 +804,31 @@ impl Shell {
             let saved = self.last_status;
             self.run_string(&handler);
             self.last_status = saved;
+        }
+    }
+
+    /// Execute the DEBUG trap if set. Returns true if the trap returned non-zero
+    /// (which causes the command to be skipped in extdebug mode).
+    pub fn run_debug_trap(&mut self) -> bool {
+        if self.in_debug_trap {
+            return false;
+        }
+        if let Some(handler) = self.traps.get("DEBUG").cloned()
+            && !handler.is_empty()
+        {
+            self.in_debug_trap = true;
+            let saved_status = self.last_status;
+            let saved_cmd = self.vars.get("BASH_COMMAND").cloned();
+            let trap_status = self.run_string(&handler);
+            // Restore BASH_COMMAND (trap shouldn't overwrite it)
+            if let Some(cmd) = saved_cmd {
+                self.vars.insert("BASH_COMMAND".to_string(), cmd);
+            }
+            self.last_status = saved_status;
+            self.in_debug_trap = false;
+            trap_status != 0
+        } else {
+            false
         }
     }
 
@@ -1729,24 +1756,36 @@ impl Shell {
 
     fn run_simple_command(&mut self, cmd: &SimpleCommand) -> i32 {
         // Set BASH_COMMAND to the source text before expansion
-        if !cmd.words.is_empty() {
-            let source = cmd
-                .words
-                .iter()
-                .map(|w| {
-                    w.iter()
-                        .map(|p| match p {
-                            WordPart::Literal(s) => s.clone(),
-                            WordPart::SingleQuoted(s) => format!("'{}'", s),
-                            WordPart::Variable(n) => format!("${}", n),
-                            _ => String::new(),
-                        })
-                        .collect::<String>()
-                })
-                .collect::<Vec<_>>()
-                .join(" ");
-            self.vars.insert("BASH_COMMAND".to_string(), source);
+        // Don't overwrite during DEBUG trap execution
+        if !self.in_debug_trap {
+            let mut parts = Vec::new();
+            for a in &cmd.assignments {
+                if a.append {
+                    parts.push(format!("{}+=...", a.name));
+                } else {
+                    match &a.value {
+                        AssignValue::Scalar(w) => {
+                            parts.push(format!(
+                                "{}={}",
+                                a.name,
+                                crate::ast::word_to_xtrace_string(w)
+                            ));
+                        }
+                        _ => parts.push(format!("{}=...", a.name)),
+                    }
+                }
+            }
+            for w in &cmd.words {
+                parts.push(crate::ast::word_to_xtrace_string(w));
+            }
+            if !parts.is_empty() {
+                self.vars
+                    .insert("BASH_COMMAND".to_string(), parts.join(" "));
+            }
         }
+
+        // Run DEBUG trap before command execution (after BASH_COMMAND is set)
+        self.run_debug_trap();
 
         let ifs = self
             .vars
