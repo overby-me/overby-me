@@ -3930,6 +3930,10 @@ impl Shell {
                 self.error_prefix(),
                 check_name
             );
+            // In POSIX mode, invalid for/select variable is a fatal error
+            if self.opt_posix {
+                std::process::exit(1);
+            }
             return 1;
         }
         self.loop_depth += 1;
