@@ -3942,10 +3942,11 @@ fn builtin_trap(shell: &mut Shell, args: &[String]) -> i32 {
         }
         for sig_arg in &args[1..] {
             let norm = normalize_signal_name(sig_arg);
-            let key = if norm == "EXIT" {
+            let lookup = norm.strip_prefix("SIG").unwrap_or(&norm);
+            let key = if lookup == "EXIT" {
                 shell.traps.get("EXIT").or_else(|| shell.traps.get("0"))
             } else {
-                shell.traps.get(&norm)
+                shell.traps.get(lookup).or_else(|| shell.traps.get(&norm))
             };
             if let Some(handler) = key {
                 println!("{}", handler);
@@ -3967,11 +3968,12 @@ fn builtin_trap(shell: &mut Shell, args: &[String]) -> i32 {
         // trap -p SIG1 SIG2 ... — print traps for specific signals
         for sig_arg in &args[1..] {
             let norm = normalize_signal_name(sig_arg);
-            let key = if norm == "EXIT" {
-                // Check both "EXIT" and "0"
+            // Traps are stored without SIG prefix, so strip it for lookup
+            let lookup = norm.strip_prefix("SIG").unwrap_or(&norm);
+            let key = if lookup == "EXIT" {
                 shell.traps.get("EXIT").or_else(|| shell.traps.get("0"))
             } else {
-                shell.traps.get(&norm)
+                shell.traps.get(lookup).or_else(|| shell.traps.get(&norm))
             };
             if let Some(handler) = key {
                 println!("trap -- '{}' {}", handler, norm);
