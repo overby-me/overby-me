@@ -3871,12 +3871,13 @@ impl Shell {
     }
 
     fn run_for(&mut self, clause: &ForClause) -> i32 {
-        // Validate variable name
-        if !is_valid_identifier(&clause.var) {
+        // Validate variable name using raw form if available
+        let check_name = clause.var_raw.as_deref().unwrap_or(&clause.var);
+        if !is_valid_identifier(check_name) {
             eprintln!(
                 "{}: `{}': not a valid identifier",
                 self.error_prefix(),
-                clause.var
+                check_name
             );
             return 1;
         }

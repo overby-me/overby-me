@@ -111,6 +111,8 @@ pub struct IfClause {
 #[derive(Debug, Clone)]
 pub struct ForClause {
     pub var: String,
+    /// Raw variable name (preserving backslashes etc.) for validation
+    pub var_raw: Option<String>,
     pub words: Option<Vec<Word>>,
     pub body: Program,
 }

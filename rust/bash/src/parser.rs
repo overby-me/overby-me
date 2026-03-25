@@ -646,19 +646,12 @@ impl Parser {
 
         let (var, var_raw) = if let Token::Word(parts) = &self.current {
             let text = word_to_string(parts);
-            // Reconstruct raw form: if any part is not Literal, it was quoted/escaped
             let raw = word_to_raw_string(parts);
-            (text, raw)
+            (text.clone(), if raw != text { Some(raw) } else { None })
         } else {
             let token = self.token_to_str();
             return Err(format!("syntax error near unexpected token `{}'", token));
         };
-        // Validate variable name using raw form (preserves backslashes etc.)
-        if !var_raw.chars().all(|c| c.is_alphanumeric() || c == '_')
-            || var_raw.chars().next().is_none_or(|c| c.is_ascii_digit())
-        {
-            return Err(format!("RUNTIME:`{}': not a valid identifier", var_raw));
-        }
         self.advance();
 
         self.skip_newlines();
@@ -693,7 +686,12 @@ impl Parser {
         let body = self.parse_program()?;
         self.expect_keyword("done")?;
 
-        Ok(CompoundCommand::For(ForClause { var, words, body }))
+        Ok(CompoundCommand::For(ForClause {
+            var,
+            var_raw,
+            words,
+            body,
+        }))
     }
 
     /// Parse `for (( init; cond; step )) do body done` — already consumed `((`
