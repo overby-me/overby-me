@@ -4577,10 +4577,48 @@ impl Shell {
         }
     }
 
+    /// Convert POSIX bracket expression classes for regex_lite.
+    /// In C locale: [[=X=]] → X, [[.X.]] → X (inside bracket expressions)
+    fn fix_posix_bracket_classes(pattern: &str) -> String {
+        let mut result = String::with_capacity(pattern.len());
+        let chars: Vec<char> = pattern.chars().collect();
+        let mut i = 0;
+        while i < chars.len() {
+            // Look for [= or [. (POSIX class inside bracket expression)
+            if i + 3 < chars.len()
+                && chars[i] == '['
+                && (chars[i + 1] == '=' || chars[i + 1] == '.')
+            {
+                let delim = chars[i + 1];
+                // Find closing =] or .]
+                let mut found = None;
+                for j in (i + 2)..chars.len().saturating_sub(1) {
+                    if chars[j] == delim && chars[j + 1] == ']' {
+                        found = Some(j);
+                        break;
+                    }
+                }
+                if let Some(close) = found {
+                    // Extract the element name between [= and =]
+                    let elem: String = chars[i + 2..close].iter().collect();
+                    result.push_str(&elem);
+                    i = close + 2; // skip past =] or .]
+                    continue;
+                }
+            }
+            result.push(chars[i]);
+            i += 1;
+        }
+        result
+    }
+
     /// Fix regex escape sequences for regex_lite compatibility.
     /// POSIX/bash regex treats `\X` where X is non-special as literal X.
     /// regex_lite rejects unknown escapes, so convert them to literal chars.
     fn fix_regex_escapes(pattern: &str) -> String {
+        // First pass: convert POSIX collating elements and equivalence classes
+        // In C locale: [[=X=]] → X, [[.X.]] → X
+        let pattern = Self::fix_posix_bracket_classes(pattern);
         let mut result = String::with_capacity(pattern.len());
         let chars: Vec<char> = pattern.chars().collect();
         let mut i = 0;
