@@ -482,6 +482,7 @@ impl Shell {
             shell.exports.remove(&key);
         }
 
+        shell.update_shellopts();
         shell
     }
 
@@ -1756,6 +1757,84 @@ impl Shell {
         flags.push('h'); // hashall
         flags.push('B'); // braceexpand
         flags
+    }
+
+    /// Update the SHELLOPTS variable to reflect current set -o options
+    pub fn update_shellopts(&mut self) {
+        let mut opts = Vec::new();
+        if self.opt_allexport {
+            opts.push("allexport");
+        }
+        opts.push("braceexpand"); // always on
+        if self.opt_errexit {
+            opts.push("errexit");
+        }
+        opts.push("hashall"); // always on
+        opts.push("interactive-comments"); // always on
+        if self.opt_keyword {
+            opts.push("keyword");
+        }
+        if self.opt_noclobber {
+            opts.push("noclobber");
+        }
+        if self.opt_noexec {
+            opts.push("noexec");
+        }
+        if self.opt_noglob {
+            opts.push("noglob");
+        }
+        if self.opt_nounset {
+            opts.push("nounset");
+        }
+        if self.opt_pipefail {
+            opts.push("pipefail");
+        }
+        if self.opt_posix {
+            opts.push("posix");
+        }
+        if self.opt_xtrace {
+            opts.push("xtrace");
+        }
+        self.vars.insert("SHELLOPTS".to_string(), opts.join(":"));
+
+        // Also update BASHOPTS (shopt options)
+        let mut bashopts = Vec::new();
+        // Check explicitly tracked options
+        if self.shopt_expand_aliases {
+            bashopts.push("expand_aliases");
+        }
+        if self.shopt_extglob {
+            bashopts.push("extglob");
+        }
+        if self.shopt_globstar {
+            bashopts.push("globstar");
+        }
+        if self.shopt_inherit_errexit {
+            bashopts.push("inherit_errexit");
+        }
+        if self.shopt_lastpipe {
+            bashopts.push("lastpipe");
+        }
+        if self.shopt_nocasematch {
+            bashopts.push("nocasematch");
+        }
+        if self.shopt_nullglob {
+            bashopts.push("nullglob");
+        }
+        // Include default-on options
+        bashopts.extend_from_slice(&[
+            "checkwinsize",
+            "cmdhist",
+            "extquote",
+            "globasciiranges",
+            "globskipdots",
+            "interactive_comments",
+            "patsub_replacement",
+            "promptvars",
+            "sourcepath",
+        ]);
+        bashopts.sort();
+        self.vars.insert("BASHOPTS".to_string(), bashopts.join(":"));
     }
 
     fn run_simple_command(&mut self, cmd: &SimpleCommand) -> i32 {

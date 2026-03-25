@@ -2444,6 +2444,7 @@ fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
         }
         i += 1;
     }
+    shell.update_shellopts();
     0
 }
 
@@ -4800,18 +4801,28 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
     let mut opts = Vec::new();
 
     for arg in args {
-        match arg.as_str() {
-            "-s" => set = true,
-            "-u" => unset = true,
-            "-q" => query = true,
-            "-p" => print_mode = true,
-            "-o" => set_o = true,
-            a if a.starts_with('-') => {
-                eprintln!("{}: shopt: {}: invalid option", shell.error_prefix(), a);
+        if arg.starts_with('-') && arg.len() > 1 {
+            let mut valid = true;
+            for ch in arg[1..].chars() {
+                match ch {
+                    's' => set = true,
+                    'u' => unset = true,
+                    'q' => query = true,
+                    'p' => print_mode = true,
+                    'o' => set_o = true,
+                    _ => {
+                        valid = false;
+                        break;
+                    }
+                }
+            }
+            if !valid {
+                eprintln!("{}: shopt: {}: invalid option", shell.error_prefix(), arg);
                 eprintln!("shopt: usage: shopt [-pqsu] [-o] [optname ...]");
                 return 2;
             }
-            _ => opts.push(arg.as_str()),
+        } else {
+            opts.push(arg.as_str());
         }
     }
 
