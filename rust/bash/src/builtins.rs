@@ -638,16 +638,31 @@ fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                         }
                         arg_idx += 1;
                     }
+                    Some('o') => {
+                        let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
+                        let n: i64 = parse_printf_int(arg);
+                        let formatted = if flags.contains('#') {
+                            format!("0{:o}", n) // C-style 0 prefix, not Rust's 0o
+                        } else {
+                            format!("{:o}", n)
+                        };
+                        if w > 0 {
+                            if left {
+                                print!("{:<w$}", formatted);
+                            } else if zero_pad {
+                                print!("{:0>w$}", formatted);
+                            } else {
+                                print!("{:>w$}", formatted);
+                            }
+                        } else {
+                            print!("{}", formatted);
+                        }
+                        arg_idx += 1;
+                    }
                     Some('u') => {
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
                         let n: u64 = parse_printf_int(arg) as u64;
                         print!("{}", n);
-                        arg_idx += 1;
-                    }
-                    Some('o') => {
-                        let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
-                        let n: i64 = parse_printf_int(arg);
-                        print!("{:o}", n);
                         arg_idx += 1;
                     }
                     Some(fmt_ch @ ('f' | 'F' | 'e' | 'E' | 'g' | 'G')) => {
