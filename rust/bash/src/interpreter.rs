@@ -227,6 +227,7 @@ pub struct Shell {
     pub vars: HashMap<String, String>,
     pub exports: HashMap<String, String>,
     pub readonly_vars: HashSet<String>,
+    pub readonly_funcs: HashSet<String>,
     pub integer_vars: HashSet<String>,
     pub uppercase_vars: HashSet<String>,
     pub lowercase_vars: HashSet<String>,
@@ -369,6 +370,7 @@ impl Shell {
             vars,
             exports,
             readonly_vars: HashSet::new(),
+            readonly_funcs: HashSet::new(),
             integer_vars: HashSet::new(),
             uppercase_vars: HashSet::new(),
             lowercase_vars: HashSet::new(),
@@ -1284,8 +1286,13 @@ impl Shell {
                 self.run_compound_with_redirects(compound, redirections)
             }
             Command::FunctionDef(name, body) => {
-                self.functions.insert(name.clone(), *body.clone());
-                0
+                if self.readonly_funcs.contains(name) {
+                    eprintln!("{}: {}: readonly function", self.error_prefix(), name);
+                    1
+                } else {
+                    self.functions.insert(name.clone(), *body.clone());
+                    0
+                }
             }
             Command::Coproc(name, inner_cmd) => self.run_coproc(name.as_deref(), inner_cmd),
         }

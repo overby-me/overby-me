@@ -1115,19 +1115,47 @@ fn builtin_export(shell: &mut Shell, args: &[String]) -> i32 {
 
 fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
     let mut unset_functions = false;
+    let mut _unset_nameref = false;
     let mut names = Vec::new();
+    let mut parsing_opts = true;
 
     for arg in args {
-        match arg.as_str() {
-            "-v" => {}
-            "-f" => unset_functions = true,
-            _ => names.push(arg.as_str()),
+        if parsing_opts && arg.starts_with('-') && arg.len() > 1 {
+            let opt = arg.as_str();
+            match opt {
+                "-v" => {}
+                "-f" => unset_functions = true,
+                "-n" => _unset_nameref = true,
+                "--" => parsing_opts = false,
+                _ => {
+                    eprintln!(
+                        "{}: unset: -{}: invalid option",
+                        shell.error_prefix(),
+                        &opt[1..]
+                    );
+                    eprintln!("unset: usage: unset [-f] [-v] [-n] [name ...]");
+                    return 2;
+                }
+            }
+        } else {
+            parsing_opts = false;
+            names.push(arg.as_str());
         }
     }
 
     let mut status = 0;
     for name in names {
         if unset_functions {
+            // Check if function is readonly
+            if shell.readonly_funcs.contains(name) {
+                eprintln!(
+                    "{}: unset: {}: cannot unset: readonly function",
+                    shell.error_prefix(),
+                    name
+                );
+                status = 1;
+                continue;
+            }
             shell.functions.remove(name);
             // Also remove the exported function env var
             let env_key = format!("BASH_FUNC_{}%%", name);
@@ -1188,43 +1216,71 @@ fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
 }
 
 fn builtin_readonly(shell: &mut Shell, args: &[String]) -> i32 {
-    let print_all = args.is_empty() || args.iter().all(|a| a.starts_with('-'));
-    if print_all && (args.is_empty() || args.contains(&"-p".to_string())) {
-        let mut names: Vec<&String> = shell.readonly_vars.iter().collect();
-        names.sort();
-        for name in names {
-            let val = shell.vars.get(name).cloned().unwrap_or_default();
-            println!("declare -r {}=\"{}\"", name, val);
+    let mut func_mode = false;
+    let mut print_mode = false;
+    let mut names = Vec::new();
+
+    for arg in args {
+        if let Some(flags) = arg.strip_prefix('-') {
+            for ch in flags.chars() {
+                match ch {
+                    'f' => func_mode = true,
+                    'p' => print_mode = true,
+                    _ => {}
+                }
+            }
+        } else {
+            names.push(arg.as_str());
+        }
+    }
+
+    let print_all = names.is_empty();
+    if print_all && (args.is_empty() || print_mode) {
+        if func_mode {
+            // Print readonly functions
+            let mut fnames: Vec<&String> = shell.readonly_funcs.iter().collect();
+            fnames.sort();
+            for name in fnames {
+                println!("declare -fr {}", name);
+            }
+        } else {
+            let mut vnames: Vec<&String> = shell.readonly_vars.iter().collect();
+            vnames.sort();
+            for name in vnames {
+                let val = shell.vars.get(name).cloned().unwrap_or_default();
+                println!("declare -r {}=\"{}\"", name, val);
+            }
         }
         return 0;
     }
 
-    for arg in args {
-        if arg.starts_with('-') {
-            continue;
-        }
-        if let Some(eq_pos) = arg.find('=') {
-            let (name, value, is_append) = if eq_pos > 0 && arg.as_bytes()[eq_pos - 1] == b'+' {
-                (&arg[..eq_pos - 1], &arg[eq_pos + 1..], true)
+    for name in names {
+        if func_mode {
+            if shell.functions.contains_key(name) {
+                shell.readonly_funcs.insert(name.to_string());
+            }
+        } else if let Some(eq_pos) = name.find('=') {
+            let (vname, value, is_append) = if eq_pos > 0 && name.as_bytes()[eq_pos - 1] == b'+' {
+                (&name[..eq_pos - 1], &name[eq_pos + 1..], true)
             } else {
-                (&arg[..eq_pos], &arg[eq_pos + 1..], false)
+                (&name[..eq_pos], &name[eq_pos + 1..], false)
             };
             if is_append {
-                if shell.integer_vars.contains(name) {
-                    let existing_str = shell.vars.get(name).cloned().unwrap_or_default();
+                if shell.integer_vars.contains(vname) {
+                    let existing_str = shell.vars.get(vname).cloned().unwrap_or_default();
                     let existing = shell.eval_arith_expr(&existing_str);
                     let addend = shell.eval_arith_expr(value);
-                    shell.set_var(name, (existing + addend).to_string());
+                    shell.set_var(vname, (existing + addend).to_string());
                 } else {
-                    let existing = shell.vars.get(name).cloned().unwrap_or_default();
-                    shell.set_var(name, format!("{}{}", existing, value));
+                    let existing = shell.vars.get(vname).cloned().unwrap_or_default();
+                    shell.set_var(vname, format!("{}{}", existing, value));
                 }
             } else {
-                shell.set_var(name, value.to_string());
+                shell.set_var(vname, value.to_string());
             }
-            shell.readonly_vars.insert(name.to_string());
+            shell.readonly_vars.insert(vname.to_string());
         } else {
-            shell.readonly_vars.insert(arg.clone());
+            shell.readonly_vars.insert(name.to_string());
         }
     }
     0
@@ -2008,21 +2064,27 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
     // declare -F: list function names
     if flag_functions {
         if names.is_empty() {
-            for name in &shell.func_names {
-                println!("declare -f {}", name);
-            }
-            // Also list functions from the functions map
-            let mut fnames: Vec<&String> = shell.functions.keys().collect();
-            fnames.sort();
-            for name in fnames {
-                if !shell.func_names.contains(name) {
-                    println!("declare -f {}", name);
+            let mut all_funcs: Vec<String> = shell.func_names.to_vec();
+            for name in shell.functions.keys() {
+                if !all_funcs.contains(name) {
+                    all_funcs.push(name.clone());
                 }
+            }
+            all_funcs.sort();
+            for name in &all_funcs {
+                let is_ro = shell.readonly_funcs.contains(name.as_str());
+                if flag_readonly && !is_ro {
+                    continue;
+                }
+                let flags = if is_ro { "-fr" } else { "-f" };
+                println!("declare {} {}", flags, name);
             }
         } else {
             for name in &names {
                 if shell.functions.contains_key(name.as_str()) || shell.func_names.contains(name) {
-                    println!("declare -f {}", name);
+                    let is_ro = shell.readonly_funcs.contains(name.as_str());
+                    let flags = if is_ro { "-fr" } else { "-f" };
+                    println!("declare {} {}", flags, name);
                 } else {
                     return 1;
                 }
