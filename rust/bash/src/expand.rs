@@ -489,7 +489,18 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                             if let ParamOp::Default(_, word) | ParamOp::Alt(_, word) = &expr.op {
                                 let mut inner = Vec::new();
                                 for part in word {
-                                    expand_part(part, ctx, &mut inner, cmd_sub);
+                                    // For bare $@ inside dquoted Default/Alt,
+                                    // produce SplitHere markers like "$@" does
+                                    if matches!(part, WordPart::Variable(n) if n == "@") {
+                                        for (i, arg) in ctx.positional[1..].iter().enumerate() {
+                                            if i > 0 {
+                                                inner.push(Segment::SplitHere);
+                                            }
+                                            inner.push(Segment::Quoted(arg.clone()));
+                                        }
+                                    } else {
+                                        expand_part(part, ctx, &mut inner, cmd_sub);
+                                    }
                                 }
                                 for seg in inner {
                                     match seg {
