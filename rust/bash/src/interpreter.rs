@@ -3757,11 +3757,13 @@ impl Shell {
                     let c_args: Vec<CString> = args
                         .iter()
                         .map(|a| {
-                            // Strip NUL bytes from arguments (bash truncates at first NUL)
-                            let bytes = a.as_bytes();
-                            let truncated = match bytes.iter().position(|&b| b == 0) {
-                                Some(pos) => &bytes[..pos],
-                                None => bytes,
+                            // Convert to raw bytes: chars U+0080..U+00FF become
+                            // single bytes (matching bash's raw byte handling)
+                            let raw = crate::builtins::string_to_raw_bytes(a);
+                            // Strip NUL bytes (bash truncates at first NUL)
+                            let truncated = match raw.iter().position(|&b| b == 0) {
+                                Some(pos) => &raw[..pos],
+                                None => &raw[..],
                             };
                             CString::new(truncated).unwrap_or_else(|_| CString::new("").unwrap())
                         })

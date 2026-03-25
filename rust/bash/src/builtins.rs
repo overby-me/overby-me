@@ -218,10 +218,15 @@ fn builtin_echo(shell: &mut Shell, args: &[String]) -> i32 {
     use std::io::Write;
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
+    // Convert to bytes: chars in U+0080..U+00FF range are written as single
+    // bytes (raw byte output like bash), not as multi-byte UTF-8
+    let bytes = string_to_raw_bytes(&output);
     let result = if newline {
-        writeln!(out, "{}", output).and_then(|_| out.flush())
+        out.write_all(&bytes)
+            .and_then(|_| out.write_all(b"\n"))
+            .and_then(|_| out.flush())
     } else {
-        write!(out, "{}", output).and_then(|_| out.flush())
+        out.write_all(&bytes).and_then(|_| out.flush())
     };
     drop(out);
     match result {
@@ -242,6 +247,25 @@ fn builtin_echo(shell: &mut Shell, args: &[String]) -> i32 {
             1
         }
     }
+}
+
+/// Convert a string to raw bytes. Characters in U+0000..U+007F are written as
+/// single ASCII bytes. Characters in U+0080..U+00FF are written as single bytes
+/// (Latin-1/raw byte output, matching bash's behavior for $'\xNN'). Characters
+/// above U+00FF are written as their UTF-8 encoding.
+pub fn string_to_raw_bytes(s: &str) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(s.len());
+    for ch in s.chars() {
+        let cp = ch as u32;
+        if cp <= 0xFF {
+            bytes.push(cp as u8);
+        } else {
+            let mut buf = [0u8; 4];
+            let encoded = ch.encode_utf8(&mut buf);
+            bytes.extend_from_slice(encoded.as_bytes());
+        }
+    }
+    bytes
 }
 
 fn interpret_echo_escapes(s: &str) -> String {
