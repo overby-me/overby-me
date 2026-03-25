@@ -144,6 +144,7 @@ fn main() {
     let mut wait = false;
     let mut root_path: Option<String> = None;
     let mut runtime = false;
+    let mut dry_run = false;
     let mut output_format: Option<String> = None;
     let mut what_filter: Option<String> = None;
     let mut kill_whom: Option<String> = None;
@@ -249,6 +250,9 @@ fn main() {
             }
             if arg == "--runtime" {
                 runtime = true;
+            }
+            if arg == "--dry-run" {
+                dry_run = true;
             }
             i += 1;
             continue;
@@ -815,6 +819,15 @@ fn main() {
 
         if !quiet {
             eprintln!("Created symlink {link_path} -> {target_path}.");
+        }
+        return;
+    }
+
+    // --dry-run: print what would happen and exit
+    if dry_run {
+        let verb = command;
+        if !quiet {
+            eprintln!("Would execute operation: {verb}");
         }
         return;
     }
