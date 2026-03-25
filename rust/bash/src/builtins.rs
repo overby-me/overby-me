@@ -2737,7 +2737,26 @@ fn eval_test_expr(args: &[String], shell: &Shell, cmd_name: &str) -> i32 {
                 };
                 return if is_set { 0 } else { 1 };
             }
-            _ => {}
+            op if op.starts_with('-') => {
+                // Unknown unary operator
+                eprintln!(
+                    "{}: {}: {}: unary operator expected",
+                    shell.error_prefix(),
+                    cmd_name,
+                    op
+                );
+                return 2;
+            }
+            _ => {
+                // Two non-operator args: second arg is not a binary operator
+                eprintln!(
+                    "{}: {}: {}: binary operator expected",
+                    shell.error_prefix(),
+                    cmd_name,
+                    args[1]
+                );
+                return 2;
+            }
         }
     }
 
