@@ -985,6 +985,9 @@ pub fn apply_dropins(
                 continue;
             };
 
+        // Resolve specifiers in the base content (%n, %i, %p, etc.)
+        let base_content = resolve_specifiers(&base_content, &unit_name, "");
+
         // Merge base + all drop-in contents
         let merged = merge_unit_contents(&base_content, &overrides);
 

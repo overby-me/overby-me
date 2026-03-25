@@ -128,6 +128,13 @@ pub fn load_new_unit(unit_dirs: &[PathBuf], find_name: &str) -> Result<units::Un
             }
         };
 
+        // Resolve specifiers (%n, %i, %p, etc.) before parsing
+        let final_content = crate::units::loading::directory_deps::resolve_specifiers(
+            &final_content,
+            find_name,
+            "",
+        );
+
         let parsed = units::parse_file(&final_content)
             .map_err(|e| format!("{}", units::ParsingError::new(e, unit_path.clone())))?;
         let unit = if find_name.ends_with(".service") {

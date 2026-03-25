@@ -1250,6 +1250,16 @@ fn main() {
                     let _ = send_unix(&addr, &call.to_string());
                 }
             }
+            // --now with mask: stop the units after masking
+            if now && method_name == "mask" {
+                for unit in &positional[1..] {
+                    let call = serde_json::json!({
+                        "method": "stop",
+                        "params": unit,
+                    });
+                    let _ = send_unix(&addr, &call.to_string());
+                }
+            }
         }
         Err(e) => {
             // daemon-reexec causes the server to execve(), dropping the connection.

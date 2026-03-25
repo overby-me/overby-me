@@ -307,8 +307,6 @@
           sed -i '/^EDITOR=/,/^# Argument help/{ /^# Argument help/!d }' TEST-26-SYSTEMCTL.sh
           # Remove global unit tests (--global flag not implemented)
           sed -i '/^# Test systemctl edit --global/,/^rm -f.*GLOBAL_MASKED_UNIT/d' TEST-26-SYSTEMCTL.sh
-          # Remove 'systemctl clean' tests (%n specifier not expanded in StateDirectory= etc.)
-          sed -i '/^# clean$/,/^# --timestamp/{/^# --timestamp/!d}' TEST-26-SYSTEMCTL.sh
         '';
       }
       {

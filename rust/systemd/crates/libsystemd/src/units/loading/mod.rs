@@ -10,7 +10,8 @@ use directory_deps::{
     DirectoryDependency, apply_directory_dependencies, apply_dropins, collect_dep_dir_entries,
     collect_dropin_entries, create_implicit_slices_from_dropins, generate_fstab_mount_units,
     generate_getty_units, insert_parsed_unit, instantiate_template_units, is_template_unit,
-    is_unit_file, parse_dep_dir_name, parse_dropin_dir_name, resolve_symlink_aliases,
+    is_unit_file, parse_dep_dir_name, parse_dropin_dir_name, resolve_specifiers,
+    resolve_symlink_aliases,
 };
 
 use std::collections::HashMap;
@@ -458,6 +459,10 @@ fn parse_all_units(
                     continue;
                 }
             };
+
+            // Resolve specifiers (%n, %i, %p, etc.) before parsing.
+            // For non-template units the instance is empty.
+            let raw = resolve_specifiers(&raw, &filename, "");
 
             let parsed_file = match parse_file(&raw) {
                 Ok(pf) => pf,
