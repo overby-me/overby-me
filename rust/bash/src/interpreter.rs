@@ -4,6 +4,16 @@ use crate::expand;
 use crate::parser::Parser;
 use std::collections::{HashMap, HashSet};
 
+/// Check if a string is a valid bash identifier (variable name).
+fn is_valid_identifier(s: &str) -> bool {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(c) if c == '_' || c.is_alphabetic() => {}
+        _ => return false,
+    }
+    chars.all(|c| c == '_' || c.is_alphanumeric())
+}
+
 /// Saved variable state for local scope restoration
 #[derive(Clone)]
 pub struct SavedVar {
@@ -3637,6 +3647,15 @@ impl Shell {
     }
 
     fn run_for(&mut self, clause: &ForClause) -> i32 {
+        // Validate variable name
+        if !is_valid_identifier(&clause.var) {
+            eprintln!(
+                "{}: `{}': not a valid identifier",
+                self.error_prefix(),
+                clause.var
+            );
+            return 1;
+        }
         self.loop_depth += 1;
         let status = self.run_for_inner(clause);
         self.loop_depth -= 1;

@@ -1398,12 +1398,11 @@ fn format_command_indent(cmd: &Command, indent: usize) -> String {
             format!("{} () \n{}", name, format_compound_command(body))
         }
         Command::Coproc(name, inner) => {
-            let name_str = name.as_deref().unwrap_or("COPROC");
-            format!(
-                "coproc {} {}",
-                name_str,
-                format_command_indent(inner, indent)
-            )
+            let inner_str = format_command_indent(inner, indent);
+            match name.as_deref() {
+                Some("COPROC") | None => format!("coproc {}", inner_str),
+                Some(n) => format!("coproc {} {}", n, inner_str),
+            }
         }
     }
 }
