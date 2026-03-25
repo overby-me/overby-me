@@ -1137,6 +1137,7 @@ fn builtin_export(shell: &mut Shell, args: &[String]) -> i32 {
 
 fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
     let mut unset_functions = false;
+    let mut unset_variables = false;
     let mut _unset_nameref = false;
     let mut names = Vec::new();
     let mut parsing_opts = true;
@@ -1145,7 +1146,7 @@ fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
         if parsing_opts && arg.starts_with('-') && arg.len() > 1 {
             let opt = arg.as_str();
             match opt {
-                "-v" => {}
+                "-v" => unset_variables = true,
                 "-f" => unset_functions = true,
                 "-n" => _unset_nameref = true,
                 "--" => parsing_opts = false,
@@ -1163,6 +1164,15 @@ fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
             parsing_opts = false;
             names.push(arg.as_str());
         }
+    }
+
+    // Cannot simultaneously unset functions and variables
+    if unset_functions && unset_variables {
+        eprintln!(
+            "{}: unset: cannot simultaneously unset a function and a variable",
+            shell.error_prefix()
+        );
+        return 1;
     }
 
     let mut status = 0;
@@ -2026,7 +2036,15 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
 
     while i < args.len() {
         let arg = &args[i];
-        if arg.starts_with('-') && arg.len() > 1 && !arg.contains('=') {
+        if arg == "--" {
+            // End of options — remaining args are names
+            i += 1;
+            while i < args.len() {
+                names.push(args[i].clone());
+                i += 1;
+            }
+            break;
+        } else if arg.starts_with('-') && arg.len() > 1 && !arg.contains('=') {
             for ch in arg[1..].chars() {
                 match ch {
                     'a' => flag_array = true,
@@ -2042,7 +2060,13 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     'l' => flag_lowercase = true,
                     'c' => flag_capitalize = true,
                     'g' => flag_global = true,
-                    _ => {}
+                    _ => {
+                        eprintln!("{}: declare: -{}: invalid option", shell.error_prefix(), ch);
+                        eprintln!(
+                            "declare: usage: declare [-aAfFgiIlnrtux] [name[=value] ...] or declare -p [-aAfFilnrtux] [name ...]"
+                        );
+                        return 2;
+                    }
                 }
             }
         } else if arg.starts_with('+') && arg.len() > 1 {
@@ -2054,6 +2078,61 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
     }
 
     let _ = flag_global; // stub
+
+    // Check for -f combined with other attributes (invalid)
+    if flag_func_body && !names.is_empty() {
+        if flag_array {
+            eprintln!("{}: declare: -a: invalid option", shell.error_prefix());
+            return 1;
+        }
+        if flag_integer {
+            eprintln!("{}: declare: -i: invalid option", shell.error_prefix());
+            return 1;
+        }
+    }
+
+    // Check for readonly function operations
+    if flag_func_body && !names.is_empty() {
+        for name in &names {
+            let pure_name = name.split('=').next().unwrap_or(name);
+            if shell.readonly_funcs.contains(pure_name) && !flag_readonly {
+                eprintln!(
+                    "{}: declare: {}: readonly function",
+                    shell.error_prefix(),
+                    pure_name
+                );
+                return 1;
+            }
+        }
+    }
+
+    // Validate identifiers (for non-function, non-print modes)
+    if !flag_func_body && !flag_functions && !flag_print {
+        let mut status = 0;
+        for name in &names {
+            let pure_name = name.split('=').next().unwrap_or(name);
+            let pure_name = pure_name.strip_suffix('+').unwrap_or(pure_name);
+            if !pure_name.is_empty()
+                && !pure_name
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || c == '_' || c == '[' || c == ']')
+                || pure_name
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_digit() || c == '-' || c == '/')
+            {
+                eprintln!(
+                    "{}: declare: `{}': not a valid identifier",
+                    shell.error_prefix(),
+                    pure_name
+                );
+                status = 1;
+            }
+        }
+        if status != 0 && names.len() == 1 {
+            return status;
+        }
+    }
 
     // declare -f: print function definitions (with body)
     if flag_func_body {
