@@ -3996,31 +3996,44 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
 
     // Read input based on options
     if let Some(n) = nchars {
-        // Read exactly n characters
-        #[cfg(unix)]
-        {
-            let mut buf = vec![0u8; n];
-            match nix::unistd::read(read_fd, &mut buf) {
-                Ok(0) => return 1,
-                Ok(bytes_read) => {
-                    // Convert raw bytes to chars (Latin-1 mapping for 0x80-0xFF)
-                    line = buf[..bytes_read].iter().map(|&b| b as char).collect();
+        if n == 0 {
+            // read -n 0: just test if fd is valid
+            // (returns 0 if fd is valid, 1 otherwise)
+            #[cfg(unix)]
+            {
+                use nix::fcntl::{FcntlArg, fcntl};
+                match fcntl(read_fd, FcntlArg::F_GETFD) {
+                    Ok(_) => {} // fd is valid, continue to assign empty
+                    Err(_) => return 1,
                 }
-                Err(_) => return 1,
             }
-        }
-        #[cfg(not(unix))]
-        {
-            use std::io::Read as _;
-            let mut buf = vec![0u8; n];
-            match std::io::stdin().read(&mut buf) {
-                Ok(0) => return 1,
-                Ok(bytes_read) => {
-                    line = buf[..bytes_read].iter().map(|&b| b as char).collect();
+        } else {
+            // Read exactly n characters
+            #[cfg(unix)]
+            {
+                let mut buf = vec![0u8; n];
+                match nix::unistd::read(read_fd, &mut buf) {
+                    Ok(0) => return 1,
+                    Ok(bytes_read) => {
+                        // Convert raw bytes to chars (Latin-1 mapping for 0x80-0xFF)
+                        line = buf[..bytes_read].iter().map(|&b| b as char).collect();
+                    }
+                    Err(_) => return 1,
                 }
-                Err(_) => return 1,
             }
-        }
+            #[cfg(not(unix))]
+            {
+                use std::io::Read as _;
+                let mut buf = vec![0u8; n];
+                match std::io::stdin().read(&mut buf) {
+                    Ok(0) => return 1,
+                    Ok(bytes_read) => {
+                        line = buf[..bytes_read].iter().map(|&b| b as char).collect();
+                    }
+                    Err(_) => return 1,
+                }
+            }
+        } // close the else block for n > 0
     } else if let Some(delim_char) = delim {
         // Read until delimiter character (byte by byte)
         #[cfg(unix)]
