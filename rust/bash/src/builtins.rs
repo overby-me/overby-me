@@ -1080,6 +1080,9 @@ fn builtin_export(shell: &mut Shell, args: &[String]) -> i32 {
                 let env_val = format!("() {}", body_str);
                 let env_key = format!("BASH_FUNC_{}%%", name);
                 unsafe { std::env::set_var(&env_key, &env_val) };
+            } else {
+                eprintln!("{}: export: {}: not a function", shell.error_prefix(), name);
+                status = 1;
             }
         }
         return status;
@@ -2107,6 +2110,16 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
         if flag_integer {
             eprintln!("{}: declare: -i: invalid option", shell.error_prefix());
             return 1;
+        }
+        // Cannot use declare -f to define functions (name=value)
+        for name in &names {
+            if name.contains('=') {
+                eprintln!(
+                    "{}: declare: cannot use `-f' to make functions",
+                    shell.error_prefix()
+                );
+                return 1;
+            }
         }
     }
 
@@ -4584,8 +4597,84 @@ fn builtin_which(_shell: &mut Shell, args: &[String]) -> i32 {
     status
 }
 
-fn builtin_hash(_shell: &mut Shell, _args: &[String]) -> i32 {
-    0 // No-op for now
+fn builtin_hash(shell: &mut Shell, args: &[String]) -> i32 {
+    if args.is_empty() {
+        // Print hash table (currently empty since we don't cache)
+        if shell.hash_table.is_empty() {
+            eprintln!("{}: hash: hash table empty", shell.error_prefix());
+        } else {
+            println!("hits\tcommand");
+            for (name, (path, hits)) in &shell.hash_table {
+                println!("   {}\t{}", hits, path);
+                let _ = name;
+            }
+        }
+        return 0;
+    }
+
+    let mut i = 0;
+    let mut status = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-r" => {
+                shell.hash_table.clear();
+            }
+            "-l" => {
+                for (name, (path, _)) in &shell.hash_table {
+                    println!("builtin hash -p {} {}", path, name);
+                }
+            }
+            "-t" => {
+                i += 1;
+                while i < args.len() && !args[i].starts_with('-') {
+                    if let Some((path, _)) = shell.hash_table.get(&args[i]) {
+                        println!("{}", path);
+                    } else {
+                        eprintln!("{}: hash: {}: not found", shell.error_prefix(), args[i]);
+                        status = 1;
+                    }
+                    i += 1;
+                }
+                continue;
+            }
+            "-d" => {
+                i += 1;
+                if i >= args.len() {
+                    eprintln!(
+                        "{}: hash: -d: option requires an argument",
+                        shell.error_prefix()
+                    );
+                    return 1;
+                }
+                shell.hash_table.remove(&args[i]);
+            }
+            "-p" => {
+                i += 1;
+                if i + 1 < args.len() {
+                    let path = args[i].clone();
+                    i += 1;
+                    let name = args[i].clone();
+                    shell.hash_table.insert(name, (path, 0));
+                }
+            }
+            opt if opt.starts_with('-') => {
+                eprintln!("{}: hash: {}: invalid option", shell.error_prefix(), opt);
+                eprintln!("hash: usage: hash [-lr] [-p pathname] [-dt] [name ...]");
+                return 1;
+            }
+            name => {
+                // Look up command and add to hash table
+                if let Some(path) = find_command_path(name) {
+                    shell.hash_table.insert(name.to_string(), (path, 0));
+                } else {
+                    eprintln!("{}: hash: {}: not found", shell.error_prefix(), name);
+                    status = 1;
+                }
+            }
+        }
+        i += 1;
+    }
+    status
 }
 
 fn builtin_trap(shell: &mut Shell, args: &[String]) -> i32 {
@@ -6056,6 +6145,10 @@ fn builtin_times(_shell: &mut Shell, _args: &[String]) -> i32 {
         println!("0m0.000s 0m0.000s");
         0
     }
+}
+
+pub fn find_command_path(name: &str) -> Option<String> {
+    find_in_path_opt(name)
 }
 
 pub fn find_executable(name: &str) -> String {
