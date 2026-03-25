@@ -2550,7 +2550,8 @@ impl Shell {
         };
 
         // Check for trailing operators (e.g., "4+" → syntax error)
-        {
+        // Only check top-level expressions (arith_depth == 1 means we're at the outermost call)
+        if self.arith_depth == 1 {
             let trimmed = expr.trim();
             if !trimmed.is_empty() {
                 let last = trimmed.as_bytes()[trimmed.len() - 1];
@@ -2558,7 +2559,6 @@ impl Shell {
                     && !trimmed.ends_with("++")
                     && !trimmed.ends_with("--")
                 {
-                    // Find the operator token for error message
                     let op_char = last as char;
                     let top_expr = self
                         .arith_top_expr
