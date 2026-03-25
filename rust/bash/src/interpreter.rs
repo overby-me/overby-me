@@ -1252,6 +1252,17 @@ impl Shell {
 
         let coproc_name = name.unwrap_or("COPROC");
 
+        // Close previous coproc fds if any
+        if let Some(arr) = self.arrays.get(coproc_name) {
+            for fd_str in arr {
+                if let Ok(fd) = fd_str.parse::<i32>() {
+                    unsafe {
+                        libc::close(fd);
+                    }
+                }
+            }
+        }
+
         // Create two pipes: one for parent→child stdin, one for child→parent stdout
         let (child_read, parent_write) = match pipe() {
             Ok(p) => (p.0.into_raw_fd(), p.1.into_raw_fd()),
