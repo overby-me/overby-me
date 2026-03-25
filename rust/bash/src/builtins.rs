@@ -1756,13 +1756,15 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 }
             }
         } else {
+            let mut found = false;
             for name in &names {
                 if let Some(body) = shell.functions.get(name.as_str()) {
                     print_func(name, body);
-                } else {
-                    eprintln!("{}: declare: {}: not found", shell.error_prefix(), name);
-                    return 1;
+                    found = true;
                 }
+            }
+            if !found {
+                return 1;
             }
         }
         return 0;
