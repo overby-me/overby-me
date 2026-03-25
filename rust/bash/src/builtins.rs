@@ -1236,6 +1236,7 @@ fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
     let mut flag_array = false;
     let mut _flag_readonly = false;
     let mut flag_nameref = false;
+    let mut flag_integer = false;
     let mut names = Vec::new();
     let mut i = 0;
 
@@ -1275,6 +1276,7 @@ fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
                     'a' => flag_array = true,
                     'r' => _flag_readonly = true,
                     'n' => flag_nameref = true,
+                    'i' => flag_integer = true,
                     _ => {}
                 }
             }
@@ -1289,11 +1291,17 @@ fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
             let name = &name_arg[..eq_pos];
             let value = &name_arg[eq_pos + 1..];
             shell.declare_local(name);
+            if flag_integer {
+                shell.integer_vars.insert(name.to_string());
+            }
             if flag_nameref {
                 shell.namerefs.insert(name.to_string(), value.to_string());
             } else if flag_array {
                 let arr = parse_array_literal(value);
                 shell.arrays.insert(name.to_string(), arr);
+            } else if flag_integer {
+                let n = shell.eval_arith_expr(value);
+                shell.set_var(name, n.to_string());
             } else {
                 shell.set_var(name, value.to_string());
             }
