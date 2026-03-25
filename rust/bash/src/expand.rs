@@ -348,6 +348,43 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                         }
                         s.push_str(&val);
                     }
+                    WordPart::Param(expr)
+                        if (expr.name == "@" || expr.name == "*")
+                            && !matches!(
+                                expr.op,
+                                ParamOp::None | ParamOp::Length | ParamOp::Substring(..)
+                            )
+                            && ctx.positional.len() > 1 =>
+                    {
+                        // "${@%pattern}" etc. — apply op to each element separately
+                        if !s.is_empty() {
+                            out.push(Segment::Quoted(std::mem::take(&mut s)));
+                        }
+                        let sep = if expr.name == "@" {
+                            None // SplitHere
+                        } else {
+                            Some(
+                                ctx.vars
+                                    .get("IFS")
+                                    .and_then(|s| s.chars().next())
+                                    .unwrap_or(' '),
+                            )
+                        };
+                        for (i, elem) in ctx.positional[1..].iter().enumerate() {
+                            if i > 0 {
+                                match sep {
+                                    None => out.push(Segment::SplitHere),
+                                    Some(c) => s.push(c),
+                                }
+                            }
+                            let result = apply_param_op(elem, &expr.op, ctx, cmd_sub);
+                            if sep.is_none() {
+                                out.push(Segment::Quoted(result));
+                            } else {
+                                s.push_str(&result);
+                            }
+                        }
+                    }
                     WordPart::Param(expr) if is_array_at_expansion(expr, ctx) => {
                         // "${arr[@]}" — each element becomes a separate field
                         let mut elements = get_array_elements(expr, ctx);
@@ -506,6 +543,35 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
             out.push(Segment::Unquoted(val));
         }
         WordPart::Param(expr) => {
+            // Handle unquoted ${@%pattern}, ${@#pattern}, ${@/pat/rep} etc.
+            // Each positional param should be expanded separately
+            if (expr.name == "@" || expr.name == "*")
+                && !matches!(
+                    expr.op,
+                    ParamOp::None | ParamOp::Length | ParamOp::Substring(..)
+                )
+                && ctx.positional.len() > 1
+            {
+                let mut first = true;
+                for elem in &ctx.positional[1..] {
+                    if !first {
+                        out.push(if expr.name == "@" {
+                            Segment::SplitHere
+                        } else {
+                            let ifs_char = ctx
+                                .vars
+                                .get("IFS")
+                                .and_then(|s| s.chars().next())
+                                .unwrap_or(' ');
+                            Segment::Unquoted(ifs_char.to_string())
+                        });
+                    }
+                    first = false;
+                    let result = apply_param_op(elem, &expr.op, ctx, cmd_sub);
+                    out.push(Segment::Unquoted(result));
+                }
+                return;
+            }
             // Check if this is an array[@] with an operator that should apply per-element
             if let Some(bracket) = expr.name.find('[') {
                 let base = &expr.name[..bracket];
@@ -766,8 +832,8 @@ fn is_array_at_expansion(expr: &ParamExpr, ctx: &ExpCtx) -> bool {
         if idx_str == "@" {
             let base = &expr.name[..bracket];
             let resolved = ctx.resolve_nameref(base);
-            // Only for None (plain expansion) and Substring (array slice)
-            if matches!(&expr.op, ParamOp::None | ParamOp::Substring(..)) {
+            // Array[@] with any operation should expand per-element
+            if !matches!(&expr.op, ParamOp::Length) {
                 return ctx.arrays.contains_key(&resolved)
                     || ctx.assoc_arrays.contains_key(&resolved);
             }
