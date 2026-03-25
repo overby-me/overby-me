@@ -1660,6 +1660,32 @@ fn read_param_word_impl(chars: &[char], i: &mut usize, delim: char, in_dquote: b
                             *i += 1;
                             dq_parts.push(parse_dollar(chars, i, true));
                         }
+                        '`' => {
+                            if !dq_lit.is_empty() {
+                                dq_parts.push(WordPart::Literal(std::mem::take(&mut dq_lit)));
+                            }
+                            *i += 1;
+                            let mut cmd = String::new();
+                            while *i < chars.len() && chars[*i] != '`' {
+                                if chars[*i] == '\\' && *i + 1 < chars.len() {
+                                    let next = chars[*i + 1];
+                                    if matches!(next, '$' | '`' | '\\' | '"') {
+                                        cmd.push(next);
+                                        *i += 2;
+                                    } else {
+                                        cmd.push(chars[*i]);
+                                        *i += 1;
+                                    }
+                                } else {
+                                    cmd.push(chars[*i]);
+                                    *i += 1;
+                                }
+                            }
+                            if *i < chars.len() {
+                                *i += 1;
+                            }
+                            dq_parts.push(WordPart::BacktickSub(cmd));
+                        }
                         ch => {
                             dq_lit.push(ch);
                             *i += 1;
@@ -1673,6 +1699,32 @@ fn read_param_word_impl(chars: &[char], i: &mut usize, delim: char, in_dquote: b
                     dq_parts.push(WordPart::Literal(dq_lit));
                 }
                 parts.push(WordPart::DoubleQuoted(dq_parts));
+            }
+            '`' => {
+                if !literal.is_empty() {
+                    parts.push(WordPart::Literal(std::mem::take(&mut literal)));
+                }
+                *i += 1;
+                let mut cmd = String::new();
+                while *i < chars.len() && chars[*i] != '`' {
+                    if chars[*i] == '\\' && *i + 1 < chars.len() {
+                        let next = chars[*i + 1];
+                        if matches!(next, '$' | '`' | '\\') {
+                            cmd.push(next);
+                            *i += 2;
+                        } else {
+                            cmd.push(chars[*i]);
+                            *i += 1;
+                        }
+                    } else {
+                        cmd.push(chars[*i]);
+                        *i += 1;
+                    }
+                }
+                if *i < chars.len() {
+                    *i += 1; // skip closing `
+                }
+                parts.push(WordPart::BacktickSub(cmd));
             }
             '{' => {
                 depth += 1;
