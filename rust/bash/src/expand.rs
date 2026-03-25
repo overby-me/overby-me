@@ -703,18 +703,24 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                 }
                 _ => false,
             };
-            // Check if word has mixed quoting (both literal and quoted parts)
-            let has_mixed_quoting =
-                if let ParamOp::Default(_, word) | ParamOp::Alt(_, word) = &expr.op {
-                    let has_literal = word.iter().any(|p| matches!(p, WordPart::Literal(_)));
-                    let has_quoted = word.iter().any(|p| {
-                        matches!(p, WordPart::SingleQuoted(_) | WordPart::DoubleQuoted(_))
+            // Check if word needs per-part expansion:
+            // - mixed quoting (both literal and quoted parts)
+            // - contains $@ which needs to produce separate fields
+            let needs_per_part = if let ParamOp::Default(_, word) | ParamOp::Alt(_, word) = &expr.op
+            {
+                let has_literal = word.iter().any(|p| matches!(p, WordPart::Literal(_)));
+                let has_quoted = word
+                    .iter()
+                    .any(|p| matches!(p, WordPart::SingleQuoted(_) | WordPart::DoubleQuoted(_)));
+                let has_at = word.iter().any(|p| {
+                        matches!(p, WordPart::Variable(n) if n == "@")
+                            || matches!(p, WordPart::DoubleQuoted(parts) if parts.iter().any(|ip| matches!(ip, WordPart::Variable(n) if n == "@")))
                     });
-                    has_literal && has_quoted
-                } else {
-                    false
-                };
-            if is_default_alt_active && has_mixed_quoting {
+                (has_literal && has_quoted) || has_at
+            } else {
+                false
+            };
+            if is_default_alt_active && needs_per_part {
                 // Per-part expansion: Literals are Unquoted (split), rest keeps quoting
                 if let ParamOp::Default(_, word) | ParamOp::Alt(_, word) = &expr.op {
                     for part in word {
