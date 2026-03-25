@@ -240,7 +240,7 @@ in
 
       test_cmd = (
           f"cd {units_dir} && "
-          "export TEST_SKIP_TESTCASES='testcase_hierarchical_slice_dropins testcase_transient_slice_dropins testcase_transient_service_dropins testcase_template_dropins testcase_template_alias testcase_masked_dropins testcase_order_dropin_paths_set_property testcase_linked_units testcase_hostnamed_alternate_paths testcase_nss-myhostname testcase_ntp testcase_timedated_alternate_paths testcase_timesyncd' && "
+          "export TEST_SKIP_TESTCASES='testcase_hierarchical_slice_dropins testcase_transient_slice_dropins testcase_transient_service_dropins testcase_template_dropins testcase_template_alias testcase_masked_dropins testcase_order_dropin_paths_set_property testcase_hostnamed_alternate_paths testcase_nss-myhostname testcase_ntp testcase_timedated_alternate_paths testcase_timesyncd' && "
           "bash -x ./${testName}.sh 2>&1"
       )
 

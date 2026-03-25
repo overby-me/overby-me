@@ -1178,22 +1178,110 @@ fn find_or_load_unit(
                 Ok(id)
             }
             Err(load_err) => {
+                // If load_name is a symlink alias (e.g. test15-b@inst.service → test15-a@inst.service),
+                // resolve it first. This allows reverse lookups and template instantiation
+                // via the real unit name.
+                let mut resolved_load_name = load_name.clone();
+                let mut is_alias = false;
+                for dir in &ri.config.unit_dirs {
+                    let candidate = dir.join(&load_name);
+                    if let Ok(meta) = candidate.symlink_metadata()
+                        && meta.file_type().is_symlink()
+                        && let Ok(target) = std::fs::read_link(&candidate)
+                    {
+                        let target_name = target
+                            .file_name()
+                            .map(|f| f.to_string_lossy().to_string())
+                            .unwrap_or_default();
+                        if !target_name.is_empty() && target_name != load_name {
+                            // Check if the target is already loaded
+                            let found = find_units_with_name(&target_name, &ri.unit_table);
+                            if let Some(unit) = found.first() {
+                                return Ok(unit.id.clone());
+                            }
+                            resolved_load_name = target_name;
+                            is_alias = true;
+                            break;
+                        }
+                    }
+                }
+
+                // If we resolved an alias, try loading the resolved name
+                if is_alias
+                    && let Ok(mut unit) =
+                        load_new_unit(&ri.config.unit_dirs, &resolved_load_name)
+                {
+                    // Add the original name as an alias
+                    if !unit.common.unit.aliases.contains(&load_name) {
+                        unit.common.unit.aliases.push(load_name.clone());
+                    }
+                    let id = unit.id.clone();
+                    crate::units::insert_new_unit_lenient(unit, &mut ri);
+                    return Ok(id);
+                }
+
                 // If this looks like a template instance (e.g. "getty@tty1.service"),
                 // try instantiating from the template file (e.g. "getty@.service").
+                // Use the resolved name for template parsing so aliases like
+                // test15-b@inst.service → test15-a@inst.service work correctly.
                 if let Some((template_name, instance_name)) =
-                    crate::units::loading::directory_deps::parse_template_instance(unit_name)
+                    crate::units::loading::directory_deps::parse_template_instance(
+                        &resolved_load_name,
+                    )
                 {
                     let empty_dropins = std::collections::HashMap::new();
-                    if let Some(unit) = crate::units::loading::directory_deps::instantiate_template(
-                        &template_name,
-                        &instance_name,
-                        unit_name,
-                        &ri.config.unit_dirs,
-                        &empty_dropins,
-                    ) {
+                    if let Some(mut unit) =
+                        crate::units::loading::directory_deps::instantiate_template(
+                            &template_name,
+                            &instance_name,
+                            &resolved_load_name,
+                            &ri.config.unit_dirs,
+                            &empty_dropins,
+                        )
+                    {
+                        // If we arrived here via alias resolution, add the
+                        // original name as an alias.
+                        if is_alias && !unit.common.unit.aliases.contains(&load_name) {
+                            unit.common.unit.aliases.push(load_name.clone());
+                        }
+                        // Discover filesystem-level symlink aliases
+                        let primary = &unit.id.name;
+                        for dir in &ri.config.unit_dirs {
+                            let entries = match std::fs::read_dir(dir) {
+                                Ok(e) => e,
+                                Err(_) => continue,
+                            };
+                            for entry in entries.flatten() {
+                                let name = entry.file_name().to_string_lossy().to_string();
+                                if name == *primary || name == load_name {
+                                    continue;
+                                }
+                                let meta = match entry.path().symlink_metadata() {
+                                    Ok(m) => m,
+                                    Err(_) => continue,
+                                };
+                                if !meta.file_type().is_symlink() {
+                                    continue;
+                                }
+                                if let Ok(target) = std::fs::read_link(entry.path()) {
+                                    let target_name = target
+                                        .file_name()
+                                        .map(|f| f.to_string_lossy().to_string())
+                                        .unwrap_or_default();
+                                    if (target_name == *primary
+                                        || target_name == resolved_load_name)
+                                        && !unit.common.unit.aliases.contains(&name)
+                                    {
+                                        unit.common.unit.aliases.push(name);
+                                    }
+                                }
+                            }
+                        }
                         let id = unit.id.clone();
                         crate::units::insert_new_unit_lenient(unit, &mut ri);
-                        info!("Instantiated template unit {unit_name} from {template_name}");
+                        info!(
+                            "Instantiated template unit {resolved_load_name} from {template_name}"
+                        );
                         return Ok(id);
                     }
                 }

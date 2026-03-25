@@ -95,6 +95,60 @@ fn collect_dropins_for_unit(
     dropins
 }
 
+/// Scan unit directories for symlinks that resolve to the same unit as
+/// `find_name`. Checks both canonical path equality and symlink target
+/// name matching (for template instances where the target doesn't exist
+/// as a real file).
+pub fn find_symlink_aliases(
+    unit_dirs: &[PathBuf],
+    unit_path: &std::path::Path,
+    find_name: &str,
+) -> Vec<String> {
+    let canonical = fs::canonicalize(unit_path).ok();
+    let mut aliases = Vec::new();
+    for dir in unit_dirs {
+        let entries = match fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name == find_name {
+                continue;
+            }
+            // Only consider symlinks
+            let meta = match entry.path().symlink_metadata() {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            if !meta.file_type().is_symlink() {
+                continue;
+            }
+            // Check by canonical path (works for regular files)
+            if let Some(ref canonical) = canonical
+                && let Ok(c) = fs::canonicalize(entry.path())
+                && c == *canonical
+                && !aliases.contains(&name)
+            {
+                aliases.push(name);
+                continue;
+            }
+            // Check by symlink target name (works for template instances
+            // where the target file doesn't exist on disk)
+            if let Ok(target) = fs::read_link(entry.path()) {
+                let target_name = target
+                    .file_name()
+                    .map(|f| f.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                if target_name == find_name && !aliases.contains(&name) {
+                    aliases.push(name);
+                }
+            }
+        }
+    }
+    aliases
+}
+
 /// Loads a unit with a given name. It searches all paths recursively until it finds a file with a matching name.
 /// Also scans for and applies drop-in overrides from `.d/` directories.
 pub fn load_new_unit(unit_dirs: &[PathBuf], find_name: &str) -> Result<units::Unit, String> {
@@ -137,25 +191,34 @@ pub fn load_new_unit(unit_dirs: &[PathBuf], find_name: &str) -> Result<units::Un
 
         let parsed = units::parse_file(&final_content)
             .map_err(|e| format!("{}", units::ParsingError::new(e, unit_path.clone())))?;
-        let unit = if find_name.ends_with(".service") {
+        let mut unit: units::Unit = if find_name.ends_with(".service") {
             units::parse_service(parsed, &unit_path)
-                .map_err(|e| format!("{}", units::ParsingError::new(e, unit_path)))?
+                .map_err(|e| format!("{}", units::ParsingError::new(e, unit_path.clone())))?
                 .try_into()?
         } else if find_name.ends_with(".socket") {
             units::parse_socket(parsed, &unit_path)
-                .map_err(|e| format!("{}", units::ParsingError::new(e, unit_path)))?
+                .map_err(|e| format!("{}", units::ParsingError::new(e, unit_path.clone())))?
                 .try_into()?
         } else if find_name.ends_with(".target") {
             units::parse_target(parsed, &unit_path)
-                .map_err(|e| format!("{}", units::ParsingError::new(e, unit_path)))?
+                .map_err(|e| format!("{}", units::ParsingError::new(e, unit_path.clone())))?
                 .try_into()?
         } else if find_name.ends_with(".slice") {
             units::parse_slice(parsed, &unit_path)
-                .map_err(|e| format!("{}", units::ParsingError::new(e, unit_path)))?
+                .map_err(|e| format!("{}", units::ParsingError::new(e, unit_path.clone())))?
                 .try_into()?
         } else {
             return Err(format!("File suffix not recognized for file {unit_path:?}"));
         };
+
+        // Discover filesystem-level symlink aliases (e.g. test15-b.service → test15-a.service)
+        let aliases = find_symlink_aliases(unit_dirs, &unit_path, find_name);
+        for alias in aliases {
+            if !unit.common.unit.aliases.contains(&alias) {
+                trace!("Discovered symlink alias for {}: {}", find_name, alias);
+                unit.common.unit.aliases.push(alias);
+            }
+        }
 
         Ok(unit)
     } else {
