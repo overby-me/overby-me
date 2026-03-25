@@ -2356,12 +2356,11 @@ fn remove_quotes(s: &str) -> String {
             if let Some(next) = chars.next() {
                 result.push(next);
             }
-        } else if ch == '\\' {
-            // Backslash quote removal: keep the next char, discard backslash
-            if let Some(next) = chars.next() {
-                result.push(next);
-            }
         } else {
+            // All other characters (including \) are kept as-is.
+            // Backslashes from the original word are already handled via \x00
+            // markers (SingleQuoted → Segment::Quoted → quote_glob_chars).
+            // Bare \ at this point is from variable expansion and is literal.
             result.push(ch);
         }
     }
@@ -2371,14 +2370,17 @@ fn remove_quotes(s: &str) -> String {
 /// Returns true if the string contains unescaped glob metacharacters.
 fn has_glob_chars(s: &str) -> bool {
     let mut prev_null = false;
+    let mut prev_backslash = false;
     for ch in s.chars() {
         if ch == '\x00' {
             prev_null = true;
+            prev_backslash = false;
             continue;
         }
-        if matches!(ch, '*' | '?' | '[') && !prev_null {
+        if matches!(ch, '*' | '?' | '[') && !prev_null && !prev_backslash {
             return true;
         }
+        prev_backslash = ch == '\\' && !prev_null;
         prev_null = false;
     }
     false
@@ -2866,18 +2868,30 @@ fn brace_expand(s: &str) -> Vec<String> {
                             if start_c <= end_c {
                                 let mut c = start_c;
                                 while c <= end_c {
+                                    // Backslash (0x5C) in char ranges produces empty
+                                    // (bash 5.3 outputs NUL which echo drops)
+                                    let ch_str = if c == 0x5C {
+                                        String::new()
+                                    } else {
+                                        (c as u8 as char).to_string()
+                                    };
                                     result.extend(brace_expand(&format!(
                                         "{}{}{}",
-                                        prefix, c as u8 as char, suffix
+                                        prefix, ch_str, suffix
                                     )));
                                     c += step;
                                 }
                             } else {
                                 let mut c = start_c;
                                 while c >= end_c {
+                                    let ch_str = if c == 0x5C {
+                                        String::new()
+                                    } else {
+                                        (c as u8 as char).to_string()
+                                    };
                                     result.extend(brace_expand(&format!(
                                         "{}{}{}",
-                                        prefix, c as u8 as char, suffix
+                                        prefix, ch_str, suffix
                                     )));
                                     c -= step;
                                 }
