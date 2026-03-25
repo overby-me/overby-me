@@ -76,6 +76,8 @@ pub enum Command {
     IsActive(String),
     IsEnabled(String),
     IsFailed(String),
+    /// `is-system-running` — report the overall system state.
+    IsSystemRunning,
     /// `mask <unit>...` — symlink unit files to /dev/null.
     Mask(Vec<String>),
     /// `unmask <unit>...` — remove /dev/null symlinks for units.
@@ -292,6 +294,7 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
             };
             Command::IsFailed(name)
         }
+        "is-system-running" => Command::IsSystemRunning,
         "start" => {
             let names = match &call.params {
                 Some(Value::String(s)) => vec![s.clone()],
@@ -861,19 +864,60 @@ pub fn format_service(srvc_unit: &Unit, status: UnitStatus) -> Value {
     Value::Object(map)
 }
 
+/// Simple glob matching for unit names. Supports '*' and '?' wildcards.
+fn unit_name_glob_match(pattern: &str, text: &str) -> bool {
+    let p: Vec<char> = pattern.chars().collect();
+    let t: Vec<char> = text.chars().collect();
+    unit_name_glob_inner(&p, &t)
+}
+
+fn unit_name_glob_inner(pattern: &[char], text: &[char]) -> bool {
+    if pattern.is_empty() {
+        return text.is_empty();
+    }
+    match pattern[0] {
+        '*' => {
+            for i in 0..=text.len() {
+                if unit_name_glob_inner(&pattern[1..], &text[i..]) {
+                    return true;
+                }
+            }
+            false
+        }
+        '?' => !text.is_empty() && unit_name_glob_inner(&pattern[1..], &text[1..]),
+        c => !text.is_empty() && text[0] == c && unit_name_glob_inner(&pattern[1..], &text[1..]),
+    }
+}
+
+/// Check if a string contains glob characters.
+fn is_glob_pattern(s: &str) -> bool {
+    s.contains('*') || s.contains('?')
+}
+
 fn find_units_with_name<'a>(unit_name: &str, unit_table: &'a UnitTable) -> Vec<&'a Unit> {
     trace!("Find unit for name: {unit_name}");
+    let use_glob = is_glob_pattern(unit_name);
     unit_table
         .values()
         .filter(|unit| {
             let name = unit.id.name.clone();
-            name.starts_with(unit_name)
-                || unit
-                    .common
-                    .unit
-                    .aliases
-                    .iter()
-                    .any(|alias| alias.starts_with(unit_name))
+            if use_glob {
+                unit_name_glob_match(unit_name, &name)
+                    || unit
+                        .common
+                        .unit
+                        .aliases
+                        .iter()
+                        .any(|alias| unit_name_glob_match(unit_name, alias))
+            } else {
+                name.starts_with(unit_name)
+                    || unit
+                        .common
+                        .unit
+                        .aliases
+                        .iter()
+                        .any(|alias| alias.starts_with(unit_name))
+            }
         })
         .collect()
 }
@@ -3484,22 +3528,26 @@ pub fn execute_command(
             if units.is_empty() {
                 return Err(format!("Unit {unit_name} not found."));
             }
-            let unit = &units[0];
-            let fragment_path = unit.common.unit.fragment_path.as_ref();
-            match fragment_path {
-                Some(path) => {
-                    let content = std::fs::read_to_string(path)
-                        .map_err(|e| format!("Failed to read {}: {e}", path.display()))?;
-                    let mut out = format!("# {}\n", path.display());
+            // For glob patterns or single units, concatenate all matching cat outputs
+            let mut out = String::new();
+            for unit in &units {
+                let fragment_path = unit.common.unit.fragment_path.as_ref();
+                if let Some(path) = fragment_path
+                    && let Ok(content) = std::fs::read_to_string(path)
+                {
+                    if !out.is_empty() {
+                        out.push('\n');
+                    }
+                    out.push_str(&format!("# {}\n", path.display()));
                     out.push_str(&content);
-                    return Ok(serde_json::json!({ "cat": out }));
-                }
-                None => {
-                    return Err(format!(
-                        "No fragment path recorded for {unit_name} (unit may have been generated at runtime)"
-                    ));
                 }
             }
+            if out.is_empty() {
+                return Err(format!(
+                    "No fragment path recorded for {unit_name} (unit may have been generated at runtime)"
+                ));
+            }
+            return Ok(serde_json::json!({ "cat": out }));
         }
         Command::Shutdown(action) => {
             crate::shutdown::shutdown_sequence(run_info, action);
@@ -3584,6 +3632,21 @@ pub fn execute_command(
             crate::units::reactivate_unit(id, &ri).map_err(|e| format!("{e}"))?;
         }
         Command::IsActive(unit_name) => {
+            // For glob patterns, check all matching units
+            if is_glob_pattern(&unit_name) {
+                let ri = run_info.read_poisoned();
+                let units = find_units_with_name(&unit_name, &ri.unit_table);
+                if units.is_empty() {
+                    return Err(format!("Unit {unit_name} not found."));
+                }
+                // Return "active" if any matching unit is active
+                let any_active = units.iter().any(|unit| {
+                    let status = unit.common.status.read_poisoned();
+                    matches!(&*status, crate::units::UnitStatus::Started(_))
+                });
+                let state = if any_active { "active" } else { "inactive" };
+                return Ok(serde_json::json!(state));
+            }
             // Try to find the unit in memory, or load it from disk.
             match find_or_load_unit(&unit_name, &run_info) {
                 Err(_) => return Err(format!("Unit {unit_name} not found.")),
@@ -3628,6 +3691,16 @@ pub fn execute_command(
                     return Ok(serde_json::json!(state));
                 }
             }
+        }
+        Command::IsSystemRunning => {
+            let ri = run_info.read_poisoned();
+            // Check if any unit is in failed state
+            let has_failed = ri.unit_table.values().any(|unit| {
+                let status = unit.common.status.read_poisoned();
+                matches!(&*status, crate::units::UnitStatus::Stopped(_, errors) if !errors.is_empty())
+            });
+            let state = if has_failed { "degraded" } else { "running" };
+            return Ok(serde_json::json!(state));
         }
         Command::IsFailed(unit_name) => match find_or_load_unit(&unit_name, &run_info) {
             Err(_) => return Err(format!("Unit {unit_name} not found.")),

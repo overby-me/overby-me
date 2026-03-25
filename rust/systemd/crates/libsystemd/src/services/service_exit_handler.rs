@@ -397,21 +397,32 @@ pub fn service_exit_handler(
         // If the exit was not clean (non-zero exit code or killed by signal),
         // override the status to "failed" so `systemctl show` reports
         // ActiveState=failed/SubState=failed.
+        // However, if the unit was being intentionally stopped (status is Stopping
+        // or already Stopped), don't mark it as failed — signal death from an
+        // intentional stop is expected behavior.
         if !success_exit_status.is_success(&code)
             && let Some(unit) = run_info.unit_table.get(&srvc_id)
         {
-            let mut status = unit.common.status.write_poisoned();
-            let reason = match &code {
-                ChildTermination::Exit(c) => UnitOperationErrorReason::GenericStartError(format!(
-                    "process exited with status {c}"
-                )),
-                ChildTermination::Signal(s) => UnitOperationErrorReason::GenericStartError(
-                    format!("process killed by signal {s}"),
-                ),
+            let was_stopping = {
+                let current = unit.common.status.read_poisoned();
+                matches!(&*current, UnitStatus::Stopping | UnitStatus::Stopped(_, _))
             };
-            *status =
-                UnitStatus::Stopped(crate::units::StatusStopped::StoppedUnexpected, vec![reason]);
-            info!("Service {name} failed with {:?}, marked as failed", code);
+            if !was_stopping {
+                let mut status = unit.common.status.write_poisoned();
+                let reason = match &code {
+                    ChildTermination::Exit(c) => UnitOperationErrorReason::GenericStartError(
+                        format!("process exited with status {c}"),
+                    ),
+                    ChildTermination::Signal(s) => UnitOperationErrorReason::GenericStartError(
+                        format!("process killed by signal {s}",),
+                    ),
+                };
+                *status = UnitStatus::Stopped(
+                    crate::units::StatusStopped::StoppedUnexpected,
+                    vec![reason],
+                );
+                info!("Service {name} failed with {:?}, marked as failed", code);
+            }
         }
     }
     Ok(())

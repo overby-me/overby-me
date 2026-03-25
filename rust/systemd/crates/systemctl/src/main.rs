@@ -718,8 +718,9 @@ fn main() {
         || method == "list-sockets"
         || method == "list-paths"
         || method == "list-jobs"
+        || method == "is-system-running"
     {
-        // list-timers/list-sockets/list-paths/list-jobs take no parameters
+        // These commands take no parameters
         None
     } else if method == "set-property" {
         // set-property <unit> <prop=val>...
@@ -934,6 +935,13 @@ fn main() {
                 }
                 std::process::exit(3);
             }
+            // For is-system-running, connection failure means offline.
+            if positional[0] == "is-system-running" {
+                if !quiet {
+                    println!("offline");
+                }
+                std::process::exit(1);
+            }
             std::process::exit(1);
         }
     }
@@ -1022,6 +1030,16 @@ fn handle_response(
             }
             match state {
                 "failed" => std::process::exit(0),
+                _ => std::process::exit(1),
+            }
+        }
+        "is-system-running" => {
+            let state = result.and_then(|v| v.as_str()).unwrap_or("offline");
+            if !quiet {
+                println!("{}", state);
+            }
+            match state {
+                "running" | "initializing" | "starting" => std::process::exit(0),
                 _ => std::process::exit(1),
             }
         }

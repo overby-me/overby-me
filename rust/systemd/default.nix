@@ -320,7 +320,7 @@
           sed -i '/^# --marked/,/^# --dry-run/{/^# --dry-run/!d}' TEST-26-SYSTEMCTL.sh
           # Remove --dry-run tests (not implemented)
           sed -i '/^# --dry-run/,/^# Aux verbs/{/^# Aux verbs/!d}' TEST-26-SYSTEMCTL.sh
-          # Remove is-system-running (not implemented)
+          # Remove is-system-running (system has degraded state due to boot-time service failures)
           sed -i '/^assert_eq.*is-system-running/d' TEST-26-SYSTEMCTL.sh
           # Remove --timestamp tests
           sed -i '/^# --timestamp$/,/^# set-default/{/^# set-default/!d}' TEST-26-SYSTEMCTL.sh
@@ -335,8 +335,6 @@
           sed -i '/^# %J in WantedBy/,/^systemctl daemon-reload$/d' TEST-26-SYSTEMCTL.sh
           # Remove global unit tests
           sed -i '/^# Test systemctl edit --global/,/^rm -f.*GLOBAL_MASKED_UNIT/d' TEST-26-SYSTEMCTL.sh
-          # Remove --with-dependencies (not implemented)
-          sed -i '/--with-dependencies/d' TEST-26-SYSTEMCTL.sh
           # Remove systemctl cat --force (not implemented)
           sed -i '/^systemctl cat --force/d' TEST-26-SYSTEMCTL.sh
           # Remove Ensure that the enablement symlinks section
@@ -353,9 +351,6 @@
           sed -i '/systemctl is-enabled/d' TEST-26-SYSTEMCTL.sh
           # Remove Failed-unit section (glob patterns in reset-failed not supported)
           sed -i '/^# Failed-unit/,/^# Aux verbs/{/^# Aux verbs/!d}' TEST-26-SYSTEMCTL.sh
-          # Remove glob pattern tests (wildcards not supported in unit names)
-          sed -i '/is-active.*journald/d' TEST-26-SYSTEMCTL.sh
-          sed -i '/systemctl cat.*udevd/d' TEST-26-SYSTEMCTL.sh
           # Remove mask/unmask/revert function and calls (not fully implemented)
           sed -i '/^test_mask_unmask_revert() {/,/^}/d' TEST-26-SYSTEMCTL.sh
           sed -i '/test_mask_unmask_revert/d' TEST-26-SYSTEMCTL.sh
