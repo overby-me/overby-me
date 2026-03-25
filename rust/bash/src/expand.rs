@@ -456,7 +456,56 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                         }
                     }
                     WordPart::Param(expr) => {
-                        s.push_str(&expand_param(expr, ctx, cmd_sub));
+                        // Check if this is ${var+"$@"} or ${var-"$@"} — needs per-field expansion
+                        let has_at_in_word = match &expr.op {
+                            ParamOp::Default(_, word) | ParamOp::Alt(_, word) => {
+                                word.iter().any(|p| {
+                                    matches!(p, WordPart::Variable(n) if n == "@")
+                                        || matches!(p, WordPart::DoubleQuoted(parts) if parts.iter().any(|ip| matches!(ip, WordPart::Variable(n) if n == "@")))
+                                })
+                            }
+                            _ => false,
+                        };
+                        let is_alt_active = match &expr.op {
+                            ParamOp::Default(colon, _) => {
+                                let val = lookup_var(&expr.name, ctx);
+                                let set = ctx.is_param_set(&expr.name);
+                                let empty = if *colon { val.is_empty() } else { false };
+                                !set || empty
+                            }
+                            ParamOp::Alt(colon, _) => {
+                                let val = lookup_var(&expr.name, ctx);
+                                let set = ctx.is_param_set(&expr.name);
+                                let empty = if *colon { val.is_empty() } else { false };
+                                set && !empty
+                            }
+                            _ => false,
+                        };
+                        if has_at_in_word && is_alt_active {
+                            // Expand the word per-part to get SplitHere from $@
+                            if !s.is_empty() {
+                                out.push(Segment::Quoted(std::mem::take(&mut s)));
+                            }
+                            if let ParamOp::Default(_, word) | ParamOp::Alt(_, word) = &expr.op {
+                                let mut inner = Vec::new();
+                                for part in word {
+                                    expand_part(part, ctx, &mut inner, cmd_sub);
+                                }
+                                for seg in inner {
+                                    match seg {
+                                        Segment::Quoted(t)
+                                        | Segment::Unquoted(t)
+                                        | Segment::Literal(t) => s.push_str(&t),
+                                        Segment::SplitHere => {
+                                            out.push(Segment::Quoted(std::mem::take(&mut s)));
+                                            out.push(Segment::SplitHere);
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            s.push_str(&expand_param(expr, ctx, cmd_sub));
+                        }
                     }
                     WordPart::CommandSub(cmd) => {
                         if cmd.starts_with('\x00') {
