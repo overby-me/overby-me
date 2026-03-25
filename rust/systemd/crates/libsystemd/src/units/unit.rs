@@ -200,7 +200,15 @@ impl ServiceState {
             Ok(crate::services::StartResult::Started) => {
                 {
                     let mut status = status.write_poisoned();
-                    *status = UnitStatus::Started(StatusStarted::Running);
+                    // Only transition to Started if still Starting or
+                    // Restarting.  A fast-exiting process (e.g. `false`)
+                    // may have already triggered SIGCHLD → exit handler →
+                    // Stopped/failed between the fork and this point.
+                    // Overwriting that status would leave the unit stuck
+                    // as "active" forever.
+                    if matches!(&*status, UnitStatus::Starting | UnitStatus::Restarting) {
+                        *status = UnitStatus::Started(StatusStarted::Running);
+                    }
                 }
                 Ok(UnitStatus::Started(StatusStarted::Running))
             }
@@ -294,7 +302,10 @@ impl ServiceState {
             Ok(crate::services::StartResult::Started) => {
                 {
                     let mut status = status.write_poisoned();
-                    *status = UnitStatus::Started(StatusStarted::Running);
+                    // Guard against fast-exiting processes (same race as in activate)
+                    if !matches!(&*status, UnitStatus::Stopped(..) | UnitStatus::NeverStarted) {
+                        *status = UnitStatus::Started(StatusStarted::Running);
+                    }
                 }
                 Ok(())
             }

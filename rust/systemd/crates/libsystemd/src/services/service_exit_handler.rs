@@ -373,6 +373,18 @@ pub fn service_exit_handler(
         trace!("Restart service {name} after it died");
         crate::units::reactivate_unit(srvc_id, run_info).map_err(|e| format!("{e}"))?;
     } else {
+        // Capture whether the unit was intentionally being stopped *before*
+        // deactivation — deactivation sets the status to Stopped, so checking
+        // afterwards would always see Stopped and never mark the unit as failed.
+        let was_intentionally_stopping = {
+            if let Some(unit) = run_info.unit_table.get(&srvc_id) {
+                let current = unit.common.status.read_poisoned();
+                matches!(&*current, UnitStatus::Stopping)
+            } else {
+                false
+            }
+        };
+
         trace!("Recursively killing all services requiring service {name}");
         loop {
             let res = crate::units::deactivate_unit_recursive(&srvc_id, run_info);
@@ -397,32 +409,25 @@ pub fn service_exit_handler(
         // If the exit was not clean (non-zero exit code or killed by signal),
         // override the status to "failed" so `systemctl show` reports
         // ActiveState=failed/SubState=failed.
-        // However, if the unit was being intentionally stopped (status is Stopping
-        // or already Stopped), don't mark it as failed — signal death from an
+        // However, if the unit was being intentionally stopped (status was Stopping
+        // before deactivation), don't mark it as failed — signal death from an
         // intentional stop is expected behavior.
         if !success_exit_status.is_success(&code)
+            && !was_intentionally_stopping
             && let Some(unit) = run_info.unit_table.get(&srvc_id)
         {
-            let was_stopping = {
-                let current = unit.common.status.read_poisoned();
-                matches!(&*current, UnitStatus::Stopping | UnitStatus::Stopped(_, _))
+            let mut status = unit.common.status.write_poisoned();
+            let reason = match &code {
+                ChildTermination::Exit(c) => UnitOperationErrorReason::GenericStartError(format!(
+                    "process exited with status {c}"
+                )),
+                ChildTermination::Signal(s) => UnitOperationErrorReason::GenericStartError(
+                    format!("process killed by signal {s}",),
+                ),
             };
-            if !was_stopping {
-                let mut status = unit.common.status.write_poisoned();
-                let reason = match &code {
-                    ChildTermination::Exit(c) => UnitOperationErrorReason::GenericStartError(
-                        format!("process exited with status {c}"),
-                    ),
-                    ChildTermination::Signal(s) => UnitOperationErrorReason::GenericStartError(
-                        format!("process killed by signal {s}",),
-                    ),
-                };
-                *status = UnitStatus::Stopped(
-                    crate::units::StatusStopped::StoppedUnexpected,
-                    vec![reason],
-                );
-                info!("Service {name} failed with {:?}, marked as failed", code);
-            }
+            *status =
+                UnitStatus::Stopped(crate::units::StatusStopped::StoppedUnexpected, vec![reason]);
+            info!("Service {name} failed with {:?}, marked as failed", code);
         }
     }
     Ok(())

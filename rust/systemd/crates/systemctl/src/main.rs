@@ -154,8 +154,21 @@ fn main() {
     let mut kill_value: Option<i32> = None;
 
     let mut i = 0;
+    let mut end_of_options = false;
     while i < args.len() {
         let arg = &args[i];
+
+        // `--` signals end-of-options: all remaining args are positional.
+        if arg == "--" && !end_of_options {
+            end_of_options = true;
+            i += 1;
+            continue;
+        }
+        if end_of_options {
+            positional.push(arg.clone());
+            i += 1;
+            continue;
+        }
 
         // --what flag (for `clean --what=configuration`)
         if arg == "--what" {
