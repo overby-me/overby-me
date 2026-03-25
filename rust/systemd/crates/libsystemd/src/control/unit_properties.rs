@@ -90,8 +90,17 @@ pub fn collect_properties(unit: &Unit) -> BTreeMap<String, String> {
 
             insert(
                 &mut props,
-                "RestartCount",
+                "NRestarts",
                 &state.common.restart_count.to_string(),
+            );
+
+            insert(
+                &mut props,
+                "ExitType",
+                match svc.conf.exit_type {
+                    crate::units::ExitType::Main => "main",
+                    crate::units::ExitType::Cgroup => "cgroup",
+                },
             );
 
             // ── sd_notify reported fields ─────────────────────────────

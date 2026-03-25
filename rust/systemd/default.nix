@@ -238,7 +238,7 @@
       {
         name = "07-PID1";
         # Patch main script to remove mountpoint check and exit, keep run_subtests.
-        # Enable mask.sh; remove all other subtests requiring unimplemented features.
+        # Enable mask.sh; remove subtests requiring unimplemented features.
         patchScript = ''
           sed -i '/mountpoint \/issue2730/d; /systemctl --no-block exit 123/d' TEST-07-PID1.sh
           rm -f TEST-07-PID1.attach_processes.sh \
