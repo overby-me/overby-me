@@ -2126,6 +2126,7 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     'l' => flag_lowercase = true,
                     'c' => flag_capitalize = true,
                     'g' => flag_global = true,
+                    't' | 'I' => {} // trace/inherit — accepted but not implemented
                     _ => {
                         eprintln!("{}: declare: -{}: invalid option", shell.error_prefix(), ch);
                         eprintln!(
@@ -4797,6 +4798,21 @@ fn builtin_trap(shell: &mut Shell, args: &[String]) -> i32 {
             println!("trap -- '{}' {}", handler, normalize_signal_name(signal));
         }
         return 0;
+    }
+
+    // Check for invalid options
+    for arg in args {
+        if arg.starts_with('-')
+            && arg.len() > 1
+            && !matches!(arg.as_str(), "-p" | "-P" | "-l" | "-L" | "--")
+        {
+            eprintln!("{}: trap: {}: invalid option", shell.error_prefix(), arg);
+            eprintln!("trap: usage: trap [-Plp] [[action] signal_spec ...]");
+            return 2;
+        }
+        if arg == "--" {
+            break;
+        }
     }
 
     if args.len() == 1 {
