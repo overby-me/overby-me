@@ -994,26 +994,48 @@ fn is_glob_pattern(s: &str) -> bool {
 fn find_units_with_name<'a>(unit_name: &str, unit_table: &'a UnitTable) -> Vec<&'a Unit> {
     trace!("Find unit for name: {unit_name}");
     let use_glob = is_glob_pattern(unit_name);
+    // If the name has a unit type suffix (contains '.'), use exact matching.
+    // Otherwise, try matching against the base name of each unit (name without
+    // suffix) to handle "foo" → "foo.service" style lookups.
+    let has_suffix = unit_name.contains('.');
     unit_table
         .values()
         .filter(|unit| {
-            let name = unit.id.name.clone();
+            let name = &unit.id.name;
             if use_glob {
-                unit_name_glob_match(unit_name, &name)
+                unit_name_glob_match(unit_name, name)
                     || unit
                         .common
                         .unit
                         .aliases
                         .iter()
                         .any(|alias| unit_name_glob_match(unit_name, alias))
-            } else {
-                name.starts_with(unit_name)
+            } else if has_suffix {
+                name == unit_name
                     || unit
                         .common
                         .unit
                         .aliases
                         .iter()
-                        .any(|alias| alias.starts_with(unit_name))
+                        .any(|alias| alias == unit_name)
+            } else {
+                // No suffix: match "name.suffix" by stripping the suffix and
+                // comparing the base. This handles "a" matching "a.service"
+                // but NOT "a-b-c.service" or "autovt@tty1.service".
+                let matches_base = |full: &str| -> bool {
+                    full == unit_name
+                        || full
+                            .rfind('.')
+                            .map(|dot| &full[..dot] == unit_name)
+                            .unwrap_or(false)
+                };
+                matches_base(name)
+                    || unit
+                        .common
+                        .unit
+                        .aliases
+                        .iter()
+                        .any(|alias| matches_base(alias))
             }
         })
         .collect()
@@ -4768,10 +4790,14 @@ pub fn execute_command(
                     .map_err(|e| format!("Error while loading unit definitions: {e:?}"))?;
 
             // collect all names
-            let existing_names = unit_table
+            let existing_names: Vec<String> = unit_table
                 .values()
                 .map(|unit| unit.id.name.clone())
-                .collect::<Vec<_>>();
+                .collect();
+
+            // Collect freshly-loaded unit names so we can detect stale entries
+            let fresh_names: std::collections::HashSet<String> =
+                units.values().map(|u| u.id.name.clone()).collect();
 
             // Separate into new and updated units
             let mut ignored_units_names = Vec::new();
@@ -4786,6 +4812,22 @@ pub fn execute_command(
                     new_units_names.push(Value::String(unit.id.name.clone()));
                     new_units.insert(id, unit);
                 }
+            }
+
+            // Remove units whose files no longer exist on disk.
+            // Skip transient units (no file path) — they only exist at runtime.
+            let mut removed_units_names = Vec::new();
+            let stale_ids: Vec<_> = run_info
+                .unit_table
+                .iter()
+                .filter(|(_, unit)| {
+                    !fresh_names.contains(&unit.id.name) && unit.common.unit.fragment_path.is_some()
+                })
+                .map(|(id, _)| id.clone())
+                .collect();
+            for id in stale_ids {
+                removed_units_names.push(Value::String(id.name.clone()));
+                run_info.unit_table.remove(&id);
             }
 
             // Update existing units' configuration (preserving runtime status)
@@ -4819,6 +4861,10 @@ pub fn execute_command(
             response_object.insert(
                 "Ignored".into(),
                 serde_json::Value::Array(ignored_units_names),
+            );
+            response_object.insert(
+                "Removed".into(),
+                serde_json::Value::Array(removed_units_names),
             );
             result_vec
                 .as_array_mut()
