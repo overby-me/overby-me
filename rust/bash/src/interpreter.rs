@@ -1252,17 +1252,26 @@ impl Shell {
 
         let coproc_name = name.unwrap_or("COPROC");
 
-        // Close previous coproc fds if any (check both named and default COPROC)
-        for check_name in [coproc_name, "COPROC"] {
-            if let Some(arr) = self.arrays.get(check_name) {
-                let fds: Vec<i32> = arr.iter().filter_map(|s| s.parse().ok()).collect();
-                for fd in fds {
-                    unsafe {
-                        libc::close(fd);
-                    }
+        // Close ALL previous coproc fds — bash only allows one active coproc
+        // Collect all coproc-related array names and their fds
+        let coproc_arrays: Vec<(String, Vec<i32>)> = self
+            .arrays
+            .iter()
+            .filter(|(_, v)| v.len() == 2 && v.iter().all(|s| s.parse::<i32>().is_ok()))
+            .filter(|(k, _)| {
+                // Check if there's a corresponding _PID variable
+                self.vars.contains_key(&format!("{}_PID", k))
+            })
+            .map(|(k, v)| (k.clone(), v.iter().filter_map(|s| s.parse().ok()).collect()))
+            .collect();
+        for (name, fds) in &coproc_arrays {
+            for fd in fds {
+                unsafe {
+                    libc::close(*fd);
                 }
-                self.arrays.remove(check_name);
             }
+            self.arrays.remove(name);
+            self.vars.remove(&format!("{}_PID", name));
         }
 
         // Create two pipes: one for parent→child stdin, one for child→parent stdout
