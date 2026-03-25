@@ -875,7 +875,8 @@ fn quote_for_declare(s: &str) -> String {
                 b'\'' => out.push_str("\\'"),
                 b'\\' => out.push_str("\\\\"),
                 b if b < 0x20 || b == 0x7f => {
-                    out.push_str(&format!("\\x{:02x}", b));
+                    // Use octal format like bash
+                    out.push_str(&format!("\\{:03o}", b));
                 }
                 b if b > 0x7f => {
                     // Non-ASCII byte: output as octal
