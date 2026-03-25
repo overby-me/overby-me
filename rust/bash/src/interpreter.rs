@@ -1890,10 +1890,17 @@ impl Shell {
         let mut expanded_words: Vec<String> = Vec::new();
         for (idx, word) in cmd.words.iter().enumerate() {
             let fields = self.expand_word_fields(word, &ifs);
-            // Check for incomplete comsub — suppress command execution
+            // Check for silent incomplete comsub — suppress without error
             if fields
                 .iter()
-                .any(|f| f == "INCOMPLETE_COMSUB" || f.contains("\x00INCOMPLETE_COMSUB"))
+                .any(|f| f == "SILENT_COMSUB" || f.contains("SILENT_COMSUB"))
+            {
+                return 1;
+            }
+            // Check for error incomplete comsub — suppress with error message
+            if fields
+                .iter()
+                .any(|f| f == "INCOMPLETE_COMSUB" || f.contains("INCOMPLETE_COMSUB"))
             {
                 let name = self
                     .vars

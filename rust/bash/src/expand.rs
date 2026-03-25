@@ -252,8 +252,8 @@ fn expand_word_to_segments(word: &Word, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> Vec<
         if is_error {
             return vec![Segment::Unquoted("\x00INCOMPLETE_COMSUB".to_string())];
         }
-        // Silent — just suppress (no marker → empty expansion → no output)
-        return Vec::new();
+        // Silent — suppress with marker so interpreter can detect
+        return vec![Segment::Unquoted("\x00SILENT_COMSUB".to_string())];
     }
     segments
 }
