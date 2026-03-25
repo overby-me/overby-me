@@ -688,47 +688,69 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                     }
                 }
             }
-            // Save original variable value before expansion (needed for quoting check)
+            // For Default/Alt words in unquoted context, check if we should
+            // expand per-part for mixed quoting (e.g., ${IFS+foo 'bar' baz})
             let orig_val = lookup_var(&expr.name, ctx);
             let orig_set = ctx.is_param_set(&expr.name);
-            let mut val = expand_param(expr, ctx, cmd_sub);
-            // Apply tilde expansion for default/assign values
-            if matches!(
-                &expr.op,
-                ParamOp::Default(..) | ParamOp::Assign(..) | ParamOp::Alt(..)
-            ) && val.starts_with('~')
-                && (val.len() == 1 || val.as_bytes().get(1) == Some(&b'/'))
-            {
-                let home = ctx.vars.get("HOME").cloned().unwrap_or_default();
-                val = format!("{}{}", home, &val[1..]);
-            }
-            // Check if the parameter expansion used a default/alt word with
-            // quoted content — if so, the result should be treated as quoted
-            // to prevent field splitting (e.g., ${B:-"$A"} preserves quotes)
-            let has_quoted_word = match &expr.op {
-                ParamOp::Default(_, word) | ParamOp::Alt(_, word) => {
-                    let is_active = match &expr.op {
-                        ParamOp::Default(colon, _) => {
-                            let empty = if *colon { orig_val.is_empty() } else { false };
-                            !orig_set || empty
-                        }
-                        ParamOp::Alt(colon, _) => {
-                            let empty = if *colon { orig_val.is_empty() } else { false };
-                            orig_set && !empty
-                        }
-                        _ => false,
-                    };
-                    is_active
-                        && word.iter().any(|p| {
-                            matches!(p, WordPart::DoubleQuoted(_) | WordPart::SingleQuoted(_))
-                        })
+            let is_default_alt_active = match &expr.op {
+                ParamOp::Default(colon, _) => {
+                    let empty = if *colon { orig_val.is_empty() } else { false };
+                    !orig_set || empty
+                }
+                ParamOp::Alt(colon, _) => {
+                    let empty = if *colon { orig_val.is_empty() } else { false };
+                    orig_set && !empty
                 }
                 _ => false,
             };
-            if has_quoted_word {
-                out.push(Segment::Quoted(val));
+            // Check if word has mixed quoting (both literal and quoted parts)
+            let has_mixed_quoting =
+                if let ParamOp::Default(_, word) | ParamOp::Alt(_, word) = &expr.op {
+                    let has_literal = word.iter().any(|p| matches!(p, WordPart::Literal(_)));
+                    let has_quoted = word.iter().any(|p| matches!(p, WordPart::SingleQuoted(_)));
+                    has_literal && has_quoted
+                } else {
+                    false
+                };
+            if is_default_alt_active && has_mixed_quoting {
+                // Per-part expansion: Literals are Unquoted (split), rest keeps quoting
+                if let ParamOp::Default(_, word) | ParamOp::Alt(_, word) = &expr.op {
+                    for part in word {
+                        match part {
+                            WordPart::Literal(s) => out.push(Segment::Unquoted(s.clone())),
+                            _ => expand_part(part, ctx, out, cmd_sub),
+                        }
+                    }
+                }
             } else {
-                out.push(Segment::Unquoted(val));
+                let mut val = expand_param(expr, ctx, cmd_sub);
+                // Apply tilde expansion for default/assign values
+                if matches!(
+                    &expr.op,
+                    ParamOp::Default(..) | ParamOp::Assign(..) | ParamOp::Alt(..)
+                ) && val.starts_with('~')
+                    && (val.len() == 1 || val.as_bytes().get(1) == Some(&b'/'))
+                {
+                    let home = ctx.vars.get("HOME").cloned().unwrap_or_default();
+                    val = format!("{}{}", home, &val[1..]);
+                }
+                // Check if the word has quoted content for field-splitting protection
+                let has_quoted_word = if is_default_alt_active {
+                    if let ParamOp::Default(_, word) | ParamOp::Alt(_, word) = &expr.op {
+                        word.iter().any(|p| {
+                            matches!(p, WordPart::DoubleQuoted(_) | WordPart::SingleQuoted(_))
+                        })
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+                if has_quoted_word {
+                    out.push(Segment::Quoted(val));
+                } else {
+                    out.push(Segment::Unquoted(val));
+                }
             }
         }
         WordPart::CommandSub(cmd) => {
@@ -2320,9 +2342,9 @@ fn word_split(segments: &[Segment], ifs: &str) -> Vec<String> {
             Segment::Unquoted(s) => {
                 let ifs_ws: Vec<char> = ifs.chars().filter(|c| c.is_whitespace()).collect();
                 let ifs_non_ws: Vec<char> = ifs.chars().filter(|c| !c.is_whitespace()).collect();
-                // State machine for IFS splitting:
-                // 0 = start/after ws delim, 1 = in field, 2 = after non-ws delim
-                let mut state = 0u8;
+                // If we have accumulated content from Quoted/Literal segments,
+                // start in "in field" state so IFS whitespace causes a split
+                let mut state: u8 = if !current.is_empty() { 1 } else { 0 };
                 for ch in s.chars() {
                     if ifs_non_ws.contains(&ch) {
                         match state {
