@@ -4603,7 +4603,7 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
     let mut set = false;
     let mut unset = false;
     let mut query = false;
-    let mut _print = false;
+    let mut print_mode = false;
     let mut set_o = false;
     let mut opts = Vec::new();
 
@@ -4612,7 +4612,7 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
             "-s" => set = true,
             "-u" => unset = true,
             "-q" => query = true,
-            "-p" => _print = true,
+            "-p" => print_mode = true,
             "-o" => set_o = true,
             a if a.starts_with('-') => {
                 eprintln!("{}: shopt: {}: invalid option", shell.error_prefix(), a);
@@ -4760,7 +4760,11 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
         // List all shopt options
         if !query {
             for (name, val) in &all_options {
-                println!("{:<20}\t{}", name, if *val { "on" } else { "off" });
+                if print_mode {
+                    println!("shopt {} {}", if *val { "-s" } else { "-u" }, name);
+                } else {
+                    println!("{:<20}\t{}", name, if *val { "on" } else { "off" });
+                }
             }
         }
         return 0;
@@ -4771,7 +4775,11 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
         if !query {
             for (name, val) in &all_options {
                 if (set && *val) || (unset && !*val) {
-                    println!("{:<20}\t{}", name, if *val { "on" } else { "off" });
+                    if print_mode {
+                        println!("shopt {} {}", if *val { "-s" } else { "-u" }, name);
+                    } else {
+                        println!("{:<20}\t{}", name, if *val { "on" } else { "off" });
+                    }
                 }
             }
         }
@@ -4855,7 +4863,21 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
                 }
             }
             _ if all_known_opts.contains(opt) => {
-                // Known option — silently accept set/unset for unimplemented ones
+                // Known but not fully tracked option — handle print/query
+                if !set
+                    && !unset
+                    && let Some((_, val)) = all_options.iter().find(|(n, _)| n == opt)
+                {
+                    if !query {
+                        if print_mode {
+                            println!("shopt {} {}", if *val { "-s" } else { "-u" }, opt);
+                        } else {
+                            println!("{:<20}\t{}", opt, if *val { "on" } else { "off" });
+                        }
+                    } else if !*val {
+                        status = 1;
+                    }
+                }
             }
             _ => {
                 if !query {
