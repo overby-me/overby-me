@@ -1303,7 +1303,7 @@ impl Shell {
 
                 // Move fds to high numbers (63+) like bash does
                 let high_read = unsafe { libc::fcntl(parent_read, libc::F_DUPFD, 63) };
-                let high_write = unsafe { libc::fcntl(parent_write, libc::F_DUPFD, 63) };
+                let high_write = unsafe { libc::fcntl(parent_write, libc::F_DUPFD, 60) };
                 if high_read >= 0 {
                     unsafe { libc::close(parent_read) };
                 }
