@@ -207,6 +207,26 @@ pub fn load_new_unit(unit_dirs: &[PathBuf], find_name: &str) -> Result<units::Un
             units::parse_slice(parsed, &unit_path)
                 .map_err(|e| format!("{}", units::ParsingError::new(e, unit_path.clone())))?
                 .try_into()?
+        } else if find_name.ends_with(".timer") {
+            units::parse_timer(parsed, &unit_path)
+                .map_err(|e| format!("{}", units::ParsingError::new(e, unit_path.clone())))?
+                .try_into()?
+        } else if find_name.ends_with(".path") {
+            units::parse_path(parsed, &unit_path)
+                .map_err(|e| format!("{}", units::ParsingError::new(e, unit_path.clone())))?
+                .try_into()?
+        } else if find_name.ends_with(".mount") {
+            units::parse_mount(parsed, &unit_path)
+                .map_err(|e| format!("{}", units::ParsingError::new(e, unit_path.clone())))?
+                .try_into()?
+        } else if find_name.ends_with(".swap") {
+            units::parse_swap(parsed, &unit_path)
+                .map_err(|e| format!("{}", units::ParsingError::new(e, unit_path.clone())))?
+                .try_into()?
+        } else if find_name.ends_with(".device") {
+            units::parse_device(parsed, &unit_path)
+                .map_err(|e| format!("{}", units::ParsingError::new(e, unit_path.clone())))?
+                .try_into()?
         } else {
             return Err(format!("File suffix not recognized for file {unit_path:?}"));
         };

@@ -180,9 +180,29 @@ in
         done
 
         # Create standard systemd testdata path so unit files referencing
-        # /usr/lib/systemd/tests/testdata/ can find helper scripts
-        mkdir -p /usr/lib/systemd/tests
-        ln -sfn /etc/systemd-tests/testdata /usr/lib/systemd/tests/testdata
+        # /usr/lib/systemd/tests/testdata/ can find helper scripts.
+        # We create a real directory instead of a plain symlink so we can
+        # add flat symlinks for test data subdirectories.
+        mkdir -p /usr/lib/systemd/tests/testdata
+
+        # Symlink all top-level entries from the nix store testdata
+        for entry in /etc/systemd-tests/testdata/*; do
+          name=$(basename "$entry")
+          ln -sfn "$entry" "/usr/lib/systemd/tests/testdata/$name"
+        done
+
+        # Upstream unit files reference e.g. /usr/lib/systemd/tests/testdata/TEST-07-PID1.units/
+        # but our nix store has testdata/TEST-07-PID1/TEST-07-PID1.units/.
+        # Bridge the gap by symlinking each test's subdirs up one level.
+        for testdir in /etc/systemd-tests/testdata/TEST-*/; do
+          [ -d "$testdir" ] || continue
+          for subdir in "$testdir"/*/; do
+            [ -d "$subdir" ] || continue
+            subname=$(basename "$subdir")
+            [ -e "/usr/lib/systemd/tests/testdata/$subname" ] || \
+              ln -sfn "$subdir" "/usr/lib/systemd/tests/testdata/$subname"
+          done
+        done
 
         # Make /etc/dbus-1 writable for tests that install D-Bus policy files
         if [ -L /etc/dbus-1 ] || [ ! -w /etc/dbus-1 2>/dev/null ]; then

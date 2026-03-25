@@ -2116,10 +2116,10 @@ mod tests {
     #[test]
     fn test_resolve_specifiers_all() {
         let result = resolve_specifiers("%n %N %i %I %p %P %%", "foo@bar.service", "bar");
-        // %N unescapes the unit name (no escaping in "foo@bar" so same),
+        // %N strips the suffix (prefix+instance without .service),
         // %I unescapes the instance ("bar" has nothing to unescape),
         // %P unescapes the prefix ("foo" has nothing to unescape).
-        assert_eq!(result, "foo@bar.service foo@bar.service bar bar foo foo %");
+        assert_eq!(result, "foo@bar.service foo@bar bar bar foo foo %");
     }
 
     #[test]
@@ -2390,6 +2390,7 @@ mod tests {
                     common: CommonState {
                         up_since: None,
                         restart_count: 0,
+                        start_timestamps: Vec::new(),
                     },
                 }),
             }),

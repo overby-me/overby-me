@@ -70,6 +70,8 @@ pub enum Command {
     ReloadOrRestart(String),
     Start(Vec<String>),
     StartNoBlock(Vec<String>),
+    StopNoBlock(Vec<String>),
+    RestartNoBlock(String),
     StartAll(String),
     Stop(Vec<String>),
     StopAll(String),
@@ -391,6 +393,33 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
                 }
             };
             Command::StopAll(name)
+        }
+
+        "stop-noblock" => {
+            let names = match &call.params {
+                Some(Value::String(s)) => vec![s.clone()],
+                Some(Value::Array(arr)) => arr
+                    .iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect(),
+                Some(_) | None => {
+                    return Err(ParseError::ParamsInvalid(
+                        "Params must be a string or array of strings".to_string(),
+                    ));
+                }
+            };
+            Command::StopNoBlock(names)
+        }
+        "restart-noblock" => {
+            let name = match &call.params {
+                Some(Value::String(s)) => s.clone(),
+                Some(_) | None => {
+                    return Err(ParseError::ParamsInvalid(
+                        "Params must be a single string".to_string(),
+                    ));
+                }
+            };
+            Command::RestartNoBlock(name)
         }
 
         "list-units" => {
@@ -4752,6 +4781,37 @@ pub fn execute_command(
                 crate::units::deactivate_unit(&id, run_info).map_err(|e| format!("{e}"))?;
             }
         }
+        Command::StopNoBlock(unit_names) => {
+            // Like Stop but returns immediately — deactivation runs in background.
+            let ri = run_info.read_poisoned();
+            let mut ids = Vec::new();
+            for unit_name in &unit_names {
+                let units = find_units_with_name(unit_name, &ri.unit_table);
+                if let Some(unit) = units.first() {
+                    ids.push(unit.id.clone());
+                }
+            }
+            drop(ri);
+            for id in ids {
+                let run_info_clone = run_info.clone();
+                std::thread::spawn(move || {
+                    let ri = run_info_clone.read_poisoned();
+                    if let Err(e) = crate::units::deactivate_unit(&id, &ri) {
+                        log::error!("Background stop error for {}: {e}", id.name);
+                    }
+                });
+            }
+        }
+        Command::RestartNoBlock(unit_name) => {
+            // Like Restart but returns immediately — restart runs in background.
+            let id = find_or_load_unit(&unit_name, &run_info)?;
+            let run_info_clone = run_info.clone();
+            std::thread::spawn(move || {
+                if let Err(e) = crate::units::reactivate_unit(id, &run_info_clone.read_poisoned()) {
+                    log::error!("Background restart error for {unit_name}: {e}");
+                }
+            });
+        }
         Command::StopAll(unit_name) => {
             let run_info = &*run_info.read_poisoned();
             let id = {
@@ -5321,6 +5381,7 @@ mod tests {
                     common: CommonState {
                         up_since: None,
                         restart_count: 0,
+                        start_timestamps: Vec::new(),
                     },
                 }),
             }),
@@ -7090,6 +7151,7 @@ mod tests {
             environment: Vec::new(),
             scope: false,
             wait: false,
+            slice: None,
             on_calendar: None,
             on_active: None,
             on_boot: None,
@@ -7114,6 +7176,7 @@ mod tests {
             environment: Vec::new(),
             scope: false,
             wait: false,
+            slice: None,
             on_calendar: None,
             on_active: None,
             on_boot: None,

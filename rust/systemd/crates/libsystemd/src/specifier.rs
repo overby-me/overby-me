@@ -29,7 +29,7 @@
 //! | `%m`      | Machine ID                                               |
 //! | `%M`      | OS pretty name (`PRETTY_NAME=` from os-release)          |
 //! | `%n`      | Full unit name                                           |
-//! | `%N`      | Full unit name (unescaped)                               |
+//! | `%N`      | Unit name without suffix (prefix + instance)             |
 //! | `%o`      | OS ID (`ID=` from os-release)                            |
 //! | `%p`      | Prefix (unit name without suffix, or template prefix)    |
 //! | `%P`      | Prefix (unescaped)                                       |
@@ -293,19 +293,13 @@ pub fn resolve_specifiers(
                     // --- unit identity ---
                     'n' => result.push_str(unit_name),
                     'N' => {
-                        // Full unit name, unescaped. We unescape the name
-                        // part (before the suffix) and re-append the suffix.
+                        // Unit name without the suffix (prefix + instance).
+                        // e.g. "foo@bar.service" -> "foo@bar",
+                        //      "issue14566-repro.service" -> "issue14566-repro"
                         if let Some(dot) = unit_name.rfind('.') {
-                            let name_part = &unit_name[..dot];
-                            let suffix = &unit_name[dot..];
-                            let unescaped =
-                                unit_name_unescape(name_part).unwrap_or(name_part.to_string());
-                            result.push_str(&unescaped);
-                            result.push_str(suffix);
+                            result.push_str(&unit_name[..dot]);
                         } else {
-                            let unescaped =
-                                unit_name_unescape(unit_name).unwrap_or(unit_name.to_string());
-                            result.push_str(&unescaped);
+                            result.push_str(unit_name);
                         }
                     }
                     'p' => result.push_str(&prefix),
@@ -753,13 +747,10 @@ mod tests {
     }
 
     #[test]
-    fn test_capital_n_unescape_name() {
+    fn test_capital_n_strips_suffix() {
         let c = ctx();
-        // For a simple name, unescaping doesn't change much.
-        assert_eq!(
-            resolve_specifiers("%N", "foo.service", "", &c),
-            "foo.service"
-        );
+        // %N = unit name without the suffix
+        assert_eq!(resolve_specifiers("%N", "foo.service", "", &c), "foo");
     }
 
     #[test]
@@ -1043,7 +1034,7 @@ mod tests {
     fn test_compound_all_identity_specifiers() {
         let c = ctx();
         let result = resolve_specifiers("%n %N %i %I %p %P %%", "foo@bar.service", "bar", &c);
-        assert_eq!(result, "foo@bar.service foo@bar.service bar bar foo foo %");
+        assert_eq!(result, "foo@bar.service foo@bar bar bar foo foo %");
     }
 
     #[test]
