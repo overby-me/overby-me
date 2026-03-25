@@ -3811,7 +3811,25 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
                     'n' => {
                         i += 1;
                         if i < args.len() {
-                            nchars = args[i].parse().ok();
+                            match args[i].parse::<i64>() {
+                                Ok(n) if n < 0 => {
+                                    eprintln!(
+                                        "{}: read: {}: invalid number",
+                                        shell.error_prefix(),
+                                        args[i]
+                                    );
+                                    return 2;
+                                }
+                                Ok(n) => nchars = Some(n as usize),
+                                Err(_) => {
+                                    eprintln!(
+                                        "{}: read: {}: invalid number",
+                                        shell.error_prefix(),
+                                        args[i]
+                                    );
+                                    return 2;
+                                }
+                            }
                         }
                         break;
                     }
