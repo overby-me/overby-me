@@ -2955,8 +2955,7 @@ fn eval_test_expr(args: &[String], shell: &Shell, cmd_name: &str) -> i32 {
     }
 
     // Handle parenthesized grouping: ( expr )
-    if args.first().map(|s| s.as_str()) == Some("(") && args.last().map(|s| s.as_str()) == Some(")")
-    {
+    if args.first().map(|s| s.as_str()) == Some("(") {
         // Find matching close paren, handling nesting
         let mut depth = 0;
         let mut close = None;
@@ -2971,11 +2970,16 @@ fn eval_test_expr(args: &[String], shell: &Shell, cmd_name: &str) -> i32 {
                 }
             }
         }
-        if let Some(close_idx) = close
-            && close_idx == args.len() - 1
-        {
-            // All args are inside parens
-            return eval_test_expr(&args[1..close_idx], shell, cmd_name);
+        if let Some(close_idx) = close {
+            if close_idx == args.len() - 1 {
+                // All args are inside parens
+                return eval_test_expr(&args[1..close_idx], shell, cmd_name);
+            }
+            // Parens with stuff after — continue processing
+        } else {
+            // Missing closing )
+            eprintln!("{}: {}: `)' expected", shell.error_prefix(), cmd_name);
+            return 2;
         }
     }
 
