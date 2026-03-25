@@ -566,14 +566,20 @@ fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                     }
                     Some('s') => {
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("");
+                        // Apply precision (truncate string)
+                        let truncated = if let Some(p) = precision {
+                            &arg[..arg.len().min(p)]
+                        } else {
+                            arg
+                        };
                         if w > 0 {
                             if left {
-                                print!("{:<w$}", arg);
+                                print!("{:<w$}", truncated);
                             } else {
-                                print!("{:>w$}", arg);
+                                print!("{:>w$}", truncated);
                             }
                         } else {
-                            print!("{}", arg);
+                            print!("{}", truncated);
                         }
                         arg_idx += 1;
                     }
