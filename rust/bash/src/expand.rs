@@ -11,8 +11,6 @@ thread_local! {
     static PROCSUB_FDS: RefCell<Vec<i32>> = const { RefCell::new(Vec::new()) };
     /// Flag set when arithmetic evaluation encounters an error.
     static ARITH_ERROR: RefCell<bool> = const { RefCell::new(false) };
-    /// Flag set when word expansion encounters an incomplete comsub.
-    static EXPANSION_ERROR: RefCell<bool> = const { RefCell::new(false) };
 }
 
 /// Check and clear the arithmetic error flag.
@@ -23,11 +21,6 @@ pub fn take_arith_error() -> bool {
 /// Set the arithmetic error flag.
 pub fn set_arith_error() {
     ARITH_ERROR.with(|f| *f.borrow_mut() = true);
-}
-
-/// Check and clear the expansion error flag.
-pub fn take_expansion_error() -> bool {
-    EXPANSION_ERROR.with(|f| std::mem::replace(&mut *f.borrow_mut(), false))
 }
 
 /// Take all pending process substitution fds (draining the list).
@@ -239,21 +232,6 @@ impl ExpCtx<'_> {
 }
 
 fn expand_word_to_segments(word: &Word, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> Vec<Segment> {
-    // Check for incomplete comsub marker — if present, the entire word is invalid
-    fn has_incomplete_comsub(word: &Word) -> bool {
-        word.iter().any(|p| match p {
-            WordPart::CommandSub(cmd) => cmd.starts_with('\x00'),
-            WordPart::DoubleQuoted(parts) => parts
-                .iter()
-                .any(|p| matches!(p, WordPart::CommandSub(cmd) if cmd.starts_with('\x00'))),
-            _ => false,
-        })
-    }
-    if has_incomplete_comsub(word) {
-        EXPANSION_ERROR.with(|f| *f.borrow_mut() = true);
-        return Vec::new();
-    }
-
     let mut segments = Vec::new();
     for part in word {
         expand_part(part, ctx, &mut segments, cmd_sub);

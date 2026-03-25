@@ -1890,21 +1890,6 @@ impl Shell {
         let mut expanded_words: Vec<String> = Vec::new();
         for (idx, word) in cmd.words.iter().enumerate() {
             let fields = self.expand_word_fields(word, &ifs);
-            // Check for expansion errors (incomplete comsub, etc.)
-            if crate::expand::take_expansion_error() {
-                let name = self
-                    .vars
-                    .get("_BASH_SOURCE_FILE")
-                    .or_else(|| self.positional.first())
-                    .map(|s| s.as_str())
-                    .unwrap_or("bash");
-                let lineno = self.vars.get("LINENO").map(|s| s.as_str()).unwrap_or("0");
-                eprintln!(
-                    "{}: command substitution: line {}: unexpected EOF while looking for matching `)'",
-                    name, lineno
-                );
-                return 1;
-            }
             // Check if this word has unquoted tilde (for assignment tilde expansion)
             let has_unquoted_tilde = word.iter().any(|p| {
                 matches!(p, crate::ast::WordPart::Literal(s) if s.contains('~'))
