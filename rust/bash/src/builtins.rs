@@ -4193,9 +4193,61 @@ fn builtin_trap(shell: &mut Shell, args: &[String]) -> i32 {
 
     let handler = &args[handler_idx];
 
+    let mut status = 0;
     for sig in &args[sig_start..] {
         let signal = sig.to_uppercase();
         let signal = signal.strip_prefix("SIG").unwrap_or(&signal).to_string();
+
+        // Validate signal name/number
+        let valid = matches!(
+            signal.as_str(),
+            "EXIT"
+                | "0"
+                | "HUP"
+                | "INT"
+                | "QUIT"
+                | "ILL"
+                | "TRAP"
+                | "ABRT"
+                | "BUS"
+                | "FPE"
+                | "KILL"
+                | "USR1"
+                | "SEGV"
+                | "USR2"
+                | "PIPE"
+                | "ALRM"
+                | "TERM"
+                | "STKFLT"
+                | "CHLD"
+                | "CONT"
+                | "STOP"
+                | "TSTP"
+                | "TTIN"
+                | "TTOU"
+                | "URG"
+                | "XCPU"
+                | "XFSZ"
+                | "VTALRM"
+                | "PROF"
+                | "WINCH"
+                | "IO"
+                | "PWR"
+                | "SYS"
+                | "DEBUG"
+                | "ERR"
+                | "RETURN"
+        ) || signal.parse::<u32>().is_ok_and(|n| n <= 64);
+
+        if !valid {
+            eprintln!(
+                "{}: trap: {}: invalid signal specification",
+                shell.error_prefix(),
+                sig
+            );
+            status = 1;
+            continue;
+        }
 
         if handler == "-" || handler.is_empty() {
             // Reset trap
@@ -4204,7 +4256,7 @@ fn builtin_trap(shell: &mut Shell, args: &[String]) -> i32 {
             shell.traps.insert(signal, handler.clone());
         }
     }
-    0
+    status
 }
 
 fn builtin_wait(shell: &mut Shell, args: &[String]) -> i32 {
