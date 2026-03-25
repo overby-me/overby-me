@@ -830,6 +830,30 @@ fn parse_double_quoted_content(s: &str) -> Word {
     parts
 }
 
+/// Parse a string as a shell word (for expanding ${...} in arithmetic contexts)
+pub fn parse_word_string(s: &str) -> Word {
+    let chars: Vec<char> = s.chars().collect();
+    let mut parts = Vec::new();
+    let mut i = 0;
+    let mut lit = String::new();
+    while i < chars.len() {
+        if chars[i] == '$' {
+            if !lit.is_empty() {
+                parts.push(WordPart::Literal(std::mem::take(&mut lit)));
+            }
+            i += 1;
+            parts.push(parse_dollar(&chars, &mut i, false));
+        } else {
+            lit.push(chars[i]);
+            i += 1;
+        }
+    }
+    if !lit.is_empty() {
+        parts.push(WordPart::Literal(lit));
+    }
+    parts
+}
+
 pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart {
     if *i >= chars.len() {
         return WordPart::Literal("$".to_string());

@@ -2494,10 +2494,10 @@ impl Shell {
             return 0;
         }
 
-        // Expand command substitutions $(...) BEFORE stripping quotes,
-        // since commands inside $() need their quotes preserved
+        // Expand command substitutions $(...) and parameter expansions ${...}
+        // BEFORE stripping quotes, since commands inside $() need their quotes preserved
         let expanded_cs: String;
-        let expr = if expr.contains("$(") || expr.contains("${ ") {
+        let expr = if expr.contains("$(") || expr.contains("${ ") || expr.contains("${") {
             expanded_cs = self.expand_comsubs_in_arith(expr);
             &expanded_cs
         } else {
@@ -3437,6 +3437,35 @@ impl Shell {
                 let output = self.capture_output(&cmd);
                 result.push_str(output.trim());
                 i = j + 1;
+            } else if chars[i] == '$'
+                && i + 1 < chars.len()
+                && chars[i + 1] == '{'
+                && (i + 2 >= chars.len() || chars[i + 2] != ' ')
+            {
+                // ${...} parameter expansion — find matching } and expand
+                let start = i;
+                i += 2; // skip ${
+                let mut depth = 1;
+                while i < chars.len() && depth > 0 {
+                    match chars[i] {
+                        '{' => depth += 1,
+                        '}' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                    i += 1;
+                }
+                if i < chars.len() {
+                    i += 1; // skip closing }
+                }
+                let param_text: String = chars[start..i].iter().collect();
+                let expanded =
+                    self.expand_word_single(&crate::lexer::parse_word_string(&param_text));
+                result.push_str(&expanded);
             } else {
                 result.push(chars[i]);
                 i += 1;
