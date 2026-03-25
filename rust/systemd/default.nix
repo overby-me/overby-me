@@ -311,8 +311,6 @@
           sed -i '/^test_list_unit_files --root=/d' TEST-26-SYSTEMCTL.sh
           # Remove template unit disable --now
           sed -i '/^# disable --now with template unit/,/^# add-wants\/add-requires/{/^# add-wants\/add-requires/!d}' TEST-26-SYSTEMCTL.sh
-          # Remove is-system-running (system has degraded state due to boot-time service failures)
-          sed -i '/^assert_eq.*is-system-running/d' TEST-26-SYSTEMCTL.sh
           # Remove sysv-generator test
           sed -i '/^# test for sysv-generator/,/^fi$/d' TEST-26-SYSTEMCTL.sh
           # Remove WantedBy %J test
@@ -329,7 +327,7 @@
           sed -i '/systemctl disable /d' TEST-26-SYSTEMCTL.sh
           sed -i '/systemctl preset /d' TEST-26-SYSTEMCTL.sh
           sed -i '/systemctl is-enabled/d' TEST-26-SYSTEMCTL.sh
-          # Remove Failed-unit section (glob patterns in reset-failed not supported)
+          # Remove Failed-unit section (systemd-run --wait hangs for transient units)
           sed -i '/^# Failed-unit/,/^# Aux verbs/{/^# Aux verbs/!d}' TEST-26-SYSTEMCTL.sh
           # Remove mask/unmask/revert function and calls (not fully implemented)
           sed -i '/^test_mask_unmask_revert() {/,/^}/d' TEST-26-SYSTEMCTL.sh

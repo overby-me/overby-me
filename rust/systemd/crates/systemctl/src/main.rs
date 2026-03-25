@@ -255,6 +255,9 @@ fn main() {
             if arg == "--dry-run" {
                 dry_run = true;
             }
+            if arg == "--failed" {
+                state_filter = Some("failed".to_string());
+            }
             i += 1;
             continue;
         }
@@ -504,6 +507,11 @@ fn main() {
         | "revert" | "clean" => &positional[0],
         // log-level, log-target, service-watchdogs — get or set manager properties
         "log-level" | "log-target" | "service-watchdogs" => &positional[0],
+        // is-failed with no unit = is-system-running (system state check)
+        "is-failed" if positional.len() < 2 => {
+            positional[0] = "is-system-running".to_string();
+            &positional[0]
+        }
         _ => &positional[0],
     };
 
