@@ -1,4 +1,4 @@
-use log::{error, info, trace};
+use log::{error, info, trace, warn};
 
 use crate::lock_ext::RwLockExt;
 use crate::runtime_info::{ArcMutRuntimeInfo, RuntimeInfo};
@@ -209,6 +209,17 @@ pub fn service_exit_handler(
         );
     }
 
+    // Record the main process exit status and PID for ExecMainStatus/ExecMainPID properties.
+    if let Specific::Service(srvc) = &unit.specific {
+        let mut state = srvc.state.write_poisoned();
+        let exit_code = match &code {
+            ChildTermination::Exit(c) => *c,
+            ChildTermination::Signal(s) => *s as i32,
+        };
+        state.srvc.main_exit_status = Some(exit_code);
+        state.srvc.main_exit_pid = Some(pid);
+    }
+
     let success_exit_status = get_success_exit_status(unit);
 
     // kill oneshot service processes. There should be none but just in case...
@@ -369,6 +380,31 @@ pub fn service_exit_handler(
                     return Ok(());
                 }
             }
+        }
+        // Check start rate limit before automatic restart.
+        if let Some(unit) = run_info.unit_table.get(&srvc_id)
+            && !crate::units::check_start_rate_limit(unit)
+        {
+            warn!("Unit {name} hit start rate limit, refusing automatic restart");
+            let reason = crate::units::UnitOperationErrorReason::GenericStartError(
+                "Start request repeated too quickly".into(),
+            );
+            {
+                let mut status = unit.common.status.write_poisoned();
+                *status = crate::units::UnitStatus::Stopped(
+                    crate::units::StatusStopped::StoppedUnexpected,
+                    vec![reason],
+                );
+            }
+            let start_limit_action = &unit.common.unit.start_limit_action;
+            if *start_limit_action != crate::units::UnitAction::None {
+                info!(
+                    "Unit {name} hit start limit, triggering StartLimitAction={:?}",
+                    start_limit_action
+                );
+                crate::units::execute_unit_action(start_limit_action, name);
+            }
+            return Ok(());
         }
         trace!("Restart service {name} after it died");
         crate::units::reactivate_unit(srvc_id, run_info).map_err(|e| format!("{e}"))?;

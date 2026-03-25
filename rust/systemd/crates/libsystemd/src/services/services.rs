@@ -145,6 +145,12 @@ pub struct Service {
     /// `Restart=on-watchdog` triggers a restart.  Cleared on service
     /// (re)start.
     pub watchdog_timeout_fired: bool,
+    /// The exit status of the main service process (exit code or signal number).
+    /// Set by the exit handler when the main process exits.
+    pub main_exit_status: Option<i32>,
+    /// The PID of the main service process at the time it was started.
+    /// Unlike `pid` (which is cleared on stop), this persists for `ExecMainPID`.
+    pub main_exit_pid: Option<nix::unistd::Pid>,
 }
 
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
@@ -281,6 +287,7 @@ impl Service {
         self.watchdog_timeout_fired = false;
         self.watchdog_last_ping = None;
         self.watchdog_usec_override = None;
+        self.main_exit_status = None;
 
         super::prepare_service::prepare_service(
             self,
@@ -316,32 +323,50 @@ impl Service {
 
         if conf.exec.is_some() {
             // Service has an ExecStart command — fork and wait for it.
+            let has_minus_prefix = conf
+                .exec
+                .as_ref()
+                .map(|e| e.prefixes.contains(&CommandlinePrefix::Minus))
+                .unwrap_or(false);
             {
                 let mut pid_table_locked = run_info.pid_table.lock_poisoned();
                 // This mainly just forks the process. The waiting (if necessary) is done below
                 // Doing it under the lock of the pid_table prevents races between processes exiting very
                 // fast and inserting the new pid into the pid table
-                start_service(
+                match start_service(
                     &run_info.config.self_path,
                     self,
                     conf,
                     name,
                     &run_info.fd_store.read_poisoned(),
-                )
-                .map_err(ServiceErrorReason::StartFailed)?;
-                if let Some(new_pid) = self.pid {
-                    pid_table_locked.insert(new_pid, PidEntry::Service(id.clone(), conf.srcv_type));
+                ) {
+                    Ok(()) => {
+                        if let Some(new_pid) = self.pid {
+                            pid_table_locked
+                                .insert(new_pid, PidEntry::Service(id.clone(), conf.srcv_type));
+                        }
+                    }
+                    Err(e) if has_minus_prefix => {
+                        // ExecStart=- prefix: ignore spawn errors (e.g. binary not found).
+                        // Record the error exit status for ExecMainStatus property.
+                        trace!("Ignore spawn error for ExecStart with '-' prefix for {name}: {e}");
+                        self.main_exit_status = Some(203); // EXIT_EXEC (exec format error)
+                    }
+                    Err(e) => return Err(ServiceErrorReason::StartFailed(e)),
                 }
             }
 
-            super::fork_parent::wait_for_service(self, conf, name, run_info).map_err(
-                |start_err| match self.run_poststop(conf, id.clone(), name, run_info) {
-                    Ok(()) => ServiceErrorReason::StartFailed(start_err),
-                    Err(poststop_err) => {
-                        ServiceErrorReason::StartAndPoststopFailed(start_err, poststop_err)
-                    }
-                },
-            )?;
+            // Only wait for the service if it was actually spawned (has a PID).
+            if self.pid.is_some() {
+                super::fork_parent::wait_for_service(self, conf, name, run_info).map_err(
+                    |start_err| match self.run_poststop(conf, id.clone(), name, run_info) {
+                        Ok(()) => ServiceErrorReason::StartFailed(start_err),
+                        Err(poststop_err) => {
+                            ServiceErrorReason::StartAndPoststopFailed(start_err, poststop_err)
+                        }
+                    },
+                )?;
+            }
         } else {
             // Exec-less oneshot service (e.g. systemd-reboot.service).
             // No main process to fork — the service succeeds immediately.

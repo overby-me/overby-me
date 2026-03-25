@@ -2386,6 +2386,8 @@ fn create_transient_unit(
                     stdout_buffer: Vec::new(),
                     stderr_buffer: Vec::new(),
                     watchdog_timeout_fired: false,
+                    main_exit_status: None,
+                    main_exit_pid: None,
                 },
             }),
         }),

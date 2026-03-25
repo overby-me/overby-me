@@ -238,7 +238,8 @@
       {
         name = "07-PID1";
         # Patch main script to remove mountpoint check and exit, keep run_subtests.
-        # Enable mask.sh, issue-16115.sh; remove subtests requiring unimplemented features.
+        # Enable mask.sh, issue-16115.sh, issue-3166.sh, issue-33672.sh, pr-31351.sh;
+        # remove subtests requiring unimplemented features.
         patchScript = ''
           sed -i '/mountpoint \/issue2730/d; /systemctl --no-block exit 123/d' TEST-07-PID1.sh
           rm -f TEST-07-PID1.attach_processes.sh \
@@ -253,10 +254,8 @@
                TEST-07-PID1.issue-2467.sh \
                TEST-07-PID1.issue-27953.sh \
                TEST-07-PID1.issue-30412.sh \
-               TEST-07-PID1.issue-3166.sh \
                TEST-07-PID1.issue-3171.sh \
                TEST-07-PID1.issue-31752.sh \
-               TEST-07-PID1.issue-33672.sh \
                TEST-07-PID1.issue-34104.sh \
                TEST-07-PID1.issue-35882.sh \
                TEST-07-PID1.issue-38320.sh \
@@ -265,7 +264,6 @@
                TEST-07-PID1.mqueue-ownership.sh \
                TEST-07-PID1.nft.sh \
                TEST-07-PID1.poll-limit.sh \
-               TEST-07-PID1.pr-31351.sh \
                TEST-07-PID1.prefix-shell.sh \
                TEST-07-PID1.private-bpf.sh \
                TEST-07-PID1.private-network.sh \

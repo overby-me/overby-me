@@ -194,6 +194,8 @@ pub fn unit_from_parsed_service(conf: ParsedServiceConfig) -> Result<Unit, Strin
                     stdout_buffer: Vec::new(),
                     stderr_buffer: Vec::new(),
                     watchdog_timeout_fired: false,
+                    main_exit_status: None,
+                    main_exit_pid: None,
                 },
             }),
         }),

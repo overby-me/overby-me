@@ -577,6 +577,8 @@ pub struct DeviceConfig {
 pub struct CommonState {
     pub up_since: Option<std::time::Instant>,
     pub restart_count: u64,
+    /// Timestamps of recent start attempts for StartLimitBurst/StartLimitIntervalSec enforcement.
+    pub start_timestamps: Vec<std::time::Instant>,
 }
 
 pub struct ServiceState {

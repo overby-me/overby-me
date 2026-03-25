@@ -88,6 +88,26 @@ pub fn collect_properties(unit: &Unit) -> BTreeMap<String, String> {
                 insert(&mut props, "MainPID", "0");
             }
 
+            // ExecMainPID — the PID of the main process (persists after exit)
+            if let Some(exit_pid) = state.srvc.main_exit_pid {
+                insert(&mut props, "ExecMainPID", &exit_pid.to_string());
+            } else if let Some(pid) = state.srvc.pid {
+                insert(&mut props, "ExecMainPID", &pid.to_string());
+            } else {
+                insert(&mut props, "ExecMainPID", "0");
+            }
+
+            // ExecMainStatus — the exit status of the main process
+            insert(
+                &mut props,
+                "ExecMainStatus",
+                &state
+                    .srvc
+                    .main_exit_status
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| "0".to_string()),
+            );
+
             insert(
                 &mut props,
                 "NRestarts",

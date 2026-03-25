@@ -3,11 +3,78 @@
 use crate::lock_ext::{MutexExt, RwLockExt};
 use crate::runtime_info::{ArcMutRuntimeInfo, RuntimeInfo, UnitTable};
 use crate::services::ServiceErrorReason;
-use crate::units::{Specific, StatusStarted, StatusStopped, UnitAction, UnitId, UnitStatus};
+use crate::units::{
+    CommonState, Specific, StatusStarted, StatusStopped, Timeout, Unit, UnitAction, UnitId,
+    UnitStatus,
+};
 
 use log::{debug, error, info, trace, warn};
 use std::sync::{Arc, Mutex};
 use threadpool::ThreadPool;
+
+/// Check and enforce the start rate limit (StartLimitBurst=/StartLimitIntervalSec=).
+/// Returns `true` if the unit is allowed to start, `false` if rate-limited.
+/// Also records the current timestamp as a start attempt.
+pub(crate) fn check_start_rate_limit(unit: &Unit) -> bool {
+    let burst = unit.common.unit.start_limit_burst.unwrap_or(5);
+    let interval = match &unit.common.unit.start_limit_interval_sec {
+        Some(Timeout::Duration(d)) => *d,
+        Some(Timeout::Infinity) | None => std::time::Duration::from_secs(10),
+    };
+
+    // If burst is 0 or interval is zero, rate limiting is disabled.
+    if burst == 0 || interval.is_zero() {
+        return true;
+    }
+
+    // Helper to access and update CommonState behind the type-specific RwLock.
+    fn check_and_record(
+        common: &mut CommonState,
+        burst: u32,
+        interval: std::time::Duration,
+    ) -> bool {
+        let now = std::time::Instant::now();
+        // Remove timestamps outside the window.
+        common
+            .start_timestamps
+            .retain(|t| now.duration_since(*t) < interval);
+        if common.start_timestamps.len() >= burst as usize {
+            return false;
+        }
+        common.start_timestamps.push(now);
+        true
+    }
+
+    match &unit.specific {
+        Specific::Service(s) => {
+            check_and_record(&mut s.state.write_poisoned().common, burst, interval)
+        }
+        Specific::Socket(s) => {
+            check_and_record(&mut s.state.write_poisoned().common, burst, interval)
+        }
+        Specific::Target(s) => {
+            check_and_record(&mut s.state.write_poisoned().common, burst, interval)
+        }
+        Specific::Slice(s) => {
+            check_and_record(&mut s.state.write_poisoned().common, burst, interval)
+        }
+        Specific::Mount(s) => {
+            check_and_record(&mut s.state.write_poisoned().common, burst, interval)
+        }
+        Specific::Swap(s) => {
+            check_and_record(&mut s.state.write_poisoned().common, burst, interval)
+        }
+        Specific::Timer(s) => {
+            check_and_record(&mut s.state.write_poisoned().common, burst, interval)
+        }
+        Specific::Path(s) => {
+            check_and_record(&mut s.state.write_poisoned().common, burst, interval)
+        }
+        Specific::Device(s) => {
+            check_and_record(&mut s.state.write_poisoned().common, burst, interval)
+        }
+    }
+}
 
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
 pub struct UnitOperationError {
