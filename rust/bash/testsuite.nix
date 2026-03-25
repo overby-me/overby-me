@@ -22,6 +22,7 @@ pkgs.runCommand "rust-bash-test-${name}" {
   gcc -o recho "$BASH_SRC/support/recho.c"
   gcc -o zecho "$BASH_SRC/support/zecho.c"
   gcc -o printenv "$BASH_SRC/support/printenv.c"
+  gcc -o xcase "$BASH_SRC/support/xcase.c"
 
   cd "$BASH_SRC/tests"
 

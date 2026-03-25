@@ -4242,16 +4242,11 @@ impl Shell {
                     Ok(WaitStatus::Exited(_, _)) | Ok(WaitStatus::Signaled(_, _, _))
                 );
                 if exited {
-                    // Process has exited — close fds and clean up
-                    if let Some(arr) = self.arrays.get(&name) {
-                        for fd_str in arr {
-                            if let Ok(fd) = fd_str.parse::<i32>() {
-                                unsafe {
-                                    libc::close(fd);
-                                }
-                            }
-                        }
-                    }
+                    // Process has exited — clean up array and PID.
+                    // Don't close fds here — they may have been moved by exec
+                    // to other fd numbers (e.g. exec 4<&${COPROC[0]}-).
+                    // The fds will be closed when the shell exits or when
+                    // explicitly closed by the script.
                     self.arrays.remove(&name);
                     self.vars.remove(&pid_key);
                 }
