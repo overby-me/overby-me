@@ -4138,13 +4138,20 @@ pub fn execute_command(
                 // Real systemd returns a stub property set with LoadState=not-found
                 // instead of an error for unknown units.
                 let mut props = std::collections::BTreeMap::new();
-                props.insert("Id".to_string(), unit_name.clone());
+                // Ensure the queried name has a unit suffix
+                let full_name = if unit_name.contains('.') {
+                    unit_name.clone()
+                } else {
+                    format!("{unit_name}.service")
+                };
+                props.insert("Id".to_string(), full_name.clone());
+                props.insert("Names".to_string(), full_name.clone());
                 props.insert("LoadState".to_string(), "not-found".to_string());
                 props.insert("ActiveState".to_string(), "inactive".to_string());
                 props.insert("SubState".to_string(), "dead".to_string());
                 props.insert("UnitFileState".to_string(), String::new());
                 props.insert("FragmentPath".to_string(), String::new());
-                props.insert("Description".to_string(), unit_name.clone());
+                props.insert("Description".to_string(), full_name);
                 let text = unit_properties::format_properties(&props, filter.as_deref());
                 return Ok(serde_json::json!({ "show": text }));
             }

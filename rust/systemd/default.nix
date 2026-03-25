@@ -462,7 +462,9 @@
                TEST-74-AUX-UTILS.sbsign.sh \
                TEST-74-AUX-UTILS.keyutil.sh \
                TEST-74-AUX-UTILS.sysusers.sh \
-               TEST-74-AUX-UTILS.id128.sh
+               TEST-74-AUX-UTILS.id128.sh \
+               TEST-74-AUX-UTILS.defer_reactivation.sh \
+               TEST-74-AUX-UTILS.socket.sh
         '';
       }
     ];
