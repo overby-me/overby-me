@@ -3934,6 +3934,8 @@ fn builtin_command(shell: &mut Shell, args: &[String]) -> i32 {
                 );
                 if is_keyword {
                     println!("{} is a shell keyword", name);
+                } else if let Some(value) = shell.aliases.get(name.as_str()) {
+                    println!("{} is aliased to `{}'", name, value);
                 } else if let Some(func_body) = shell.functions.get(name.as_str()) {
                     println!("{} is a function", name);
                     let body = format_compound_command_indent(func_body, 0);
