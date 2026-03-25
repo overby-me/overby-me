@@ -2733,7 +2733,7 @@ fn builtin_false(_shell: &mut Shell, _args: &[String]) -> i32 {
 }
 
 fn builtin_test(shell: &mut Shell, args: &[String]) -> i32 {
-    eval_test_expr(args, shell, "test")
+    eval_test_expr(args, shell, "test", false)
 }
 
 fn builtin_test_bracket(shell: &mut Shell, args: &[String]) -> i32 {
@@ -2744,10 +2744,23 @@ fn builtin_test_bracket(shell: &mut Shell, args: &[String]) -> i32 {
         eprintln!("{}: [: missing `]'", shell.error_prefix());
         return 2;
     };
-    eval_test_expr(args, shell, "[")
+    eval_test_expr(args, shell, "[", false)
 }
 
-fn eval_test_expr(args: &[String], shell: &Shell, cmd_name: &str) -> i32 {
+/// Helper: format test error for [ command, appending ", found ]" when appropriate
+fn test_paren_error(shell: &Shell, cmd_name: &str) {
+    if cmd_name == "[" {
+        eprintln!(
+            "{}: {}: `)' expected, found ]",
+            shell.error_prefix(),
+            cmd_name
+        );
+    } else {
+        eprintln!("{}: {}: `)' expected", shell.error_prefix(), cmd_name);
+    }
+}
+
+fn eval_test_expr(args: &[String], shell: &Shell, cmd_name: &str, sub_expr: bool) -> i32 {
     if args.is_empty() {
         return 1; // Empty test is false
     }
@@ -2760,7 +2773,7 @@ fn eval_test_expr(args: &[String], shell: &Shell, cmd_name: &str) -> i32 {
     if args.len() == 2 {
         match args[0].as_str() {
             "!" => {
-                return if eval_test_expr(&args[1..], shell, cmd_name) == 0 {
+                return if eval_test_expr(&args[1..], shell, cmd_name, true) == 0 {
                     1
                 } else {
                     0
@@ -3056,19 +3069,28 @@ fn eval_test_expr(args: &[String], shell: &Shell, cmd_name: &str) -> i32 {
                 return 2;
             }
             _ => {
-                // Two non-operator args: second arg is not a binary operator
-                eprintln!(
-                    "{}: {}: {}: binary operator expected",
-                    shell.error_prefix(),
-                    cmd_name,
-                    args[1]
-                );
+                if args[0] == "(" && sub_expr {
+                    // ( ) as sub-expression — paren error
+                    test_paren_error(shell, cmd_name);
+                } else {
+                    // Two args, first is not a known unary operator
+                    eprintln!(
+                        "{}: {}: {}: unary operator expected",
+                        shell.error_prefix(),
+                        cmd_name,
+                        args[0]
+                    );
+                }
                 return 2;
             }
         }
     }
 
     if args.len() == 3 {
+        // Handle ( expr ) grouping
+        if args[0] == "(" && args[2] == ")" {
+            return eval_test_expr(&args[1..2], shell, cmd_name, true);
+        }
         match args[1].as_str() {
             "=" | "==" => return if args[0] == args[2] { 0 } else { 1 },
             "!=" => return if args[0] != args[2] { 0 } else { 1 },
@@ -3188,7 +3210,26 @@ fn eval_test_expr(args: &[String], shell: &Shell, cmd_name: &str) -> i32 {
                     _ => 1,
                 };
             }
-            _ => {}
+            // -a and -o as binary (AND/OR) — fall through to general handler
+            "-a" | "-o" => {}
+            _ => {
+                // 3 args: middle arg is not a valid binary operator
+                if args[0] == "!" {
+                    // ! expr — fall through to general handler
+                } else if args[0] == "(" {
+                    // ( X — missing )
+                    test_paren_error(shell, cmd_name);
+                    return 2;
+                } else {
+                    eprintln!(
+                        "{}: {}: {}: binary operator expected",
+                        shell.error_prefix(),
+                        cmd_name,
+                        args[1]
+                    );
+                    return 2;
+                }
+            }
         }
     }
 
@@ -3211,42 +3252,219 @@ fn eval_test_expr(args: &[String], shell: &Shell, cmd_name: &str) -> i32 {
         if let Some(close_idx) = close {
             if close_idx == args.len() - 1 {
                 // All args are inside parens
-                return eval_test_expr(&args[1..close_idx], shell, cmd_name);
+                return eval_test_expr(&args[1..close_idx], shell, cmd_name, true);
             }
             // Parens with stuff after — continue processing
         } else {
             // Missing closing )
-            eprintln!("{}: {}: `)' expected", shell.error_prefix(), cmd_name);
+            test_paren_error(shell, cmd_name);
             return 2;
         }
     }
 
-    // Handle -a (and) and -o (or)
-    for (i, arg) in args.iter().enumerate() {
-        if arg == "-a" && i > 0 && i < args.len() - 1 {
-            let left = eval_test_expr(&args[..i], shell, cmd_name);
-            let right = eval_test_expr(&args[i + 1..], shell, cmd_name);
-            return if left == 0 && right == 0 { 0 } else { 1 };
+    // For many-arg expressions, detect structural errors before splitting on -a/-o
+    if !sub_expr && args.len() >= 4 {
+        // Flatten args outside parens and check for structural issues
+        let mut depth = 0;
+        // Check for trailing -a/-o with no right operand (at top paren level)
+        for (i, arg) in args.iter().enumerate() {
+            if arg == "(" {
+                depth += 1;
+            } else if arg == ")" {
+                depth -= 1;
+            } else if depth == 0 {
+                // trailing -a/-o
+                if (arg == "-a" || arg == "-o") && i == args.len() - 1 {
+                    eprintln!("{}: {}: argument expected", shell.error_prefix(), cmd_name);
+                    return 2;
+                }
+                // Check for value followed by binary op at end (e.g. `4 -ne` with nothing after)
+                if i + 2 == args.len()
+                    && !arg.starts_with('-')
+                    && arg != "("
+                    && arg != ")"
+                    && is_test_binop(&args[i + 1])
+                {
+                    eprintln!(
+                        "{}: {}: syntax error: `{}' unexpected",
+                        shell.error_prefix(),
+                        cmd_name,
+                        args[i + 1]
+                    );
+                    return 2;
+                }
+                // Check for unary op at end with no argument after a complete expression
+                if i + 1 == args.len()
+                    && is_test_unop(arg)
+                    && i >= 2
+                    && !is_test_binop(&args[i - 1])
+                    && args[i - 1] != "-a"
+                    && args[i - 1] != "-o"
+                {
+                    eprintln!(
+                        "{}: {}: syntax error: `{}' unexpected",
+                        shell.error_prefix(),
+                        cmd_name,
+                        arg
+                    );
+                    return 2;
+                }
+                // Adjacent non-operators after -a/-o (e.g. `-a 3 4`)
+                if i >= 1
+                    && (args[i - 1] == "-a" || args[i - 1] == "-o")
+                    && !arg.starts_with('-')
+                    && arg != "("
+                    && arg != ")"
+                    && i + 1 < args.len()
+                    && !is_test_binop(&args[i + 1])
+                    && args[i + 1] != "-a"
+                    && args[i + 1] != "-o"
+                    && args[i + 1] != ")"
+                    && !args[i + 1].starts_with('-')
+                {
+                    eprintln!("{}: {}: too many arguments", shell.error_prefix(), cmd_name);
+                    return 2;
+                }
+            }
         }
     }
-    for (i, arg) in args.iter().enumerate() {
-        if arg == "-o" && i > 0 && i < args.len() - 1 {
-            let left = eval_test_expr(&args[..i], shell, cmd_name);
-            let right = eval_test_expr(&args[i + 1..], shell, cmd_name);
-            return if left == 0 || right == 0 { 0 } else { 1 };
+
+    // Handle -a (and) and -o (or), skipping inside parentheses
+    {
+        let mut depth = 0;
+        for (i, arg) in args.iter().enumerate() {
+            if arg == "(" {
+                depth += 1;
+            } else if arg == ")" {
+                depth -= 1;
+            } else if arg == "-a" && depth == 0 && i > 0 && i < args.len() - 1 {
+                let left = eval_test_expr(&args[..i], shell, cmd_name, true);
+                if left == 2 {
+                    return 2;
+                }
+                let right = eval_test_expr(&args[i + 1..], shell, cmd_name, true);
+                if right == 2 {
+                    return 2;
+                }
+                return if left == 0 && right == 0 { 0 } else { 1 };
+            }
+        }
+    }
+    {
+        let mut depth = 0;
+        for (i, arg) in args.iter().enumerate() {
+            if arg == "(" {
+                depth += 1;
+            } else if arg == ")" {
+                depth -= 1;
+            } else if arg == "-o" && depth == 0 && i > 0 && i < args.len() - 1 {
+                let left = eval_test_expr(&args[..i], shell, cmd_name, true);
+                if left == 2 {
+                    return 2;
+                }
+                let right = eval_test_expr(&args[i + 1..], shell, cmd_name, true);
+                if right == 2 {
+                    return 2;
+                }
+                return if left == 0 || right == 0 { 0 } else { 1 };
+            }
         }
     }
 
     // Handle ! prefix with 3+ args
     if args[0] == "!" {
-        return if eval_test_expr(&args[1..], shell, cmd_name) == 0 {
+        return if eval_test_expr(&args[1..], shell, cmd_name, true) == 0 {
             1
         } else {
             0
         };
     }
 
+    // For 4+ args that didn't match any pattern: report appropriate error
+    if args.len() >= 4 {
+        // Check for trailing -a/-o with no right operand
+        if args.last().is_some_and(|last| last == "-a" || last == "-o") {
+            eprintln!("{}: {}: argument expected", shell.error_prefix(), cmd_name);
+            return 2;
+        }
+        // Check for repeated operators or misplaced tokens
+        for i in 0..args.len() {
+            let a = &args[i];
+            if is_test_binop(a) && i + 1 < args.len() && is_test_binop(&args[i + 1]) {
+                eprintln!(
+                    "{}: {}: syntax error: `{}' unexpected",
+                    shell.error_prefix(),
+                    cmd_name,
+                    args[i + 1]
+                );
+                return 2;
+            }
+            if is_test_unop(a) && i + 1 < args.len() && is_test_binop(&args[i + 1]) {
+                eprintln!(
+                    "{}: {}: syntax error: `{}' unexpected",
+                    shell.error_prefix(),
+                    cmd_name,
+                    args[i + 1]
+                );
+                return 2;
+            }
+        }
+        eprintln!("{}: {}: too many arguments", shell.error_prefix(), cmd_name);
+        return 2;
+    }
+
     1 // Default: false
+}
+
+fn is_test_binop(s: &str) -> bool {
+    matches!(
+        s,
+        "-eq"
+            | "-ne"
+            | "-lt"
+            | "-le"
+            | "-gt"
+            | "-ge"
+            | "-nt"
+            | "-ot"
+            | "-ef"
+            | "="
+            | "=="
+            | "!="
+            | "<"
+            | ">"
+    )
+}
+
+fn is_test_unop(s: &str) -> bool {
+    matches!(
+        s,
+        "-a" | "-b"
+            | "-c"
+            | "-d"
+            | "-e"
+            | "-f"
+            | "-g"
+            | "-h"
+            | "-k"
+            | "-n"
+            | "-p"
+            | "-r"
+            | "-s"
+            | "-t"
+            | "-u"
+            | "-w"
+            | "-x"
+            | "-z"
+            | "-G"
+            | "-L"
+            | "-N"
+            | "-O"
+            | "-R"
+            | "-S"
+            | "-v"
+            | "-o"
+    )
 }
 
 fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {

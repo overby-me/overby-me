@@ -3336,8 +3336,12 @@ impl Shell {
 
         // Array element: arr[idx]
         if let Some(bracket) = expr.find('[') {
+            let close = expr.rfind(']').unwrap_or(expr.len());
+            if close <= bracket + 1 {
+                return 0;
+            }
             let name = &expr[..bracket];
-            let idx_str = &expr[bracket + 1..expr.len() - 1];
+            let idx_str = &expr[bracket + 1..close];
             let resolved = self.resolve_nameref(name);
             let idx = self.eval_arith_expr_impl(idx_str) as usize;
             if let Some(arr) = self.arrays.get(&resolved) {
