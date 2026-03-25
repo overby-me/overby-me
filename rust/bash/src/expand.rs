@@ -984,7 +984,9 @@ fn apply_param_op(val: &str, op: &ParamOp, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> S
         | ParamOp::ReplacePrefix(pattern, replacement)
         | ParamOp::ReplaceSuffix(pattern, replacement) => {
             let pat = expand_word_nosplit_ctx(pattern, ctx, cmd_sub);
-            let rep = expand_word_nosplit_ctx(replacement, ctx, cmd_sub);
+            let raw_rep = expand_word_nosplit_ctx(replacement, ctx, cmd_sub);
+            // In replacement strings, \' produces literal '
+            let rep = raw_rep.replace("\\'", "'");
             match op {
                 ParamOp::ReplaceAll(..) => pattern_replace(val, &pat, &rep, true),
                 ParamOp::ReplacePrefix(..) => {
@@ -1278,7 +1280,8 @@ fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
         | ParamOp::ReplacePrefix(pattern, replacement)
         | ParamOp::ReplaceSuffix(pattern, replacement) => {
             let pat = expand_word_nosplit_ctx(pattern, ctx, cmd_sub);
-            let rep = expand_word_nosplit_ctx(replacement, ctx, cmd_sub);
+            let raw_rep = expand_word_nosplit_ctx(replacement, ctx, cmd_sub);
+            let rep = raw_rep.replace("\\'", "'");
             match &expr.op {
                 ParamOp::ReplaceAll(..) => pattern_replace(&val, &pat, &rep, true),
                 ParamOp::ReplacePrefix(..) => {
