@@ -1306,6 +1306,22 @@ fn unit_file_state(
     path: &std::path::Path,
     unit_dirs: &[std::path::PathBuf],
 ) -> &'static str {
+    // Check if masked: the file is a symlink pointing to /dev/null
+    // Check runtime mask first (/run/systemd/system/)
+    let runtime_path = std::path::Path::new("/run/systemd/system").join(name);
+    if let Ok(target) = std::fs::read_link(&runtime_path) {
+        if target == std::path::Path::new("/dev/null") {
+            return "masked-runtime";
+        }
+    }
+    // Check persistent mask (/etc/systemd/system/)
+    let persistent_path = std::path::Path::new("/etc/systemd/system").join(name);
+    if let Ok(target) = std::fs::read_link(&persistent_path) {
+        if target == std::path::Path::new("/dev/null") {
+            return "masked";
+        }
+    }
+
     // Check if the unit has an [Install] section by looking for WantedBy=/RequiredBy=
     // in the loaded unit table, or by reading the file itself.
     let has_install = if let Some(unit) = unit_table.values().find(|u| u.id.name == name) {
@@ -4437,10 +4453,16 @@ pub fn execute_command(
                 .push(Value::Object(response_object));
         }
         Command::Mask(names) => {
-            // Create symlinks to /dev/null in /run/systemd/system/ (runtime mask)
-            // or /etc/systemd/system/ (persistent mask).
-            // We use /etc/systemd/system/ to match systemd's default behavior.
-            let mask_dir = std::path::Path::new("/etc/systemd/system");
+            // Check for --runtime flag in names
+            let is_runtime = names.iter().any(|n| n == "--runtime");
+            let names: Vec<String> = names.into_iter().filter(|n| n != "--runtime").collect();
+            let mask_dir = if is_runtime {
+                std::path::Path::new("/run/systemd/system")
+            } else {
+                std::path::Path::new("/etc/systemd/system")
+            };
+            std::fs::create_dir_all(mask_dir)
+                .map_err(|e| format!("Failed to create {}: {e}", mask_dir.display()))?;
             let mut masked = Vec::new();
             for name in &names {
                 let link_path = mask_dir.join(name);
@@ -4462,7 +4484,14 @@ pub fn execute_command(
             return Ok(serde_json::json!({ "masked": masked }));
         }
         Command::Unmask(names) => {
-            let mask_dir = std::path::Path::new("/etc/systemd/system");
+            // Check for --runtime flag in names
+            let is_runtime = names.iter().any(|n| n == "--runtime");
+            let names: Vec<String> = names.into_iter().filter(|n| n != "--runtime").collect();
+            let mask_dir = if is_runtime {
+                std::path::Path::new("/run/systemd/system")
+            } else {
+                std::path::Path::new("/etc/systemd/system")
+            };
             let mut unmasked = Vec::new();
             for name in &names {
                 let link_path = mask_dir.join(name);

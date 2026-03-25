@@ -1059,6 +1059,19 @@ fn main() {
             }
             Some(Value::Array(arr))
         }
+    } else if method == "mask" || method == "unmask" {
+        // mask/unmask <unit>... [--runtime]
+        if positional.len() < 2 {
+            if !quiet {
+                eprintln!("Error: {method} requires at least one unit name.");
+            }
+            std::process::exit(1);
+        }
+        let mut arr: Vec<Value> = positional[1..].iter().cloned().map(Value::String).collect();
+        if runtime {
+            arr.push(Value::String("--runtime".to_string()));
+        }
+        Some(Value::Array(arr))
     } else if marked && (method == "reload-or-restart" || method == "restart") {
         // --marked: operate on all units with needs-restart marker
         Some(Value::String("--marked".to_string()))
