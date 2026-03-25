@@ -4134,6 +4134,47 @@ impl Shell {
         }
     }
 
+    /// Expand a word for use as a regex pattern in [[ =~ ]].
+    /// Unlike expand_word_single, this preserves backslashes from
+    /// SingleQuoted parts (which come from \x in the source).
+    fn expand_regex_pattern(&mut self, word: &Word) -> String {
+        let mut result = String::new();
+        for part in word {
+            match part {
+                WordPart::Literal(s) => result.push_str(s),
+                WordPart::SingleQuoted(s) => {
+                    if s.len() == 1 {
+                        // Single char from backslash escaping — preserve: \. -> \.
+                        result.push('\\');
+                    }
+                    result.push_str(s);
+                }
+                WordPart::Variable(name) => {
+                    let val = self.vars.get(name.as_str()).cloned().unwrap_or_default();
+                    result.push_str(&val);
+                }
+                WordPart::DoubleQuoted(parts) => {
+                    for p in parts {
+                        match p {
+                            WordPart::Literal(s) => result.push_str(s),
+                            WordPart::Variable(name) => {
+                                let val = self.vars.get(name.as_str()).cloned().unwrap_or_default();
+                                result.push_str(&val);
+                            }
+                            _ => {
+                                result.push_str(&self.expand_word_single(&vec![p.clone()]));
+                            }
+                        }
+                    }
+                }
+                _ => {
+                    result.push_str(&self.expand_word_single(&vec![part.clone()]));
+                }
+            }
+        }
+        result
+    }
+
     fn run_conditional(&mut self, expr: &CondExpr) -> i32 {
         if self.opt_xtrace {
             let trace = self.format_cond_for_xtrace(expr);
@@ -4180,11 +4221,18 @@ impl Shell {
                 let lval = self.expand_word_single(left);
                 // For = and != operators, the right side is a pattern
                 if op == "=~" {
-                    // For =~, check if pattern is quoted (any SingleQuoted/DoubleQuoted part)
-                    let is_quoted = right.iter().any(|p| {
-                        matches!(p, WordPart::SingleQuoted(_) | WordPart::DoubleQuoted(_))
+                    // For =~, check if pattern has explicit quoting (not just backslash escapes).
+                    // SingleQuoted with len>1 comes from '...' quoting.
+                    // SingleQuoted with len==1 comes from \x backslash escaping.
+                    // DoubleQuoted always counts as quoting.
+                    let is_quoted = right.iter().any(|p| match p {
+                        WordPart::DoubleQuoted(_) => true,
+                        WordPart::SingleQuoted(s) => s.len() > 1,
+                        _ => false,
                     });
-                    let rval = self.expand_word_single(right);
+                    // For regex patterns, preserve backslashes from SingleQuoted parts
+                    // (which come from backslash-escaping in the source)
+                    let rval = self.expand_regex_pattern(right);
                     if is_quoted {
                         // Quoted: literal string match (not regex)
                         let matched = lval.contains(&rval);
