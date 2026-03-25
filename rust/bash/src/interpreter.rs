@@ -1890,6 +1890,14 @@ impl Shell {
         let mut expanded_words: Vec<String> = Vec::new();
         for (idx, word) in cmd.words.iter().enumerate() {
             let fields = self.expand_word_fields(word, &ifs);
+            // Check for expansion errors (incomplete comsub, etc.)
+            if crate::expand::take_expansion_error() {
+                eprintln!(
+                    "{}: command substitution: unexpected EOF while looking for matching `)'",
+                    self.error_prefix()
+                );
+                return 1;
+            }
             // Check if this word has unquoted tilde (for assignment tilde expansion)
             let has_unquoted_tilde = word.iter().any(|p| {
                 matches!(p, crate::ast::WordPart::Literal(s) if s.contains('~'))

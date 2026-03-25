@@ -1021,8 +1021,8 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                     *i += 1;
                 }
                 if depth > 0 {
-                    // Incomplete comsub — return empty, error will be handled elsewhere
-                    WordPart::Literal(String::new())
+                    // Incomplete comsub — signal error via special marker
+                    WordPart::CommandSub("\x00INCOMPLETE_COMSUB".to_string())
                 } else {
                     WordPart::CommandSub(cmd)
                 }
