@@ -600,41 +600,62 @@ fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                         };
                         let effective_width = if let Some(p) = precision { p.max(w) } else { w };
                         let use_zero_pad = zero_pad || precision.is_some();
-                        let formatted = if n < 0 {
-                            format!("{}", n)
-                        } else {
-                            format!("{}{}", sign_prefix, n)
-                        };
                         if effective_width > 0 {
                             if left {
+                                let formatted = if n < 0 {
+                                    format!("{}", n)
+                                } else {
+                                    format!("{}{}", sign_prefix, n)
+                                };
                                 print!("{:<effective_width$}", formatted);
                             } else if use_zero_pad {
-                                print!("{:0>effective_width$}", formatted);
+                                // For zero-padding, sign/prefix comes first, then zeros, then digits
+                                let prefix = if n < 0 { "-" } else { sign_prefix };
+                                let abs_n = n.unsigned_abs();
+                                let num_width = effective_width.saturating_sub(prefix.len());
+                                print!("{}{:0>num_width$}", prefix, abs_n);
                             } else {
+                                let formatted = if n < 0 {
+                                    format!("{}", n)
+                                } else {
+                                    format!("{}{}", sign_prefix, n)
+                                };
                                 print!("{:>effective_width$}", formatted);
                             }
                         } else {
+                            let formatted = if n < 0 {
+                                format!("{}", n)
+                            } else {
+                                format!("{}{}", sign_prefix, n)
+                            };
                             print!("{}", formatted);
                         }
                         arg_idx += 1;
                     }
-                    Some('x') => {
+                    Some(hex_ch @ ('x' | 'X')) => {
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
                         let n: i64 = parse_printf_int(arg);
-                        if flags.contains('#') {
-                            print!("{:#x}", n);
+                        let formatted = if hex_ch == 'x' {
+                            if flags.contains('#') {
+                                format!("{:#x}", n)
+                            } else {
+                                format!("{:x}", n)
+                            }
+                        } else if flags.contains('#') {
+                            format!("{:#X}", n)
                         } else {
-                            print!("{:x}", n);
-                        }
-                        arg_idx += 1;
-                    }
-                    Some('X') => {
-                        let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
-                        let n: i64 = parse_printf_int(arg);
-                        if flags.contains('#') {
-                            print!("{:#X}", n);
+                            format!("{:X}", n)
+                        };
+                        if w > 0 {
+                            if left {
+                                print!("{:<w$}", formatted);
+                            } else if zero_pad {
+                                print!("{:0>w$}", formatted);
+                            } else {
+                                print!("{:>w$}", formatted);
+                            }
                         } else {
-                            print!("{:X}", n);
+                            print!("{}", formatted);
                         }
                         arg_idx += 1;
                     }
@@ -662,7 +683,18 @@ fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                     Some('u') => {
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
                         let n: u64 = parse_printf_int(arg) as u64;
-                        print!("{}", n);
+                        let formatted = format!("{}", n);
+                        if w > 0 {
+                            if left {
+                                print!("{:<w$}", formatted);
+                            } else if zero_pad {
+                                print!("{:0>w$}", formatted);
+                            } else {
+                                print!("{:>w$}", formatted);
+                            }
+                        } else {
+                            print!("{}", formatted);
+                        }
                         arg_idx += 1;
                     }
                     Some(fmt_ch @ ('f' | 'F' | 'e' | 'E' | 'g' | 'G')) => {
