@@ -3382,6 +3382,22 @@ pub fn execute_command(
                         }
                     }
                 }
+                // Boot timestamps — use process start time as approximation
+                let boot_usec = {
+                    let uptime = std::fs::read_to_string("/proc/uptime")
+                        .ok()
+                        .and_then(|s| s.split_whitespace().next().map(String::from))
+                        .and_then(|s| s.parse::<f64>().ok())
+                        .unwrap_or(0.0);
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default();
+                    let boot = now.as_micros() as u64 - (uptime * 1_000_000.0) as u64;
+                    boot.to_string()
+                };
+                props.insert("KernelTimestamp".to_string(), boot_usec.clone());
+                props.insert("KernelTimestampMonotonic".to_string(), "0".to_string());
+
                 let text = if let Some(ref f) = filter {
                     let mut out = String::new();
                     for part in f {

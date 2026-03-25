@@ -321,9 +321,6 @@
           sed -i '/^# --dry-run/,/^# Aux verbs/{/^# Aux verbs/!d}' TEST-26-SYSTEMCTL.sh
           # Remove is-system-running (system has degraded state due to boot-time service failures)
           sed -i '/^assert_eq.*is-system-running/d' TEST-26-SYSTEMCTL.sh
-          # Remove --timestamp tests
-          sed -i '/^# --timestamp$/,/^# set-default/{/^# set-default/!d}' TEST-26-SYSTEMCTL.sh
-          sed -i '/^# --timestamp with timer/,/^# set-default/{/^# set-default/!d}' TEST-26-SYSTEMCTL.sh
           # Remove sysv-generator test
           sed -i '/^# test for sysv-generator/,/^fi$/d' TEST-26-SYSTEMCTL.sh
           # Remove WantedBy %J test
