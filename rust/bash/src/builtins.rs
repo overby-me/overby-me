@@ -145,6 +145,7 @@ pub fn builtins() -> HashMap<&'static str, BuiltinFn> {
     map.insert("fg", builtin_fg);
     map.insert("bg", builtin_bg);
     map.insert("suspend", builtin_suspend);
+    map.insert("logout", builtin_logout);
     map
 }
 
@@ -1318,7 +1319,25 @@ fn builtin_readonly(shell: &mut Shell, args: &[String]) -> i32 {
     0
 }
 
+fn builtin_logout(shell: &mut Shell, _args: &[String]) -> i32 {
+    if !shell.login_shell {
+        eprintln!(
+            "{}: logout: not login shell: use `exit'",
+            shell.error_prefix()
+        );
+        return 1;
+    }
+    std::process::exit(shell.last_status);
+}
+
 fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
+    if shell.local_scopes.is_empty() {
+        eprintln!(
+            "{}: local: can only be used in a function",
+            shell.error_prefix()
+        );
+        return 1;
+    }
     let mut flag_array = false;
     let mut _flag_readonly = false;
     let mut flag_nameref = false;
@@ -2847,12 +2866,42 @@ fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
 }
 
 fn builtin_shift(shell: &mut Shell, args: &[String]) -> i32 {
-    let n: usize = args.first().and_then(|s| s.parse().ok()).unwrap_or(1);
-
+    if args.len() > 1 {
+        eprintln!("{}: shift: too many arguments", shell.error_prefix());
+        return 1;
+    }
+    let n: i64 = if let Some(s) = args.first() {
+        match s.parse::<i64>() {
+            Ok(v) => v,
+            Err(_) => {
+                eprintln!(
+                    "{}: shift: {}: numeric argument required",
+                    shell.error_prefix(),
+                    s
+                );
+                return 1;
+            }
+        }
+    } else {
+        1
+    };
+    if n < 0 {
+        eprintln!(
+            "{}: shift: {}: shift count out of range",
+            shell.error_prefix(),
+            n
+        );
+        return 1;
+    }
+    let n = n as usize;
     if shell.positional.len() > 1 {
         let available = shell.positional.len() - 1;
         if n > available {
-            eprintln!("{}: shift: shift count out of range", shell.error_prefix());
+            eprintln!(
+                "{}: shift: {}: shift count out of range",
+                shell.error_prefix(),
+                n
+            );
             return 1;
         }
         shell.positional.drain(1..=n);
