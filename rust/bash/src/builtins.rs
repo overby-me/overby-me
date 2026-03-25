@@ -4456,34 +4456,167 @@ fn builtin_let(shell: &mut Shell, args: &[String]) -> i32 {
 }
 
 fn builtin_mapfile(shell: &mut Shell, args: &[String]) -> i32 {
-    let varname = args
-        .last()
-        .cloned()
-        .unwrap_or_else(|| "MAPFILE".to_string());
-    let mut lines = Vec::new();
+    let mut strip_trailing = false;
+    let mut count: Option<usize> = None;
+    let mut origin: usize = 0;
+    let mut skip: usize = 0;
+    let mut delim: u8 = b'\n';
+    let mut callback: Option<String> = None;
+    let mut quantum: usize = 5000;
+    let mut varname = "MAPFILE".to_string();
+    let mut fd: Option<i32> = None;
 
-    let stdin = std::io::stdin();
-    use std::io::BufRead;
-    for line in stdin.lock().lines() {
-        match line {
-            Ok(l) => lines.push(l),
-            Err(_) => break,
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-t" => strip_trailing = true,
+            "-n" => {
+                i += 1;
+                if i < args.len() {
+                    count = args[i].parse().ok();
+                }
+            }
+            "-O" => {
+                i += 1;
+                if i < args.len() {
+                    origin = args[i].parse().unwrap_or(0);
+                }
+            }
+            "-s" => {
+                i += 1;
+                if i < args.len() {
+                    skip = args[i].parse().unwrap_or(0);
+                }
+            }
+            "-d" => {
+                i += 1;
+                if i < args.len() {
+                    delim = if args[i].is_empty() {
+                        0 // NUL delimiter
+                    } else {
+                        args[i].as_bytes()[0]
+                    };
+                }
+            }
+            "-C" => {
+                i += 1;
+                if i < args.len() {
+                    callback = Some(args[i].clone());
+                }
+            }
+            "-c" => {
+                i += 1;
+                if i < args.len() {
+                    quantum = args[i].parse().unwrap_or(5000);
+                }
+            }
+            "-u" => {
+                i += 1;
+                if i < args.len() {
+                    fd = args[i].parse().ok();
+                }
+            }
+            a if a.starts_with('-') => {
+                eprintln!("{}: mapfile: {}: invalid option", shell.error_prefix(), a);
+                return 2;
+            }
+            _ => {
+                varname = args[i].clone();
+            }
+        }
+        i += 1;
+    }
+
+    // Read lines from stdin or specified fd
+    let mut lines = Vec::new();
+    use std::io::Read;
+
+    let mut input_data = Vec::new();
+    if let Some(fd_num) = fd {
+        #[cfg(unix)]
+        {
+            use std::os::unix::io::FromRawFd;
+            let mut file = unsafe { std::fs::File::from_raw_fd(fd_num) };
+            let _ = file.read_to_end(&mut input_data);
+            // Don't close — leak the fd so it remains valid
+            std::mem::forget(file);
+        }
+    } else {
+        let stdin = std::io::stdin();
+        let _ = stdin.lock().read_to_end(&mut input_data);
+    }
+
+    // Split by delimiter
+    let mut start = 0;
+    for pos in 0..input_data.len() {
+        if input_data[pos] == delim {
+            let line = String::from_utf8_lossy(&input_data[start..=pos]).to_string();
+            lines.push(line);
+            start = pos + 1;
+        }
+    }
+    // Remaining data (no trailing delimiter)
+    if start < input_data.len() {
+        let line = String::from_utf8_lossy(&input_data[start..]).to_string();
+        lines.push(line);
+    }
+
+    // Apply skip
+    if skip > 0 {
+        lines = lines.into_iter().skip(skip).collect();
+    }
+
+    // Apply count limit
+    if let Some(n) = count
+        && n > 0
+    {
+        lines.truncate(n);
+    }
+
+    // Strip trailing delimiter if -t
+    if strip_trailing {
+        let delim_char = delim as char;
+        for line in &mut lines {
+            if line.ends_with(delim_char) {
+                line.pop();
+            }
         }
     }
 
-    // Store as array
-    shell.arrays.insert(varname.clone(), lines.clone());
-
-    // Also store as indexed values for compatibility
-    for (i, line) in lines.iter().enumerate() {
-        shell
-            .vars
-            .insert(format!("{}[{}]", varname, i), line.clone());
+    // Execute callback if specified
+    if let Some(ref cb) = callback {
+        for (idx, line) in lines.iter().enumerate() {
+            if (idx + 1) % quantum == 0 || idx == lines.len() - 1 {
+                let cmd = format!("{} {} {}", cb, origin + idx, shell_quote(line));
+                shell.run_string(&cmd);
+            }
+        }
     }
-    shell
-        .vars
-        .insert(format!("{}[@]", varname), lines.join(" "));
+
+    // Store as array starting at origin
+    let arr = shell.arrays.entry(varname.clone()).or_default();
+    // Extend array to fit origin + lines
+    while arr.len() < origin {
+        arr.push(String::new());
+    }
+    for (idx, line) in lines.iter().enumerate() {
+        let pos = origin + idx;
+        if pos < arr.len() {
+            arr[pos] = line.clone();
+        } else {
+            arr.push(line.clone());
+        }
+    }
+
     0
+}
+
+fn shell_quote(s: &str) -> String {
+    if s.contains('\'') {
+        format!("$'{}'", s.replace('\\', "\\\\").replace('\'', "\\'"))
+    } else {
+        format!("'{}'", s)
+    }
 }
 
 fn builtin_alias(shell: &mut Shell, args: &[String]) -> i32 {
