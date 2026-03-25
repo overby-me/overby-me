@@ -1688,7 +1688,6 @@ fn read_param_word_impl(chars: &[char], i: &mut usize, delim: char, in_dquote: b
                 let next = chars[*i + 1];
                 if in_dquote && !matches!(next, '$' | '`' | '"' | '\\' | '\n' | '}' | '/') {
                     // Inside double quotes, preserve backslash for non-special chars
-                    // Strip for } (param end) and / (pattern delimiter)
                     literal.push('\\');
                     literal.push(next);
                 } else if !in_dquote {
