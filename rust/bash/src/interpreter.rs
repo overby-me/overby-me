@@ -3864,6 +3864,9 @@ impl Shell {
                                 .unwrap_or(0);
                             self.vars
                                 .insert("BASH_SUBSHELL".to_string(), (subshell + 1).to_string());
+                            // Clear inherited traps (subshells don't inherit EXIT trap)
+                            self.traps.remove("EXIT");
+                            self.traps.remove("0");
                             let status = self.run_program(program);
                             self.last_status = status;
                             // Run EXIT trap in subshell before exiting

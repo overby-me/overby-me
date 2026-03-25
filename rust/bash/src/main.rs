@@ -27,6 +27,12 @@ fn run() -> i32 {
     let args: Vec<String> = std::env::args().collect();
     let mut shell = Shell::new();
 
+    // Record the SIGPIPE ignore in the trap table so `trap -p` shows it
+    #[cfg(unix)]
+    {
+        shell.traps.insert("SIGPIPE".to_string(), String::new());
+    }
+
     let mut command_string: Option<String> = None;
     let mut script_file: Option<String> = None;
     let mut force_interactive = false;
