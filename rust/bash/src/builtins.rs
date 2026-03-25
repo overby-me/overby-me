@@ -942,9 +942,10 @@ fn shell_escape(s: &str) -> String {
             '\x1b' => result.push_str("\\E"),
             c if c.is_ascii_graphic() || c == ' ' => result.push(c),
             c => {
+                // Use octal format like bash for control/non-printable chars
                 let bytes = c.to_string();
                 for b in bytes.as_bytes() {
-                    result.push_str(&format!("\\x{:02x}", b));
+                    result.push_str(&format!("\\{:03o}", b));
                 }
             }
         }
