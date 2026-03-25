@@ -3472,6 +3472,26 @@ impl Shell {
             "FUNCNAME".to_string(),
             self.func_names.iter().rev().cloned().collect(),
         );
+        // Set BASH_SOURCE to current source file
+        let source_file = self
+            .vars
+            .get("_BASH_SOURCE_FILE")
+            .or_else(|| self.positional.first())
+            .cloned()
+            .unwrap_or_default();
+        let mut bash_source = vec![source_file; self.func_names.len()];
+        if bash_source.is_empty() {
+            bash_source.push(String::new());
+        }
+        self.arrays.insert("BASH_SOURCE".to_string(), bash_source);
+        // Set BASH_LINENO
+        let lineno = self
+            .vars
+            .get("LINENO")
+            .cloned()
+            .unwrap_or_else(|| "0".to_string());
+        let bash_lineno = vec![lineno; self.func_names.len().saturating_sub(1)];
+        self.arrays.insert("BASH_LINENO".to_string(), bash_lineno);
 
         // Save procsub fds so inner commands don't close them
         let saved_fds = crate::expand::take_procsub_fds();
