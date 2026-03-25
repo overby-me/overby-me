@@ -925,8 +925,8 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                 let mut case_depth = 0i32;
                 while *i < chars.len() && depth > 0 {
                     match chars[*i] {
-                        '\'' if !in_dquote => {
-                            // Single-quoted string — skip entirely (not in dquote context)
+                        '\'' => {
+                            // Single-quoted string — always skip in comsub (new quoting context)
                             cmd.push(chars[*i]);
                             *i += 1;
                             while *i < chars.len() && chars[*i] != '\'' {
