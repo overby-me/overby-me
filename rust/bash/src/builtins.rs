@@ -1063,6 +1063,20 @@ fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
                     shell.opt_pipefail,
                 ));
             }
+        } else if arg == "-p" {
+            // local -p: print all local variables in declare format
+            if let Some(scope) = shell.local_scopes.last() {
+                let mut sorted: Vec<_> = scope.keys().collect();
+                sorted.sort();
+                for name in sorted {
+                    if let Some(val) = shell.vars.get(name.as_str()) {
+                        println!("{}={}", name, val);
+                    } else {
+                        println!("{}", name);
+                    }
+                }
+            }
+            return 0;
         } else if arg.starts_with('-') && arg.len() > 1 {
             for ch in arg[1..].chars() {
                 match ch {
