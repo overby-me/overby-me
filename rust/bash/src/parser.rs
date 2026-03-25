@@ -289,7 +289,7 @@ impl Parser {
             match cmd {
                 Command::Simple(sc) => {
                     for redir in &mut sc.redirections {
-                        if matches!(redir.kind, RedirectKind::HereDoc(_))
+                        if matches!(redir.kind, RedirectKind::HereDoc(_, _))
                             && (redir.target.is_empty()
                                 || (redir.target.len() == 1
                                     && matches!(&redir.target[0], WordPart::Literal(s) if s.is_empty())))
@@ -301,7 +301,7 @@ impl Parser {
                 }
                 Command::Compound(_, redirections) => {
                     for redir in redirections {
-                        if matches!(redir.kind, RedirectKind::HereDoc(_))
+                        if matches!(redir.kind, RedirectKind::HereDoc(_, _))
                             && (redir.target.is_empty()
                                 || (redir.target.len() == 1
                                     && matches!(&redir.target[0], WordPart::Literal(s) if s.is_empty())))
@@ -1355,8 +1355,8 @@ impl Parser {
             Token::LessAnd => Some(RedirectKind::DupInput),
             Token::GreatAnd => Some(RedirectKind::DupOutput),
             Token::LessGreat => Some(RedirectKind::ReadWrite),
-            Token::DLess => Some(RedirectKind::HereDoc(false)),
-            Token::DLessDash => Some(RedirectKind::HereDoc(true)),
+            Token::DLess => Some(RedirectKind::HereDoc(false, String::new())),
+            Token::DLessDash => Some(RedirectKind::HereDoc(true, String::new())),
             Token::TripleLess => Some(RedirectKind::HereString),
             Token::AmpGreat => Some(RedirectKind::OutputAll),
             Token::AmpDGreat => Some(RedirectKind::AppendAll),
@@ -1371,7 +1371,13 @@ impl Parser {
         if let Some(kind) = kind {
             self.advance();
             match &kind {
-                RedirectKind::HereDoc(_) => {
+                RedirectKind::HereDoc(_, _) => {
+                    // Get the delimiter for this heredoc
+                    let delim = self.lexer.take_heredoc_delimiter().unwrap_or_default();
+                    let kind = match kind {
+                        RedirectKind::HereDoc(strip, _) => RedirectKind::HereDoc(strip, delim),
+                        _ => kind,
+                    };
                     // Heredoc body is read when the next newline is tokenized.
                     // Use empty placeholder if not available yet (pipeline case).
                     let target = self

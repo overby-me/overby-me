@@ -62,6 +62,7 @@ pub struct Lexer {
     pub line: usize,
     pending_heredocs: Vec<HereDocPending>,
     heredoc_bodies: Vec<Word>,
+    pub heredoc_delimiters: Vec<String>,
     heredoc_index: usize,
     pub heredoc_overflow_line: Option<usize>,
     pub heredoc_eof_warnings: Vec<(usize, usize, String)>, // (eof_line, start_line, delimiter)
@@ -89,6 +90,7 @@ impl Lexer {
             line: 1,
             pending_heredocs: Vec::new(),
             heredoc_bodies: Vec::new(),
+            heredoc_delimiters: Vec::new(),
             heredoc_index: 0,
             heredoc_overflow_line: None,
             heredoc_eof_warnings: Vec::new(),
@@ -688,6 +690,7 @@ impl Lexer {
             self.heredoc_overflow_line = Some(self.line);
             return;
         }
+        self.heredoc_delimiters.push(delimiter.clone());
         self.pending_heredocs.push(HereDocPending {
             delimiter,
             strip_tabs,
@@ -2613,6 +2616,14 @@ impl Lexer {
             let body = self.heredoc_bodies[self.heredoc_index].clone();
             self.heredoc_index += 1;
             Some(body)
+        } else {
+            None
+        }
+    }
+
+    pub fn take_heredoc_delimiter(&mut self) -> Option<String> {
+        if !self.heredoc_delimiters.is_empty() {
+            Some(self.heredoc_delimiters.remove(0))
         } else {
             None
         }

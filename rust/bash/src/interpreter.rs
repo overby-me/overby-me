@@ -4450,7 +4450,7 @@ impl Shell {
                         nix::unistd::dup2(src_fd, fd).map_err(|e| e.to_string())?;
                     }
                 }
-                RedirectKind::HereDoc(_) | RedirectKind::HereString => {
+                RedirectKind::HereDoc(_, _) | RedirectKind::HereString => {
                     let fd = self.resolve_redir_fd(&redir.fd, 0);
                     if let Ok(saved_fd) = nix::unistd::dup(fd) {
                         saved.push((fd, saved_fd));

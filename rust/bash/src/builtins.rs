@@ -1307,7 +1307,7 @@ fn format_redirection(redir: &Redirection) -> String {
                     RedirectKind::Input
                     | RedirectKind::ReadWrite
                     | RedirectKind::DupInput
-                    | RedirectKind::HereDoc(_)
+                    | RedirectKind::HereDoc(_, _)
                     | RedirectKind::HereString
                     | RedirectKind::ProcessSubIn => {
                         if *n != 0 {
@@ -1336,11 +1336,19 @@ fn format_redirection(redir: &Redirection) -> String {
         RedirectKind::DupInput => s.push_str("<&"),
         RedirectKind::DupOutput => s.push_str(">&"),
         RedirectKind::ReadWrite => s.push_str("<> "),
-        RedirectKind::HereDoc(strip) => {
+        RedirectKind::HereDoc(strip, ref delim) => {
             if strip {
                 s.push_str("<<-");
             } else {
                 s.push_str("<<");
+            }
+            if !delim.is_empty() {
+                s.push_str(delim);
+                s.push('\n');
+                s.push_str(&format_word(&redir.target));
+                s.push('\n');
+                s.push_str(delim);
+                return s;
             }
         }
         RedirectKind::HereString => s.push_str("<<< "),

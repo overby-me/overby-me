@@ -271,7 +271,7 @@ pub enum RedirectKind {
     DupOutput,
     ReadWrite,
     #[allow(dead_code)]
-    HereDoc(bool),
+    HereDoc(bool, String),
     HereString,
     /// `<(cmd)` — process substitution (read)
     #[allow(dead_code)]
