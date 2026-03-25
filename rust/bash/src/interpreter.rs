@@ -4146,15 +4146,16 @@ impl Shell {
 
     /// Execute `[[ conditional expression ]]`
     fn format_cond_for_xtrace(&mut self, expr: &CondExpr) -> String {
+        let quote_empty = |s: String| -> String { if s.is_empty() { "''".to_string() } else { s } };
         match expr {
-            CondExpr::Word(w) => self.expand_word_single(w),
+            CondExpr::Word(w) => quote_empty(self.expand_word_single(w)),
             CondExpr::Unary(op, w) => {
-                let val = self.expand_word_single(w);
+                let val = quote_empty(self.expand_word_single(w));
                 format!("{} {}", op, val)
             }
             CondExpr::Binary(l, op, r) => {
-                let lv = self.expand_word_single(l);
-                let rv = self.expand_word_single(r);
+                let lv = quote_empty(self.expand_word_single(l));
+                let rv = quote_empty(self.expand_word_single(r));
                 format!("{} {} {}", lv, op, rv)
             }
             CondExpr::Not(e) => {
@@ -4255,7 +4256,8 @@ impl Shell {
     }
 
     fn run_conditional(&mut self, expr: &CondExpr) -> i32 {
-        if self.opt_xtrace {
+        // For And/Or, xtrace is output per sub-expression during eval_cond
+        if self.opt_xtrace && !matches!(expr, CondExpr::And(_, _) | CondExpr::Or(_, _)) {
             let trace = self.format_cond_for_xtrace(expr);
             self.xtrace_write(&format!("+ [[ {} ]]", trace));
         }
@@ -4274,16 +4276,32 @@ impl Shell {
             }
             CondExpr::Not(e) => self.eval_cond(e).map(|v| !v),
             CondExpr::And(a, b) => {
+                if self.opt_xtrace {
+                    let trace = self.format_cond_for_xtrace(a);
+                    self.xtrace_write(&format!("+ [[ {} ]]", trace));
+                }
                 let av = self.eval_cond(a)?;
                 if !av {
                     return Ok(false);
                 }
+                if self.opt_xtrace {
+                    let trace = self.format_cond_for_xtrace(b);
+                    self.xtrace_write(&format!("+ [[ {} ]]", trace));
+                }
                 self.eval_cond(b)
             }
             CondExpr::Or(a, b) => {
+                if self.opt_xtrace {
+                    let trace = self.format_cond_for_xtrace(a);
+                    self.xtrace_write(&format!("+ [[ {} ]]", trace));
+                }
                 let av = self.eval_cond(a)?;
                 if av {
                     return Ok(true);
+                }
+                if self.opt_xtrace {
+                    let trace = self.format_cond_for_xtrace(b);
+                    self.xtrace_write(&format!("+ [[ {} ]]", trace));
                 }
                 self.eval_cond(b)
             }
