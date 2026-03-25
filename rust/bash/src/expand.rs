@@ -826,11 +826,17 @@ fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
                         if let Some(assoc) = ctx.assoc_arrays.get(&resolved) {
                             return assoc.get(idx_str).cloned().unwrap_or_default();
                         }
-                        // Numeric index for indexed arrays
-                        let idx: usize = idx_str.parse().unwrap_or(0);
+                        // Numeric index for indexed arrays (supports negative)
+                        let raw_idx: i64 = idx_str.parse().unwrap_or(0);
                         if let Some(arr) = ctx.arrays.get(&resolved) {
+                            let idx = if raw_idx < 0 {
+                                let len = arr.len() as i64;
+                                (len + raw_idx).max(0) as usize
+                            } else {
+                                raw_idx as usize
+                            };
                             arr.get(idx).cloned().unwrap_or_default()
-                        } else if idx == 0 {
+                        } else if raw_idx == 0 {
                             ctx.vars.get(&resolved).cloned().unwrap_or_default()
                         } else {
                             String::new()

@@ -2138,7 +2138,7 @@ impl Shell {
                     // Check if it's an array element append (x[n]+=val)
                     if let Some(bracket) = assign.name.find('[') {
                         let idx_str = &assign.name[bracket + 1..assign.name.len() - 1];
-                        let idx = self.eval_arith_expr(idx_str) as usize;
+                        let raw_idx = self.eval_arith_expr(idx_str);
                         let is_int = self.integer_vars.contains(&resolved);
                         let addend = if is_int {
                             self.eval_arith_expr(&value)
@@ -2146,6 +2146,13 @@ impl Shell {
                             0
                         };
                         if let Some(arr) = self.arrays.get_mut(&resolved) {
+                            // Handle negative indices
+                            let idx = if raw_idx < 0 {
+                                let len = arr.len() as i64;
+                                (len + raw_idx).max(0) as usize
+                            } else {
+                                raw_idx as usize
+                            };
                             while arr.len() <= idx {
                                 arr.push(String::new());
                             }
@@ -2241,8 +2248,14 @@ impl Shell {
                                     .or_default()
                                     .insert(idx_str.to_string(), value);
                             } else {
-                                let idx: usize = self.eval_arith_expr(idx_str).max(0) as usize;
+                                let raw_idx = self.eval_arith_expr(idx_str);
                                 let arr = self.arrays.entry(resolved).or_default();
+                                let idx = if raw_idx < 0 {
+                                    let len = arr.len() as i64;
+                                    (len + raw_idx).max(0) as usize
+                                } else {
+                                    raw_idx as usize
+                                };
                                 while arr.len() <= idx {
                                     arr.push(String::new());
                                 }

@@ -974,11 +974,17 @@ fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
                     .get_mut(&resolved)
                     .map(|a| a.remove(idx_str));
             } else {
-                let idx = shell.eval_arith_expr(idx_str).max(0) as usize;
-                if let Some(arr) = shell.arrays.get_mut(&resolved)
-                    && idx < arr.len()
-                {
-                    arr[idx] = String::new();
+                let raw_idx = shell.eval_arith_expr(idx_str);
+                if let Some(arr) = shell.arrays.get_mut(&resolved) {
+                    let idx = if raw_idx < 0 {
+                        let len = arr.len() as i64;
+                        (len + raw_idx).max(0) as usize
+                    } else {
+                        raw_idx as usize
+                    };
+                    if idx < arr.len() {
+                        arr[idx] = String::new();
+                    }
                 }
             }
         } else {
