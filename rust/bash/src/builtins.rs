@@ -3623,15 +3623,25 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
             PollFlags::POLLIN,
         );
         let timeout_ms = (secs * 1000.0) as i32;
-        let timeout = if timeout_ms <= 0 {
+        let is_poll = timeout_ms <= 0; // -t 0 is just a polling check
+        let timeout = if is_poll {
             PollTimeout::ZERO
         } else {
             PollTimeout::from(timeout_ms as u16)
         };
         match nix::poll::poll(&mut [poll_fd], timeout) {
-            Ok(0) => return 142, // timeout — exit code > 128
-            Err(_) => return 142,
-            _ => {}
+            Ok(0) => {
+                if is_poll {
+                    return 1; // polling: no data available
+                }
+                return 142; // timeout — exit code > 128
+            }
+            Err(_) => return if is_poll { 1 } else { 142 },
+            _ => {
+                if is_poll {
+                    return 0; // polling: data available, don't actually read
+                }
+            }
         }
     }
 
