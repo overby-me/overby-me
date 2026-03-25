@@ -5,6 +5,8 @@ use std::collections::{HashMap, HashSet};
 thread_local! {
     /// Set when parsing heredoc body — suppresses $'...' processing in nested contexts
     static IN_HEREDOC: Cell<bool> = const { Cell::new(false) };
+    /// Set when parsing pattern words (#, %, /) — enables single-quote quoting in dquote
+    static PATTERN_WORD: Cell<bool> = const { Cell::new(false) };
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1466,16 +1468,20 @@ fn read_param_op(chars: &[char], i: &mut usize, _name: &str, in_dquote: bool) ->
         read_param_word_impl(chars, i, delim, in_dquote)
     };
     let read_pattern_word = |chars: &[char], i: &mut usize| -> Word {
-        // Temporarily clear IN_HEREDOC so $'...' is expanded in patterns
+        // For pattern words: clear IN_HEREDOC and set PATTERN_WORD
         let was_heredoc = IN_HEREDOC.with(|f| f.replace(false));
+        let was_pattern = PATTERN_WORD.with(|f| f.replace(true));
         let result = read_param_word_impl(chars, i, '}', in_dquote);
         IN_HEREDOC.with(|f| f.set(was_heredoc));
+        PATTERN_WORD.with(|f| f.set(was_pattern));
         result
     };
     let read_pattern_word_until = |chars: &[char], i: &mut usize, delim: char| -> Word {
         let was_heredoc = IN_HEREDOC.with(|f| f.replace(false));
+        let was_pattern = PATTERN_WORD.with(|f| f.replace(true));
         let result = read_param_word_impl(chars, i, delim, in_dquote);
         IN_HEREDOC.with(|f| f.set(was_heredoc));
+        PATTERN_WORD.with(|f| f.set(was_pattern));
         result
     };
 
@@ -1672,9 +1678,10 @@ fn read_param_word_impl(chars: &[char], i: &mut usize, delim: char, in_dquote: b
                 *i += 1;
                 parts.push(parse_dollar(chars, i, in_dquote));
             }
-            '\'' if !IN_HEREDOC.with(|f| f.get()) => {
-                // Single quotes have quoting effect in parameter expansion words
-                // even inside double quotes (bash behavior), except in heredocs
+            '\'' if !in_dquote || PATTERN_WORD.with(|f| f.get()) => {
+                // Single quotes have quoting effect:
+                // - always in unquoted context
+                // - in dquote context only for pattern words (#, %, /)
                 if !literal.is_empty() {
                     parts.push(WordPart::Literal(std::mem::take(&mut literal)));
                 }
