@@ -2541,7 +2541,7 @@ fn eval_test_expr(args: &[String], shell: &Shell, cmd_name: &str) -> i32 {
                 {
                     use std::os::unix::fs::MetadataExt;
                     return if !args[1].is_empty()
-                        && std::fs::metadata(&args[1]).is_ok_and(|m| m.mtime() >= m.atime())
+                        && std::fs::metadata(&args[1]).is_ok_and(|m| m.mtime() > m.atime())
                     {
                         0
                     } else {
@@ -2706,7 +2706,18 @@ fn eval_test_expr(args: &[String], shell: &Shell, cmd_name: &str) -> i32 {
                 };
             }
             "-t" => {
-                let fd: i32 = args[1].parse().unwrap_or(-1);
+                let fd: i32 = match args[1].parse() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        eprintln!(
+                            "{}: {}: {}: integer expected",
+                            shell.error_prefix(),
+                            cmd_name,
+                            args[1]
+                        );
+                        return 2;
+                    }
+                };
                 #[cfg(unix)]
                 {
                     return if nix::unistd::isatty(fd).unwrap_or(false) {
@@ -2736,6 +2747,14 @@ fn eval_test_expr(args: &[String], shell: &Shell, cmd_name: &str) -> i32 {
                     _ => false,
                 };
                 return if is_set { 0 } else { 1 };
+            }
+            "-R" => {
+                // Nameref test
+                return if shell.namerefs.contains_key(args[1].as_str()) {
+                    0
+                } else {
+                    1
+                };
             }
             op if op.starts_with('-') => {
                 // Unknown unary operator
@@ -2829,7 +2848,9 @@ fn eval_test_expr(args: &[String], shell: &Shell, cmd_name: &str) -> i32 {
                 };
             }
             "-nt" => {
-                // Newer than
+                // Newer than — existing is newer than non-existent
+                let a_exists = std::path::Path::new(&args[0]).exists();
+                let b_exists = std::path::Path::new(&args[2]).exists();
                 let a = std::fs::metadata(&args[0]).and_then(|m| m.modified()).ok();
                 let b = std::fs::metadata(&args[2]).and_then(|m| m.modified()).ok();
                 return match (a, b) {
@@ -2840,10 +2861,13 @@ fn eval_test_expr(args: &[String], shell: &Shell, cmd_name: &str) -> i32 {
                             1
                         }
                     }
+                    (Some(_), None) if a_exists && !b_exists => 0,
                     _ => 1,
                 };
             }
             "-ot" => {
+                let a_exists = std::path::Path::new(&args[0]).exists();
+                let b_exists = std::path::Path::new(&args[2]).exists();
                 let a = std::fs::metadata(&args[0]).and_then(|m| m.modified()).ok();
                 let b = std::fs::metadata(&args[2]).and_then(|m| m.modified()).ok();
                 return match (a, b) {
@@ -2854,6 +2878,8 @@ fn eval_test_expr(args: &[String], shell: &Shell, cmd_name: &str) -> i32 {
                             1
                         }
                     }
+                    // Non-existent file is older than existing
+                    (None, Some(_)) if !a_exists && b_exists => 0,
                     _ => 1,
                 };
             }
