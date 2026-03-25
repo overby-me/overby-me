@@ -1290,11 +1290,31 @@ fn builtin_readonly(shell: &mut Shell, args: &[String]) -> i32 {
         return 0;
     }
 
+    let mut status = 0;
     for name in names {
         if func_mode {
-            if shell.functions.contains_key(name) {
+            if shell.readonly_funcs.contains(name) {
+                eprintln!(
+                    "{}: readonly: {}: readonly variable",
+                    shell.error_prefix(),
+                    name
+                );
+                status = 1;
+            } else if shell.functions.contains_key(name) {
                 shell.readonly_funcs.insert(name.to_string());
             }
+        } else if shell.readonly_vars.contains(name)
+            || name
+                .find('=')
+                .is_some_and(|eq| shell.readonly_vars.contains(&name[..eq]))
+        {
+            // Already readonly — report error if trying to change value
+            if name.contains('=') {
+                let vname = name.split('=').next().unwrap();
+                eprintln!("{}: {}: readonly variable", shell.error_prefix(), vname);
+                status = 1;
+            }
+            // readonly without = on already readonly var is a no-op (not an error)
         } else if let Some(eq_pos) = name.find('=') {
             let (vname, value, is_append) = if eq_pos > 0 && name.as_bytes()[eq_pos - 1] == b'+' {
                 (&name[..eq_pos - 1], &name[eq_pos + 1..], true)
@@ -1319,7 +1339,7 @@ fn builtin_readonly(shell: &mut Shell, args: &[String]) -> i32 {
             shell.readonly_vars.insert(name.to_string());
         }
     }
-    0
+    status
 }
 
 fn builtin_logout(shell: &mut Shell, _args: &[String]) -> i32 {
