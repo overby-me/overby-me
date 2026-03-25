@@ -311,8 +311,6 @@
           sed -i '/^test_list_unit_files --root=/d' TEST-26-SYSTEMCTL.sh
           # Remove template unit disable --now
           sed -i '/^# disable --now with template unit/,/^# add-wants\/add-requires/{/^# add-wants\/add-requires/!d}' TEST-26-SYSTEMCTL.sh
-          # Remove add-wants/add-requires (not implemented)
-          sed -i '/^# add-wants\/add-requires/,/^# set-property/{/^# set-property/!d}' TEST-26-SYSTEMCTL.sh
           # Remove is-system-running (system has degraded state due to boot-time service failures)
           sed -i '/^assert_eq.*is-system-running/d' TEST-26-SYSTEMCTL.sh
           # Remove sysv-generator test

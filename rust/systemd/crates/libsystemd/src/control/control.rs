@@ -84,6 +84,10 @@ pub enum Command {
     Unmask(Vec<String>),
     /// `disable <unit>...` — no-op for now (prevents "Unknown method" errors).
     Disable(Vec<String>),
+    /// `add-wants <unit> <target>` — create a `.wants` symlink.
+    AddWants(String, String),
+    /// `add-requires <unit> <target>` — create a `.requires` symlink.
+    AddRequires(String, String),
     /// `reset-failed [unit]` — clear the failed state of a unit (or all units).
     ResetFailed(Option<String>),
     /// `kill <unit> [--signal=SIG] [--kill-whom=WHO] [--kill-value=N]`
@@ -703,6 +707,26 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
                 }
             };
             Command::Unmask(names)
+        }
+        "add-wants" | "add-requires" => {
+            // add-wants <unit> <target> or add-requires <unit> <target>
+            let (unit, target) = match &call.params {
+                Some(Value::Array(arr)) if arr.len() >= 2 => {
+                    let u = arr[0].as_str().unwrap_or("").to_owned();
+                    let t = arr[1].as_str().unwrap_or("").to_owned();
+                    (u, t)
+                }
+                Some(_) | None => {
+                    return Err(ParseError::ParamsInvalid(
+                        "add-wants/add-requires requires unit and target".to_string(),
+                    ));
+                }
+            };
+            if call.method == "add-wants" {
+                Command::AddWants(unit, target)
+            } else {
+                Command::AddRequires(unit, target)
+            }
         }
         "list-timers" => Command::ListTimers,
         "list-sockets" => Command::ListSockets,
@@ -4457,6 +4481,42 @@ pub fn execute_command(
                 // If it's not a symlink to /dev/null, silently skip
             }
             return Ok(serde_json::json!({ "unmasked": unmasked }));
+        }
+        Command::AddWants(unit, target) => {
+            let dep_type = "wants";
+            let dep_dir =
+                std::path::Path::new("/etc/systemd/system").join(format!("{unit}.{dep_type}"));
+            std::fs::create_dir_all(&dep_dir)
+                .map_err(|e| format!("Failed to create {}: {e}", dep_dir.display()))?;
+            let link_path = dep_dir.join(&target);
+            let target_path = format!("/usr/lib/systemd/system/{target}");
+            let _ = std::fs::remove_file(&link_path);
+            std::os::unix::fs::symlink(&target_path, &link_path).map_err(|e| {
+                format!(
+                    "Failed to create symlink {}: {e}",
+                    link_path.display()
+                )
+            })?;
+            return Ok(serde_json::json!(null));
+        }
+        Command::AddRequires(unit, target) => {
+            let dep_type = "requires";
+            // Create /etc/systemd/system/<unit>.<dep_type>/<target> -> /usr/lib/systemd/system/<target>
+            let dep_dir =
+                std::path::Path::new("/etc/systemd/system").join(format!("{unit}.{dep_type}"));
+            std::fs::create_dir_all(&dep_dir)
+                .map_err(|e| format!("Failed to create {}: {e}", dep_dir.display()))?;
+            let link_path = dep_dir.join(&target);
+            let target_path = format!("/usr/lib/systemd/system/{target}");
+            // Remove existing symlink if present
+            let _ = std::fs::remove_file(&link_path);
+            std::os::unix::fs::symlink(&target_path, &link_path).map_err(|e| {
+                format!(
+                    "Failed to create symlink {}: {e}",
+                    link_path.display()
+                )
+            })?;
+            return Ok(serde_json::json!(null));
         }
     }
     Ok(result_vec)
