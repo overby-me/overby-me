@@ -1399,17 +1399,40 @@ fn parse_brace_param(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart
         });
     }
 
-    // ${#name} - length, but ${#} ${#:...} ${#-...} etc. are $# with operations
+    // ${#name} - length, but ${#} ${#:-...} ${#-...} etc. are $# with operations
     if *i < chars.len() && chars[*i] == '#' {
         let next = if *i + 1 < chars.len() {
             chars[*i + 1]
         } else {
             '}'
         };
-        // If next char is an operator or }, treat # as $# (param count), not length
-        if next != '}' && !matches!(next, ':' | '-' | '+' | '=' | '%' | '/' | '?' | '#') {
+        // Check if this is $# with an operation vs ${#name} (length)
+        // ${#:-word}, ${#-word}, ${#+word}, ${#?word} are $# with operations
+        let is_hash_param_op = match next {
+            '}' => false,
+            ':' => {
+                // ${#:X} is $# op only if X is -, +, =, ?
+                *i + 2 < chars.len() && matches!(chars[*i + 2], '-' | '+' | '=' | '?')
+            }
+            '-' | '+' | '?' => true,
+            _ => false, // ${#name} is length
+        };
+        if !is_hash_param_op && next != '}' {
             *i += 1;
             let name = read_param_name_with_subscript(chars, i);
+            // If name is empty and next char is not }, it's like ${#:} — invalid
+            if name.is_empty() && *i < chars.len() && chars[*i] != '}' {
+                // Skip to closing } and return error literal
+                let start = *i;
+                while *i < chars.len() && chars[*i] != '}' {
+                    *i += 1;
+                }
+                let rest: String = chars[start..*i].iter().collect();
+                if *i < chars.len() {
+                    *i += 1;
+                }
+                return WordPart::Literal(format!("${{#{}}}", rest));
+            }
             if *i < chars.len() && chars[*i] == '}' {
                 *i += 1;
             }
