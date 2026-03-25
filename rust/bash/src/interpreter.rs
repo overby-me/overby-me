@@ -4369,9 +4369,15 @@ impl Shell {
                             Ok(false)
                         }
                     }
-                    Err(_) => {
+                    Err(e) => {
+                        eprintln!(
+                            "{}: conditional binary operator: {}: {}",
+                            self.error_prefix(),
+                            right,
+                            e
+                        );
                         self.arrays.insert("BASH_REMATCH".to_string(), Vec::new());
-                        Ok(false)
+                        Err(())
                     }
                 }
             }
