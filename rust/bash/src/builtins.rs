@@ -5107,24 +5107,170 @@ fn builtin_umask(shell: &mut Shell, args: &[String]) -> i32 {
     {
         use nix::sys::stat::Mode;
 
-        if args.is_empty() {
+        let mut symbolic = false;
+        let mut print_mode = false;
+        let mut mask_arg = None;
+
+        for arg in args {
+            match arg.as_str() {
+                "-S" => symbolic = true,
+                "-p" => print_mode = true,
+                s if s.starts_with('-') && s.len() > 1 => {
+                    eprintln!("{}: umask: {}: invalid option", shell.error_prefix(), s);
+                    eprintln!("umask: usage: umask [-p] [-S] [mode]");
+                    return 1;
+                }
+                _ => mask_arg = Some(arg.as_str()),
+            }
+        }
+
+        if mask_arg.is_none() {
             let current = nix::sys::stat::umask(Mode::empty());
             nix::sys::stat::umask(current);
-            println!("{:04o}", current.bits());
+            if symbolic {
+                let bits = current.bits();
+                let u = 7 - ((bits >> 6) & 7);
+                let g = 7 - ((bits >> 3) & 7);
+                let o = 7 - (bits & 7);
+                let mode_str = |m: u32| -> String {
+                    let mut s = String::new();
+                    if m & 4 != 0 {
+                        s.push('r');
+                    }
+                    if m & 2 != 0 {
+                        s.push('w');
+                    }
+                    if m & 1 != 0 {
+                        s.push('x');
+                    }
+                    s
+                };
+                if print_mode {
+                    println!(
+                        "umask -S u={},g={},o={}",
+                        mode_str(u),
+                        mode_str(g),
+                        mode_str(o)
+                    );
+                } else {
+                    println!("u={},g={},o={}", mode_str(u), mode_str(g), mode_str(o));
+                }
+            } else if print_mode {
+                println!("umask {:04o}", current.bits());
+            } else {
+                println!("{:04o}", current.bits());
+            }
             return 0;
         }
 
-        if let Ok(mask) = u32::from_str_radix(args[0].trim_start_matches('0'), 8) {
-            nix::sys::stat::umask(Mode::from_bits_truncate(mask));
-            0
-        } else {
-            eprintln!(
-                "{}: umask: {}: invalid octal number",
-                shell.error_prefix(),
-                args[0]
-            );
-            1
+        let mask_str = mask_arg.unwrap();
+        // Try octal first
+        if mask_str.chars().all(|c| c.is_ascii_digit()) {
+            if mask_str.chars().any(|c| c == '8' || c == '9') {
+                eprintln!(
+                    "{}: umask: {}: octal number out of range",
+                    shell.error_prefix(),
+                    mask_str
+                );
+                return 1;
+            }
+            if let Ok(mask) = u32::from_str_radix(mask_str, 8) {
+                nix::sys::stat::umask(Mode::from_bits_truncate(mask));
+                return 0;
+            }
         }
+
+        // Try symbolic mode: [ugoa][+-=][rwx]
+        // Simplified: just check for basic valid characters
+        let valid_who = ['u', 'g', 'o', 'a'];
+        let valid_op = ['+', '-', '='];
+        let valid_perm = ['r', 'w', 'x', 'X', 's', 't'];
+        let first = mask_str.chars().next().unwrap_or(' ');
+        if !valid_who.contains(&first) && !valid_op.contains(&first) {
+            eprintln!(
+                "{}: umask: `{}': invalid symbolic mode character",
+                shell.error_prefix(),
+                first
+            );
+            return 1;
+        }
+        // Check for valid operator
+        let has_op = mask_str.chars().any(|c| valid_op.contains(&c));
+        if !has_op {
+            eprintln!(
+                "{}: umask: `{}': invalid symbolic mode operator",
+                shell.error_prefix(),
+                mask_str
+                    .chars()
+                    .find(|c| !valid_who.contains(c))
+                    .unwrap_or(' ')
+            );
+            return 1;
+        }
+        // Check permission chars
+        for ch in mask_str.chars() {
+            if !valid_who.contains(&ch)
+                && !valid_op.contains(&ch)
+                && !valid_perm.contains(&ch)
+                && ch != ','
+            {
+                eprintln!(
+                    "{}: umask: `{}': invalid symbolic mode character",
+                    shell.error_prefix(),
+                    ch
+                );
+                return 1;
+            }
+        }
+
+        // Apply symbolic mask (simplified)
+        let current = nix::sys::stat::umask(Mode::empty());
+        nix::sys::stat::umask(current);
+        let mut bits = current.bits();
+        for part in mask_str.split(',') {
+            let chars: Vec<char> = part.chars().collect();
+            let mut i = 0;
+            let mut who_mask = 0u32;
+            while i < chars.len() && valid_who.contains(&chars[i]) {
+                match chars[i] {
+                    'u' => who_mask |= 0o700,
+                    'g' => who_mask |= 0o070,
+                    'o' => who_mask |= 0o007,
+                    'a' => who_mask |= 0o777,
+                    _ => {}
+                }
+                i += 1;
+            }
+            if who_mask == 0 {
+                who_mask = 0o777;
+            }
+            if i < chars.len() && valid_op.contains(&chars[i]) {
+                let op = chars[i];
+                i += 1;
+                let mut perm = 0u32;
+                while i < chars.len() && valid_perm.contains(&chars[i]) {
+                    match chars[i] {
+                        'r' => perm |= 0o444,
+                        'w' => perm |= 0o222,
+                        'x' => perm |= 0o111,
+                        _ => {}
+                    }
+                    i += 1;
+                }
+                let effective = perm & who_mask;
+                match op {
+                    '+' => bits &= !effective,
+                    '-' => bits |= effective,
+                    '=' => {
+                        bits |= who_mask;
+                        bits &= !effective;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        nix::sys::stat::umask(Mode::from_bits_truncate(bits));
+        0
     }
     #[cfg(not(unix))]
     {
@@ -5729,7 +5875,7 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
                 }
             } else {
                 eprintln!(
-                    "{}: shopt: {}: invalid shell option name",
+                    "{}: shopt: {}: invalid option name",
                     shell.error_prefix(),
                     opt
                 );
@@ -5993,7 +6139,7 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
             _ => {
                 if !query {
                     eprintln!(
-                        "{}: shopt: {}: invalid shell option name",
+                        "{}: shopt: {}: invalid option name",
                         shell.error_prefix(),
                         opt
                     );
