@@ -4107,6 +4107,11 @@ impl Shell {
             }
             CondExpr::Unary(op, w) => {
                 let val = self.expand_word_single(w);
+                // -t with non-integer returns error (status 2)
+                if op == "-t" && val.parse::<i32>().is_err() {
+                    eprintln!("{}: [[: {}: integer expected", self.error_prefix(), val);
+                    return Err(());
+                }
                 Ok(self.eval_cond_unary(op, &val))
             }
             CondExpr::Binary(left, op, right) => {
@@ -4236,8 +4241,7 @@ impl Shell {
                         false
                     }
                 } else {
-                    eprintln!("{}: [[: {}: integer expected", self.error_prefix(), val);
-                    false
+                    false // Error already handled by caller
                 }
             }
             "-N" => std::path::Path::new(val).exists(),
