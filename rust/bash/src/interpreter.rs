@@ -1290,10 +1290,30 @@ impl Shell {
                     libc::close(child_write);
                 }
 
+                // Move fds to high numbers (63+) like bash does
+                let high_read = unsafe { libc::fcntl(parent_read, libc::F_DUPFD, 63) };
+                let high_write = unsafe { libc::fcntl(parent_write, libc::F_DUPFD, 63) };
+                if high_read >= 0 {
+                    unsafe { libc::close(parent_read) };
+                }
+                if high_write >= 0 {
+                    unsafe { libc::close(parent_write) };
+                }
+                let read_fd = if high_read >= 0 {
+                    high_read
+                } else {
+                    parent_read
+                };
+                let write_fd = if high_write >= 0 {
+                    high_write
+                } else {
+                    parent_write
+                };
+
                 // Set COPROC array: [0]=read_fd, [1]=write_fd
                 self.arrays.insert(
                     coproc_name.to_string(),
-                    vec![parent_read.to_string(), parent_write.to_string()],
+                    vec![read_fd.to_string(), write_fd.to_string()],
                 );
 
                 // Set COPROC_PID
