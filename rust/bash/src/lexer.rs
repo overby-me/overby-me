@@ -1459,11 +1459,24 @@ fn read_param_name(chars: &[char], i: &mut usize) -> String {
 }
 
 fn read_param_op(chars: &[char], i: &mut usize, _name: &str, in_dquote: bool) -> ParamOp {
-    // Pattern operations (#, %, /): single quotes always protect $ even in dquote
+    // For pattern operations (#, %, /), $'...' should still be expanded even in heredoc
     let read_word =
         |chars: &[char], i: &mut usize| -> Word { read_param_word_impl(chars, i, '}', in_dquote) };
-    let read_word_until = |chars: &[char], i: &mut usize, delim: char| -> Word {
+    let _read_word_until = |chars: &[char], i: &mut usize, delim: char| -> Word {
         read_param_word_impl(chars, i, delim, in_dquote)
+    };
+    let read_pattern_word = |chars: &[char], i: &mut usize| -> Word {
+        // Temporarily clear IN_HEREDOC so $'...' is expanded in patterns
+        let was_heredoc = IN_HEREDOC.with(|f| f.replace(false));
+        let result = read_param_word_impl(chars, i, '}', in_dquote);
+        IN_HEREDOC.with(|f| f.set(was_heredoc));
+        result
+    };
+    let read_pattern_word_until = |chars: &[char], i: &mut usize, delim: char| -> Word {
+        let was_heredoc = IN_HEREDOC.with(|f| f.replace(false));
+        let result = read_param_word_impl(chars, i, delim, in_dquote);
+        IN_HEREDOC.with(|f| f.set(was_heredoc));
+        result
     };
 
     if *i >= chars.len() {
@@ -1543,10 +1556,10 @@ fn read_param_op(chars: &[char], i: &mut usize, _name: &str, in_dquote: bool) ->
             *i += 1;
             if *i < chars.len() && chars[*i] == '#' {
                 *i += 1;
-                let word = read_word(chars, i);
+                let word = read_pattern_word(chars, i);
                 ParamOp::TrimLargeLeft(word)
             } else {
-                let word = read_word(chars, i);
+                let word = read_pattern_word(chars, i);
                 ParamOp::TrimSmallLeft(word)
             }
         }
@@ -1554,10 +1567,10 @@ fn read_param_op(chars: &[char], i: &mut usize, _name: &str, in_dquote: bool) ->
             *i += 1;
             if *i < chars.len() && chars[*i] == '%' {
                 *i += 1;
-                let word = read_word(chars, i);
+                let word = read_pattern_word(chars, i);
                 ParamOp::TrimLargeRight(word)
             } else {
-                let word = read_word(chars, i);
+                let word = read_pattern_word(chars, i);
                 ParamOp::TrimSmallRight(word)
             }
         }
@@ -1582,7 +1595,7 @@ fn read_param_op(chars: &[char], i: &mut usize, _name: &str, in_dquote: bool) ->
             } else {
                 'f'
             };
-            let pattern = read_word_until(chars, i, '/');
+            let pattern = read_pattern_word_until(chars, i, '/');
             let replacement = if *i < chars.len() && chars[*i] == '/' {
                 *i += 1;
                 read_word(chars, i)
