@@ -4561,7 +4561,25 @@ impl Shell {
         match e.kind() {
             std::io::ErrorKind::NotFound => "No such file or directory",
             std::io::ErrorKind::PermissionDenied => "Permission denied",
-            _ => "No such file or directory",
+            std::io::ErrorKind::AlreadyExists => "File exists",
+            std::io::ErrorKind::BrokenPipe => "Broken pipe",
+            _ => {
+                // Check raw OS error for more specific messages
+                #[cfg(unix)]
+                if let Some(errno) = e.raw_os_error() {
+                    match errno {
+                        libc::EBADF => return "Bad file descriptor",
+                        libc::ENOENT => return "No such file or directory",
+                        libc::EACCES => return "Permission denied",
+                        libc::EISDIR => return "Is a directory",
+                        libc::ENOTDIR => return "Not a directory",
+                        libc::ENODEV => return "No such device or address",
+                        libc::ENXIO => return "No such device or address",
+                        _ => {}
+                    }
+                }
+                "No such file or directory"
+            }
         }
     }
 
