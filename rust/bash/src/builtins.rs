@@ -4840,6 +4840,23 @@ fn builtin_trap(shell: &mut Shell, args: &[String]) -> i32 {
         }
     }
 
+    // Handle -p with signal arguments: trap -p SIG1 SIG2 ...
+    if args.first().map(|s| s.as_str()) == Some("-p") && args.len() >= 2 {
+        for sig_arg in &args[1..] {
+            let norm = normalize_signal_name(sig_arg);
+            let lookup = norm.strip_prefix("SIG").unwrap_or(&norm);
+            let key = if lookup == "EXIT" {
+                shell.traps.get("EXIT").or_else(|| shell.traps.get("0"))
+            } else {
+                shell.traps.get(lookup).or_else(|| shell.traps.get(&norm))
+            };
+            if let Some(handler) = key {
+                println!("trap -- '{}' {}", handler, norm);
+            }
+        }
+        return 0;
+    }
+
     // trap [-p|-P] 'handler' signal [signal...]
     let handler_idx = 0;
     let sig_start = 1;
