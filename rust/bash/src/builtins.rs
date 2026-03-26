@@ -4651,6 +4651,14 @@ fn builtin_eval(shell: &mut Shell, args: &[String]) -> i32 {
         shell.shopt_expand_aliases,
         shell.opt_posix,
     );
+    // Set the eval parser's line offset to the current LINENO
+    // so error messages reference the correct source file line
+    let lineno_offset: usize = shell
+        .vars
+        .get("LINENO")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1);
+    parser.set_line_offset(lineno_offset.saturating_sub(1));
     let result = match parser.parse_program() {
         Ok(program) => {
             if !parser.is_at_eof() {
@@ -4696,6 +4704,20 @@ fn builtin_eval(shell: &mut Shell, args: &[String]) -> i32 {
             }
         }
         Err(e) => {
+            // Check for compound command context in the eval parse error
+            if let Some((cmd, cmd_line)) = parser.compound_cmd_context() {
+                let name = shell
+                    .positional
+                    .first()
+                    .map(|s| s.as_str())
+                    .unwrap_or("bash");
+                let eval_line = parser.current_line();
+                eprintln!(
+                    "{}: eval: line {}: syntax error: unexpected end of file from `{}' command on line {}",
+                    name, eval_line, cmd, cmd_line
+                );
+                return 2;
+            }
             eprintln!("{}: eval: {}", shell.error_prefix(), e);
             2
         }

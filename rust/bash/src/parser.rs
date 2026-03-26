@@ -165,6 +165,11 @@ impl Parser {
             .map(|(cmd, line)| (cmd.as_str(), *line))
     }
 
+    /// Set a line offset for the lexer (used by eval to inherit source file line numbers)
+    pub fn set_line_offset(&mut self, offset: usize) {
+        self.lexer.line += offset;
+    }
+
     pub fn current_pos(&self) -> usize {
         self.lexer.current_pos()
     }
@@ -606,17 +611,26 @@ impl Parser {
     }
 
     fn parse_brace_group(&mut self) -> Result<CompoundCommand, String> {
+        let start_line = self.current_line();
+        self.compound_cmd_stack.push(("{".to_string(), start_line));
         self.expect_keyword("{")?;
         self.skip_newlines();
         let body = self.parse_program()?;
-        self.expect_keyword("}")?;
+        let result = self.expect_keyword("}");
+        if result.is_ok() {
+            self.compound_cmd_stack.pop();
+        }
+        result?;
         Ok(CompoundCommand::BraceGroup(body))
     }
 
     fn parse_subshell(&mut self) -> Result<CompoundCommand, String> {
+        let start_line = self.current_line();
+        self.compound_cmd_stack.push(("(".to_string(), start_line));
         assert!(self.eat(&Token::LParen));
         self.skip_newlines();
         let body = self.parse_program()?;
+        self.compound_cmd_stack.pop();
         if !self.eat(&Token::RParen) {
             return Err("expected ')'".to_string());
         }
