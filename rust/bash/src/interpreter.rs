@@ -544,17 +544,7 @@ impl Shell {
     pub fn set_var(&mut self, name: &str, value: String) {
         let resolved = self.resolve_nameref(name);
         if self.readonly_vars.contains(&resolved) {
-            let sname = self
-                .vars
-                .get("_BASH_SOURCE_FILE")
-                .or_else(|| self.positional.first())
-                .map(|s| s.as_str())
-                .unwrap_or("bash");
-            let lineno = self.vars.get("LINENO").map(|s| s.as_str()).unwrap_or("0");
-            eprintln!(
-                "{}: line {}: {}: readonly variable",
-                sname, lineno, resolved
-            );
+            eprintln!("{}: {}: readonly variable", self.error_prefix(), resolved);
             self.last_status = 1;
             return;
         }
