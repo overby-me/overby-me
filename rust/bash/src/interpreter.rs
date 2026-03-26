@@ -3874,10 +3874,13 @@ impl Shell {
         } else {
             None
         };
+        // Note: DEBUG trap is global — functions can modify it and the change persists.
+        // Without functrace, the function doesn't inherit the parent's DEBUG trap,
+        // but any trap set inside the function IS visible after the function returns.
 
         let status = self.run_compound_command(body);
 
-        // Restore ERR trap and LINENO
+        // Restore ERR and DEBUG traps and LINENO
         if let Some(err_trap) = saved_err_trap {
             self.traps.insert("ERR".to_string(), err_trap);
         }
