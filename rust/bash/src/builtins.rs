@@ -3911,18 +3911,49 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
                     'u' => {
                         i += 1;
                         if i < args.len() {
-                            fd = args[i].parse().ok();
+                            match args[i].parse::<i32>() {
+                                Ok(f) => fd = Some(f),
+                                Err(_) => {
+                                    eprintln!(
+                                        "{}: read: {}: invalid file descriptor specification",
+                                        shell.error_prefix(),
+                                        args[i]
+                                    );
+                                    return 1;
+                                }
+                            }
                         }
                         break;
                     }
                     't' => {
                         i += 1;
                         if i < args.len() {
-                            timeout_secs = args[i].parse().ok();
+                            match args[i].parse::<f64>() {
+                                Ok(t) => timeout_secs = Some(t),
+                                Err(_) => {
+                                    eprintln!(
+                                        "{}: read: {}: invalid timeout specification",
+                                        shell.error_prefix(),
+                                        args[i]
+                                    );
+                                    return 1;
+                                }
+                            }
                         }
                         break;
                     }
-                    _ => break,
+                    'E' | 'i' => {} // accepted but not implemented
+                    _ => {
+                        eprintln!(
+                            "{}: read: -{}: invalid option",
+                            shell.error_prefix(),
+                            fchars[j]
+                        );
+                        eprintln!(
+                            "read: usage: read [-Eers] [-a array] [-d delim] [-i text] [-n nchars] [-N nchars] [-p prompt] [-t timeout] [-u fd] [name ...]"
+                        );
+                        return 2;
+                    }
                 }
                 j += 1;
             }
@@ -3980,6 +4011,17 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
                 }
             }
             arg if !arg.starts_with('-') => {
+                // Validate identifier
+                if !arg.chars().all(|c| c.is_alphanumeric() || c == '_')
+                    || arg.chars().next().is_some_and(|c| c.is_ascii_digit())
+                {
+                    eprintln!(
+                        "{}: read: `{}': not a valid identifier",
+                        shell.error_prefix(),
+                        arg
+                    );
+                    return 1;
+                }
                 var_names.push(arg.to_string());
             }
             _ => {}
@@ -3994,6 +4036,19 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
 
     if !prompt.is_empty() {
         eprint!("{}", prompt);
+    }
+
+    // Validate fd if specified
+    #[cfg(unix)]
+    if let Some(f) = fd
+        && nix::fcntl::fcntl(f, nix::fcntl::FcntlArg::F_GETFD).is_err()
+    {
+        eprintln!(
+            "{}: read: {}: invalid file descriptor: Bad file descriptor",
+            shell.error_prefix(),
+            f
+        );
+        return 1;
     }
 
     let mut line = String::new();
