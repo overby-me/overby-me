@@ -3018,6 +3018,7 @@ fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
                         ("noclobber", shell.opt_noclobber),
                         ("noexec", shell.opt_noexec),
                         ("noglob", shell.opt_noglob),
+                        ("monitor", false),
                         ("nolog", false),
                         ("notify", false),
                         ("nounset", shell.opt_nounset),
@@ -3053,7 +3054,7 @@ fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
                         'C' => shell.opt_noclobber = enable,
                         'n' => shell.opt_noexec = enable,
                         'h' => shell.opt_hashall = enable,
-                        'a' | 'b' | 'p' | 't' | 'v' | 'B' | 'H' | 'P' | 'T' => {
+                        'a' | 'b' | 'm' | 'p' | 't' | 'v' | 'B' | 'E' | 'H' | 'P' | 'T' => {
                             // Known but not fully implemented flags — accept silently
                         }
                         _ => {
