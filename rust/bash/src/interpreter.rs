@@ -281,6 +281,8 @@ pub struct Shell {
     pub shopt_nocasematch: bool,
     pub shopt_lastpipe: bool,
     pub shopt_expand_aliases: bool,
+    /// Generic shopt options storage for options not yet individually tracked
+    pub shopt_options: HashMap<String, bool>,
     pub in_pipeline_child: bool,
     pub dash_c_mode: bool,
     pub loop_depth: i32,
@@ -422,6 +424,7 @@ impl Shell {
             shopt_nocasematch: false,
             shopt_lastpipe: false,
             shopt_expand_aliases: false,
+            shopt_options: HashMap::new(),
             in_pipeline_child: false,
             dash_c_mode: false,
             loop_depth: 0,

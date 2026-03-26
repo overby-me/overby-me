@@ -6610,67 +6610,112 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
     ];
 
     // Build the full options table with current values
-    let all_options: Vec<(&str, bool)> = vec![
-        ("array_expand_once", false),
-        ("assoc_expand_once", false),
-        ("autocd", false),
-        ("bash_source_fullpath", false),
-        ("cdable_vars", false),
-        ("cdspell", false),
-        ("checkhash", false),
-        ("checkjobs", false),
+    // Helper: get shopt option value, checking per-field bools first, then generic map
+    let get_opt = |name: &str| -> bool {
+        match name {
+            "expand_aliases" => shell.shopt_expand_aliases,
+            "extglob" => shell.shopt_extglob,
+            "globstar" => shell.shopt_globstar,
+            "inherit_errexit" => shell.shopt_inherit_errexit,
+            "lastpipe" => shell.shopt_lastpipe,
+            "nocasematch" => shell.shopt_nocasematch,
+            "nullglob" => shell.shopt_nullglob,
+            _ => *shell.shopt_options.get(name).unwrap_or(&false),
+        }
+    };
+    // Default values for options (used when not explicitly set)
+    let defaults: &[(&str, bool)] = &[
         ("checkwinsize", false),
         ("cmdhist", true),
-        ("compat31", false),
-        ("compat32", false),
-        ("compat40", false),
-        ("compat41", false),
-        ("compat42", false),
-        ("compat43", false),
-        ("compat44", false),
         ("complete_fullquote", true),
-        ("direxpand", false),
-        ("dirspell", false),
-        ("dotglob", false),
-        ("execfail", false),
-        ("expand_aliases", shell.shopt_expand_aliases),
-        ("extdebug", false),
-        ("extglob", shell.shopt_extglob),
         ("extquote", true),
-        ("failglob", false),
         ("force_fignore", true),
         ("globasciiranges", true),
         ("globskipdots", true),
-        ("globstar", shell.shopt_globstar),
-        ("gnu_errfmt", false),
-        ("histappend", false),
-        ("histreedit", false),
-        ("histverify", false),
         ("hostcomplete", true),
-        ("huponexit", false),
-        ("inherit_errexit", shell.shopt_inherit_errexit),
         ("interactive_comments", true),
-        ("lastpipe", shell.shopt_lastpipe),
-        ("lithist", false),
-        ("localvar_inherit", false),
-        ("localvar_unset", false),
-        ("login_shell", false),
-        ("mailwarn", false),
-        ("no_empty_cmd_completion", false),
-        ("nocaseglob", false),
-        ("nocasematch", shell.shopt_nocasematch),
-        ("noexpand_translation", false),
-        ("nullglob", shell.shopt_nullglob),
         ("patsub_replacement", true),
         ("progcomp", true),
-        ("progcomp_alias", false),
         ("promptvars", true),
-        ("restricted_shell", false),
-        ("shift_verbose", false),
         ("sourcepath", true),
-        ("varredir_close", false),
-        ("xpg_echo", false),
     ];
+    let option_names: &[&str] = &[
+        "array_expand_once",
+        "assoc_expand_once",
+        "autocd",
+        "bash_source_fullpath",
+        "cdable_vars",
+        "cdspell",
+        "checkhash",
+        "checkjobs",
+        "checkwinsize",
+        "cmdhist",
+        "compat31",
+        "compat32",
+        "compat40",
+        "compat41",
+        "compat42",
+        "compat43",
+        "compat44",
+        "complete_fullquote",
+        "direxpand",
+        "dirspell",
+        "dotglob",
+        "execfail",
+        "expand_aliases",
+        "extdebug",
+        "extglob",
+        "extquote",
+        "failglob",
+        "force_fignore",
+        "globasciiranges",
+        "globskipdots",
+        "globstar",
+        "gnu_errfmt",
+        "histappend",
+        "histreedit",
+        "histverify",
+        "hostcomplete",
+        "huponexit",
+        "inherit_errexit",
+        "interactive_comments",
+        "lastpipe",
+        "lithist",
+        "localvar_inherit",
+        "localvar_unset",
+        "login_shell",
+        "mailwarn",
+        "no_empty_cmd_completion",
+        "nocaseglob",
+        "nocasematch",
+        "noexpand_translation",
+        "nullglob",
+        "patsub_replacement",
+        "progcomp",
+        "progcomp_alias",
+        "promptvars",
+        "restricted_shell",
+        "shift_verbose",
+        "sourcepath",
+        "varredir_close",
+        "xpg_echo",
+    ];
+    let all_options: Vec<(&str, bool)> = option_names
+        .iter()
+        .map(|&name| {
+            let val = if shell.shopt_options.contains_key(name) {
+                get_opt(name)
+            } else {
+                // Check defaults
+                defaults
+                    .iter()
+                    .find(|(n, _)| *n == name)
+                    .map(|(_, v)| *v)
+                    .unwrap_or_else(|| get_opt(name))
+            };
+            (name, val)
+        })
+        .collect();
 
     if opts.is_empty() && !set && !unset {
         // List all shopt options
@@ -6779,11 +6824,11 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
                 }
             }
             _ if all_known_opts.contains(opt) => {
-                // Known but not fully tracked option — handle print/query
-                if !set
-                    && !unset
-                    && let Some((_, val)) = all_options.iter().find(|(n, _)| n == opt)
-                {
+                if set {
+                    shell.shopt_options.insert(opt.to_string(), true);
+                } else if unset {
+                    shell.shopt_options.insert(opt.to_string(), false);
+                } else if let Some((_, val)) = all_options.iter().find(|(n, _)| n == opt) {
                     if !query {
                         if print_mode {
                             println!("shopt {} {}", if *val { "-s" } else { "-u" }, opt);
