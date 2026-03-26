@@ -423,9 +423,8 @@
           # Remove RestartForceExitStatus section from oneshot-restart test
           # (requires runtime unit file creation and helper script not available)
           sed -i '/^# Test RestartForceExitStatus/,$d' TEST-23-UNIT-FILE.oneshot-restart.sh
-          # Remove success-failure subtest: requires synchronous start semantics
-          # for Type=notify (systemctl start must block until READY or failure)
-          rm -f TEST-23-UNIT-FILE.success-failure.sh
+          # success-failure subtest: enabled — requires synchronous start for
+          # Type=notify and OnFailure=/OnSuccess= triggers
         '';
       }
       {

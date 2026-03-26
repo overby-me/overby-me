@@ -5120,32 +5120,106 @@ pub fn execute_command(
                     }
                     return Err(errstr);
                 }
-                // For oneshot services the activation graph swallows errors
-                // (to let After= units proceed), so check the target unit's
-                // final status explicitly. Also check Restarting state since
-                // the exit handler may have already transitioned from
-                // StoppedUnexpected to Restarting for auto-restart.
-                // Only check oneshot services — Type=simple/notify/etc. return
-                // success as soon as the process is forked, matching systemd behavior.
+                // Check the target unit's final status after activation.
+                //
+                // For oneshot services: activation is synchronous, so check
+                // immediately for failure / restart.
+                //
+                // For Type=notify services: block until READY=1 is received
+                // or the service stops, matching real systemd behavior where
+                // `systemctl start` waits for readiness notification.
                 {
                     let ri = run_info.read_poisoned();
                     if let Some(unit) = ri.unit_table.get(&id) {
-                        let is_oneshot = if let Specific::Service(srvc) = &unit.specific {
-                            srvc.conf.srcv_type == crate::units::ServiceType::OneShot
+                        let srvc_type = if let Specific::Service(srvc) = &unit.specific {
+                            Some(srvc.conf.srcv_type.clone())
                         } else {
-                            false
+                            None
                         };
-                        if is_oneshot {
-                            let status = unit.common.status.read_poisoned();
-                            match &*status {
-                                UnitStatus::Stopped(_, errors) if !errors.is_empty() => {
-                                    return Err(format!("Unit {} failed to start", id.name));
+                        match srvc_type {
+                            Some(crate::units::ServiceType::OneShot) => {
+                                let status = unit.common.status.read_poisoned();
+                                match &*status {
+                                    UnitStatus::Stopped(_, errors) if !errors.is_empty() => {
+                                        return Err(format!(
+                                            "Unit {} failed to start",
+                                            id.name
+                                        ));
+                                    }
+                                    UnitStatus::Restarting => {
+                                        return Err(format!(
+                                            "Unit {} failed to start",
+                                            id.name
+                                        ));
+                                    }
+                                    _ => {}
                                 }
-                                UnitStatus::Restarting => {
-                                    return Err(format!("Unit {} failed to start", id.name));
-                                }
-                                _ => {}
                             }
+                            Some(
+                                crate::units::ServiceType::Notify
+                                | crate::units::ServiceType::NotifyReload,
+                            ) => {
+                                // Drop the run_info lock before polling.
+                                drop(ri);
+                                // Poll until the service sends READY=1 or stops.
+                                loop {
+                                    let ri = run_info.read_poisoned();
+                                    let Some(unit) = ri.unit_table.get(&id) else {
+                                        break;
+                                    };
+                                    let status = unit.common.status.read_poisoned();
+                                    match &*status {
+                                        UnitStatus::Stopped(_, errors)
+                                            if !errors.is_empty() =>
+                                        {
+                                            return Err(format!(
+                                                "Unit {} failed to start",
+                                                id.name
+                                            ));
+                                        }
+                                        UnitStatus::Stopped(
+                                            crate::units::StatusStopped::StoppedUnexpected,
+                                            _,
+                                        ) => {
+                                            return Err(format!(
+                                                "Unit {} failed to start",
+                                                id.name
+                                            ));
+                                        }
+                                        UnitStatus::Restarting => {
+                                            return Err(format!(
+                                                "Unit {} failed to start",
+                                                id.name
+                                            ));
+                                        }
+                                        UnitStatus::Stopped(_, _) => {
+                                            // Clean stop before READY — treat as failure
+                                            return Err(format!(
+                                                "Unit {} failed to start",
+                                                id.name
+                                            ));
+                                        }
+                                        UnitStatus::Started(_) => {
+                                            // Check if READY=1 has been signaled
+                                            if let Specific::Service(svc) = &unit.specific
+                                            {
+                                                let state =
+                                                    svc.state.read_poisoned();
+                                                if state.srvc.signaled_ready {
+                                                    break; // success
+                                                }
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                    drop(status);
+                                    drop(ri);
+                                    std::thread::sleep(
+                                        std::time::Duration::from_millis(50),
+                                    );
+                                }
+                            }
+                            _ => {}
                         }
                     }
                 }
