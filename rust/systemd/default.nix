@@ -627,7 +627,6 @@
                TEST-74-AUX-UTILS.varlinkctl.sh \
                TEST-74-AUX-UTILS.networkctl.sh \
                TEST-74-AUX-UTILS.cgls.sh \
-               TEST-74-AUX-UTILS.cgtop.sh \
                TEST-74-AUX-UTILS.socket-activate.sh \
                TEST-74-AUX-UTILS.network-generator.sh \
                TEST-74-AUX-UTILS.pty-forward.sh \

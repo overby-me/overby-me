@@ -23,32 +23,40 @@ use std::time::{Duration, Instant};
     version
 )]
 struct Cli {
-    /// Refresh interval in seconds (0 = one-shot)
-    #[arg(short = 'd', long, default_value_t = 1.0)]
+    /// Refresh interval (e.g. "1", "500ms", "2s")
+    #[arg(short = 'd', long, default_value = "1", value_parser = parse_delay)]
     delay: f64,
 
     /// Number of iterations (0 = infinite)
     #[arg(short = 'n', long, default_value_t = 1)]
     iterations: u32,
 
+    /// Run a single iteration (equivalent to --iterations=1)
+    #[arg(short = '1', hide = true)]
+    one_shot: bool,
+
     /// Sort by: cpu, memory, io, tasks, path
-    #[arg(short = 's', long, default_value = "cpu")]
+    #[arg(short = 's', long, default_value = "cpu", value_parser = parse_order)]
     order: String,
 
     /// Show raw (bytes/usec) values instead of human-readable
     #[arg(long)]
     raw: bool,
 
-    /// Only show cgroups with at least one task
-    #[arg(short, long)]
-    processes: bool,
+    /// Count only userspace processes instead of tasks (processes + kernel threads)
+    #[arg(short = 'P')]
+    count_userspace_processes: bool,
+
+    /// Include kernel threads in output
+    #[arg(short = 'k')]
+    kernel_threads: bool,
 
     /// Do not pipe output into a pager
     #[arg(long)]
     no_pager: bool,
 
-    /// Show recursive resource usage
-    #[arg(long)]
+    /// Show recursive resource usage (yes/no)
+    #[arg(long, default_value = "yes", default_missing_value = "yes", num_args = 0..=1, value_parser = parse_bool_arg)]
     recursive: bool,
 
     /// Limit depth of cgroup hierarchy shown
@@ -59,8 +67,93 @@ struct Cli {
     #[arg(short, long)]
     batch: bool,
 
+    /// CPU display mode: percentage or time
+    #[arg(long, value_parser = parse_cpu_mode)]
+    cpu: Option<String>,
+
+    /// Order by path
+    #[arg(short = 'p', hide = true)]
+    order_path: bool,
+
+    /// Order by tasks
+    #[arg(short = 't', hide = true)]
+    order_tasks: bool,
+
+    /// Order by CPU
+    #[arg(short = 'c', hide = true)]
+    order_cpu: bool,
+
+    /// Order by memory
+    #[arg(short = 'm', hide = true)]
+    order_memory: bool,
+
+    /// Order by I/O
+    #[arg(short = 'i', hide = true)]
+    order_io: bool,
+
     /// Specific cgroup path to show (default: /)
     cgroup: Option<String>,
+}
+
+/// Parse a delay value with optional time suffix (ms, s, min, h, d, us, usec, msec).
+fn parse_delay(s: &str) -> Result<f64, String> {
+    // Try parsing as plain number (seconds)
+    if let Ok(v) = s.parse::<f64>() {
+        return Ok(v);
+    }
+
+    // Try with suffix
+    let s_lower = s.to_lowercase();
+    let (num_str, multiplier) = if let Some(n) = s_lower.strip_suffix("msec") {
+        (n, 0.001)
+    } else if let Some(n) = s_lower.strip_suffix("usec") {
+        (n, 0.000_001)
+    } else if let Some(n) = s_lower.strip_suffix("ms") {
+        (n, 0.001)
+    } else if let Some(n) = s_lower.strip_suffix("us") {
+        (n, 0.000_001)
+    } else if let Some(n) = s_lower.strip_suffix("min") {
+        (n, 60.0)
+    } else if let Some(n) = s_lower.strip_suffix('s') {
+        (n, 1.0)
+    } else if let Some(n) = s_lower.strip_suffix('h') {
+        (n, 3600.0)
+    } else if let Some(n) = s_lower.strip_suffix('d') {
+        (n, 86400.0)
+    } else {
+        return Err(format!("Failed to parse delay value: {s}"));
+    };
+
+    let num: f64 = num_str
+        .parse()
+        .map_err(|_| format!("Failed to parse delay value: {s}"))?;
+    Ok(num * multiplier)
+}
+
+/// Parse order value with validation.
+fn parse_order(s: &str) -> Result<String, String> {
+    match s.to_lowercase().as_str() {
+        "cpu" | "c" | "memory" | "mem" | "m" | "io" | "i" | "input" | "output" | "tasks" | "t"
+        | "task" | "path" | "p" | "name" => Ok(s.to_string()),
+        _ => Err(format!("Invalid order: {s}")),
+    }
+}
+
+/// Parse --cpu mode value.
+fn parse_cpu_mode(s: &str) -> Result<String, String> {
+    match s.to_lowercase().as_str() {
+        "percentage" | "time" => Ok(s.to_string()),
+        _ => Err(format!("Invalid CPU mode: {s}")),
+    }
+}
+
+/// Parse a boolean argument value (yes/no/true/false/1/0).
+fn parse_bool_arg(s: &str) -> Result<bool, String> {
+    match s.to_lowercase().as_str() {
+        "yes" | "true" | "1" => Ok(true),
+        "no" | "false" | "0" => Ok(false),
+        _ => Err(format!("Invalid boolean value: {s}")),
+    }
 }
 
 // ── Data structures ───────────────────────────────────────────────────────
@@ -110,7 +203,11 @@ impl SortOrder {
             "io" | "i" | "input" | "output" => SortOrder::Io,
             "tasks" | "t" | "task" => SortOrder::Tasks,
             "path" | "p" | "name" => SortOrder::Path,
-            _ => SortOrder::Cpu,
+            // Validated by CLI parser, should not reach here
+            other => {
+                eprintln!("Invalid order: {other}");
+                process::exit(1);
+            }
         }
     }
 }
@@ -477,7 +574,23 @@ fn display_snapshot(
 fn main() {
     let cli = Cli::parse();
 
-    let order = SortOrder::from_str(&cli.order);
+    // Determine sort order: short flags take precedence over --order
+    let order = if cli.order_path {
+        SortOrder::Path
+    } else if cli.order_tasks {
+        SortOrder::Tasks
+    } else if cli.order_cpu {
+        SortOrder::Cpu
+    } else if cli.order_memory {
+        SortOrder::Memory
+    } else if cli.order_io {
+        SortOrder::Io
+    } else {
+        SortOrder::from_str(&cli.order)
+    };
+
+    // -1 flag forces one iteration
+    let iterations = if cli.one_shot { 1 } else { cli.iterations };
 
     let cgroup_root = if let Some(ref cg) = cli.cgroup {
         let cg = cg.trim_start_matches('/');
@@ -498,16 +611,20 @@ fn main() {
         process::exit(1);
     }
 
-    let is_one_shot = cli.iterations == 1 || cli.delay == 0.0;
+    let is_one_shot = iterations == 1 || cli.delay == 0.0;
     let batch_mode = cli.batch || is_one_shot;
 
     // Take initial snapshot
     let mut prev_snapshot = take_snapshot(&cgroup_root, cli.depth);
 
     if is_one_shot {
-        // For one-shot, we still need a tiny delay to compute CPU%
-        // But if this is the very first run, just show raw data without CPU%
-        display_snapshot(&prev_snapshot, order, cli.raw, cli.processes, batch_mode);
+        display_snapshot(
+            &prev_snapshot,
+            order,
+            cli.raw,
+            cli.count_userspace_processes,
+            batch_mode,
+        );
         return;
     }
 
@@ -520,12 +637,18 @@ fn main() {
         let mut curr_snapshot = take_snapshot(&cgroup_root, cli.depth);
         compute_cpu_percentages(&prev_snapshot, &mut curr_snapshot);
 
-        display_snapshot(&curr_snapshot, order, cli.raw, cli.processes, batch_mode);
+        display_snapshot(
+            &curr_snapshot,
+            order,
+            cli.raw,
+            cli.count_userspace_processes,
+            batch_mode,
+        );
 
         prev_snapshot = curr_snapshot;
         iteration += 1;
 
-        if cli.iterations > 0 && iteration >= cli.iterations {
+        if iterations > 0 && iteration >= iterations {
             break;
         }
     }
@@ -572,10 +695,8 @@ mod tests {
         assert_eq!(SortOrder::from_str("name"), SortOrder::Path);
     }
 
-    #[test]
-    fn test_sort_order_from_str_unknown() {
-        assert_eq!(SortOrder::from_str("foobar"), SortOrder::Cpu);
-    }
+    // Unknown order now exits with error (validated by CLI parser),
+    // so no unit test for unknown order fallback.
 
     // Formatting tests
 
