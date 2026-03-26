@@ -1229,6 +1229,16 @@ impl Shell {
                         }
 
                         let status = self.run_command(cmd);
+                        // Run EXIT trap before exiting pipeline child
+                        if let Some(handler) = self
+                            .traps
+                            .get("EXIT")
+                            .or_else(|| self.traps.get("0"))
+                            .cloned()
+                            && !handler.is_empty()
+                        {
+                            self.run_string(&handler);
+                        }
                         std::io::stdout().flush().ok();
                         std::io::stderr().flush().ok();
                         std::process::exit(status);
