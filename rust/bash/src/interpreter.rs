@@ -992,15 +992,19 @@ impl Shell {
                         self.in_trap_handler += 1;
                         self.run_string(&handler);
                         self.in_trap_handler -= 1;
-                        // If return was called in trap, propagate it
+                        // If return was called in trap, propagate it only if inside a function
                         if self.returning {
-                            // Don't restore status — the return value takes precedence
-                            if let Some(v) = old_trapsig {
-                                self.vars.insert("BASH_TRAPSIG".to_string(), v);
-                            } else {
-                                self.vars.remove("BASH_TRAPSIG");
+                            if !self.func_names.is_empty() {
+                                // Inside a function — propagate return
+                                if let Some(v) = old_trapsig {
+                                    self.vars.insert("BASH_TRAPSIG".to_string(), v);
+                                } else {
+                                    self.vars.remove("BASH_TRAPSIG");
+                                }
+                                return;
                             }
-                            return;
+                            // At top level — clear returning (trap handler return is local)
+                            self.returning = false;
                         }
                         self.last_status = saved_status;
                         if let Some(v) = old_trapsig {
@@ -4344,10 +4348,29 @@ impl Shell {
                     }
                 }
                 Ok(nix::unistd::ForkResult::Parent { child }) => {
-                    match nix::sys::wait::waitpid(child, None) {
-                        Ok(nix::sys::wait::WaitStatus::Exited(_, code)) => code,
-                        Ok(nix::sys::wait::WaitStatus::Signaled(_, sig, _)) => 128 + sig as i32,
-                        _ => 1,
+                    // Wait for child, but check for pending signals on EINTR
+                    loop {
+                        match nix::sys::wait::waitpid(
+                            child,
+                            Some(nix::sys::wait::WaitPidFlag::WNOHANG),
+                        ) {
+                            Ok(nix::sys::wait::WaitStatus::Exited(_, code)) => break code,
+                            Ok(nix::sys::wait::WaitStatus::Signaled(_, sig, _)) => {
+                                break 128 + sig as i32;
+                            }
+                            Ok(nix::sys::wait::WaitStatus::StillAlive) => {
+                                // Child still running — check signals
+                                self.check_pending_signals();
+                                if self.returning || self.breaking > 0 {
+                                    // Signal handler requested return — leave child running
+                                    break 128;
+                                }
+                                // Brief sleep to avoid busy-waiting
+                                std::thread::sleep(std::time::Duration::from_millis(1));
+                            }
+                            Err(_) => break 1,
+                            _ => break 1,
+                        }
                     }
                 }
                 Err(e) => {
@@ -4673,6 +4696,17 @@ impl Shell {
             }
             if self.continuing > 0 {
                 self.continuing -= 1;
+            }
+
+            // Check signals at the end of each loop iteration too
+            if self.in_trap_handler == 0 {
+                self.check_pending_signals();
+                if self.returning || self.breaking > 0 {
+                    if self.breaking > 0 {
+                        self.breaking -= 1;
+                    }
+                    break;
+                }
             }
         }
         self.loop_depth -= 1;
