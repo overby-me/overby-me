@@ -2204,6 +2204,9 @@ impl Lexer {
                             }
                             parts.push(WordPart::SingleQuoted(next.to_string()));
                         }
+                    } else {
+                        // \ at EOF — treat as literal backslash
+                        literal.push('\\');
                     }
                 }
                 '\'' => {
