@@ -7111,6 +7111,29 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
                     shell.shopt_inherit_errexit = true;
                 } else if unset {
                     shell.shopt_inherit_errexit = false;
+                } else if !query {
+                    if print_mode {
+                        println!(
+                            "shopt {} inherit_errexit",
+                            if shell.shopt_inherit_errexit {
+                                "-s"
+                            } else {
+                                "-u"
+                            }
+                        );
+                    } else {
+                        println!(
+                            "{:<20}\t{}",
+                            "inherit_errexit",
+                            if shell.shopt_inherit_errexit {
+                                "on"
+                            } else {
+                                "off"
+                            }
+                        );
+                    }
+                } else if !shell.shopt_inherit_errexit {
+                    status = 1;
                 }
             }
             "nocasematch" => {
@@ -7118,6 +7141,21 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
                     shell.shopt_nocasematch = true;
                 } else if unset {
                     shell.shopt_nocasematch = false;
+                } else if !query {
+                    if print_mode {
+                        println!(
+                            "shopt {} nocasematch",
+                            if shell.shopt_nocasematch { "-s" } else { "-u" }
+                        );
+                    } else {
+                        println!(
+                            "{:<20}\t{}",
+                            "nocasematch",
+                            if shell.shopt_nocasematch { "on" } else { "off" }
+                        );
+                    }
+                } else if !shell.shopt_nocasematch {
+                    status = 1;
                 }
             }
             "lastpipe" => {
@@ -7125,6 +7163,21 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
                     shell.shopt_lastpipe = true;
                 } else if unset {
                     shell.shopt_lastpipe = false;
+                } else if !query {
+                    if print_mode {
+                        println!(
+                            "shopt {} lastpipe",
+                            if shell.shopt_lastpipe { "-s" } else { "-u" }
+                        );
+                    } else {
+                        println!(
+                            "{:<20}\t{}",
+                            "lastpipe",
+                            if shell.shopt_lastpipe { "on" } else { "off" }
+                        );
+                    }
+                } else if !shell.shopt_lastpipe {
+                    status = 1;
                 }
             }
             "expand_aliases" => {
@@ -7132,6 +7185,29 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
                     shell.shopt_expand_aliases = true;
                 } else if unset {
                     shell.shopt_expand_aliases = false;
+                } else if !query {
+                    if print_mode {
+                        println!(
+                            "shopt {} expand_aliases",
+                            if shell.shopt_expand_aliases {
+                                "-s"
+                            } else {
+                                "-u"
+                            }
+                        );
+                    } else {
+                        println!(
+                            "{:<20}\t{}",
+                            "expand_aliases",
+                            if shell.shopt_expand_aliases {
+                                "on"
+                            } else {
+                                "off"
+                            }
+                        );
+                    }
+                } else if !shell.shopt_expand_aliases {
+                    status = 1;
                 }
             }
             _ if all_known_opts.contains(opt) => {
