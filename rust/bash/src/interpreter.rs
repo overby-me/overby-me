@@ -691,6 +691,18 @@ impl Shell {
             if cur_pos == last_pos {
                 if self.dash_c_mode {
                     // In -c mode, a stuck parser is a syntax error
+                    // Check for compound command context for better error messages
+                    if parser.current_token_str() == "EOF"
+                        && let Some((cmd, cmd_line)) = parser.compound_cmd_context()
+                    {
+                        eprintln!(
+                            "{}: syntax error: unexpected end of file from `{}' command on line {}",
+                            self.syntax_error_prefix(),
+                            cmd,
+                            cmd_line
+                        );
+                        return 2;
+                    }
                     let token = parser.current_token_str();
                     eprintln!(
                         "{}: syntax error near unexpected token `{}'",
@@ -783,6 +795,27 @@ impl Shell {
                     if let Some(msg) = e.strip_prefix("\x00COND_ERROR") {
                         // Conditional expression error — print with prefix
                         eprintln!("{}: {}", self.syntax_error_prefix(), msg);
+                        // For EOF errors, also print compound command context
+                        if parser.current_token_str() == "EOF" {
+                            if let Some((cmd, cmd_line)) = parser.compound_cmd_context() {
+                                // Use line 2 for the compound command EOF error (like bash)
+                                let name = self
+                                    .positional
+                                    .first()
+                                    .map(|s| s.as_str())
+                                    .unwrap_or("bash");
+                                let prefix = if self.dash_c_mode {
+                                    format!("{}: -c: line 2", name)
+                                } else {
+                                    self.syntax_error_prefix()
+                                };
+                                eprintln!(
+                                    "{}: syntax error: unexpected end of file from `{}' command on line {}",
+                                    prefix, cmd, cmd_line
+                                );
+                            }
+                            return 2;
+                        }
                         // Also print generic syntax error like bash does
                         let token = parser.current_token_str();
                         eprintln!(

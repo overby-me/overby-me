@@ -5,13 +5,19 @@ use std::collections::HashMap;
 pub struct Parser {
     lexer: Lexer,
     current: Token,
+    /// Stack of compound command starts for EOF error reporting
+    compound_cmd_stack: Vec<(String, usize)>, // (keyword, line_number)
 }
 
 impl Parser {
     pub fn new(input: &str) -> Self {
         let mut lexer = Lexer::new(input);
         let current = lexer.next_token();
-        Self { lexer, current }
+        Self {
+            lexer,
+            current,
+            compound_cmd_stack: Vec::new(),
+        }
     }
 
     pub fn new_with_aliases(
@@ -25,7 +31,11 @@ impl Parser {
         lexer.shopt_expand_aliases = expand_aliases;
         lexer.posix_mode = posix_mode;
         let current = lexer.next_token();
-        Self { lexer, current }
+        Self {
+            lexer,
+            current,
+            compound_cmd_stack: Vec::new(),
+        }
     }
 
     /// Update the alias table (called between parse-execute cycles)
@@ -148,6 +158,13 @@ impl Parser {
     }
 
     /// Get current lexer position (for stuck detection)
+    /// Get the innermost compound command context (for EOF error messages)
+    pub fn compound_cmd_context(&self) -> Option<(&str, usize)> {
+        self.compound_cmd_stack
+            .last()
+            .map(|(cmd, line)| (cmd.as_str(), *line))
+    }
+
     pub fn current_pos(&self) -> usize {
         self.lexer.current_pos()
     }
@@ -856,6 +873,8 @@ impl Parser {
 
     /// Parse `[[ expression ]]`
     fn parse_conditional(&mut self) -> Result<CompoundCommand, String> {
+        let start_line = self.current_line();
+        self.compound_cmd_stack.push(("[[".to_string(), start_line));
         self.expect_keyword("[[")?;
         let expr = self.parse_cond_or()?;
         // Check for ]] — if not found, produce a conditional-specific error
@@ -869,6 +888,7 @@ impl Parser {
                 tok
             )));
         }
+        self.compound_cmd_stack.pop();
         self.advance(); // consume ]]
         Ok(CompoundCommand::Conditional(expr))
     }
