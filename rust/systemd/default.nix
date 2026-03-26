@@ -322,7 +322,6 @@
                TEST-07-PID1.poll-limit.sh \
                TEST-07-PID1.prefix-shell.sh \
                TEST-07-PID1.private-bpf.sh \
-               TEST-07-PID1.private-network.sh \
                TEST-07-PID1.private-pids.sh \
                TEST-07-PID1.private-users.sh \
                TEST-07-PID1.protect-control-groups.sh \
@@ -334,7 +333,6 @@
                TEST-07-PID1.start-limit.sh \
                TEST-07-PID1.startv.sh \
                TEST-07-PID1.subgroup-kill.sh \
-               TEST-07-PID1.transient.sh \
                TEST-07-PID1.transient-unit-container.sh \
                TEST-07-PID1.user-namespace-path.sh \
                TEST-07-PID1.working-directory.sh
