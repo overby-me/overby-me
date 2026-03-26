@@ -165,6 +165,12 @@ pub struct Service {
     /// TRIGGER_UNIT — set by the path watcher when a path unit triggers this
     /// service. Contains the name of the .path unit that fired the trigger.
     pub trigger_unit: Option<String>,
+    /// TRIGGER_TIMER_REALTIME_USEC — set by the timer scheduler when a .timer
+    /// unit triggers this service. Contains the realtime timestamp in microseconds.
+    pub trigger_timer_realtime_usec: Option<u64>,
+    /// TRIGGER_TIMER_MONOTONIC_USEC — set by the timer scheduler when a .timer
+    /// unit triggers this service. Contains the monotonic timestamp in microseconds.
+    pub trigger_timer_monotonic_usec: Option<u64>,
     /// MONITOR_* environment variables — set when this service is activated
     /// as an OnSuccess= or OnFailure= handler for another unit.
     pub monitor_env: Option<MonitorEnv>,
@@ -690,6 +696,13 @@ impl Service {
         }
         if let Some(ref tu) = self.trigger_unit {
             cmd.env("TRIGGER_UNIT", tu);
+        }
+        // Pass TRIGGER_TIMER_*_USEC env vars for timer-activated services
+        if let Some(usec) = self.trigger_timer_realtime_usec {
+            cmd.env("TRIGGER_TIMER_REALTIME_USEC", usec.to_string());
+        }
+        if let Some(usec) = self.trigger_timer_monotonic_usec {
+            cmd.env("TRIGGER_TIMER_MONOTONIC_USEC", usec.to_string());
         }
 
         // Pass MONITOR_* env vars for OnSuccess/OnFailure handler services

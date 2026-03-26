@@ -306,6 +306,12 @@ fn start_service_with_filedescriptors(
             if let Some(ref tu) = srvc.trigger_unit {
                 env.push(("TRIGGER_UNIT".to_owned(), tu.clone()));
             }
+            if let Some(usec) = srvc.trigger_timer_realtime_usec {
+                env.push(("TRIGGER_TIMER_REALTIME_USEC".to_owned(), usec.to_string()));
+            }
+            if let Some(usec) = srvc.trigger_timer_monotonic_usec {
+                env.push(("TRIGGER_TIMER_MONOTONIC_USEC".to_owned(), usec.to_string()));
+            }
 
             // MONITOR_* env vars for OnSuccess=/OnFailure= handler services.
             if let Some(ref mon) = srvc.monitor_env {

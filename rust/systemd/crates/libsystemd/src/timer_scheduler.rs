@@ -96,7 +96,7 @@ fn check_and_fire_timers(
         );
         last_fired.insert(timer_id.name.clone(), now);
 
-        fire_timer_target(run_info, &target_unit_name);
+        fire_timer_target(run_info, &target_unit_name, &timer_id.name);
     }
 }
 
@@ -248,7 +248,22 @@ fn should_fire_timer(
 pub use crate::calendar_spec::unix_to_datetime;
 
 /// Fire a timer's target unit by starting it via the activation system.
-fn fire_timer_target(run_info: &ArcMutRuntimeInfo, target_unit_name: &str) {
+/// Set TRIGGER_UNIT and TRIGGER_TIMER_*_USEC on the target service's state.
+fn set_timer_trigger_info(unit: &crate::units::Unit, timer_name: &str) {
+    if let Specific::Service(specific) = &unit.specific {
+        let mut state = specific.state.write_poisoned();
+        state.srvc.trigger_unit = Some(timer_name.to_owned());
+        let now = SystemTime::now();
+        if let Ok(dur) = now.duration_since(SystemTime::UNIX_EPOCH) {
+            state.srvc.trigger_timer_realtime_usec = Some(dur.as_micros() as u64);
+        }
+        let boot_instant = BOOT_INSTANT.get().copied().unwrap_or_else(Instant::now);
+        let mono = Instant::now().duration_since(boot_instant);
+        state.srvc.trigger_timer_monotonic_usec = Some(mono.as_micros() as u64);
+    }
+}
+
+fn fire_timer_target(run_info: &ArcMutRuntimeInfo, target_unit_name: &str, timer_name: &str) {
     let ri = run_info.read_poisoned();
 
     // Find the target unit
@@ -259,6 +274,7 @@ fn fire_timer_target(run_info: &ArcMutRuntimeInfo, target_unit_name: &str) {
 
     match target_unit {
         Some(unit) => {
+            set_timer_trigger_info(unit, timer_name);
             let status = unit.common.status.read_poisoned().clone();
             match status {
                 UnitStatus::Started(_) => {

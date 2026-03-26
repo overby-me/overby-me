@@ -200,6 +200,8 @@ pub fn unit_from_parsed_service(conf: ParsedServiceConfig) -> Result<Unit, Strin
                     main_exit_pid: None,
                     trigger_path: None,
                     trigger_unit: None,
+                    trigger_timer_realtime_usec: None,
+                    trigger_timer_monotonic_usec: None,
                     monitor_env: None,
                 },
             }),
