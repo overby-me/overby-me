@@ -583,10 +583,14 @@ fn main() {
     }
 
     // Generate or use the given unit name
-    let unit_name = cli
+    let mut unit_name = cli
         .unit
         .clone()
         .unwrap_or_else(|| generate_unit_name(&command, cli.scope));
+    // Ensure the unit name has a type suffix.
+    if !unit_name.contains('.') {
+        unit_name.push_str(if cli.scope { ".scope" } else { ".service" });
+    }
 
     // Print unit info to stderr (matching systemd-run behavior)
     print_unit_info(&cli, &unit_name);
@@ -629,6 +633,13 @@ fn main() {
             );
         }
         Err(e) => {
+            // If the error indicates that the service manager rejected the
+            // request (as opposed to a socket-not-found error), exit with
+            // failure rather than falling through to direct execution.
+            if e.starts_with("Service manager error:") {
+                eprintln!("Failed to start transient unit: {e}");
+                process::exit(1);
+            }
             eprintln!("Warning: Failed to create transient unit: {e}");
             if command.is_empty() {
                 process::exit(1);

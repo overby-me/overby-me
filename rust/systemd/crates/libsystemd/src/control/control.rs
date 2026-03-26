@@ -1940,19 +1940,20 @@ fn create_transient_unit(
         Some(other) => return Err(format!("Unknown service type: {other}")),
     };
 
-    // Build ExecStart command line.
-    let exec: Vec<Commandline> = params
+    // Build the main command from the command line.  This is appended to
+    // the ExecStart list AFTER any `-p ExecStart=` properties, so that
+    // for multi-ExecStart oneshot services the property-based commands run
+    // first and the trailing command is the main process.
+    let main_cmd: Option<Commandline> = params
         .command
         .as_ref()
         .filter(|cmd_parts| !cmd_parts.is_empty())
-        .map(|cmd_parts| {
-            vec![Commandline {
-                cmd: cmd_parts[0].clone(),
-                args: cmd_parts[1..].to_vec(),
-                prefixes: vec![],
-            }]
-        })
-        .unwrap_or_default();
+        .map(|cmd_parts| Commandline {
+            cmd: cmd_parts[0].clone(),
+            args: cmd_parts[1..].to_vec(),
+            prefixes: vec![],
+        });
+    let exec: Vec<Commandline> = Vec::new();
 
     // Build a minimal ExecConfig with the requested user/group/workdir.
     // Use the correct concrete types for ExecConfig fields.
@@ -2496,6 +2497,12 @@ fn create_transient_unit(
         }
     }
 
+    // Append the main command (from the trailing command line) after any
+    // `-p ExecStart=` property entries, so it runs last.
+    if let Some(cmd) = main_cmd {
+        service_conf.exec.push(cmd);
+    }
+
     // Apply environment variables from -E/--setenv
     for env_str in &params.environment {
         if let Some((k, v)) = env_str.split_once('=') {
@@ -2925,6 +2932,41 @@ pub fn execute_command(
                 let ri = run_info.read_poisoned();
                 crate::units::activate_unit(id.clone(), &ri, ActivationSource::Regular)
                     .map_err(|e| format!("Failed to start transient unit {unit_name}: {e}"))?;
+            }
+
+            // After activate_unit returns, check if the unit actually
+            // started.  activate_unit swallows some errors (converting
+            // them to Ok) for dependency-graph walking purposes, but for
+            // transient units we need to detect failure so that
+            // `systemd-run` can exit non-zero.
+            {
+                let ri = run_info.read_poisoned();
+                if let Some(unit) = ri.unit_table.get(&id) {
+                    let status = unit.common.status.read_poisoned();
+                    match &*status {
+                        crate::units::UnitStatus::Stopped(
+                            crate::units::StatusStopped::StoppedUnexpected,
+                            errors,
+                        ) => {
+                            let msg = if let Some(e) = errors.first() {
+                                format!("{e}")
+                            } else {
+                                "unit failed".to_string()
+                            };
+                            return Err(format!(
+                                "Failed to start transient unit {unit_name}: {msg}"
+                            ));
+                        }
+                        crate::units::UnitStatus::Restarting => {
+                            // The exit handler already kicked in and is
+                            // restarting the unit — the initial start failed.
+                            return Err(format!(
+                                "Failed to start transient unit {unit_name}: initial start failed, unit is restarting"
+                            ));
+                        }
+                        _ => {}
+                    }
+                }
             }
 
             if !do_wait {

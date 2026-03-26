@@ -12,6 +12,26 @@ use log::{debug, error, info, trace, warn};
 use std::sync::{Arc, Mutex};
 use threadpool::ThreadPool;
 
+/// Record a start timestamp for rate limiting purposes, without checking
+/// the rate limit.  Used to count the initial activation against
+/// StartLimitBurst.
+fn record_start_timestamp(unit: &Unit) {
+    fn record(common: &mut CommonState) {
+        common.start_timestamps.push(std::time::Instant::now());
+    }
+    match &unit.specific {
+        Specific::Service(s) => record(&mut s.state.write_poisoned().common),
+        Specific::Socket(s) => record(&mut s.state.write_poisoned().common),
+        Specific::Target(s) => record(&mut s.state.write_poisoned().common),
+        Specific::Slice(s) => record(&mut s.state.write_poisoned().common),
+        Specific::Mount(s) => record(&mut s.state.write_poisoned().common),
+        Specific::Swap(s) => record(&mut s.state.write_poisoned().common),
+        Specific::Timer(s) => record(&mut s.state.write_poisoned().common),
+        Specific::Path(s) => record(&mut s.state.write_poisoned().common),
+        Specific::Device(s) => record(&mut s.state.write_poisoned().common),
+    }
+}
+
 /// Check and enforce the start rate limit (StartLimitBurst=/StartLimitIntervalSec=).
 /// Returns `true` if the unit is allowed to start, `false` if rate-limited.
 /// Also records the current timestamp as a start attempt.
@@ -431,6 +451,13 @@ pub fn activate_unit(
         let status = unit.common.status.read_poisoned();
         status.is_started()
     };
+
+    // Record a start timestamp for rate limiting.  This ensures the
+    // initial activation counts against StartLimitBurst, matching real
+    // systemd behavior.
+    if !was_already_started {
+        record_start_timestamp(unit);
+    }
 
     match unit.activate(run_info, source) {
         Ok(status) => {
