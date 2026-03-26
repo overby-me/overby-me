@@ -233,6 +233,11 @@ struct ExpCtx<'a> {
     opt_flags: &'a str,
 }
 
+thread_local! {
+    /// Error prefix set by the interpreter for expansion error messages
+    pub static EXPAND_ERROR_PREFIX: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+
 impl ExpCtx<'_> {
     fn resolve_nameref(&self, name: &str) -> String {
         let mut resolved = name.to_string();
@@ -927,6 +932,19 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                 let _ = (kind, cmd);
                 out.push(Segment::Unquoted(String::new()));
             }
+        }
+        WordPart::BadSubstitution(expr) => {
+            let prefix = EXPAND_ERROR_PREFIX.with(|p| {
+                let p = p.borrow();
+                if p.is_empty() {
+                    "bash".to_string()
+                } else {
+                    p.clone()
+                }
+            });
+            eprintln!("{}: {}: bad substitution", prefix, expr);
+            // Push empty to avoid breaking segment collection
+            out.push(Segment::Unquoted(String::new()));
         }
     }
 }

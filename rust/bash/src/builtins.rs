@@ -1715,6 +1715,7 @@ fn format_word_part(part: &WordPart) -> String {
             ProcessSubKind::Input => format!("<({})", cmd),
             ProcessSubKind::Output => format!(">({})", cmd),
         },
+        WordPart::BadSubstitution(expr) => expr.clone(),
     }
 }
 

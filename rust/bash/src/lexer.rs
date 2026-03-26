@@ -1367,56 +1367,73 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
 fn parse_brace_param(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart {
     // ${!name} — indirect expansion / name prefix / array indices
     if *i < chars.len() && chars[*i] == '!' {
-        *i += 1;
-        let name = read_param_name_with_subscript(chars, i);
-
-        // Check if name ends with [@] or [*] — this is ${!arr[@]} for array indices
-        if name.ends_with("[@]") || name.ends_with("[*]") {
-            let ch = if name.ends_with("[@]") { '@' } else { '*' };
-            let arr_name = name[..name.len() - 3].to_string();
-            if *i < chars.len() && chars[*i] == '}' {
-                *i += 1;
-            }
-            return WordPart::Param(ParamExpr {
-                name: arr_name,
-                op: ParamOp::ArrayIndices(ch),
-            });
-        }
-
-        // ${!prefix*} or ${!prefix@} — names matching prefix
-        if *i < chars.len() && (chars[*i] == '*' || chars[*i] == '@') {
-            let ch = chars[*i];
+        // Check if '!' should be the variable name (not indirect prefix)
+        // ${!} = $!, ${!-word} = $! with default, ${!:-word} = $! with colon-default
+        // vs ${!name} = indirect, ${!name-word} = indirect with op
+        let next_after_bang = if *i + 1 < chars.len() {
+            chars[*i + 1]
+        } else {
+            '}'
+        };
+        if next_after_bang == '}'
+            || next_after_bang == ':'
+            || (matches!(next_after_bang, '-' | '+' | '=' | '?')
+                && (*i + 2 >= chars.len() || chars[*i + 2] != '}'))
+        {
+            // Treat '!' as the variable name, not indirect prefix
+            // Falls through to the normal param name reading below
+        } else {
             *i += 1;
+            let name = read_param_name_with_subscript(chars, i);
+
+            // Check if name ends with [@] or [*] — this is ${!arr[@]} for array indices
+            if name.ends_with("[@]") || name.ends_with("[*]") {
+                let ch = if name.ends_with("[@]") { '@' } else { '*' };
+                let arr_name = name[..name.len() - 3].to_string();
+                if *i < chars.len() && chars[*i] == '}' {
+                    *i += 1;
+                }
+                return WordPart::Param(ParamExpr {
+                    name: arr_name,
+                    op: ParamOp::ArrayIndices(ch),
+                });
+            }
+
+            // ${!prefix*} or ${!prefix@} — names matching prefix
+            if *i < chars.len() && (chars[*i] == '*' || chars[*i] == '@') {
+                let ch = chars[*i];
+                *i += 1;
+                if *i < chars.len() && chars[*i] == '}' {
+                    *i += 1;
+                }
+                return WordPart::Param(ParamExpr {
+                    name,
+                    op: ParamOp::NamePrefix(ch),
+                });
+            }
+            // Check for operator after indirect name: ${!name+word}, ${!name-word}, etc.
+            if *i < chars.len() && chars[*i] != '}' {
+                // There's an operator — parse it as indirect + operator
+                let op = read_param_op(chars, i, &name, in_dquote);
+                if *i < chars.len() && chars[*i] == '}' {
+                    *i += 1;
+                }
+                // Wrap the result: we need indirect resolution first, then apply the op
+                // For now, represent as Indirect with the name containing the op info
+                // Actually, we need a proper representation. Let's use a special name prefix.
+                return WordPart::Param(ParamExpr {
+                    name: format!("!{}", name),
+                    op,
+                });
+            }
             if *i < chars.len() && chars[*i] == '}' {
                 *i += 1;
             }
             return WordPart::Param(ParamExpr {
                 name,
-                op: ParamOp::NamePrefix(ch),
+                op: ParamOp::Indirect,
             });
-        }
-        // Check for operator after indirect name: ${!name+word}, ${!name-word}, etc.
-        if *i < chars.len() && chars[*i] != '}' {
-            // There's an operator — parse it as indirect + operator
-            let op = read_param_op(chars, i, &name, in_dquote);
-            if *i < chars.len() && chars[*i] == '}' {
-                *i += 1;
-            }
-            // Wrap the result: we need indirect resolution first, then apply the op
-            // For now, represent as Indirect with the name containing the op info
-            // Actually, we need a proper representation. Let's use a special name prefix.
-            return WordPart::Param(ParamExpr {
-                name: format!("!{}", name),
-                op,
-            });
-        }
-        if *i < chars.len() && chars[*i] == '}' {
-            *i += 1;
-        }
-        return WordPart::Param(ParamExpr {
-            name,
-            op: ParamOp::Indirect,
-        });
+        } // end of else (indirect expansion path)
     }
 
     // ${#name} - length, but ${#} ${#:-...} ${#-...} etc. are $# with operations
@@ -1427,12 +1444,20 @@ fn parse_brace_param(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart
             '}'
         };
         // Check if this is $# with an operation vs ${#name} (length)
-        // ${#:...}, ${#-word}, ${#+word} are $# with operations
-        // ${#?} alone = length of $?, ${#?word} = $# with ? (error) op
+        // ${#:-word}, ${#-word}, ${#+word} are $# with operations
+        // ${#-} alone = length of $-, ${#?} alone = length of $?
+        // ${#:} alone = bad substitution
         let is_hash_param_op = match next {
             '}' => false,
-            ':' => true, // ${#:anything} is always $# with operation
-            '-' | '+' => true,
+            ':' => {
+                // ${#:} = bad substitution, ${#:X} = $# with operation
+                *i + 2 < chars.len() && chars[*i + 2] != '}'
+            }
+            '-' | '+' => {
+                // ${#-} = length of $-, ${#-word} = $# default op
+                // ${#+} = bad substitution, ${#+word} = $# alt op
+                *i + 2 < chars.len() && chars[*i + 2] != '}'
+            }
             '?' => {
                 // ${#?} = length of $?, ${#?word} = $# error op
                 *i + 2 < chars.len() && chars[*i + 2] != '}'
@@ -1443,9 +1468,9 @@ fn parse_brace_param(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart
         if !is_hash_param_op && next != '}' {
             *i += 1;
             let name = read_param_name_with_subscript(chars, i);
-            // If name is empty and next char is not }, it's like ${#:} — invalid
+            // If name is empty and next char is not }, it's an invalid ${#X} form
             if name.is_empty() && *i < chars.len() && chars[*i] != '}' {
-                // Skip to closing } and return error literal
+                // Skip to closing } and return bad substitution error
                 let start = *i;
                 while *i < chars.len() && chars[*i] != '}' {
                     *i += 1;
@@ -1454,7 +1479,22 @@ fn parse_brace_param(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart
                 if *i < chars.len() {
                     *i += 1;
                 }
-                return WordPart::Literal(format!("${{#{}}}", rest));
+                return WordPart::BadSubstitution(format!("${{#{}}}", rest));
+            }
+            // Check for trailing invalid chars after name (e.g., ${#1xyz})
+            if *i < chars.len() && chars[*i] != '}' {
+                let start_pos = *i;
+                while *i < chars.len() && chars[*i] != '}' {
+                    *i += 1;
+                }
+                let rest: String = std::iter::once('#')
+                    .chain(name.chars())
+                    .chain(chars[start_pos..*i].iter().copied())
+                    .collect();
+                if *i < chars.len() {
+                    *i += 1;
+                }
+                return WordPart::BadSubstitution(format!("${{{}}}", rest));
             }
             if *i < chars.len() && chars[*i] == '}' {
                 *i += 1;

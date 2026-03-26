@@ -1506,6 +1506,10 @@ impl Shell {
         let last_status = self.last_status;
         let last_bg_pid = self.last_bg_pid;
         let opt_flags = self.get_opt_flags();
+        // Set error prefix for expansion error messages
+        crate::expand::EXPAND_ERROR_PREFIX.with(|p| {
+            *p.borrow_mut() = self.error_prefix();
+        });
         let mut cmd_sub = |cmd: &str| -> String { self.capture_output(cmd) };
         expand::expand_word(
             &word,
@@ -1588,6 +1592,9 @@ impl Shell {
         let last_status = self.last_status;
         let last_bg_pid = self.last_bg_pid;
         let opt_flags = self.get_opt_flags();
+        crate::expand::EXPAND_ERROR_PREFIX.with(|p| {
+            *p.borrow_mut() = self.error_prefix();
+        });
         let mut cmd_sub = |cmd: &str| -> String { self.capture_output(cmd) };
         expand::expand_word_nosplit(
             &word,

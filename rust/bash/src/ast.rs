@@ -189,6 +189,8 @@ pub enum WordPart {
     ArithSub(String),
     /// `<(cmd)` or `>(cmd)` — process substitution
     ProcessSub(ProcessSubKind, String),
+    /// Bad substitution — produces an error at expansion time
+    BadSubstitution(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
