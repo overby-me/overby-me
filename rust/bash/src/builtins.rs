@@ -2245,7 +2245,8 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
     }
 
     // declare -f: print function definitions (with body)
-    if flag_func_body {
+    // But if -r is also set (declare -fr), it's trying to set readonly, not print
+    if flag_func_body && !flag_readonly && !flag_unset_readonly {
         let print_func = |name: &str, body: &CompoundCommand| {
             println!("{} () \n{}", name, format_compound_command(body));
         };
