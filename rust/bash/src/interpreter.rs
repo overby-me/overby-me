@@ -3167,11 +3167,16 @@ impl Shell {
                 match bytes[i] {
                     b')' => depth += 1,
                     b'(' => depth -= 1,
-                    b'*' | b'/' | b'%' if depth == 0 => {
+                    b'*' | b'/' | b'%' if depth == 0 && i > 0 => {
                         if bytes[i] == b'*' && i + 1 < bytes.len() && bytes[i + 1] == b'*' {
                             continue;
                         }
                         if bytes[i] == b'*' && i > 0 && bytes[i - 1] == b'*' {
+                            continue;
+                        }
+                        // Don't split if left side is empty/whitespace-only
+                        let left_str = expr[..i].trim();
+                        if left_str.is_empty() {
                             continue;
                         }
                         let left = self.eval_arith_expr_impl(&expr[..i]);
