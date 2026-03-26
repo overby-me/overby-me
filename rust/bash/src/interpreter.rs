@@ -2253,6 +2253,15 @@ impl Shell {
                     | "trap"
                     | "unset"
             );
+            // In POSIX mode, errors from special builtins are fatal (exit the shell)
+            if self.opt_posix
+                && is_special
+                && result != 0
+                && !matches!(command_name.as_str(), "trap")
+            {
+                self.restore_redirections(saved_fds);
+                std::process::exit(result);
+            }
             if !(expanded_words.is_empty() || self.opt_posix && is_special) {
                 for (k, old) in saved {
                     match old {
