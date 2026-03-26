@@ -1311,8 +1311,8 @@ fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
 
     let mut status = 0;
     for name in names {
-        // Validate identifier (skip for function names and array subscripts)
-        if !unset_functions && !name.contains('[') && !is_valid_identifier(name) {
+        // Validate identifier only with explicit -v flag (not default mode)
+        if unset_variables && !name.contains('[') && !is_valid_identifier(name) {
             eprintln!(
                 "{}: unset: `{}': not a valid identifier",
                 shell.error_prefix(),
