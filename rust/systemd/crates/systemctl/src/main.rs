@@ -137,6 +137,7 @@ fn main() {
     let mut value_only = false;
     let mut state_filter: Option<String> = None;
 
+    let mut no_legend = false;
     let mut force = false;
     let mut wait = false;
     let mut root_path: Option<String> = None;
@@ -298,6 +299,9 @@ fn main() {
             }
             if arg == "--now" {
                 now = true;
+            }
+            if arg == "--no-legend" {
+                no_legend = true;
             }
             if arg == "--failed" {
                 state_filter = Some("failed".to_string());
@@ -1194,6 +1198,7 @@ fn main() {
                 quiet,
                 value_only,
                 force,
+                no_legend,
                 output_format.as_deref(),
                 &property_filter,
             );
@@ -1293,6 +1298,7 @@ fn handle_response(
     quiet: bool,
     value_only: bool,
     force: bool,
+    no_legend: bool,
     output_format: Option<&str>,
     property_filter: &[String],
 ) {
@@ -1516,7 +1522,7 @@ fn handle_response(
                 && let Some(arr) = result.as_array()
                 && !quiet
             {
-                format_timer_table(arr);
+                format_timer_table(arr, no_legend);
             }
         }
         "list-sockets" => {
@@ -1525,16 +1531,22 @@ fn handle_response(
                 && !quiet
             {
                 if arr.is_empty() {
-                    println!("0 sockets listed.");
+                    if !no_legend {
+                        println!("0 sockets listed.");
+                    }
                 } else {
-                    println!("{:<40} {:<8} {:<40}", "LISTEN", "TYPE", "UNIT");
+                    if !no_legend {
+                        println!("{:<40} {:<8} {:<40}", "LISTEN", "TYPE", "UNIT");
+                    }
                     for socket in arr {
                         let listen = socket.get("LISTEN").and_then(|v| v.as_str()).unwrap_or("");
                         let stype = socket.get("TYPE").and_then(|v| v.as_str()).unwrap_or("");
                         let unit = socket.get("UNIT").and_then(|v| v.as_str()).unwrap_or("");
                         println!("{:<40} {:<8} {:<40}", listen, stype, unit);
                     }
-                    println!("\n{} sockets listed.", arr.len());
+                    if !no_legend {
+                        println!("\n{} sockets listed.", arr.len());
+                    }
                 }
             }
         }
@@ -1544,7 +1556,9 @@ fn handle_response(
                 && !quiet
             {
                 if arr.is_empty() {
-                    println!("0 paths listed.");
+                    if !no_legend {
+                        println!("0 paths listed.");
+                    }
                 } else {
                     for path_entry in arr {
                         let path = path_entry
@@ -1557,7 +1571,9 @@ fn handle_response(
                             .unwrap_or("");
                         println!("{:<40} {:<40}", path, unit);
                     }
-                    println!("\n{} paths listed.", arr.len());
+                    if !no_legend {
+                        println!("\n{} paths listed.", arr.len());
+                    }
                 }
             }
         }
@@ -1578,7 +1594,9 @@ fn handle_response(
                         .unwrap_or("running");
                     println!("{id:>6} {unit:<48} {jtype:<15} {state}");
                 }
-                println!("\n{} jobs listed.", arr.len());
+                if !no_legend {
+                    println!("\n{} jobs listed.", arr.len());
+                }
             }
         }
         "list-units" => {
@@ -1650,16 +1668,20 @@ fn handle_response(
     }
 }
 
-fn format_timer_table(timers: &[Value]) {
+fn format_timer_table(timers: &[Value], no_legend: bool) {
     if timers.is_empty() {
-        println!("0 timers listed.");
+        if !no_legend {
+            println!("0 timers listed.");
+        }
         return;
     }
-    // Print header
-    println!(
-        "{:<40} {:<8} {:<40} TRIGGERS",
-        "UNIT", "ACTIVE", "ACTIVATES"
-    );
+    if !no_legend {
+        // Print header
+        println!(
+            "{:<40} {:<8} {:<40} TRIGGERS",
+            "UNIT", "ACTIVE", "ACTIVATES"
+        );
+    }
     for timer in timers {
         let unit = timer.get("UNIT").and_then(|v| v.as_str()).unwrap_or("");
         let active = timer.get("ACTIVE").and_then(|v| v.as_str()).unwrap_or("");
@@ -1670,7 +1692,9 @@ fn format_timer_table(timers: &[Value]) {
         let triggers = timer.get("TRIGGERS").and_then(|v| v.as_str()).unwrap_or("");
         println!("{:<40} {:<8} {:<40} {}", unit, active, activates, triggers);
     }
-    println!("\n{} timers listed.", timers.len());
+    if !no_legend {
+        println!("\n{} timers listed.", timers.len());
+    }
 }
 
 fn print_help() {
