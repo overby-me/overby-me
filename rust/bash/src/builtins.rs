@@ -1028,12 +1028,18 @@ fn builtin_cd(shell: &mut Shell, args: &[String]) -> i32 {
         return 1;
     }
     let target = if args.is_empty() {
-        shell
+        match shell
             .vars
             .get("HOME")
             .cloned()
             .or_else(|| std::env::var("HOME").ok())
-            .unwrap_or_else(|| "/".to_string())
+        {
+            Some(h) if !h.is_empty() => h,
+            _ => {
+                eprintln!("{}: cd: HOME not set", shell.error_prefix());
+                return 1;
+            }
+        }
     } else if args[0].as_str() == "-" {
         shell
             .vars
@@ -1051,13 +1057,18 @@ fn builtin_cd(shell: &mut Shell, args: &[String]) -> i32 {
 
     match std::env::set_current_dir(&target) {
         Ok(()) => {
-            shell.vars.insert("OLDPWD".to_string(), old);
+            shell.set_var("OLDPWD", old);
             let new = std::env::current_dir()
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_default();
-            shell.vars.insert("PWD".to_string(), new.clone());
+            shell.set_var("PWD", new.clone());
             unsafe { std::env::set_var("PWD", &new) };
-            unsafe { std::env::set_var("OLDPWD", shell.vars.get("OLDPWD").unwrap()) };
+            unsafe {
+                std::env::set_var(
+                    "OLDPWD",
+                    shell.vars.get("OLDPWD").cloned().unwrap_or_default(),
+                )
+            };
             if !args.is_empty() && args[0] == "-" {
                 println!("{}", new);
             }
