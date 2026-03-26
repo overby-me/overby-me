@@ -720,7 +720,7 @@ impl Shell {
 
             // Update LINENO to current parser line
             // (but not inside trap handlers — they preserve the calling context's LINENO)
-            if !self.in_debug_trap {
+            if !self.in_debug_trap && !self.in_trap_handler {
                 self.vars
                     .insert("LINENO".to_string(), parser.current_line().to_string());
             }
@@ -940,8 +940,8 @@ impl Shell {
         #[cfg(unix)]
         self.reap_coprocs();
 
-        // Update LINENO (skip inside trap handlers)
-        if !self.in_debug_trap {
+        // Update LINENO (skip inside trap handlers to preserve calling context)
+        if !self.in_debug_trap && !self.in_trap_handler {
             self.vars.insert("LINENO".to_string(), cmd.line.to_string());
         }
 
