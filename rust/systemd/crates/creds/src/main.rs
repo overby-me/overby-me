@@ -792,12 +792,6 @@ fn cmd_list(system: bool, quiet: bool, no_legend: bool, json_mode: &str) {
 
     if dir.is_none() && enc_dir.is_none() {
         if system {
-            // If /run/credentials exists but @system doesn't, something is wrong
-            // (e.g. someone mounted a tmpfs over it). Otherwise, no creds were passed.
-            if Path::new("/run/credentials").exists() {
-                eprintln!("System credentials directory not accessible.");
-                process::exit(1);
-            }
             if !no_legend && !quiet {
                 println!("No credentials passed to system.");
             }
