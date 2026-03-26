@@ -1949,6 +1949,14 @@ impl Shell {
             {
                 return 1;
             }
+            // Check for incomplete funsub (${ ... } without terminator)
+            if fields.iter().any(|f| f.contains("INCOMPLETE_FUNSUB")) {
+                eprintln!(
+                    "{}: unexpected EOF while looking for matching `}}'",
+                    self.error_prefix()
+                );
+                return 1;
+            }
             // Check for error incomplete comsub — suppress with error message
             if fields
                 .iter()

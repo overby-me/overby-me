@@ -1156,8 +1156,11 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
             // Check for funsub: ${ cmd; } — space/tab/newline/| after {
             if *i < chars.len() && matches!(chars[*i], ' ' | '\t' | '\n' | '|') {
                 // Parse as command substitution delimited by }
+                // Funsub requires that } is preceded by a command terminator (;/\n/&)
+                // at the SAME depth level (not from nested blocks)
                 let mut depth = 1;
                 let mut cmd = String::new();
+                let mut has_terminator_at_depth1 = false;
                 while *i < chars.len() && depth > 0 {
                     match chars[*i] {
                         '{' => {
@@ -1165,9 +1168,21 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                             cmd.push(chars[*i]);
                         }
                         '}' => {
-                            depth -= 1;
-                            if depth > 0 {
+                            if depth == 1 && has_terminator_at_depth1 {
+                                // Valid funsub close at depth 1 with terminator
+                                depth = 0;
+                            } else if depth > 1 {
+                                depth -= 1;
                                 cmd.push(chars[*i]);
+                            } else {
+                                // depth == 1 but no terminator at this level
+                                cmd.push(chars[*i]);
+                            }
+                        }
+                        ';' | '&' | '\n' => {
+                            cmd.push(chars[*i]);
+                            if depth == 1 {
+                                has_terminator_at_depth1 = true;
                             }
                         }
                         '\'' => {
@@ -1179,6 +1194,9 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                             }
                             if *i < chars.len() {
                                 cmd.push(chars[*i]);
+                            }
+                            if depth == 1 {
+                                has_terminator_at_depth1 = false;
                             }
                         }
                         '"' => {
@@ -1195,13 +1213,29 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                             if *i < chars.len() {
                                 cmd.push(chars[*i]);
                             }
+                            if depth == 1 {
+                                has_terminator_at_depth1 = false;
+                            }
                         }
-                        _ => cmd.push(chars[*i]),
+                        ' ' | '\t' => {
+                            cmd.push(chars[*i]);
+                            // Whitespace doesn't affect terminator state
+                        }
+                        _ => {
+                            cmd.push(chars[*i]);
+                            if depth == 1 {
+                                has_terminator_at_depth1 = false;
+                            }
+                        }
                     }
                     *i += 1;
                 }
-                // Treat funsub as command substitution for now
-                WordPart::CommandSub(cmd)
+                if depth > 0 {
+                    // Unclosed funsub — return as incomplete
+                    WordPart::CommandSub(format!("\x00INCOMPLETE_FUNSUB{}", cmd))
+                } else {
+                    WordPart::CommandSub(cmd)
+                }
             } else {
                 parse_brace_param(chars, i, in_dquote)
             }

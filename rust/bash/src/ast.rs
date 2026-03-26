@@ -193,6 +193,21 @@ pub enum WordPart {
     BadSubstitution(String),
 }
 
+/// Check if a word contains an incomplete funsub marker
+pub fn word_has_incomplete_funsub(word: &Word) -> bool {
+    word.iter().any(|p| {
+        if let WordPart::CommandSub(cmd) = p {
+            cmd.starts_with("\x00INCOMPLETE_FUNSUB")
+        } else if let WordPart::DoubleQuoted(parts) = p {
+            parts.iter().any(|ip| {
+                matches!(ip, WordPart::CommandSub(cmd) if cmd.starts_with("\x00INCOMPLETE_FUNSUB"))
+            })
+        } else {
+            false
+        }
+    })
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProcessSubKind {
     /// `<(cmd)` — provides input (read from)

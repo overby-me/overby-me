@@ -279,14 +279,24 @@ fn expand_word_to_segments(word: &Word, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> Vec<
     for part in word {
         expand_part(part, ctx, &mut segments, cmd_sub);
     }
-    // If any segment came from an incomplete comsub, suppress output
+    // If any segment came from an incomplete comsub/funsub, suppress output
     let has_any_incomplete = segments.iter().any(|s| match s {
         Segment::Unquoted(t) | Segment::Quoted(t) => {
-            t == "\x00INCOMPLETE_COMSUB" || t == "\x00SILENT_COMSUB"
+            t == "\x00INCOMPLETE_COMSUB"
+                || t == "\x00SILENT_COMSUB"
+                || t.contains("\x00INCOMPLETE_FUNSUB")
         }
         _ => false,
     });
     if has_any_incomplete {
+        // Check for incomplete funsub
+        let has_funsub = segments.iter().any(|s| match s {
+            Segment::Unquoted(t) | Segment::Quoted(t) => t.contains("\x00INCOMPLETE_FUNSUB"),
+            _ => false,
+        });
+        if has_funsub {
+            return vec![Segment::Unquoted("\x00INCOMPLETE_FUNSUB".to_string())];
+        }
         // Check if it's a noisy (error) or silent suppression
         let is_error = segments.iter().any(|s| match s {
             Segment::Unquoted(t) | Segment::Quoted(t) => t == "\x00INCOMPLETE_COMSUB",

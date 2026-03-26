@@ -7,6 +7,48 @@ use std::collections::HashMap;
 
 pub type BuiltinFn = fn(&mut Shell, &[String]) -> i32;
 
+/// Check if a parsed program contains any incomplete funsub markers
+fn program_has_incomplete_funsub(program: &Program) -> bool {
+    fn word_check(word: &Word) -> bool {
+        crate::ast::word_has_incomplete_funsub(word)
+    }
+    fn cmd_check(cmd: &Command) -> bool {
+        match cmd {
+            Command::Simple(sc) => {
+                sc.words.iter().any(word_check)
+                    || sc.redirections.iter().any(|r| word_check(&r.target))
+                    || sc.assignments.iter().any(|a| match &a.value {
+                        AssignValue::Scalar(w) => word_check(w),
+                        AssignValue::Array(items) => {
+                            items.iter().any(|elem| word_check(&elem.value))
+                        }
+                        AssignValue::None => false,
+                    })
+            }
+            Command::Compound(cc, redirs) => {
+                redirs.iter().any(|r| word_check(&r.target)) || compound_check(cc)
+            }
+            Command::FunctionDef(_, body) => compound_check(body),
+            Command::Coproc(_, inner) => cmd_check(inner),
+        }
+    }
+    fn compound_check(cc: &CompoundCommand) -> bool {
+        match cc {
+            CompoundCommand::BraceGroup(cmds) | CompoundCommand::Subshell(cmds) => {
+                cmds.iter().any(|cc| andor_check(&cc.list))
+            }
+            _ => false,
+        }
+    }
+    fn andor_check(ao: &crate::ast::AndOrList) -> bool {
+        pipeline_check(&ao.first) || ao.rest.iter().any(|(_, p)| pipeline_check(p))
+    }
+    fn pipeline_check(p: &Pipeline) -> bool {
+        p.commands.iter().any(cmd_check)
+    }
+    program.iter().any(|cc| andor_check(&cc.list))
+}
+
 /// Fix Rust's scientific notation (e.g. "4.2e0") to C/bash format ("4.2e+00")
 fn fix_scientific_notation(s: &str, uppercase: bool) -> String {
     let marker = if uppercase { 'E' } else { 'e' };
@@ -4598,7 +4640,27 @@ fn builtin_eval(shell: &mut Shell, args: &[String]) -> i32 {
                 eprintln!("{}: eval: line {}: `{}'", name, lineno, command.trim());
                 2
             } else {
-                shell.run_program(&program)
+                // Check for incomplete funsub in the AST
+                let has_incomplete = program_has_incomplete_funsub(&program);
+                if has_incomplete {
+                    let name = shell
+                        .positional
+                        .first()
+                        .map(|s| s.as_str())
+                        .unwrap_or("bash");
+                    let lineno = shell
+                        .vars
+                        .get("LINENO")
+                        .and_then(|s| s.parse::<usize>().ok())
+                        .unwrap_or(0);
+                    eprintln!(
+                        "{}: eval: line {}: unexpected EOF while looking for matching `}}'",
+                        name, lineno
+                    );
+                    2
+                } else {
+                    shell.run_program(&program)
+                }
             }
         }
         Err(e) => {
