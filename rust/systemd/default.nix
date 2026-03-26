@@ -603,7 +603,7 @@
         # Skip sections needing DynamicUser, ImportCredential, varlink, run0.
         patchScript = ''
           sed -i '/^(! unshare -m/d' TEST-54-CREDS.sh
-          sed -i '/^# Verify that the creds are immutable/i touch /testok; exit 0' TEST-54-CREDS.sh
+          sed -i '/^# Verify that the creds are properly loaded/i touch /testok; exit 0' TEST-54-CREDS.sh
         '';
       }
       {name = "31-DEVICE-ENUMERATION";}
