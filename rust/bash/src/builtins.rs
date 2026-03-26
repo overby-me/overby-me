@@ -5412,6 +5412,13 @@ fn builtin_kill(shell: &mut Shell, args: &[String]) -> i32 {
         use nix::sys::signal::{self, Signal};
         use nix::unistd::Pid;
 
+        if args.is_empty() {
+            eprintln!(
+                "kill: usage: kill [-s sigspec | -n signum | -sigspec] pid | jobspec ... or kill -l [sigspec]"
+            );
+            return 2;
+        }
+
         // Handle kill -l [signum]
         if args.first().map(|s| s.as_str()) == Some("-l")
             || args.first().map(|s| s.as_str()) == Some("-L")
@@ -5463,6 +5470,13 @@ fn builtin_kill(shell: &mut Shell, args: &[String]) -> i32 {
                         let upper = upper.strip_prefix("SIG").unwrap_or(&upper);
                         if let Some((_, num)) = sig_names.iter().find(|(n, _)| *n == upper) {
                             println!("{}", num);
+                        } else {
+                            eprintln!(
+                                "{}: kill: {}: invalid signal specification",
+                                shell.error_prefix(),
+                                arg
+                            );
+                            return 1;
                         }
                     }
                 }
@@ -5485,31 +5499,90 @@ fn builtin_kill(shell: &mut Shell, args: &[String]) -> i32 {
         let mut signal = Signal::SIGTERM;
         let mut pids = Vec::new();
 
+        let parse_signal = |name: &str| -> Option<Signal> {
+            let upper = name.to_uppercase();
+            let upper = upper.strip_prefix("SIG").unwrap_or(&upper);
+            match upper {
+                "HUP" => Some(Signal::SIGHUP),
+                "INT" => Some(Signal::SIGINT),
+                "QUIT" => Some(Signal::SIGQUIT),
+                "ILL" => Some(Signal::SIGILL),
+                "TRAP" => Some(Signal::SIGTRAP),
+                "ABRT" => Some(Signal::SIGABRT),
+                "BUS" => Some(Signal::SIGBUS),
+                "FPE" => Some(Signal::SIGFPE),
+                "KILL" => Some(Signal::SIGKILL),
+                "USR1" => Some(Signal::SIGUSR1),
+                "SEGV" => Some(Signal::SIGSEGV),
+                "USR2" => Some(Signal::SIGUSR2),
+                "PIPE" => Some(Signal::SIGPIPE),
+                "ALRM" => Some(Signal::SIGALRM),
+                "TERM" => Some(Signal::SIGTERM),
+                "CHLD" => Some(Signal::SIGCHLD),
+                "CONT" => Some(Signal::SIGCONT),
+                "STOP" => Some(Signal::SIGSTOP),
+                "TSTP" => Some(Signal::SIGTSTP),
+                "TTIN" => Some(Signal::SIGTTIN),
+                "TTOU" => Some(Signal::SIGTTOU),
+                _ => None,
+            }
+        };
+
         let mut i = 0;
         while i < args.len() {
             let arg = &args[i];
-            if arg.starts_with('-') && arg.len() > 1 {
+            if arg == "-s" || arg == "-n" {
+                i += 1;
+                if i >= args.len() {
+                    eprintln!(
+                        "{}: kill: {}: option requires an argument",
+                        shell.error_prefix(),
+                        arg
+                    );
+                    return 2;
+                }
+                let sig_arg = &args[i];
+                if let Ok(n) = sig_arg.parse::<i32>() {
+                    signal = Signal::try_from(n).unwrap_or(Signal::SIGTERM);
+                } else if let Some(sig) = parse_signal(sig_arg) {
+                    signal = sig;
+                } else {
+                    eprintln!(
+                        "{}: kill: {}: invalid signal specification",
+                        shell.error_prefix(),
+                        sig_arg
+                    );
+                    return 1;
+                }
+            } else if arg.starts_with('-') && arg.len() > 1 {
                 let sig_name = &arg[1..];
                 if let Ok(n) = sig_name.parse::<i32>() {
                     signal = Signal::try_from(n).unwrap_or(Signal::SIGTERM);
+                } else if let Some(sig) = parse_signal(sig_name) {
+                    signal = sig;
                 } else {
-                    let upper = sig_name.to_uppercase();
-                    let upper = upper.strip_prefix("SIG").unwrap_or(&upper);
-                    signal = match upper {
-                        "HUP" => Signal::SIGHUP,
-                        "INT" => Signal::SIGINT,
-                        "QUIT" => Signal::SIGQUIT,
-                        "KILL" => Signal::SIGKILL,
-                        "TERM" => Signal::SIGTERM,
-                        "STOP" => Signal::SIGSTOP,
-                        "CONT" => Signal::SIGCONT,
-                        "USR1" => Signal::SIGUSR1,
-                        "USR2" => Signal::SIGUSR2,
-                        _ => Signal::SIGTERM,
-                    };
+                    eprintln!(
+                        "{}: kill: {}: invalid signal specification",
+                        shell.error_prefix(),
+                        sig_name
+                    );
+                    return 1;
                 }
+            } else if arg.is_empty() {
+                eprintln!(
+                    "{}: kill: `': not a pid or valid job spec",
+                    shell.error_prefix()
+                );
+                return 1;
             } else if let Ok(pid) = arg.parse::<i32>() {
                 pids.push(pid);
+            } else {
+                eprintln!(
+                    "{}: kill: `{}': not a pid or valid job spec",
+                    shell.error_prefix(),
+                    arg
+                );
+                return 1;
             }
             i += 1;
         }
