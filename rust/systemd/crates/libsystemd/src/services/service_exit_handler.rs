@@ -603,10 +603,14 @@ pub(crate) fn service_exit_handler(
                 srvc_id, unit.id.name, pid, code
             );
 
-            // Check whether the watchdog enforcement thread killed this service.
-            let watchdog_fired = {
+            // Check whether the watchdog or RuntimeMaxSec enforcement
+            // thread killed this service.
+            let (watchdog_fired, runtime_max_fired) = {
                 let state = srvc.state.read_poisoned();
-                state.srvc.watchdog_timeout_fired
+                (
+                    state.srvc.watchdog_timeout_fired,
+                    state.srvc.runtime_max_timeout_fired,
+                )
             };
             if watchdog_fired {
                 trace!(
@@ -614,6 +618,15 @@ pub(crate) fn service_exit_handler(
                     unit.id.name
                 );
             }
+            if runtime_max_fired {
+                trace!(
+                    "Service {}: exit was caused by RuntimeMaxSec timeout",
+                    unit.id.name
+                );
+            }
+            // Both watchdog and runtime-max timeouts count as a "timeout"
+            // failure for restart policy purposes.
+            let timeout_fired = watchdog_fired || runtime_max_fired;
 
             // RestartPreventExitStatus= overrides the Restart= policy: if the
             // termination status matches any entry, prevent restart regardless
@@ -648,7 +661,7 @@ pub(crate) fn service_exit_handler(
                         &srvc.conf.restart,
                         &code,
                         &success_exit_status,
-                        watchdog_fired,
+                        timeout_fired,
                     );
 
                 // Graduated restart delay: if RestartSteps= > 0 and

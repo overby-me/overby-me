@@ -210,6 +210,9 @@ impl ServiceState {
                         *status = UnitStatus::Started(StatusStarted::Running);
                     }
                 }
+                // Record the instant the service became Running so the
+                // watchdog thread can enforce RuntimeMaxSec=.
+                self.srvc.runtime_started_at = Some(std::time::Instant::now());
                 Ok(UnitStatus::Started(StatusStarted::Running))
             }
             Ok(crate::services::StartResult::ConditionSkipped) => {
@@ -314,6 +317,7 @@ impl ServiceState {
                         *status = UnitStatus::Started(StatusStarted::Running);
                     }
                 }
+                self.srvc.runtime_started_at = Some(std::time::Instant::now());
                 Ok(())
             }
             Ok(crate::services::StartResult::ConditionSkipped) => {

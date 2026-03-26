@@ -130,12 +130,26 @@ pub fn collect_properties(unit: &Unit) -> BTreeMap<String, String> {
                 },
             );
 
-            // Result — "success" if stopped cleanly, "exit-code" / "signal" on failure
+            // Result — "success" if stopped cleanly, "timeout" / "watchdog" /
+            // "exit-code" / "signal" on failure
             {
                 let status = unit.common.status.read_poisoned();
-                let result = match &*status {
-                    UnitStatus::Stopped(_, errors) if !errors.is_empty() => "exit-code",
-                    _ => "success",
+                let result = if let Some(ref st) = state_ref {
+                    if st.srvc.runtime_max_timeout_fired {
+                        "timeout"
+                    } else if st.srvc.watchdog_timeout_fired {
+                        "watchdog"
+                    } else {
+                        match &*status {
+                            UnitStatus::Stopped(_, errors) if !errors.is_empty() => "exit-code",
+                            _ => "success",
+                        }
+                    }
+                } else {
+                    match &*status {
+                        UnitStatus::Stopped(_, errors) if !errors.is_empty() => "exit-code",
+                        _ => "success",
+                    }
                 };
                 insert(&mut props, "Result", result);
             }

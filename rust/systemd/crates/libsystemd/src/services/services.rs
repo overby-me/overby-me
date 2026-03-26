@@ -145,6 +145,14 @@ pub struct Service {
     /// `Restart=on-watchdog` triggers a restart.  Cleared on service
     /// (re)start.
     pub watchdog_timeout_fired: bool,
+    /// Set to `true` by the watchdog/runtime-max enforcement thread when
+    /// this service's `RuntimeMaxSec=` timeout fires.  The exit handler
+    /// checks this flag to set the service result to "timeout".
+    /// Cleared on service (re)start.
+    pub runtime_max_timeout_fired: bool,
+    /// Timestamp when the service transitioned to Running.
+    /// Used by the watchdog thread to enforce `RuntimeMaxSec=`.
+    pub runtime_started_at: Option<std::time::Instant>,
     /// The exit status of the main service process (exit code or signal number).
     /// Set by the exit handler when the main process exits.
     pub main_exit_status: Option<i32>,
@@ -307,6 +315,8 @@ impl Service {
         // enforcement thread doesn't immediately kill the freshly started
         // service based on stale state.
         self.watchdog_timeout_fired = false;
+        self.runtime_max_timeout_fired = false;
+        self.runtime_started_at = None;
         self.watchdog_last_ping = None;
         self.watchdog_usec_override = None;
         self.main_exit_status = None;

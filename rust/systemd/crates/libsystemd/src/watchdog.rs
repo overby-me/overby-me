@@ -80,13 +80,14 @@ pub fn start_watchdog_thread(run_info: ArcMutRuntimeInfo) {
 ///
 /// Iterates over all running service units with a `WatchdogSec=` timeout,
 /// checks whether the service has pinged within the timeout, and kills
-/// unresponsive services.
+/// unresponsive services.  Also enforces `RuntimeMaxSec=` limits.
 fn check_watchdog_timeouts(run_info: &ArcMutRuntimeInfo) {
     let now = Instant::now();
 
     // Collect services that need to be killed.  We collect first, then
     // act, to avoid holding the RuntimeInfo read lock during signal delivery.
     let mut timed_out: Vec<WatchdogTimeout> = Vec::new();
+    let mut runtime_max_timed_out: Vec<RuntimeMaxTimeout> = Vec::new();
 
     {
         let ri = run_info.read_poisoned();
@@ -101,17 +102,37 @@ fn check_watchdog_timeouts(run_info: &ArcMutRuntimeInfo) {
                 continue;
             }
 
+            let state = srvc_specific.state.read_poisoned();
+            let srvc = &state.srvc;
+
+            // --- RuntimeMaxSec enforcement ---
+            if let Some(started_at) = srvc.runtime_started_at {
+                if let Some(max_dur) = effective_runtime_max(&srvc_specific.conf.runtime_max_sec) {
+                    let elapsed = now.duration_since(started_at);
+                    if elapsed >= max_dur {
+                        let effective_pid = srvc.main_pid.or(srvc.pid);
+                        runtime_max_timed_out.push(RuntimeMaxTimeout {
+                            unit_name: unit.id.name.clone(),
+                            pid: effective_pid,
+                            process_group: srvc.process_group,
+                            elapsed,
+                            limit: max_dur,
+                        });
+                        // Skip watchdog check — we're already killing it.
+                        continue;
+                    }
+                }
+            }
+
+            // --- Watchdog enforcement ---
             // Determine the effective watchdog timeout.
             let timeout = effective_watchdog_timeout(
                 &srvc_specific.conf.watchdog_sec,
-                &srvc_specific.state.read_poisoned().srvc,
+                srvc,
             );
             let Some(timeout) = timeout else {
                 continue; // no watchdog configured or infinity
             };
-
-            let state = srvc_specific.state.read_poisoned();
-            let srvc = &state.srvc;
 
             // The service must have signaled ready (for Type=notify) or at
             // least been started (for other types) before we enforce the
@@ -168,8 +189,39 @@ fn check_watchdog_timeouts(run_info: &ArcMutRuntimeInfo) {
         }
     }
 
-    // Act on timed-out services outside the read lock.
-    for wt in timed_out {
+    // Act on RuntimeMaxSec timed-out services outside the read lock.
+    for rt in &runtime_max_timed_out {
+        warn!(
+            "RuntimeMaxSec timeout for service {} ({}s elapsed, {}s limit) — sending SIGTERM",
+            rt.unit_name,
+            rt.elapsed.as_secs(),
+            rt.limit.as_secs(),
+        );
+
+        // Set the runtime_max_timeout_fired flag so the exit handler knows
+        // this was a RuntimeMaxSec kill (result="timeout").
+        {
+            let ri = run_info.read_poisoned();
+            if let Some(unit) = ri.unit_table.values().find(|u| u.id.name == rt.unit_name)
+                && let Specific::Service(srvc_specific) = &unit.specific
+            {
+                let mut state = srvc_specific.state.write_poisoned();
+                state.srvc.runtime_max_timeout_fired = true;
+            }
+        }
+
+        // Send SIGTERM (real systemd sends SIGTERM for RuntimeMaxSec, not
+        // the watchdog signal).
+        send_signal_to_service(
+            &rt.unit_name,
+            rt.pid,
+            rt.process_group,
+            nix::sys::signal::Signal::SIGTERM,
+        );
+    }
+
+    // Act on watchdog timed-out services outside the read lock.
+    for wt in &timed_out {
         warn!(
             "Watchdog timeout for service {} ({}s elapsed, {}s limit) — sending {}",
             wt.unit_name,
@@ -190,45 +242,78 @@ fn check_watchdog_timeouts(run_info: &ArcMutRuntimeInfo) {
             }
         }
 
-        // Send the watchdog signal to the service process.
-        if let Some(pid) = wt.pid {
-            match nix::sys::signal::kill(pid, wt.signal) {
-                Ok(()) => {
-                    debug!(
-                        "Sent {} to service {} (PID {})",
-                        wt.signal, wt.unit_name, pid
-                    );
-                }
-                Err(e) => {
-                    warn!(
-                        "Failed to send {} to service {} (PID {}): {}",
-                        wt.signal, wt.unit_name, pid, e
-                    );
-                }
-            }
-        } else if let Some(pgid) = wt.process_group {
-            // No main PID known; send to the whole process group.
-            match nix::sys::signal::kill(pgid, wt.signal) {
-                Ok(()) => {
-                    debug!(
-                        "Sent {} to process group of service {} (PGID {})",
-                        wt.signal, wt.unit_name, pgid
-                    );
-                }
-                Err(e) => {
-                    warn!(
-                        "Failed to send {} to process group of service {} (PGID {}): {}",
-                        wt.signal, wt.unit_name, pgid, e
-                    );
-                }
-            }
-        } else {
-            warn!(
-                "Watchdog timeout for service {} but no PID or process group to signal",
-                wt.unit_name
-            );
-        }
+        send_signal_to_service(&wt.unit_name, wt.pid, wt.process_group, wt.signal);
     }
+}
+
+/// Send a signal to a service's main PID or process group.
+fn send_signal_to_service(
+    unit_name: &str,
+    pid: Option<nix::unistd::Pid>,
+    process_group: Option<nix::unistd::Pid>,
+    signal: nix::sys::signal::Signal,
+) {
+    if let Some(pid) = pid {
+        match nix::sys::signal::kill(pid, signal) {
+            Ok(()) => {
+                debug!(
+                    "Sent {} to service {} (PID {})",
+                    signal, unit_name, pid
+                );
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to send {} to service {} (PID {}): {}",
+                    signal, unit_name, pid, e
+                );
+            }
+        }
+    } else if let Some(pgid) = process_group {
+        match nix::sys::signal::kill(pgid, signal) {
+            Ok(()) => {
+                debug!(
+                    "Sent {} to process group of service {} (PGID {})",
+                    signal, unit_name, pgid
+                );
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to send {} to process group of service {} (PGID {}): {}",
+                    signal, unit_name, pgid, e
+                );
+            }
+        }
+    } else {
+        warn!(
+            "Timeout for service {} but no PID or process group to signal",
+            unit_name
+        );
+    }
+}
+
+/// Compute the effective RuntimeMaxSec for a service.
+///
+/// Returns `None` if not configured, zero, or infinity.
+fn effective_runtime_max(configured: &Option<Timeout>) -> Option<Duration> {
+    match configured {
+        Some(Timeout::Duration(dur)) => {
+            if dur.is_zero() {
+                None
+            } else {
+                Some(*dur)
+            }
+        }
+        Some(Timeout::Infinity) | None => None,
+    }
+}
+
+/// Information collected about a service whose RuntimeMaxSec has expired.
+struct RuntimeMaxTimeout {
+    unit_name: String,
+    pid: Option<nix::unistd::Pid>,
+    process_group: Option<nix::unistd::Pid>,
+    elapsed: Duration,
+    limit: Duration,
 }
 
 /// Compute the effective watchdog timeout for a service.
@@ -303,6 +388,8 @@ mod tests {
             stdout_buffer: Vec::new(),
             stderr_buffer: Vec::new(),
             watchdog_timeout_fired: false,
+            runtime_max_timeout_fired: false,
+            runtime_started_at: None,
             main_exit_status: None,
             main_exit_pid: None,
             trigger_path: None,
@@ -462,6 +549,8 @@ mod tests {
         assert!(srvc.watchdog_last_ping.is_none());
         assert!(srvc.watchdog_usec_override.is_none());
         assert!(!srvc.watchdog_timeout_fired);
+        assert!(!srvc.runtime_max_timeout_fired);
+        assert!(srvc.runtime_started_at.is_none());
     }
 
     #[test]
