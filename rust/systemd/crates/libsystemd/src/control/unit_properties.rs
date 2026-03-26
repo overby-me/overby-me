@@ -616,16 +616,29 @@ fn next_calendar_event(spec: &str, now: u64) -> Option<u64> {
 /// property names.
 pub fn format_properties(props: &BTreeMap<String, String>, filter: Option<&[String]>) -> String {
     let mut out = String::new();
-    for (key, value) in props {
-        let include = match filter {
-            Some(keys) => keys.iter().any(|k| k.eq_ignore_ascii_case(key)),
-            None => true,
-        };
-        if include {
-            out.push_str(key);
-            out.push('=');
-            out.push_str(value);
-            out.push('\n');
+    match filter {
+        Some(keys) => {
+            // Emit properties in the order they were requested (matches
+            // systemd's behaviour of honouring the -p flag order).
+            for requested in keys {
+                if let Some((key, value)) = props
+                    .iter()
+                    .find(|(k, _)| k.eq_ignore_ascii_case(requested))
+                {
+                    out.push_str(key);
+                    out.push('=');
+                    out.push_str(value);
+                    out.push('\n');
+                }
+            }
+        }
+        None => {
+            for (key, value) in props {
+                out.push_str(key);
+                out.push('=');
+                out.push_str(value);
+                out.push('\n');
+            }
         }
     }
     out

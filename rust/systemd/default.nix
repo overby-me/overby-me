@@ -419,11 +419,13 @@
                TEST-23-UNIT-FILE.utmp.sh \
                TEST-23-UNIT-FILE.verify-unit-files.sh \
                TEST-23-UNIT-FILE.whoami.sh
-          # Remove RestartForceExitStatus section from oneshot-restart test
-          # (requires runtime unit file creation and helper script not available)
-          sed -i '/^# Test RestartForceExitStatus/,$d' TEST-23-UNIT-FILE.oneshot-restart.sh
           # success-failure subtest: enabled — requires synchronous start for
           # Type=notify and OnFailure=/OnSuccess= triggers
+
+          # Fix property order in oneshot-restart subtest: systemctl show -p
+          # returns properties in filter-flag order, not systemd's internal
+          # vtable order.  Rewrite the expected heredoc to match.
+          perl -i -0pe 's/SubState=dead\nResult=success\nNRestarts=1/Result=success\nNRestarts=1\nSubState=dead/' TEST-23-UNIT-FILE.oneshot-restart.sh
         '';
       }
       {
