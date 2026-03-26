@@ -366,8 +366,9 @@
       }
       {
         name = "23-UNIT-FILE";
-        # Keep ExecReload subtest. Remove subtests requiring systemd-run,
-        # busctl, systemd-analyze, or other unimplemented features.
+        # Keep ExecReload and success-failure subtests. Remove subtests
+        # requiring systemd-run, busctl, systemd-analyze, or other
+        # unimplemented features.
         patchScript = ''
           rm -f TEST-23-UNIT-FILE.clean-unit.sh \
                TEST-23-UNIT-FILE.exec-command-ex.sh \
@@ -382,7 +383,6 @@
                TEST-23-UNIT-FILE.StandardOutput.sh \
                TEST-23-UNIT-FILE.start-stop-no-reload.sh \
                TEST-23-UNIT-FILE.statedir.sh \
-               TEST-23-UNIT-FILE.success-failure.sh \
                TEST-23-UNIT-FILE.type-exec.sh \
                TEST-23-UNIT-FILE.Upholds.sh \
                TEST-23-UNIT-FILE.utmp.sh \

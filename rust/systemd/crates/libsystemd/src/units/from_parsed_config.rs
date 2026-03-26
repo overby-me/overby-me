@@ -818,6 +818,8 @@ fn make_common_from_parsed(
             allow_isolate: unit.allow_isolate,
             refuse_manual_start: unit.refuse_manual_start,
             refuse_manual_stop: unit.refuse_manual_stop,
+            on_success: unit.on_success,
+            on_success_job_mode: unit.on_success_job_mode,
             on_failure: unit.on_failure,
             on_failure_job_mode: unit.on_failure_job_mode,
             start_limit_interval_sec: unit.start_limit_interval_sec,

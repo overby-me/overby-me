@@ -1164,7 +1164,7 @@ fn find_sleep_binary() -> Option<std::path::PathBuf> {
     None
 }
 
-fn find_or_load_unit(
+pub fn find_or_load_unit(
     unit_name: &str,
     run_info: &ArcMutRuntimeInfo,
 ) -> Result<crate::units::UnitId, String> {
@@ -2422,6 +2422,8 @@ fn create_transient_unit(
                 job_timeout_action: crate::units::UnitAction::None,
                 refuse_manual_start: false,
                 refuse_manual_stop: false,
+                on_success: vec![],
+                on_success_job_mode: crate::units::OnFailureJobMode::default(),
                 on_failure: vec![],
                 on_failure_job_mode: crate::units::OnFailureJobMode::default(),
                 start_limit_interval_sec: None,
@@ -2591,6 +2593,8 @@ fn create_transient_unit(
                     job_timeout_action: crate::units::UnitAction::None,
                     refuse_manual_start: false,
                     refuse_manual_stop: false,
+                    on_success: vec![],
+                    on_success_job_mode: crate::units::OnFailureJobMode::default(),
                     on_failure: vec![],
                     on_failure_job_mode: crate::units::OnFailureJobMode::default(),
                     start_limit_interval_sec: None,
@@ -3922,11 +3926,9 @@ pub fn execute_command(
                         }
                     }
                 }
-                // For SIGTERM/SIGKILL without kill_value, also deactivate
-                if kill_value.is_none() && (signal == libc::SIGTERM || signal == libc::SIGKILL) {
-                    let ri = run_info.read_poisoned();
-                    crate::units::deactivate_unit(&id, &ri).map_err(|e| format!("{e}"))?;
-                }
+                // Do NOT deactivate here — the service exit handler will
+                // handle deactivation, restart, and OnSuccess/OnFailure
+                // when the process actually dies from the signal.
             }
 
             // Wait for the unit to become inactive before returning.
@@ -5690,6 +5692,8 @@ mod tests {
                     job_timeout_action: crate::units::UnitAction::None,
                     refuse_manual_start: false,
                     refuse_manual_stop: false,
+                    on_success: vec![],
+                    on_success_job_mode: crate::units::OnFailureJobMode::Replace,
                     on_failure: vec![],
                     on_failure_job_mode: crate::units::OnFailureJobMode::Replace,
                     start_limit_interval_sec: None,

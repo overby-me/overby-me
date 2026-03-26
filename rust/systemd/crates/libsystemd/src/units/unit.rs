@@ -1876,15 +1876,22 @@ pub struct UnitConfig {
     /// Parsed and stored; no runtime enforcement yet.
     pub refuse_manual_stop: bool,
 
+    /// Units to activate when this unit finishes successfully.
+    /// Matches systemd's `OnSuccess=` setting.
+    pub on_success: Vec<String>,
+
+    /// Job mode for enqueuing OnSuccess= units.
+    /// Defaults to `Replace`, matching systemd's default.
+    /// Matches systemd's `OnSuccessJobMode=` setting.
+    pub on_success_job_mode: OnFailureJobMode,
+
     /// Units to activate when this unit enters the "failed" state.
     /// Matches systemd's `OnFailure=` setting.
-    /// Parsed and stored; no runtime triggering enforcement yet.
     pub on_failure: Vec<String>,
 
     /// Job mode for enqueuing OnFailure= units.
     /// Defaults to `Replace`, matching systemd's default.
     /// Matches systemd's `OnFailureJobMode=` setting.
-    /// Parsed and stored; no runtime enforcement yet.
     pub on_failure_job_mode: OnFailureJobMode,
 
     /// Time interval for rate limiting unit starts.

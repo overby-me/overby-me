@@ -65,6 +65,69 @@ fn get_success_exit_status(unit: &crate::units::Unit) -> SuccessExitStatus {
     }
 }
 
+/// Trigger OnSuccess= or OnFailure= units for a service that has reached
+/// its final state. This resolves unit names from the config (loading from
+/// disk if necessary), resets them to NeverStarted, and activates them
+/// asynchronously in a new thread to avoid blocking the exit handler.
+fn trigger_on_success_failure_units(
+    unit_names: &[String],
+    source_name: &str,
+    kind: &str,
+    _run_info: &RuntimeInfo,
+    arc_run_info: &ArcMutRuntimeInfo,
+) {
+    for target_name in unit_names {
+        trace!("Triggering {kind}={target_name} for unit {source_name}");
+        // Activate asynchronously so we don't block restart logic.
+        let arc_ri = arc_run_info.clone();
+        let target_name_owned = target_name.clone();
+        let source_name_owned = source_name.to_string();
+        let kind_owned = kind.to_string();
+        std::thread::spawn(move || {
+            // Find or load the target unit (may need to read from disk).
+            let target_id = match crate::control::find_or_load_unit(&target_name_owned, &arc_ri) {
+                Ok(id) => id,
+                Err(e) => {
+                    warn!(
+                        "Could not find {kind_owned} unit {target_name_owned} for {source_name_owned}: {e}"
+                    );
+                    return;
+                }
+            };
+            // Reset the target unit from Stopped → NeverStarted so it can be activated.
+            {
+                let ri = arc_ri.read_poisoned();
+                if let Some(target_unit) = ri.unit_table.get(&target_id) {
+                    let mut status = target_unit.common.status.write_poisoned();
+                    if matches!(
+                        &*status,
+                        UnitStatus::Stopped(_, _) | UnitStatus::NeverStarted
+                    ) {
+                        *status = UnitStatus::NeverStarted;
+                    }
+                }
+            }
+            let ri = arc_ri.read_poisoned();
+            match crate::units::activate_unit(
+                target_id,
+                &ri,
+                crate::units::ActivationSource::Regular,
+            ) {
+                Ok(_) => {
+                    info!(
+                        "{kind_owned} unit {target_name_owned} activated for {source_name_owned}"
+                    );
+                }
+                Err(e) => {
+                    warn!(
+                        "Failed to activate {kind_owned} unit {target_name_owned} for {source_name_owned}: {e}"
+                    );
+                }
+            }
+        });
+    }
+}
+
 /// Determine whether a service should be restarted given its `Restart=`
 /// policy and the way it terminated.
 ///
@@ -172,7 +235,9 @@ pub fn service_exit_handler_new_thread(
     run_info: ArcMutRuntimeInfo,
 ) {
     std::thread::spawn(move || {
-        if let Err(e) = service_exit_handler(pid, srvc_id, code, &run_info.read_poisoned()) {
+        if let Err(e) =
+            service_exit_handler(pid, srvc_id, code, &run_info.read_poisoned(), &run_info)
+        {
             error!("{e}");
         }
     });
@@ -188,6 +253,7 @@ pub fn service_exit_handler(
     srvc_id: UnitId,
     code: ChildTermination,
     run_info: &RuntimeInfo,
+    arc_run_info: &ArcMutRuntimeInfo,
 ) -> Result<(), String> {
     trace!(
         "Exit handler for service {:?} with pid: {pid} code: {code:?}",
@@ -392,9 +458,8 @@ pub fn service_exit_handler(
                 .map_err(|e| format!("{e}"))?;
 
             // Mark as failed if the exit was not clean.
-            if !success_exit_status.is_success(&code)
-                && let Some(unit) = run_info.unit_table.get(&srvc_id)
-            {
+            let is_success = success_exit_status.is_success(&code);
+            if !is_success && let Some(unit) = run_info.unit_table.get(&srvc_id) {
                 let mut status = unit.common.status.write_poisoned();
                 let reason = match &code {
                     ChildTermination::Exit(c) => UnitOperationErrorReason::GenericStartError(
@@ -412,6 +477,29 @@ pub fn service_exit_handler(
                     "Oneshot service {name} failed with {:?}, marked as failed",
                     code
                 );
+            }
+
+            // Trigger OnSuccess=/OnFailure= units for the oneshot service.
+            if let Some(unit) = run_info.unit_table.get(&srvc_id) {
+                if is_success && !unit.common.unit.on_success.is_empty() {
+                    let targets = unit.common.unit.on_success.clone();
+                    trigger_on_success_failure_units(
+                        &targets,
+                        name,
+                        "OnSuccess",
+                        run_info,
+                        arc_run_info,
+                    );
+                } else if !is_success && !unit.common.unit.on_failure.is_empty() {
+                    let targets = unit.common.unit.on_failure.clone();
+                    trigger_on_success_failure_units(
+                        &targets,
+                        name,
+                        "OnFailure",
+                        run_info,
+                        arc_run_info,
+                    );
+                }
             }
             return Ok(());
         }
@@ -546,7 +634,56 @@ pub fn service_exit_handler(
         return Ok(());
     }
 
+    // Run ExecStopPost= commands. In real systemd these always run when a
+    // service process exits, regardless of exit status or restart policy.
+    if let Specific::Service(srvc) = &unit.specific
+        && !srvc.conf.stoppost.is_empty()
+    {
+        trace!("Running ExecStopPost for service {name}");
+        let mut state = srvc.state.write_poisoned();
+        let timeout = state.srvc.get_stop_timeout(&srvc.conf);
+        let cmds = srvc.conf.stoppost.clone();
+        if let Err(e) = state.srvc.run_all_cmds(
+            &cmds,
+            srvc_id.clone(),
+            name,
+            timeout,
+            run_info,
+            srvc.conf.exec_config.working_directory.as_ref(),
+        ) {
+            warn!("ExecStopPost for service {name} failed: {e:?}");
+        }
+    }
+
     if restart_unit {
+        // Trigger OnSuccess=/OnFailure= even when restarting — systemd fires
+        // these on the state transition independent of restart.
+        // A clean signal (SIGHUP/SIGINT/SIGTERM/SIGPIPE) or explicit success
+        // triggers OnSuccess=; everything else triggers OnFailure=.
+        if let Some(unit) = run_info.unit_table.get(&srvc_id) {
+            let is_clean =
+                success_exit_status.is_success(&code) || success_exit_status.is_clean_signal(&code);
+            if is_clean && !unit.common.unit.on_success.is_empty() {
+                let targets = unit.common.unit.on_success.clone();
+                trigger_on_success_failure_units(
+                    &targets,
+                    name,
+                    "OnSuccess",
+                    run_info,
+                    arc_run_info,
+                );
+            } else if !is_clean && !unit.common.unit.on_failure.is_empty() {
+                let targets = unit.common.unit.on_failure.clone();
+                trigger_on_success_failure_units(
+                    &targets,
+                    name,
+                    "OnFailure",
+                    run_info,
+                    arc_run_info,
+                );
+            }
+        }
+
         // Mark the unit as Restarting so that SubState shows "auto-restart"
         // and `systemctl start` can shortcut the pending restart.
         if let Some(unit) = run_info.unit_table.get(&srvc_id) {
@@ -672,7 +809,8 @@ pub fn service_exit_handler(
         // However, if the unit was being intentionally stopped (status was Stopping
         // before deactivation), don't mark it as failed — signal death from an
         // intentional stop is expected behavior.
-        if !success_exit_status.is_success(&code)
+        let is_success = success_exit_status.is_success(&code);
+        if !is_success
             && !was_intentionally_stopping
             && let Some(unit) = run_info.unit_table.get(&srvc_id)
         {
@@ -688,6 +826,35 @@ pub fn service_exit_handler(
             *status =
                 UnitStatus::Stopped(crate::units::StatusStopped::StoppedUnexpected, vec![reason]);
             info!("Service {name} failed with {:?}, marked as failed", code);
+        }
+
+        // Trigger OnSuccess=/OnFailure= units.
+        // A "clean" exit for OnSuccess purposes includes exit code 0, clean signals
+        // (SIGHUP/SIGINT/SIGTERM/SIGPIPE), intentional stops, and any extra signals
+        // in SuccessExitStatus=.
+        if let Some(unit) = run_info.unit_table.get(&srvc_id) {
+            let effective_success = is_success
+                || was_intentionally_stopping
+                || success_exit_status.is_clean_signal(&code);
+            if effective_success && !unit.common.unit.on_success.is_empty() {
+                let targets = unit.common.unit.on_success.clone();
+                trigger_on_success_failure_units(
+                    &targets,
+                    name,
+                    "OnSuccess",
+                    run_info,
+                    arc_run_info,
+                );
+            } else if !effective_success && !unit.common.unit.on_failure.is_empty() {
+                let targets = unit.common.unit.on_failure.clone();
+                trigger_on_success_failure_units(
+                    &targets,
+                    name,
+                    "OnFailure",
+                    run_info,
+                    arc_run_info,
+                );
+            }
         }
     }
     Ok(())

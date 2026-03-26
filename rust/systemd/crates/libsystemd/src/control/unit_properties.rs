@@ -714,6 +714,11 @@ fn insert_unit_config(props: &mut BTreeMap<String, String>, conf: &UnitConfig) {
         &format!("{:?}", conf.job_timeout_action),
     );
 
+    if !conf.on_success.is_empty() {
+        insert_string_list(props, "OnSuccess", &conf.on_success);
+    } else {
+        insert(props, "OnSuccess", "");
+    }
     if !conf.on_failure.is_empty() {
         insert_string_list(props, "OnFailure", &conf.on_failure);
     } else {

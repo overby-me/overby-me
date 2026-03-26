@@ -563,7 +563,7 @@ impl Service {
         }
     }
 
-    const fn get_stop_timeout(&self, conf: &ServiceConfig) -> Option<std::time::Duration> {
+    pub const fn get_stop_timeout(&self, conf: &ServiceConfig) -> Option<std::time::Duration> {
         if let Some(timeout) = &conf.stoptimeout {
             match timeout {
                 Timeout::Duration(dur) => Some(*dur),
@@ -721,7 +721,7 @@ impl Service {
         }
     }
 
-    fn run_all_cmds(
+    pub fn run_all_cmds(
         &mut self,
         cmds: &Vec<Commandline>,
         id: UnitId,
@@ -840,7 +840,7 @@ impl Service {
             conf.exec_config.working_directory.as_ref(),
         )
     }
-    fn run_poststop(
+    pub fn run_poststop(
         &mut self,
         conf: &ServiceConfig,
         id: UnitId,
