@@ -5364,6 +5364,15 @@ fn builtin_trap(shell: &mut Shell, args: &[String]) -> i32 {
 
     // Handle -p with signal arguments: trap -p SIG1 SIG2 ...
     if args.first().map(|s| s.as_str()) == Some("-p") && args.len() >= 2 {
+        // Check for conflicting -P
+        if args.iter().any(|a| a == "-P") {
+            eprintln!(
+                "{}: trap: cannot specify both -p and -P",
+                shell.error_prefix()
+            );
+            eprintln!("trap: usage: trap [-Plp] [[action] signal_spec ...]");
+            return 2;
+        }
         let mut status = 0;
         for sig_arg in &args[1..] {
             let norm = normalize_signal_name(sig_arg);
@@ -5455,10 +5464,21 @@ fn builtin_trap(shell: &mut Shell, args: &[String]) -> i32 {
     }
 
     if args.len() < sig_start + 1 {
-        // Just a handler with no signals - might be a single signal to reset
-        // If the first arg looks like a signal name, reset it
+        // Handler with no signals specified
         if handler_idx == 0 && args.len() == 1 {
-            return 0;
+            // Single arg that looks like a signal name → reset it
+            let norm = normalize_signal_name(&args[0]);
+            if signal_number(&norm) != 999 {
+                // It's a signal name — reset it
+                let signal = norm.strip_prefix("SIG").unwrap_or(&norm).to_string();
+                if !shell.original_ignored_signals.contains(&signal) {
+                    shell.traps.remove(&signal);
+                }
+                return 0;
+            }
+            // Not a signal name — error (e.g., trap "" with no signal)
+            eprintln!("trap: usage: trap [-Plp] [[action] signal_spec ...]");
+            return 2;
         }
     }
 
