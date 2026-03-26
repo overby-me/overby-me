@@ -59,6 +59,18 @@ fn run() -> i32 {
         }
     }
 
+    // Detect if invoked as "sh" (posix mode, like bash's act_like_sh)
+    if let Some(argv0) = args.first() {
+        let base = argv0.rsplit('/').next().unwrap_or(argv0);
+        if base == "sh" || base == "sh.exe" {
+            shell.opt_posix = true;
+            shell.shopt_expand_aliases = true;
+            shell
+                .shopt_options
+                .insert("expand_aliases".to_string(), true);
+        }
+    }
+
     let mut command_string: Option<String> = None;
     let mut script_file: Option<String> = None;
     let mut force_interactive = false;
