@@ -294,10 +294,8 @@ fn builtin_echo(shell: &mut Shell, args: &[String]) -> i32 {
     match result {
         Ok(()) => 0,
         Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {
-            // Only report broken pipe if NOT in a pipeline child
-            // (pipeline children with SIG_DFL would be killed by SIGPIPE;
-            // with SIG_IGN we get this error but should suppress it in
-            // non-lastpipe contexts to match bash behavior)
+            // In pipeline children, broken pipe is handled by SIGPIPE (SIG_DFL).
+            // In lastpipe (current shell), report the error like bash does.
             if !shell.in_pipeline_child {
                 eprintln!("{}: echo: write error: Broken pipe", shell.error_prefix());
             }
