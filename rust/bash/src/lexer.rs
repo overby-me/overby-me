@@ -1165,16 +1165,14 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                         }
                         // Count ( and ) in alias expansion to adjust depth
                         if let Some(ref exp) = effective {
-                            for ch in exp.chars() {
+                            let mut close_idx = None;
+                            for (ci, ch) in exp.chars().enumerate() {
                                 match ch {
                                     '(' => depth += 1,
                                     ')' if case_depth <= 0 => {
                                         depth -= 1;
                                         if depth == 0 {
-                                            // Alias closes the comsub — add word and stop
-                                            cmd.push_str(&word);
-                                            *i -= 1; // back up so caller sees the position
-                                            // Don't consume the position — let caller handle EOF
+                                            close_idx = Some(ci);
                                             break;
                                         }
                                     }
@@ -1182,7 +1180,11 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                                 }
                             }
                             if depth == 0 {
-                                *i += 1;
+                                // Alias closes the comsub — add expanded content up to )
+                                if let Some(ci) = close_idx {
+                                    let before_close: String = exp.chars().take(ci).collect();
+                                    cmd.push_str(&before_close);
+                                }
                                 break;
                             }
                         }

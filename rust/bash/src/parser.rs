@@ -291,6 +291,16 @@ impl Parser {
         let line = self.current_line();
         let mut list = self.parse_and_or_list()?;
 
+        // RParen at top level is a syntax error (not inside subshell/case)
+        if self.current == Token::RParen
+            && !self
+                .compound_cmd_stack
+                .iter()
+                .any(|(kw, _)| kw == "(" || kw == "case")
+        {
+            return Err("syntax error near unexpected token `)'".to_string());
+        }
+
         let background = match self.current {
             Token::Amp => {
                 self.advance();

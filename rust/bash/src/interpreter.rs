@@ -724,7 +724,26 @@ impl Shell {
                     eprintln!("{}: `{}'", self.syntax_error_prefix(), line);
                     return 2;
                 }
-                // Parser is stuck — skip one token and retry
+                // Parser is stuck — emit syntax error and skip
+                let token = parser.current_token_str();
+                if token != "EOF" {
+                    eprintln!(
+                        "{}: syntax error near unexpected token `{}'",
+                        self.syntax_error_prefix(),
+                        token
+                    );
+                    let lineno: usize = self
+                        .vars
+                        .get("LINENO")
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(1);
+                    let line = input
+                        .lines()
+                        .nth(lineno.saturating_sub(1))
+                        .unwrap_or(input.lines().next().unwrap_or(input));
+                    eprintln!("{}: `{}'", self.syntax_error_prefix(), line.trim_end());
+                    status = 2;
+                }
                 parser.skip_to_next_command();
                 if parser.is_at_eof() {
                     break;
@@ -871,6 +890,18 @@ impl Shell {
                         return 2;
                     } else {
                         eprintln!("{}: {}", self.error_prefix(), e);
+                        if e.contains("syntax error") {
+                            let lineno: usize = self
+                                .vars
+                                .get("LINENO")
+                                .and_then(|s| s.parse().ok())
+                                .unwrap_or(1);
+                            let line = input
+                                .lines()
+                                .nth(lineno.saturating_sub(1))
+                                .unwrap_or(input.lines().next().unwrap_or(input));
+                            eprintln!("{}: `{}'", self.error_prefix(), line.trim_end());
+                        }
                     }
                     status = 2;
                     // Skip to the next newline to try to recover
