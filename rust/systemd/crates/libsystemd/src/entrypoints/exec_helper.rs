@@ -310,6 +310,22 @@ pub struct ExecHelperConfig {
     #[serde(default)]
     pub stderr_is_tty: bool,
 
+    /// StandardOutput=file:/path or append:/path or truncate:/path.
+    /// When set, stdout is redirected to this file.
+    #[serde(default)]
+    pub stdout_file_path: Option<String>,
+    /// Whether stdout file should be opened in append mode.
+    #[serde(default)]
+    pub stdout_file_append: bool,
+
+    /// StandardError=file:/path or append:/path or truncate:/path.
+    /// When set, stderr is redirected to this file.
+    #[serde(default)]
+    pub stderr_file_path: Option<String>,
+    /// Whether stderr file should be opened in append mode.
+    #[serde(default)]
+    pub stderr_file_append: bool,
+
     /// AmbientCapabilities= — Linux capability names (e.g. CAP_SYS_TIME) to
     /// raise as ambient capabilities after dropping privileges.  Ambient
     /// capabilities survive execve() even without file capabilities, so the
@@ -1078,6 +1094,42 @@ pub fn run_exec_helper() {
     // If StandardOutput=tty or StandardError=tty but stdin is NOT a TTY,
     // open the TTY independently for output.
     setup_tty_output(&config);
+
+    // StandardOutput=file:/path, append:/path, truncate:/path
+    if let Some(ref path) = config.stdout_file_path {
+        let flags = libc::O_WRONLY
+            | libc::O_CREAT
+            | if config.stdout_file_append {
+                libc::O_APPEND
+            } else {
+                libc::O_TRUNC
+            };
+        let c_path = std::ffi::CString::new(path.as_str()).unwrap();
+        let fd = unsafe { libc::open(c_path.as_ptr(), flags, 0o644) };
+        if fd >= 0 {
+            unsafe {
+                libc::dup2(fd, libc::STDOUT_FILENO);
+                libc::close(fd);
+            }
+        }
+    }
+    if let Some(ref path) = config.stderr_file_path {
+        let flags = libc::O_WRONLY
+            | libc::O_CREAT
+            | if config.stderr_file_append {
+                libc::O_APPEND
+            } else {
+                libc::O_TRUNC
+            };
+        let c_path = std::ffi::CString::new(path.as_str()).unwrap();
+        let fd = unsafe { libc::open(c_path.as_ptr(), flags, 0o644) };
+        if fd >= 0 {
+            unsafe {
+                libc::dup2(fd, libc::STDERR_FILENO);
+                libc::close(fd);
+            }
+        }
+    }
 
     // ── Apply all LimitXXX= resource limits before anything else ──────
     apply_resource_limit("RLIMIT_NOFILE", libc::RLIMIT_NOFILE, &config.limit_nofile);

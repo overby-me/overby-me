@@ -385,6 +385,26 @@ fn start_service_with_filedescriptors(
         ),
         stdout_is_tty: matches!(conf.exec_config.stdout_path, Some(StdIoOption::Tty)),
         stderr_is_tty: matches!(conf.exec_config.stderr_path, Some(StdIoOption::Tty)),
+        stdout_file_path: match &conf.exec_config.stdout_path {
+            Some(StdIoOption::File(p)) | Some(StdIoOption::AppendFile(p)) => {
+                Some(p.to_string_lossy().into_owned())
+            }
+            _ => None,
+        },
+        stdout_file_append: matches!(
+            conf.exec_config.stdout_path,
+            Some(StdIoOption::AppendFile(_))
+        ),
+        stderr_file_path: match &conf.exec_config.stderr_path {
+            Some(StdIoOption::File(p)) | Some(StdIoOption::AppendFile(p)) => {
+                Some(p.to_string_lossy().into_owned())
+            }
+            _ => None,
+        },
+        stderr_file_append: matches!(
+            conf.exec_config.stderr_path,
+            Some(StdIoOption::AppendFile(_))
+        ),
         ambient_capabilities: conf.exec_config.ambient_capabilities.clone(),
 
         // Security & sandboxing directives
