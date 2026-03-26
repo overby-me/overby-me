@@ -2,7 +2,7 @@ use crate::ast::{
     AndOr, AssignValue, CaseTerminator, Command, CompoundCommand, CondExpr, ParamOp, Pipeline,
     ProcessSubKind, Program, RedirFd, RedirectKind, Redirection, SimpleCommand, Word, WordPart,
 };
-use crate::interpreter::{Shell, capitalize_string};
+use crate::interpreter::{Shell, capitalize_string, is_valid_identifier};
 use std::collections::HashMap;
 
 pub type BuiltinFn = fn(&mut Shell, &[String]) -> i32;
@@ -4159,6 +4159,44 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
             _ => {}
         }
         i += 1;
+    }
+
+    // Validate array name
+    if let Some(ref name) = array_name
+        && !is_valid_identifier(name)
+    {
+        eprintln!(
+            "{}: read: `{}': not a valid identifier",
+            shell.error_prefix(),
+            name
+        );
+        return 1;
+    }
+
+    // Validate variable names
+    for name in &var_names {
+        if !is_valid_identifier(name) {
+            eprintln!(
+                "{}: read: `{}': not a valid identifier",
+                shell.error_prefix(),
+                name
+            );
+            return 1;
+        }
+    }
+
+    // Check for readonly variables
+    for name in &var_names {
+        if shell.readonly_vars.contains(name) {
+            eprintln!("{}: {}: readonly variable", shell.error_prefix(), name);
+            return 1;
+        }
+    }
+    if let Some(ref name) = array_name
+        && shell.readonly_vars.contains(name)
+    {
+        eprintln!("{}: {}: readonly variable", shell.error_prefix(), name);
+        return 1;
     }
 
     let is_reply = var_names.is_empty() && array_name.is_none();

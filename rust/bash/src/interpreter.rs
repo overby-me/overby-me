@@ -5,7 +5,7 @@ use crate::parser::Parser;
 use std::collections::{HashMap, HashSet};
 
 /// Check if a string is a valid bash identifier (variable name).
-fn is_valid_identifier(s: &str) -> bool {
+pub fn is_valid_identifier(s: &str) -> bool {
     let mut chars = s.chars();
     match chars.next() {
         Some(c) if c == '_' || c.is_alphabetic() => {}
@@ -2748,6 +2748,22 @@ impl Shell {
                         self.arith_cmd_prefix(),
                         expr,
                         &expr[pos..]
+                    );
+                    crate::expand::set_arith_error();
+                    return 0;
+                }
+                // Check for readonly variable
+                let base_name = if let Some(bracket) = name.find('[') {
+                    &name[..bracket]
+                } else {
+                    name
+                };
+                let resolved_name = self.resolve_nameref(base_name).to_string();
+                if self.readonly_vars.contains(&resolved_name) {
+                    eprintln!(
+                        "{}: {}: readonly variable",
+                        self.error_prefix(),
+                        resolved_name
                     );
                     crate::expand::set_arith_error();
                     return 0;
