@@ -1161,6 +1161,7 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                 let mut depth = 1;
                 let mut cmd = String::new();
                 let mut has_terminator_at_depth1 = false;
+                let mut has_nonws_at_depth1 = false;
                 while *i < chars.len() && depth > 0 {
                     match chars[*i] {
                         '{' => {
@@ -1168,8 +1169,8 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                             cmd.push(chars[*i]);
                         }
                         '}' => {
-                            if depth == 1 && has_terminator_at_depth1 {
-                                // Valid funsub close at depth 1 with terminator
+                            if depth == 1 && (has_terminator_at_depth1 || !has_nonws_at_depth1) {
+                                // Valid funsub close: either has terminator or empty content
                                 depth = 0;
                             } else if depth > 1 {
                                 depth -= 1;
@@ -1177,12 +1178,14 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                             } else {
                                 // depth == 1 but no terminator at this level
                                 cmd.push(chars[*i]);
+                                has_nonws_at_depth1 = true;
                             }
                         }
                         ';' | '&' | '\n' => {
                             cmd.push(chars[*i]);
                             if depth == 1 {
                                 has_terminator_at_depth1 = true;
+                                has_nonws_at_depth1 = true;
                             }
                         }
                         '\'' => {
@@ -1197,6 +1200,7 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                             }
                             if depth == 1 {
                                 has_terminator_at_depth1 = false;
+                                has_nonws_at_depth1 = true;
                             }
                         }
                         '"' => {
@@ -1215,16 +1219,18 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                             }
                             if depth == 1 {
                                 has_terminator_at_depth1 = false;
+                                has_nonws_at_depth1 = true;
                             }
                         }
                         ' ' | '\t' => {
                             cmd.push(chars[*i]);
-                            // Whitespace doesn't affect terminator state
+                            // Whitespace doesn't affect terminator or nonws state
                         }
                         _ => {
                             cmd.push(chars[*i]);
                             if depth == 1 {
                                 has_terminator_at_depth1 = false;
+                                has_nonws_at_depth1 = true;
                             }
                         }
                     }
