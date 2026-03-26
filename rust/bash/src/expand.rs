@@ -383,7 +383,7 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                                     Some(c) => s.push(c),
                                 }
                             }
-                            let result = apply_param_op(elem, &expr.op, ctx, cmd_sub);
+                            let result = apply_param_op(elem, &expr.op, ctx, cmd_sub, &expr.name);
                             if sep.is_none() {
                                 out.push(Segment::Quoted(result));
                             } else {
@@ -438,7 +438,7 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                                 let modified = if matches!(&expr.op, ParamOp::Substring(..)) {
                                     elem.clone()
                                 } else {
-                                    apply_param_op(elem, &expr.op, ctx, cmd_sub)
+                                    apply_param_op(elem, &expr.op, ctx, cmd_sub, &expr.name)
                                 };
                                 s.push_str(&modified);
                             }
@@ -455,7 +455,7 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                                 let modified = if matches!(&expr.op, ParamOp::Substring(..)) {
                                     elem.clone()
                                 } else {
-                                    apply_param_op(elem, &expr.op, ctx, cmd_sub)
+                                    apply_param_op(elem, &expr.op, ctx, cmd_sub, &expr.name)
                                 };
                                 out.push(Segment::Quoted(modified));
                             }
@@ -659,7 +659,7 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                         });
                     }
                     first = false;
-                    let result = apply_param_op(elem, &expr.op, ctx, cmd_sub);
+                    let result = apply_param_op(elem, &expr.op, ctx, cmd_sub, &expr.name);
                     out.push(Segment::Unquoted(result));
                 }
                 return;
@@ -698,7 +698,8 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                             op: expr.op.clone(),
                         };
                         // Apply the operation using the element value directly
-                        let result = apply_param_op(elem, &single_expr.op, ctx, cmd_sub);
+                        let result =
+                            apply_param_op(elem, &single_expr.op, ctx, cmd_sub, &single_expr.name);
                         out.push(Segment::Unquoted(result));
                     }
                     return;
@@ -1237,8 +1238,54 @@ fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
     }
 }
 
+/// Parse an arithmetic expression for substring offset/length.
+/// If the string is a simple integer, parse it directly. If it's a variable name,
+/// resolve it. Otherwise, report an arithmetic error.
+fn parse_arith_offset(s: &str, param_name: &str, ctx: &ExpCtx) -> i64 {
+    if s.is_empty() {
+        return 0;
+    }
+    // Try direct integer parse first
+    if let Ok(v) = s.parse::<i64>() {
+        return v;
+    }
+    // Try as variable name (evaluates to 0 if unset, like in arithmetic)
+    let first = s.as_bytes()[0];
+    if (first == b'_' || first.is_ascii_alphabetic())
+        && s.chars().all(|c| c.is_alphanumeric() || c == '_')
+    {
+        let val = ctx
+            .vars
+            .get(s)
+            .and_then(|v| v.parse::<i64>().ok())
+            .unwrap_or(0);
+        return val;
+    }
+    // Report arithmetic syntax error
+    let prefix = EXPAND_ERROR_PREFIX.with(|p| {
+        let p = p.borrow();
+        if p.is_empty() {
+            "bash".to_string()
+        } else {
+            p.clone()
+        }
+    });
+    eprintln!(
+        "{}: {}: {}: arithmetic syntax error: operand expected (error token is \"{}\")",
+        prefix, param_name, s, s
+    );
+    crate::expand::set_arith_error();
+    0
+}
+
 /// Apply a parameter operation to a pre-resolved value (for array per-element operations)
-fn apply_param_op(val: &str, op: &ParamOp, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
+fn apply_param_op(
+    val: &str,
+    op: &ParamOp,
+    ctx: &ExpCtx,
+    cmd_sub: CmdSubFn,
+    param_name: &str,
+) -> String {
     match op {
         ParamOp::None | ParamOp::Length | ParamOp::Indirect => val.to_string(),
         ParamOp::UpperFirst(pat) => {
@@ -1382,7 +1429,7 @@ fn apply_param_op(val: &str, op: &ParamOp, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> S
             }
         }
         ParamOp::Substring(offset_str, length_str) => {
-            let offset: i64 = offset_str.trim().parse().unwrap_or(0);
+            let offset: i64 = parse_arith_offset(offset_str.trim(), param_name, ctx);
             let char_count = val.chars().count();
             let start = if offset < 0 {
                 (char_count as i64 + offset).max(0) as usize
@@ -1390,7 +1437,7 @@ fn apply_param_op(val: &str, op: &ParamOp, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> S
                 (offset as usize).min(char_count)
             };
             if let Some(len_str) = length_str {
-                let len: i64 = len_str.trim().parse().unwrap_or(char_count as i64);
+                let len: i64 = parse_arith_offset(len_str.trim(), param_name, ctx);
                 let end = if len < 0 {
                     (char_count as i64 + len).max(start as i64) as usize
                 } else {
@@ -1457,7 +1504,7 @@ fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
         }
         let elements: Vec<String> = ctx.positional[1..]
             .iter()
-            .map(|elem| apply_param_op(elem, &expr.op, ctx, cmd_sub))
+            .map(|elem| apply_param_op(elem, &expr.op, ctx, cmd_sub, &expr.name))
             .collect();
         return elements.join(" ");
     }
@@ -1480,7 +1527,7 @@ fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
             };
             let modified: Vec<String> = elements
                 .iter()
-                .map(|elem| apply_param_op(elem, &expr.op, ctx, cmd_sub))
+                .map(|elem| apply_param_op(elem, &expr.op, ctx, cmd_sub, &expr.name))
                 .collect();
             return modified.join(" ");
         }
@@ -1693,7 +1740,7 @@ fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
             }
         }
         ParamOp::Substring(offset_str, length_str) => {
-            let offset: i64 = offset_str.trim().parse().unwrap_or(0);
+            let offset: i64 = parse_arith_offset(offset_str.trim(), &expr.name, ctx);
             let char_count = val.chars().count();
             let start = if offset < 0 {
                 (char_count as i64 + offset).max(0) as usize
@@ -1701,7 +1748,7 @@ fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
                 (offset as usize).min(char_count)
             };
             if let Some(len_str) = length_str {
-                let len: i64 = len_str.trim().parse().unwrap_or(char_count as i64);
+                let len: i64 = parse_arith_offset(len_str.trim(), &expr.name, ctx);
                 let end = if len < 0 {
                     (char_count as i64 + len).max(start as i64) as usize
                 } else {

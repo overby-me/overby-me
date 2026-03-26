@@ -1375,7 +1375,7 @@ fn builtin_readonly(shell: &mut Shell, args: &[String]) -> i32 {
                             ch
                         );
                         eprintln!(
-                            "readonly: usage: readonly [-aAfn] [name[=value] ...] or readonly -p"
+                            "readonly: usage: readonly [-aAf] [name[=value] ...] or readonly -p"
                         );
                         return 2;
                     }
@@ -3118,14 +3118,37 @@ fn builtin_shift(shell: &mut Shell, args: &[String]) -> i32 {
     if shell.positional.len() > 1 {
         let available = shell.positional.len() - 1;
         if n > available {
+            // Only print error if shift_verbose is enabled
+            if shell
+                .shopt_options
+                .get("shift_verbose")
+                .copied()
+                .unwrap_or(false)
+            {
+                eprintln!(
+                    "{}: shift: {}: shift count out of range",
+                    shell.error_prefix(),
+                    n
+                );
+            }
+            return 1;
+        }
+        shell.positional.drain(1..=n);
+    } else if n > 0 {
+        // No positional params to shift
+        if shell
+            .shopt_options
+            .get("shift_verbose")
+            .copied()
+            .unwrap_or(false)
+        {
             eprintln!(
                 "{}: shift: {}: shift count out of range",
                 shell.error_prefix(),
                 n
             );
-            return 1;
         }
-        shell.positional.drain(1..=n);
+        return 1;
     }
     0
 }
@@ -6525,7 +6548,7 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
                 }
             } else {
                 eprintln!(
-                    "{}: shopt: {}: invalid option name",
+                    "{}: shopt: {}: invalid shell option name",
                     shell.error_prefix(),
                     opt
                 );
@@ -6844,7 +6867,7 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
             _ => {
                 if !query {
                     eprintln!(
-                        "{}: shopt: {}: invalid option name",
+                        "{}: shopt: {}: invalid shell option name",
                         shell.error_prefix(),
                         opt
                     );
