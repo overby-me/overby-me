@@ -4526,6 +4526,16 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
 }
 
 fn builtin_eval(shell: &mut Shell, args: &[String]) -> i32 {
+    // Check for invalid options
+    if let Some(first) = args.first()
+        && first.starts_with('-')
+        && first.len() > 1
+        && first != "--"
+    {
+        eprintln!("{}: eval: {}: invalid option", shell.error_prefix(), first);
+        eprintln!("eval: usage: eval [arg ...]");
+        return 2;
+    }
     let command = args.join(" ");
     // Save procsub fds so inner run_simple_command calls don't close them
     let saved_fds = crate::expand::take_procsub_fds();
