@@ -1,4 +1,21 @@
-# Version control rules
+# RTK (token-optimized commands)
+
+- **Always prefix shell commands with `rtk`** to minimize token consumption. RTK filters and compresses command output before it reaches the LLM context, saving 60-90% tokens. Examples:
+  - `rtk git status` instead of `git status`
+  - `rtk cargo test` instead of `cargo test`
+  - `rtk ls src/` instead of `ls src/`
+  - `rtk grep "pattern" src/` instead of `grep "pattern" src/`
+  - `rtk find "*.rs" .` instead of `find "*.rs" .`
+  - `rtk read file.rs` instead of `cat file.rs`
+  - `rtk docker ps` instead of `docker ps`
+  - `rtk gh pr list` instead of `gh pr list`
+
+- **Use `rtk` meta commands for analytics:**
+  - `rtk gain` — show token savings statistics
+  - `rtk discover` — find missed RTK opportunities
+  - `rtk proxy <cmd>` — run raw command without filtering (for debugging)
+
+## Version control rules
 
 - **Use `jj` (Jujutsu) instead of `git` for all version control operations.** This project uses Jujutsu as its VCS. Common mappings:
   - `jj status` — show working copy status

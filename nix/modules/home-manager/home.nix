@@ -64,6 +64,7 @@
       BATDIFF_USE_DELTA = "true";
       PYTHON_HISTORY = "~/.local/share/python/history";
       GRANTED_ALIAS_CONFIGURED = "true";
+      RTK_TELEMETRY_DISABLED = "1";
     };
     file = let
       symlink = config.lib.file.mkOutOfStoreSymlink;

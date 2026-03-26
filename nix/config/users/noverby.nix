@@ -18,6 +18,6 @@
     services
     catppuccin
     vibe
-    peon-ping
+    claude-code
   ];
 }
