@@ -3063,6 +3063,51 @@ pub fn execute_command(
                 }
             }
 
+            // For oneshot services, wait for the main process to be fully
+            // reaped before returning, matching real systemd's behavior
+            // where the start job blocks until ExecStart completes.
+            // Without this, callers see a race where the service's side
+            // effects (e.g. RuntimeDirectory creation) have not yet
+            // happened.
+            {
+                let is_oneshot = {
+                    let ri = run_info.read_poisoned();
+                    ri.unit_table
+                        .get(&id)
+                        .map(|u| {
+                            matches!(
+                                &u.specific,
+                                Specific::Service(s)
+                                    if s.conf.srcv_type == crate::units::ServiceType::OneShot
+                            )
+                        })
+                        .unwrap_or(false)
+                };
+                if is_oneshot && !do_wait {
+                    // Poll until the exit handler has reaped the main
+                    // process (sets main_exit_pid) — max 30s.
+                    for _ in 0..300 {
+                        let reaped = {
+                            let ri = run_info.read_poisoned();
+                            ri.unit_table
+                                .get(&id)
+                                .map(|u| {
+                                    if let Specific::Service(s) = &u.specific {
+                                        s.state.read_poisoned().srvc.main_exit_pid.is_some()
+                                    } else {
+                                        true
+                                    }
+                                })
+                                .unwrap_or(true)
+                        };
+                        if reaped {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                    }
+                }
+            }
+
             if !do_wait {
                 return Ok(serde_json::json!({ "started": unit_name }));
             }

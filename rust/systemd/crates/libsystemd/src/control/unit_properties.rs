@@ -265,11 +265,7 @@ pub fn collect_properties(unit: &Unit) -> BTreeMap<String, String> {
                 let state = tmr.state.read_poisoned();
                 if let Some(usec) = state.last_trigger_usec {
                     insert(&mut props, "LastTriggerUSec", &format_usec_timestamp(usec));
-                    insert(
-                        &mut props,
-                        "LastTriggerUSecMonotonic",
-                        &usec.to_string(),
-                    );
+                    insert(&mut props, "LastTriggerUSecMonotonic", &usec.to_string());
                 } else {
                     insert(&mut props, "LastTriggerUSec", "n/a");
                     insert(&mut props, "LastTriggerUSecMonotonic", "0");

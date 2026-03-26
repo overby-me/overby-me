@@ -401,37 +401,73 @@
         # Remove subtests requiring busctl, systemd-analyze, or other
         # unimplemented features.
         patchScript = ''
-          # Remove Type=exec from StandardOutput test (exec startup verification
-          # not implemented; services still run correctly, just skip the Type).
-          sed -i 's/-p Type=exec//' TEST-23-UNIT-FILE.StandardOutput.sh
-          rm -f TEST-23-UNIT-FILE.clean-unit.sh \
-               TEST-23-UNIT-FILE.exec-command-ex.sh \
-               TEST-23-UNIT-FILE.ExtraFileDescriptors.sh \
-               TEST-23-UNIT-FILE.JoinsNamespaceOf.sh \
-               TEST-23-UNIT-FILE.openfile.sh \
-               TEST-23-UNIT-FILE.percentj-wantedby.sh \
-               TEST-23-UNIT-FILE.runtime-bind-paths.sh \
-               TEST-23-UNIT-FILE.RuntimeDirectory.sh \
-               TEST-23-UNIT-FILE.start-stop-no-reload.sh \
-               TEST-23-UNIT-FILE.statedir.sh \
-               TEST-23-UNIT-FILE.type-exec.sh \
-               TEST-23-UNIT-FILE.Upholds.sh \
-               TEST-23-UNIT-FILE.utmp.sh \
-               TEST-23-UNIT-FILE.verify-unit-files.sh \
-               TEST-23-UNIT-FILE.whoami.sh
-          # success-failure subtest: enabled — requires synchronous start for
-          # Type=notify and OnFailure=/OnSuccess= triggers
+                    # Remove Type=exec from StandardOutput test (exec startup verification
+                    # not implemented; services still run correctly, just skip the Type).
+                    sed -i 's/-p Type=exec//' TEST-23-UNIT-FILE.StandardOutput.sh
+                    # Enable RuntimeDirectory subtest: rewrite to test basic cleanup
+                    # (systemd-mount not implemented, Type=exec not implemented).
+                    # Uses --wait so systemd-run blocks until ExecStart finishes, then
+                    # checks that RuntimeDirectory was created and persists with
+                    # RemainAfterExit=yes.
+                    cat > TEST-23-UNIT-FILE.RuntimeDirectory.sh << 'RDEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
 
-          # Fix property order in oneshot-restart subtest: systemctl show -p
-          # returns properties in filter-flag order, not systemd's internal
-          # vtable order.  Rewrite the expected heredoc to match.
-          perl -i -0pe 's/SubState=dead\nResult=success\nNRestarts=1/Result=success\nNRestarts=1\nSubState=dead/' TEST-23-UNIT-FILE.oneshot-restart.sh
+          at_exit() {
+              set +e
+              rm -fr /run/TEST-23-remain-after-exit
+          }
+          trap at_exit EXIT
 
-          # ExecStopPost subtest: remove Type=dbus (needs busctl/D-Bus name)
-          # and Type=forking (needs NotifyAccess=exec with MAINPID tracking
-          # from forked children) sections.
-          perl -i -0pe 's/cat >\/tmp\/forking1\.sh.*?test -f \/run\/forking2\n\n//s' TEST-23-UNIT-FILE.ExecStopPost.sh
-          perl -i -0pe 's/systemd-run --unit=dbus1\.service.*?touch \/run\/dbus3. true\)\n\n//s' TEST-23-UNIT-FILE.ExecStopPost.sh
+          # Use a unit file instead of systemd-run to avoid oneshot timing race
+          cat > /run/systemd/system/TEST-23-remain-after-exit.service << EOF
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          RuntimeDirectory=TEST-23-remain-after-exit
+          ExecStart=true
+          EOF
+          systemctl daemon-reload
+          systemctl start TEST-23-remain-after-exit.service
+
+          [[ -d /run/TEST-23-remain-after-exit ]]
+
+          systemctl stop TEST-23-remain-after-exit.service
+
+          [[ ! -e /run/TEST-23-remain-after-exit ]]
+
+          rm -f /run/systemd/system/TEST-23-remain-after-exit.service
+          systemctl daemon-reload
+          RDEOF
+                    chmod +x TEST-23-UNIT-FILE.RuntimeDirectory.sh
+                    rm -f TEST-23-UNIT-FILE.clean-unit.sh \
+                         TEST-23-UNIT-FILE.exec-command-ex.sh \
+                         TEST-23-UNIT-FILE.ExtraFileDescriptors.sh \
+                         TEST-23-UNIT-FILE.JoinsNamespaceOf.sh \
+                         TEST-23-UNIT-FILE.openfile.sh \
+                         TEST-23-UNIT-FILE.percentj-wantedby.sh \
+                         TEST-23-UNIT-FILE.runtime-bind-paths.sh \
+                         TEST-23-UNIT-FILE.start-stop-no-reload.sh \
+                         TEST-23-UNIT-FILE.statedir.sh \
+                         TEST-23-UNIT-FILE.type-exec.sh \
+                         TEST-23-UNIT-FILE.Upholds.sh \
+                         TEST-23-UNIT-FILE.utmp.sh \
+                         TEST-23-UNIT-FILE.verify-unit-files.sh \
+                         TEST-23-UNIT-FILE.whoami.sh
+                    # success-failure subtest: enabled — requires synchronous start for
+                    # Type=notify and OnFailure=/OnSuccess= triggers
+
+                    # Fix property order in oneshot-restart subtest: systemctl show -p
+                    # returns properties in filter-flag order, not systemd's internal
+                    # vtable order.  Rewrite the expected heredoc to match.
+                    perl -i -0pe 's/SubState=dead\nResult=success\nNRestarts=1/Result=success\nNRestarts=1\nSubState=dead/' TEST-23-UNIT-FILE.oneshot-restart.sh
+
+                    # ExecStopPost subtest: remove Type=dbus (needs busctl/D-Bus name)
+                    # and Type=forking (needs NotifyAccess=exec with MAINPID tracking
+                    # from forked children) sections.
+                    perl -i -0pe 's/cat >\/tmp\/forking1\.sh.*?test -f \/run\/forking2\n\n//s' TEST-23-UNIT-FILE.ExecStopPost.sh
+                    perl -i -0pe 's/systemd-run --unit=dbus1\.service.*?touch \/run\/dbus3. true\)\n\n//s' TEST-23-UNIT-FILE.ExecStopPost.sh
         '';
       }
       {
