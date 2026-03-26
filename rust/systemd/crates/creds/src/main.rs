@@ -77,6 +77,18 @@ struct Cli {
     /// Credential name (used by encrypt/decrypt).
     #[arg(long, global = true)]
     name: Option<String>,
+
+    /// Control trailing newline: auto, yes, no. (global alias for cat/encrypt)
+    #[arg(long, global = true)]
+    newline: Option<String>,
+
+    /// Transcode output: base64, unbase64, hex, unhex. (global alias for cat)
+    #[arg(long, global = true)]
+    transcode: Option<String>,
+
+    /// JSON output format: pretty, short, off. (global alias for list)
+    #[arg(long, global = true)]
+    json: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -1422,7 +1434,8 @@ fn main() {
     let command = cli.command.as_ref().unwrap_or(&default_list);
     match command {
         Command::List { json } => {
-            cmd_list(cli.system, cli.quiet, cli.no_legend, json);
+            let effective_json = cli.json.as_deref().unwrap_or(json.as_str());
+            cmd_list(cli.system, cli.quiet, cli.no_legend, effective_json);
         }
 
         Command::Cat {
@@ -1430,12 +1443,15 @@ fn main() {
             transcode,
             newline,
         } => {
+            // Global --transcode/--newline override subcommand defaults
+            let effective_transcode = cli.transcode.as_deref().or(transcode.as_deref());
+            let effective_newline = cli.newline.as_deref().unwrap_or(newline.as_str());
             cmd_cat(
                 credentials,
                 cli.system,
                 cli.quiet,
-                transcode.as_deref(),
-                newline,
+                effective_transcode,
+                effective_newline,
                 cli.name.as_deref(),
             );
         }
@@ -1482,12 +1498,13 @@ fn main() {
             newline,
             allow_null,
         } => {
+            let effective_newline = cli.newline.as_deref().unwrap_or(newline.as_str());
             cmd_decrypt(
                 input,
                 output.as_deref(),
                 cli.name.as_deref(),
-                transcode.as_deref(),
-                newline,
+                cli.transcode.as_deref().or(transcode.as_deref()),
+                effective_newline,
                 *allow_null,
                 cli.quiet,
             );

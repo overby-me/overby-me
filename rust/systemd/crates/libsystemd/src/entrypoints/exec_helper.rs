@@ -10,6 +10,99 @@ use crate::units::{
     PlatformSpecificServiceFields, RLimitValue, ResourceLimit, StandardInput, UtmpMode,
 };
 
+/// Process C-style escape sequences in a string, matching systemd's
+/// `cunescape()`.  Handles: `\\`, `\a`, `\b`, `\f`, `\n`, `\r`, `\t`,
+/// `\v`, `\xHH` (hex byte), `\NNN` (octal byte).  Unknown escapes are
+/// passed through literally.  Returns raw bytes because the unescaped
+/// data may contain arbitrary byte values (e.g. `\x00`).
+fn cunescape(s: &str) -> Vec<u8> {
+    let mut out = Vec::with_capacity(s.len());
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' && i + 1 < bytes.len() {
+            match bytes[i + 1] {
+                b'\\' => {
+                    out.push(b'\\');
+                    i += 2;
+                }
+                b'a' => {
+                    out.push(0x07);
+                    i += 2;
+                }
+                b'b' => {
+                    out.push(0x08);
+                    i += 2;
+                }
+                b'f' => {
+                    out.push(0x0c);
+                    i += 2;
+                }
+                b'n' => {
+                    out.push(b'\n');
+                    i += 2;
+                }
+                b'r' => {
+                    out.push(b'\r');
+                    i += 2;
+                }
+                b't' => {
+                    out.push(b'\t');
+                    i += 2;
+                }
+                b'v' => {
+                    out.push(0x0b);
+                    i += 2;
+                }
+                b'x' if i + 3 < bytes.len() => {
+                    // \xHH
+                    if let Ok(byte) = u8::from_str_radix(
+                        std::str::from_utf8(&bytes[i + 2..i + 4]).unwrap_or(""),
+                        16,
+                    ) {
+                        out.push(byte);
+                        i += 4;
+                    } else {
+                        out.push(bytes[i]);
+                        i += 1;
+                    }
+                }
+                b'0'..=b'7' => {
+                    // Octal: up to 3 digits
+                    let start = i + 1;
+                    let mut end = start + 1;
+                    while end < bytes.len()
+                        && end < start + 3
+                        && bytes[end] >= b'0'
+                        && bytes[end] <= b'7'
+                    {
+                        end += 1;
+                    }
+                    if let Ok(val) =
+                        u8::from_str_radix(std::str::from_utf8(&bytes[start..end]).unwrap_or(""), 8)
+                    {
+                        out.push(val);
+                        i = end;
+                    } else {
+                        out.push(bytes[i]);
+                        i += 1;
+                    }
+                }
+                _ => {
+                    // Unknown escape — pass through literally
+                    out.push(bytes[i]);
+                    out.push(bytes[i + 1]);
+                    i += 2;
+                }
+            }
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    out
+}
+
 /// Convert a Linux capability name (e.g. "CAP_SYS_TIME") to its numeric
 /// value as defined in `<linux/capability.h>`.  Returns `None` for
 /// unrecognised names.
@@ -2834,7 +2927,8 @@ fn setup_credentials(config: &ExecHelperConfig) {
     // --- Phase 1: SetCredential= (lowest priority) ---
     for (id, data) in &config.set_credentials {
         let dst = cred_dir.join(id);
-        match std::fs::write(&dst, data.as_bytes()) {
+        let unescaped = cunescape(data);
+        match std::fs::write(&dst, &unescaped) {
             Ok(()) => {
                 set_credential_perms(&dst, uid, gid);
                 _wrote += 1;
