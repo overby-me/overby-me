@@ -164,6 +164,8 @@ fn builtin_break(shell: &mut Shell, args: &[String]) -> i32 {
             shell.error_prefix(),
             n
         );
+        // bash still breaks after the error
+        shell.breaking = 1;
         return 1;
     }
     shell.breaking = n;
@@ -185,6 +187,8 @@ fn builtin_continue(shell: &mut Shell, args: &[String]) -> i32 {
             shell.error_prefix(),
             n
         );
+        // bash breaks the loop after the error (not continue)
+        shell.breaking = 1;
         return 1;
     }
     shell.continuing = n;
@@ -1363,7 +1367,7 @@ fn builtin_readonly(shell: &mut Shell, args: &[String]) -> i32 {
                 match ch {
                     'f' => func_mode = true,
                     'p' => print_mode = true,
-                    'a' | 'A' => {} // array flags accepted
+                    'a' | 'A' | 'n' => {} // array/nameref flags accepted
                     _ => {
                         eprintln!(
                             "{}: readonly: -{}: invalid option",
@@ -1371,7 +1375,7 @@ fn builtin_readonly(shell: &mut Shell, args: &[String]) -> i32 {
                             ch
                         );
                         eprintln!(
-                            "readonly: usage: readonly [-aAf] [name[=value] ...] or readonly -p"
+                            "readonly: usage: readonly [-aAfn] [name[=value] ...] or readonly -p"
                         );
                         return 2;
                     }
@@ -4885,12 +4889,7 @@ fn builtin_builtin(shell: &mut Shell, args: &[String]) -> i32 {
     } else {
         eprintln!(
             "{}: builtin: {}: not a shell builtin",
-            shell
-                .vars
-                .get("_BASH_SOURCE_FILE")
-                .or_else(|| shell.positional.first())
-                .map(|s| s.as_str())
-                .unwrap_or("bash"),
+            shell.error_prefix(),
             name
         );
         1
@@ -6526,7 +6525,7 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
                 }
             } else {
                 eprintln!(
-                    "{}: shopt: {}: invalid shell option name",
+                    "{}: shopt: {}: invalid option name",
                     shell.error_prefix(),
                     opt
                 );
@@ -6845,7 +6844,7 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
             _ => {
                 if !query {
                     eprintln!(
-                        "{}: shopt: {}: invalid shell option name",
+                        "{}: shopt: {}: invalid option name",
                         shell.error_prefix(),
                         opt
                     );
