@@ -244,7 +244,7 @@ pub struct Shell {
     pub continuing: i32,
     pub in_condition: bool,
     pub in_debug_trap: bool,
-    pub in_trap_handler: bool,
+    pub in_trap_handler: i32,
     pub errexit_suppressed: bool,
     pub sourcing: bool,
     /// The original script file name for error messages (doesn't change with BASH_ARGV0)
@@ -398,7 +398,7 @@ impl Shell {
             continuing: 0,
             in_condition: false,
             in_debug_trap: false,
-            in_trap_handler: false,
+            in_trap_handler: 0,
             errexit_suppressed: false,
             sourcing: false,
             script_name: String::new(),
@@ -720,7 +720,7 @@ impl Shell {
 
             // Update LINENO to current parser line
             // (but not inside trap handlers — they preserve the calling context's LINENO)
-            if !self.in_debug_trap && !self.in_trap_handler {
+            if !self.in_debug_trap && self.in_trap_handler == 0 {
                 self.vars
                     .insert("LINENO".to_string(), parser.current_line().to_string());
             }
@@ -852,7 +852,7 @@ impl Shell {
         {
             let saved = self.last_status;
             let saved_in_trap = self.in_trap_handler;
-            self.in_trap_handler = true;
+            self.in_trap_handler += 1;
             self.run_string(&handler);
             self.in_trap_handler = saved_in_trap;
             self.last_status = saved;
@@ -941,7 +941,7 @@ impl Shell {
         self.reap_coprocs();
 
         // Update LINENO (skip inside trap handlers to preserve calling context)
-        if !self.in_debug_trap && !self.in_trap_handler {
+        if !self.in_debug_trap && self.in_trap_handler == 0 {
             self.vars.insert("LINENO".to_string(), cmd.line.to_string());
         }
 
@@ -1768,13 +1768,27 @@ impl Shell {
     }
 
     pub fn xtrace_write(&self, msg: &str) {
-        // Replace leading "+ " or "++ " with expanded PS4
-        let output = if let Some(rest) = msg.strip_prefix("++ ") {
+        // Replace leading "+" prefix with expanded PS4
+        // Bash replicates the first char of PS4 based on nesting depth
+        let output = if msg.starts_with('+') {
             let ps4 = self.get_ps4();
-            format!("{}{}{}", ps4, ps4, rest)
-        } else if let Some(rest) = msg.strip_prefix("+ ") {
-            let ps4 = self.get_ps4();
-            format!("{}{}", ps4, rest)
+            // Count leading '+' characters from the message
+            let msg_depth = msg.chars().take_while(|&c| c == '+').count();
+            // Add trap handler nesting depth
+            let depth = msg_depth + self.in_trap_handler as usize;
+            let rest = msg[msg_depth..].trim_start();
+            if ps4.is_empty() {
+                format!("{} {}", "+".repeat(depth), rest)
+            } else {
+                let first_char = ps4.chars().next().unwrap();
+                let remainder = &ps4[first_char.len_utf8()..];
+                format!(
+                    "{}{}{}",
+                    first_char.to_string().repeat(depth),
+                    remainder,
+                    rest
+                )
+            }
         } else {
             msg.to_string()
         };
@@ -1985,7 +1999,7 @@ impl Shell {
     fn run_simple_command(&mut self, cmd: &SimpleCommand) -> i32 {
         // Set BASH_COMMAND to the source text before expansion
         // Don't overwrite during DEBUG or ERR trap execution
-        if !self.in_debug_trap && !self.in_trap_handler {
+        if !self.in_debug_trap && self.in_trap_handler == 0 {
             let mut parts = Vec::new();
             for a in &cmd.assignments {
                 if a.append {
@@ -4654,7 +4668,7 @@ impl Shell {
 
     fn run_conditional(&mut self, expr: &CondExpr) -> i32 {
         // Set BASH_COMMAND for the conditional (using raw source text, not expanded)
-        if !self.in_debug_trap && !self.in_trap_handler {
+        if !self.in_debug_trap && self.in_trap_handler == 0 {
             let raw = Self::format_cond_raw_helper(expr);
             self.vars
                 .insert("BASH_COMMAND".to_string(), format!("[[ {} ]]", raw));
