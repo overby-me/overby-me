@@ -3037,8 +3037,43 @@ impl Lexer {
         let mut depth = 0i32;
         while self.pos < self.input.len() {
             let ch = self.input[self.pos];
-            // Handle $(...) — use proper comsub parser with case/esac awareness
+            // Handle $((...)) and $(...) — use proper parsers
             if ch == '$' && self.pos + 1 < self.input.len() {
+                if self.input[self.pos + 1] == '('
+                    && self.pos + 2 < self.input.len()
+                    && self.input[self.pos + 2] == '('
+                {
+                    // $((arith)) — skip arithmetic expansion
+                    s.push_str("$((");
+                    self.pos += 3;
+                    let mut arith_depth = 1i32;
+                    while self.pos < self.input.len() && arith_depth > 0 {
+                        let c = self.input[self.pos];
+                        if c == '$'
+                            && self.pos + 1 < self.input.len()
+                            && self.input[self.pos + 1] == '('
+                        {
+                            // Nested $( — skip comsub inside arithmetic
+                            s.push('$');
+                            self.pos += 1;
+                            s.push_str(&self.skip_comsub());
+                            continue;
+                        } else if c == ')'
+                            && self.pos + 1 < self.input.len()
+                            && self.input[self.pos + 1] == ')'
+                        {
+                            arith_depth -= 1;
+                            if arith_depth == 0 {
+                                s.push_str("))");
+                                self.pos += 2;
+                                break;
+                            }
+                        }
+                        s.push(c);
+                        self.pos += 1;
+                    }
+                    continue;
+                }
                 if self.input[self.pos + 1] == '(' {
                     s.push(ch);
                     self.pos += 1;

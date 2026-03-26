@@ -3766,6 +3766,42 @@ impl Shell {
                 i = j + 1;
                 continue;
             }
+            if i + 2 < chars.len() && chars[i] == '$' && chars[i + 1] == '(' && chars[i + 2] == '('
+            {
+                // $((arith)) — nested arithmetic expansion
+                // Recursively expand comsubs inside, then evaluate as arithmetic
+                // Find the matching ))
+                let mut depth = 1i32;
+                let mut j = i + 3;
+                while j < chars.len() {
+                    if chars[j] == '(' && j > 0 && chars[j - 1] == '$' {
+                        // Nested $( inside arithmetic
+                        depth += 1;
+                    } else if chars[j] == '(' {
+                        depth += 1;
+                    } else if chars[j] == ')'
+                        && j + 1 < chars.len()
+                        && chars[j + 1] == ')'
+                        && depth == 1
+                    {
+                        // Found matching ))
+                        let inner: String = chars[i + 3..j].iter().collect();
+                        let expanded = self.expand_comsubs_in_arith(&inner);
+                        let val = self.eval_arith_expr(&expanded);
+                        result.push_str(&val.to_string());
+                        i = j + 2;
+                        break;
+                    } else if chars[j] == ')' {
+                        depth -= 1;
+                    }
+                    j += 1;
+                }
+                if i <= j {
+                    // Didn't find matching )) — just pass through
+                    continue;
+                }
+                continue;
+            }
             if i + 1 < chars.len() && chars[i] == '$' && chars[i + 1] == '(' {
                 // Find matching closing paren with case/esac and quote awareness
                 let mut depth = 0i32;
