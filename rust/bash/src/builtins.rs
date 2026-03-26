@@ -3298,8 +3298,8 @@ fn builtin_return(shell: &mut Shell, args: &[String]) -> i32 {
         .first()
         .and_then(|s| s.parse().ok())
         .unwrap_or(shell.last_status);
-    // return is only valid in functions and sourced scripts
-    if shell.local_scopes.is_empty() && !shell.sourcing {
+    // return is valid in functions, sourced scripts, and trap handlers
+    if shell.local_scopes.is_empty() && !shell.sourcing && shell.in_trap_handler == 0 {
         eprintln!(
             "{}: return: can only `return' from a function or sourced script",
             shell.error_prefix()
@@ -5657,8 +5657,12 @@ fn builtin_trap(shell: &mut Shell, args: &[String]) -> i32 {
                 }
             }
         } else {
-            // Set trap handler (signal will be caught by the shell)
-            shell.traps.insert(signal, handler.clone());
+            // Set trap handler and install signal catcher
+            shell.traps.insert(signal.clone(), handler.clone());
+            #[cfg(unix)]
+            if let Some(signum) = signal_name_to_number(&signal) {
+                crate::interpreter::install_signal_handler(signum);
+            }
         }
     }
     status

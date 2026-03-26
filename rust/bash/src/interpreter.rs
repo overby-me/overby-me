@@ -3,6 +3,37 @@ use crate::builtins::{self, BuiltinFn};
 use crate::expand;
 use crate::parser::Parser;
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Global pending signal flags (indexed by signal number, 0-64)
+#[allow(clippy::declare_interior_mutable_const)]
+static PENDING_SIGNALS: [AtomicBool; 65] = {
+    const INIT: AtomicBool = AtomicBool::new(false);
+    [INIT; 65]
+};
+
+/// C-level signal handler that sets the pending flag
+extern "C" fn shell_signal_handler(signum: libc::c_int) {
+    if (signum as usize) < PENDING_SIGNALS.len() {
+        PENDING_SIGNALS[signum as usize].store(true, Ordering::SeqCst);
+    }
+}
+
+/// Install a signal handler that marks the signal as pending
+pub fn install_signal_handler(signum: i32) {
+    unsafe {
+        libc::signal(signum, shell_signal_handler as libc::sighandler_t);
+    }
+}
+
+/// Check and clear a pending signal, returns true if it was pending
+pub fn take_pending_signal(signum: i32) -> bool {
+    if (signum as usize) < PENDING_SIGNALS.len() {
+        PENDING_SIGNALS[signum as usize].swap(false, Ordering::SeqCst)
+    } else {
+        false
+    }
+}
 
 /// Check if a string is a valid bash identifier (variable name).
 pub fn is_valid_identifier(s: &str) -> bool {
@@ -818,6 +849,8 @@ impl Shell {
                         std::process::exit(status);
                     }
                     self.errexit_suppressed = false;
+                    // Check for pending signals after each command
+                    self.check_pending_signals();
                     if self.returning || self.breaking > 0 || self.continuing > 0 {
                         break;
                     }
@@ -921,6 +954,68 @@ impl Shell {
         status
     }
 
+    /// Check for pending Unix signals and run their trap handlers
+    pub fn check_pending_signals(&mut self) {
+        #[cfg(unix)]
+        {
+            // Check signals 1-64
+            for signum in 1..=64 {
+                if take_pending_signal(signum) {
+                    // Convert signal number to name
+                    let sig_name = match signum {
+                        libc::SIGHUP => "HUP",
+                        libc::SIGINT => "INT",
+                        libc::SIGQUIT => "QUIT",
+                        libc::SIGILL => "ILL",
+                        libc::SIGTRAP => "TRAP",
+                        libc::SIGABRT => "ABRT",
+                        libc::SIGBUS => "BUS",
+                        libc::SIGFPE => "FPE",
+                        libc::SIGUSR1 => "USR1",
+                        libc::SIGUSR2 => "USR2",
+                        libc::SIGPIPE => "PIPE",
+                        libc::SIGALRM => "ALRM",
+                        libc::SIGTERM => "TERM",
+                        libc::SIGCHLD => "CHLD",
+                        libc::SIGCONT => "CONT",
+                        libc::SIGWINCH => "WINCH",
+                        _ => continue,
+                    };
+                    if let Some(handler) = self.traps.get(sig_name).cloned()
+                        && !handler.is_empty()
+                    {
+                        // Set BASH_TRAPSIG to the signal number
+                        let old_trapsig = self.vars.get("BASH_TRAPSIG").cloned();
+                        self.vars
+                            .insert("BASH_TRAPSIG".to_string(), signum.to_string());
+                        let saved_status = self.last_status;
+                        self.in_trap_handler += 1;
+                        self.run_string(&handler);
+                        self.in_trap_handler -= 1;
+                        // If return was called in trap, propagate it
+                        if self.returning {
+                            // Don't restore status — the return value takes precedence
+                            if let Some(v) = old_trapsig {
+                                self.vars.insert("BASH_TRAPSIG".to_string(), v);
+                            } else {
+                                self.vars.remove("BASH_TRAPSIG");
+                            }
+                            return;
+                        }
+                        self.last_status = saved_status;
+                        if let Some(v) = old_trapsig {
+                            self.vars.insert("BASH_TRAPSIG".to_string(), v);
+                        } else {
+                            self.vars.remove("BASH_TRAPSIG");
+                        }
+                        // Re-install the signal handler (some systems reset to SIG_DFL)
+                        install_signal_handler(signum);
+                    }
+                }
+            }
+        }
+    }
+
     /// Execute the ERR trap if set and the command failed
     pub fn run_err_trap(&mut self) {
         if let Some(handler) = self.traps.get("ERR").cloned()
@@ -997,6 +1092,13 @@ impl Shell {
                 break;
             }
             status = self.run_complete_command(cmd);
+            // Check for pending signals after each command
+            if self.in_trap_handler == 0 {
+                self.check_pending_signals();
+                if self.returning || self.breaking > 0 {
+                    break;
+                }
+            }
             // Run ERR trap on non-zero status (not in conditions or negated)
             if status != 0 && !self.in_condition {
                 self.run_err_trap();
@@ -4541,7 +4643,22 @@ impl Shell {
                 break;
             }
 
+            // Check for pending signals (allows trap handlers to break loops)
+            self.check_pending_signals();
+            if self.returning || self.breaking > 0 {
+                if self.breaking > 0 {
+                    self.breaking -= 1;
+                }
+                break;
+            }
+
             let cond_status = self.run_condition(&clause.condition);
+            if self.returning || self.breaking > 0 {
+                if self.breaking > 0 {
+                    self.breaking -= 1;
+                }
+                break;
+            }
             if cond_status != 0 {
                 break;
             }
