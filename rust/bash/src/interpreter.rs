@@ -3894,7 +3894,16 @@ impl Shell {
                                     }
                                 }
                                 nix::errno::Errno::EACCES => "Permission denied",
-                                nix::errno::Errno::ENOEXEC => "Exec format error",
+                                nix::errno::Errno::ENOEXEC => {
+                                    // Fall back to running script with ourselves
+                                    // (like bash does for scripts without shebang)
+                                    use std::ffi::CString;
+                                    let self_exe = CString::new("/proc/self/exe").unwrap();
+                                    let mut new_args = vec![self_exe.clone()];
+                                    new_args.extend(c_args.iter().cloned());
+                                    nix::unistd::execvp(&self_exe, &new_args).ok();
+                                    "Exec format error"
+                                }
                                 _ => "command not found",
                             };
                             eprintln!("{}: {}: {}", self.error_prefix(), name, msg);
