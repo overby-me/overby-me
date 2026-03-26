@@ -6765,7 +6765,7 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
                 }
             } else {
                 eprintln!(
-                    "{}: shopt: {}: invalid shell option name",
+                    "{}: shopt: {}: invalid option name",
                     shell.error_prefix(),
                     opt
                 );
