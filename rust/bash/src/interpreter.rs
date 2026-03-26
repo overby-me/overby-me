@@ -1708,7 +1708,77 @@ impl Shell {
     }
 
     /// Write xtrace output to the appropriate fd (BASH_XTRACEFD or stderr)
+    /// Get the expanded PS4 prompt for xtrace
+    pub fn get_ps4(&self) -> String {
+        let ps4 = self
+            .vars
+            .get("PS4")
+            .cloned()
+            .unwrap_or_else(|| "+ ".to_string());
+        // Expand PS4 (simple variable expansion, mainly $LINENO)
+        let mut result = String::new();
+        let chars: Vec<char> = ps4.chars().collect();
+        let mut i = 0;
+        while i < chars.len() {
+            if chars[i] == '$' && i + 1 < chars.len() {
+                if chars[i + 1] == '{' {
+                    // ${VAR}
+                    i += 2;
+                    let mut name = String::new();
+                    while i < chars.len() && chars[i] != '}' {
+                        name.push(chars[i]);
+                        i += 1;
+                    }
+                    if i < chars.len() {
+                        i += 1;
+                    }
+                    result.push_str(
+                        self.vars
+                            .get(name.as_str())
+                            .map(|s| s.as_str())
+                            .unwrap_or(""),
+                    );
+                } else if chars[i + 1].is_alphabetic() || chars[i + 1] == '_' {
+                    // $VAR
+                    i += 1;
+                    let mut name = String::new();
+                    while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') {
+                        name.push(chars[i]);
+                        i += 1;
+                    }
+                    result.push_str(
+                        self.vars
+                            .get(name.as_str())
+                            .map(|s| s.as_str())
+                            .unwrap_or(""),
+                    );
+                } else {
+                    result.push(chars[i]);
+                    i += 1;
+                }
+            } else if chars[i] == '\\' && i + 1 < chars.len() {
+                result.push(chars[i + 1]);
+                i += 2;
+            } else {
+                result.push(chars[i]);
+                i += 1;
+            }
+        }
+        result
+    }
+
     pub fn xtrace_write(&self, msg: &str) {
+        // Replace leading "+ " or "++ " with expanded PS4
+        let output = if let Some(rest) = msg.strip_prefix("++ ") {
+            let ps4 = self.get_ps4();
+            format!("{}{}{}", ps4, ps4, rest)
+        } else if let Some(rest) = msg.strip_prefix("+ ") {
+            let ps4 = self.get_ps4();
+            format!("{}{}", ps4, rest)
+        } else {
+            msg.to_string()
+        };
+        let msg = &output;
         let fd = self
             .vars
             .get("BASH_XTRACEFD")
