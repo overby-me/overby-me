@@ -242,6 +242,7 @@ fn credentials_dir(system: bool) -> Option<PathBuf> {
     } else {
         std::env::var("CREDENTIALS_DIRECTORY")
             .ok()
+            .filter(|s| !s.is_empty())
             .map(PathBuf::from)
     }
 }
@@ -250,6 +251,7 @@ fn credentials_dir(system: bool) -> Option<PathBuf> {
 fn encrypted_credentials_dir() -> Option<PathBuf> {
     std::env::var("ENCRYPTED_CREDENTIALS_DIRECTORY")
         .ok()
+        .filter(|s| !s.is_empty())
         .map(PathBuf::from)
         .filter(|p| p.is_dir())
 }
