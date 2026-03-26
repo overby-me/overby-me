@@ -1948,7 +1948,7 @@ fn read_param_op(chars: &[char], i: &mut usize, _name: &str, in_dquote: bool) ->
             let pattern = read_pattern_word_until(chars, i, '/');
             let replacement = if *i < chars.len() && chars[*i] == '/' {
                 *i += 1;
-                read_word(chars, i)
+                read_pattern_word(chars, i)
             } else {
                 vec![]
             };
@@ -2005,7 +2005,10 @@ fn read_param_word_impl(chars: &[char], i: &mut usize, delim: char, in_dquote: b
         match chars[*i] {
             '\\' if *i + 1 < chars.len() => {
                 let next = chars[*i + 1];
-                if in_dquote && !matches!(next, '$' | '`' | '"' | '\\' | '\n' | '}' | '/') {
+                if in_dquote
+                    && !matches!(next, '$' | '`' | '"' | '\\' | '\n' | '}' | '/')
+                    && !(next == '\'' && PATTERN_WORD.with(|f| f.get()))
+                {
                     // At top level of param word in dquote, preserve backslash
                     literal.push('\\');
                     literal.push(next);
