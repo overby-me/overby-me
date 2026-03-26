@@ -2532,6 +2532,30 @@ fn create_transient_unit(
                         target.push(parse_cmd(value));
                     }
                 }
+                "SetCredential"
+                | "SetCredentialEncrypted"
+                | "LoadCredential"
+                | "LoadCredentialEncrypted" => {
+                    let target = match key {
+                        "SetCredential" => &mut service_conf.exec_config.set_credentials,
+                        "SetCredentialEncrypted" => {
+                            &mut service_conf.exec_config.set_credentials_encrypted
+                        }
+                        "LoadCredential" => &mut service_conf.exec_config.load_credentials,
+                        "LoadCredentialEncrypted" => {
+                            &mut service_conf.exec_config.load_credentials_encrypted
+                        }
+                        _ => unreachable!(),
+                    };
+                    if value.is_empty() {
+                        target.clear();
+                    } else if let Some((id, data)) = value.split_once(':') {
+                        let id = id.trim();
+                        if !id.is_empty() {
+                            target.push((id.to_owned(), data.to_owned()));
+                        }
+                    }
+                }
                 _ => {
                     log::debug!("Ignoring unknown transient unit property: {key}={value}");
                 }

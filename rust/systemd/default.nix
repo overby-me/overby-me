@@ -598,7 +598,7 @@
       }
       {
         name = "54-CREDS";
-        # Skip tests requiring systemd-run --pipe (transient unit credential passing).
+        # Skip tests requiring systemd-creds binary (encrypt/decrypt/list).
         patchScript = ''
           sed -i '0,/run_with_cred_compare/s/run_with_cred_compare/touch \/testok; exit 0\\n&/' TEST-54-CREDS.sh
         '';
@@ -630,9 +630,7 @@
           (! systemd-cgls --cgroup-id=foo)
           TESTEOF
           chmod +x TEST-74-AUX-UTILS.cgls.sh
-          # Patch id128 test: remove the 65-zeros error test (bash printf expansion differs)
-          # and the INVOCATION_ID pipe test (needs INVOCATION_ID env var in transient units).
-          sed -i '/systemd-run --wait --pipe/d' TEST-74-AUX-UTILS.id128.sh
+          # Patch id128 test: remove the 65-zeros error test (bash printf expansion differs).
           sed -i '/printf.*%0.s0.*{0..64}/d' TEST-74-AUX-UTILS.id128.sh
           rm -f TEST-74-AUX-UTILS.busctl.sh \
                TEST-74-AUX-UTILS.capsule.sh \

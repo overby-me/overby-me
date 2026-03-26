@@ -281,6 +281,23 @@ fn start_service_with_filedescriptors(
             }
             env.push(("NOTIFY_SOCKET".to_owned(), notifications_path));
 
+            // INVOCATION_ID — a unique 128-bit identifier for each service
+            // invocation, formatted as lowercase hex without dashes.
+            {
+                use std::io::Read;
+                let mut buf = [0u8; 16];
+                if let Ok(mut f) = std::fs::File::open("/dev/urandom")
+                    && f.read_exact(&mut buf).is_ok()
+                {
+                    // Set version 4 (random) UUID variant bits
+                    buf[6] = (buf[6] & 0x0f) | 0x40;
+                    buf[8] = (buf[8] & 0x3f) | 0x80;
+                    let id = buf.iter().map(|b| format!("{b:02x}")).collect::<String>();
+                    srvc.invocation_id = Some(id.clone());
+                    env.push(("INVOCATION_ID".to_owned(), id));
+                }
+            }
+
             // TRIGGER_PATH / TRIGGER_UNIT — set by path watcher when a .path
             // unit triggers this service. Cleared after use (one-shot).
             if let Some(ref tp) = srvc.trigger_path {
