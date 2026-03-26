@@ -703,6 +703,8 @@ pub struct SwapState {
 
 pub struct TimerState {
     pub common: CommonState,
+    /// Timestamp (microseconds since epoch) when the timer last triggered.
+    pub last_trigger_usec: Option<u64>,
 }
 
 pub struct PathState {

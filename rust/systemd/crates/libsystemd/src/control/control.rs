@@ -2830,6 +2830,7 @@ fn create_transient_unit(
                 conf: timer_config,
                 state: RwLock::new(crate::units::TimerState {
                     common: CommonState::default(),
+                    last_trigger_usec: None,
                 }),
             }),
         };

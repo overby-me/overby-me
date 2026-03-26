@@ -435,6 +435,7 @@ pub fn unit_from_parsed_timer(conf: ParsedTimerConfig) -> Result<Unit, String> {
             conf: timer_conf,
             state: RwLock::new(TimerState {
                 common: CommonState::default(),
+                last_trigger_usec: None,
             }),
         }),
     })

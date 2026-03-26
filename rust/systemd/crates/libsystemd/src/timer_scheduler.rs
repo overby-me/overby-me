@@ -96,6 +96,20 @@ fn check_and_fire_timers(
         );
         last_fired.insert(timer_id.name.clone(), now);
 
+        // Record LastTriggerUSec on the timer unit's state
+        {
+            let ri = run_info.read_poisoned();
+            if let Some(unit) = ri.unit_table.values().find(|u| u.id == timer_id) {
+                if let Specific::Timer(ref tmr) = unit.specific {
+                    let trigger_usec = SystemTime::now()
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .map(|d| d.as_micros() as u64)
+                        .unwrap_or(0);
+                    tmr.state.write_poisoned().last_trigger_usec = Some(trigger_usec);
+                }
+            }
+        }
+
         fire_timer_target(run_info, &target_unit_name, &timer_id.name);
     }
 }

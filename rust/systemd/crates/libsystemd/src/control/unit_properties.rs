@@ -260,6 +260,29 @@ pub fn collect_properties(unit: &Unit) -> BTreeMap<String, String> {
             } else {
                 insert(&mut props, "NextElapseUSecRealtime", "n/a");
             }
+            // LastTriggerUSec — when the timer last fired
+            {
+                let state = tmr.state.read_poisoned();
+                if let Some(usec) = state.last_trigger_usec {
+                    insert(&mut props, "LastTriggerUSec", &format_usec_timestamp(usec));
+                    insert(
+                        &mut props,
+                        "LastTriggerUSecMonotonic",
+                        &usec.to_string(),
+                    );
+                } else {
+                    insert(&mut props, "LastTriggerUSec", "n/a");
+                    insert(&mut props, "LastTriggerUSecMonotonic", "0");
+                }
+            }
+            // TimersCalendar — list of OnCalendar= specs with next elapse times
+            if !tmr.conf.on_calendar.is_empty() {
+                let mut parts = Vec::new();
+                for spec in &tmr.conf.on_calendar {
+                    parts.push(format!("OnCalendar={}", spec));
+                }
+                insert(&mut props, "TimersCalendar", &parts.join(" ; "));
+            }
         }
         Specific::Path(path) => {
             // Path-specific properties
@@ -1588,6 +1611,27 @@ fn format_notify_access(n: NotifyKind) -> String {
         NotifyKind::Exec => "exec",
     }
     .to_owned()
+}
+
+/// Format a microsecond timestamp as "Day YYYY-MM-DD HH:MM:SS UTC".
+fn format_usec_timestamp(usec: u64) -> String {
+    let secs = (usec / 1_000_000) as libc::time_t;
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    unsafe {
+        libc::gmtime_r(&secs, &mut tm);
+    }
+    let weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    let wday = weekdays.get(tm.tm_wday as usize).unwrap_or(&"???");
+    format!(
+        "{} {:04}-{:02}-{:02} {:02}:{:02}:{:02} UTC",
+        wday,
+        tm.tm_year + 1900,
+        tm.tm_mon + 1,
+        tm.tm_mday,
+        tm.tm_hour,
+        tm.tm_min,
+        tm.tm_sec,
+    )
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────
