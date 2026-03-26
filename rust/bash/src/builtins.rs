@@ -5402,7 +5402,6 @@ fn builtin_trap(shell: &mut Shell, args: &[String]) -> i32 {
                 "{}: trap: cannot specify both -p and -P",
                 shell.error_prefix()
             );
-            eprintln!("trap: usage: trap [-Plp] [[action] signal_spec ...]");
             return 2;
         }
         let mut status = 0;
