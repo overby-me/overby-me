@@ -4278,7 +4278,7 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
             {
                 let mut buf = vec![0u8; n];
                 match nix::unistd::read(read_fd, &mut buf) {
-                    Ok(0) => return 1,
+                    Ok(0) => eof_reached = true,
                     Ok(bytes_read) => {
                         // Convert raw bytes to chars (Latin-1 mapping for 0x80-0xFF)
                         line = buf[..bytes_read].iter().map(|&b| b as char).collect();
@@ -4324,11 +4324,10 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
                     }
                 }
             }
-            if hit_eof && line.is_empty() {
-                return 1; // EOF with no data
-            }
             if hit_eof {
                 eof_reached = true;
+                // Don't return early — still need to assign variables
+                // (and check readonly) even on EOF with empty data
             }
         }
         #[cfg(not(unix))]
@@ -4357,9 +4356,7 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
             loop {
                 match nix::unistd::read(read_fd, &mut buf) {
                     Ok(0) => {
-                        if line.is_empty() {
-                            return 1;
-                        }
+                        eof_reached = true;
                         break;
                     }
                     Ok(_) => {
@@ -4370,9 +4367,7 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
                         line.push(ch);
                     }
                     Err(_) => {
-                        if line.is_empty() {
-                            return 1;
-                        }
+                        eof_reached = true;
                         break;
                     }
                 }
@@ -4385,9 +4380,7 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
             loop {
                 match std::io::stdin().read(&mut buf) {
                     Ok(0) => {
-                        if line.is_empty() {
-                            return 1;
-                        }
+                        eof_reached = true;
                         break;
                     }
                     Ok(_) => {
@@ -4398,9 +4391,7 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
                         line.push(ch);
                     }
                     Err(_) => {
-                        if line.is_empty() {
-                            return 1;
-                        }
+                        eof_reached = true;
                         break;
                     }
                 }
@@ -4415,9 +4406,7 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
             loop {
                 match nix::unistd::read(read_fd, &mut buf) {
                     Ok(0) => {
-                        if line.is_empty() {
-                            return 1;
-                        }
+                        eof_reached = true;
                         break;
                     }
                     Ok(_) => {
@@ -4433,9 +4422,7 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
                         line.push(ch);
                     }
                     Err(_) => {
-                        if line.is_empty() {
-                            return 1;
-                        }
+                        eof_reached = true;
                         break;
                     }
                 }
@@ -4621,7 +4608,9 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
         {
             let resolved = shell.resolve_nameref(name);
             eprintln!("{}: {}: readonly variable", shell.error_prefix(), resolved);
-            read_status = 2;
+            if !eof_reached {
+                read_status = 2;
+            }
             break; // bash stops assigning after readonly error
         }
         shell.set_var(name, value);
