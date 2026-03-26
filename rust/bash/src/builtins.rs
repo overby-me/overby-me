@@ -1119,6 +1119,7 @@ fn builtin_cd(shell: &mut Shell, args: &[String]) -> i32 {
 
     match std::env::set_current_dir(&target) {
         Ok(()) => {
+            let saved_status = shell.last_status;
             shell.set_var("OLDPWD", old);
             let new = std::env::current_dir()
                 .map(|p| p.to_string_lossy().to_string())
@@ -1134,7 +1135,12 @@ fn builtin_cd(shell: &mut Shell, args: &[String]) -> i32 {
             if !args.is_empty() && args[0] == "-" {
                 println!("{}", new);
             }
-            0
+            // If set_var failed (readonly), return 1
+            if shell.last_status != saved_status {
+                shell.last_status
+            } else {
+                0
+            }
         }
         Err(e) => {
             let msg = match e.kind() {
