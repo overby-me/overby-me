@@ -207,6 +207,18 @@ impl Parser {
         }
     }
 
+    fn current_token_desc(&self) -> String {
+        self.current_token_str()
+    }
+
+    /// Print a conditional expression error directly to stderr (like bash's cond_error)
+    /// and return a special error marker that tells the caller not to re-print.
+    fn cond_error(&self, msg: &str) -> String {
+        // The error prefix will be added by the caller (interpreter)
+        // Just mark it as a cond error that should be printed as-is
+        format!("\x00COND_ERROR{}", msg)
+    }
+
     pub fn parse_program(&mut self) -> Result<Program, String> {
         let mut commands = Vec::new();
         self.skip_newlines();
@@ -879,7 +891,8 @@ impl Parser {
             self.advance();
             let expr = self.parse_cond_or()?;
             if !self.eat(&Token::RParen) {
-                return Err("expected ')' in conditional".to_string());
+                let tok = self.current_token_desc();
+                return Err(self.cond_error(&format!("unexpected token `{}', expected `)'", tok)));
             }
             return Ok(expr);
         }
@@ -890,16 +903,24 @@ impl Parser {
         {
             let op = text;
             self.advance();
-            let operand = self
-                .take_word()
-                .ok_or_else(|| format!("expected operand after '{}'", op))?;
+            let operand = self.take_word().ok_or_else(|| {
+                let tok = self.current_token_desc();
+                self.cond_error(&format!(
+                    "unexpected argument `{}' to conditional unary operator",
+                    tok
+                ))
+            })?;
             return Ok(CondExpr::Unary(op, operand));
         }
 
         // Must be a word — check for binary operator after it
-        let left = self
-            .take_word()
-            .ok_or_else(|| "expected expression in [[ ]]".to_string())?;
+        let left = self.take_word().ok_or_else(|| {
+            let tok = self.current_token_desc();
+            self.cond_error(&format!(
+                "unexpected token `{}' in conditional command",
+                tok
+            ))
+        })?;
 
         // Check for ]]
         if self.is_keyword("]]") || self.current == Token::Eof {
@@ -938,11 +959,20 @@ impl Parser {
                 } else if matches!(self.current, Token::LParen) {
                     self.read_cond_pattern()?
                 } else {
-                    return Err(format!("expected operand after '{}'", op));
+                    let tok = self.current_token_desc();
+                    return Err(self.cond_error(&format!(
+                        "unexpected argument `{}' to conditional binary operator",
+                        tok
+                    )));
                 }
             } else {
-                self.take_word()
-                    .ok_or_else(|| format!("expected operand after '{}'", op))?
+                self.take_word().ok_or_else(|| {
+                    let tok = self.current_token_desc();
+                    self.cond_error(&format!(
+                        "unexpected argument `{}' to conditional binary operator",
+                        tok
+                    ))
+                })?
             };
             return Ok(CondExpr::Binary(left, op, right));
         }
@@ -955,13 +985,30 @@ impl Parser {
                 ">".to_string()
             };
             self.advance();
-            let right = self
-                .take_word()
-                .ok_or_else(|| format!("expected operand after '{}'", op))?;
+            let right = self.take_word().ok_or_else(|| {
+                let tok = self.current_token_desc();
+                self.cond_error(&format!(
+                    "unexpected argument `{}' to conditional binary operator",
+                    tok
+                ))
+            })?;
             return Ok(CondExpr::Binary(left, op, right));
         }
 
-        // Just a word
+        // If next token is not ]], &&, ||, or EOF, then it's an unexpected token
+        // where a binary operator was expected
+        if !self.is_keyword("]]")
+            && !matches!(
+                self.current,
+                Token::AndIf | Token::OrIf | Token::Eof | Token::RParen
+            )
+        {
+            let tok = self.current_token_desc();
+            return Err(self.cond_error(&format!(
+                "unexpected token `{}', conditional binary operator expected",
+                tok
+            )));
+        }
         Ok(CondExpr::Word(left))
     }
 

@@ -775,7 +775,27 @@ impl Shell {
                     }
                 }
                 Err(e) => {
-                    if let Some(msg) = e.strip_prefix("RUNTIME:") {
+                    if let Some(msg) = e.strip_prefix("\x00COND_ERROR") {
+                        // Conditional expression error — print with prefix
+                        eprintln!("{}: {}", self.syntax_error_prefix(), msg);
+                        // Also print generic syntax error like bash does
+                        let token = parser.current_token_str();
+                        eprintln!(
+                            "{}: syntax error near `{}'",
+                            self.syntax_error_prefix(),
+                            token
+                        );
+                        let lineno: usize = self
+                            .vars
+                            .get("LINENO")
+                            .and_then(|s| s.parse().ok())
+                            .unwrap_or(1);
+                        let line = input
+                            .lines()
+                            .nth(lineno.saturating_sub(1))
+                            .unwrap_or(input.lines().next().unwrap_or(input));
+                        eprintln!("{}: `{}'", self.syntax_error_prefix(), line.trim());
+                    } else if let Some(msg) = e.strip_prefix("RUNTIME:") {
                         eprintln!("{}: {}", self.error_prefix(), msg);
                     } else if self.dash_c_mode {
                         eprintln!("{}: {}", self.syntax_error_prefix(), e);
