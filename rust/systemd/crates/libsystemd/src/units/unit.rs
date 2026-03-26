@@ -315,6 +315,22 @@ impl ServiceState {
                 *status = UnitStatus::Stopped(StatusStopped::StoppedFinal, vec![e.reason.clone()]);
             }
         }
+        // Clean up RuntimeDirectory= dirs unless RuntimeDirectoryPreserve=yes
+        if conf.exec_config.runtime_directory_preserve != RuntimeDirectoryPreserve::Yes {
+            for dir_name in &conf.exec_config.runtime_directory {
+                let full_path = std::path::Path::new("/run").join(dir_name);
+                if full_path.exists() {
+                    if let Err(e) = std::fs::remove_dir_all(&full_path) {
+                        trace!(
+                            "Failed to remove runtime directory {:?} for {}: {}",
+                            full_path,
+                            id.name,
+                            e
+                        );
+                    }
+                }
+            }
+        }
         kill_result
     }
     fn reactivate(
