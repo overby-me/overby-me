@@ -3906,8 +3906,15 @@ pub fn execute_command(
                         let sigval = libc::sigval {
                             sival_ptr: val as *mut libc::c_void,
                         };
-                        unsafe {
-                            libc::sigqueue(*pid, signal, sigval);
+                        let ret = unsafe { libc::sigqueue(*pid, signal, sigval) };
+                        if ret == -1 {
+                            log::trace!(
+                                "sigqueue(pid={}, sig={}, val={}) failed: {}",
+                                *pid,
+                                signal,
+                                val,
+                                std::io::Error::last_os_error()
+                            );
                         }
                     } else {
                         unsafe {

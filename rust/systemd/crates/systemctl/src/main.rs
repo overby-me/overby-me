@@ -85,9 +85,6 @@ const LONG_FLAGS_WITH_VALUE: &[&str] = &[
     "--machine",
     "--signal",
     "--kill-mode",
-    "--kill-who",
-    "--kill-whom",
-    "--kill-value",
     "--job-mode",
     "--root",
     "--preset-mode",
@@ -152,6 +149,7 @@ fn main() {
     let mut preset_mode: Option<String> = None;
     let mut kill_whom: Option<String> = None;
     let mut kill_value: Option<i32> = None;
+    let mut kill_signal_str: Option<String> = None;
 
     let mut i = 0;
     let mut end_of_options = false;
@@ -211,6 +209,20 @@ fn main() {
         }
         if let Some(rest) = arg.strip_prefix("--kill-value=") {
             kill_value = rest.parse::<i32>().ok();
+            i += 1;
+            continue;
+        }
+
+        // --signal / -s flag (for `kill --signal=SIGKILL`)
+        if arg == "--signal" || arg == "-s" {
+            if i + 1 < args.len() {
+                kill_signal_str = Some(args[i + 1].clone());
+            }
+            i += 2;
+            continue;
+        }
+        if let Some(rest) = arg.strip_prefix("--signal=") {
+            kill_signal_str = Some(rest.to_string());
             i += 1;
             continue;
         }
@@ -396,64 +408,45 @@ fn main() {
         positional.push("list-units".to_string());
     }
 
-    // Extract --signal flag for kill command
-    let mut kill_signal: Option<i32> = None;
-    {
-        let parse_signal_name = |name: &str| -> Option<i32> {
-            if let Ok(sig) = name.parse::<i32>() {
-                return Some(sig);
-            }
-            // Handle SIGRTMIN+N / SIGRTMAX-N
-            let name_upper = name.to_uppercase();
-            if let Some(offset) = name_upper
-                .strip_prefix("SIGRTMIN+")
-                .or_else(|| name_upper.strip_prefix("RTMIN+"))
-                && let Ok(n) = offset.parse::<i32>()
-            {
-                return Some(34 + n); // SIGRTMIN = 34 on Linux
-            }
-            if let Some(offset) = name_upper
-                .strip_prefix("SIGRTMAX-")
-                .or_else(|| name_upper.strip_prefix("RTMAX-"))
-                && let Ok(n) = offset.parse::<i32>()
-            {
-                return Some(64 - n); // SIGRTMAX = 64 on Linux
-            }
-            match name_upper.as_str() {
-                "SIGTERM" | "TERM" => Some(15),
-                "SIGKILL" | "KILL" => Some(9),
-                "SIGHUP" | "HUP" => Some(1),
-                "SIGINT" | "INT" => Some(2),
-                "SIGUSR1" | "USR1" => Some(10),
-                "SIGUSR2" | "USR2" => Some(12),
-                "SIGCONT" | "CONT" => Some(18),
-                "SIGSTOP" | "STOP" => Some(19),
-                "SIGTSTP" | "TSTP" => Some(20),
-                "SIGQUIT" | "QUIT" => Some(3),
-                "SIGABRT" | "ABRT" => Some(6),
-                "SIGPIPE" | "PIPE" => Some(13),
-                "SIGALRM" | "ALRM" => Some(14),
-                "SIGCHLD" | "CHLD" => Some(17),
-                "SIGWINCH" | "WINCH" => Some(28),
-                _ => None,
-            }
-        };
-        let mut i = 0;
-        while i < positional.len() {
-            if positional[i] == "--signal" || positional[i] == "-s" {
-                positional.remove(i);
-                if i < positional.len() {
-                    kill_signal = parse_signal_name(&positional[i]).or(Some(15));
-                    positional.remove(i);
-                }
-            } else if let Some(rest) = positional[i].strip_prefix("--signal=") {
-                kill_signal = parse_signal_name(rest).or(Some(15));
-                positional.remove(i);
-            } else {
-                i += 1;
-            }
+    // Parse signal name from --signal / -s flag captured in first pass
+    let kill_signal: Option<i32> = kill_signal_str.as_deref().and_then(|name| {
+        if let Ok(sig) = name.parse::<i32>() {
+            return Some(sig);
         }
-    }
+        let name_upper = name.to_uppercase();
+        if let Some(offset) = name_upper
+            .strip_prefix("SIGRTMIN+")
+            .or_else(|| name_upper.strip_prefix("RTMIN+"))
+            && let Ok(n) = offset.parse::<i32>()
+        {
+            return Some(34 + n); // SIGRTMIN = 34 on Linux
+        }
+        if let Some(offset) = name_upper
+            .strip_prefix("SIGRTMAX-")
+            .or_else(|| name_upper.strip_prefix("RTMAX-"))
+            && let Ok(n) = offset.parse::<i32>()
+        {
+            return Some(64 - n); // SIGRTMAX = 64 on Linux
+        }
+        match name_upper.as_str() {
+            "SIGTERM" | "TERM" => Some(15),
+            "SIGKILL" | "KILL" => Some(9),
+            "SIGHUP" | "HUP" => Some(1),
+            "SIGINT" | "INT" => Some(2),
+            "SIGUSR1" | "USR1" => Some(10),
+            "SIGUSR2" | "USR2" => Some(12),
+            "SIGCONT" | "CONT" => Some(18),
+            "SIGSTOP" | "STOP" => Some(19),
+            "SIGTSTP" | "TSTP" => Some(20),
+            "SIGQUIT" | "QUIT" => Some(3),
+            "SIGABRT" | "ABRT" => Some(6),
+            "SIGPIPE" | "PIPE" => Some(13),
+            "SIGALRM" | "ALRM" => Some(14),
+            "SIGCHLD" | "CHLD" => Some(17),
+            "SIGWINCH" | "WINCH" => Some(28),
+            _ => None,
+        }
+    });
 
     // Extract --reverse, --after, --before, --plain flags for list-dependencies
     let mut reverse = false;
