@@ -296,79 +296,15 @@ pub fn parse_service(
 }
 
 pub(super) fn parse_timeout(descr: &str) -> Timeout {
-    if descr.to_uppercase() == "INFINITY" {
+    if descr.trim().eq_ignore_ascii_case("infinity") {
         Timeout::Infinity
-    } else if let Ok(secs) = descr.parse::<u64>() {
+    } else if let Ok(secs) = descr.trim().parse::<u64>() {
         Timeout::Duration(std::time::Duration::from_secs(secs))
+    } else if let Some(dur) = crate::units::from_parsed_config::parse_timespan(descr) {
+        Timeout::Duration(dur)
     } else {
-        let mut sum_us: u64 = 0;
-        let split = descr.split(' ').collect::<Vec<_>>();
-        for t in &split {
-            if t.ends_with("us") || t.ends_with("usec") {
-                let suffix_len = if t.ends_with("usec") { 4 } else { 2 };
-                if let Ok(us) = t[0..t.len() - suffix_len].parse::<u64>() {
-                    sum_us += us;
-                }
-            } else if t.ends_with("ms") || t.ends_with("msec") {
-                let suffix_len = if t.ends_with("msec") { 4 } else { 2 };
-                if let Ok(ms) = t[0..t.len() - suffix_len].parse::<u64>() {
-                    sum_us += ms * 1_000;
-                }
-            } else if t.ends_with("min") || t.ends_with("minutes") || t.ends_with("minute") {
-                let suffix_len = if t.ends_with("minutes") {
-                    7
-                } else if t.ends_with("minute") {
-                    6
-                } else {
-                    3
-                };
-                if let Ok(mins) = t[0..t.len() - suffix_len].parse::<u64>() {
-                    sum_us += mins * 60 * 1_000_000;
-                }
-            } else if t.ends_with("days") || t.ends_with("day") || t.ends_with('d') {
-                let suffix_len = if t.ends_with("days") {
-                    4
-                } else if t.ends_with("day") {
-                    3
-                } else {
-                    1
-                };
-                if let Ok(days) = t[0..t.len() - suffix_len].parse::<u64>() {
-                    sum_us += days * 24 * 60 * 60 * 1_000_000;
-                }
-            } else if t.ends_with("weeks") || t.ends_with("week") || t.ends_with('w') {
-                let suffix_len = if t.ends_with("weeks") {
-                    5
-                } else if t.ends_with("week") {
-                    4
-                } else {
-                    1
-                };
-                if let Ok(weeks) = t[0..t.len() - suffix_len].parse::<u64>() {
-                    sum_us += weeks * 7 * 24 * 60 * 60 * 1_000_000;
-                }
-            } else if t.ends_with("hrs") || t.ends_with("hr") || t.ends_with('h') {
-                let suffix_len = if t.ends_with("hrs") {
-                    3
-                } else if t.ends_with("hr") {
-                    2
-                } else {
-                    1
-                };
-                if let Ok(hrs) = t[0..t.len() - suffix_len].parse::<u64>() {
-                    sum_us += hrs * 60 * 60 * 1_000_000;
-                }
-            } else if t.ends_with("sec")
-                && let Ok(secs) = t[0..t.len() - 3].parse::<u64>()
-            {
-                sum_us += secs * 1_000_000;
-            } else if t.ends_with('s')
-                && let Ok(secs) = t[0..t.len() - 1].parse::<u64>()
-            {
-                sum_us += secs * 1_000_000;
-            }
-        }
-        Timeout::Duration(std::time::Duration::from_micros(sum_us))
+        // Unparsable value — treat as zero (disabled).
+        Timeout::Duration(std::time::Duration::ZERO)
     }
 }
 
