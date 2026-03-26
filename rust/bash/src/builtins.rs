@@ -6467,7 +6467,7 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
             if !query {
                 for (name, val) in &set_options {
                     if print_mode {
-                        println!("shopt {} -o {}", if *val { "-s" } else { "-u" }, name);
+                        println!("set {}o {}", if *val { "-" } else { "+" }, name);
                     } else if set {
                         if *val {
                             println!("{:<20}\ton", name);
@@ -6515,7 +6515,7 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
                     }
                 } else if !query {
                     if print_mode {
-                        println!("shopt {} -o {}", if *val { "-s" } else { "-u" }, opt);
+                        println!("set {}o {}", if *val { "-" } else { "+" }, opt);
                     } else {
                         println!("{:<15}\t{}", opt, if *val { "on" } else { "off" });
                     }
