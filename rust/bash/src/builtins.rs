@@ -5898,6 +5898,12 @@ fn builtin_kill(shell: &mut Shell, args: &[String]) -> i32 {
             i += 1;
         }
 
+        if pids.is_empty() {
+            eprintln!(
+                "kill: usage: kill [-s sigspec | -n signum | -sigspec] pid | jobspec ... or kill -l [sigspec]"
+            );
+            return 2;
+        }
         let mut status = 0;
         for pid in pids {
             if signal::kill(Pid::from_raw(pid), signal).is_err() {
