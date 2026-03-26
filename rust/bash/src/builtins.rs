@@ -6136,8 +6136,23 @@ fn builtin_unalias(shell: &mut Shell, args: &[String]) -> i32 {
     status
 }
 
-fn builtin_enable(_shell: &mut Shell, _args: &[String]) -> i32 {
-    0
+fn builtin_enable(shell: &mut Shell, args: &[String]) -> i32 {
+    let builtins = builtins();
+    let mut status = 0;
+    for arg in args {
+        if arg.starts_with('-') {
+            continue; // skip flags
+        }
+        if !builtins.contains_key(arg.as_str()) {
+            eprintln!(
+                "{}: enable: {}: not a shell builtin",
+                shell.error_prefix(),
+                arg
+            );
+            status = 1;
+        }
+    }
+    status
 }
 
 fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
@@ -6172,6 +6187,15 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
         } else {
             opts.push(arg.as_str());
         }
+    }
+
+    // Cannot set and unset simultaneously
+    if set && unset {
+        eprintln!(
+            "{}: shopt: cannot set and unset shell options simultaneously",
+            shell.error_prefix()
+        );
+        return 1;
     }
 
     // Handle -o (set -o options) separately — delegates to set -o options
