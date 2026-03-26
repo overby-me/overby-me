@@ -33,6 +33,5 @@
     veo
     cloud-hypervisor
     android-tools
-    {zswap.swapSize = 64 * 1024;}
   ];
 }

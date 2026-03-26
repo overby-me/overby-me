@@ -13,6 +13,7 @@
     ./system.nix
     ./users.nix
     ./virtualisation.nix
+    ./zram.nix
     ./zswap.nix
   ];
 }

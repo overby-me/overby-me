@@ -8,5 +8,5 @@
     };
     amdgpu.opencl.enable = true;
   };
-  zswap.enable = true;
+  zram.enable = true;
 }
