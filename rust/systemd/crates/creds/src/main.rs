@@ -89,6 +89,38 @@ struct Cli {
     /// JSON output format: pretty, short, off. (global alias for list)
     #[arg(long, global = true)]
     json: Option<String>,
+
+    /// Encryption key type: host, tpm2, host+tpm2, null, auto, auto-initrd.
+    #[arg(long, global = true, default_value = "auto")]
+    with_key: String,
+
+    /// Shortcut for --with-key=host.
+    #[arg(short = 'H', long, global = true)]
+    host: bool,
+
+    /// Shortcut for --with-key=tpm2.
+    #[arg(short = 'T', long, global = true)]
+    tpm2: bool,
+
+    /// PCR indices to bind TPM2-sealed credentials to.
+    #[arg(long, global = true, default_value = "7")]
+    tpm2_pcrs: String,
+
+    /// Timestamp to embed (microseconds since epoch, or "now").
+    #[arg(long, global = true)]
+    timestamp: Option<String>,
+
+    /// Expiry timestamp (0 or empty = never).
+    #[arg(long, global = true)]
+    not_after: Option<String>,
+
+    /// Show output as SetCredentialEncrypted= line.
+    #[arg(short = 'p', long, global = true)]
+    pretty: bool,
+
+    /// Allow decrypting null-key credentials even on secure-boot systems.
+    #[arg(long, global = true)]
+    allow_null: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -125,35 +157,6 @@ enum Command {
 
         /// Output file path or "-" for stdout.
         output: String,
-
-        /// Encryption key type: host, tpm2, host+tpm2, null, auto, auto-initrd.
-        #[arg(long, default_value = "auto")]
-        with_key: String,
-
-        /// Shortcut for --with-key=host.
-        #[arg(short = 'H', long)]
-        host: bool,
-
-        /// Shortcut for --with-key=tpm2.
-        #[arg(short = 'T', long)]
-        tpm2: bool,
-
-        /// PCR indices to bind TPM2-sealed credentials to (comma-separated).
-        /// Default: 7 (Secure Boot policy).
-        #[arg(long, default_value = "7")]
-        tpm2_pcrs: String,
-
-        /// Timestamp to embed (microseconds since epoch, or "now").
-        #[arg(long)]
-        timestamp: Option<String>,
-
-        /// Expiry timestamp (0 or empty = never).
-        #[arg(long)]
-        not_after: Option<String>,
-
-        /// Show output as SetCredentialEncrypted= line (requires --name and output="-").
-        #[arg(short = 'p', long)]
-        pretty: bool,
     },
 
     /// Decrypt an encrypted credential.
@@ -171,10 +174,6 @@ enum Command {
         /// Control trailing newline: auto, yes, no.
         #[arg(long, default_value = "auto")]
         newline: String,
-
-        /// Allow decrypting null-key credentials even on secure-boot systems.
-        #[arg(long)]
-        allow_null: bool,
     },
 
     /// Report whether a TPM2 device is available.
@@ -1520,33 +1519,23 @@ fn main() {
             cmd_setup(cli.quiet);
         }
 
-        Command::Encrypt {
-            input,
-            output,
-            with_key,
-            host,
-            tpm2,
-            tpm2_pcrs,
-            timestamp,
-            not_after,
-            pretty,
-        } => {
-            let effective_key = if *host {
+        Command::Encrypt { input, output } => {
+            let effective_key = if cli.host {
                 "host"
-            } else if *tpm2 {
+            } else if cli.tpm2 {
                 "tpm2"
             } else {
-                with_key.as_str()
+                cli.with_key.as_str()
             };
             cmd_encrypt(
                 input,
                 output,
                 cli.name.as_deref(),
                 effective_key,
-                tpm2_pcrs,
-                timestamp.as_deref(),
-                not_after.as_deref(),
-                *pretty,
+                &cli.tpm2_pcrs,
+                cli.timestamp.as_deref(),
+                cli.not_after.as_deref(),
+                cli.pretty,
                 cli.quiet,
             );
         }
@@ -1556,7 +1545,6 @@ fn main() {
             output,
             transcode,
             newline,
-            allow_null,
         } => {
             let effective_newline = cli.newline.as_deref().unwrap_or(newline.as_str());
             cmd_decrypt(
@@ -1565,7 +1553,7 @@ fn main() {
                 cli.name.as_deref(),
                 cli.transcode.as_deref().or(transcode.as_deref()),
                 effective_newline,
-                *allow_null,
+                cli.allow_null,
                 cli.quiet,
             );
         }
