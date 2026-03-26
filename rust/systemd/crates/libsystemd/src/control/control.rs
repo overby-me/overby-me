@@ -1925,7 +1925,7 @@ fn create_transient_unit(
     use crate::units::{
         Commandline, Common, CommonState, Delegate, Dependencies, ExecConfig, NotifyKind,
         PlatformSpecificServiceFields, ServiceConfig, ServiceSpecific, ServiceState, ServiceType,
-        Specific, SuccessExitStatus, UnitConfig, UnitId, UnitIdKind, UnitStatus,
+        Specific, SuccessExitStatus, UnitConfig, UnitId, UnitIdKind, UnitStatus, UnitTimestamps,
     };
     use std::sync::RwLock;
 
@@ -2649,6 +2649,7 @@ fn create_transient_unit(
                 bound_by: vec![],
             },
             status: RwLock::new(UnitStatus::NeverStarted),
+            timestamps: RwLock::new(UnitTimestamps::default()),
         },
         specific: Specific::Service(ServiceSpecific {
             conf: service_conf,
@@ -2825,6 +2826,7 @@ fn create_transient_unit(
                     bound_by: vec![],
                 },
                 status: RwLock::new(UnitStatus::Started(crate::units::StatusStarted::Running)),
+                timestamps: RwLock::new(UnitTimestamps::default()),
             },
             specific: Specific::Timer(crate::units::TimerSpecific {
                 conf: timer_config,
@@ -6115,6 +6117,7 @@ mod tests {
     use crate::units::{
         Common, CommonState, Dependencies, Specific, StatusStarted, StatusStopped, TargetSpecific,
         TargetState, Unit, UnitConfig, UnitId, UnitIdKind, UnitOperationErrorReason, UnitStatus,
+        UnitTimestamps,
     };
     use std::collections::HashMap;
     use std::sync::RwLock;
@@ -6185,6 +6188,7 @@ mod tests {
                     bound_by: vec![],
                 },
                 status: RwLock::new(UnitStatus::NeverStarted),
+                timestamps: RwLock::new(UnitTimestamps::default()),
             },
             specific: Specific::Target(TargetSpecific {
                 state: RwLock::new(TargetState {

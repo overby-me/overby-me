@@ -32,6 +32,60 @@ pub struct Common {
     pub unit: UnitConfig,
     pub dependencies: Dependencies,
     pub status: RwLock<UnitStatus>,
+    /// Lifecycle timestamps (microseconds since epoch) matching systemd's
+    /// InactiveExitTimestamp, ActiveEnterTimestamp, ActiveExitTimestamp,
+    /// InactiveEnterTimestamp and StateChangeTimestamp.
+    pub timestamps: RwLock<UnitTimestamps>,
+}
+
+/// Lifecycle timestamps for a unit, tracking when it transitions between
+/// the inactive → active → inactive states. All values are microseconds
+/// since the Unix epoch (CLOCK_REALTIME).
+#[derive(Default)]
+pub struct UnitTimestamps {
+    /// When the unit last left the inactive state (start began).
+    pub inactive_exit: Option<u64>,
+    /// When the unit last entered the active state (start finished).
+    pub active_enter: Option<u64>,
+    /// When the unit last left the active state (stop began).
+    pub active_exit: Option<u64>,
+    /// When the unit last entered the inactive state (stop finished).
+    pub inactive_enter: Option<u64>,
+    /// When the unit's state last changed (any transition).
+    pub state_change: Option<u64>,
+}
+
+impl UnitTimestamps {
+    pub fn now_usec() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_micros() as u64
+    }
+
+    pub fn record_inactive_exit(&mut self) {
+        let now = Self::now_usec();
+        self.inactive_exit = Some(now);
+        self.state_change = Some(now);
+    }
+
+    pub fn record_active_enter(&mut self) {
+        let now = Self::now_usec();
+        self.active_enter = Some(now);
+        self.state_change = Some(now);
+    }
+
+    pub fn record_active_exit(&mut self) {
+        let now = Self::now_usec();
+        self.active_exit = Some(now);
+        self.state_change = Some(now);
+    }
+
+    pub fn record_inactive_enter(&mut self) {
+        let now = Self::now_usec();
+        self.inactive_enter = Some(now);
+        self.state_change = Some(now);
+    }
 }
 
 /// Different unit-types have different configs and state
@@ -1270,8 +1324,11 @@ impl Unit {
             }
         })?;
 
+        // Record lifecycle timestamp: leaving active state
+        self.common.timestamps.write_poisoned().record_active_exit();
+
         trace!("Deactivate unit: {}", self.id.name);
-        match state {
+        let result = match state {
             LockedState::Target(_) | LockedState::Slice(_) | LockedState::Device(_) => {
                 let mut status = self.common.status.write_poisoned();
                 *status = UnitStatus::Stopped(StatusStopped::StoppedFinal, vec![]);
@@ -1292,7 +1349,17 @@ impl Unit {
                 *status = UnitStatus::Stopped(StatusStopped::StoppedFinal, vec![]);
                 Ok(())
             }
+        };
+
+        if result.is_ok() {
+            // Record lifecycle timestamp: entered inactive state
+            self.common
+                .timestamps
+                .write_poisoned()
+                .record_inactive_enter();
         }
+
+        result
     }
 
     /// This rectivates the unit and manages the state transitions. It reports back any

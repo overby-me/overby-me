@@ -10,7 +10,7 @@ use crate::units::{
     ServiceSpecific, ServiceState, SingleSocketConfig, SliceConfig, SliceSpecific, SliceState,
     SocketConfig, SocketSpecific, SocketState, Specific, SwapConfig, SwapSpecific, SwapState,
     TargetSpecific, TargetState, TimerConfig, TimerSpecific, TimerState, Unit, UnitConfig, UnitId,
-    UnitIdKind, UnitStatus,
+    UnitIdKind, UnitStatus, UnitTimestamps,
 };
 
 use log::trace;
@@ -850,6 +850,7 @@ fn make_common_from_parsed(
             binds_to,
             bound_by: Vec::new(),
         },
+        timestamps: RwLock::new(UnitTimestamps::default()),
     })
 }
 

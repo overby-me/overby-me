@@ -62,6 +62,9 @@ pub fn collect_properties(unit: &Unit) -> BTreeMap<String, String> {
     let status = unit.common.status.read_poisoned();
     insert_status(&mut props, &status);
 
+    // ── Lifecycle timestamps ─────────────────────────────────────────
+    insert_timestamps(&mut props, unit);
+
     // ── Type-specific properties ──────────────────────────────────────
     match &unit.specific {
         Specific::Service(svc) => {
@@ -871,6 +874,48 @@ fn insert_status(props: &mut BTreeMap<String, String>, status: &UnitStatus) {
     };
     insert(props, "ActiveState", active_state);
     insert(props, "SubState", sub_state);
+}
+
+fn insert_timestamps(props: &mut BTreeMap<String, String>, unit: &Unit) {
+    let ts = unit.common.timestamps.read_poisoned();
+    let fmt = |v: Option<u64>| match v {
+        Some(usec) => format_usec_timestamp(usec),
+        None => "n/a".to_string(),
+    };
+    let fmt_usec = |v: Option<u64>| match v {
+        Some(usec) => usec.to_string(),
+        None => "0".to_string(),
+    };
+    insert(props, "InactiveExitTimestamp", &fmt(ts.inactive_exit));
+    insert(
+        props,
+        "InactiveExitTimestampMonotonic",
+        &fmt_usec(ts.inactive_exit),
+    );
+    insert(props, "ActiveEnterTimestamp", &fmt(ts.active_enter));
+    insert(
+        props,
+        "ActiveEnterTimestampMonotonic",
+        &fmt_usec(ts.active_enter),
+    );
+    insert(props, "ActiveExitTimestamp", &fmt(ts.active_exit));
+    insert(
+        props,
+        "ActiveExitTimestampMonotonic",
+        &fmt_usec(ts.active_exit),
+    );
+    insert(props, "InactiveEnterTimestamp", &fmt(ts.inactive_enter));
+    insert(
+        props,
+        "InactiveEnterTimestampMonotonic",
+        &fmt_usec(ts.inactive_enter),
+    );
+    insert(props, "StateChangeTimestamp", &fmt(ts.state_change));
+    insert(
+        props,
+        "StateChangeTimestampMonotonic",
+        &fmt_usec(ts.state_change),
+    );
 }
 
 fn insert_service_config(props: &mut BTreeMap<String, String>, conf: &ServiceConfig) {

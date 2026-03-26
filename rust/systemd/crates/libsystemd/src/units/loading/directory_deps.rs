@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 use crate::units::{
     Common, CommonState, Dependencies, MountConfig, MountSpecific, MountState, ParsedFile,
     ParsingErrorReason, Specific, SwapConfig, SwapSpecific, SwapState, Unit, UnitConfig, UnitId,
-    UnitIdKind, UnitStatus, parse_device, parse_file, parse_mount, parse_path, parse_service,
-    parse_slice, parse_socket, parse_swap, parse_target, path_to_mount_unit_name,
+    UnitIdKind, UnitStatus, UnitTimestamps, parse_device, parse_file, parse_mount, parse_path,
+    parse_service, parse_slice, parse_socket, parse_swap, parse_target, path_to_mount_unit_name,
     path_to_swap_unit_name,
 };
 use std::sync::RwLock;
@@ -1721,6 +1721,7 @@ pub fn generate_fstab_mount_units(unit_table: &mut HashMap<UnitId, Unit>) {
                         binds_to: Vec::new(),
                         bound_by: Vec::new(),
                     },
+                    timestamps: RwLock::new(UnitTimestamps::default()),
                 },
                 specific: Specific::Swap(SwapSpecific {
                     conf: SwapConfig {
@@ -1882,6 +1883,7 @@ pub fn generate_fstab_mount_units(unit_table: &mut HashMap<UnitId, Unit>) {
                     binds_to: Vec::new(),
                     bound_by: Vec::new(),
                 },
+                timestamps: RwLock::new(UnitTimestamps::default()),
             },
             specific: Specific::Mount(MountSpecific {
                 conf: MountConfig {
@@ -2501,6 +2503,7 @@ mod tests {
                     bound_by: vec![],
                 },
                 status: RwLock::new(UnitStatus::NeverStarted),
+                timestamps: RwLock::new(UnitTimestamps::default()),
             },
             specific: Specific::Target(crate::units::TargetSpecific {
                 state: RwLock::new(crate::units::TargetState {

@@ -457,6 +457,11 @@ pub fn activate_unit(
     // systemd behavior.
     if !was_already_started {
         record_start_timestamp(unit);
+        // Record lifecycle timestamp: leaving inactive state
+        unit.common
+            .timestamps
+            .write_poisoned()
+            .record_inactive_exit();
     }
 
     match unit.activate(run_info, source) {
@@ -486,6 +491,14 @@ pub fn activate_unit(
                     id_to_start.name
                 );
                 return Ok(StartResult::Started(vec![]));
+            }
+
+            // Record lifecycle timestamp: entered active state
+            if !was_already_started {
+                unit.common
+                    .timestamps
+                    .write_poisoned()
+                    .record_active_enter();
             }
 
             // Activate the slice hierarchy for this unit so that
