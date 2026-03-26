@@ -867,6 +867,26 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
     }
 
     match chars[*i] {
+        '[' => {
+            // Old-style arithmetic: $[expr]
+            *i += 1;
+            let mut expr = String::new();
+            let mut depth = 1;
+            while *i < chars.len() && depth > 0 {
+                if chars[*i] == '[' {
+                    depth += 1;
+                } else if chars[*i] == ']' {
+                    depth -= 1;
+                    if depth == 0 {
+                        *i += 1;
+                        break;
+                    }
+                }
+                expr.push(chars[*i]);
+                *i += 1;
+            }
+            WordPart::ArithSub(expr)
+        }
         '(' => {
             *i += 1;
             if *i < chars.len() && chars[*i] == '(' {
