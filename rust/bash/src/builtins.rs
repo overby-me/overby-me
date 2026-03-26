@@ -1264,6 +1264,18 @@ fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
                     .map(|a| a.remove(idx_str));
             } else {
                 let raw_idx = shell.eval_arith_expr(idx_str);
+                if raw_idx < 0
+                    && let Some(arr) = shell.arrays.get(&resolved)
+                    && raw_idx.abs() > arr.len() as i64
+                {
+                    eprintln!(
+                        "{}: unset: [{}]: bad array subscript",
+                        shell.error_prefix(),
+                        raw_idx
+                    );
+                    status = 1;
+                    continue;
+                }
                 if let Some(arr) = shell.arrays.get_mut(&resolved) {
                     let idx = if raw_idx < 0 {
                         let len = arr.len() as i64;
@@ -2908,6 +2920,7 @@ fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
                         "keyword" => shell.opt_keyword = enable,
                         "noglob" => shell.opt_noglob = enable,
                         "posix" => shell.opt_posix = enable,
+                        "hashall" => shell.opt_hashall = enable,
                         _ => {}
                     }
                 } else {
@@ -2918,7 +2931,7 @@ fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
                         ("errexit", shell.opt_errexit),
                         ("errtrace", false),
                         ("functrace", false),
-                        ("hashall", true),
+                        ("hashall", shell.opt_hashall),
                         ("histexpand", false),
                         ("history", false),
                         ("ignoreeof", false),
@@ -2962,6 +2975,7 @@ fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
                         'k' => shell.opt_keyword = enable,
                         'C' => shell.opt_noclobber = enable,
                         'n' => shell.opt_noexec = enable,
+                        'h' => shell.opt_hashall = enable,
                         _ => {}
                     }
                 }
@@ -4901,6 +4915,10 @@ fn builtin_hash(shell: &mut Shell, args: &[String]) -> i32 {
                 shell.hash_table.remove(&args[i]);
             }
             "-p" => {
+                if !shell.opt_hashall {
+                    eprintln!("{}: hash: hashing disabled", shell.error_prefix());
+                    return 1;
+                }
                 i += 1;
                 if i + 1 < args.len() {
                     let path = args[i].clone();
