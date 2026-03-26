@@ -2478,15 +2478,18 @@ fn word_split(segments: &[Segment], ifs: &str) -> Vec<String> {
 
     let mut fields: Vec<String> = Vec::new();
     let mut current = String::new();
+    let mut has_quoted_since_split = false;
 
     for segment in segments {
         match segment {
             Segment::SplitHere => {
                 // Force a field break here (for "$@" and "${arr[@]}")
                 fields.push(std::mem::take(&mut current));
+                has_quoted_since_split = false;
             }
             Segment::Quoted(s) => {
                 current.push_str(&quote_glob_chars(s));
+                has_quoted_since_split = true;
             }
             Segment::Literal(s) => {
                 // Literal text: not IFS-split, glob chars preserved
@@ -2497,13 +2500,18 @@ fn word_split(segments: &[Segment], ifs: &str) -> Vec<String> {
                 let ifs_non_ws: Vec<char> = ifs.chars().filter(|c| !c.is_whitespace()).collect();
                 // If we have accumulated content from Quoted/Literal segments,
                 // start in "in field" state so IFS whitespace causes a split
-                let mut state: u8 = if !current.is_empty() { 1 } else { 0 };
+                let mut state: u8 = if !current.is_empty() || has_quoted_since_split {
+                    1
+                } else {
+                    0
+                };
                 for ch in s.chars() {
                     if ifs_non_ws.contains(&ch) {
                         match state {
                             1 => {
                                 // End current field
                                 fields.push(std::mem::take(&mut current));
+                                has_quoted_since_split = false;
                             }
                             2 => {
                                 // Consecutive non-ws delim: push empty field between them
@@ -2523,6 +2531,7 @@ fn word_split(segments: &[Segment], ifs: &str) -> Vec<String> {
                         if state == 1 {
                             // End current field on whitespace
                             fields.push(std::mem::take(&mut current));
+                            has_quoted_since_split = false;
                             state = 0;
                         }
                         // In states 0 or 2, whitespace is consumed
@@ -2535,15 +2544,10 @@ fn word_split(segments: &[Segment], ifs: &str) -> Vec<String> {
         }
     }
 
-    // Push the last field. For "$@" with empty trailing elements, we must
-    // keep empty fields — but only if there was actual quoted content after
-    // the last SplitHere (even if that content was empty).
-    let had_quoted_after_split = segments
-        .iter()
-        .rev()
-        .take_while(|s| !matches!(s, Segment::SplitHere))
-        .any(|s| matches!(s, Segment::Quoted(_)));
-    if !current.is_empty() || (has_split && had_quoted_after_split) {
+    // Push the last field if:
+    // 1. Current is non-empty, OR
+    // 2. There was quoted content since the last split (empty quoted string = empty field)
+    if !current.is_empty() || has_quoted_since_split {
         fields.push(current);
     }
 
