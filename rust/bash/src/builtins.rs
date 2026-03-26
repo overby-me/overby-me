@@ -1237,21 +1237,42 @@ fn builtin_export(shell: &mut Shell, args: &[String]) -> i32 {
             } else {
                 (&arg[..eq_pos], &arg[eq_pos + 1..], false)
             };
-            let final_value = if is_append {
-                let existing = shell.vars.get(name).cloned().unwrap_or_default();
-                if shell.integer_vars.contains(name) {
-                    let e = shell.eval_arith_expr(&existing);
-                    let a = shell.eval_arith_expr(value);
-                    (e + a).to_string()
-                } else {
-                    format!("{}{}", existing, value)
+            if !is_append && value.starts_with('(') && value.ends_with(')') {
+                // Array assignment: export r=(4)
+                let arr = parse_array_literal(value);
+                let export_val = arr.first().cloned().unwrap_or_default();
+                shell.arrays.insert(name.to_string(), arr);
+                shell.exports.insert(name.to_string(), export_val.clone());
+                unsafe { std::env::set_var(name, &export_val) };
+            } else if shell.arrays.contains_key(name) {
+                // Assigning scalar to existing array: set array[0]
+                let final_value = value.to_string();
+                if let Some(arr) = shell.arrays.get_mut(name) {
+                    if arr.is_empty() {
+                        arr.push(final_value.clone());
+                    } else {
+                        arr[0] = final_value.clone();
+                    }
                 }
+                shell.exports.insert(name.to_string(), final_value.clone());
+                unsafe { std::env::set_var(name, &final_value) };
             } else {
-                value.to_string()
-            };
-            shell.set_var(name, final_value.clone());
-            shell.exports.insert(name.to_string(), final_value.clone());
-            unsafe { std::env::set_var(name, &final_value) };
+                let final_value = if is_append {
+                    let existing = shell.vars.get(name).cloned().unwrap_or_default();
+                    if shell.integer_vars.contains(name) {
+                        let e = shell.eval_arith_expr(&existing);
+                        let a = shell.eval_arith_expr(value);
+                        (e + a).to_string()
+                    } else {
+                        format!("{}{}", existing, value)
+                    }
+                } else {
+                    value.to_string()
+                };
+                shell.set_var(name, final_value.clone());
+                shell.exports.insert(name.to_string(), final_value.clone());
+                unsafe { std::env::set_var(name, &final_value) };
+            }
         } else {
             // Export existing variable
             let value = shell
@@ -1506,10 +1527,22 @@ fn builtin_readonly(shell: &mut Shell, args: &[String]) -> i32 {
                 }
             } else if value.starts_with('(') && value.ends_with(')') {
                 // Treat (value) as array assignment: readonly a=(1 2 3)
-                // Note: bash's parser handles quoted vs unquoted distinction;
-                // our parser doesn't, so readonly 'a=(3)' incorrectly uses array syntax
-                let arr = parse_array_literal(value);
-                shell.arrays.insert(vname.to_string(), arr);
+                if shell.readonly_vars.contains(vname) {
+                    if let Some(fname) = shell.func_names.last() {
+                        eprintln!(
+                            "{}: {}: {}: readonly variable",
+                            shell.error_prefix(),
+                            fname,
+                            vname
+                        );
+                    } else {
+                        eprintln!("{}: {}: readonly variable", shell.error_prefix(), vname);
+                    }
+                    status = 1;
+                } else {
+                    let arr = parse_array_literal(value);
+                    shell.arrays.insert(vname.to_string(), arr);
+                }
             } else {
                 shell.set_var(vname, value.to_string());
             }
@@ -2472,6 +2505,9 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     if shell.readonly_vars.contains(name.as_str()) {
                         flags.push('r');
                     }
+                    if shell.exports.contains_key(name.as_str()) {
+                        flags.push('x');
+                    }
                     let arr = &shell.arrays[name];
                     let elements: Vec<String> = arr
                         .iter()
@@ -2507,6 +2543,9 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     }
                     if shell.readonly_vars.contains(name.as_str()) {
                         flags.push('r');
+                    }
+                    if shell.exports.contains_key(name.as_str()) {
+                        flags.push('x');
                     }
                     let arr = &shell.arrays[name];
                     let elements: Vec<String> = arr
@@ -2547,6 +2586,9 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     }
                     if shell.readonly_vars.contains(name.as_str()) {
                         flags.push('r');
+                    }
+                    if shell.exports.contains_key(name.as_str()) {
+                        flags.push('x');
                     }
                     let elements: Vec<String> = arr
                         .iter()

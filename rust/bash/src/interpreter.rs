@@ -551,7 +551,16 @@ impl Shell {
     pub fn set_var(&mut self, name: &str, value: String) {
         let resolved = self.resolve_nameref(name);
         if self.readonly_vars.contains(&resolved) {
-            eprintln!("{}: {}: readonly variable", self.error_prefix(), resolved);
+            if let Some(fname) = self.func_names.last() {
+                eprintln!(
+                    "{}: {}: {}: readonly variable",
+                    self.error_prefix(),
+                    fname,
+                    resolved
+                );
+            } else {
+                eprintln!("{}: {}: readonly variable", self.error_prefix(), resolved);
+            }
             self.last_status = 1;
             return;
         }
