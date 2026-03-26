@@ -355,6 +355,7 @@ pub(crate) fn service_exit_handler(
         };
         state.srvc.main_exit_status = Some(exit_code);
         state.srvc.main_exit_pid = Some(pid);
+        state.srvc.exec_main_exit_timestamp = Some(crate::units::UnitTimestamps::now_usec());
     }
 
     let success_exit_status = get_success_exit_status(unit);

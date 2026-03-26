@@ -551,6 +551,9 @@ fn start_service_with_filedescriptors(
             drop(exec_helper_conf_file);
             srvc.pid = Some(child);
             srvc.process_group = Some(nix::unistd::Pid::from_raw(-child.as_raw()));
+            let now = crate::units::UnitTimestamps::now_usec();
+            srvc.exec_main_start_timestamp = Some(now);
+            srvc.exec_main_handoff_timestamp = Some(now);
         }
         Ok(nix::unistd::ForkResult::Child) => {
             let stdout = {

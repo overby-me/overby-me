@@ -318,6 +318,9 @@ pub fn wait_for_service(
                                         daemon_pid, pid_file_path
                                     );
                                     srvc.pid = Some(daemon_pid);
+                                    let now = crate::units::UnitTimestamps::now_usec();
+                                    srvc.exec_main_start_timestamp = Some(now);
+                                    srvc.exec_main_handoff_timestamp = Some(now);
                                     pid_table_locked.insert(
                                         daemon_pid,
                                         PidEntry::Service(

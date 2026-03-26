@@ -174,6 +174,12 @@ pub struct Service {
     /// MONITOR_* environment variables — set when this service is activated
     /// as an OnSuccess= or OnFailure= handler for another unit.
     pub monitor_env: Option<MonitorEnv>,
+    /// Timestamp (usec since epoch) when the main process was started.
+    pub exec_main_start_timestamp: Option<u64>,
+    /// Timestamp (usec since epoch) when the main process was handed off (exec).
+    pub exec_main_handoff_timestamp: Option<u64>,
+    /// Timestamp (usec since epoch) when the main process exited.
+    pub exec_main_exit_timestamp: Option<u64>,
 }
 
 /// Environment variables passed to OnSuccess=/OnFailure= handler services.

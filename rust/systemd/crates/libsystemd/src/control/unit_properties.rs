@@ -114,6 +114,45 @@ pub fn collect_properties(unit: &Unit) -> BTreeMap<String, String> {
                     "NRestarts",
                     &state.common.restart_count.to_string(),
                 );
+                // ExecMain timestamps
+                let fmt_ts = |v: Option<u64>| match v {
+                    Some(usec) => format_usec_timestamp(usec),
+                    None => "n/a".to_string(),
+                };
+                let fmt_usec = |v: Option<u64>| match v {
+                    Some(usec) => usec.to_string(),
+                    None => "0".to_string(),
+                };
+                insert(
+                    &mut props,
+                    "ExecMainStartTimestamp",
+                    &fmt_ts(state.srvc.exec_main_start_timestamp),
+                );
+                insert(
+                    &mut props,
+                    "ExecMainStartTimestampMonotonic",
+                    &fmt_usec(state.srvc.exec_main_start_timestamp),
+                );
+                insert(
+                    &mut props,
+                    "ExecMainHandoffTimestamp",
+                    &fmt_ts(state.srvc.exec_main_handoff_timestamp),
+                );
+                insert(
+                    &mut props,
+                    "ExecMainHandoffTimestampMonotonic",
+                    &fmt_usec(state.srvc.exec_main_handoff_timestamp),
+                );
+                insert(
+                    &mut props,
+                    "ExecMainExitTimestamp",
+                    &fmt_ts(state.srvc.exec_main_exit_timestamp),
+                );
+                insert(
+                    &mut props,
+                    "ExecMainExitTimestampMonotonic",
+                    &fmt_usec(state.srvc.exec_main_exit_timestamp),
+                );
             } else {
                 // State lock is contended (service is activating).
                 // Provide sensible defaults so `systemctl show` doesn't hang.
