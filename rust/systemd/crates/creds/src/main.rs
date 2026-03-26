@@ -1001,18 +1001,19 @@ fn cmd_cat(
         }
 
         // Handle trailing newline.
-        let needs_newline = match newline {
-            "yes" => true,
-            "no" => false,
-            _ => {
-                // "auto": add newline if writing to a TTY and data doesn't
-                // already end with one.
-                let is_tty = unsafe { libc::isatty(libc::STDOUT_FILENO) == 1 };
-                is_tty && !data.ends_with(b"\n")
+        // --newline only takes effect when stdout is a tty; when piped,
+        // no newline is ever appended regardless of the setting.
+        let is_tty = unsafe { libc::isatty(libc::STDOUT_FILENO) == 1 };
+        if is_tty {
+            let needs_newline = match newline {
+                "yes" => true,
+                "no" => false,
+                // "auto": add newline if data doesn't already end with one.
+                _ => !data.ends_with(b"\n"),
+            };
+            if needs_newline {
+                let _ = out.write_all(b"\n");
             }
-        };
-        if needs_newline {
-            let _ = out.write_all(b"\n");
         }
     }
 
@@ -1280,17 +1281,18 @@ fn cmd_decrypt(
     }
 
     // Handle trailing newline.
+    // --newline only takes effect when stdout is a tty.
     if out_path == "-" {
-        let needs_newline = match newline {
-            "yes" => true,
-            "no" => false,
-            _ => {
-                let is_tty = unsafe { libc::isatty(libc::STDOUT_FILENO) == 1 };
-                is_tty && !plaintext.ends_with(b"\n")
+        let is_tty = unsafe { libc::isatty(libc::STDOUT_FILENO) == 1 };
+        if is_tty {
+            let needs_newline = match newline {
+                "yes" => true,
+                "no" => false,
+                _ => !plaintext.ends_with(b"\n"),
+            };
+            if needs_newline {
+                println!();
             }
-        };
-        if needs_newline {
-            println!();
         }
     }
 
