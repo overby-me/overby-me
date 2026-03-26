@@ -2937,34 +2937,43 @@ pub fn execute_command(
             // After activate_unit returns, check if the unit actually
             // started.  activate_unit swallows some errors (converting
             // them to Ok) for dependency-graph walking purposes, but for
-            // transient units we need to detect failure so that
+            // oneshot transient units we need to detect failure so that
             // `systemd-run` can exit non-zero.
+            //
+            // Only check oneshot services — for Type=simple/exec/notify
+            // the process may exit immediately after fork, but that's a
+            // runtime failure, not a start failure.
             {
                 let ri = run_info.read_poisoned();
                 if let Some(unit) = ri.unit_table.get(&id) {
-                    let status = unit.common.status.read_poisoned();
-                    match &*status {
-                        crate::units::UnitStatus::Stopped(
-                            crate::units::StatusStopped::StoppedUnexpected,
-                            errors,
-                        ) => {
-                            let msg = if let Some(e) = errors.first() {
-                                format!("{e}")
-                            } else {
-                                "unit failed".to_string()
-                            };
-                            return Err(format!(
-                                "Failed to start transient unit {unit_name}: {msg}"
-                            ));
+                    let is_oneshot = if let Specific::Service(srvc) = &unit.specific {
+                        srvc.conf.srcv_type == crate::units::ServiceType::OneShot
+                    } else {
+                        false
+                    };
+                    if is_oneshot {
+                        let status = unit.common.status.read_poisoned();
+                        match &*status {
+                            crate::units::UnitStatus::Stopped(
+                                crate::units::StatusStopped::StoppedUnexpected,
+                                errors,
+                            ) => {
+                                let msg = if let Some(e) = errors.first() {
+                                    format!("{e}")
+                                } else {
+                                    "unit failed".to_string()
+                                };
+                                return Err(format!(
+                                    "Failed to start transient unit {unit_name}: {msg}"
+                                ));
+                            }
+                            crate::units::UnitStatus::Restarting => {
+                                return Err(format!(
+                                    "Failed to start transient unit {unit_name}: initial start failed, unit is restarting"
+                                ));
+                            }
+                            _ => {}
                         }
-                        crate::units::UnitStatus::Restarting => {
-                            // The exit handler already kicked in and is
-                            // restarting the unit — the initial start failed.
-                            return Err(format!(
-                                "Failed to start transient unit {unit_name}: initial start failed, unit is restarting"
-                            ));
-                        }
-                        _ => {}
                     }
                 }
             }
