@@ -376,6 +376,7 @@ fn in_container() -> bool {
 /// Transcode data according to the specified mode.
 fn transcode(data: &[u8], mode: &str) -> Result<Vec<u8>, String> {
     match mode {
+        "no" | "0" | "false" | "" => Ok(data.to_vec()),
         "base64" => Ok(BASE64.encode(data).into_bytes()),
         "unbase64" => {
             let s = String::from_utf8_lossy(data);
