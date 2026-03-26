@@ -1150,9 +1150,29 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                             case_depth += 1;
                         } else if kw == "esac" || word == "esac" {
                             case_depth -= 1;
-                        } else if kw == "(" {
-                            // Alias expands to ( — increase depth
-                            depth += 1;
+                        }
+                        // Count ( and ) in alias expansion to adjust depth
+                        if let Some(ref exp) = effective {
+                            for ch in exp.chars() {
+                                match ch {
+                                    '(' => depth += 1,
+                                    ')' if case_depth <= 0 => {
+                                        depth -= 1;
+                                        if depth == 0 {
+                                            // Alias closes the comsub — add word and stop
+                                            cmd.push_str(&word);
+                                            *i -= 1; // back up so caller sees the position
+                                            // Don't consume the position — let caller handle EOF
+                                            break;
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            if depth == 0 {
+                                *i += 1;
+                                break;
+                            }
                         }
                         cmd.push_str(&word);
                         continue;
