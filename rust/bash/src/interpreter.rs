@@ -4095,7 +4095,11 @@ impl Shell {
                                     // Fall back to running script with ourselves
                                     // (like bash does for scripts without shebang)
                                     use std::ffi::CString;
-                                    let self_exe = CString::new("/proc/self/exe").unwrap();
+                                    // Try current_exe first, fall back to /proc/self/exe
+                                    let exe_path = std::env::current_exe()
+                                        .map(|p| p.to_string_lossy().to_string())
+                                        .unwrap_or_else(|_| "/proc/self/exe".to_string());
+                                    let self_exe = CString::new(exe_path.as_str()).unwrap();
                                     let mut new_args = vec![self_exe.clone()];
                                     new_args.extend(c_args.iter().cloned());
                                     nix::unistd::execvp(&self_exe, &new_args).ok();
