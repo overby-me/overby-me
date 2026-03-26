@@ -4107,9 +4107,18 @@ impl Shell {
                         // no shebang
                         {
                             // Text file without shebang — run with ourselves
+                            // Try multiple paths: current_exe, /proc/self/exe, argv[0]
                             let exe_path = std::env::current_exe()
                                 .map(|p| p.to_string_lossy().to_string())
-                                .unwrap_or_else(|_| "/proc/self/exe".to_string());
+                                .or_else(|_| {
+                                    std::fs::read_link("/proc/self/exe")
+                                        .map(|p| p.to_string_lossy().to_string())
+                                })
+                                .unwrap_or_else(|_| {
+                                    std::env::args()
+                                        .next()
+                                        .unwrap_or_else(|| "bash".to_string())
+                                });
                             let self_exe = std::ffi::CString::new(exe_path.as_str()).unwrap();
                             let mut new_args = vec![self_exe.clone()];
                             new_args.extend(c_args.iter().cloned());
