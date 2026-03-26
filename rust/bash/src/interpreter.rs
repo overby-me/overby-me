@@ -1197,11 +1197,9 @@ impl Shell {
                         // Clear EXIT trap in subshell (pipeline children are subshells)
                         self.traps.remove("EXIT");
                         self.traps.remove("0");
-                        // Restore SIGPIPE to default in pipeline children
-                        // so broken pipes cause silent exit (not error messages)
-                        unsafe {
-                            libc::signal(libc::SIGPIPE, libc::SIG_DFL);
-                        }
+                        // Note: SIGPIPE stays as SIG_IGN for builtins in pipeline children
+                        // so they can handle EPIPE gracefully. SIGPIPE is restored to SIG_DFL
+                        // before execvp for external commands (in the exec path below).
                         // Mark as pipeline child (suppresses broken pipe errors)
                         // but NOT in lastpipe pipelines where the reader may close early
                         self.in_pipeline_child = !self.shopt_lastpipe;
