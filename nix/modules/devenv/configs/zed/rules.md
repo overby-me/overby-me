@@ -40,6 +40,10 @@
 
 - **The `jj` wrapper runs git hooks automatically.** The `jj` binary is wrapped to run `pre-commit` hooks before `jj commit`, `jj new`, and `jj squash`, and `prepare-commit-msg` hooks when `-m`/`--message` is provided. If a hook fails, fix the issue and run the command again — do not try to bypass hooks.
 
+## Pre-commit file review
+
+- **Always review `jj status` for unintended files before committing.** jj auto-tracks all unignored files — there is no explicit staging step. Before every `jj commit` or `jj new`, check the file list and delete any test artifacts, temp files, or anything not intentionally part of the change. Be especially vigilant when running test suites that execute shell scripts, as they may create files in the working directory.
+
 ## Nix flake rules
 
 - **Run any `jj` command (e.g. `jj status`) before Nix flake operations when you've created new files.** Nix flakes only see files tracked by git. In a jj colocated repo, jj automatically snapshots the working directory (updating the git index) on every `jj` command. Unlike plain git, you do NOT need to manually `git add` files — just ensure at least one `jj` command has run since creating the file.
