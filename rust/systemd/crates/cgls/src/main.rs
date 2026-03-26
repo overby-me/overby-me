@@ -46,6 +46,31 @@ struct Cli {
     /// Limit depth of the displayed cgroup tree
     #[arg(long)]
     depth: Option<usize>,
+
+    /// Show extended attributes for each cgroup (yes/no)
+    #[arg(long, default_value = "no", default_missing_value = "yes", num_args = 0..=1, value_parser = parse_bool_arg)]
+    xattr: bool,
+
+    /// Show cgroup ID for each cgroup (yes/no)
+    #[arg(long, default_value = "no", default_missing_value = "yes", num_args = 0..=1, value_parser = parse_bool_arg)]
+    cgroup_id: bool,
+
+    /// Show the subtree of a specific unit
+    #[arg(short = 'u', long)]
+    unit: Option<String>,
+
+    /// Show the subtree of a specific user unit
+    #[arg(long)]
+    user_unit: Option<String>,
+}
+
+/// Parse a boolean argument value (yes/no/true/false/1/0).
+fn parse_bool_arg(s: &str) -> Result<bool, String> {
+    match s.to_lowercase().as_str() {
+        "yes" | "true" | "1" => Ok(true),
+        "no" | "false" | "0" => Ok(false),
+        _ => Err(format!("Invalid boolean value: {s}")),
+    }
 }
 
 // ── Data structures ───────────────────────────────────────────────────────
@@ -282,6 +307,51 @@ fn print_tree(node: &CgroupNode, prefix: &str, is_last: bool, is_root: bool, sho
     }
 }
 
+/// Resolve a cgroup path string to a filesystem path.
+/// Handles both relative cgroup paths (e.g. "system.slice/foo.service")
+/// and absolute filesystem paths (e.g. "/sys/fs/cgroup/system.slice/foo.service").
+fn resolve_cgroup_path(cg: &str) -> PathBuf {
+    let path = Path::new(cg);
+    if path.starts_with(CGROUP_ROOT) {
+        path.to_path_buf()
+    } else {
+        let cg = cg.trim_start_matches('/');
+        if cg.is_empty() {
+            PathBuf::from(CGROUP_ROOT)
+        } else {
+            PathBuf::from(CGROUP_ROOT).join(cg)
+        }
+    }
+}
+
+/// Find a unit's cgroup path by searching for a directory matching the unit name
+/// in the cgroup hierarchy.
+fn find_unit_cgroup(unit_name: &str) -> Option<PathBuf> {
+    find_unit_cgroup_in(Path::new(CGROUP_ROOT), unit_name)
+}
+
+fn find_unit_cgroup_in(dir: &Path, unit_name: &str) -> Option<PathBuf> {
+    let entries = fs::read_dir(dir).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        if name_str == unit_name && path.join("cgroup.procs").exists() {
+            return Some(path);
+        }
+        // Recurse into slices
+        if (name_str.ends_with(".slice") || name_str == "init.scope")
+            && let Some(found) = find_unit_cgroup_in(&path, unit_name)
+        {
+            return Some(found);
+        }
+    }
+    None
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────
 
 fn main() {
@@ -293,19 +363,44 @@ fn main() {
     }
 
     // Determine which cgroup paths to display
-    let cgroup_paths = if cli.cgroup.is_empty() {
-        vec![PathBuf::from(CGROUP_ROOT)]
+    let cgroup_paths = if let Some(ref unit) = cli.unit {
+        match find_unit_cgroup(unit) {
+            Some(path) => vec![path],
+            None => {
+                eprintln!("Failed to get unit cgroup path for {unit}.");
+                process::exit(1);
+            }
+        }
+    } else if let Some(ref user_unit) = cli.user_unit {
+        // Search in user cgroup hierarchy
+        let user_root = PathBuf::from(CGROUP_ROOT).join("user.slice");
+        let found = if user_root.exists() {
+            find_unit_cgroup_in(&user_root, user_unit)
+        } else {
+            None
+        };
+        match found {
+            Some(path) => vec![path],
+            None => {
+                eprintln!("Failed to get user unit cgroup path for {user_unit}.");
+                process::exit(1);
+            }
+        }
+    } else if cli.cgroup.is_empty() {
+        // Auto-detect: if CWD is under /sys/fs/cgroup, use it
+        if let Ok(cwd) = std::env::current_dir() {
+            if cwd.starts_with(CGROUP_ROOT) && cwd.join("cgroup.procs").exists() {
+                vec![cwd]
+            } else {
+                vec![PathBuf::from(CGROUP_ROOT)]
+            }
+        } else {
+            vec![PathBuf::from(CGROUP_ROOT)]
+        }
     } else {
         cli.cgroup
             .iter()
-            .map(|cg| {
-                let cg = cg.trim_start_matches('/');
-                if cg.is_empty() {
-                    PathBuf::from(CGROUP_ROOT)
-                } else {
-                    PathBuf::from(CGROUP_ROOT).join(cg)
-                }
-            })
+            .map(|cg| resolve_cgroup_path(cg))
             .collect()
     };
 

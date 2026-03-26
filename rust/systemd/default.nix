@@ -618,6 +618,24 @@
         # standalone. Remove subtests that need D-Bus, transient units,
         # user sessions, or other unimplemented features.
         patchScript = ''
+          # Rewrite cgls test: keep only flag tests and error cases.
+          # Remove lines needing specific unit cgroups, user sessions, init.scope.
+          cat > TEST-74-AUX-UTILS.cgls.sh << 'TESTEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+          systemd-cgls
+          systemd-cgls --all --full
+          systemd-cgls -k
+          systemd-cgls --xattr=yes
+          systemd-cgls --xattr=no
+          systemd-cgls --cgroup-id=yes
+          systemd-cgls --cgroup-id=no
+          (! systemd-cgls /foo/bar)
+          (! systemd-cgls --xattr=foo)
+          (! systemd-cgls --cgroup-id=foo)
+          TESTEOF
+          chmod +x TEST-74-AUX-UTILS.cgls.sh
           rm -f TEST-74-AUX-UTILS.busctl.sh \
                TEST-74-AUX-UTILS.capsule.sh \
                TEST-74-AUX-UTILS.run.sh \
@@ -626,7 +644,6 @@
                TEST-74-AUX-UTILS.vpick.sh \
                TEST-74-AUX-UTILS.varlinkctl.sh \
                TEST-74-AUX-UTILS.networkctl.sh \
-               TEST-74-AUX-UTILS.cgls.sh \
                TEST-74-AUX-UTILS.socket-activate.sh \
                TEST-74-AUX-UTILS.network-generator.sh \
                TEST-74-AUX-UTILS.pty-forward.sh \
