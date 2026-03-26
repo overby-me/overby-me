@@ -598,7 +598,9 @@
       }
       {
         name = "54-CREDS";
-        # Skip tests requiring systemd-creds binary (encrypt/decrypt/list).
+        # Enable standalone systemd-creds operations (setup, list, encrypt/decrypt).
+        # Skip run_with_cred_compare tests: SetCredential C-escape handling
+        # (\n, \t etc.) not yet implemented in transient unit property parser.
         patchScript = ''
           sed -i '0,/run_with_cred_compare/s/run_with_cred_compare/touch \/testok; exit 0\\n&/' TEST-54-CREDS.sh
         '';
