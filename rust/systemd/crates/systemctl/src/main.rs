@@ -1292,6 +1292,7 @@ fn main() {
 
 /// Handle the JSON-RPC response, with special exit code logic for
 /// `is-active`, `is-enabled`, and `is-failed`.
+#[allow(clippy::too_many_arguments)]
 fn handle_response(
     command: &str,
     resp: &Value,

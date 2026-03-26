@@ -2488,6 +2488,29 @@ fn create_transient_unit(
                         });
                     }
                 }
+                "ExecStartPre" | "ExecStartPost" | "ExecStop" | "ExecStopPost" => {
+                    let parse_cmd = |s: &str| -> crate::units::Commandline {
+                        let parts: Vec<String> =
+                            shlex::split(s).unwrap_or_else(|| vec![s.to_string()]);
+                        crate::units::Commandline {
+                            cmd: parts.first().cloned().unwrap_or_default(),
+                            args: parts.into_iter().skip(1).collect(),
+                            prefixes: vec![],
+                        }
+                    };
+                    let target = match key {
+                        "ExecStartPre" => &mut service_conf.startpre,
+                        "ExecStartPost" => &mut service_conf.startpost,
+                        "ExecStop" => &mut service_conf.stop,
+                        "ExecStopPost" => &mut service_conf.stoppost,
+                        _ => unreachable!(),
+                    };
+                    if value.is_empty() {
+                        target.clear();
+                    } else {
+                        target.push(parse_cmd(value));
+                    }
+                }
                 _ => {
                     log::debug!("Ignoring unknown transient unit property: {key}={value}");
                 }

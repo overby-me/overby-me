@@ -403,7 +403,6 @@
         patchScript = ''
           rm -f TEST-23-UNIT-FILE.clean-unit.sh \
                TEST-23-UNIT-FILE.exec-command-ex.sh \
-               TEST-23-UNIT-FILE.ExecStopPost.sh \
                TEST-23-UNIT-FILE.ExtraFileDescriptors.sh \
                TEST-23-UNIT-FILE.JoinsNamespaceOf.sh \
                TEST-23-UNIT-FILE.openfile.sh \
@@ -424,6 +423,12 @@
           # returns properties in filter-flag order, not systemd's internal
           # vtable order.  Rewrite the expected heredoc to match.
           perl -i -0pe 's/SubState=dead\nResult=success\nNRestarts=1/Result=success\nNRestarts=1\nSubState=dead/' TEST-23-UNIT-FILE.oneshot-restart.sh
+
+          # ExecStopPost subtest: remove Type=dbus (needs busctl/D-Bus name)
+          # and Type=forking (needs NotifyAccess=exec with MAINPID tracking
+          # from forked children) sections.
+          perl -i -0pe 's/cat >\/tmp\/forking1\.sh.*?test -f \/run\/forking2\n\n//s' TEST-23-UNIT-FILE.ExecStopPost.sh
+          perl -i -0pe 's/systemd-run --unit=dbus1\.service.*?touch \/run\/dbus3. true\)\n\n//s' TEST-23-UNIT-FILE.ExecStopPost.sh
         '';
       }
       {
