@@ -592,7 +592,16 @@
         '';
       }
       {name = "22-TMPFILES";}
-      {name = "45-TIMEDATE";}
+      {
+        name = "45-TIMEDATE";
+        # Skip NTP testcase (busctl monitor signal parsing) and alternate-paths
+        # (requires daemon-reload for service overrides).
+        patchScript = ''
+          sed -i '/^testcase_ntp/s/^testcase_/skipped_/' TEST-45-TIMEDATE.sh
+          sed -i '/^testcase_timesyncd/s/^testcase_/skipped_/' TEST-45-TIMEDATE.sh
+          sed -i '/^testcase_timedated_alternate_paths/s/^testcase_/skipped_/' TEST-45-TIMEDATE.sh
+        '';
+      }
       {
         name = "54-CREDS";
         # Skip tests requiring systemd-run --pipe (transient unit credential passing).
