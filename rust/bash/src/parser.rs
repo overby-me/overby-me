@@ -203,6 +203,12 @@ impl Parser {
             Token::OrIf => "||".to_string(),
             Token::Newline => "newline".to_string(),
             Token::Eof => "EOF".to_string(),
+            Token::Less => "<".to_string(),
+            Token::Great => ">".to_string(),
+            Token::DGreat => ">>".to_string(),
+            Token::DLess => "<<".to_string(),
+            Token::SemiAmp => ";&".to_string(),
+            Token::DSemiAmp => ";;&".to_string(),
             _ => "unknown".to_string(),
         }
     }
@@ -852,7 +858,18 @@ impl Parser {
     fn parse_conditional(&mut self) -> Result<CompoundCommand, String> {
         self.expect_keyword("[[")?;
         let expr = self.parse_cond_or()?;
-        self.expect_keyword("]]")?;
+        // Check for ]] — if not found, produce a conditional-specific error
+        if !self.is_keyword("]]") {
+            if self.current == Token::Eof {
+                return Err(self.cond_error("unexpected EOF while looking for `]]'"));
+            }
+            let tok = self.current_token_desc();
+            return Err(self.cond_error(&format!(
+                "syntax error in conditional expression: unexpected token `{}'",
+                tok
+            )));
+        }
+        self.advance(); // consume ]]
         Ok(CompoundCommand::Conditional(expr))
     }
 
