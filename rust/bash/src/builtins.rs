@@ -1243,6 +1243,17 @@ fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
 
     let mut status = 0;
     for name in names {
+        // Check for un-unsettable special variables
+        if !unset_functions
+            && matches!(
+                name,
+                "BASH_LINENO" | "BASH_SOURCE" | "FUNCNAME" | "GROUPS" | "DIRSTACK"
+            )
+        {
+            eprintln!("{}: unset: {}: cannot unset", shell.error_prefix(), name);
+            status = 1;
+            continue;
+        }
         if unset_functions {
             // Check if function is readonly
             if shell.readonly_funcs.contains(name) {
@@ -2932,7 +2943,29 @@ fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
                         "noglob" => shell.opt_noglob = enable,
                         "posix" => shell.opt_posix = enable,
                         "hashall" => shell.opt_hashall = enable,
-                        _ => {}
+                        "braceexpand"
+                        | "emacs"
+                        | "errtrace"
+                        | "functrace"
+                        | "histexpand"
+                        | "history"
+                        | "ignoreeof"
+                        | "interactive-comments"
+                        | "monitor"
+                        | "notify"
+                        | "onecmd"
+                        | "physical"
+                        | "privileged"
+                        | "verbose"
+                        | "vi" => {} // known but not implemented
+                        _ => {
+                            eprintln!(
+                                "{}: set: {}: invalid option name",
+                                shell.error_prefix(),
+                                option
+                            );
+                            return 2;
+                        }
                     }
                 } else {
                     let options: Vec<(&str, bool)> = vec![
@@ -4787,8 +4820,18 @@ fn builtin_builtin(shell: &mut Shell, args: &[String]) -> i32 {
     if args.is_empty() {
         return 0;
     }
+    // Check for invalid options
+    if args[0].starts_with('-') && args[0] != "--" {
+        eprintln!(
+            "{}: builtin: {}: invalid option",
+            shell.error_prefix(),
+            args[0]
+        );
+        eprintln!("builtin: usage: builtin [shell-builtin [arg ...]]");
+        return 2;
+    }
     let builtin_map = builtins();
-    let name = &args[0];
+    let name = if args[0] == "--" { &args[1] } else { &args[0] };
     if let Some(func) = builtin_map.get(name.as_str()) {
         func(shell, &args[1..])
     } else {
@@ -6805,13 +6848,13 @@ fn builtin_disown(_shell: &mut Shell, _args: &[String]) -> i32 {
     0
 }
 
-fn builtin_fg(_shell: &mut Shell, _args: &[String]) -> i32 {
-    eprintln!("bash: fg: no job control");
+fn builtin_fg(shell: &mut Shell, _args: &[String]) -> i32 {
+    eprintln!("{}: fg: no job control", shell.error_prefix());
     1
 }
 
-fn builtin_bg(_shell: &mut Shell, _args: &[String]) -> i32 {
-    eprintln!("bash: bg: no job control");
+fn builtin_bg(shell: &mut Shell, _args: &[String]) -> i32 {
+    eprintln!("{}: bg: no job control", shell.error_prefix());
     1
 }
 
