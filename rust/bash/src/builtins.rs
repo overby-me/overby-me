@@ -2249,6 +2249,7 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
     let mut flag_lowercase = false;
     let mut flag_capitalize = false;
     let mut flag_global = false; // -g stub
+    let mut flag_trace = false;
     let mut names = Vec::new();
     let mut i = 0;
 
@@ -2278,7 +2279,8 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     'l' => flag_lowercase = true,
                     'c' => flag_capitalize = true,
                     'g' => flag_global = true,
-                    't' | 'I' => {} // trace/inherit — accepted but not implemented
+                    't' => flag_trace = true,
+                    'I' => {} // inherit — accepted but not implemented
                     _ => {
                         eprintln!("{}: declare: -{}: invalid option", shell.error_prefix(), ch);
                         eprintln!(
@@ -2370,7 +2372,7 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
 
     // declare -f: print function definitions (with body)
     // But if -r is also set (declare -fr), it's trying to set readonly, not print
-    if flag_func_body && !flag_readonly && !flag_unset_readonly {
+    if flag_func_body && !flag_readonly && !flag_unset_readonly && !flag_trace {
         let print_func = |name: &str, body: &CompoundCommand| {
             println!("{} () \n{}", name, format_compound_command(body));
         };
