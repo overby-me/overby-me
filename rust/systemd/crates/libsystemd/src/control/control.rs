@@ -2211,6 +2211,8 @@ fn create_transient_unit(
     let mut failure_action = crate::units::UnitAction::None;
     let mut success_action = crate::units::UnitAction::None;
     let mut prop_description: Option<String> = None;
+    let mut success_action_units: Vec<String> = vec![];
+    let mut failure_action_units: Vec<String> = vec![];
     for prop in &params.properties {
         if let Some((key, value)) = prop.split_once('=') {
             match key {
@@ -2375,6 +2377,26 @@ fn create_transient_unit(
                 "SendSIGHUP" => {
                     service_conf.send_sighup = matches!(value, "yes" | "true" | "1");
                 }
+                "OnSuccess" => {
+                    for name in value.split_whitespace() {
+                        let full = if name.contains('.') {
+                            name.to_string()
+                        } else {
+                            format!("{name}.service")
+                        };
+                        success_action_units.push(full);
+                    }
+                }
+                "OnFailure" => {
+                    for name in value.split_whitespace() {
+                        let full = if name.contains('.') {
+                            name.to_string()
+                        } else {
+                            format!("{name}.service")
+                        };
+                        failure_action_units.push(full);
+                    }
+                }
                 _ => {
                     log::debug!("Ignoring unknown transient unit property: {key}={value}");
                 }
@@ -2422,9 +2444,9 @@ fn create_transient_unit(
                 job_timeout_action: crate::units::UnitAction::None,
                 refuse_manual_start: false,
                 refuse_manual_stop: false,
-                on_success: vec![],
+                on_success: success_action_units,
                 on_success_job_mode: crate::units::OnFailureJobMode::default(),
-                on_failure: vec![],
+                on_failure: failure_action_units,
                 on_failure_job_mode: crate::units::OnFailureJobMode::default(),
                 start_limit_interval_sec: None,
                 start_limit_burst: None,

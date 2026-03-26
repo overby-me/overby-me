@@ -480,10 +480,8 @@
       {
         name = "68-PROPAGATE-EXIT-STATUS";
         patchScript = ''
-          # Remove sections III-VII (systemd-run, templates, cross-handler).
-          sed -i '/^: "-------III/,/^touch \/testok/{/^touch \/testok/!d}' TEST-68-PROPAGATE-EXIT-STATUS.sh
-          # Remove systemd-analyze calls (not implemented).
-          sed -i '/systemd-analyze/d' TEST-68-PROPAGATE-EXIT-STATUS.sh
+          # Remove template sections V-VI (template instantiation not yet implemented).
+          sed -i '/^: "-------V/,/^: "-------VII/{/^: "-------VII/!d}' TEST-68-PROPAGATE-EXIT-STATUS.sh
         '';
       }
       {name = "71-HOSTNAME";}
