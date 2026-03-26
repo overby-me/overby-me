@@ -6762,15 +6762,26 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
             // List all set -o options
             if !query {
                 for (name, val) in &set_options {
-                    if print_mode {
+                    if print_mode && set {
+                        // shopt -s -p -o: only print ON options
+                        if *val {
+                            println!("set -o {}", name);
+                        }
+                    } else if print_mode && unset {
+                        // shopt -u -p -o: only print OFF options
+                        if !*val {
+                            println!("set +o {}", name);
+                        }
+                    } else if print_mode {
+                        // shopt -p -o: print all in set format
                         println!("set {}o {}", if *val { "-" } else { "+" }, name);
                     } else if set {
-                        // shopt -s -o: list only ON options in set format
+                        // shopt -s -o: list only ON options
                         if *val {
                             println!("set -o {}", name);
                         }
                     } else if unset {
-                        // shopt -u -o: list only OFF options in set format
+                        // shopt -u -o: list only OFF options
                         if !*val {
                             println!("set +o {}", name);
                         }
