@@ -3735,7 +3735,25 @@ impl Shell {
         // Save procsub fds so inner commands don't close them
         let saved_fds = crate::expand::take_procsub_fds();
 
+        // Save LINENO so ERR trap after function sees the call-site line
+        let saved_lineno = self.vars.get("LINENO").cloned();
+
+        // ERR trap is not inherited by functions unless errtrace is set
+        let saved_err_trap = if !self.shopt_options.get("errtrace").copied().unwrap_or(false) {
+            self.traps.remove("ERR")
+        } else {
+            None
+        };
+
         let status = self.run_compound_command(body);
+
+        // Restore ERR trap and LINENO
+        if let Some(err_trap) = saved_err_trap {
+            self.traps.insert("ERR".to_string(), err_trap);
+        }
+        if let Some(ln) = saved_lineno {
+            self.vars.insert("LINENO".to_string(), ln);
+        }
 
         // Run RETURN trap before restoring scope
         self.run_return_trap();
