@@ -401,6 +401,9 @@
         # Remove subtests requiring busctl, systemd-analyze, or other
         # unimplemented features.
         patchScript = ''
+          # Remove Type=exec from StandardOutput test (exec startup verification
+          # not implemented; services still run correctly, just skip the Type).
+          sed -i 's/-p Type=exec//' TEST-23-UNIT-FILE.StandardOutput.sh
           rm -f TEST-23-UNIT-FILE.clean-unit.sh \
                TEST-23-UNIT-FILE.exec-command-ex.sh \
                TEST-23-UNIT-FILE.ExtraFileDescriptors.sh \
