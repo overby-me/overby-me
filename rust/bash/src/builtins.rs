@@ -6765,12 +6765,14 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
                     if print_mode {
                         println!("set {}o {}", if *val { "-" } else { "+" }, name);
                     } else if set {
+                        // shopt -s -o: list only ON options in set format
                         if *val {
-                            println!("{:<20}\ton", name);
+                            println!("set -o {}", name);
                         }
                     } else if unset {
+                        // shopt -u -o: list only OFF options in set format
                         if !*val {
-                            println!("{:<20}\toff", name);
+                            println!("set +o {}", name);
                         }
                     } else {
                         println!("{:<15}\t{}", name, if *val { "on" } else { "off" });
