@@ -1198,6 +1198,9 @@ impl Shell {
                 std::io::Write::flush(&mut std::io::stdout()).ok();
                 match unsafe { nix::unistd::fork() } {
                     Ok(nix::unistd::ForkResult::Child) => {
+                        // Clear EXIT trap in subshell (pipeline children are subshells)
+                        self.traps.remove("EXIT");
+                        self.traps.remove("0");
                         // Mark as pipeline child (suppresses broken pipe errors)
                         // but NOT in lastpipe pipelines where the reader may close early
                         self.in_pipeline_child = !self.shopt_lastpipe;
