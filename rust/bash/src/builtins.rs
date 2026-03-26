@@ -4191,19 +4191,8 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
         }
     }
 
-    // Check for readonly variables
-    for name in &var_names {
-        if shell.readonly_vars.contains(name) {
-            eprintln!("{}: {}: readonly variable", shell.error_prefix(), name);
-            return 1;
-        }
-    }
-    if let Some(ref name) = array_name
-        && shell.readonly_vars.contains(name)
-    {
-        eprintln!("{}: {}: readonly variable", shell.error_prefix(), name);
-        return 1;
-    }
+    // Readonly checks happen during assignment, not here
+    // (bash reads input first, then errors on readonly during assignment)
 
     let is_reply = var_names.is_empty() && array_name.is_none();
     if is_reply {
@@ -4633,7 +4622,7 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
             let resolved = shell.resolve_nameref(name);
             eprintln!("{}: {}: readonly variable", shell.error_prefix(), resolved);
             read_status = 2;
-            break;
+            break; // bash stops assigning after readonly error
         }
         shell.set_var(name, value);
     }
