@@ -21,6 +21,7 @@ pub struct SavedVar {
     pub array: Option<Vec<String>>,
     pub assoc: Option<AssocArray>,
     pub was_integer: bool,
+    pub was_readonly: bool,
 }
 
 /// Bash-compatible hash function (FNV-1 variant) for associative arrays.
@@ -651,8 +652,11 @@ impl Shell {
                     array: self.arrays.get(name).cloned(),
                     assoc: self.assoc_arrays.get(name).cloned(),
                     was_integer: self.integer_vars.contains(name),
+                    was_readonly: self.readonly_vars.contains(name),
                 },
             );
+            // Remove readonly for the local scope (will be re-applied if -r is used)
+            self.readonly_vars.remove(name);
         }
     }
 
@@ -3960,9 +3964,15 @@ impl Shell {
                 }
                 // Restore integer attribute
                 if saved.was_integer {
-                    self.integer_vars.insert(var_name);
+                    self.integer_vars.insert(var_name.clone());
                 } else {
                     self.integer_vars.remove(&var_name);
+                }
+                // Restore readonly attribute
+                if saved.was_readonly {
+                    self.readonly_vars.insert(var_name);
+                } else {
+                    self.readonly_vars.remove(&var_name);
                 }
             }
         }

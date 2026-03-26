@@ -1505,6 +1505,10 @@ fn builtin_readonly(shell: &mut Shell, args: &[String]) -> i32 {
                     let existing = shell.vars.get(vname).cloned().unwrap_or_default();
                     shell.set_var(vname, format!("{}{}", existing, value));
                 }
+            } else if value.starts_with('(') && value.ends_with(')') {
+                // Array value: readonly a=(1 2 3)
+                let arr = parse_array_literal(value);
+                shell.arrays.insert(vname.to_string(), arr);
             } else {
                 shell.set_var(vname, value.to_string());
             }
@@ -1536,7 +1540,7 @@ fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
         return 1;
     }
     let mut flag_array = false;
-    let mut _flag_readonly = false;
+    let mut flag_readonly = false;
     let mut flag_nameref = false;
     let mut flag_integer = false;
     let mut names = Vec::new();
@@ -1576,7 +1580,7 @@ fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
             for ch in arg[1..].chars() {
                 match ch {
                     'a' => flag_array = true,
-                    'r' => _flag_readonly = true,
+                    'r' => flag_readonly = true,
                     'n' => flag_nameref = true,
                     'i' => flag_integer = true,
                     _ => {}
@@ -1589,9 +1593,11 @@ fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
     }
 
     for name_arg in &names {
+        let var_name;
         if let Some(eq_pos) = name_arg.find('=') {
             let name = &name_arg[..eq_pos];
             let value = &name_arg[eq_pos + 1..];
+            var_name = name.to_string();
             shell.declare_local(name);
             if flag_integer {
                 shell.integer_vars.insert(name.to_string());
@@ -1608,7 +1614,11 @@ fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
                 shell.set_var(name, value.to_string());
             }
         } else {
+            var_name = name_arg.clone();
             shell.declare_local(name_arg);
+            if flag_integer {
+                shell.integer_vars.insert(name_arg.clone());
+            }
             if flag_nameref {
                 shell.namerefs.entry(name_arg.clone()).or_default();
             } else if flag_array {
@@ -1616,6 +1626,10 @@ fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
             } else {
                 shell.vars.entry(name_arg.clone()).or_default();
             }
+        }
+        // Apply readonly attribute
+        if flag_readonly {
+            shell.readonly_vars.insert(var_name);
         }
     }
     0
