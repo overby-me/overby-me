@@ -1363,7 +1363,18 @@ fn builtin_readonly(shell: &mut Shell, args: &[String]) -> i32 {
                 match ch {
                     'f' => func_mode = true,
                     'p' => print_mode = true,
-                    _ => {}
+                    'a' | 'A' => {} // array flags accepted
+                    _ => {
+                        eprintln!(
+                            "{}: readonly: -{}: invalid option",
+                            shell.error_prefix(),
+                            ch
+                        );
+                        eprintln!(
+                            "readonly: usage: readonly [-aAf] [name[=value] ...] or readonly -p"
+                        );
+                        return 2;
+                    }
                 }
             }
         } else {
@@ -6086,7 +6097,17 @@ fn builtin_mapfile(shell: &mut Shell, args: &[String]) -> i32 {
             "-u" => {
                 i += 1;
                 if i < args.len() {
-                    fd = args[i].parse().ok();
+                    match args[i].parse::<i32>() {
+                        Ok(f) => fd = Some(f),
+                        Err(_) => {
+                            eprintln!(
+                                "{}: mapfile: {}: invalid file descriptor specification",
+                                shell.error_prefix(),
+                                args[i]
+                            );
+                            return 1;
+                        }
+                    }
                 }
             }
             a if a.starts_with('-') => {
@@ -6094,10 +6115,40 @@ fn builtin_mapfile(shell: &mut Shell, args: &[String]) -> i32 {
                 return 2;
             }
             _ => {
+                if args[i].is_empty() {
+                    eprintln!(
+                        "{}: mapfile: empty array variable name",
+                        shell.error_prefix()
+                    );
+                    return 1;
+                }
+                if !args[i].chars().all(|c| c.is_alphanumeric() || c == '_')
+                    || args[i].chars().next().is_some_and(|c| c.is_ascii_digit())
+                {
+                    eprintln!(
+                        "{}: mapfile: `{}': not a valid identifier",
+                        shell.error_prefix(),
+                        args[i]
+                    );
+                    return 1;
+                }
                 varname = args[i].clone();
             }
         }
         i += 1;
+    }
+
+    // Validate fd if specified
+    #[cfg(unix)]
+    if let Some(f) = fd
+        && nix::fcntl::fcntl(f, nix::fcntl::FcntlArg::F_GETFD).is_err()
+    {
+        eprintln!(
+            "{}: mapfile: {}: invalid file descriptor: Bad file descriptor",
+            shell.error_prefix(),
+            f
+        );
+        return 1;
     }
 
     // Read lines from stdin or specified fd
