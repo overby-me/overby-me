@@ -1471,11 +1471,12 @@ fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
     let val = lookup_var(&expr.name, ctx);
 
     // set -u (nounset): error on unset variables, unless operation provides a default
+    // Operations that provide defaults (:-,  :=, :+, :?) are OK; trim/replace/etc are not
     if val.is_empty()
         && ctx.opt_flags.contains('u')
-        && matches!(
+        && !matches!(
             expr.op,
-            ParamOp::None | ParamOp::Length | ParamOp::Substring(..)
+            ParamOp::Default(..) | ParamOp::Assign(..) | ParamOp::Alt(..) | ParamOp::Error(..)
         )
         && !matches!(
             expr.name.as_str(),
