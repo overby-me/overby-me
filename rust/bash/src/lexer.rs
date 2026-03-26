@@ -1131,6 +1131,18 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                             brace_depth += 1;
                             continue;
                         }
+                        '#' if cmd.is_empty()
+                            || cmd.ends_with('\n')
+                            || (cmd.ends_with(";;")
+                                || (cmd.ends_with(';') && !cmd.ends_with("\\;"))) =>
+                        {
+                            // Comment after newline, ;;, or unescaped ; (not after space — could be escaped word)
+                            while *i < chars.len() && chars[*i] != '\n' {
+                                cmd.push(chars[*i]);
+                                *i += 1;
+                            }
+                            continue;
+                        }
                         _ => {}
                     }
                     // Track case/esac keywords
