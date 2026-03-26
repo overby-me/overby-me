@@ -7,6 +7,8 @@ thread_local! {
     static IN_HEREDOC: Cell<bool> = const { Cell::new(false) };
     /// Set when parsing pattern words (#, %, /) — enables single-quote quoting in dquote
     static PATTERN_WORD: Cell<bool> = const { Cell::new(false) };
+    /// Aliases available for comsub keyword expansion
+    static COMSUB_ALIASES: std::cell::RefCell<HashMap<String, String>> = std::cell::RefCell::new(HashMap::new());
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -407,6 +409,12 @@ impl Lexer {
     }
 
     pub fn next_token(&mut self) -> Token {
+        // Sync aliases for comsub keyword expansion
+        if self.shopt_expand_aliases {
+            COMSUB_ALIASES.with(|a| {
+                *a.borrow_mut() = self.aliases.clone();
+            });
+        }
         let pos_before_ws = self.pos;
         self.skip_whitespace();
         self.had_whitespace_before_token = self.pos > pos_before_ws;
@@ -1134,9 +1142,13 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                             word.push(chars[*i]);
                             *i += 1;
                         }
-                        if word == "case" {
+                        // Check aliases for case keyword expansion
+                        let effective = COMSUB_ALIASES
+                            .with(|a| a.borrow().get(word.as_str()).map(|v| v.trim().to_string()));
+                        let kw = effective.as_deref().unwrap_or(word.as_str());
+                        if kw == "case" {
                             case_depth += 1;
-                        } else if word == "esac" {
+                        } else if kw == "esac" || word == "esac" {
                             case_depth -= 1;
                         }
                         cmd.push_str(&word);
@@ -2830,9 +2842,18 @@ impl Lexer {
                     word.push(self.input[self.pos]);
                     self.pos += 1;
                 }
-                if word == "case" {
+                // Check for case/esac keywords, also through aliases
+                let effective_word = if self.shopt_expand_aliases {
+                    self.aliases
+                        .get(word.as_str())
+                        .map(|v| v.trim().to_string())
+                        .unwrap_or_else(|| word.clone())
+                } else {
+                    word.clone()
+                };
+                if effective_word == "case" {
                     case_depth += 1;
-                } else if word == "esac" {
+                } else if effective_word == "esac" || word == "esac" {
                     case_depth -= 1;
                 }
                 s.push_str(&word);
