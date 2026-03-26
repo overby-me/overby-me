@@ -298,7 +298,7 @@
         name = "07-PID1";
         # Patch main script to remove mountpoint check and exit, keep run_subtests.
         # Enable mask.sh, issue-16115.sh, issue-3166.sh, issue-33672.sh, pr-31351.sh,
-        # issue-27953.sh, issue-31752.sh, issue-14566.sh;
+        # issue-27953.sh, issue-31752.sh, issue-14566.sh, socket-on-failure.sh;
         # remove subtests requiring unimplemented features.
         patchScript = ''
           sed -i '/mountpoint \/issue2730/d; /systemctl --no-block exit 123/d' TEST-07-PID1.sh
@@ -330,7 +330,6 @@
                TEST-07-PID1.quota.sh \
                TEST-07-PID1.socket-defer.sh \
                TEST-07-PID1.socket-max-connection.sh \
-               TEST-07-PID1.socket-on-failure.sh \
                TEST-07-PID1.socket-pass-fds.sh \
                TEST-07-PID1.start-limit.sh \
                TEST-07-PID1.startv.sh \
@@ -340,6 +339,7 @@
                TEST-07-PID1.user-namespace-path.sh \
                TEST-07-PID1.working-directory.sh
         '';
+        extraPackages = pkgs: [pkgs.e2fsprogs]; # chattr for socket-on-failure test
       }
       {name = "15-DROPIN";}
       {

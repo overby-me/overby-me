@@ -63,12 +63,12 @@ impl SpecializedSocketConfig {
             Self::SpecialFile(conf) => conf.open(sock_conf),
         }
     }
-    fn close(&self, rawfd: RawFd) -> Result<(), String> {
+    fn close(&self, rawfd: RawFd, remove_on_stop: bool) -> Result<(), String> {
         match self {
-            Self::UnixSocket(conf) => conf.close(rawfd),
+            Self::UnixSocket(conf) => conf.close(rawfd, remove_on_stop),
             Self::TcpSocket(conf) => conf.close(rawfd),
             Self::UdpSocket(conf) => conf.close(rawfd),
-            Self::Fifo(conf) => conf.close(rawfd),
+            Self::Fifo(conf) => conf.close(rawfd, remove_on_stop),
             Self::NetlinkSocket(conf) => conf.close(rawfd),
             Self::SpecialFile(conf) => conf.close(rawfd),
         }
@@ -650,7 +650,9 @@ impl Socket {
     ) -> Result<(), String> {
         if let Some(fds) = fd_store.remove_global(&name) {
             for (sock_conf, fd_entry) in conf.sockets.iter().zip(fds.iter()) {
-                sock_conf.specialized.close(fd_entry.2.as_raw_fd())?;
+                sock_conf
+                    .specialized
+                    .close(fd_entry.2.as_raw_fd(), conf.remove_on_stop)?;
             }
         }
         Ok(())

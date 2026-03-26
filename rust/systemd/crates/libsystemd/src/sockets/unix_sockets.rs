@@ -71,14 +71,16 @@ fn prepare_unix_socket_path(path: &std::path::Path, conf: &SocketConfig) -> Resu
 }
 
 impl UnixSocketConfig {
-    pub fn close(&self, rawfd: RawFd) -> Result<(), String> {
-        let strpath = match self {
-            Self::Stream(s) | Self::Datagram(s) | Self::Sequential(s) => s,
-        };
-        let path = std::path::PathBuf::from(strpath);
-        if path.exists() {
-            std::fs::remove_file(&path)
-                .map_err(|e| format!("Error removing file {path:?}: {e}"))?;
+    pub fn close(&self, rawfd: RawFd, remove_on_stop: bool) -> Result<(), String> {
+        if remove_on_stop {
+            let strpath = match self {
+                Self::Stream(s) | Self::Datagram(s) | Self::Sequential(s) => s,
+            };
+            let path = std::path::PathBuf::from(strpath);
+            if path.exists() {
+                std::fs::remove_file(&path)
+                    .map_err(|e| format!("Error removing file {path:?}: {e}"))?;
+            }
         }
 
         super::close_raw_fd(rawfd);

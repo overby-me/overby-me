@@ -5142,6 +5142,16 @@ pub fn execute_command(
                             None
                         };
                         match srvc_type {
+                            // Non-service units (sockets, targets, etc.):
+                            // check if the unit ended up in a failed state.
+                            None => {
+                                let status = unit.common.status.read_poisoned();
+                                if let UnitStatus::Stopped(_, errors) = &*status
+                                    && !errors.is_empty()
+                                {
+                                    return Err(format!("Unit {} failed to start", id.name));
+                                }
+                            }
                             Some(crate::units::ServiceType::OneShot) => {
                                 let status = unit.common.status.read_poisoned();
                                 match &*status {

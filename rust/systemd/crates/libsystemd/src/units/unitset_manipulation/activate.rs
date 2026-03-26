@@ -870,12 +870,38 @@ fn activate_units_recursive(
         let filter_ids_copy = filter_ids.clone();
         tpool.execute(move || {
             let unit_name = id.name.clone();
-            match activate_unit(
-                id,
-                &run_info_copy.read_poisoned(),
-                ActivationSource::Regular,
-            ) {
+            let id_saved = id.clone();
+
+            // Hold the RuntimeInfo read lock in a named variable so we can
+            // reuse it for the post-activation status check without acquiring
+            // a second read lock (which would deadlock on glibc's
+            // writer-preferring rwlock if a writer is pending).
+            let ri_guard = run_info_copy.read_poisoned();
+            let result = activate_unit(id, &ri_guard, ActivationSource::Regular);
+
+            match result {
                 Ok(StartResult::Started(next_services_ids)) => {
+                    // activate_unit may swallow errors (converting to Ok) for
+                    // graph walking.  Check actual unit status and trigger
+                    // OnFailure= if the unit ended up in a failed state.
+                    let needs_on_failure = if let Some(unit) =
+                        ri_guard.unit_table.get(&id_saved)
+                    {
+                        let status = unit.common.status.read_poisoned();
+                        matches!(
+                            &*status,
+                            UnitStatus::Stopped(StatusStopped::StoppedUnexpected, errs) if !errs.is_empty()
+                        )
+                    } else {
+                        false
+                    };
+                    // Drop the read lock before triggering OnFailure= (which
+                    // may need a write lock via find_or_load_unit).
+                    drop(ri_guard);
+                    if needs_on_failure {
+                        trigger_on_failure_units(&id_saved, &run_info_copy);
+                    }
+
                     if !next_services_ids.is_empty() {
                         let next_names: Vec<&str> = next_services_ids
                             .iter()
@@ -912,6 +938,9 @@ fn activate_units_recursive(
                     tpool_copy.execute(next_services_job);
                 }
                 Err(e) => {
+                    // Drop the read lock before triggering OnFailure= (which
+                    // may need a write lock via find_or_load_unit).
+                    drop(ri_guard);
                     if let UnitOperationErrorReason::DependencyError(_) = e.reason {
                         // Thats ok. The unit is waiting for more dependencies and will be
                         // activated again when another dependency has finished starting
@@ -920,8 +949,71 @@ fn activate_units_recursive(
                         // to only get the startables
                     } else {
                         error!("Error while activating unit {e}");
+                        // Trigger OnFailure= units for the failed unit.
+                        trigger_on_failure_units(&e.unit_id, &run_info_copy);
                         errors_copy.lock_poisoned().push(e);
                     }
+                }
+            }
+        });
+    }
+}
+
+/// Trigger `OnFailure=` units when a non-service unit (e.g. socket) fails
+/// to activate. Service units handle OnFailure in the exit handler; this
+/// covers all other unit types.
+fn trigger_on_failure_units(failed_id: &UnitId, run_info: &ArcMutRuntimeInfo) {
+    let on_failure_targets: Vec<String> = {
+        let ri = run_info.read_poisoned();
+        let Some(unit) = ri.unit_table.get(failed_id) else {
+            return;
+        };
+        // Services handle OnFailure in service_exit_handler — skip them here.
+        if matches!(&unit.specific, Specific::Service(_)) {
+            return;
+        }
+        unit.common.unit.on_failure.clone()
+    };
+    if on_failure_targets.is_empty() {
+        return;
+    }
+    let source_name = failed_id.name.clone();
+    for target_name in on_failure_targets {
+        trace!("Triggering OnFailure={target_name} for unit {source_name}");
+        let arc_ri = run_info.clone();
+        let source = source_name.clone();
+        std::thread::spawn(move || {
+            let target_id = match crate::control::find_or_load_unit(&target_name, &arc_ri) {
+                Ok(id) => id,
+                Err(e) => {
+                    warn!("Could not find OnFailure unit {target_name} for {source}: {e}");
+                    return;
+                }
+            };
+            // Reset the target from Stopped → NeverStarted so it can be activated.
+            {
+                let ri = arc_ri.read_poisoned();
+                if let Some(target_unit) = ri.unit_table.get(&target_id) {
+                    let mut status = target_unit.common.status.write_poisoned();
+                    if matches!(
+                        &*status,
+                        UnitStatus::Stopped(_, _) | UnitStatus::NeverStarted
+                    ) {
+                        *status = UnitStatus::NeverStarted;
+                    }
+                }
+            }
+            let ri = arc_ri.read_poisoned();
+            match crate::units::activate_unit(
+                target_id,
+                &ri,
+                crate::units::ActivationSource::Regular,
+            ) {
+                Ok(_) => {
+                    info!("OnFailure unit {target_name} activated for {source}");
+                }
+                Err(e) => {
+                    warn!("Failed to activate OnFailure unit {target_name} for {source}: {e}");
                 }
             }
         });
