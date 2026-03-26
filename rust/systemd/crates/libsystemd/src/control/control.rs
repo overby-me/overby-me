@@ -2556,6 +2556,21 @@ fn create_transient_unit(
                         }
                     }
                 }
+                "KillSignal" => {
+                    if let Some(sig) = crate::units::unit_parsing::parse_signal_to_raw(value) {
+                        service_conf.kill_signal = Some(sig);
+                    }
+                }
+                "RestartKillSignal" => {
+                    if let Some(sig) = crate::units::unit_parsing::parse_signal_to_raw(value) {
+                        service_conf.restart_kill_signal = Some(sig);
+                    }
+                }
+                "FinalKillSignal" => {
+                    if let Some(sig) = crate::units::unit_parsing::parse_signal_to_raw(value) {
+                        service_conf.final_kill_signal = Some(sig);
+                    }
+                }
                 _ => {
                     log::debug!("Ignoring unknown transient unit property: {key}={value}");
                 }

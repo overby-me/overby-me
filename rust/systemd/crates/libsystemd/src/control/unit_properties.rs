@@ -187,6 +187,30 @@ pub fn collect_properties(unit: &Unit) -> BTreeMap<String, String> {
                 "FileDescriptorStoreMax",
                 &svc.conf.file_descriptor_store_max.to_string(),
             );
+
+            // Kill-related properties
+            insert(
+                &mut props,
+                "KillSignal",
+                &svc.conf.kill_signal.unwrap_or(15).to_string(),
+            );
+            insert(
+                &mut props,
+                "RestartKillSignal",
+                &svc.conf
+                    .restart_kill_signal
+                    .map_or("0".to_string(), |s| s.to_string()),
+            );
+            insert(
+                &mut props,
+                "FinalKillSignal",
+                &svc.conf.final_kill_signal.unwrap_or(9).to_string(),
+            );
+            insert(
+                &mut props,
+                "SendSIGHUP",
+                if svc.conf.send_sighup { "yes" } else { "no" },
+            );
         }
         Specific::Socket(sock) => {
             insert_socket_config(&mut props, &sock.conf);

@@ -67,7 +67,7 @@ const SIGRTMAX_RAW: i32 = 64;
 /// - `RTMAX`, `RTMAX-N`, `SIGRTMAX-N`
 ///
 /// Returns `None` for unrecognised values.
-fn parse_signal_to_raw(s: &str) -> Option<i32> {
+pub fn parse_signal_to_raw(s: &str) -> Option<i32> {
     let trimmed = s.trim();
     if trimmed.is_empty() {
         return None;
