@@ -4105,7 +4105,11 @@ impl Shell {
         // Without functrace, the function doesn't inherit the parent's DEBUG trap,
         // but any trap set inside the function IS visible after the function returns.
 
-        let status = self.run_compound_command(body);
+        let mut status = self.run_compound_command(body);
+        // If returning was set (by builtin_return or a trap handler), use last_status
+        if self.returning {
+            status = self.last_status;
+        }
 
         // Restore ERR and DEBUG traps and LINENO
         if let Some(err_trap) = saved_err_trap {
