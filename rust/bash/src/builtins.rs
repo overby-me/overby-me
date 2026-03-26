@@ -3053,7 +3053,7 @@ fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
                         _ => {
                             eprintln!("{}: set: -{}: invalid option", shell.error_prefix(), flag);
                             eprintln!(
-                                "set: usage: set [-abefhkmnptuvxBCEHPT] [-o option-name] [--] [arg ...]"
+                                "set: usage: set [-abefhkmnptuvxBCEHPT] [-o option-name] [--] [-] [arg ...]"
                             );
                             return 2;
                         }
