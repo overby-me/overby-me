@@ -792,10 +792,8 @@ fn cmd_list(system: bool, quiet: bool, no_legend: bool, json_mode: &str) {
 
     if dir.is_none() && enc_dir.is_none() {
         if system {
-            if !no_legend && !quiet {
-                println!("No credentials.");
-            }
-            return;
+            eprintln!("No system credentials passed.");
+            process::exit(1);
         }
         if !quiet {
             eprintln!(
@@ -885,7 +883,11 @@ fn cmd_list(system: bool, quiet: bool, no_legend: bool, json_mode: &str) {
             }
 
             if !no_legend {
-                println!("\n{} credentials listed.", entries.len());
+                if entries.is_empty() && system {
+                    println!("No credentials.");
+                } else {
+                    println!("\n{} credentials listed.", entries.len());
+                }
             }
         }
     }
