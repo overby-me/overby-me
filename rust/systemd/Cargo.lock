@@ -1553,6 +1553,7 @@ dependencies = [
  "base64",
  "clap",
  "libc",
+ "serde_json",
  "sha2",
 ]
 

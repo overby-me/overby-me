@@ -376,7 +376,7 @@ fn in_container() -> bool {
 /// Transcode data according to the specified mode.
 fn transcode(data: &[u8], mode: &str) -> Result<Vec<u8>, String> {
     match mode {
-        "no" | "0" | "false" | "" => Ok(data.to_vec()),
+        "no" | "0" | "false" => Ok(data.to_vec()),
         "base64" => Ok(BASE64.encode(data).into_bytes()),
         "unbase64" => {
             let s = String::from_utf8_lossy(data);
@@ -893,6 +893,7 @@ fn cmd_cat(
     transcode_mode: Option<&str>,
     newline: &str,
     global_name: Option<&str>,
+    json_mode: Option<&str>,
 ) {
     let dir = credentials_dir(system);
     let enc_dir = if !system {
@@ -993,6 +994,28 @@ fn cmd_cat(
                     continue;
                 }
             };
+        }
+
+        // Handle --json=short/pretty: parse credential as JSON and re-serialize.
+        if let Some(jm) = json_mode
+            && (jm == "short" || jm == "pretty")
+        {
+            let text = String::from_utf8_lossy(&data);
+            match serde_json::from_str::<serde_json::Value>(text.as_ref()) {
+                Ok(val) => {
+                    let serialized = if jm == "pretty" {
+                        serde_json::to_string_pretty(&val).unwrap()
+                    } else {
+                        serde_json::to_string(&val).unwrap()
+                    };
+                    data = format!("{serialized}\n").into_bytes();
+                }
+                Err(e) => {
+                    eprintln!("Failed to parse credential {cred_name:?} as JSON: {e}");
+                    failed = true;
+                    continue;
+                }
+            }
         }
 
         let stdout = io::stdout();
@@ -1431,6 +1454,39 @@ fn parse_timestamp_usec(s: &str) -> u64 {
 fn main() {
     let cli = Cli::parse();
 
+    // Validate --json values.
+    if let Some(ref j) = cli.json {
+        match j.as_str() {
+            "pretty" | "short" | "off" => {}
+            other => {
+                eprintln!("Unknown JSON mode: {other:?}");
+                process::exit(1);
+            }
+        }
+    }
+
+    // Validate --newline values.
+    if let Some(ref n) = cli.newline {
+        match n.as_str() {
+            "auto" | "yes" | "no" => {}
+            other => {
+                eprintln!("Unknown newline mode: {other:?}");
+                process::exit(1);
+            }
+        }
+    }
+
+    // Validate --transcode values.
+    if let Some(ref t) = cli.transcode {
+        match t.as_str() {
+            "base64" | "unbase64" | "hex" | "unhex" | "no" | "0" | "false" => {}
+            other => {
+                eprintln!("Unknown transcode mode: {other:?}");
+                process::exit(1);
+            }
+        }
+    }
+
     let default_list = Command::List {
         json: "off".to_string(),
     };
@@ -1456,6 +1512,7 @@ fn main() {
                 effective_transcode,
                 effective_newline,
                 cli.name.as_deref(),
+                cli.json.as_deref(),
             );
         }
 
