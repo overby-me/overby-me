@@ -2056,6 +2056,8 @@ fn read_param_word_impl(chars: &[char], i: &mut usize, delim: char, in_dquote: b
                                     if matches!(next, '$' | '`' | '\\' | '"') {
                                         cmd.push(next);
                                         *i += 2;
+                                    } else if next == '\n' {
+                                        *i += 2; // line continuation
                                     } else {
                                         cmd.push(chars[*i]);
                                         *i += 1;
@@ -2334,6 +2336,10 @@ impl Lexer {
                                                 // Only these chars are special after \ in double-quoted backtick
                                                 Some(c @ ('$' | '\\' | '`' | '"')) => {
                                                     cmd.push(c);
+                                                    self.advance();
+                                                }
+                                                Some('\n') => {
+                                                    // \<newline> line continuation
                                                     self.advance();
                                                 }
                                                 Some(c) => {
