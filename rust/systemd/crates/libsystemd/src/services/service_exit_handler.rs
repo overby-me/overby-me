@@ -65,6 +65,17 @@ fn get_success_exit_status(unit: &crate::units::Unit) -> SuccessExitStatus {
     }
 }
 
+/// Info collected by the exit handler about OnSuccess=/OnFailure= units
+/// that need to be triggered. The actual triggering happens AFTER the
+/// RuntimeInfo read lock is dropped, to avoid writer-preferring RwLock
+/// starvation when the trigger thread needs a write lock.
+pub(crate) struct PendingTrigger {
+    targets: Vec<String>,
+    source_name: String,
+    kind: String,
+    monitor_env: crate::services::MonitorEnv,
+}
+
 /// Trigger OnSuccess= or OnFailure= units for a service that has reached
 /// its final state. This resolves unit names from the config (loading from
 /// disk if necessary), resets them to NeverStarted, and activates them
@@ -73,8 +84,8 @@ fn trigger_on_success_failure_units(
     unit_names: &[String],
     source_name: &str,
     kind: &str,
-    _run_info: &RuntimeInfo,
     arc_run_info: &ArcMutRuntimeInfo,
+    monitor_env: crate::services::MonitorEnv,
 ) {
     for target_name in unit_names {
         trace!("Triggering {kind}={target_name} for unit {source_name}");
@@ -83,6 +94,7 @@ fn trigger_on_success_failure_units(
         let target_name_owned = target_name.clone();
         let source_name_owned = source_name.to_string();
         let kind_owned = kind.to_string();
+        let mon = monitor_env.clone();
         std::thread::spawn(move || {
             // Find or load the target unit (may need to read from disk).
             let target_id = match crate::control::find_or_load_unit(&target_name_owned, &arc_ri) {
@@ -94,7 +106,8 @@ fn trigger_on_success_failure_units(
                     return;
                 }
             };
-            // Reset the target unit from Stopped → NeverStarted so it can be activated.
+            // Reset the target unit from Stopped → NeverStarted so it can be activated,
+            // and set MONITOR_* env vars on the target service.
             {
                 let ri = arc_ri.read_poisoned();
                 if let Some(target_unit) = ri.unit_table.get(&target_id) {
@@ -104,6 +117,11 @@ fn trigger_on_success_failure_units(
                         UnitStatus::Stopped(_, _) | UnitStatus::NeverStarted
                     ) {
                         *status = UnitStatus::NeverStarted;
+                    }
+                    // Set MONITOR_* env vars on the target service.
+                    if let Specific::Service(srvc) = &target_unit.specific {
+                        let mut state = srvc.state.write_poisoned();
+                        state.srvc.monitor_env = Some(mon);
                     }
                 }
             }
@@ -125,6 +143,41 @@ fn trigger_on_success_failure_units(
                 }
             }
         });
+    }
+}
+
+/// Build a `MonitorEnv` from the source unit's termination status.
+fn build_monitor_env(
+    source_name: &str,
+    code: &crate::signal_handler::ChildTermination,
+    is_success: bool,
+) -> crate::services::MonitorEnv {
+    use crate::signal_handler::ChildTermination;
+    let (exit_code, exit_status, service_result) = match code {
+        ChildTermination::Exit(c) => (
+            "exited".to_string(),
+            c.to_string(),
+            if is_success {
+                "success".to_string()
+            } else {
+                "exit-code".to_string()
+            },
+        ),
+        ChildTermination::Signal(s) => (
+            "killed".to_string(),
+            (*s as i32).to_string(),
+            if is_success {
+                "success".to_string()
+            } else {
+                "signal".to_string()
+            },
+        ),
+    };
+    crate::services::MonitorEnv {
+        service_result,
+        exit_code,
+        exit_status,
+        unit: source_name.to_string(),
     }
 }
 
@@ -235,10 +288,28 @@ pub fn service_exit_handler_new_thread(
     run_info: ArcMutRuntimeInfo,
 ) {
     std::thread::spawn(move || {
-        if let Err(e) =
-            service_exit_handler(pid, srvc_id, code, &run_info.read_poisoned(), &run_info)
-        {
-            error!("{e}");
+        let pending_trigger = {
+            let guard = run_info.read_poisoned();
+            match service_exit_handler(pid, srvc_id, code, &guard, &run_info) {
+                Ok(trigger) => trigger,
+                Err(e) => {
+                    error!("{e}");
+                    None
+                }
+            }
+        };
+        // The RuntimeInfo read lock is now dropped. Trigger OnSuccess=/OnFailure=
+        // units without holding any lock, so the trigger thread can freely
+        // acquire write locks (e.g. in find_or_load_unit) without causing
+        // writer-preferring RwLock starvation.
+        if let Some(trigger) = pending_trigger {
+            trigger_on_success_failure_units(
+                &trigger.targets,
+                &trigger.source_name,
+                &trigger.kind,
+                &run_info,
+                trigger.monitor_env,
+            );
         }
     });
 }
@@ -248,13 +319,13 @@ pub fn service_exit_handler_new_thread(
 /// The PID table has already been updated by the signal handler; this function
 /// deals with utmp records, oneshot process cleanup, restart decisions, and
 /// SuccessAction/FailureAction triggers.
-pub fn service_exit_handler(
+pub(crate) fn service_exit_handler(
     pid: nix::unistd::Pid,
     srvc_id: UnitId,
     code: ChildTermination,
     run_info: &RuntimeInfo,
     arc_run_info: &ArcMutRuntimeInfo,
-) -> Result<(), String> {
+) -> Result<Option<PendingTrigger>, String> {
     trace!(
         "Exit handler for service {:?} with pid: {pid} code: {code:?}",
         srvc_id.name
@@ -309,7 +380,7 @@ pub fn service_exit_handler(
                     "Oneshot service {} exited cleanly with RemainAfterExit=yes, staying active",
                     unit.id.name
                 );
-                return Ok(());
+                return Ok(None);
             }
 
             // RemainAfterExit=no (default): deactivate the oneshot service
@@ -410,7 +481,7 @@ pub fn service_exit_handler(
                                         trace!(
                                             "Restart of oneshot {name} shortcut by external start"
                                         );
-                                        return Ok(());
+                                        return Ok(None);
                                     }
                                 }
                                 std::thread::sleep(std::time::Duration::from_millis(100));
@@ -420,7 +491,7 @@ pub fn service_exit_handler(
                             trace!(
                                 "RestartSec=infinity for oneshot service {name}, not restarting"
                             );
-                            return Ok(());
+                            return Ok(None);
                         }
                     }
                 }
@@ -429,7 +500,7 @@ pub fn service_exit_handler(
                 if let Some(unit) = run_info.unit_table.get(&srvc_id) {
                     let st = unit.common.status.read_poisoned();
                     if !matches!(&*st, crate::units::UnitStatus::Restarting) {
-                        return Ok(());
+                        return Ok(None);
                     }
                 }
 
@@ -446,12 +517,12 @@ pub fn service_exit_handler(
                         crate::units::StatusStopped::StoppedUnexpected,
                         vec![reason],
                     );
-                    return Ok(());
+                    return Ok(None);
                 }
 
                 info!("Restarting oneshot service {name}");
                 crate::units::reactivate_unit(srvc_id, run_info).map_err(|e| format!("{e}"))?;
-                return Ok(());
+                return Ok(None);
             }
 
             crate::units::deactivate_unit_recursive(&srvc_id, run_info)
@@ -479,29 +550,26 @@ pub fn service_exit_handler(
                 );
             }
 
-            // Trigger OnSuccess=/OnFailure= units for the oneshot service.
+            // Collect OnSuccess=/OnFailure= trigger info for the oneshot service.
+            // Actual triggering happens after the read lock is dropped.
             if let Some(unit) = run_info.unit_table.get(&srvc_id) {
                 if is_success && !unit.common.unit.on_success.is_empty() {
-                    let targets = unit.common.unit.on_success.clone();
-                    trigger_on_success_failure_units(
-                        &targets,
-                        name,
-                        "OnSuccess",
-                        run_info,
-                        arc_run_info,
-                    );
+                    return Ok(Some(PendingTrigger {
+                        targets: unit.common.unit.on_success.clone(),
+                        source_name: name.to_string(),
+                        kind: "OnSuccess".to_string(),
+                        monitor_env: build_monitor_env(name, &code, true),
+                    }));
                 } else if !is_success && !unit.common.unit.on_failure.is_empty() {
-                    let targets = unit.common.unit.on_failure.clone();
-                    trigger_on_success_failure_units(
-                        &targets,
-                        name,
-                        "OnFailure",
-                        run_info,
-                        arc_run_info,
-                    );
+                    return Ok(Some(PendingTrigger {
+                        targets: unit.common.unit.on_failure.clone(),
+                        source_name: name.to_string(),
+                        kind: "OnFailure".to_string(),
+                        monitor_env: build_monitor_env(name, &code, false),
+                    }));
                 }
             }
-            return Ok(());
+            return Ok(None);
         }
     }
 
@@ -623,7 +691,7 @@ pub fn service_exit_handler(
                 "Exit handler ignores exit of service {}. Its status is not 'Started'/'Starting', it is: {:?}",
                 name, *status_locked
             );
-            return Ok(());
+            return Ok(None);
         }
     }
 
@@ -631,7 +699,7 @@ pub fn service_exit_handler(
     // in its current active state — do not restart, do not deactivate.
     if has_remain_after_exit(unit) && success_exit_status.is_success(&code) {
         trace!("Service {name} exited cleanly with RemainAfterExit=yes, staying active");
-        return Ok(());
+        return Ok(None);
     }
 
     // Run ExecStopPost= commands. In real systemd these always run when a
@@ -660,27 +728,20 @@ pub fn service_exit_handler(
         // these on the state transition independent of restart.
         // A clean signal (SIGHUP/SIGINT/SIGTERM/SIGPIPE) or explicit success
         // triggers OnSuccess=; everything else triggers OnFailure=.
+        // NOTE: We trigger here while still holding the read lock because the
+        // restart logic below also needs it. The trigger spawns a thread that
+        // acquires its own locks asynchronously.
         if let Some(unit) = run_info.unit_table.get(&srvc_id) {
             let is_clean =
                 success_exit_status.is_success(&code) || success_exit_status.is_clean_signal(&code);
             if is_clean && !unit.common.unit.on_success.is_empty() {
                 let targets = unit.common.unit.on_success.clone();
-                trigger_on_success_failure_units(
-                    &targets,
-                    name,
-                    "OnSuccess",
-                    run_info,
-                    arc_run_info,
-                );
+                let mon = build_monitor_env(name, &code, true);
+                trigger_on_success_failure_units(&targets, name, "OnSuccess", arc_run_info, mon);
             } else if !is_clean && !unit.common.unit.on_failure.is_empty() {
                 let targets = unit.common.unit.on_failure.clone();
-                trigger_on_success_failure_units(
-                    &targets,
-                    name,
-                    "OnFailure",
-                    run_info,
-                    arc_run_info,
-                );
+                let mon = build_monitor_env(name, &code, false);
+                trigger_on_success_failure_units(&targets, name, "OnFailure", arc_run_info, mon);
             }
         }
 
@@ -721,7 +782,7 @@ pub fn service_exit_handler(
                                 trace!(
                                     "Restart of {name} shortcut by external start; aborting auto-restart"
                                 );
-                                return Ok(());
+                                return Ok(None);
                             }
                         }
                         std::thread::sleep(std::time::Duration::from_millis(100));
@@ -729,7 +790,7 @@ pub fn service_exit_handler(
                 }
                 Timeout::Infinity => {
                     trace!("RestartSec=infinity for service {name}, not restarting");
-                    return Ok(());
+                    return Ok(None);
                 }
             }
         }
@@ -738,7 +799,7 @@ pub fn service_exit_handler(
         if let Some(unit) = run_info.unit_table.get(&srvc_id) {
             let st = unit.common.status.read_poisoned();
             if !matches!(&*st, crate::units::UnitStatus::Restarting) {
-                return Ok(());
+                return Ok(None);
             }
         }
 
@@ -765,7 +826,7 @@ pub fn service_exit_handler(
                 );
                 crate::units::execute_unit_action(start_limit_action, name);
             }
-            return Ok(());
+            return Ok(None);
         }
         trace!("Restart service {name} after it died");
         crate::units::reactivate_unit(srvc_id, run_info).map_err(|e| format!("{e}"))?;
@@ -828,36 +889,30 @@ pub fn service_exit_handler(
             info!("Service {name} failed with {:?}, marked as failed", code);
         }
 
-        // Trigger OnSuccess=/OnFailure= units.
-        // A "clean" exit for OnSuccess purposes includes exit code 0, clean signals
-        // (SIGHUP/SIGINT/SIGTERM/SIGPIPE), intentional stops, and any extra signals
-        // in SuccessExitStatus=.
+        // Collect OnSuccess=/OnFailure= trigger info.
+        // Actual triggering happens after the read lock is dropped.
         if let Some(unit) = run_info.unit_table.get(&srvc_id) {
             let effective_success = is_success
                 || was_intentionally_stopping
                 || success_exit_status.is_clean_signal(&code);
             if effective_success && !unit.common.unit.on_success.is_empty() {
-                let targets = unit.common.unit.on_success.clone();
-                trigger_on_success_failure_units(
-                    &targets,
-                    name,
-                    "OnSuccess",
-                    run_info,
-                    arc_run_info,
-                );
+                return Ok(Some(PendingTrigger {
+                    targets: unit.common.unit.on_success.clone(),
+                    source_name: name.to_string(),
+                    kind: "OnSuccess".to_string(),
+                    monitor_env: build_monitor_env(name, &code, true),
+                }));
             } else if !effective_success && !unit.common.unit.on_failure.is_empty() {
-                let targets = unit.common.unit.on_failure.clone();
-                trigger_on_success_failure_units(
-                    &targets,
-                    name,
-                    "OnFailure",
-                    run_info,
-                    arc_run_info,
-                );
+                return Ok(Some(PendingTrigger {
+                    targets: unit.common.unit.on_failure.clone(),
+                    source_name: name.to_string(),
+                    kind: "OnFailure".to_string(),
+                    monitor_env: build_monitor_env(name, &code, false),
+                }));
             }
         }
     }
-    Ok(())
+    Ok(None)
 }
 
 #[cfg(test)]

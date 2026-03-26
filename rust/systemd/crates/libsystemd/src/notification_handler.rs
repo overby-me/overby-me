@@ -836,6 +836,7 @@ mod tests {
             main_exit_pid: None,
             trigger_path: None,
             trigger_unit: None,
+            monitor_env: None,
         }
     }
 

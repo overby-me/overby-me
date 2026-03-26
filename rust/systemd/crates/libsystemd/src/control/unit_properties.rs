@@ -69,50 +69,57 @@ pub fn collect_properties(unit: &Unit) -> BTreeMap<String, String> {
             insert_service_config(&mut props, &svc.conf);
             insert_exec_config(&mut props, &svc.conf.exec_config);
 
-            // MainPID — read from state if available
-            let state = svc.state.read_poisoned();
+            // Try to read service state without blocking.  During oneshot
+            // activation the state write-lock is held for the entire
+            // wait_for_service duration; blocking here would make
+            // `systemctl show` hang.  Fall back to defaults if contended.
+            let state_guard = svc.state.try_read();
+            let state_ref = state_guard.as_ref().ok();
 
-            // Override NotifyAccess with the effective value (runtime
-            // NOTIFYACCESS= override takes precedence over unit file).
-            insert(
-                &mut props,
-                "NotifyAccess",
-                &format_notify_access(crate::services::effective_notify_access(
-                    &state.srvc,
-                    &svc.conf,
-                )),
-            );
-            if let Some(pid) = state.srvc.pid {
-                insert(&mut props, "MainPID", &pid.to_string());
+            if let Some(state) = state_ref {
+                insert(
+                    &mut props,
+                    "NotifyAccess",
+                    &format_notify_access(crate::services::effective_notify_access(
+                        &state.srvc,
+                        &svc.conf,
+                    )),
+                );
+                if let Some(pid) = state.srvc.pid {
+                    insert(&mut props, "MainPID", &pid.to_string());
+                } else {
+                    insert(&mut props, "MainPID", "0");
+                }
+                if let Some(exit_pid) = state.srvc.main_exit_pid {
+                    insert(&mut props, "ExecMainPID", &exit_pid.to_string());
+                } else if let Some(pid) = state.srvc.pid {
+                    insert(&mut props, "ExecMainPID", &pid.to_string());
+                } else {
+                    insert(&mut props, "ExecMainPID", "0");
+                }
+                insert(
+                    &mut props,
+                    "ExecMainStatus",
+                    &state
+                        .srvc
+                        .main_exit_status
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| "0".to_string()),
+                );
+                insert(
+                    &mut props,
+                    "NRestarts",
+                    &state.common.restart_count.to_string(),
+                );
             } else {
+                // State lock is contended (service is activating).
+                // Provide sensible defaults so `systemctl show` doesn't hang.
+                insert(&mut props, "NotifyAccess", "none");
                 insert(&mut props, "MainPID", "0");
-            }
-
-            // ExecMainPID — the PID of the main process (persists after exit)
-            if let Some(exit_pid) = state.srvc.main_exit_pid {
-                insert(&mut props, "ExecMainPID", &exit_pid.to_string());
-            } else if let Some(pid) = state.srvc.pid {
-                insert(&mut props, "ExecMainPID", &pid.to_string());
-            } else {
                 insert(&mut props, "ExecMainPID", "0");
+                insert(&mut props, "ExecMainStatus", "0");
+                insert(&mut props, "NRestarts", "0");
             }
-
-            // ExecMainStatus — the exit status of the main process
-            insert(
-                &mut props,
-                "ExecMainStatus",
-                &state
-                    .srvc
-                    .main_exit_status
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| "0".to_string()),
-            );
-
-            insert(
-                &mut props,
-                "NRestarts",
-                &state.common.restart_count.to_string(),
-            );
 
             insert(
                 &mut props,
@@ -134,28 +141,33 @@ pub fn collect_properties(unit: &Unit) -> BTreeMap<String, String> {
             }
 
             // ── sd_notify reported fields ─────────────────────────────
-            if let Some(errno) = state.srvc.notify_errno {
-                insert(&mut props, "StatusErrno", &errno.to_string());
+            if let Some(state) = state_ref {
+                if let Some(errno) = state.srvc.notify_errno {
+                    insert(&mut props, "StatusErrno", &errno.to_string());
+                } else {
+                    insert(&mut props, "StatusErrno", "0");
+                }
+                if let Some(ref bus_error) = state.srvc.notify_bus_error {
+                    insert(&mut props, "StatusBusError", bus_error);
+                }
+                if let Some(ref exit_status) = state.srvc.notify_exit_status {
+                    insert(&mut props, "StatusExitStatus", exit_status);
+                }
+                if let Some(ref invocation_id) = state.srvc.invocation_id {
+                    insert(&mut props, "InvocationID", invocation_id);
+                }
+                if let Some(usec) = state.srvc.watchdog_usec_override {
+                    insert(&mut props, "WatchdogUSec", &usec.to_string());
+                }
+                insert(
+                    &mut props,
+                    "NFileDescriptorStore",
+                    &state.srvc.stored_fds.len().to_string(),
+                );
             } else {
                 insert(&mut props, "StatusErrno", "0");
+                insert(&mut props, "NFileDescriptorStore", "0");
             }
-            if let Some(ref bus_error) = state.srvc.notify_bus_error {
-                insert(&mut props, "StatusBusError", bus_error);
-            }
-            if let Some(ref exit_status) = state.srvc.notify_exit_status {
-                insert(&mut props, "StatusExitStatus", exit_status);
-            }
-            if let Some(ref invocation_id) = state.srvc.invocation_id {
-                insert(&mut props, "InvocationID", invocation_id);
-            }
-            if let Some(usec) = state.srvc.watchdog_usec_override {
-                insert(&mut props, "WatchdogUSec", &usec.to_string());
-            }
-            insert(
-                &mut props,
-                "NFileDescriptorStore",
-                &state.srvc.stored_fds.len().to_string(),
-            );
             insert(
                 &mut props,
                 "FileDescriptorStoreMax",

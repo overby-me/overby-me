@@ -9,7 +9,7 @@ use crate::units::{
 use std::fmt::Write as _;
 use std::os::unix::fs::PermissionsExt;
 
-use log::{info, trace};
+use log::{info, trace, warn};
 use serde_json::Value;
 
 pub fn open_all_sockets(run_info: ArcMutRuntimeInfo, conf: &crate::config::Config) {
@@ -2481,6 +2481,7 @@ fn create_transient_unit(
                     main_exit_pid: None,
                     trigger_path: None,
                     trigger_unit: None,
+                    monitor_env: None,
                 },
             }),
         }),
@@ -4900,18 +4901,27 @@ pub fn execute_command(
                 // final status explicitly. Also check Restarting state since
                 // the exit handler may have already transitioned from
                 // StoppedUnexpected to Restarting for auto-restart.
+                // Only check oneshot services — Type=simple/notify/etc. return
+                // success as soon as the process is forked, matching systemd behavior.
                 {
                     let ri = run_info.read_poisoned();
                     if let Some(unit) = ri.unit_table.get(&id) {
-                        let status = unit.common.status.read_poisoned();
-                        match &*status {
-                            UnitStatus::Stopped(_, errors) if !errors.is_empty() => {
-                                return Err(format!("Unit {} failed to start", id.name));
+                        let is_oneshot = if let Specific::Service(srvc) = &unit.specific {
+                            srvc.conf.srcv_type == crate::units::ServiceType::OneShot
+                        } else {
+                            false
+                        };
+                        if is_oneshot {
+                            let status = unit.common.status.read_poisoned();
+                            match &*status {
+                                UnitStatus::Stopped(_, errors) if !errors.is_empty() => {
+                                    return Err(format!("Unit {} failed to start", id.name));
+                                }
+                                UnitStatus::Restarting => {
+                                    return Err(format!("Unit {} failed to start", id.name));
+                                }
+                                _ => {}
                             }
-                            UnitStatus::Restarting => {
-                                return Err(format!("Unit {} failed to start", id.name));
-                            }
-                            _ => {}
                         }
                     }
                 }
@@ -5624,8 +5634,14 @@ pub fn accept_control_connections_unix_socket(
 ) {
     std::thread::spawn(move || {
         loop {
-            let stream = Box::new(source.accept().unwrap().0);
-            listen_on_commands(stream, run_info.clone());
+            match source.accept() {
+                Ok((stream, _addr)) => {
+                    listen_on_commands(Box::new(stream), run_info.clone());
+                }
+                Err(e) => {
+                    warn!("Error on control socket accept: {e}");
+                }
+            }
         }
     });
 }

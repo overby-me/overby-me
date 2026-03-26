@@ -290,6 +290,18 @@ fn start_service_with_filedescriptors(
                 env.push(("TRIGGER_UNIT".to_owned(), tu.clone()));
             }
 
+            // MONITOR_* env vars for OnSuccess=/OnFailure= handler services.
+            if let Some(ref mon) = srvc.monitor_env {
+                env.push((
+                    "MONITOR_SERVICE_RESULT".to_owned(),
+                    mon.service_result.clone(),
+                ));
+                env.push(("MONITOR_EXIT_CODE".to_owned(), mon.exit_code.clone()));
+                env.push(("MONITOR_EXIT_STATUS".to_owned(), mon.exit_status.clone()));
+                env.push(("MONITOR_UNIT".to_owned(), mon.unit.clone()));
+                env.push(("MONITOR_INVOCATION_ID".to_owned(), "0".to_owned()));
+            }
+
             // UnsetEnvironment= is applied as the final step (see systemd.exec(5)).
             // It can undo assignments from any source, including Environment=,
             // EnvironmentFile=, PassEnvironment=, and even internal variables.

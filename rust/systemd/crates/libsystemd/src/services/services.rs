@@ -157,6 +157,22 @@ pub struct Service {
     /// TRIGGER_UNIT — set by the path watcher when a path unit triggers this
     /// service. Contains the name of the .path unit that fired the trigger.
     pub trigger_unit: Option<String>,
+    /// MONITOR_* environment variables — set when this service is activated
+    /// as an OnSuccess= or OnFailure= handler for another unit.
+    pub monitor_env: Option<MonitorEnv>,
+}
+
+/// Environment variables passed to OnSuccess=/OnFailure= handler services.
+#[derive(Clone, Debug, Default)]
+pub struct MonitorEnv {
+    /// "success" or "exit-code" / "signal" etc.
+    pub service_result: String,
+    /// "exited" or "killed"
+    pub exit_code: String,
+    /// The exit code number or signal number as a string.
+    pub exit_status: String,
+    /// The name of the triggering unit.
+    pub unit: String,
 }
 
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
@@ -394,6 +410,10 @@ impl Service {
         if conf.watchdog_sec.is_some() && self.watchdog_last_ping.is_none() {
             self.watchdog_last_ping = Some(std::time::Instant::now());
         }
+
+        // Clear MONITOR_* env vars before ExecStartPost.  Real systemd only
+        // passes these to ExecStartPre/ExecStart processes, not ExecStartPost.
+        self.monitor_env = None;
 
         self.run_poststart(conf, id.clone(), name, run_info)
             .map_err(
@@ -635,6 +655,17 @@ impl Service {
         }
         if let Some(ref tu) = self.trigger_unit {
             cmd.env("TRIGGER_UNIT", tu);
+        }
+
+        // Pass MONITOR_* env vars for OnSuccess/OnFailure handler services
+        if let Some(ref mon) = self.monitor_env {
+            cmd.env("MONITOR_SERVICE_RESULT", &mon.service_result);
+            cmd.env("MONITOR_EXIT_CODE", &mon.exit_code);
+            cmd.env("MONITOR_EXIT_STATUS", &mon.exit_status);
+            cmd.env("MONITOR_UNIT", &mon.unit);
+            // MONITOR_INVOCATION_ID is required but we don't track invocation IDs yet;
+            // use a placeholder so handler scripts that check -z don't fail.
+            cmd.env("MONITOR_INVOCATION_ID", "0");
         }
 
         trace!("Run {cmdline:?} for service: {name}");
