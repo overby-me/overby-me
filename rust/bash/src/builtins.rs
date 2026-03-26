@@ -3075,7 +3075,9 @@ fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
                         | "physical"
                         | "privileged"
                         | "verbose"
-                        | "vi" => {} // known but not implemented
+                        | "vi" => {
+                            shell.shopt_options.insert(option.to_string(), enable);
+                        }
                         _ => {
                             eprintln!(
                                 "{}: set: {}: invalid option name",
@@ -3086,33 +3088,36 @@ fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
                         }
                     }
                 } else {
+                    let so = |name: &str, default: bool| -> bool {
+                        shell.shopt_options.get(name).copied().unwrap_or(default)
+                    };
                     let options: Vec<(&str, bool)> = vec![
                         ("allexport", shell.opt_allexport),
-                        ("braceexpand", true),
-                        ("emacs", true),
+                        ("braceexpand", so("braceexpand", true)),
+                        ("emacs", so("emacs", false)),
                         ("errexit", shell.opt_errexit),
-                        ("errtrace", false),
-                        ("functrace", false),
+                        ("errtrace", so("errtrace", false)),
+                        ("functrace", so("functrace", false)),
                         ("hashall", shell.opt_hashall),
-                        ("histexpand", true),
-                        ("history", true),
-                        ("ignoreeof", false),
-                        ("interactive-comments", true),
+                        ("histexpand", so("histexpand", false)),
+                        ("history", so("history", false)),
+                        ("ignoreeof", so("ignoreeof", false)),
+                        ("interactive-comments", so("interactive-comments", true)),
                         ("keyword", shell.opt_keyword),
-                        ("monitor", true),
+                        ("monitor", so("monitor", false)),
                         ("noclobber", shell.opt_noclobber),
                         ("noexec", shell.opt_noexec),
                         ("noglob", shell.opt_noglob),
-                        ("nolog", false),
-                        ("notify", false),
+                        ("nolog", so("nolog", false)),
+                        ("notify", so("notify", false)),
                         ("nounset", shell.opt_nounset),
-                        ("onecmd", false),
-                        ("physical", false),
+                        ("onecmd", so("onecmd", false)),
+                        ("physical", so("physical", false)),
                         ("pipefail", shell.opt_pipefail),
                         ("posix", shell.opt_posix),
-                        ("privileged", false),
-                        ("verbose", false),
-                        ("vi", false),
+                        ("privileged", so("privileged", false)),
+                        ("verbose", so("verbose", false)),
+                        ("vi", so("vi", false)),
                         ("xtrace", shell.opt_xtrace),
                     ];
                     if enable {
@@ -6674,18 +6679,69 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
     if set_o {
         let set_options: Vec<(&str, bool)> = vec![
             ("allexport", shell.opt_allexport),
-            ("braceexpand", true),
-            ("emacs", true),
+            (
+                "braceexpand",
+                shell
+                    .shopt_options
+                    .get("braceexpand")
+                    .copied()
+                    .unwrap_or(true),
+            ),
+            (
+                "emacs",
+                shell.shopt_options.get("emacs").copied().unwrap_or(false),
+            ),
             ("errexit", shell.opt_errexit),
-            ("errtrace", false),
-            ("functrace", false),
-            ("hashall", true),
-            ("histexpand", true),
-            ("history", true),
-            ("ignoreeof", false),
-            ("interactive-comments", true),
+            (
+                "errtrace",
+                shell
+                    .shopt_options
+                    .get("errtrace")
+                    .copied()
+                    .unwrap_or(false),
+            ),
+            (
+                "functrace",
+                shell
+                    .shopt_options
+                    .get("functrace")
+                    .copied()
+                    .unwrap_or(false),
+            ),
+            ("hashall", shell.opt_hashall),
+            (
+                "histexpand",
+                shell
+                    .shopt_options
+                    .get("histexpand")
+                    .copied()
+                    .unwrap_or(false),
+            ),
+            (
+                "history",
+                shell.shopt_options.get("history").copied().unwrap_or(false),
+            ),
+            (
+                "ignoreeof",
+                shell
+                    .shopt_options
+                    .get("ignoreeof")
+                    .copied()
+                    .unwrap_or(false),
+            ),
+            (
+                "interactive-comments",
+                shell
+                    .shopt_options
+                    .get("interactive-comments")
+                    .copied()
+                    .unwrap_or(true),
+            ),
             ("keyword", shell.opt_keyword),
-            ("monitor", true),
+            (
+                "monitor",
+                shell.shopt_options.get("monitor").copied().unwrap_or(false),
+            ),
             ("noclobber", shell.opt_noclobber),
             ("noexec", shell.opt_noexec),
             ("noglob", shell.opt_noglob),
@@ -6739,7 +6795,9 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
                         "noglob" => shell.opt_noglob = true,
                         "posix" => shell.opt_posix = true,
                         "pipefail" => shell.opt_pipefail = true,
-                        _ => {}
+                        _ => {
+                            shell.shopt_options.insert(opt.to_string(), true);
+                        }
                     }
                 } else if unset {
                     match *opt {
@@ -6751,7 +6809,9 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
                         "noglob" => shell.opt_noglob = false,
                         "posix" => shell.opt_posix = false,
                         "pipefail" => shell.opt_pipefail = false,
-                        _ => {}
+                        _ => {
+                            shell.shopt_options.insert(opt.to_string(), false);
+                        }
                     }
                 } else if !query {
                     if print_mode {
