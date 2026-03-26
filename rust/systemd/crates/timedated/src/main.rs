@@ -28,11 +28,26 @@ use zbus::blocking::Connection;
 // Paths
 // ---------------------------------------------------------------------------
 
-const LOCALTIME_PATH: &str = "/etc/localtime";
-const TIMEZONE_PATH: &str = "/etc/timezone";
+const DEFAULT_LOCALTIME_PATH: &str = "/etc/localtime";
+const DEFAULT_TIMEZONE_PATH: &str = "/etc/timezone";
 const ZONEINFO_DIR: &str = "/usr/share/zoneinfo";
-const ADJTIME_PATH: &str = "/etc/adjtime";
+const DEFAULT_ADJTIME_PATH: &str = "/etc/adjtime";
 const CONTROL_SOCKET_PATH: &str = "/run/systemd/timedated.sock";
+
+/// Return the effective localtime symlink path, honoring `SYSTEMD_ETC_LOCALTIME`.
+fn localtime_path() -> String {
+    env::var("SYSTEMD_ETC_LOCALTIME").unwrap_or_else(|_| DEFAULT_LOCALTIME_PATH.to_string())
+}
+
+/// Return the effective timezone file path, honoring `SYSTEMD_ETC_TIMEZONE`.
+fn timezone_path() -> String {
+    env::var("SYSTEMD_ETC_TIMEZONE").unwrap_or_else(|_| DEFAULT_TIMEZONE_PATH.to_string())
+}
+
+/// Return the effective adjtime file path, honoring `SYSTEMD_ETC_ADJTIME`.
+fn adjtime_path() -> String {
+    env::var("SYSTEMD_ETC_ADJTIME").unwrap_or_else(|_| DEFAULT_ADJTIME_PATH.to_string())
+}
 
 const DBUS_NAME: &str = "org.freedesktop.timedate1";
 const DBUS_PATH: &str = "/org/freedesktop/timedate1";
@@ -71,7 +86,12 @@ impl Default for TimedateState {
 impl TimedateState {
     /// Load all time/date state from the filesystem.
     pub fn load() -> Self {
-        Self::load_from(LOCALTIME_PATH, TIMEZONE_PATH, ADJTIME_PATH, ZONEINFO_DIR)
+        Self::load_from(
+            &localtime_path(),
+            &timezone_path(),
+            &adjtime_path(),
+            ZONEINFO_DIR,
+        )
     }
 
     /// Load state from custom paths (for testing).
@@ -103,9 +123,9 @@ impl TimedateState {
             .unwrap_or_default();
         let secs = now.as_secs() as i64;
 
-        let local_time = format_timestamp_local(secs);
+        let local_time = format_timestamp_local(secs, &self.timezone);
         let utc_time = format_timestamp_utc(secs);
-        let utc_offset = get_utc_offset_str();
+        let (tz_abbr, utc_offset) = get_tz_abbr_and_offset(&self.timezone);
         let rtc_time = read_rtc_time();
 
         let yes_no = |b: bool| if b { "yes" } else { "no" };
@@ -119,8 +139,8 @@ impl TimedateState {
             out.push_str("                 RTC time: n/a\n");
         }
         out.push_str(&format!(
-            "                Time zone: {} ({})\n",
-            self.timezone, utc_offset
+            "                Time zone: {} ({}, {})\n",
+            self.timezone, tz_abbr, utc_offset
         ));
         out.push_str(&format!(
             "System clock synchronized: {}\n",
@@ -304,7 +324,7 @@ fn collect_timezones(base: &Path, dir: &Path, out: &mut Vec<String>) {
 
 /// Set the system timezone by updating /etc/localtime and /etc/timezone.
 pub fn set_timezone(tz: &str) -> Result<(), String> {
-    set_timezone_at(tz, LOCALTIME_PATH, TIMEZONE_PATH, ZONEINFO_DIR)
+    set_timezone_at(tz, &localtime_path(), &timezone_path(), ZONEINFO_DIR)
 }
 
 /// Set the timezone using custom paths (for testing).
@@ -357,7 +377,7 @@ pub fn set_timezone_at(
 
 /// Check whether the RTC is configured for local time.
 pub fn is_rtc_local() -> bool {
-    is_rtc_local_from(ADJTIME_PATH)
+    is_rtc_local_from(&adjtime_path())
 }
 
 /// Check RTC mode from a custom adjtime path (for testing).
@@ -373,38 +393,76 @@ pub fn is_rtc_local_from(adjtime_path: &str) -> bool {
 
 /// Set the RTC to local or UTC mode by writing /etc/adjtime.
 pub fn set_local_rtc(local: bool) -> Result<(), String> {
-    set_local_rtc_at(local, ADJTIME_PATH)
+    set_local_rtc_at(local, &adjtime_path())
 }
 
 /// Set RTC mode using a custom adjtime path (for testing).
 pub fn set_local_rtc_at(local: bool, adjtime_path: &str) -> Result<(), String> {
+    const NULL_ADJTIME_UTC: &str = "0.0 0 0\n0\nUTC\n";
+
+    let content = match fs::read_to_string(adjtime_path) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            if !local {
+                return Ok(()); // No file + UTC is the default — nothing to do
+            }
+            return fs::write(adjtime_path, "0.0 0 0\n0\nLOCAL\n")
+                .map_err(|e| format!("Failed to write {}: {}", adjtime_path, e));
+        }
+        Err(e) => return Err(format!("Failed to read {}: {}", adjtime_path, e)),
+    };
+
     let mode = if local { "LOCAL" } else { "UTC" };
+    let bytes = content.as_bytes();
 
-    // Read existing /etc/adjtime or create default content
-    let content = fs::read_to_string(adjtime_path).unwrap_or_default();
-    let mut lines: Vec<&str> = content.lines().collect();
+    // Build new content following the upstream C logic:
+    // Find the boundary between the prefix (lines 1-2) and the mode line (line 3),
+    // then reconstruct with the new mode and any suffix (lines 4+).
+    let new_content = match bytes.iter().position(|&b| b == b'\n') {
+        None => {
+            // "line0" — no newlines at all
+            format!("{}\n0\n{}\n", content, mode)
+        }
+        Some(pos1) if pos1 + 1 >= bytes.len() => {
+            // "line0\n" — only one line with trailing newline
+            format!("{}0\n{}\n", content, mode)
+        }
+        Some(pos1) => {
+            match bytes[pos1 + 1..].iter().position(|&b| b == b'\n') {
+                None => {
+                    // "line0\nline1" — two lines, no trailing newline
+                    format!("{}\n{}\n", content, mode)
+                }
+                Some(rel_pos2) => {
+                    let pos2 = pos1 + 1 + rel_pos2;
+                    let prefix = &content[..pos2 + 1]; // through second \n
+                    // Find end of line 3 (third \n)
+                    let suffix = match bytes[pos2 + 1..].iter().position(|&b| b == b'\n') {
+                        Some(rel_pos3) => &content[pos2 + 1 + rel_pos3..],
+                        None => "\n",
+                    };
+                    format!("{}{}{}", prefix, mode, suffix)
+                }
+            }
+        }
+    };
 
-    // Ensure at least 3 lines
-    while lines.len() < 3 {
-        if lines.is_empty() {
-            lines.push("0.0 0 0.0");
-        } else if lines.len() == 1 {
-            lines.push("0");
-        } else {
-            lines.push("UTC");
+    // If the rebuilt content is identical to the original, leave the file as-is.
+    // This mirrors the upstream daemon's early-return when the mode already matches.
+    if new_content == content {
+        return Ok(());
+    }
+
+    if new_content == NULL_ADJTIME_UTC {
+        match fs::remove_file(adjtime_path) {
+            Ok(()) => return Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(format!("Failed to remove {}: {}", adjtime_path, e)),
         }
     }
 
-    // Replace the third line with the mode
-    let mut output_lines: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
-    output_lines[2] = mode.to_string();
-
-    let output = output_lines.join("\n") + "\n";
-
-    fs::write(adjtime_path, output)
-        .map_err(|e| format!("Failed to write {}: {}", adjtime_path, e))?;
-
-    Ok(())
+    fs::write(adjtime_path, &new_content)
+        .map_err(|e| format!("Failed to write {}: {}", adjtime_path, e))
 }
 
 // ---------------------------------------------------------------------------
@@ -542,25 +600,64 @@ fn read_rtc_time() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-/// Get the UTC offset as a string like "+0100" or "-0500".
-fn get_utc_offset_str() -> String {
+/// Sync the process's TZ environment with the timezone we manage.
+///
+/// This ensures that subsequent `localtime_r` calls (used by `format_status`)
+/// reflect the timezone configured via `SYSTEMD_ETC_LOCALTIME`, not necessarily
+/// `/etc/localtime`.
+/// Sync the process TZ with the given timezone name or localtime file path.
+///
+/// Sets `TZ=:<localtime-path>` so glibc resolves the timezone directly from
+/// the localtime symlink, then calls `tzset()` to reload.
+fn sync_process_tz(_tz: &str) {
+    unsafe extern "C" {
+        fn tzset();
+    }
+
+    let lt_path = localtime_path();
+    if !Path::new(&lt_path).exists() {
+        return;
+    }
+
     unsafe {
-        let now = libc::time(std::ptr::null_mut());
-        let mut tm: libc::tm = std::mem::zeroed();
-        libc::localtime_r(&now, &mut tm);
-
-        let offset_secs = tm.tm_gmtoff;
-        let sign = if offset_secs >= 0 { '+' } else { '-' };
-        let abs_offset = offset_secs.unsigned_abs();
-        let hours = abs_offset / 3600;
-        let minutes = (abs_offset % 3600) / 60;
-
-        format!("{}{:02}{:02}", sign, hours, minutes)
+        env::set_var("TZ", format!(":{}", lt_path));
+        tzset();
     }
 }
 
+/// Get the UTC offset and abbreviation for a given timezone name.
+///
+/// Uses `date` subprocess with `TZ=<name>` to resolve the timezone, avoiding
+/// glibc TZ caching issues within the long-running daemon process.
+fn get_tz_abbr_and_offset(tz_name: &str) -> (String, String) {
+    if let Ok(output) = process::Command::new("date")
+        .env("TZ", tz_name)
+        .arg("+%Z %z")
+        .output()
+        && output.status.success()
+    {
+        let s = String::from_utf8_lossy(&output.stdout);
+        let parts: Vec<&str> = s.trim().splitn(2, ' ').collect();
+        if parts.len() == 2 {
+            return (parts[0].to_string(), parts[1].to_string());
+        }
+    }
+    ("UTC".to_string(), "+0000".to_string())
+}
+
 /// Format a Unix timestamp as a local time string.
-fn format_timestamp_local(secs: i64) -> String {
+fn format_timestamp_local(secs: i64, tz_name: &str) -> String {
+    if let Ok(output) = process::Command::new("date")
+        .env("TZ", tz_name)
+        .arg("-d")
+        .arg(format!("@{}", secs))
+        .arg("+%a %Y-%b-%d %H:%M:%S")
+        .output()
+        && output.status.success()
+    {
+        return String::from_utf8_lossy(&output.stdout).trim().to_string();
+    }
+    // Fallback
     unsafe {
         let mut tm: libc::tm = std::mem::zeroed();
         libc::localtime_r(&secs, &mut tm);
@@ -746,6 +843,7 @@ impl Timedate1Manager {
                 e
             )));
         }
+        sync_process_tz(&timezone);
         let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
         s.timezone = timezone;
         Ok(())
@@ -755,9 +853,15 @@ impl Timedate1Manager {
     fn set_local_rtc(
         &self,
         local_rtc: bool,
-        _fix_system: bool,
+        fix_system: bool,
         _interactive: bool,
     ) -> zbus::fdo::Result<()> {
+        {
+            let s = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            if local_rtc == s.local_rtc && !fix_system {
+                return Ok(());
+            }
+        }
         if let Err(e) = set_local_rtc(local_rtc) {
             return Err(zbus::fdo::Error::Failed(format!(
                 "Failed to set local RTC: {}",
@@ -810,18 +914,25 @@ fn setup_dbus(shared: SharedState) -> Result<Connection, String> {
 // ---------------------------------------------------------------------------
 
 /// Handle a single control command and return the response string.
-pub fn handle_control_command(line: &str) -> String {
+///
+/// When `state` is provided, stateful early-return optimisations are used
+/// (e.g. SET-LOCAL-RTC skips the write when the mode already matches).
+pub fn handle_control_command(line: &str, state: Option<&SharedState>) -> String {
     let parts: Vec<&str> = line.trim().splitn(3, ' ').collect();
     let cmd = parts.first().copied().unwrap_or("");
 
     match cmd.to_ascii_uppercase().as_str() {
         "STATUS" => {
-            let state = TimedateState::load();
-            state.format_status()
+            let s = state
+                .map(|st| st.lock().unwrap_or_else(|e| e.into_inner()).clone())
+                .unwrap_or_else(TimedateState::load);
+            s.format_status()
         }
         "SHOW" => {
-            let state = TimedateState::load();
-            state.format_show()
+            let s = state
+                .map(|st| st.lock().unwrap_or_else(|e| e.into_inner()).clone())
+                .unwrap_or_else(TimedateState::load);
+            s.format_show()
         }
         "SET-TIMEZONE" => {
             let tz = parts.get(1).unwrap_or(&"");
@@ -830,6 +941,11 @@ pub fn handle_control_command(line: &str) -> String {
             }
             match set_timezone(tz) {
                 Ok(()) => {
+                    sync_process_tz(tz);
+                    if let Some(st) = state {
+                        let mut s = st.lock().unwrap_or_else(|e| e.into_inner());
+                        s.timezone = tz.to_string();
+                    }
                     log::info!("Timezone set to '{}'", tz);
                     "OK\n".to_string()
                 }
@@ -844,8 +960,19 @@ pub fn handle_control_command(line: &str) -> String {
                 "" => return "ERROR: Boolean argument required\n".to_string(),
                 _ => return format!("ERROR: Invalid boolean value '{}'\n", val),
             };
+            // Early return if the mode already matches (mirrors upstream behaviour)
+            if let Some(st) = state {
+                let s = st.lock().unwrap_or_else(|e| e.into_inner());
+                if local == s.local_rtc {
+                    return "OK\n".to_string();
+                }
+            }
             match set_local_rtc(local) {
                 Ok(()) => {
+                    if let Some(st) = state {
+                        let mut s = st.lock().unwrap_or_else(|e| e.into_inner());
+                        s.local_rtc = local;
+                    }
                     log::info!("RTC in local TZ: {}", local);
                     "OK\n".to_string()
                 }
@@ -883,7 +1010,7 @@ pub fn handle_control_command(line: &str) -> String {
 }
 
 /// Handle a client connection on the control socket.
-fn handle_client(stream: &mut UnixStream) {
+fn handle_client(stream: &mut UnixStream, state: Option<&SharedState>) {
     let reader = BufReader::new(match stream.try_clone() {
         Ok(s) => s,
         Err(_) => return,
@@ -893,7 +1020,7 @@ fn handle_client(stream: &mut UnixStream) {
         match line {
             Ok(l) if l.trim().is_empty() => continue,
             Ok(l) => {
-                let response = handle_control_command(&l);
+                let response = handle_control_command(&l, state);
                 let _ = stream.write_all(response.as_bytes());
                 let _ = stream.flush();
             }
@@ -1016,12 +1143,14 @@ fn watchdog_interval() -> Option<Duration> {
 
 fn main() {
     init_logging();
-    setup_signal_handlers();
+    // Signal handlers are set up after D-Bus initialization to prevent
+    // zbus from potentially overriding them.
 
     log::info!("systemd-timedated starting");
 
     // Load initial state into shared state for D-Bus and control socket
     let initial_state = TimedateState::load();
+    sync_process_tz(&initial_state.timezone);
     log::info!(
         "Timezone: {}, NTP: {}",
         initial_state.timezone,
@@ -1035,12 +1164,6 @@ fn main() {
         log::info!("Watchdog enabled, interval {:?}", iv);
     }
     let mut last_watchdog = Instant::now();
-
-    // D-Bus connection is deferred to after READY=1 so we don't block
-    // early boot waiting for dbus-daemon.  zbus dispatches messages
-    // automatically in a background thread — we just keep the connection alive.
-    let mut _dbus_conn: Option<Connection> = None;
-    let mut dbus_attempted = false;
 
     // Ensure /run/systemd exists
     let _ = fs::create_dir_all(Path::new(CONTROL_SOCKET_PATH).parent().unwrap());
@@ -1069,8 +1192,46 @@ fn main() {
         l.set_nonblocking(true).expect("Failed to set non-blocking");
     }
 
-    sd_notify(&format!("READY=1\nSTATUS=TZ: {}", initial_state.timezone));
+    // Setup D-Bus before sending READY=1.  The service unit has
+    // BusName=org.freedesktop.timedate1, so systemd waits for both
+    // READY=1 and bus-name acquisition before considering the service
+    // started.  Retry a few times to handle the case where the old
+    // daemon's bus name hasn't been released yet after a restart.
+    let _dbus_conn: Option<Connection> = {
+        let mut conn = None;
+        for attempt in 0..5 {
+            match setup_dbus(shared_state.clone()) {
+                Ok(c) => {
+                    log::info!("D-Bus interface registered: {} at {}", DBUS_NAME, DBUS_PATH);
+                    conn = Some(c);
+                    break;
+                }
+                Err(e) => {
+                    log::warn!("D-Bus attempt {} failed: {}", attempt, e);
+                    if attempt < 4 {
+                        thread::sleep(Duration::from_millis(200));
+                    }
+                }
+            }
+        }
+        if conn.is_none() {
+            log::warn!("Failed to register D-Bus interface after retries; control socket only");
+        }
+        conn
+    };
 
+    // Install signal handlers AFTER D-Bus setup so zbus can't override them
+    setup_signal_handlers();
+
+    sd_notify(&format!(
+        "READY=1\nSTATUS=TZ: {}{}",
+        initial_state.timezone,
+        if _dbus_conn.is_some() {
+            " (D-Bus active)"
+        } else {
+            ""
+        }
+    ));
     log::info!("systemd-timedated ready");
 
     // Main loop
@@ -1103,35 +1264,12 @@ fn main() {
             last_watchdog = Instant::now();
         }
 
-        // Attempt D-Bus registration once (deferred from startup so we don't
-        // block early boot before dbus-daemon is running).
-        // zbus handles message dispatch in a background thread automatically.
-        if !dbus_attempted {
-            dbus_attempted = true;
-            match setup_dbus(shared_state.clone()) {
-                Ok(conn) => {
-                    log::info!("D-Bus interface registered: {} at {}", DBUS_NAME, DBUS_PATH);
-                    _dbus_conn = Some(conn);
-                    sd_notify(&format!(
-                        "STATUS=TZ: {} (D-Bus active)",
-                        initial_state.timezone
-                    ));
-                }
-                Err(e) => {
-                    log::warn!(
-                        "Failed to register D-Bus interface ({}); control socket only",
-                        e
-                    );
-                }
-            }
-        }
-
         // Accept control socket connections
         if let Some(ref listener) = listener {
             match listener.accept() {
                 Ok((mut stream, _addr)) => {
                     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
-                    handle_client(&mut stream);
+                    handle_client(&mut stream, Some(&shared_state));
                     let _ = stream.shutdown(Shutdown::Both);
                 }
                 Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
@@ -1680,21 +1818,21 @@ mod tests {
 
     #[test]
     fn test_handle_control_ping() {
-        assert_eq!(handle_control_command("PING"), "PONG\n");
-        assert_eq!(handle_control_command("ping"), "PONG\n");
-        assert_eq!(handle_control_command("Ping"), "PONG\n");
+        assert_eq!(handle_control_command("PING", None), "PONG\n");
+        assert_eq!(handle_control_command("ping", None), "PONG\n");
+        assert_eq!(handle_control_command("Ping", None), "PONG\n");
     }
 
     #[test]
     fn test_handle_control_status() {
-        let response = handle_control_command("STATUS");
+        let response = handle_control_command("STATUS", None);
         assert!(response.contains("Local time:"));
         assert!(response.contains("Universal time:"));
     }
 
     #[test]
     fn test_handle_control_show() {
-        let response = handle_control_command("SHOW");
+        let response = handle_control_command("SHOW", None);
         assert!(response.contains("Timezone="));
         assert!(response.contains("LocalRTC="));
         assert!(response.contains("NTP="));
@@ -1702,27 +1840,27 @@ mod tests {
 
     #[test]
     fn test_handle_control_set_timezone_empty() {
-        let response = handle_control_command("SET-TIMEZONE");
+        let response = handle_control_command("SET-TIMEZONE", None);
         assert!(response.starts_with("ERROR:"));
         assert!(response.contains("required"));
     }
 
     #[test]
     fn test_handle_control_set_timezone_invalid() {
-        let response = handle_control_command("SET-TIMEZONE ../etc/shadow");
+        let response = handle_control_command("SET-TIMEZONE ../etc/shadow", None);
         assert!(response.starts_with("ERROR:"));
     }
 
     #[test]
     fn test_handle_control_set_local_rtc_empty() {
-        let response = handle_control_command("SET-LOCAL-RTC");
+        let response = handle_control_command("SET-LOCAL-RTC", None);
         assert!(response.starts_with("ERROR:"));
         assert!(response.contains("required"));
     }
 
     #[test]
     fn test_handle_control_set_local_rtc_invalid() {
-        let response = handle_control_command("SET-LOCAL-RTC maybe");
+        let response = handle_control_command("SET-LOCAL-RTC maybe", None);
         assert!(response.starts_with("ERROR:"));
         assert!(response.contains("Invalid"));
     }
@@ -1776,36 +1914,36 @@ mod tests {
 
     #[test]
     fn test_handle_control_set_ntp_empty() {
-        let response = handle_control_command("SET-NTP");
+        let response = handle_control_command("SET-NTP", None);
         assert!(response.starts_with("ERROR:"));
         assert!(response.contains("required"));
     }
 
     #[test]
     fn test_handle_control_set_ntp_invalid() {
-        let response = handle_control_command("SET-NTP sometimes");
+        let response = handle_control_command("SET-NTP sometimes", None);
         assert!(response.starts_with("ERROR:"));
         assert!(response.contains("Invalid"));
     }
 
     #[test]
     fn test_handle_control_unknown() {
-        let response = handle_control_command("FROBNICATE");
+        let response = handle_control_command("FROBNICATE", None);
         assert!(response.starts_with("ERROR:"));
         assert!(response.contains("Unknown"));
     }
 
     #[test]
     fn test_handle_control_empty() {
-        let response = handle_control_command("");
+        let response = handle_control_command("", None);
         assert!(response.starts_with("ERROR:"));
     }
 
     #[test]
     fn test_handle_control_case_insensitive() {
-        let r1 = handle_control_command("status");
-        let r2 = handle_control_command("STATUS");
-        let r3 = handle_control_command("Status");
+        let r1 = handle_control_command("status", None);
+        let r2 = handle_control_command("STATUS", None);
+        let r3 = handle_control_command("Status", None);
         // All should return valid status output
         assert!(r1.contains("Local time:"));
         assert!(r2.contains("Local time:"));
@@ -1815,7 +1953,7 @@ mod tests {
     #[test]
     fn test_handle_control_list_timezones() {
         // On systems without zoneinfo, this may return empty, but should not error
-        let response = handle_control_command("LIST-TIMEZONES");
+        let response = handle_control_command("LIST-TIMEZONES", None);
         assert!(!response.starts_with("ERROR:"));
     }
 
@@ -1859,12 +1997,13 @@ mod tests {
     #[test]
     fn test_format_timestamp_local_runs() {
         // Just verify it doesn't panic
-        let _ = format_timestamp_local(0);
+        let _ = format_timestamp_local(0, "UTC");
     }
 
     #[test]
-    fn test_get_utc_offset_str_format() {
-        let offset = get_utc_offset_str();
+    fn test_get_tz_abbr_and_offset_format() {
+        let (abbr, offset) = get_tz_abbr_and_offset("UTC");
+        assert!(!abbr.is_empty());
         // Should be in the format +HHMM or -HHMM
         assert!(offset.len() == 5);
         assert!(offset.starts_with('+') || offset.starts_with('-'));

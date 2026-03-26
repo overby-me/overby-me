@@ -5661,7 +5661,8 @@ pub fn execute_command(
                 if let Some(existing_id) = existing_id {
                     if let Some(existing_unit) = run_info.unit_table.get_mut(&existing_id) {
                         // Update configuration but preserve runtime status
-                        existing_unit.specific = new_unit.specific;
+                        // (PIDs, restart counts, etc.) by only replacing conf.
+                        existing_unit.specific.update_config_from(new_unit.specific);
                         existing_unit.common.unit = new_unit.common.unit;
                         existing_unit.common.dependencies = new_unit.common.dependencies;
                         updated_units_names.push(Value::String(existing_id.name.clone()));

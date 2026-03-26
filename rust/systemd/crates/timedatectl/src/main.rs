@@ -41,6 +41,8 @@ struct TimeInfo {
     rtc_time: Option<String>,
     /// Timezone name (e.g., "America/New_York")
     timezone: String,
+    /// Timezone abbreviation (e.g., "EST")
+    tz_abbr: String,
     /// UTC offset string (e.g., "+0000")
     utc_offset: String,
     /// Whether NTP is enabled
@@ -396,11 +398,40 @@ fn collect_timezones(base: &Path, current: &Path, result: &mut Vec<String>) {
 // ── Commands ───────────────────────────────────────────────────────────────
 
 fn cmd_status() {
+    // Try to get status from the daemon (which may use alternate paths)
+    match send_daemon_command("STATUS") {
+        Ok(output) if !output.is_empty() => {
+            print!("{}", output);
+            return;
+        }
+        Ok(_) => {
+            eprintln!("timedatectl: daemon returned empty STATUS response, using local fallback");
+        }
+        Err(e) => {
+            eprintln!(
+                "timedatectl: daemon STATUS failed ({}), using local fallback",
+                e
+            );
+        }
+    }
+
+    // Fall back to local filesystem reads.
+    // Detect the timezone name first, then set TZ so localtime_r()
+    // uses the correct zone (glibc caches /etc/localtime which may
+    // differ from the configured timezone, e.g. when alternate paths
+    // are in use).
+    let timezone = detect_timezone();
+    unsafe extern "C" {
+        fn tzset();
+    }
+    unsafe {
+        env::set_var("TZ", &timezone);
+        tzset();
+    }
     let local_tm = get_local_tm();
     let utc_tm = get_utc_tm();
     let tz_abbr = get_tz_abbr(&local_tm);
     let offset = get_utc_offset(&local_tm);
-    let timezone = detect_timezone();
     let rtc_time = read_rtc_time();
     let ntp_enabled = is_ntp_enabled();
     let ntp_synced = is_ntp_synced();
@@ -411,6 +442,7 @@ fn cmd_status() {
         utc_time: format_tm(&utc_tm, "UTC"),
         rtc_time,
         timezone,
+        tz_abbr,
         utc_offset: format_utc_offset(offset),
         ntp_enabled,
         ntp_synced,
@@ -430,13 +462,9 @@ fn print_status(info: &TimeInfo) {
     } else {
         println!("                 RTC time: n/a");
     }
-    // Show timezone abbreviation and offset, matching systemd format:
-    // "Time zone: America/New_York (EST, -0500)"
-    let local_tm = get_local_tm();
-    let tz_abbr = get_tz_abbr(&local_tm);
     println!(
         "                Time zone: {} ({}, {})",
-        info.timezone, tz_abbr, info.utc_offset
+        info.timezone, info.tz_abbr, info.utc_offset
     );
 
     println!("System clock synchronized: {}", yes_no(info.ntp_synced));
@@ -493,6 +521,13 @@ fn cmd_show_property(prop: &str, value_only: bool) {
 }
 
 fn cmd_show() {
+    // Try to get show output from the daemon (which may use alternate paths)
+    if let Ok(output) = send_daemon_command("SHOW") {
+        print!("{}", output);
+        return;
+    }
+
+    // Fall back to local filesystem reads
     let local_tm = get_local_tm();
     let _utc_tm = get_utc_tm();
     let _tz_abbr = get_tz_abbr(&local_tm);
@@ -632,11 +667,43 @@ fn parse_time(s: &str) -> Option<(i32, i32, i32)> {
     Some((hour, min, sec))
 }
 
-fn cmd_set_timezone(tz: &str) {
-    // Validate the timezone exists
-    let zoneinfo = Path::new(ZONEINFO_DIR);
+/// Send a command to the timedated daemon's control socket and return the response.
+/// Falls back to direct filesystem operations if the daemon is unavailable.
+fn send_daemon_command(cmd: &str) -> Result<String, String> {
+    const SOCKET_PATH: &str = "/run/systemd/timedated.sock";
+    use std::io::{BufRead, BufReader};
+    use std::os::unix::net::UnixStream;
 
-    // Also check TZDIR env
+    let mut stream = UnixStream::connect(SOCKET_PATH)
+        .map_err(|e| format!("Cannot connect to timedated: {}", e))?;
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+        .ok();
+    stream
+        .write_all(format!("{}\n", cmd).as_bytes())
+        .map_err(|e| format!("Failed to send command: {}", e))?;
+    stream
+        .flush()
+        .map_err(|e| format!("Failed to flush: {}", e))?;
+    // Shut down the write half so the daemon sees EOF and sends the response.
+    let _ = stream.shutdown(std::net::Shutdown::Write);
+
+    let reader = BufReader::new(&stream);
+    let response: String = reader
+        .lines()
+        .map_while(Result::ok)
+        .collect::<Vec<_>>()
+        .join("\n");
+    if response.starts_with("ERROR:") {
+        Err(response)
+    } else {
+        Ok(response)
+    }
+}
+
+fn cmd_set_timezone(tz: &str) {
+    // Validate the timezone exists locally first
+    let zoneinfo = Path::new(ZONEINFO_DIR);
     let tzdir = env::var("TZDIR").ok();
     let tz_path = zoneinfo.join(tz);
     let alt_tz_path = tzdir.as_ref().map(|d| Path::new(d).join(tz));
@@ -648,32 +715,29 @@ fn cmd_set_timezone(tz: &str) {
         process::exit(1);
     }
 
-    // Create /etc/localtime symlink
-    let target = if tz_path.exists() {
-        tz_path
-    } else {
-        alt_tz_path.unwrap()
-    };
-
-    // Remove existing
-    let _ = fs::remove_file(LOCALTIME_PATH);
-
-    // Create symlink
-    #[cfg(unix)]
-    {
-        if let Err(e) = std::os::unix::fs::symlink(&target, LOCALTIME_PATH) {
-            eprintln!("Failed to set timezone: {}", e);
-            if e.raw_os_error() == Some(libc::EPERM) {
-                eprintln!("Hint: This operation requires root privileges.");
+    // Send the command to the daemon (which honors SYSTEMD_ETC_LOCALTIME)
+    match send_daemon_command(&format!("SET-TIMEZONE {}", tz)) {
+        Ok(_) => {}
+        Err(e) => {
+            // Fall back to direct write if daemon is unavailable
+            eprintln!("Warning: timedated unavailable ({}), writing directly", e);
+            let target = if tz_path.exists() {
+                tz_path
+            } else {
+                alt_tz_path.unwrap()
+            };
+            let _ = fs::remove_file(LOCALTIME_PATH);
+            #[cfg(unix)]
+            {
+                if let Err(e) = std::os::unix::fs::symlink(&target, LOCALTIME_PATH) {
+                    eprintln!("Failed to set timezone: {}", e);
+                    process::exit(1);
+                }
             }
-            process::exit(1);
+            if let Err(e) = fs::write(TIMEZONE_PATH, format!("{}\n", tz)) {
+                eprintln!("Warning: Could not write {}: {}", TIMEZONE_PATH, e);
+            }
         }
-    }
-
-    // Write /etc/timezone
-    if let Err(e) = fs::write(TIMEZONE_PATH, format!("{}\n", tz)) {
-        // Non-fatal: some systems don't use /etc/timezone
-        eprintln!("Warning: Could not write {}: {}", TIMEZONE_PATH, e);
     }
 }
 
@@ -716,85 +780,88 @@ fn cmd_set_ntp(enable: bool) {
 }
 
 fn cmd_set_local_rtc(local: bool) {
-    let adjtime_exists = Path::new(ADJTIME_PATH).exists();
-
-    if !local && !adjtime_exists {
-        // Setting to UTC when no adjtime exists — nothing to do.
-        return;
+    let val = if local { "true" } else { "false" };
+    match send_daemon_command(&format!("SET-LOCAL-RTC {}", val)) {
+        Ok(_) => {
+            if local {
+                eprintln!();
+                eprintln!(
+                    "Warning: The system is configured to read the RTC time in the local time zone."
+                );
+                eprintln!("         This is not recommended. Please set the RTC to UTC with:");
+                eprintln!("         timedatectl set-local-rtc 0");
+            }
+        }
+        Err(_) => {
+            // Fall back to direct filesystem write
+            set_local_rtc_direct(local);
+        }
     }
+}
 
-    // Read raw file content to check if it's well-formed (ends with newline).
-    let raw_content = if adjtime_exists {
-        fs::read_to_string(ADJTIME_PATH).ok().unwrap_or_default()
-    } else {
-        String::new()
-    };
+fn set_local_rtc_direct(local: bool) {
+    const NULL_ADJTIME_UTC: &str = "0.0 0 0\n0\nUTC\n";
 
-    let lines: Vec<&str> = raw_content.lines().collect();
-    let well_formed = raw_content.ends_with('\n') && lines.len() >= 3;
-
-    let line0 = lines.first().copied().unwrap_or("0.0 0 0");
-    let line1 = lines.get(1).copied().unwrap_or("0");
-    let line2 = lines.get(2).copied().unwrap_or("");
-    let extra_lines: Vec<&str> = lines.iter().skip(3).copied().collect();
-
-    let is_local = line2.trim().eq_ignore_ascii_case("LOCAL");
-    let is_utc = line2.trim().eq_ignore_ascii_case("UTC");
-    let is_default =
-        (line0.trim() == "0.0 0 0" || line0.trim() == "0.0 0 0.0") && line1.trim() == "0";
-
-    let desired_mode = if local { "LOCAL" } else { "UTC" };
-
-    // Check if file already matches the desired state and is well-formed.
-    // If so, do nothing (matching real timedated behavior).
-    if well_formed && !local && is_utc {
-        return;
-    }
-    if well_formed && local && is_local {
-        return;
-    }
-
-    if !local {
-        // Setting to UTC. Normalize the file.
-        if is_default && extra_lines.is_empty() {
-            // Default drift values, no extra content — remove file entirely.
-            let _ = fs::remove_file(ADJTIME_PATH);
+    let content = match fs::read_to_string(ADJTIME_PATH) {
+        Ok(s) => s,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            if !local {
+                return; // No file + UTC is the default
+            }
+            if let Err(e) = fs::write(ADJTIME_PATH, "0.0 0 0\n0\nLOCAL\n") {
+                eprintln!("Failed to write {}: {}", ADJTIME_PATH, e);
+                process::exit(1);
+            }
             return;
         }
-        // Non-default drift or extra content — rewrite with UTC, preserving extra lines.
-        let mut content = format!("{}\n{}\n{}", line0, line1, desired_mode);
-        for extra in &extra_lines {
-            content.push('\n');
-            content.push_str(extra);
-        }
-        content.push('\n');
-        if let Err(e) = fs::write(ADJTIME_PATH, &content) {
-            eprintln!("Failed to write {}: {}", ADJTIME_PATH, e);
+        Err(e) => {
+            eprintln!("Failed to read {}: {}", ADJTIME_PATH, e);
             process::exit(1);
         }
+    };
+
+    let mode = if local { "LOCAL" } else { "UTC" };
+    let bytes = content.as_bytes();
+
+    // Build new content following the upstream C logic
+    let new_content = match bytes.iter().position(|&b| b == b'\n') {
+        None => format!("{}\n0\n{}\n", content, mode),
+        Some(pos1) if pos1 + 1 >= bytes.len() => format!("{}0\n{}\n", content, mode),
+        Some(pos1) => match bytes[pos1 + 1..].iter().position(|&b| b == b'\n') {
+            None => format!("{}\n{}\n", content, mode),
+            Some(rel_pos2) => {
+                let pos2 = pos1 + 1 + rel_pos2;
+                let prefix = &content[..pos2 + 1];
+                let suffix = match bytes[pos2 + 1..].iter().position(|&b| b == b'\n') {
+                    Some(rel_pos3) => &content[pos2 + 1 + rel_pos3..],
+                    None => "\n",
+                };
+                format!("{}{}{}", prefix, mode, suffix)
+            }
+        },
+    };
+
+    // If the rebuilt content is identical to the original, leave the file as-is
+    if new_content == content {
         return;
     }
 
-    // Setting to LOCAL — always write the file, preserving extra lines.
-    let mut content = format!("{}\n{}\n{}", line0, line1, desired_mode);
-    for extra in &extra_lines {
-        content.push('\n');
-        content.push_str(extra);
+    if new_content == NULL_ADJTIME_UTC {
+        let _ = fs::remove_file(ADJTIME_PATH);
+        return;
     }
-    content.push('\n');
 
-    if let Err(e) = fs::write(ADJTIME_PATH, &content) {
+    if let Err(e) = fs::write(ADJTIME_PATH, &new_content) {
         eprintln!("Failed to write {}: {}", ADJTIME_PATH, e);
-        if e.raw_os_error() == Some(libc::EPERM) {
-            eprintln!("Hint: This operation requires root privileges.");
-        }
         process::exit(1);
     }
 
-    eprintln!();
-    eprintln!("Warning: The system is configured to read the RTC time in the local time zone.");
-    eprintln!("         This is not recommended. Please set the RTC to UTC with:");
-    eprintln!("         timedatectl set-local-rtc 0");
+    if local {
+        eprintln!();
+        eprintln!("Warning: The system is configured to read the RTC time in the local time zone.");
+        eprintln!("         This is not recommended. Please set the RTC to UTC with:");
+        eprintln!("         timedatectl set-local-rtc 0");
+    }
 }
 
 fn cmd_list_timezones() {

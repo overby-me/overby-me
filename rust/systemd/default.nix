@@ -522,10 +522,7 @@
       }
       {
         name = "71-HOSTNAME";
-        # Skip alternate-paths testcase (daemon-reload doesn't propagate
-        # Environment overrides from drop-ins to restarted services).
         patchScript = ''
-          sed -i 's/^testcase_hostnamed_alternate_paths/skipped_testcase_hostnamed_alternate_paths/' TEST-71-HOSTNAME.sh
           # Skip nss-myhostname testcase (NSS module not available in rust-systemd)
           sed -i '/^testcase_nss-myhostname/s/^testcase_/skipped_/' TEST-71-HOSTNAME.sh
         '';
@@ -594,12 +591,10 @@
       {name = "22-TMPFILES";}
       {
         name = "45-TIMEDATE";
-        # Skip NTP testcase (busctl monitor signal parsing) and alternate-paths
-        # (requires daemon-reload for service overrides).
+        # Skip NTP and timesyncd testcases (busctl monitor signal parsing).
         patchScript = ''
           sed -i '/^testcase_ntp/s/^testcase_/skipped_/' TEST-45-TIMEDATE.sh
           sed -i '/^testcase_timesyncd/s/^testcase_/skipped_/' TEST-45-TIMEDATE.sh
-          sed -i '/^testcase_timedated_alternate_paths/s/^testcase_/skipped_/' TEST-45-TIMEDATE.sh
         '';
       }
       {

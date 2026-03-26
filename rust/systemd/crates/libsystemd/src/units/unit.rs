@@ -1,7 +1,7 @@
 use log::{error, info, trace};
 
-use crate::lock_ext::RwLockExt;
-use crate::runtime_info::RuntimeInfo;
+use crate::lock_ext::{MutexExt, RwLockExt};
+use crate::runtime_info::{PidEntry, RuntimeInfo};
 use crate::services::Service;
 use crate::sockets::{Socket, SocketKind, SpecializedSocketConfig};
 use crate::units::{
@@ -45,6 +45,48 @@ pub enum Specific {
     Timer(TimerSpecific),
     Path(PathSpecific),
     Device(DeviceSpecific),
+}
+
+impl Specific {
+    /// Update only the configuration from another `Specific`, preserving
+    /// runtime state (PIDs, restart counts, etc.). Used by daemon-reload.
+    ///
+    /// If the unit type changed (e.g. service → socket), falls back to
+    /// full replacement since the state types are incompatible.
+    pub fn update_config_from(&mut self, other: Self) {
+        match (self, other) {
+            (Specific::Service(existing), Specific::Service(new)) => {
+                existing.conf = new.conf;
+            }
+            (Specific::Socket(existing), Specific::Socket(new)) => {
+                existing.conf = new.conf;
+            }
+            (Specific::Slice(existing), Specific::Slice(new)) => {
+                existing.conf = new.conf;
+            }
+            (Specific::Mount(existing), Specific::Mount(new)) => {
+                existing.conf = new.conf;
+            }
+            (Specific::Swap(existing), Specific::Swap(new)) => {
+                existing.conf = new.conf;
+            }
+            (Specific::Timer(existing), Specific::Timer(new)) => {
+                existing.conf = new.conf;
+            }
+            (Specific::Path(existing), Specific::Path(new)) => {
+                existing.conf = new.conf;
+            }
+            (Specific::Device(existing), Specific::Device(new)) => {
+                existing.conf = new.conf;
+            }
+            // Target has no conf, only state — nothing to update.
+            (Specific::Target(_), Specific::Target(_)) => {}
+            // Type changed — full replacement (state is incompatible anyway).
+            (this, other) => {
+                *this = other;
+            }
+        }
+    }
 }
 
 pub struct ServiceSpecific {
@@ -283,6 +325,18 @@ impl ServiceState {
         run_info: &RuntimeInfo,
         source: ActivationSource,
     ) -> Result<(), UnitOperationError> {
+        // Mark the unit as Stopping before killing so that the exit handler
+        // recognises the SIGKILL as intentional and doesn't flip the status
+        // to StoppedUnexpected (which would race with the subsequent start).
+        {
+            let mut st = status.write_poisoned();
+            *st = UnitStatus::Stopping;
+        }
+
+        // Save the old PID so we can wait for the signal handler to
+        // process its exit before starting the replacement.
+        let old_pid = self.srvc.pid;
+
         let kill_result = self
             .srvc
             .kill(conf, id.clone(), &id.name, run_info)
@@ -297,6 +351,29 @@ impl ServiceState {
             let mut status = status.write_poisoned();
             *status = UnitStatus::Stopped(StatusStopped::StoppedFinal, vec![error.reason.clone()]);
             return Err(error);
+        }
+
+        // Wait for the signal handler thread to reap the old process and
+        // update the PID table to ServiceExited.  This avoids racing with
+        // the exit handler (which would call deactivate_unit_recursive and
+        // kill the freshly-started replacement).  Do NOT call waitpid()
+        // here — that would steal the reap from the signal handler.
+        if let Some(pid) = old_pid {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            loop {
+                {
+                    let pt = run_info.pid_table.lock_poisoned();
+                    match pt.get(&pid) {
+                        Some(PidEntry::ServiceExited(_)) | None => break,
+                        _ => {}
+                    }
+                }
+                if std::time::Instant::now() >= deadline {
+                    log::warn!("Timed out waiting for old PID {} to be reaped", pid);
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
         }
 
         // Restart and set the status according to the result

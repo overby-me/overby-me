@@ -944,6 +944,29 @@ fn handle_control_command(line: &str) -> String {
                 Err(e) => format!("ERROR: {}\n", e),
             }
         }
+        "SET-MACHINE-INFO" | "set-machine-info" => {
+            // SET-MACHINE-INFO KEY VALUE
+            let key = parts.get(1).unwrap_or(&"");
+            let value = if parts.len() >= 3 {
+                // Everything after "SET-MACHINE-INFO KEY " is the value
+                let prefix = format!("{} {} ", cmd, key);
+                let trimmed = line.trim();
+                if trimmed.len() > prefix.len() {
+                    &trimmed[prefix.len()..]
+                } else {
+                    ""
+                }
+            } else {
+                ""
+            };
+            if key.is_empty() {
+                return "ERROR: Key argument required\n".to_string();
+            }
+            match set_machine_info_key(key, value) {
+                Ok(()) => "OK\n".to_string(),
+                Err(e) => format!("ERROR: {}\n", e),
+            }
+        }
         _ => format!("ERROR: Unknown command '{}'\n", cmd),
     }
 }

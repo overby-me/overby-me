@@ -11,7 +11,7 @@
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, BufRead, Write};
 use std::path::Path;
 use std::process;
 
@@ -313,7 +313,45 @@ fn is_valid_chassis(chassis: &str) -> bool {
     chassis.is_empty() || VALID_CHASSIS.contains(&chassis)
 }
 
+/// Send a command to the hostnamed daemon's control socket and return the response.
+fn send_daemon_command(cmd: &str) -> Result<String, String> {
+    const SOCKET_PATH: &str = "/run/systemd/hostnamed.sock";
+    use std::os::unix::net::UnixStream;
+
+    let mut stream = UnixStream::connect(SOCKET_PATH)
+        .map_err(|e| format!("Cannot connect to hostnamed: {}", e))?;
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+        .ok();
+    stream
+        .write_all(format!("{}\n", cmd).as_bytes())
+        .map_err(|e| format!("Failed to send command: {}", e))?;
+    stream
+        .flush()
+        .map_err(|e| format!("Failed to flush: {}", e))?;
+    // Shut down write half so daemon sees EOF
+    let _ = stream.shutdown(std::net::Shutdown::Write);
+
+    let reader = io::BufReader::new(&stream);
+    let response: String = reader
+        .lines()
+        .map_while(Result::ok)
+        .collect::<Vec<_>>()
+        .join("\n");
+    if response.starts_with("ERROR:") {
+        Err(response)
+    } else {
+        Ok(response)
+    }
+}
+
 fn set_static_hostname(hostname: &str) -> io::Result<()> {
+    // Try via daemon (which honors SYSTEMD_ETC_HOSTNAME)
+    let cmd = format!("SET-STATIC-HOSTNAME {}", hostname.trim());
+    if send_daemon_command(&cmd).is_ok() {
+        return Ok(());
+    }
+    // Fall back to direct write
     let clean = hostname.trim();
     let path = std::path::Path::new(HOSTNAME_PATH);
     if clean.is_empty() {
@@ -323,8 +361,6 @@ fn set_static_hostname(hostname: &str) -> io::Result<()> {
             Err(e) => return Err(e),
         }
     } else {
-        // If the path is a symlink (e.g. on NixOS pointing to the store),
-        // remove it first so we can write a regular file.
         if path.is_symlink() {
             fs::remove_file(path)?;
         }
@@ -339,6 +375,12 @@ fn set_transient_hostname(hostname: &str) -> io::Result<()> {
 }
 
 fn set_machine_info_key(key: &str, value: &str) -> io::Result<()> {
+    // Try via daemon (which honors SYSTEMD_ETC_MACHINE_INFO)
+    let cmd = format!("SET-MACHINE-INFO {} {}", key, value);
+    if send_daemon_command(&cmd).is_ok() {
+        return Ok(());
+    }
+    // Fall back to direct write
     let mut entries = parse_env_file(MACHINE_INFO_PATH);
     if value.is_empty() {
         entries.remove(key);
@@ -353,6 +395,11 @@ fn set_machine_info_key(key: &str, value: &str) -> io::Result<()> {
 // ---------------------------------------------------------------------------
 
 fn cmd_status() {
+    // Try to get status from the daemon (which may use alternate paths)
+    if let Ok(output) = send_daemon_command("STATUS") {
+        print!("{}", output);
+        return;
+    }
     let state = HostnameState::load();
 
     // Match systemd's hostnamectl output format

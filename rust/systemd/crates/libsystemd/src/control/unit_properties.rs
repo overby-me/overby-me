@@ -276,39 +276,29 @@ pub fn collect_properties(unit: &Unit) -> BTreeMap<String, String> {
     // ── LoadState / UnitFileState (synthetic) ─────────────────────────
     // Determine LoadState from the unit's fragment path:
     // - "masked" if the unit file is a symlink to /dev/null
+    // - "bad-setting" if the unit has invalid configuration
     // - "loaded" otherwise
-    let load_state = match &unit.common.unit.fragment_path {
-        Some(p) => {
-            if let Ok(target) = std::fs::read_link(p) {
-                if target == std::path::Path::new("/dev/null") {
-                    "masked"
-                } else {
-                    "loaded"
-                }
-            } else {
-                "loaded"
+    let load_state = {
+        let is_masked = match &unit.common.unit.fragment_path {
+            Some(p) => std::fs::read_link(p)
+                .map(|t| t == std::path::Path::new("/dev/null"))
+                .unwrap_or(false),
+            None => {
+                let name = &unit.id.name;
+                let runtime = std::path::Path::new("/run/systemd/system").join(name);
+                let persistent = std::path::Path::new("/etc/systemd/system").join(name);
+                std::fs::read_link(&runtime)
+                    .or_else(|_| std::fs::read_link(&persistent))
+                    .map(|t| t == std::path::Path::new("/dev/null"))
+                    .unwrap_or(false)
             }
-        }
-        None => {
-            // No fragment path — check runtime and persistent paths for mask
-            let name = &unit.id.name;
-            let runtime = std::path::Path::new("/run/systemd/system").join(name);
-            let persistent = std::path::Path::new("/etc/systemd/system").join(name);
-            if let Ok(target) = std::fs::read_link(&runtime) {
-                if target == std::path::Path::new("/dev/null") {
-                    "masked"
-                } else {
-                    "loaded"
-                }
-            } else if let Ok(target) = std::fs::read_link(&persistent) {
-                if target == std::path::Path::new("/dev/null") {
-                    "masked"
-                } else {
-                    "loaded"
-                }
-            } else {
-                "loaded"
-            }
+        };
+        if is_masked {
+            "masked"
+        } else if has_bad_setting(unit) {
+            "bad-setting"
+        } else {
+            "loaded"
         }
     };
     insert(&mut props, "LoadState", load_state);
@@ -325,6 +315,31 @@ pub fn collect_properties(unit: &Unit) -> BTreeMap<String, String> {
     insert(&mut props, "NeedDaemonReload", "no");
 
     props
+}
+
+/// Check whether a unit has semantically invalid configuration.
+///
+/// Returns `true` for cases like Type=exec/simple/forking/notify/idle without
+/// ExecStart=, matching systemd's `LoadState=bad-setting`.
+fn has_bad_setting(unit: &Unit) -> bool {
+    if let Specific::Service(srvc) = &unit.specific {
+        let has_exec_start = !srvc.conf.exec.is_empty();
+        if !has_exec_start {
+            // Type=oneshot is valid without ExecStart (e.g. systemd-reboot.service).
+            // All other service types require ExecStart.
+            match srvc.conf.srcv_type {
+                ServiceType::Simple
+                | ServiceType::Exec
+                | ServiceType::Forking
+                | ServiceType::Notify
+                | ServiceType::NotifyReload
+                | ServiceType::Dbus
+                | ServiceType::Idle => return true,
+                ServiceType::OneShot => {}
+            }
+        }
+    }
+    false
 }
 
 /// Check whether a unit's on-disk configuration has changed since it was loaded.

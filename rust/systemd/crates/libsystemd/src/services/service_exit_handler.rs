@@ -844,37 +844,59 @@ pub(crate) fn service_exit_handler(
         trace!("Restart service {name} after it died");
         crate::units::reactivate_unit(srvc_id, run_info).map_err(|e| format!("{e}"))?;
     } else {
-        // Capture whether the unit was intentionally being stopped *before*
-        // deactivation — deactivation sets the status to Stopped, so checking
-        // afterwards would always see Stopped and never mark the unit as failed.
-        let was_intentionally_stopping = {
+        // Detect whether this exit is for a stale process that was replaced
+        // by a restart.  If the service already has a different PID (the new
+        // process started by reactivate()), or no PID at all (killed and
+        // cleared by reactivate→kill), skip recursive deactivation — it would
+        // race and kill the freshly-started replacement.  Also check the
+        // Stopping status as a fallback for the window between kill() and
+        // start().
+        let was_replaced_or_stopping = {
             if let Some(unit) = run_info.unit_table.get(&srvc_id) {
                 let current = unit.common.status.read_poisoned();
-                matches!(&*current, UnitStatus::Stopping)
-            } else {
-                false
-            }
-        };
-
-        trace!("Recursively killing all services requiring service {name}");
-        loop {
-            let res = crate::units::deactivate_unit_recursive(&srvc_id, run_info);
-            let retry = if let Err(e) = &res {
-                if let UnitOperationErrorReason::DependencyError(_) = e.reason {
-                    // Only retry if this is the case. This only occurs if, while the units are being deactivated,
-                    // another unit got activated that would not be able to run with this unit deactivated.
-                    // This should generally be pretty rare but it should be handled properly.
+                if matches!(&*current, UnitStatus::Stopping) {
                     true
+                } else if let Specific::Service(srvc) = &unit.specific {
+                    let state = srvc.state.read_poisoned();
+                    // If the service now has a different PID, reactivate()
+                    // already started a replacement — this exit is stale.
+                    match state.srvc.pid {
+                        Some(current_pid) => current_pid != pid,
+                        None => false,
+                    }
                 } else {
                     false
                 }
             } else {
                 false
-            };
-            if !retry {
-                res.map_err(|e| format!("{e}"))?;
-                break;
             }
+        };
+
+        if !was_replaced_or_stopping {
+            trace!("Recursively killing all services requiring service {name}");
+            loop {
+                let res = crate::units::deactivate_unit_recursive(&srvc_id, run_info);
+                let retry = if let Err(e) = &res {
+                    if let UnitOperationErrorReason::DependencyError(_) = e.reason {
+                        // Only retry if this is the case. This only occurs if, while the units are being deactivated,
+                        // another unit got activated that would not be able to run with this unit deactivated.
+                        // This should generally be pretty rare but it should be handled properly.
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+                if !retry {
+                    res.map_err(|e| format!("{e}"))?;
+                    break;
+                }
+            }
+        } else {
+            trace!(
+                "Skipping recursive deactivation for service {name} (intentional stop, likely restart)"
+            );
         }
 
         // If the exit was not clean (non-zero exit code or killed by signal),
@@ -885,7 +907,7 @@ pub(crate) fn service_exit_handler(
         // intentional stop is expected behavior.
         let is_success = success_exit_status.is_success(&code);
         if !is_success
-            && !was_intentionally_stopping
+            && !was_replaced_or_stopping
             && let Some(unit) = run_info.unit_table.get(&srvc_id)
         {
             let mut status = unit.common.status.write_poisoned();
@@ -906,7 +928,7 @@ pub(crate) fn service_exit_handler(
         // Actual triggering happens after the read lock is dropped.
         if let Some(unit) = run_info.unit_table.get(&srvc_id) {
             let effective_success = is_success
-                || was_intentionally_stopping
+                || was_replaced_or_stopping
                 || success_exit_status.is_clean_signal(&code);
             if effective_success && !unit.common.unit.on_success.is_empty() {
                 return Ok(Some(PendingTrigger {
