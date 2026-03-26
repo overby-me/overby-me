@@ -73,11 +73,29 @@ pub fn prepare_service(
         daemon_socket_path
     };
 
+    // Unix socket paths are limited to 108 bytes (sun_path). If the path
+    // exceeds this, use a shorter hash-based name to avoid bind failures
+    // (e.g. for long template instance names like foo@bar.service.service).
+    const SUN_PATH_MAX: usize = 108;
+    let notify_socket_env_var = if notify_socket_env_var.as_os_str().len() >= SUN_PATH_MAX {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        name.hash(&mut hasher);
+        let hash = hasher.finish();
+        notification_socket_path.join(format!("{:016x}.notify_socket", hash))
+    } else {
+        notify_socket_env_var
+    };
+
     if srvc.notifications.is_none() {
         if notify_socket_env_var.exists() {
-            std::fs::remove_file(&notify_socket_env_var).unwrap();
+            std::fs::remove_file(&notify_socket_env_var).map_err(|e| {
+                format!("Failed to remove old notify socket {notify_socket_env_var:?}: {e}")
+            })?;
         }
-        let stream = UnixDatagram::bind(&notify_socket_env_var).unwrap();
+        let stream = UnixDatagram::bind(&notify_socket_env_var)
+            .map_err(|e| format!("Failed to bind notify socket {notify_socket_env_var:?}: {e}"))?;
 
         // Make the socket world-writable so that services running as non-root
         // users (e.g. User=nscd) can send sd_notify readiness notifications.
@@ -88,7 +106,7 @@ pub fn prepare_service(
             &notify_socket_env_var,
             std::fs::Permissions::from_mode(0o666),
         )
-        .unwrap();
+        .map_err(|e| format!("Failed to chmod notify socket {notify_socket_env_var:?}: {e}"))?;
 
         // close these fd's on exec. They must not show up in child processes
         let new_listener_fd = stream.as_raw_fd();
@@ -96,7 +114,7 @@ pub fn prepare_service(
             unsafe { BorrowedFd::borrow_raw(new_listener_fd) },
             nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::FD_CLOEXEC),
         )
-        .unwrap();
+        .map_err(|e| format!("Failed to set CLOEXEC on notify socket: {e}"))?;
 
         srvc.notifications = Some(stream);
     }

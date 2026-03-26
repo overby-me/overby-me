@@ -516,8 +516,8 @@
       {
         name = "68-PROPAGATE-EXIT-STATUS";
         patchScript = ''
-          # Remove template sections V-VI (template instantiation not yet implemented).
-          sed -i '/^: "-------V/,/^: "-------VII/{/^: "-------VII/!d}' TEST-68-PROPAGATE-EXIT-STATUS.sh
+          # Remove transient unit sections III-IV (systemd-run not implemented).
+          sed -i '/^: "-------III/,/^: "-------V/{/^: "-------V/!d}' TEST-68-PROPAGATE-EXIT-STATUS.sh
         '';
       }
       {
