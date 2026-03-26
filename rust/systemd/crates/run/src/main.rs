@@ -86,7 +86,7 @@ struct Cli {
     pty: bool,
 
     /// Use pipe for stdin/stdout/stderr (standard I/O forwarding).
-    #[arg(long)]
+    #[arg(short = 'P', long)]
     pipe: bool,
 
     /// Invoke a shell if no command is specified.
@@ -117,6 +117,18 @@ struct Cli {
     /// Send SIGHUP to remaining processes when the main process exits.
     #[arg(long)]
     send_sighup: bool,
+
+    /// Suppress informational messages, only show errors.
+    #[arg(short = 'q', long)]
+    quiet: bool,
+
+    /// Do not query the user for authentication.
+    #[arg(long)]
+    no_ask_password: bool,
+
+    /// Do not pipe output into a pager.
+    #[arg(long)]
+    no_pager: bool,
 
     /// Do not synchronously wait for the unit to start.
     #[arg(long)]
@@ -279,6 +291,9 @@ fn default_shell() -> String {
 
 /// Print information about the transient unit that would be created.
 fn print_unit_info(cli: &Cli, unit_name: &str) {
+    if cli.quiet {
+        return;
+    }
     eprintln!("Running as unit: {unit_name}");
 
     if let Some(ref desc) = cli.description {
@@ -603,7 +618,9 @@ fn main() {
     match try_create_transient_unit(&cli, &unit_name) {
         Ok(Some(resp)) => {
             // Successfully created the transient unit.
-            eprintln!("Running as unit: {unit_name}");
+            if !cli.quiet {
+                eprintln!("Running as unit: {unit_name}");
+            }
 
             // When --wait was set, the control socket blocked until the unit
             // finished and the response contains the exit code.
@@ -640,9 +657,11 @@ fn main() {
                 process::exit(1);
             }
 
-            eprintln!(
-                "Note: rust-systemd control socket not available, executing command directly."
-            );
+            if !cli.quiet {
+                eprintln!(
+                    "Note: rust-systemd control socket not available, executing command directly."
+                );
+            }
         }
         Err(e) => {
             // If the error indicates that the service manager rejected the
@@ -652,11 +671,15 @@ fn main() {
                 eprintln!("Failed to start transient unit: {e}");
                 process::exit(1);
             }
-            eprintln!("Warning: Failed to create transient unit: {e}");
+            if !cli.quiet {
+                eprintln!("Warning: Failed to create transient unit: {e}");
+            }
             if command.is_empty() {
                 process::exit(1);
             }
-            eprintln!("Falling back to direct execution.");
+            if !cli.quiet {
+                eprintln!("Falling back to direct execution.");
+            }
         }
     }
 
