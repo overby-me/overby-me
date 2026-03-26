@@ -2987,7 +2987,16 @@ fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
                         'C' => shell.opt_noclobber = enable,
                         'n' => shell.opt_noexec = enable,
                         'h' => shell.opt_hashall = enable,
-                        _ => {}
+                        'a' | 'b' | 'p' | 't' | 'v' | 'B' | 'H' | 'P' | 'T' => {
+                            // Known but not fully implemented flags — accept silently
+                        }
+                        _ => {
+                            eprintln!("{}: set: -{}: invalid option", shell.error_prefix(), flag);
+                            eprintln!(
+                                "set: usage: set [-abefhkmnptuvxBCEHPT] [-o option-name] [--] [arg ...]"
+                            );
+                            return 2;
+                        }
                     }
                 }
             }
@@ -4551,12 +4560,28 @@ fn builtin_exec(shell: &mut Shell, args: &[String]) -> i32 {
 }
 
 fn builtin_source(shell: &mut Shell, args: &[String]) -> i32 {
+    // Handle options
+    let mut file_start = 0;
+    if let Some((i, arg)) = args.iter().enumerate().next() {
+        if arg == "--" {
+            file_start = i + 1;
+        } else if arg.starts_with('-') && arg.len() > 1 {
+            eprintln!("{}: .: {}: invalid option", shell.error_prefix(), arg);
+            eprintln!(".: usage: . [-p path] filename [arguments]");
+            return 2;
+        } else {
+            file_start = i;
+        }
+    }
+    if file_start >= args.len() || args.is_empty() {
+        eprintln!("{}: .: filename argument required", shell.error_prefix());
+        eprintln!(".: usage: . [-p path] filename [arguments]");
+        return 2;
+    }
+    let args = &args[file_start..];
     if args.is_empty() {
-        eprintln!(
-            "{}: source: filename argument required",
-            shell.error_prefix()
-        );
-        eprintln!("source: usage: source filename [arguments]");
+        eprintln!("{}: .: filename argument required", shell.error_prefix());
+        eprintln!(".: usage: . [-p path] filename [arguments]");
         return 2;
     }
 
