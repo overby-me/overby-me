@@ -630,8 +630,8 @@
           (! systemd-cgls --cgroup-id=foo)
           TESTEOF
           chmod +x TEST-74-AUX-UTILS.cgls.sh
-          # Patch id128 test: remove systemd-run --wait --pipe line (not implemented)
-          # and the 65-zeros error test (bash printf expansion differs).
+          # Patch id128 test: remove the 65-zeros error test (bash printf expansion differs)
+          # and the INVOCATION_ID pipe test (needs INVOCATION_ID env var in transient units).
           sed -i '/systemd-run --wait --pipe/d' TEST-74-AUX-UTILS.id128.sh
           sed -i '/printf.*%0.s0.*{0..64}/d' TEST-74-AUX-UTILS.id128.sh
           rm -f TEST-74-AUX-UTILS.busctl.sh \

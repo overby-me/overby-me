@@ -460,8 +460,12 @@ fn try_create_transient_unit(
         properties.insert("scope".into(), Value::Bool(true));
     }
 
-    if cli.wait {
+    if cli.wait || cli.pipe {
         properties.insert("wait".into(), Value::Bool(true));
+    }
+
+    if cli.pipe {
+        properties.insert("pipe".into(), Value::Bool(true));
     }
 
     if let Some(ref slice) = cli.slice {
@@ -603,7 +607,18 @@ fn main() {
 
             // When --wait was set, the control socket blocked until the unit
             // finished and the response contains the exit code.
-            if cli.wait {
+            if cli.wait || cli.pipe {
+                // When --pipe, relay captured stdout/stderr to the caller.
+                if cli.pipe {
+                    if let Some(data) = resp.get("stdout").and_then(|v| v.as_str()) {
+                        use std::io::Write;
+                        let _ = std::io::stdout().write_all(data.as_bytes());
+                    }
+                    if let Some(data) = resp.get("stderr").and_then(|v| v.as_str()) {
+                        use std::io::Write;
+                        let _ = std::io::stderr().write_all(data.as_bytes());
+                    }
+                }
                 let exit_code = resp.get("exit_code").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
                 let result = resp
                     .get("result")

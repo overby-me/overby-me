@@ -185,6 +185,8 @@ pub struct TransientUnitParams {
     pub scope: bool,
     /// Whether the caller wants to wait for completion.
     pub wait: bool,
+    /// Whether to pipe stdin/stdout/stderr between the caller and the service.
+    pub pipe: bool,
     /// Slice to place the unit in.
     pub slice: Option<String>,
     /// Timer properties — if any are set, a companion .timer unit is created.
@@ -586,6 +588,7 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
                         .unwrap_or_default();
                     let scope = obj.get("scope").and_then(|v| v.as_bool()).unwrap_or(false);
                     let wait = obj.get("wait").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let pipe = obj.get("pipe").and_then(|v| v.as_bool()).unwrap_or(false);
                     let slice = obj
                         .get("slice")
                         .and_then(|v| v.as_str())
@@ -617,6 +620,7 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
                         environment,
                         scope,
                         wait,
+                        pipe,
                         slice,
                         on_calendar,
                         on_active,
@@ -1955,6 +1959,11 @@ fn create_transient_unit(
         });
     let exec: Vec<Commandline> = Vec::new();
 
+    // Ensure the transient directory exists for --pipe temp files.
+    if params.pipe {
+        let _ = std::fs::create_dir_all("/run/systemd/transient");
+    }
+
     // Build a minimal ExecConfig with the requested user/group/workdir.
     // Use the correct concrete types for ExecConfig fields.
     // Non-optional enums use their Default impl; bools use systemd defaults.
@@ -1963,8 +1972,20 @@ fn create_transient_unit(
         group: params.group.clone(),
         supplementary_groups: vec![],
         stdin_option: crate::units::StandardInput::Null,
-        stdout_path: None,
-        stderr_path: None,
+        stdout_path: if params.pipe {
+            Some(crate::units::StdIoOption::File(
+                format!("/run/systemd/transient/{}.stdout", params.unit_name).into(),
+            ))
+        } else {
+            None
+        },
+        stderr_path: if params.pipe {
+            Some(crate::units::StdIoOption::File(
+                format!("/run/systemd/transient/{}.stderr", params.unit_name).into(),
+            ))
+        } else {
+            None
+        },
         environment: None,
         environment_files: vec![],
         working_directory: params
@@ -2947,6 +2968,7 @@ pub fn execute_command(
         Command::StartTransient(params) => {
             let unit_name = params.unit_name.clone();
             let do_wait = params.wait;
+            let do_pipe = params.pipe;
             let id = create_transient_unit(&params, &run_info)?;
             // Now start the unit.
             {
@@ -3046,11 +3068,29 @@ pub fn execute_command(
                                 };
                             ("exit-code", exit_status)
                         };
-                        return Ok(serde_json::json!({
+                        let mut resp = serde_json::json!({
                             "started": unit_name,
                             "result": result,
                             "exit_code": exit_code
-                        }));
+                        });
+                        // When --pipe was requested, read the captured
+                        // stdout/stderr temp files and include them in the
+                        // response so the client can relay them.
+                        if do_pipe {
+                            let stdout_path =
+                                format!("/run/systemd/transient/{}.stdout", unit_name);
+                            let stderr_path =
+                                format!("/run/systemd/transient/{}.stderr", unit_name);
+                            if let Ok(data) = std::fs::read_to_string(&stdout_path) {
+                                resp["stdout"] = Value::String(data);
+                                let _ = std::fs::remove_file(&stdout_path);
+                            }
+                            if let Ok(data) = std::fs::read_to_string(&stderr_path) {
+                                resp["stderr"] = Value::String(data);
+                                let _ = std::fs::remove_file(&stderr_path);
+                            }
+                        }
+                        return Ok(resp);
                     }
                     crate::units::UnitStatus::NeverStarted => {
                         // Not started yet, keep waiting
