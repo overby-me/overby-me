@@ -337,7 +337,6 @@
                TEST-07-PID1.subgroup-kill.sh \
                TEST-07-PID1.transient.sh \
                TEST-07-PID1.transient-unit-container.sh \
-               TEST-07-PID1.type-exec-parallel.sh \
                TEST-07-PID1.user-namespace-path.sh \
                TEST-07-PID1.working-directory.sh
         '';
