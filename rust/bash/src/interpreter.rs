@@ -2775,6 +2775,27 @@ impl Shell {
             expr
         };
 
+        // Check for leading operators that can't start an expression (/, *, %)
+        // These indicate "operand expected" — report once for the full expression
+        if self.arith_depth == 1 {
+            let trimmed = expr.trim();
+            if !trimmed.is_empty() {
+                let first = trimmed.as_bytes()[0];
+                if matches!(first, b'/' | b'%') {
+                    let top_expr = self.arith_top_expr.as_deref().unwrap_or(expr);
+                    eprintln!(
+                        "{}: {}{}: arithmetic syntax error: operand expected (error token is \"{}\")",
+                        self.arith_error_prefix(),
+                        self.arith_cmd_prefix(),
+                        top_expr,
+                        top_expr
+                    );
+                    crate::expand::set_arith_error();
+                    return 0;
+                }
+            }
+        }
+
         // Check for trailing operators (e.g., "4+" → syntax error)
         // Only check top-level expressions (arith_depth == 1 means we're at the outermost call)
         if self.arith_depth == 1 {
@@ -3633,7 +3654,7 @@ impl Shell {
 
         // Fall back to reporting error
         eprintln!(
-            "{}: {}{}: syntax error: operand expected (error token is \"{}\")",
+            "{}: {}{}: arithmetic syntax error: operand expected (error token is \"{}\")",
             self.arith_error_prefix(),
             self.arith_cmd_prefix(),
             expr,
