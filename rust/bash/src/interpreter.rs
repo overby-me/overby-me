@@ -467,6 +467,13 @@ impl Shell {
                 .arrays
                 .insert("GROUPS".to_string(), vec![gid.to_string()]);
             // GROUPS is noassign (silently ignored, not readonly)
+
+            // Detect privileged mode: if effective UID != real UID or effective GID != real GID
+            let privileged =
+                unsafe { libc::geteuid() != libc::getuid() || libc::getegid() != libc::getgid() };
+            if privileged {
+                shell.shopt_options.insert("privileged".to_string(), true);
+            }
         }
 
         // Import exported functions from environment (BASH_FUNC_name%% variables)
