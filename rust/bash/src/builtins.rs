@@ -3993,7 +3993,12 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
             Err(_) => return if is_poll { 1 } else { 142 },
             _ => {
                 if is_poll {
-                    return 0; // polling: data available (or EOF), don't actually read
+                    // Check for POLLNVAL (closed/invalid fd) or POLLERR
+                    let revents = poll_fd.revents().unwrap_or(PollFlags::empty());
+                    if revents.intersects(PollFlags::POLLNVAL | PollFlags::POLLERR) {
+                        return 1; // invalid fd
+                    }
+                    return 0; // polling: data available (or EOF)
                 }
             }
         }
