@@ -4664,28 +4664,37 @@ fn builtin_exec(shell: &mut Shell, args: &[String]) -> i32 {
 }
 
 fn builtin_source(shell: &mut Shell, args: &[String]) -> i32 {
+    let cmd = shell.current_builtin.as_deref().unwrap_or(".");
     // Handle options
     let mut file_start = 0;
     if let Some((i, arg)) = args.iter().enumerate().next() {
         if arg == "--" {
             file_start = i + 1;
         } else if arg.starts_with('-') && arg.len() > 1 {
-            eprintln!("{}: .: {}: invalid option", shell.error_prefix(), arg);
-            eprintln!(".: usage: . [-p path] filename [arguments]");
+            eprintln!("{}: {}: {}: invalid option", shell.error_prefix(), cmd, arg);
+            eprintln!("{}: usage: {} [-p path] filename [arguments]", cmd, cmd);
             return 2;
         } else {
             file_start = i;
         }
     }
     if file_start >= args.len() || args.is_empty() {
-        eprintln!("{}: .: filename argument required", shell.error_prefix());
-        eprintln!(".: usage: . [-p path] filename [arguments]");
+        eprintln!(
+            "{}: {}: filename argument required",
+            shell.error_prefix(),
+            cmd
+        );
+        eprintln!("{}: usage: {} [-p path] filename [arguments]", cmd, cmd);
         return 2;
     }
     let args = &args[file_start..];
     if args.is_empty() {
-        eprintln!("{}: .: filename argument required", shell.error_prefix());
-        eprintln!(".: usage: . [-p path] filename [arguments]");
+        eprintln!(
+            "{}: {}: filename argument required",
+            shell.error_prefix(),
+            cmd
+        );
+        eprintln!("{}: usage: {} [-p path] filename [arguments]", cmd, cmd);
         return 2;
     }
 

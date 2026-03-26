@@ -269,6 +269,8 @@ pub struct Shell {
     pub opt_posix: bool,
     pub opt_hashall: bool,
     pub login_shell: bool,
+    /// Name of the currently executing builtin (for error messages)
+    pub current_builtin: Option<String>,
     pub opt_allexport: bool,
 
     // Shell options (shopt)
@@ -411,6 +413,7 @@ impl Shell {
             opt_posix: false,
             opt_hashall: true, // enabled by default
             login_shell: false,
+            current_builtin: None,
             opt_allexport: false,
             shopt_nullglob: false,
             shopt_extglob: false,
@@ -2182,7 +2185,9 @@ impl Shell {
                 })
                 .collect();
 
+            self.current_builtin = Some(command_name.clone());
             let result = builtin(self, args);
+            self.current_builtin = None;
 
             // In POSIX mode, prefix assignments to special builtins persist
             let is_special = matches!(
