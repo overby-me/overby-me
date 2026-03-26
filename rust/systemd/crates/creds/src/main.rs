@@ -294,7 +294,14 @@ fn derive_null_key(cred_name: &str) -> [u8; 32] {
 }
 
 /// Get current time as microseconds since the Unix epoch.
+/// Global timestamp override for testing/CLI. When non-zero, `now_usec()` returns this value.
+static TIMESTAMP_OVERRIDE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 fn now_usec() -> u64 {
+    let ovr = TIMESTAMP_OVERRIDE.load(std::sync::atomic::Ordering::Relaxed);
+    if ovr != 0 {
+        return ovr;
+    }
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -1169,8 +1176,9 @@ fn cmd_encrypt(
         None => now_usec(),
     };
     let na = match not_after {
-        Some(s) if !s.is_empty() && s != "0" => parse_timestamp_usec(s),
-        _ => 0,
+        Some("0") => 0,
+        Some(s) => parse_timestamp_usec(s),
+        None => 0,
     };
 
     // Parse PCR mask for TPM2 modes (default is PCR 7 = Secure Boot policy).
@@ -1429,11 +1437,23 @@ fn seal_type_name(seal_type: u32) -> &'static str {
 }
 
 /// Parse a timestamp string into microseconds since epoch.
-/// Accepts "now", plain integer (microseconds), or seconds with "s" suffix.
+/// Accepts "now", plain integer (microseconds), seconds with "s" suffix,
+/// or relative offsets like "+1d", "+2h", "+30m", "+60s".
 fn parse_timestamp_usec(s: &str) -> u64 {
     let s = s.trim();
     if s.eq_ignore_ascii_case("now") {
         return now_usec();
+    }
+    // Relative time: +<N>d, +<N>h, +<N>m, +<N>s (or plain +N = seconds)
+    if let Some(rest) = s.strip_prefix('+') {
+        let now = now_usec();
+        let secs = parse_duration_secs(rest);
+        return now + secs * 1_000_000;
+    }
+    // Negative relative time: reject as invalid for timestamps.
+    if s.starts_with('-') {
+        eprintln!("Negative relative timestamp not supported: {s:?}");
+        process::exit(1);
     }
     if let Some(secs_str) = s.strip_suffix('s')
         && let Ok(secs) = secs_str.parse::<u64>()
@@ -1442,6 +1462,26 @@ fn parse_timestamp_usec(s: &str) -> u64 {
     }
     s.parse::<u64>().unwrap_or_else(|_| {
         eprintln!("Failed to parse timestamp: {s:?}");
+        process::exit(1);
+    })
+}
+
+/// Parse a duration string like "1d", "2h", "30m", "60s", or plain seconds.
+fn parse_duration_secs(s: &str) -> u64 {
+    if let Some(n) = s.strip_suffix('d') {
+        return n.parse::<u64>().unwrap_or(0) * 86400;
+    }
+    if let Some(n) = s.strip_suffix('h') {
+        return n.parse::<u64>().unwrap_or(0) * 3600;
+    }
+    if let Some(n) = s.strip_suffix('m') {
+        return n.parse::<u64>().unwrap_or(0) * 60;
+    }
+    if let Some(n) = s.strip_suffix('s') {
+        return n.parse::<u64>().unwrap_or(0);
+    }
+    s.parse::<u64>().unwrap_or_else(|_| {
+        eprintln!("Failed to parse duration: {s:?}");
         process::exit(1);
     })
 }
@@ -1484,6 +1524,12 @@ fn main() {
                 process::exit(1);
             }
         }
+    }
+
+    // Apply --timestamp override for decrypt's expiry checks.
+    if let Some(ref ts) = cli.timestamp {
+        let usec = parse_timestamp_usec(ts);
+        TIMESTAMP_OVERRIDE.store(usec, std::sync::atomic::Ordering::Relaxed);
     }
 
     let default_list = Command::List {
