@@ -5526,10 +5526,11 @@ fn builtin_trap(shell: &mut Shell, args: &[String]) -> i32 {
             continue;
         }
 
-        if handler == "-" || handler.is_empty() {
-            // Reset trap
+        if handler == "-" {
+            // Reset trap to default
             shell.traps.remove(&signal);
         } else {
+            // Set trap (empty string means ignore signal)
             shell.traps.insert(signal, handler.clone());
         }
     }
