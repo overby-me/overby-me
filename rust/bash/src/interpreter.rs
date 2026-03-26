@@ -1322,11 +1322,17 @@ impl Shell {
                     drop(pipe_r);
                     nix::unistd::dup2(pipe_w_raw, 1).ok();
                     drop(pipe_w);
-                    // Command substitution does not inherit errexit
-                    // (unless inherit_errexit shopt is set or POSIX mode is on)
+                    // Command substitution does not inherit errexit or ERR trap
+                    // (unless inherit_errexit/errtrace shopt is set or POSIX mode is on)
                     if !self.shopt_inherit_errexit && !self.opt_posix {
                         self.opt_errexit = false;
                     }
+                    if !self.shopt_options.get("errtrace").copied().unwrap_or(false) {
+                        self.traps.remove("ERR");
+                    }
+                    // Clear EXIT trap in command substitution subshell
+                    self.traps.remove("EXIT");
+                    self.traps.remove("0");
                     let status = self.run_string(cmd_str);
                     std::io::Write::flush(&mut std::io::stdout()).ok();
                     std::process::exit(status);
@@ -4080,6 +4086,30 @@ impl Shell {
                     unsafe {
                         libc::signal(libc::SIGPIPE, libc::SIG_DFL);
                     }
+
+                    // Check if this is a script without shebang — run with ourselves
+                    // instead of letting execvp fall back to /bin/sh
+                    if name.contains('/')
+                        && let Ok(mut f) = std::fs::File::open(name)
+                    {
+                        use std::io::Read;
+                        let mut header = [0u8; 4];
+                        if f.read(&mut header).unwrap_or(0) >= 2
+                                && header[0] != 0x7f // not ELF
+                                && !(header[0] == b'#' && header[1] == b'!')
+                        // no shebang
+                        {
+                            // Text file without shebang — run with ourselves
+                            let exe_path = std::env::current_exe()
+                                .map(|p| p.to_string_lossy().to_string())
+                                .unwrap_or_else(|_| "/proc/self/exe".to_string());
+                            let self_exe = std::ffi::CString::new(exe_path.as_str()).unwrap();
+                            let mut new_args = vec![self_exe.clone()];
+                            new_args.extend(c_args.iter().cloned());
+                            nix::unistd::execvp(&self_exe, &new_args).ok();
+                        }
+                    }
+
                     match nix::unistd::execvp(&c_prog, &c_args) {
                         Ok(_) => unreachable!(),
                         Err(e) => {
@@ -4183,9 +4213,12 @@ impl Shell {
                                 .unwrap_or(0);
                             self.vars
                                 .insert("BASH_SUBSHELL".to_string(), (subshell + 1).to_string());
-                            // Clear inherited traps (subshells don't inherit EXIT trap)
+                            // Clear inherited traps (subshells don't inherit EXIT/ERR traps)
                             self.traps.remove("EXIT");
                             self.traps.remove("0");
+                            if !self.shopt_options.get("errtrace").copied().unwrap_or(false) {
+                                self.traps.remove("ERR");
+                            }
                             let status = self.run_program(program);
                             self.last_status = status;
                             // Run EXIT trap in subshell before exiting
