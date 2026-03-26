@@ -38,5 +38,7 @@
     IOSchedulingClass = lib.mkForce "idle";
     IPEgressPriority = 7;
     IPIngressPriority = 7;
+    MemoryMax = "90%";
+    MemorySwapMax = "64G";
   };
 }
