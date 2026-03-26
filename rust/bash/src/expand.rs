@@ -1423,8 +1423,16 @@ fn apply_param_op(
         | ParamOp::ReplaceSuffix(pattern, replacement) => {
             let pat = expand_pattern_word(pattern, ctx, cmd_sub);
             let raw_rep = expand_word_nosplit_ctx(replacement, ctx, cmd_sub);
-            // In replacement strings, \' produces literal '
-            let rep = raw_rep.replace("\\'", "'");
+            // In double-quoted context, \' in the replacement produces literal '
+            // The lexer preserves \' in dquote mode; we need to strip the backslash here
+            let rep = if replacement
+                .iter()
+                .any(|p| matches!(p, WordPart::Literal(s) if s.contains("\\'")))
+            {
+                raw_rep.replace("\\'", "'")
+            } else {
+                raw_rep
+            };
             match op {
                 ParamOp::ReplaceAll(..) => pattern_replace(val, &pat, &rep, true),
                 ParamOp::ReplacePrefix(..) => {
@@ -1733,7 +1741,14 @@ fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
         | ParamOp::ReplaceSuffix(pattern, replacement) => {
             let pat = expand_pattern_word(pattern, ctx, cmd_sub);
             let raw_rep = expand_word_nosplit_ctx(replacement, ctx, cmd_sub);
-            let rep = raw_rep.replace("\\'", "'");
+            let rep = if replacement
+                .iter()
+                .any(|p| matches!(p, WordPart::Literal(s) if s.contains("\\'")))
+            {
+                raw_rep.replace("\\'", "'")
+            } else {
+                raw_rep
+            };
             match &expr.op {
                 ParamOp::ReplaceAll(..) => pattern_replace(&val, &pat, &rep, true),
                 ParamOp::ReplacePrefix(..) => {
