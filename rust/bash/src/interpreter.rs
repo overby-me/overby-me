@@ -2214,6 +2214,14 @@ impl Shell {
                 vec![]
             };
 
+            // Check readonly for prefix assignments
+            for (k, _) in &prefix_exports {
+                if self.readonly_vars.contains(k) {
+                    eprintln!("{}: {}: readonly variable", self.error_prefix(), k);
+                    self.restore_redirections(saved_fds);
+                    return 1;
+                }
+            }
             let saved: Vec<(String, Option<String>)> = prefix_exports
                 .iter()
                 .map(|(k, v)| {
@@ -4080,6 +4088,11 @@ impl Shell {
                     clause.var,
                     expanded_items.join(" ")
                 ));
+            }
+            // Check for readonly variable
+            if self.readonly_vars.contains(&clause.var) {
+                eprintln!("{}: {}: readonly variable", self.error_prefix(), clause.var);
+                return 1;
             }
             self.vars.insert(clause.var.clone(), item);
             // Loop body commands should not trigger errexit individually
