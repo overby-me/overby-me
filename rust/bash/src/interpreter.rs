@@ -4339,6 +4339,35 @@ impl Shell {
     }
 
     /// Execute `[[ conditional expression ]]`
+    /// Format conditional expression using raw source text (for BASH_COMMAND)
+    fn format_cond_raw_helper(expr: &CondExpr) -> String {
+        match expr {
+            CondExpr::Word(w) => crate::ast::word_to_string(w),
+            CondExpr::Unary(op, w) => {
+                format!("{} {}", op, crate::ast::word_to_string(w))
+            }
+            CondExpr::Binary(l, op, r) => {
+                format!(
+                    "{} {} {}",
+                    crate::ast::word_to_string(l),
+                    op,
+                    crate::ast::word_to_string(r)
+                )
+            }
+            CondExpr::Not(e) => format!("! {}", Self::format_cond_raw_helper(e)),
+            CondExpr::And(a, b) => format!(
+                "{} && {}",
+                Self::format_cond_raw_helper(a),
+                Self::format_cond_raw_helper(b)
+            ),
+            CondExpr::Or(a, b) => format!(
+                "{} || {}",
+                Self::format_cond_raw_helper(a),
+                Self::format_cond_raw_helper(b)
+            ),
+        }
+    }
+
     fn format_cond_for_xtrace(&mut self, expr: &CondExpr) -> String {
         let quote_empty = |s: String| -> String { if s.is_empty() { "''".to_string() } else { s } };
         match expr {
@@ -4536,11 +4565,11 @@ impl Shell {
     }
 
     fn run_conditional(&mut self, expr: &CondExpr) -> i32 {
-        // Set BASH_COMMAND for the conditional
+        // Set BASH_COMMAND for the conditional (using raw source text, not expanded)
         if !self.in_debug_trap && !self.in_trap_handler {
-            let trace = self.format_cond_for_xtrace(expr);
+            let raw = Self::format_cond_raw_helper(expr);
             self.vars
-                .insert("BASH_COMMAND".to_string(), format!("[[ {} ]]", trace));
+                .insert("BASH_COMMAND".to_string(), format!("[[ {} ]]", raw));
         }
         // For And/Or, xtrace is output per sub-expression during eval_cond
         if self.opt_xtrace && !matches!(expr, CondExpr::And(_, _) | CondExpr::Or(_, _)) {
