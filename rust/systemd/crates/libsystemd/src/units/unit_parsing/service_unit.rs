@@ -762,15 +762,12 @@ fn parse_service_section(
     };
 
     // For Type=oneshot, systemd allows multiple ExecStart= lines and runs
-    // them sequentially.  We store only the last one in the `exec` field
-    // (the runtime only supports a single command today), but we parse all
-    // entries so that units with multiple ExecStart= don't fail to load.
+    // them sequentially.  For non-oneshot types, only the last ExecStart=
+    // line is meaningful (single main process).  We store all entries and
+    // let the runtime decide how to use them based on service type.
     let exec = match exec {
-        Some(vec) if !vec.is_empty() => {
-            let last = &vec[vec.len() - 1].1;
-            Some(parse_cmdline(last)?)
-        }
-        _ => None,
+        Some(vec) => parse_cmdlines(&vec)?,
+        None => Vec::new(),
     };
 
     let srcv_type = match srcv_type {
@@ -813,7 +810,7 @@ fn parse_service_section(
         // oneshot (matches systemd behavior for exec-less service units like
         // systemd-reboot.service).
         None => {
-            if exec.is_none() {
+            if exec.is_empty() {
                 ServiceType::OneShot
             } else {
                 ServiceType::Simple
@@ -3544,7 +3541,7 @@ MemoryMax=2G
             "#,
         )
         .unwrap();
-        let exec = config.srvc.exec.as_ref().unwrap();
+        let exec = config.srvc.exec.last().unwrap();
         assert_eq!(exec.cmd, "/usr/bin/foo");
         assert_eq!(exec.args, vec!["arg1", "arg2"]);
         assert!(
@@ -3562,7 +3559,7 @@ MemoryMax=2G
             "#,
         )
         .unwrap();
-        let exec = config.srvc.exec.as_ref().unwrap();
+        let exec = config.srvc.exec.last().unwrap();
         assert_eq!(exec.cmd, "/usr/bin/foo");
         assert!(
             exec.prefixes
@@ -3579,7 +3576,7 @@ MemoryMax=2G
             "#,
         )
         .unwrap();
-        let exec = config.srvc.exec.as_ref().unwrap();
+        let exec = config.srvc.exec.last().unwrap();
         assert_eq!(exec.cmd, "/usr/bin/foo");
         assert!(
             exec.prefixes
@@ -3596,7 +3593,7 @@ MemoryMax=2G
             "#,
         )
         .unwrap();
-        let exec = config.srvc.exec.as_ref().unwrap();
+        let exec = config.srvc.exec.last().unwrap();
         assert_eq!(exec.cmd, "/usr/bin/foo");
         assert!(
             exec.prefixes
@@ -3613,7 +3610,7 @@ MemoryMax=2G
             "#,
         )
         .unwrap();
-        let exec = config.srvc.exec.as_ref().unwrap();
+        let exec = config.srvc.exec.last().unwrap();
         assert_eq!(exec.cmd, "/usr/bin/foo");
         assert!(
             exec.prefixes
@@ -3634,7 +3631,7 @@ MemoryMax=2G
             "#,
         )
         .unwrap();
-        let exec = config.srvc.exec.as_ref().unwrap();
+        let exec = config.srvc.exec.last().unwrap();
         assert_eq!(exec.cmd, "/usr/bin/foo");
         assert!(
             exec.prefixes
@@ -3655,7 +3652,7 @@ MemoryMax=2G
             "#,
         )
         .unwrap();
-        let exec = config.srvc.exec.as_ref().unwrap();
+        let exec = config.srvc.exec.last().unwrap();
         assert_eq!(exec.cmd, "/usr/bin/foo");
         assert!(
             exec.prefixes
@@ -3676,7 +3673,7 @@ MemoryMax=2G
             "#,
         )
         .unwrap();
-        let exec = config.srvc.exec.as_ref().unwrap();
+        let exec = config.srvc.exec.last().unwrap();
         assert_eq!(exec.cmd, "/usr/bin/foo");
         assert!(
             exec.prefixes
@@ -3763,7 +3760,7 @@ MemoryMax=2G
             "#,
         )
         .unwrap();
-        let exec = config.srvc.exec.as_ref().unwrap();
+        let exec = config.srvc.exec.last().unwrap();
         assert_eq!(exec.cmd, "/usr/bin/foo");
         assert!(
             exec.prefixes
@@ -3789,7 +3786,7 @@ MemoryMax=2G
             "#,
         )
         .unwrap();
-        let exec = config.srvc.exec.as_ref().unwrap();
+        let exec = config.srvc.exec.last().unwrap();
         assert_eq!(exec.prefixes.len(), 1);
         assert!(
             exec.prefixes
@@ -3811,7 +3808,7 @@ MemoryMax=2G
             "#,
         )
         .unwrap();
-        let exec = config.srvc.exec.as_ref().unwrap();
+        let exec = config.srvc.exec.last().unwrap();
         assert_eq!(exec.prefixes.len(), 3);
         assert_eq!(exec.prefixes[0], super::super::CommandlinePrefix::Minus);
         assert_eq!(exec.prefixes[1], super::super::CommandlinePrefix::Plus);
@@ -3841,8 +3838,8 @@ ExecStartPost=test -z ''
             result.err()
         );
         let config = result.unwrap();
-        // exec is Option<Commandline> — only the last ExecStart= is stored
-        assert!(config.srvc.exec.is_some());
+        // exec is Vec<Commandline> — all ExecStart= lines are stored
+        assert_eq!(config.srvc.exec.len(), 2);
         assert_eq!(config.srvc.startpre.len(), 2);
         assert_eq!(config.srvc.startpost.len(), 1);
     }

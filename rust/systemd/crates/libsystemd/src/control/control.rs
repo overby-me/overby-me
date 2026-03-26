@@ -1941,16 +1941,18 @@ fn create_transient_unit(
     };
 
     // Build ExecStart command line.
-    let exec: Option<Commandline> = params.command.as_ref().and_then(|cmd_parts| {
-        if cmd_parts.is_empty() {
-            return None;
-        }
-        Some(Commandline {
-            cmd: cmd_parts[0].clone(),
-            args: cmd_parts[1..].to_vec(),
-            prefixes: vec![],
+    let exec: Vec<Commandline> = params
+        .command
+        .as_ref()
+        .filter(|cmd_parts| !cmd_parts.is_empty())
+        .map(|cmd_parts| {
+            vec![Commandline {
+                cmd: cmd_parts[0].clone(),
+                args: cmd_parts[1..].to_vec(),
+                prefixes: vec![],
+            }]
         })
-    });
+        .unwrap_or_default();
 
     // Build a minimal ExecConfig with the requested user/group/workdir.
     // Use the correct concrete types for ExecConfig fields.

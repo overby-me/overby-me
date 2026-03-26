@@ -68,7 +68,7 @@ fn start_service_with_filedescriptors(
     name: &str,
     fd_store: &FDStore,
 ) -> Result<(), RunCmdError> {
-    let exec = conf.exec.as_ref().ok_or_else(|| {
+    let exec = conf.exec.last().ok_or_else(|| {
         RunCmdError::SpawnError(
             name.to_owned(),
             "Service has no ExecStart command".to_string(),

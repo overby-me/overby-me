@@ -80,7 +80,7 @@ pub fn wait_for_service(
                         trace!("[FORK_PARENT] Service {name} notification timed out");
                         return Err(RunCmdError::Timeout(
                             conf.exec
-                                .as_ref()
+                                .last()
                                 .map(|e| e.to_string())
                                 .unwrap_or_else(|| "(no exec)".to_owned()),
                             format!("{duration_timeout:?}"),
@@ -178,7 +178,7 @@ pub fn wait_for_service(
                     pid_table_locked.remove(&pid);
                     return Err(RunCmdError::BadExitCode(
                         conf.exec
-                            .as_ref()
+                            .last()
                             .map(|e| e.to_string())
                             .unwrap_or_else(|| "(no exec)".to_owned()),
                         code,
@@ -198,7 +198,7 @@ pub fn wait_for_service(
                     error!("oneshot service {name} reached timeout");
                     return Err(RunCmdError::Timeout(
                         conf.exec
-                            .as_ref()
+                            .last()
                             .map(|e| e.to_string())
                             .unwrap_or_else(|| "(no exec)".to_owned()),
                         format!("{duration_timeout:?}"),
@@ -219,13 +219,13 @@ pub fn wait_for_service(
                                         && !conf.success_exit_status.is_success(&code)
                                         && !conf
                                             .exec
-                                            .as_ref()
+                                            .last()
                                             .map(|e| e.prefixes.contains(&CommandlinePrefix::Minus))
                                             .unwrap_or(false)
                                     {
                                         return Err(RunCmdError::BadExitCode(
                                             conf.exec
-                                                .as_ref()
+                                                .last()
                                                 .map(|e| e.to_string())
                                                 .unwrap_or_else(|| "(no exec)".to_owned()),
                                             code,
@@ -278,7 +278,7 @@ pub fn wait_for_service(
                     error!("forking service {name} reached timeout waiting for parent to exit");
                     return Err(RunCmdError::Timeout(
                         conf.exec
-                            .as_ref()
+                            .last()
                             .map(|e| e.to_string())
                             .unwrap_or_else(|| "(no exec)".to_owned()),
                         format!("{duration_timeout:?}"),
@@ -297,13 +297,13 @@ pub fn wait_for_service(
                                 && !conf.success_exit_status.is_success(&code)
                                 && !conf
                                     .exec
-                                    .as_ref()
+                                    .last()
                                     .map(|e| e.prefixes.contains(&CommandlinePrefix::Minus))
                                     .unwrap_or(false)
                             {
                                 return Err(RunCmdError::BadExitCode(
                                     conf.exec
-                                        .as_ref()
+                                        .last()
                                         .map(|e| e.to_string())
                                         .unwrap_or_else(|| "(no exec)".to_owned()),
                                     code,
@@ -377,7 +377,7 @@ pub fn wait_for_service(
                             warn!("[FORK_PARENT] Did not find dbus name on bus: {dbus_name}");
                             return Err(RunCmdError::Timeout(
                                 conf.exec
-                                    .as_ref()
+                                    .last()
                                     .map(|e| e.to_string())
                                     .unwrap_or_else(|| "(no exec)".to_owned()),
                                 format!("{duration_timeout:?}"),
@@ -387,7 +387,7 @@ pub fn wait_for_service(
                     Err(e) => {
                         return Err(RunCmdError::WaitError(
                             conf.exec
-                                .as_ref()
+                                .last()
                                 .map(|e| e.to_string())
                                 .unwrap_or_else(|| "(no exec)".to_owned()),
                             format!("Error while waiting for dbus name: {e}"),

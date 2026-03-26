@@ -798,10 +798,7 @@ fn insert_service_config(props: &mut BTreeMap<String, String>, conf: &ServiceCon
     }
 
     // Exec lines
-    match &conf.exec {
-        Some(cmd) => insert_commandlines(props, "ExecStart", std::slice::from_ref(cmd)),
-        None => insert_commandlines(props, "ExecStart", &[]),
-    }
+    insert_commandlines(props, "ExecStart", &conf.exec);
     insert_commandlines(props, "ExecCondition", &conf.exec_condition);
     insert_commandlines(props, "ExecStartPre", &conf.startpre);
     insert_commandlines(props, "ExecStartPost", &conf.startpost);

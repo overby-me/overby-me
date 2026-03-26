@@ -351,51 +351,75 @@ impl Service {
         super::prepare_service::reopen_stdio(self, conf)
             .map_err(ServiceErrorReason::PreparingFailed)?;
 
-        if conf.exec.is_some() {
-            // Service has an ExecStart command — fork and wait for it.
-            let has_minus_prefix = conf
-                .exec
-                .as_ref()
-                .map(|e| e.prefixes.contains(&CommandlinePrefix::Minus))
-                .unwrap_or(false);
-            {
-                let mut pid_table_locked = run_info.pid_table.lock_poisoned();
-                // This mainly just forks the process. The waiting (if necessary) is done below
-                // Doing it under the lock of the pid_table prevents races between processes exiting very
-                // fast and inserting the new pid into the pid table
-                match start_service(
-                    &run_info.config.self_path,
-                    self,
-                    conf,
-                    name,
-                    &run_info.fd_store.read_poisoned(),
-                ) {
-                    Ok(()) => {
-                        if let Some(new_pid) = self.pid {
-                            pid_table_locked
-                                .insert(new_pid, PidEntry::Service(id.clone(), conf.srcv_type));
-                        }
-                    }
-                    Err(e) if has_minus_prefix => {
-                        // ExecStart=- prefix: ignore spawn errors (e.g. binary not found).
-                        // Record the error exit status for ExecMainStatus property.
-                        trace!("Ignore spawn error for ExecStart with '-' prefix for {name}: {e}");
-                        self.main_exit_status = Some(203); // EXIT_EXEC (exec format error)
-                    }
-                    Err(e) => return Err(ServiceErrorReason::StartFailed(e)),
+        if !conf.exec.is_empty() {
+            // For multi-ExecStart oneshot services, run all but the last
+            // command via run_cmd (helper process style) sequentially.
+            if conf.srcv_type == ServiceType::OneShot && conf.exec.len() > 1 {
+                let timeout = self.get_start_timeout(conf);
+                let working_dir = conf.exec_config.working_directory.as_ref();
+                let preliminary = &conf.exec[..conf.exec.len() - 1];
+                for cmd in preliminary {
+                    self.run_cmd(cmd, id.clone(), name, timeout, run_info, working_dir)
+                        .map_err(|start_err| {
+                            match self.run_poststop(conf, id.clone(), name, run_info) {
+                                Ok(()) => ServiceErrorReason::StartFailed(start_err),
+                                Err(poststop_err) => ServiceErrorReason::StartAndPoststopFailed(
+                                    start_err,
+                                    poststop_err,
+                                ),
+                            }
+                        })?;
                 }
             }
 
-            // Only wait for the service if it was actually spawned (has a PID).
-            if self.pid.is_some() {
-                super::fork_parent::wait_for_service(self, conf, name, run_info).map_err(
-                    |start_err| match self.run_poststop(conf, id.clone(), name, run_info) {
-                        Ok(()) => ServiceErrorReason::StartFailed(start_err),
-                        Err(poststop_err) => {
-                            ServiceErrorReason::StartAndPoststopFailed(start_err, poststop_err)
+            // Fork the last ExecStart command as the main process.
+            {
+                let has_minus_prefix = conf
+                    .exec
+                    .last()
+                    .map(|e| e.prefixes.contains(&CommandlinePrefix::Minus))
+                    .unwrap_or(false);
+                {
+                    let mut pid_table_locked = run_info.pid_table.lock_poisoned();
+                    // This mainly just forks the process. The waiting (if necessary) is done below
+                    // Doing it under the lock of the pid_table prevents races between processes exiting very
+                    // fast and inserting the new pid into the pid table
+                    match start_service(
+                        &run_info.config.self_path,
+                        self,
+                        conf,
+                        name,
+                        &run_info.fd_store.read_poisoned(),
+                    ) {
+                        Ok(()) => {
+                            if let Some(new_pid) = self.pid {
+                                pid_table_locked
+                                    .insert(new_pid, PidEntry::Service(id.clone(), conf.srcv_type));
+                            }
                         }
-                    },
-                )?;
+                        Err(e) if has_minus_prefix => {
+                            // ExecStart=- prefix: ignore spawn errors (e.g. binary not found).
+                            // Record the error exit status for ExecMainStatus property.
+                            trace!(
+                                "Ignore spawn error for ExecStart with '-' prefix for {name}: {e}"
+                            );
+                            self.main_exit_status = Some(203); // EXIT_EXEC (exec format error)
+                        }
+                        Err(e) => return Err(ServiceErrorReason::StartFailed(e)),
+                    }
+                }
+
+                // Only wait for the service if it was actually spawned (has a PID).
+                if self.pid.is_some() {
+                    super::fork_parent::wait_for_service(self, conf, name, run_info).map_err(
+                        |start_err| match self.run_poststop(conf, id.clone(), name, run_info) {
+                            Ok(()) => ServiceErrorReason::StartFailed(start_err),
+                            Err(poststop_err) => {
+                                ServiceErrorReason::StartAndPoststopFailed(start_err, poststop_err)
+                            }
+                        },
+                    )?;
+                }
             }
         } else {
             // Exec-less oneshot service (e.g. systemd-reboot.service).
@@ -424,6 +448,7 @@ impl Service {
                     }
                 },
             )?;
+
         Ok(StartResult::Started)
     }
 
@@ -754,7 +779,7 @@ impl Service {
 
     pub fn run_all_cmds(
         &mut self,
-        cmds: &Vec<Commandline>,
+        cmds: &[Commandline],
         id: UnitId,
         name: &str,
         timeout: Option<std::time::Duration>,

@@ -84,11 +84,11 @@ fn test_service_parsing() {
 
     assert_eq!(
         service.srvc.exec,
-        Some(crate::units::Commandline {
+        vec![crate::units::Commandline {
             cmd: "/path/to/startbin".into(),
             args: vec!["arg1".into(), "arg2".into(), "arg3".into()],
             prefixes: vec![],
-        })
+        }]
     );
     assert_eq!(
         service.srvc.startpre,
@@ -2778,11 +2778,11 @@ fn test_at_prefix_execstart() {
 
     assert_eq!(
         service.srvc.exec,
-        Some(crate::units::Commandline {
+        vec![crate::units::Commandline {
             cmd: "/usr/bin/foo".into(),
             args: vec!["bar".into(), "arg1".into(), "arg2".into()],
             prefixes: vec![crate::units::CommandlinePrefix::AtSign],
-        })
+        }]
     );
 }
 
@@ -2827,14 +2827,14 @@ fn test_at_prefix_combined_with_minus() {
 
     assert_eq!(
         service.srvc.exec,
-        Some(crate::units::Commandline {
+        vec![crate::units::Commandline {
             cmd: "/usr/bin/foo".into(),
             args: vec!["bar".into(), "arg1".into()],
             prefixes: vec![
                 crate::units::CommandlinePrefix::Minus,
                 crate::units::CommandlinePrefix::AtSign,
             ],
-        })
+        }]
     );
 }
 
@@ -2855,14 +2855,14 @@ fn test_at_prefix_combined_minus_at() {
 
     assert_eq!(
         service.srvc.exec,
-        Some(crate::units::Commandline {
+        vec![crate::units::Commandline {
             cmd: "/usr/bin/foo".into(),
             args: vec!["bar".into(), "arg1".into()],
             prefixes: vec![
                 crate::units::CommandlinePrefix::AtSign,
                 crate::units::CommandlinePrefix::Minus,
             ],
-        })
+        }]
     );
 }
 
@@ -2883,11 +2883,11 @@ fn test_at_prefix_no_extra_args() {
 
     assert_eq!(
         service.srvc.exec,
-        Some(crate::units::Commandline {
+        vec![crate::units::Commandline {
             cmd: "/usr/bin/foo".into(),
             args: vec!["bar".into()],
             prefixes: vec![crate::units::CommandlinePrefix::AtSign],
-        })
+        }]
     );
 }
 
@@ -3306,7 +3306,7 @@ fn test_environment_nixos_firewall_pattern() {
     );
 
     // ExecStart must parse the @ prefix correctly
-    let exec = service.srvc.exec.as_ref().expect("ExecStart should be set");
+    let exec = service.srvc.exec.last().expect("ExecStart should be set");
     assert_eq!(exec.prefixes, vec![crate::units::CommandlinePrefix::AtSign]);
     assert_eq!(exec.cmd, "/nix/store/pqr-firewall-start/bin/firewall-start");
     assert_eq!(exec.args, vec!["firewall-start".to_owned()]);
@@ -3389,7 +3389,7 @@ fn test_service_no_service_section() {
     )
     .unwrap();
 
-    assert_eq!(service.srvc.exec, None);
+    assert!(service.srvc.exec.is_empty());
     assert_eq!(service.srvc.srcv_type, crate::units::ServiceType::OneShot);
     assert_eq!(service.common.unit.description, "System Reboot".to_owned());
     assert!(!service.common.unit.default_dependencies);
@@ -3414,7 +3414,7 @@ fn test_service_oneshot_no_execstart() {
     )
     .unwrap();
 
-    assert_eq!(service.srvc.exec, None);
+    assert!(service.srvc.exec.is_empty());
     assert_eq!(service.srvc.srcv_type, crate::units::ServiceType::OneShot);
 }
 
@@ -3434,7 +3434,7 @@ fn test_service_no_service_section_defaults_to_oneshot() {
     )
     .unwrap();
 
-    assert_eq!(service.srvc.exec, None);
+    assert!(service.srvc.exec.is_empty());
     assert_eq!(service.srvc.srcv_type, crate::units::ServiceType::OneShot);
     assert_eq!(service.srvc.restart, crate::units::ServiceRestart::No);
 }
@@ -3459,7 +3459,7 @@ fn test_service_implicit_oneshot_with_pre_post_commands() {
     )
     .unwrap();
 
-    assert_eq!(service.srvc.exec, None);
+    assert!(service.srvc.exec.is_empty());
     assert_eq!(service.srvc.srcv_type, crate::units::ServiceType::OneShot);
     assert_eq!(service.srvc.startpre.len(), 1);
     assert_eq!(service.srvc.startpre[0].cmd, "/usr/bin/echo");
@@ -3704,7 +3704,7 @@ fn test_no_service_section_through_unit_conversion() {
 
     assert_eq!(unit.common.unit.description, "System Reboot");
     if let crate::units::Specific::Service(ref srvc) = unit.specific {
-        assert_eq!(srvc.conf.exec, None);
+        assert!(srvc.conf.exec.is_empty());
         assert_eq!(srvc.conf.srcv_type, crate::units::ServiceType::OneShot);
         assert_eq!(srvc.conf.exec_config.user, None);
         assert_eq!(srvc.conf.exec_config.group, None);
@@ -3798,7 +3798,7 @@ fn test_execstart_commas_in_arguments_not_split() {
     let exec = service
         .srvc
         .exec
-        .as_ref()
+        .last()
         .expect("ExecStart should be parsed");
     assert_eq!(exec.cmd, "udevadm");
     assert_eq!(
@@ -4778,7 +4778,7 @@ fn test_service_type_forking_with_all_settings() {
     );
     assert_eq!(service.common.unit.description, "A forking daemon");
     assert_eq!(service.srvc.restart, crate::units::ServiceRestart::Always);
-    assert!(service.srvc.exec.is_some());
+    assert!(!service.srvc.exec.is_empty());
     assert_eq!(service.srvc.stop.len(), 1);
 }
 
@@ -6223,7 +6223,7 @@ fn test_no_service_section_with_success_action() {
 
     assert_eq!(service.common.unit.description, "System Reboot");
     assert!(!service.common.unit.default_dependencies);
-    assert_eq!(service.srvc.exec, None);
+    assert!(service.srvc.exec.is_empty());
     assert_eq!(service.srvc.srcv_type, crate::units::ServiceType::OneShot);
     assert_eq!(
         service.common.unit.success_action,
@@ -6420,7 +6420,7 @@ fn test_no_service_section_defaults_actions_to_none() {
     )
     .unwrap();
 
-    assert_eq!(service.srvc.exec, None);
+    assert!(service.srvc.exec.is_empty());
     assert_eq!(service.srvc.srcv_type, crate::units::ServiceType::OneShot);
     assert_eq!(
         service.common.unit.success_action,

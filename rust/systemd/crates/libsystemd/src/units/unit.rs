@@ -859,7 +859,14 @@ impl Unit {
                 let pulled = self.common.dependencies.wants.contains(id);
                 let is_pull_dep = required || pulled;
                 let ready = if required {
+                    // StoppedFinal means the unit completed successfully
+                    // (e.g. Type=oneshot without RemainAfterExit).  Treat
+                    // it as ready so dependents aren't blocked.
                     status_locked.is_started()
+                        || matches!(
+                            &**status_locked,
+                            UnitStatus::Stopped(StatusStopped::StoppedFinal, _)
+                        )
                 } else if is_pull_dep {
                     **status_locked != UnitStatus::NeverStarted
                 } else {
@@ -910,6 +917,10 @@ impl Unit {
                 let is_pull_dep = required || pulled;
                 let ready = if required {
                     status_locked.is_started()
+                        || matches!(
+                            &**status_locked,
+                            UnitStatus::Stopped(StatusStopped::StoppedFinal, _)
+                        )
                 } else if is_pull_dep {
                     **status_locked != UnitStatus::NeverStarted
                 } else {
@@ -2771,7 +2782,7 @@ pub struct ServiceConfig {
     pub limit_nofile: Option<ResourceLimit>,
     pub accept: bool,
     pub notifyaccess: NotifyKind,
-    pub exec: Option<Commandline>,
+    pub exec: Vec<Commandline>,
     pub reload: Vec<Commandline>,
     pub stop: Vec<Commandline>,
     pub stoppost: Vec<Commandline>,
