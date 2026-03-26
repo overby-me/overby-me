@@ -158,6 +158,14 @@ fn builtin_break(shell: &mut Shell, args: &[String]) -> i32 {
         return 0;
     }
     let n: i32 = args.first().and_then(|s| s.parse().ok()).unwrap_or(1);
+    if n <= 0 {
+        eprintln!(
+            "{}: break: {}: loop count out of range",
+            shell.error_prefix(),
+            n
+        );
+        return 1;
+    }
     shell.breaking = n;
     0
 }
@@ -171,6 +179,14 @@ fn builtin_continue(shell: &mut Shell, args: &[String]) -> i32 {
         return 0;
     }
     let n: i32 = args.first().and_then(|s| s.parse().ok()).unwrap_or(1);
+    if n <= 0 {
+        eprintln!(
+            "{}: continue: {}: loop count out of range",
+            shell.error_prefix(),
+            n
+        );
+        return 1;
+    }
     shell.continuing = n;
     0
 }
@@ -4858,13 +4874,32 @@ fn builtin_command(shell: &mut Shell, args: &[String]) -> i32 {
     let mut flag_big_v = false;
     let mut cmd_args = Vec::new();
 
+    let mut parsing_opts = true;
     for arg in args {
-        match arg.as_str() {
-            "-v" => flag_v = true,
-            "-V" => flag_big_v = true,
-            "-p" => {} // ignored for now
-            _ => cmd_args.push(arg.clone()),
+        if parsing_opts {
+            match arg.as_str() {
+                "-v" => {
+                    flag_v = true;
+                    continue;
+                }
+                "-V" => {
+                    flag_big_v = true;
+                    continue;
+                }
+                "-p" => continue,
+                "--" => {
+                    parsing_opts = false;
+                    continue;
+                }
+                s if s.starts_with('-') && s.len() > 1 => {
+                    eprintln!("{}: command: {}: invalid option", shell.error_prefix(), s);
+                    eprintln!("command: usage: command [-pVv] command [arg ...]");
+                    return 2;
+                }
+                _ => parsing_opts = false,
+            }
         }
+        cmd_args.push(arg.clone());
     }
 
     if flag_v || flag_big_v {
@@ -5180,8 +5215,19 @@ fn builtin_trap(shell: &mut Shell, args: &[String]) -> i32 {
 
     // Handle -p with signal arguments: trap -p SIG1 SIG2 ...
     if args.first().map(|s| s.as_str()) == Some("-p") && args.len() >= 2 {
+        let mut status = 0;
         for sig_arg in &args[1..] {
             let norm = normalize_signal_name(sig_arg);
+            // Validate signal name
+            if signal_number(&norm) == 999 {
+                eprintln!(
+                    "{}: trap: {}: invalid signal specification",
+                    shell.error_prefix(),
+                    sig_arg
+                );
+                status = 1;
+                continue;
+            }
             let lookup = norm.strip_prefix("SIG").unwrap_or(&norm);
             let key = if lookup == "EXIT" {
                 shell.traps.get("EXIT").or_else(|| shell.traps.get("0"))
@@ -5192,7 +5238,7 @@ fn builtin_trap(shell: &mut Shell, args: &[String]) -> i32 {
                 println!("trap -- '{}' {}", handler, norm);
             }
         }
-        return 0;
+        return status;
     }
 
     // trap [-p|-P] 'handler' signal [signal...]
