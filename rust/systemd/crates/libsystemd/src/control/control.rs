@@ -2215,6 +2215,8 @@ fn create_transient_unit(
     let mut prop_description: Option<String> = None;
     let mut success_action_units: Vec<String> = vec![];
     let mut failure_action_units: Vec<String> = vec![];
+    let mut start_limit_burst: Option<u32> = None;
+    let mut start_limit_interval_sec: Option<crate::units::unit_parsing::Timeout> = None;
     for prop in &params.properties {
         if let Some((key, value)) = prop.split_once('=') {
             match key {
@@ -2379,6 +2381,42 @@ fn create_transient_unit(
                 "SendSIGHUP" => {
                     service_conf.send_sighup = matches!(value, "yes" | "true" | "1");
                 }
+                "StandardOutput" | "StandardError" => {
+                    let opt = match value {
+                        "null" | "" => Some(crate::units::StdIoOption::Null),
+                        "inherit" => Some(crate::units::StdIoOption::Inherit),
+                        "tty" => Some(crate::units::StdIoOption::Tty),
+                        "journal" | "syslog" | "journal+console" | "syslog+console" => {
+                            Some(crate::units::StdIoOption::Journal)
+                        }
+                        "kmsg" | "kmsg+console" => Some(crate::units::StdIoOption::Kmsg),
+                        _ if value.starts_with("file:") => Some(crate::units::StdIoOption::File(
+                            value.trim_start_matches("file:").into(),
+                        )),
+                        _ if value.starts_with("append:") => {
+                            Some(crate::units::StdIoOption::AppendFile(
+                                value.trim_start_matches("append:").into(),
+                            ))
+                        }
+                        _ if value.starts_with("truncate:") => {
+                            Some(crate::units::StdIoOption::File(
+                                value.trim_start_matches("truncate:").into(),
+                            ))
+                        }
+                        _ => None,
+                    };
+                    if let Some(opt) = opt {
+                        match key {
+                            "StandardOutput" => {
+                                service_conf.exec_config.stdout_path = Some(opt);
+                            }
+                            "StandardError" => {
+                                service_conf.exec_config.stderr_path = Some(opt);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
                 "OnSuccess" => {
                     for name in value.split_whitespace() {
                         let full = if name.contains('.') {
@@ -2397,6 +2435,58 @@ fn create_transient_unit(
                             format!("{name}.service")
                         };
                         failure_action_units.push(full);
+                    }
+                }
+                "StartLimitBurst" => {
+                    if let Ok(burst) = value.parse::<u32>() {
+                        start_limit_burst = Some(burst);
+                    }
+                }
+                "StartLimitIntervalSec" => {
+                    // Parse simple seconds
+                    let trimmed = value.trim_end_matches('s');
+                    if let Ok(secs) = trimmed.parse::<u64>() {
+                        start_limit_interval_sec =
+                            Some(crate::units::unit_parsing::Timeout::Duration(
+                                std::time::Duration::from_secs(secs),
+                            ));
+                    }
+                }
+                "RestartForceExitStatus" => {
+                    // Parse space-separated exit codes/signals
+                    let mut codes = vec![];
+                    for part in value.split_whitespace() {
+                        if let Ok(code) = part.parse::<i32>() {
+                            codes.push(code);
+                        }
+                    }
+                    service_conf.restart_force_exit_status =
+                        crate::units::SuccessExitStatus {
+                            exit_codes: codes,
+                            signals: vec![],
+                        };
+                }
+                "RestartSec" => {
+                    let trimmed = value.trim_end_matches('s');
+                    if let Ok(secs) = trimmed.parse::<u64>() {
+                        service_conf.restart_sec = Some(
+                            crate::units::unit_parsing::Timeout::Duration(
+                                std::time::Duration::from_secs(secs),
+                            ),
+                        );
+                    }
+                }
+                "ExecStart" => {
+                    if value.is_empty() {
+                        service_conf.exec.clear();
+                    } else {
+                        let parts: Vec<String> =
+                            shlex::split(value).unwrap_or_else(|| vec![value.to_string()]);
+                        service_conf.exec.push(crate::units::Commandline {
+                            cmd: parts.first().cloned().unwrap_or_default(),
+                            args: parts.into_iter().skip(1).collect(),
+                            prefixes: vec![],
+                        });
                     }
                 }
                 _ => {
@@ -2450,8 +2540,8 @@ fn create_transient_unit(
                 on_success_job_mode: crate::units::OnFailureJobMode::default(),
                 on_failure: failure_action_units,
                 on_failure_job_mode: crate::units::OnFailureJobMode::default(),
-                start_limit_interval_sec: None,
-                start_limit_burst: None,
+                start_limit_interval_sec,
+                start_limit_burst,
                 start_limit_action: crate::units::UnitAction::None,
                 loaded_at: std::time::SystemTime::now(),
                 loaded_dropin_files: Vec::new(),
@@ -2826,12 +2916,78 @@ pub fn execute_command(
         },
         Command::StartTransient(params) => {
             let unit_name = params.unit_name.clone();
+            let do_wait = params.wait;
             let id = create_transient_unit(&params, &run_info)?;
             // Now start the unit.
-            let ri = run_info.read_poisoned();
-            crate::units::activate_unit(id, &ri, ActivationSource::Regular)
-                .map_err(|e| format!("Failed to start transient unit {unit_name}: {e}"))?;
-            return Ok(serde_json::json!({ "started": unit_name }));
+            {
+                let ri = run_info.read_poisoned();
+                crate::units::activate_unit(id.clone(), &ri, ActivationSource::Regular)
+                    .map_err(|e| format!("Failed to start transient unit {unit_name}: {e}"))?;
+            }
+
+            if !do_wait {
+                return Ok(serde_json::json!({ "started": unit_name }));
+            }
+
+            // --wait mode: poll until the unit reaches a terminal state,
+            // then return the exit code.
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                let ri = run_info.read_poisoned();
+                let Some(unit) = ri.unit_table.get(&id) else {
+                    // Unit was removed — treat as completed successfully.
+                    return Ok(serde_json::json!({
+                        "started": unit_name,
+                        "result": "success",
+                        "exit_code": 0
+                    }));
+                };
+                let status = unit.common.status.read_poisoned();
+                match &*status {
+                    crate::units::UnitStatus::Stopped(_, errors) => {
+                        let (result, exit_code) = if errors.is_empty() {
+                            // Get the actual exit status from the service state.
+                            let exit_status = if let crate::units::Specific::Service(svc) =
+                                &unit.specific
+                            {
+                                if let Ok(state) = svc.state.try_read() {
+                                    state.srvc.main_exit_status.unwrap_or(0)
+                                } else {
+                                    0
+                                }
+                            } else {
+                                0
+                            };
+                            ("success", exit_status)
+                        } else {
+                            // Failed — extract exit status from service state.
+                            let exit_status = if let crate::units::Specific::Service(svc) =
+                                &unit.specific
+                            {
+                                if let Ok(state) = svc.state.try_read() {
+                                    state.srvc.main_exit_status.unwrap_or(1)
+                                } else {
+                                    1
+                                }
+                            } else {
+                                1
+                            };
+                            ("exit-code", exit_status)
+                        };
+                        return Ok(serde_json::json!({
+                            "started": unit_name,
+                            "result": result,
+                            "exit_code": exit_code
+                        }));
+                    }
+                    crate::units::UnitStatus::NeverStarted => {
+                        // Not started yet, keep waiting
+                    }
+                    _ => {
+                        // Still running/starting, keep waiting
+                    }
+                }
+            }
         }
         Command::Enable(names) => {
             let is_runtime = names.iter().any(|n| n == "--runtime");

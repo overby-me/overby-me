@@ -1126,6 +1126,10 @@ fn make_stdio_option(setting: &str) -> Result<StdIoOption, ParsingErrorReason> {
             let p = setting.trim_start_matches("append:");
             Ok(StdIoOption::AppendFile(p.into()))
         }
+        _ if setting.starts_with("truncate:") => {
+            let p = setting.trim_start_matches("truncate:");
+            Ok(StdIoOption::File(p.into()))
+        }
         _ => {
             trace!(
                 "Unsupported StandardOutput/StandardError={}, treating as inherit",

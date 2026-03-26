@@ -405,9 +405,12 @@ fn apply_process_properties(cli: &Cli) -> Result<(), String> {
 }
 
 /// Try to connect to the rust-systemd control socket and create a
-/// transient unit. Returns `Ok(true)` if successful, `Ok(false)` if the
-/// control socket is not available (falling back to direct exec).
-fn try_create_transient_unit(cli: &Cli, unit_name: &str) -> Result<bool, String> {
+/// transient unit. Returns `Ok(Some(response))` if successful, `Ok(None)` if
+/// the control socket is not available (falling back to direct exec).
+fn try_create_transient_unit(
+    cli: &Cli,
+    unit_name: &str,
+) -> Result<Option<serde_json::Value>, String> {
     use libsystemd::control::jsonrpc2::Call;
     use serde_json::Value;
     use std::io::Write;
@@ -417,7 +420,7 @@ fn try_create_transient_unit(cli: &Cli, unit_name: &str) -> Result<bool, String>
 
     let stream = match UnixStream::connect(socket_path) {
         Ok(s) => s,
-        Err(_) => return Ok(false), // Control socket not available
+        Err(_) => return Ok(None), // Control socket not available
     };
 
     // Build the transient unit creation request.
@@ -549,7 +552,12 @@ fn try_create_transient_unit(cli: &Cli, unit_name: &str) -> Result<bool, String>
         return Err(format!("Service manager error: {msg}"));
     }
 
-    Ok(true)
+    // Return the "result" field from the JSON-RPC response
+    let result = resp
+        .get("result")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    Ok(Some(result))
 }
 
 fn main() {
@@ -585,52 +593,31 @@ fn main() {
 
     // Try to create a transient unit via the control socket first
     match try_create_transient_unit(&cli, &unit_name) {
-        Ok(true) => {
-            // Successfully created the transient unit
-            if !cli.wait {
-                eprintln!("Running as unit: {unit_name}");
-                process::exit(0);
+        Ok(Some(resp)) => {
+            // Successfully created the transient unit.
+            eprintln!("Running as unit: {unit_name}");
+
+            // When --wait was set, the control socket blocked until the unit
+            // finished and the response contains the exit code.
+            if cli.wait {
+                let exit_code = resp
+                    .get("exit_code")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0) as i32;
+                let result = resp
+                    .get("result")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("success");
+                if result != "success" {
+                    // Match systemd-run behavior: non-zero exit propagated
+                    process::exit(if exit_code != 0 { exit_code } else { 1 });
+                }
+                process::exit(exit_code);
             }
 
-            // In --wait mode, poll the unit status until it completes
-            eprintln!("Running as unit: {unit_name}");
-            let socket_path = "/run/systemd/rust-systemd-notify/control.socket";
-            let mut exit_code = 0i32;
-            loop {
-                std::thread::sleep(std::time::Duration::from_millis(250));
-                if let Ok(mut stream) = std::os::unix::net::UnixStream::connect(socket_path) {
-                    use std::io::Write;
-                    let request = format!(
-                        r#"{{"jsonrpc":"2.0","method":"is-active","params":"{}","id":1}}"#,
-                        unit_name
-                    );
-                    let _ = stream.write_all(request.as_bytes());
-                    let _ = stream.shutdown(std::net::Shutdown::Write);
-                    if let Ok(resp) = serde_json::from_reader::<_, serde_json::Value>(&mut stream) {
-                        if let Some(result) = resp.get("result").and_then(|v| v.as_str()) {
-                            match result {
-                                "inactive" | "failed" => {
-                                    // Unit has completed
-                                    if result == "failed" {
-                                        exit_code = 1;
-                                    }
-                                    break;
-                                }
-                                _ => continue,
-                            }
-                        }
-                        // If we got an error (unit not found), it's done
-                        if resp.get("error").is_some() {
-                            break;
-                        }
-                    }
-                } else {
-                    break;
-                }
-            }
-            process::exit(exit_code);
+            process::exit(0);
         }
-        Ok(false) => {
+        Ok(None) => {
             // Control socket not available — fall back to direct execution
             if command.is_empty() {
                 eprintln!("Error: No command to execute and cannot connect to service manager.");
