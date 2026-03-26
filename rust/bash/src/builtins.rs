@@ -5520,15 +5520,62 @@ fn builtin_trap(shell: &mut Shell, args: &[String]) -> i32 {
             continue;
         }
 
+        // Signals that were ignored at startup cannot be trapped or reset
+        if shell.original_ignored_signals.contains(&signal) {
+            // Silently ignore the request (bash behavior)
+            continue;
+        }
         if handler == "-" {
             // Reset trap to default
             shell.traps.remove(&signal);
+            // Reset Unix signal disposition to default
+            #[cfg(unix)]
+            if let Some(signum) = signal_name_to_number(&signal) {
+                unsafe {
+                    libc::signal(signum, libc::SIG_DFL);
+                }
+            }
+        } else if handler.is_empty() {
+            // Empty handler = ignore signal
+            shell.traps.insert(signal.clone(), handler.clone());
+            #[cfg(unix)]
+            if let Some(signum) = signal_name_to_number(&signal) {
+                unsafe {
+                    libc::signal(signum, libc::SIG_IGN);
+                }
+            }
         } else {
-            // Set trap (empty string means ignore signal)
+            // Set trap handler (signal will be caught by the shell)
             shell.traps.insert(signal, handler.clone());
         }
     }
     status
+}
+
+#[cfg(unix)]
+fn signal_name_to_number(name: &str) -> Option<i32> {
+    match name {
+        "HUP" => Some(libc::SIGHUP),
+        "INT" => Some(libc::SIGINT),
+        "QUIT" => Some(libc::SIGQUIT),
+        "ILL" => Some(libc::SIGILL),
+        "TRAP" => Some(libc::SIGTRAP),
+        "ABRT" => Some(libc::SIGABRT),
+        "BUS" => Some(libc::SIGBUS),
+        "FPE" => Some(libc::SIGFPE),
+        "KILL" => Some(libc::SIGKILL),
+        "USR1" => Some(libc::SIGUSR1),
+        "SEGV" => Some(libc::SIGSEGV),
+        "USR2" => Some(libc::SIGUSR2),
+        "PIPE" => Some(libc::SIGPIPE),
+        "ALRM" => Some(libc::SIGALRM),
+        "TERM" => Some(libc::SIGTERM),
+        "CHLD" => Some(libc::SIGCHLD),
+        "CONT" => Some(libc::SIGCONT),
+        "STOP" => Some(libc::SIGSTOP),
+        "TSTP" => Some(libc::SIGTSTP),
+        _ => None,
+    }
 }
 
 fn builtin_wait(shell: &mut Shell, args: &[String]) -> i32 {

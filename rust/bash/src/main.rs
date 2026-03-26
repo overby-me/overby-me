@@ -31,6 +31,33 @@ fn run() -> i32 {
     #[cfg(unix)]
     {
         shell.traps.insert("SIGPIPE".to_string(), String::new());
+
+        // Check which signals were already ignored (SIG_IGN) at startup.
+        // These cannot be trapped by the shell (POSIX requirement).
+        let signals_to_check: &[(i32, &str)] = &[
+            (libc::SIGHUP, "HUP"),
+            (libc::SIGINT, "INT"),
+            (libc::SIGQUIT, "QUIT"),
+            (libc::SIGUSR1, "USR1"),
+            (libc::SIGUSR2, "USR2"),
+            (libc::SIGTERM, "TERM"),
+            (libc::SIGCHLD, "CHLD"),
+        ];
+        for &(signum, name) in signals_to_check {
+            unsafe {
+                let prev = libc::signal(signum, libc::SIG_DFL);
+                if prev == libc::SIG_IGN {
+                    // Signal was ignored — restore and record
+                    libc::signal(signum, libc::SIG_IGN);
+                    shell.original_ignored_signals.insert(name.to_string());
+                    // Also set the trap to empty (representing the inherited ignore)
+                    shell.traps.insert(name.to_string(), String::new());
+                } else {
+                    // Restore original handler
+                    libc::signal(signum, prev);
+                }
+            }
+        }
     }
 
     let mut command_string: Option<String> = None;

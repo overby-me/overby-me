@@ -251,6 +251,8 @@ pub struct Shell {
     pub dir_stack: Vec<String>,
     pub func_names: Vec<String>,
     pub traps: HashMap<String, String>,
+    /// Signals that were ignored (SIG_IGN) at shell startup — cannot be trapped
+    pub original_ignored_signals: HashSet<String>,
     pub namerefs: HashMap<String, String>,
     /// Stack of local variable scopes. Each scope maps variable names to their
     /// saved values (None if the variable didn't exist before).
@@ -401,6 +403,7 @@ impl Shell {
             dir_stack: Vec::new(),
             func_names: Vec::new(),
             traps: HashMap::new(),
+            original_ignored_signals: HashSet::new(),
             namerefs: HashMap::new(),
             local_scopes: Vec::new(),
             saved_opts_stack: Vec::new(),
