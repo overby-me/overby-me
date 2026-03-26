@@ -557,8 +557,7 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                         }
                     }
                     WordPart::BacktickSub(cmd) => {
-                        let processed = preprocess_backtick_content(cmd);
-                        s.push_str(&cmd_sub(&processed));
+                        s.push_str(&cmd_sub(cmd));
                     }
                     WordPart::ArithSub(expr) => {
                         s.push_str(&expand_arith(expr, ctx));
@@ -881,9 +880,7 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
             out.push(Segment::Unquoted(val));
         }
         WordPart::BacktickSub(cmd) => {
-            // Process backtick content: \\ → \, \` → `, \$ → $, \<NL> → removed
-            let processed = preprocess_backtick_content(cmd);
-            let val = cmd_sub(&processed);
+            let val = cmd_sub(cmd);
             // Protect backslashes from quote removal with \x00 markers
             let val = val.replace('\\', "\x00\\");
             out.push(Segment::Unquoted(val));
@@ -3141,25 +3138,6 @@ fn trim_pattern(value: &str, pattern: &str, mode: TrimMode) -> String {
 /// Preprocess backtick command substitution content.
 /// The lexer already handles \\→\, \`→`, \$→$ during backtick scanning.
 /// This function only handles \<newline> → removed (line continuation).
-fn preprocess_backtick_content(cmd: &str) -> String {
-    if !cmd.contains("\\\n") {
-        return cmd.to_string();
-    }
-    let mut result = String::with_capacity(cmd.len());
-    let chars: Vec<char> = cmd.chars().collect();
-    let mut i = 0;
-    while i < chars.len() {
-        if chars[i] == '\\' && i + 1 < chars.len() && chars[i + 1] == '\n' {
-            // Line continuation — remove both
-            i += 2;
-        } else {
-            result.push(chars[i]);
-            i += 1;
-        }
-    }
-    result
-}
-
 fn pattern_replace(value: &str, pattern: &str, replacement: &str, all: bool) -> String {
     if pattern.is_empty() {
         return value.to_string();

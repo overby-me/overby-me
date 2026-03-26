@@ -809,6 +809,8 @@ fn parse_double_quoted_content(s: &str) -> Word {
                         // Inside double-quoted context backticks, also unescape \"
                         if matches!(next, '$' | '`' | '\\' | '"') {
                             cmd.push(next);
+                        } else if next == '\n' {
+                            // \<newline> is line continuation — remove both
                         } else {
                             cmd.push('\\');
                             cmd.push(next);
@@ -2092,7 +2094,12 @@ fn read_param_word_impl(chars: &[char], i: &mut usize, delim: char, in_dquote: b
                     if chars[*i] == '\\' && *i + 1 < chars.len() {
                         let next = chars[*i + 1];
                         if matches!(next, '$' | '`' | '\\') {
+                            // \\→\, \`→`, \$→$ (processed first)
                             cmd.push(next);
+                            *i += 2;
+                        } else if next == '\n' {
+                            // \<newline> is line continuation — remove both
+                            // This applies regardless of quoting context (lexical)
                             *i += 2;
                         } else {
                             cmd.push(chars[*i]);
@@ -2648,6 +2655,8 @@ impl Lexer {
                                 if let Some(c) = self.advance() {
                                     if matches!(c, '$' | '`' | '\\') {
                                         cmd.push(c);
+                                    } else if c == '\n' {
+                                        // \<newline> is line continuation — remove both
                                     } else {
                                         cmd.push('\\');
                                         cmd.push(c);
