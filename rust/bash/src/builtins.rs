@@ -3993,7 +3993,7 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
             Err(_) => return if is_poll { 1 } else { 142 },
             _ => {
                 if is_poll {
-                    return 0; // polling: data available, don't actually read
+                    return 0; // polling: data available (or EOF), don't actually read
                 }
             }
         }
