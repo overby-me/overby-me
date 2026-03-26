@@ -4327,6 +4327,64 @@ impl Shell {
         result
     }
 
+    /// Expand a regex pattern with mixed quoted/unquoted parts.
+    /// Unquoted parts are treated as regex. Quoted parts have regex metacharacters escaped.
+    fn expand_regex_pattern_mixed(&mut self, word: &Word) -> String {
+        let mut result = String::new();
+        for part in word {
+            match part {
+                WordPart::Literal(s) => result.push_str(s),
+                WordPart::SingleQuoted(s) => {
+                    if s.len() == 1 {
+                        // Backslash escape from \x — preserve as regex escape
+                        result.push('\\');
+                        result.push_str(s);
+                    } else {
+                        // Quoted string — escape regex metacharacters except [ and ]
+                        // because escaping ] changes bracket expression semantics
+                        // in regex_lite (where \] inside [...] is literal ], extending the bracket)
+                        for ch in s.chars() {
+                            if "\\(){}.*+?|^$".contains(ch) {
+                                result.push('\\');
+                            }
+                            result.push(ch);
+                        }
+                    }
+                }
+                WordPart::Variable(name) => {
+                    let val = self.vars.get(name.as_str()).cloned().unwrap_or_default();
+                    result.push_str(&val);
+                }
+                WordPart::DoubleQuoted(parts) => {
+                    // Quoted — escape regex metacharacters (except [ and ])
+                    let mut expanded = String::new();
+                    for p in parts {
+                        match p {
+                            WordPart::Literal(s) => expanded.push_str(s),
+                            WordPart::Variable(name) => {
+                                let val = self.vars.get(name.as_str()).cloned().unwrap_or_default();
+                                expanded.push_str(&val);
+                            }
+                            _ => {
+                                expanded.push_str(&self.expand_word_single(&vec![p.clone()]));
+                            }
+                        }
+                    }
+                    for ch in expanded.chars() {
+                        if "\\(){}.*+?|^$".contains(ch) {
+                            result.push('\\');
+                        }
+                        result.push(ch);
+                    }
+                }
+                _ => {
+                    result.push_str(&self.expand_word_single(&vec![part.clone()]));
+                }
+            }
+        }
+        result
+    }
+
     /// Check if any coproc process has exited and clean up its fds/variables
     #[cfg(unix)]
     fn reap_coprocs(&mut self) {
@@ -4457,20 +4515,21 @@ impl Shell {
                 let lval = self.expand_word_single(left);
                 // For = and != operators, the right side is a pattern
                 if op == "=~" {
-                    // For =~, check if pattern has explicit quoting (not just backslash escapes).
-                    // SingleQuoted with len>1 comes from '...' quoting.
-                    // SingleQuoted with len==1 comes from \x backslash escaping.
-                    // DoubleQuoted always counts as quoting.
-                    let is_quoted = right.iter().any(|p| match p {
+                    // Check if the ENTIRE pattern is quoted (all parts are quoted/backslash-escaped).
+                    // If entirely quoted, do literal string match.
+                    // If mixed (some quoted, some not), build regex with quoted parts escaped.
+                    let has_unquoted = right
+                        .iter()
+                        .any(|p| matches!(p, WordPart::Literal(_) | WordPart::Variable(_)));
+                    let has_quoted = right.iter().any(|p| match p {
                         WordPart::DoubleQuoted(_) => true,
                         WordPart::SingleQuoted(s) => s.len() > 1,
                         _ => false,
                     });
-                    // For regex patterns, preserve backslashes from SingleQuoted parts
-                    // (which come from backslash-escaping in the source)
-                    let rval = self.expand_regex_pattern(right);
-                    if is_quoted {
-                        // Quoted: literal string match (not regex)
+                    let is_fully_quoted = has_quoted && !has_unquoted;
+                    if is_fully_quoted {
+                        // Fully quoted: literal string match (not regex)
+                        let rval = self.expand_regex_pattern(right);
                         let matched = lval.contains(&rval);
                         if matched {
                             self.arrays
@@ -4480,6 +4539,13 @@ impl Shell {
                         }
                         return Ok(matched);
                     }
+                    if has_quoted && has_unquoted {
+                        // Mixed: build regex with quoted parts having metacharacters escaped
+                        let rval = self.expand_regex_pattern_mixed(right);
+                        return self.eval_cond_binary(&lval, op, &rval);
+                    }
+                    // Fully unquoted: treat as regex
+                    let rval = self.expand_regex_pattern(right);
                     return self.eval_cond_binary(&lval, op, &rval);
                 }
                 let rval = if matches!(op.as_str(), "=" | "==" | "!=") {
