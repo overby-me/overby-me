@@ -1150,6 +1150,9 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                             case_depth += 1;
                         } else if kw == "esac" || word == "esac" {
                             case_depth -= 1;
+                        } else if kw == "(" {
+                            // Alias expands to ( — increase depth
+                            depth += 1;
                         }
                         cmd.push_str(&word);
                         continue;
@@ -2855,6 +2858,8 @@ impl Lexer {
                     case_depth += 1;
                 } else if effective_word == "esac" || word == "esac" {
                     case_depth -= 1;
+                } else if effective_word == "(" {
+                    depth += 1;
                 }
                 s.push_str(&word);
                 continue;
