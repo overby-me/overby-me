@@ -515,13 +515,7 @@
           echo 'touch /testok' >> TEST-65-ANALYZE.sh
         '';
       }
-      {
-        name = "68-PROPAGATE-EXIT-STATUS";
-        patchScript = ''
-          # Remove transient unit sections III-IV (systemd-run not implemented).
-          sed -i '/^: "-------III/,/^: "-------V/{/^: "-------V/!d}' TEST-68-PROPAGATE-EXIT-STATUS.sh
-        '';
-      }
+      {name = "68-PROPAGATE-EXIT-STATUS";}
       {
         name = "71-HOSTNAME";
         patchScript = ''
