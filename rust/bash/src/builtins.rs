@@ -1507,7 +1507,9 @@ fn builtin_readonly(shell: &mut Shell, args: &[String]) -> i32 {
                     shell.set_var(vname, format!("{}{}", existing, value));
                 }
             } else if value.starts_with('(') && value.ends_with(')') {
-                // Array value: readonly a=(1 2 3) or readonly -a a=(1 2 3)
+                // Treat (value) as array assignment: readonly a=(1 2 3)
+                // Note: bash's parser handles quoted vs unquoted distinction;
+                // our parser doesn't, so readonly 'a=(3)' incorrectly uses array syntax
                 let arr = parse_array_literal(value);
                 shell.arrays.insert(vname.to_string(), arr);
             } else {
