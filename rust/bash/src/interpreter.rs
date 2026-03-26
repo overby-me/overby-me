@@ -244,6 +244,7 @@ pub struct Shell {
     pub continuing: i32,
     pub in_condition: bool,
     pub in_debug_trap: bool,
+    pub in_trap_handler: bool,
     pub errexit_suppressed: bool,
     pub sourcing: bool,
     /// The original script file name for error messages (doesn't change with BASH_ARGV0)
@@ -397,6 +398,7 @@ impl Shell {
             continuing: 0,
             in_condition: false,
             in_debug_trap: false,
+            in_trap_handler: false,
             errexit_suppressed: false,
             sourcing: false,
             script_name: String::new(),
@@ -849,7 +851,10 @@ impl Shell {
             && !handler.is_empty()
         {
             let saved = self.last_status;
+            let saved_in_trap = self.in_trap_handler;
+            self.in_trap_handler = true;
             self.run_string(&handler);
+            self.in_trap_handler = saved_in_trap;
             self.last_status = saved;
         }
     }
@@ -1909,8 +1914,8 @@ impl Shell {
 
     fn run_simple_command(&mut self, cmd: &SimpleCommand) -> i32 {
         // Set BASH_COMMAND to the source text before expansion
-        // Don't overwrite during DEBUG trap execution
-        if !self.in_debug_trap {
+        // Don't overwrite during DEBUG or ERR trap execution
+        if !self.in_debug_trap && !self.in_trap_handler {
             let mut parts = Vec::new();
             for a in &cmd.assignments {
                 if a.append {
@@ -4531,6 +4536,12 @@ impl Shell {
     }
 
     fn run_conditional(&mut self, expr: &CondExpr) -> i32 {
+        // Set BASH_COMMAND for the conditional
+        if !self.in_debug_trap && !self.in_trap_handler {
+            let trace = self.format_cond_for_xtrace(expr);
+            self.vars
+                .insert("BASH_COMMAND".to_string(), format!("[[ {} ]]", trace));
+        }
         // For And/Or, xtrace is output per sub-expression during eval_cond
         if self.opt_xtrace && !matches!(expr, CondExpr::And(_, _) | CondExpr::Or(_, _)) {
             let trace = self.format_cond_for_xtrace(expr);
