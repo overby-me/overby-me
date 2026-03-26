@@ -2372,6 +2372,14 @@ fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
 
     // declare -f: print function definitions (with body)
     // But if -r is also set (declare -fr), it's trying to set readonly, not print
+    // declare -ft: mark functions as traced
+    if flag_func_body && flag_trace && !names.is_empty() {
+        for name in &names {
+            shell.traced_funcs.insert(name.clone());
+        }
+        return 0;
+    }
+
     if flag_func_body && !flag_readonly && !flag_unset_readonly && !flag_trace {
         let print_func = |name: &str, body: &CompoundCommand| {
             println!("{} () \n{}", name, format_compound_command(body));

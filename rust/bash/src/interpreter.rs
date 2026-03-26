@@ -235,6 +235,7 @@ pub struct Shell {
     pub arrays: HashMap<String, Vec<String>>,
     pub assoc_arrays: HashMap<String, AssocArray>,
     pub functions: HashMap<String, CompoundCommand>,
+    pub traced_funcs: HashSet<String>,
     pub hash_table: HashMap<String, (String, u32)>,
     pub positional: Vec<String>,
     pub last_status: i32,
@@ -389,6 +390,7 @@ impl Shell {
             arrays: HashMap::new(),
             assoc_arrays: HashMap::new(),
             functions: HashMap::new(),
+            traced_funcs: HashSet::new(),
             hash_table: HashMap::new(),
             positional: vec!["bash".to_string()],
             last_status: 0,
@@ -3874,7 +3876,19 @@ impl Shell {
         } else {
             None
         };
-        // Note: DEBUG trap is global — functions can modify it and the change persists.
+        // DEBUG trap: not inherited unless functrace is set OR function is traced
+        let is_traced = self.traced_funcs.contains(name);
+        let inherit_debug = self
+            .shopt_options
+            .get("functrace")
+            .copied()
+            .unwrap_or(false)
+            || is_traced;
+        let saved_debug_trap = if !inherit_debug {
+            self.traps.remove("DEBUG")
+        } else {
+            None
+        };
         // Without functrace, the function doesn't inherit the parent's DEBUG trap,
         // but any trap set inside the function IS visible after the function returns.
 
@@ -3883,6 +3897,12 @@ impl Shell {
         // Restore ERR and DEBUG traps and LINENO
         if let Some(err_trap) = saved_err_trap {
             self.traps.insert("ERR".to_string(), err_trap);
+        }
+        // Only restore DEBUG trap if the function didn't set a new one
+        if let Some(debug_trap) = saved_debug_trap
+            && !self.traps.contains_key("DEBUG")
+        {
+            self.traps.insert("DEBUG".to_string(), debug_trap);
         }
         if let Some(ln) = saved_lineno {
             self.vars.insert("LINENO".to_string(), ln);
