@@ -106,30 +106,27 @@ fn check_watchdog_timeouts(run_info: &ArcMutRuntimeInfo) {
             let srvc = &state.srvc;
 
             // --- RuntimeMaxSec enforcement ---
-            if let Some(started_at) = srvc.runtime_started_at {
-                if let Some(max_dur) = effective_runtime_max(&srvc_specific.conf.runtime_max_sec) {
-                    let elapsed = now.duration_since(started_at);
-                    if elapsed >= max_dur {
-                        let effective_pid = srvc.main_pid.or(srvc.pid);
-                        runtime_max_timed_out.push(RuntimeMaxTimeout {
-                            unit_name: unit.id.name.clone(),
-                            pid: effective_pid,
-                            process_group: srvc.process_group,
-                            elapsed,
-                            limit: max_dur,
-                        });
-                        // Skip watchdog check — we're already killing it.
-                        continue;
-                    }
+            if let Some(started_at) = srvc.runtime_started_at
+                && let Some(max_dur) = effective_runtime_max(&srvc_specific.conf.runtime_max_sec)
+            {
+                let elapsed = now.duration_since(started_at);
+                if elapsed >= max_dur {
+                    let effective_pid = srvc.main_pid.or(srvc.pid);
+                    runtime_max_timed_out.push(RuntimeMaxTimeout {
+                        unit_name: unit.id.name.clone(),
+                        pid: effective_pid,
+                        process_group: srvc.process_group,
+                        elapsed,
+                        limit: max_dur,
+                    });
+                    // Skip watchdog check — we're already killing it.
+                    continue;
                 }
             }
 
             // --- Watchdog enforcement ---
             // Determine the effective watchdog timeout.
-            let timeout = effective_watchdog_timeout(
-                &srvc_specific.conf.watchdog_sec,
-                srvc,
-            );
+            let timeout = effective_watchdog_timeout(&srvc_specific.conf.watchdog_sec, srvc);
             let Some(timeout) = timeout else {
                 continue; // no watchdog configured or infinity
             };
@@ -256,10 +253,7 @@ fn send_signal_to_service(
     if let Some(pid) = pid {
         match nix::sys::signal::kill(pid, signal) {
             Ok(()) => {
-                debug!(
-                    "Sent {} to service {} (PID {})",
-                    signal, unit_name, pid
-                );
+                debug!("Sent {} to service {} (PID {})", signal, unit_name, pid);
             }
             Err(e) => {
                 warn!(

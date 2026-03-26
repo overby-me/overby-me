@@ -134,7 +134,7 @@ pub fn collect_properties(unit: &Unit) -> BTreeMap<String, String> {
             // "exit-code" / "signal" on failure
             {
                 let status = unit.common.status.read_poisoned();
-                let result = if let Some(ref st) = state_ref {
+                let result = if let Some(st) = state_ref {
                     if st.srvc.runtime_max_timeout_fired {
                         "timeout"
                     } else if st.srvc.watchdog_timeout_fired {

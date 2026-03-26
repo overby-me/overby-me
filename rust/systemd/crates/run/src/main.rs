@@ -604,10 +604,7 @@ fn main() {
             // When --wait was set, the control socket blocked until the unit
             // finished and the response contains the exit code.
             if cli.wait {
-                let exit_code = resp
-                    .get("exit_code")
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(0) as i32;
+                let exit_code = resp.get("exit_code").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
                 let result = resp
                     .get("result")
                     .and_then(|v| v.as_str())

@@ -111,7 +111,11 @@ fn write_machine_id(path: &Path, id: &str) -> io::Result<()> {
 }
 
 /// Initialize the machine ID if it doesn't exist or is empty.
-fn initialize(machine_id_path: &Path) -> Result<String, i32> {
+///
+/// If the persistent `/etc/machine-id` cannot be written (e.g. read-only
+/// root filesystem), falls back to writing a transient ID in
+/// `<root>/run/machine-id`.
+fn initialize(machine_id_path: &Path, root: &Path) -> Result<String, i32> {
     // Check if we already have a valid machine ID.
     if let Some(existing) = read_machine_id(machine_id_path) {
         eprintln!(
@@ -119,6 +123,13 @@ fn initialize(machine_id_path: &Path) -> Result<String, i32> {
             machine_id_path.display(),
             existing
         );
+        return Ok(existing);
+    }
+
+    // Also check the transient path — if a previous run already wrote there,
+    // reuse it.
+    let run_machine_id = root.join("run/machine-id");
+    if let Some(existing) = read_machine_id(&run_machine_id) {
         return Ok(existing);
     }
 
@@ -142,13 +153,23 @@ fn initialize(machine_id_path: &Path) -> Result<String, i32> {
             );
             Ok(id)
         }
-        Err(e) => {
-            eprintln!(
-                "Error: failed to write {}: {}",
-                machine_id_path.display(),
-                e
-            );
-            Err(1)
+        Err(_) => {
+            // Persistent write failed (e.g. read-only filesystem).
+            // Fall back to transient path in /run.
+            match write_machine_id(&run_machine_id, &id) {
+                Ok(()) => {
+                    eprintln!(
+                        "Initialized transient {} with machine ID: {}",
+                        run_machine_id.display(),
+                        id
+                    );
+                    Ok(id)
+                }
+                Err(e) => {
+                    eprintln!("Error: failed to write {}: {}", run_machine_id.display(), e);
+                    Err(1)
+                }
+            }
         }
     }
 }
@@ -184,9 +205,11 @@ fn try_product_uuid() -> Option<String> {
 ///   1. Reads the current (transient) machine ID.
 ///   2. Attempts to unmount the bind mount.
 ///   3. Writes the ID to the real file on disk.
-fn commit(machine_id_path: &Path) -> Result<String, i32> {
-    // Read the current transient machine ID.
-    let id = match read_machine_id(machine_id_path) {
+fn commit(machine_id_path: &Path, root: &Path) -> Result<String, i32> {
+    // Read the current machine ID — try persistent path first, then transient.
+    let run_machine_id = root.join("run/machine-id");
+    let id = read_machine_id(machine_id_path).or_else(|| read_machine_id(&run_machine_id));
+    let id = match id {
         Some(id) => id,
         None => {
             eprintln!(
@@ -346,9 +369,9 @@ fn run(args: &[String]) -> i32 {
     let machine_id_path = root.join("etc/machine-id");
 
     let result = if do_commit {
-        commit(&machine_id_path)
+        commit(&machine_id_path, &root)
     } else {
-        initialize(&machine_id_path)
+        initialize(&machine_id_path, &root)
     };
 
     match result {
@@ -513,7 +536,7 @@ mod tests {
         let dir = temp_dir();
         let path = dir.path().join("machine-id");
 
-        let result = initialize(&path);
+        let result = initialize(&path, dir.path());
         assert!(result.is_ok());
 
         let id = result.unwrap();
@@ -531,7 +554,7 @@ mod tests {
         let existing = "0123456789abcdef0123456789abcdef";
         fs::write(&path, format!("{}\n", existing)).unwrap();
 
-        let result = initialize(&path);
+        let result = initialize(&path, dir.path());
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), existing);
 
@@ -546,7 +569,7 @@ mod tests {
         let path = dir.path().join("machine-id");
         fs::write(&path, "").unwrap();
 
-        let result = initialize(&path);
+        let result = initialize(&path, dir.path());
         assert!(result.is_ok());
 
         let id = result.unwrap();
@@ -559,7 +582,7 @@ mod tests {
         let path = dir.path().join("machine-id");
         fs::write(&path, "uninitialized\n").unwrap();
 
-        let result = initialize(&path);
+        let result = initialize(&path, dir.path());
         assert!(result.is_ok());
 
         let id = result.unwrap();
@@ -573,7 +596,7 @@ mod tests {
         let id = "aabbccdd11223344aabbccdd11223344";
         fs::write(&path, format!("{}\n", id)).unwrap();
 
-        let result = commit(&path);
+        let result = commit(&path, dir.path());
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), id);
     }
@@ -584,7 +607,7 @@ mod tests {
         let path = dir.path().join("machine-id");
         fs::write(&path, "").unwrap();
 
-        let result = commit(&path);
+        let result = commit(&path, dir.path());
         assert!(result.is_err());
     }
 
@@ -593,7 +616,7 @@ mod tests {
         let dir = temp_dir();
         let path = dir.path().join("nonexistent");
 
-        let result = commit(&path);
+        let result = commit(&path, dir.path());
         assert!(result.is_err());
     }
 

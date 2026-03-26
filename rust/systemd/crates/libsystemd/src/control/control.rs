@@ -2461,20 +2461,18 @@ fn create_transient_unit(
                             codes.push(code);
                         }
                     }
-                    service_conf.restart_force_exit_status =
-                        crate::units::SuccessExitStatus {
-                            exit_codes: codes,
-                            signals: vec![],
-                        };
+                    service_conf.restart_force_exit_status = crate::units::SuccessExitStatus {
+                        exit_codes: codes,
+                        signals: vec![],
+                    };
                 }
                 "RestartSec" => {
                     let trimmed = value.trim_end_matches('s');
                     if let Ok(secs) = trimmed.parse::<u64>() {
-                        service_conf.restart_sec = Some(
-                            crate::units::unit_parsing::Timeout::Duration(
+                        service_conf.restart_sec =
+                            Some(crate::units::unit_parsing::Timeout::Duration(
                                 std::time::Duration::from_secs(secs),
-                            ),
-                        );
+                            ));
                     }
                 }
                 "ExecStart" => {
@@ -3000,31 +2998,29 @@ pub fn execute_command(
                     crate::units::UnitStatus::Stopped(_, errors) => {
                         let (result, exit_code) = if errors.is_empty() {
                             // Get the actual exit status from the service state.
-                            let exit_status = if let crate::units::Specific::Service(svc) =
-                                &unit.specific
-                            {
-                                if let Ok(state) = svc.state.try_read() {
-                                    state.srvc.main_exit_status.unwrap_or(0)
+                            let exit_status =
+                                if let crate::units::Specific::Service(svc) = &unit.specific {
+                                    if let Ok(state) = svc.state.try_read() {
+                                        state.srvc.main_exit_status.unwrap_or(0)
+                                    } else {
+                                        0
+                                    }
                                 } else {
                                     0
-                                }
-                            } else {
-                                0
-                            };
+                                };
                             ("success", exit_status)
                         } else {
                             // Failed — extract exit status from service state.
-                            let exit_status = if let crate::units::Specific::Service(svc) =
-                                &unit.specific
-                            {
-                                if let Ok(state) = svc.state.try_read() {
-                                    state.srvc.main_exit_status.unwrap_or(1)
+                            let exit_status =
+                                if let crate::units::Specific::Service(svc) = &unit.specific {
+                                    if let Ok(state) = svc.state.try_read() {
+                                        state.srvc.main_exit_status.unwrap_or(1)
+                                    } else {
+                                        1
+                                    }
                                 } else {
                                     1
-                                }
-                            } else {
-                                1
-                            };
+                                };
                             ("exit-code", exit_status)
                         };
                         return Ok(serde_json::json!({
@@ -5141,7 +5137,7 @@ pub fn execute_command(
                     let ri = run_info.read_poisoned();
                     if let Some(unit) = ri.unit_table.get(&id) {
                         let srvc_type = if let Specific::Service(srvc) = &unit.specific {
-                            Some(srvc.conf.srcv_type.clone())
+                            Some(srvc.conf.srcv_type)
                         } else {
                             None
                         };
@@ -5150,16 +5146,10 @@ pub fn execute_command(
                                 let status = unit.common.status.read_poisoned();
                                 match &*status {
                                     UnitStatus::Stopped(_, errors) if !errors.is_empty() => {
-                                        return Err(format!(
-                                            "Unit {} failed to start",
-                                            id.name
-                                        ));
+                                        return Err(format!("Unit {} failed to start", id.name));
                                     }
                                     UnitStatus::Restarting => {
-                                        return Err(format!(
-                                            "Unit {} failed to start",
-                                            id.name
-                                        ));
+                                        return Err(format!("Unit {} failed to start", id.name));
                                     }
                                     _ => {}
                                 }
@@ -5178,9 +5168,7 @@ pub fn execute_command(
                                     };
                                     let status = unit.common.status.read_poisoned();
                                     match &*status {
-                                        UnitStatus::Stopped(_, errors)
-                                            if !errors.is_empty() =>
-                                        {
+                                        UnitStatus::Stopped(_, errors) if !errors.is_empty() => {
                                             return Err(format!(
                                                 "Unit {} failed to start",
                                                 id.name
@@ -5210,10 +5198,8 @@ pub fn execute_command(
                                         }
                                         UnitStatus::Started(_) => {
                                             // Check if READY=1 has been signaled
-                                            if let Specific::Service(svc) = &unit.specific
-                                            {
-                                                let state =
-                                                    svc.state.read_poisoned();
+                                            if let Specific::Service(svc) = &unit.specific {
+                                                let state = svc.state.read_poisoned();
                                                 if state.srvc.signaled_ready {
                                                     break; // success
                                                 }
@@ -5223,9 +5209,7 @@ pub fn execute_command(
                                     }
                                     drop(status);
                                     drop(ri);
-                                    std::thread::sleep(
-                                        std::time::Duration::from_millis(50),
-                                    );
+                                    std::thread::sleep(std::time::Duration::from_millis(50));
                                 }
                             }
                             _ => {}
