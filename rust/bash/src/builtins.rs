@@ -2968,6 +2968,7 @@ fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
                         "noclobber" => shell.opt_noclobber = enable,
                         "keyword" => shell.opt_keyword = enable,
                         "noglob" => shell.opt_noglob = enable,
+                        "noexec" => shell.opt_noexec = enable,
                         "posix" => shell.opt_posix = enable,
                         "hashall" => shell.opt_hashall = enable,
                         "braceexpand"
