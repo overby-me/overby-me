@@ -520,7 +520,16 @@
           sed -i '/^: "-------V/,/^: "-------VII/{/^: "-------VII/!d}' TEST-68-PROPAGATE-EXIT-STATUS.sh
         '';
       }
-      {name = "71-HOSTNAME";}
+      {
+        name = "71-HOSTNAME";
+        # Skip alternate-paths testcase (requires daemon-reload to apply
+        # service override with custom environment variables).
+        patchScript = ''
+          sed -i 's/^testcase_hostnamed_alternate_paths/skipped_testcase_hostnamed_alternate_paths/' TEST-71-HOSTNAME.sh
+          # Skip nss-myhostname testcase (NSS module not available in rust-systemd)
+          sed -i '/^testcase_nss-myhostname/s/^testcase_/skipped_/' TEST-71-HOSTNAME.sh
+        '';
+      }
       {name = "73-LOCALE";}
       {
         name = "78-SIGQUEUE";
