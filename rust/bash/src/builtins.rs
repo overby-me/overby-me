@@ -1425,7 +1425,8 @@ fn builtin_readonly(shell: &mut Shell, args: &[String]) -> i32 {
                 match ch {
                     'f' => func_mode = true,
                     'p' => print_mode = true,
-                    'a' | 'A' | 'n' => {} // array/nameref flags accepted
+                    'a' => {}       // array flag accepted
+                    'A' | 'n' => {} // assoc/nameref flags accepted
                     _ => {
                         eprintln!(
                             "{}: readonly: -{}: invalid option",
@@ -1506,7 +1507,7 @@ fn builtin_readonly(shell: &mut Shell, args: &[String]) -> i32 {
                     shell.set_var(vname, format!("{}{}", existing, value));
                 }
             } else if value.starts_with('(') && value.ends_with(')') {
-                // Array value: readonly a=(1 2 3)
+                // Array value: readonly a=(1 2 3) or readonly -a a=(1 2 3)
                 let arr = parse_array_literal(value);
                 shell.arrays.insert(vname.to_string(), arr);
             } else {
