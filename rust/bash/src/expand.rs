@@ -579,7 +579,15 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                     }
                 }
             }
-            if !s.is_empty() {
+            // Push Quoted for DoubleQuoted — even empty strings create a field.
+            // EXCEPT when the only content was "$@" with no positional params,
+            // which should produce zero fields, not one empty field.
+            let only_at = parts
+                .iter()
+                .all(|p| matches!(p, WordPart::Variable(n) if n == "@"))
+                && !parts.is_empty();
+            let at_was_empty = only_at && s.is_empty() && ctx.positional.len() <= 1;
+            if !at_was_empty {
                 out.push(Segment::Quoted(s));
             }
         }
