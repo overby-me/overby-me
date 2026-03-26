@@ -3829,10 +3829,15 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
                         break;
                     }
                     'd' => {
-                        // -d takes next arg
-                        i += 1;
-                        if i < args.len() {
-                            delim = Some(args[i].chars().next().unwrap_or('\0'));
+                        // Check if delimiter char follows in same arg (e.g., -d\n)
+                        if j + 1 < fchars.len() {
+                            delim = Some(fchars[j + 1]);
+                        } else {
+                            // -d takes next arg
+                            i += 1;
+                            if i < args.len() {
+                                delim = Some(args[i].chars().next().unwrap_or('\0'));
+                            }
                         }
                         break;
                     }
@@ -3843,7 +3848,7 @@ fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
                         }
                         break;
                     }
-                    'n' => {
+                    'n' | 'N' => {
                         i += 1;
                         if i < args.len() {
                             match args[i].parse::<i64>() {
