@@ -962,13 +962,103 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                             continue;
                         }
                         '"' => {
-                            // Double-quoted string — skip but handle $() inside
+                            // Double-quoted string — skip but handle $() and ${} inside
                             cmd.push(chars[*i]);
                             *i += 1;
                             while *i < chars.len() && chars[*i] != '"' {
                                 if chars[*i] == '\\' && *i + 1 < chars.len() {
                                     cmd.push(chars[*i]);
                                     *i += 1;
+                                    cmd.push(chars[*i]);
+                                    *i += 1;
+                                    continue;
+                                }
+                                if chars[*i] == '$' && *i + 1 < chars.len() {
+                                    if chars[*i + 1] == '(' {
+                                        // Nested $() inside dquotes — track paren depth
+                                        cmd.push(chars[*i]);
+                                        *i += 1;
+                                        cmd.push(chars[*i]);
+                                        *i += 1;
+                                        let mut inner_depth = 1i32;
+                                        while *i < chars.len() && inner_depth > 0 {
+                                            match chars[*i] {
+                                                '(' => inner_depth += 1,
+                                                ')' => {
+                                                    inner_depth -= 1;
+                                                    if inner_depth == 0 {
+                                                        cmd.push(chars[*i]);
+                                                        *i += 1;
+                                                        break;
+                                                    }
+                                                }
+                                                '"' => {
+                                                    // Nested dquotes inside inner $()
+                                                    cmd.push(chars[*i]);
+                                                    *i += 1;
+                                                    while *i < chars.len() && chars[*i] != '"' {
+                                                        if chars[*i] == '\\' && *i + 1 < chars.len()
+                                                        {
+                                                            cmd.push(chars[*i]);
+                                                            *i += 1;
+                                                        }
+                                                        cmd.push(chars[*i]);
+                                                        *i += 1;
+                                                    }
+                                                    if *i < chars.len() {
+                                                        cmd.push(chars[*i]);
+                                                        *i += 1;
+                                                    }
+                                                    continue;
+                                                }
+                                                '\'' => {
+                                                    cmd.push(chars[*i]);
+                                                    *i += 1;
+                                                    while *i < chars.len() && chars[*i] != '\'' {
+                                                        cmd.push(chars[*i]);
+                                                        *i += 1;
+                                                    }
+                                                    if *i < chars.len() {
+                                                        cmd.push(chars[*i]);
+                                                        *i += 1;
+                                                    }
+                                                    continue;
+                                                }
+                                                _ => {}
+                                            }
+                                            if *i < chars.len() && inner_depth > 0 {
+                                                cmd.push(chars[*i]);
+                                                *i += 1;
+                                            }
+                                        }
+                                        continue;
+                                    } else if chars[*i + 1] == '{' {
+                                        // Nested ${} inside dquotes — track brace depth
+                                        cmd.push(chars[*i]);
+                                        *i += 1;
+                                        cmd.push(chars[*i]);
+                                        *i += 1;
+                                        let mut inner_depth = 1i32;
+                                        while *i < chars.len() && inner_depth > 0 {
+                                            match chars[*i] {
+                                                '{' => inner_depth += 1,
+                                                '}' => {
+                                                    inner_depth -= 1;
+                                                    if inner_depth == 0 {
+                                                        cmd.push(chars[*i]);
+                                                        *i += 1;
+                                                        break;
+                                                    }
+                                                }
+                                                _ => {}
+                                            }
+                                            if *i < chars.len() && inner_depth > 0 {
+                                                cmd.push(chars[*i]);
+                                                *i += 1;
+                                            }
+                                        }
+                                        continue;
+                                    }
                                 }
                                 cmd.push(chars[*i]);
                                 *i += 1;
