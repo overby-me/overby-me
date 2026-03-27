@@ -803,6 +803,11 @@
           systemd-run --wait --pipe --uid=testuser \
                       bash -xec '[[ "$USER" == testuser && "$HOME" == /home/testuser && -n "$SHELL" ]]'
 
+          : "Transient service with --nice"
+          systemd-run --wait --pipe \
+                      --nice=10 \
+                      bash -xec 'read -r -a SELF_STAT </proc/self/stat && [[ "''${SELF_STAT[18]}" -eq 10 ]]'
+
           : "Verbose mode (-v)"
           systemd-run -v echo wampfl | grep wampfl
 

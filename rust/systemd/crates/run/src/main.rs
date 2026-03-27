@@ -119,6 +119,10 @@ struct Cli {
     #[arg(long)]
     send_sighup: bool,
 
+    /// Set the nice level of the spawned process.
+    #[arg(long, value_name = "NICE", allow_hyphen_values = true)]
+    nice: Option<i32>,
+
     /// Suppress informational messages, only show errors.
     #[arg(short = 'q', long)]
     quiet: bool,
@@ -353,6 +357,10 @@ fn print_unit_info(cli: &Cli, unit_name: &str) {
         eprintln!("Environment: {env}");
     }
 
+    if let Some(nice) = cli.nice {
+        eprintln!("Nice: {nice}");
+    }
+
     if cli.remain_after_exit {
         eprintln!("RemainAfterExit: yes");
     }
@@ -422,6 +430,17 @@ fn apply_process_properties(cli: &Cli) -> Result<(), String> {
         unsafe { std::env::set_var("HOME", &home) };
     }
 
+    // Apply nice level
+    if let Some(nice) = cli.nice {
+        let ret = unsafe { libc::setpriority(libc::PRIO_PROCESS, 0, nice) };
+        if ret != 0 {
+            return Err(format!(
+                "Failed to set nice level to {nice}: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+    }
+
     // Apply working directory
     if let Some(ref wd) = cli.working_directory {
         std::env::set_current_dir(wd)
@@ -487,6 +506,10 @@ fn try_create_transient_unit(
 
     if let Some(ref gid) = cli.gid {
         properties.insert("group".into(), Value::String(gid.clone()));
+    }
+
+    if let Some(nice) = cli.nice {
+        properties.insert("nice".into(), Value::Number(nice.into()));
     }
 
     if let Some(ref wd) = cli.working_directory {

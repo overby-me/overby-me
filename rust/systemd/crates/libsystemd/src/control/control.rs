@@ -208,6 +208,8 @@ pub struct TransientUnitParams {
     pub path_properties: Vec<String>,
     /// Socket properties (e.g. ListenFIFO=/tmp/foo).
     pub socket_properties: Vec<String>,
+    /// Nice level for the spawned process.
+    pub nice: Option<i32>,
 }
 
 #[derive(Debug)]
@@ -673,6 +675,7 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
                                 .collect()
                         })
                         .unwrap_or_default();
+                    let nice = obj.get("nice").and_then(|v| v.as_i64()).map(|n| n as i32);
 
                     Command::StartTransient(TransientUnitParams {
                         unit_name,
@@ -700,6 +703,7 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
                         timer_properties,
                         path_properties,
                         socket_properties,
+                        nice,
                     })
                 }
                 Some(_) | None => {
@@ -2157,6 +2161,10 @@ fn write_transient_service_file(
         writeln!(f, "User={user}")?;
     }
 
+    if let Some(nice) = params.nice {
+        writeln!(f, "Nice={nice}")?;
+    }
+
     if let Some(ref group) = params.group {
         writeln!(f, "Group={group}")?;
     }
@@ -2446,7 +2454,7 @@ fn create_transient_unit(
         io_scheduling_priority: None,
         umask: None,
         proc_subset: crate::units::ProcSubset::All,
-        nice: None,
+        nice: params.nice,
         remove_ipc: false,
         pam_name: None,
         limit_core: None,
@@ -2999,6 +3007,11 @@ fn create_transient_unit(
                 "Before" => {
                     for u in value.split_whitespace() {
                         dep_before.push(u.to_string());
+                    }
+                }
+                "Nice" => {
+                    if let Ok(n) = value.parse::<i32>() {
+                        service_conf.exec_config.nice = Some(n);
                     }
                 }
                 _ => {
