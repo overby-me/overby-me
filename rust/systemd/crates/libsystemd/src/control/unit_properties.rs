@@ -128,6 +128,8 @@ pub fn collect_properties(unit: &Unit) -> BTreeMap<String, String> {
                         &svc.conf,
                     )),
                 );
+                // ControlPID (ExecStop/ExecStopPost process — not tracked separately)
+                insert(&mut props, "ControlPID", "0");
                 if let Some(pid) = state.srvc.pid {
                     insert(&mut props, "MainPID", &pid.to_string());
                 } else {
@@ -310,6 +312,10 @@ pub fn collect_properties(unit: &Unit) -> BTreeMap<String, String> {
                 "SendSIGHUP",
                 if svc.conf.send_sighup { "yes" } else { "no" },
             );
+            // CleanResult / ReloadResult — always "success" (cleaning/reload
+            // failures not tracked yet)
+            insert(&mut props, "CleanResult", "success");
+            insert(&mut props, "ReloadResult", "success");
         }
         Specific::Socket(sock) => {
             insert_socket_config(&mut props, &sock.conf);
