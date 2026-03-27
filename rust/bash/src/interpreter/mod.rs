@@ -308,6 +308,7 @@ pub struct Shell {
     /// Generic shopt options storage for options not yet individually tracked
     pub shopt_options: HashMap<String, bool>,
     pub in_pipeline_child: bool,
+    pub in_foreground_wait: bool, // suppress SIGCHLD trap during foreground waits
     pub dash_c_mode: bool,
     pub loop_depth: i32,
     /// Original top-level arithmetic expression for error reporting
@@ -460,6 +461,7 @@ impl Shell {
             shopt_expand_aliases: false,
             shopt_options: HashMap::new(),
             in_pipeline_child: false,
+            in_foreground_wait: false,
             dash_c_mode: false,
             loop_depth: 0,
             arith_top_expr: None,

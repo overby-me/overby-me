@@ -1797,7 +1797,8 @@ impl Shell {
                 }
                 Ok(nix::unistd::ForkResult::Parent { child }) => {
                     // Wait for child, but check for pending signals on EINTR
-                    loop {
+                    self.in_foreground_wait = true;
+                    let result = loop {
                         match nix::sys::wait::waitpid(
                             child,
                             Some(nix::sys::wait::WaitPidFlag::WNOHANG),
@@ -1819,7 +1820,9 @@ impl Shell {
                             Err(_) => break 1,
                             _ => break 1,
                         }
-                    }
+                    };
+                    self.in_foreground_wait = false;
+                    result
                 }
                 Err(e) => {
                     eprintln!("bash: fork: {}", e);
