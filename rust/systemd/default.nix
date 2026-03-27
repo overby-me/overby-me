@@ -767,6 +767,30 @@
                       --working-directory=/tmp \
                       bash -xec '[[ "$PWD" == /tmp ]]'
 
+          : "Transient service with uid/gid"
+          systemd-run --wait --pipe \
+                      --uid=testuser \
+                      bash -xec '[[ "$(id -nu)" == testuser && "$(id -ng)" == testuser ]]'
+          systemd-run --wait --pipe \
+                      --gid=testuser \
+                      bash -xec '[[ "$(id -nu)" == root && "$(id -ng)" == testuser ]]'
+          systemd-run --wait --pipe \
+                      --uid=testuser \
+                      --gid=root \
+                      bash -xec '[[ "$(id -nu)" == testuser && "$(id -ng)" == root ]]'
+
+          : "Transient service with environment variables"
+          export PARENT_FOO=bar
+          systemd-run --wait --pipe \
+                      --setenv=ENV_HELLO="nope" \
+                      --setenv=ENV_HELLO="env world" \
+                      --setenv=EMPTY= \
+                      --setenv=PARENT_FOO \
+                      bash -xec '[[ "$ENV_HELLO" == "env world" && -z "$EMPTY" && "$PARENT_FOO" == bar ]]'
+
+          : "Verbose mode (-v)"
+          systemd-run -v echo wampfl | grep wampfl
+
           : "Transient service with --remain-after-exit and systemctl cat"
           UNIT="service-0-$RANDOM"
           systemd-run --remain-after-exit --unit="$UNIT" \

@@ -530,14 +530,25 @@ fn try_create_transient_unit(
         properties.insert("properties".into(), Value::Array(props));
     }
 
-    // Pass environment variables
+    // Pass environment variables (resolve pass-through vars client-side)
     if !cli.setenv.is_empty() {
         let envs: Vec<Value> = cli
             .setenv
             .iter()
-            .map(|s| Value::String(s.clone()))
+            .filter_map(|s| {
+                if s.contains('=') {
+                    Some(Value::String(s.clone()))
+                } else {
+                    // Pass-through: resolve from current environment
+                    std::env::var(s)
+                        .ok()
+                        .map(|val| Value::String(format!("{s}={val}")))
+                }
+            })
             .collect();
-        properties.insert("environment".into(), Value::Array(envs));
+        if !envs.is_empty() {
+            properties.insert("environment".into(), Value::Array(envs));
+        }
     }
 
     // Pass timer properties

@@ -223,18 +223,25 @@ in
       '';
 
       users = {
-        users.nixos = {
-          isNormalUser = true;
-          extraGroups = ["wheel"];
-          password = "nixos";
-        };
-
-        # The "daemon" user/group is expected by upstream test scripts (e.g. TEST-22-TMPFILES).
-        users.daemon = {
-          isSystemUser = true;
-          group = "daemon";
+        users = {
+          nixos = {
+            isNormalUser = true;
+            extraGroups = ["wheel"];
+            password = "nixos";
+          };
+          # The "daemon" user/group is expected by upstream test scripts (e.g. TEST-22-TMPFILES).
+          daemon = {
+            isSystemUser = true;
+            group = "daemon";
+          };
+          # The "testuser" user/group is used by TEST-74-AUX-UTILS uid/gid tests.
+          testuser = {
+            isNormalUser = true;
+            group = "testuser";
+          };
         };
         groups.daemon = {};
+        groups.testuser = {};
       };
 
       # Give the VM enough resources for tests

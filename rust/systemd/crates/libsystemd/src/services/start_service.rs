@@ -45,6 +45,28 @@ pub fn resolve_gid(group: &Option<String>) -> Result<libc::gid_t, String> {
     }
 }
 
+/// Resolve a Group= value, falling back to the User='s primary group if
+/// `group` is `None` but `user` is `Some`. This matches systemd behavior
+/// where setting User= without Group= runs the service with the user's
+/// primary group.
+fn resolve_gid_with_user_fallback(
+    group: &Option<String>,
+    user: &Option<String>,
+) -> Result<libc::gid_t, String> {
+    if group.is_some() {
+        return resolve_gid(group);
+    }
+    if let Some(user_str) = user {
+        // Look up the user's primary group
+        if user_str.parse::<u32>().is_err() {
+            let pwentry = crate::platform::pwnam::getpwnam_r(user_str)
+                .map_err(|_| format!("Couldn't resolve user for group fallback: {user_str}"))?;
+            return Ok(pwentry.gid.as_raw());
+        }
+    }
+    resolve_gid(group)
+}
+
 /// Resolve a list of SupplementaryGroups= values to raw `gid_t` values.
 fn resolve_supplementary_gids(groups: &[String]) -> Result<Vec<libc::gid_t>, String> {
     groups
@@ -343,7 +365,7 @@ fn start_service_with_filedescriptors(
 
             env
         },
-        group: resolve_gid(&conf.exec_config.group)
+        group: resolve_gid_with_user_fallback(&conf.exec_config.group, &conf.exec_config.user)
             .map_err(|e| RunCmdError::SpawnError(name.to_owned(), e))?,
         supplementary_groups: resolve_supplementary_gids(&conf.exec_config.supplementary_groups)
             .map_err(|e| RunCmdError::SpawnError(name.to_owned(), e))?,
