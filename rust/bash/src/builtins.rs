@@ -1178,6 +1178,7 @@ fn builtin_export(shell: &mut Shell, args: &[String]) -> i32 {
     let mut unexport = false;
     let mut export_funcs = false;
     let mut print_mode = false;
+    let mut array_mode = false;
     let mut names = Vec::new();
     for arg in args {
         match arg.as_str() {
@@ -1188,7 +1189,11 @@ fn builtin_export(shell: &mut Shell, args: &[String]) -> i32 {
                 unexport = true;
                 export_funcs = true;
             }
-            a if a.starts_with('-') => {}
+            a if a.starts_with('-') => {
+                if a.contains('a') {
+                    array_mode = true;
+                }
+            }
             _ => names.push(arg.clone()),
         }
     }
@@ -1237,8 +1242,8 @@ fn builtin_export(shell: &mut Shell, args: &[String]) -> i32 {
             } else {
                 (&arg[..eq_pos], &arg[eq_pos + 1..], false)
             };
-            if !is_append && value.starts_with('(') && value.ends_with(')') {
-                // Array assignment: export r=(4)
+            if array_mode && value.starts_with('(') && value.ends_with(')') {
+                // -a flag with (value): parse as array
                 let arr = parse_array_literal(value);
                 let export_val = arr.first().cloned().unwrap_or_default();
                 shell.arrays.insert(name.to_string(), arr);
@@ -1436,6 +1441,7 @@ fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
 fn builtin_readonly(shell: &mut Shell, args: &[String]) -> i32 {
     let mut func_mode = false;
     let mut print_mode = false;
+    let mut array_mode = false;
     let mut names = Vec::new();
 
     for arg in args {
@@ -1444,7 +1450,7 @@ fn builtin_readonly(shell: &mut Shell, args: &[String]) -> i32 {
                 match ch {
                     'f' => func_mode = true,
                     'p' => print_mode = true,
-                    'a' => {}       // array flag accepted
+                    'a' => array_mode = true,
                     'A' | 'n' => {} // assoc/nameref flags accepted
                     _ => {
                         eprintln!(
@@ -1525,26 +1531,32 @@ fn builtin_readonly(shell: &mut Shell, args: &[String]) -> i32 {
                     let existing = shell.vars.get(vname).cloned().unwrap_or_default();
                     shell.set_var(vname, format!("{}{}", existing, value));
                 }
-            } else if value.starts_with('(') && value.ends_with(')') {
-                // Treat (value) as array assignment: readonly a=(1 2 3)
+            } else {
+                // For quoted args (which reach here after parser-level handles unquoted),
+                // assign as scalar. If the variable is already an array, set array[0].
                 if shell.readonly_vars.contains(vname) {
-                    if let Some(fname) = shell.func_names.last() {
-                        eprintln!(
-                            "{}: {}: {}: readonly variable",
-                            shell.error_prefix(),
-                            fname,
-                            vname
-                        );
-                    } else {
-                        eprintln!("{}: {}: readonly variable", shell.error_prefix(), vname);
-                    }
+                    eprintln!(
+                        "{}: readonly: {}: readonly variable",
+                        shell.error_prefix(),
+                        vname
+                    );
                     status = 1;
-                } else {
+                } else if array_mode && value.starts_with('(') && value.ends_with(')') {
+                    // -a flag with (value): parse as array
                     let arr = parse_array_literal(value);
                     shell.arrays.insert(vname.to_string(), arr);
+                } else if shell.arrays.contains_key(vname) {
+                    // Existing array: assign to element 0
+                    if let Some(arr) = shell.arrays.get_mut(vname) {
+                        if arr.is_empty() {
+                            arr.push(value.to_string());
+                        } else {
+                            arr[0] = value.to_string();
+                        }
+                    }
+                } else {
+                    shell.set_var(vname, value.to_string());
                 }
-            } else {
-                shell.set_var(vname, value.to_string());
             }
             shell.readonly_vars.insert(vname.to_string());
         } else {

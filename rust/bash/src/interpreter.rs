@@ -2543,20 +2543,8 @@ impl Shell {
                         {
                             // Perform the array assignment
                             if self.readonly_vars.contains(name) {
-                                if let Some(fname) = self.func_names.last() {
-                                    eprintln!(
-                                        "{}: {}: {}: readonly variable",
-                                        self.error_prefix(),
-                                        fname,
-                                        name
-                                    );
-                                } else {
-                                    eprintln!(
-                                        "{}: {}: readonly variable",
-                                        self.error_prefix(),
-                                        name
-                                    );
-                                }
+                                // Parser-level assignment error: no builtin/function prefix
+                                eprintln!("{}: {}: readonly variable", self.error_prefix(), name);
                                 self.last_status = 1;
                             } else {
                                 let arr = crate::builtins::parse_array_literal(value);
