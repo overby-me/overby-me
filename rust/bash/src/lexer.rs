@@ -2347,16 +2347,25 @@ fn read_param_word_impl(chars: &[char], i: &mut usize, delim: char, in_dquote: b
                 }
                 *i += 1;
                 let mut cmd = String::new();
+                let mut in_squote = false;
                 while *i < chars.len() && chars[*i] != '`' {
-                    if chars[*i] == '\\' && *i + 1 < chars.len() {
+                    if in_squote {
+                        if chars[*i] == '\'' {
+                            in_squote = false;
+                        }
+                        cmd.push(chars[*i]);
+                        *i += 1;
+                    } else if chars[*i] == '\'' {
+                        in_squote = true;
+                        cmd.push(chars[*i]);
+                        *i += 1;
+                    } else if chars[*i] == '\\' && *i + 1 < chars.len() {
                         let next = chars[*i + 1];
                         if matches!(next, '$' | '`' | '\\') {
-                            // \\→\, \`→`, \$→$ (processed first)
                             cmd.push(next);
                             *i += 2;
                         } else if next == '\n' {
-                            // \<newline> is line continuation — remove both
-                            // This applies regardless of quoting context (lexical)
+                            // \<newline> line continuation (only outside quotes)
                             *i += 2;
                         } else {
                             cmd.push(chars[*i]);
