@@ -665,8 +665,14 @@ impl Lexer {
                         quoted = true;
                         self.advance();
                         if let Some(next) = self.peek() {
-                            delimiter.push(next);
-                            self.advance();
+                            if next == '\n' {
+                                // Line continuation: \<newline> is discarded, join next line
+                                self.advance();
+                                self.line += 1;
+                            } else {
+                                delimiter.push(next);
+                                self.advance();
+                            }
                         }
                     } else if ch == '\'' {
                         // Single-quoted portion of delimiter
