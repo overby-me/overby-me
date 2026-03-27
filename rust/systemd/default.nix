@@ -766,12 +766,9 @@
                TEST-74-AUX-UTILS.pty-forward.sh \
                TEST-74-AUX-UTILS.mute-console.sh \
                TEST-74-AUX-UTILS.ask-password.sh \
-               TEST-74-AUX-UTILS.battery-check.sh \
                TEST-74-AUX-UTILS.userdbctl.sh \
                TEST-74-AUX-UTILS.mount.sh \
-               TEST-74-AUX-UTILS.sysusers.sh \
-               TEST-74-AUX-UTILS.defer_reactivation.sh \
-               TEST-74-AUX-UTILS.socket.sh
+               TEST-74-AUX-UTILS.sysusers.sh
         '';
         extraPackages = pkgs: [pkgs.openssl];
       }
