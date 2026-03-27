@@ -3037,6 +3037,16 @@ fn create_transient_unit(
                         service_conf.exec_config.nice = Some(n);
                     }
                 }
+                "UMask" => {
+                    if let Ok(m) = u32::from_str_radix(value.trim(), 8) {
+                        service_conf.exec_config.umask = Some(m);
+                    }
+                }
+                "OOMScoreAdjust" => {
+                    if let Ok(n) = value.parse::<i32>() {
+                        service_conf.exec_config.oom_score_adjust = Some(n);
+                    }
+                }
                 "LimitCPU" => {
                     service_conf.exec_config.limit_cpu =
                         crate::units::unit_parsing::parse_resource_limit(value);

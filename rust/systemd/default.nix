@@ -356,9 +356,13 @@
           perl -i -pe 's{"\/"$}{"/var/empty"}' TEST-07-PID1.working-directory.sh
           # Ensure /home/testuser exists (NixOS creates it via users-groups.service)
           sed -i '3a mkdir -p /home/testuser && chown testuser:testuser /home/testuser' TEST-07-PID1.working-directory.sh
-          # Rewrite exec-context test: keep ProtectSystem, ProtectHome, and Limit tests.
-          # Remove PrivateMounts/MountAPIVFS, ProtectProc, ProcSubset, ProtectKernelLogs,
-          # BindPaths, RestrictFileSystems, DynamicUser, env file serialization,
+          # Rewrite exec-context test: keep ProtectSystem, ProtectHome, Limit,
+          # directory (Runtime/State/Cache/Logs/Configuration), PrivateTmp,
+          # PrivateDevices, ProtectKernel*, ProtectControlGroups, ProtectHostname,
+          # Bind/ReadOnly/Inaccessible paths, TemporaryFileSystem, ReadWritePaths,
+          # UMask, Nice, and OOMScoreAdjust tests.
+          # Remove PrivateMounts/MountAPIVFS, ProtectProc, ProcSubset,
+          # RestrictFileSystems, DynamicUser, env file serialization,
           # IO/CPU/Device directives, SocketBind, and RestrictNamespaces sections.
           cat > TEST-07-PID1.exec-context.sh << 'TESTEOF'
           #!/usr/bin/env bash
@@ -420,6 +424,101 @@
                          : MSGQUEUE;   [[ $(ulimit -Sq) -eq 666 ]];          [[ $(ulimit -Hq) -eq 666 ]];
                          : NICE;       [[ $(ulimit -Se) -eq 4 ]];            [[ $(ulimit -He) -eq 4 ]];
                          : RTPRIO;     [[ $(ulimit -Sr) -eq 8 ]];            [[ $(ulimit -Hr) -eq 8 ]];'
+
+          : "RuntimeDirectory= tests"
+          systemd-run --wait --pipe -p RuntimeDirectory=exec-ctx-test \
+              bash -xec '[[ -d /run/exec-ctx-test ]]; [[ "$RUNTIME_DIRECTORY" == /run/exec-ctx-test ]]'
+
+          : "StateDirectory= tests"
+          systemd-run --wait --pipe -p StateDirectory=exec-ctx-test \
+              bash -xec '[[ -d /var/lib/exec-ctx-test ]]; [[ "$STATE_DIRECTORY" == /var/lib/exec-ctx-test ]]'
+          rm -rf /var/lib/exec-ctx-test
+
+          : "CacheDirectory= tests"
+          systemd-run --wait --pipe -p CacheDirectory=exec-ctx-test \
+              bash -xec '[[ -d /var/cache/exec-ctx-test ]]; [[ "$CACHE_DIRECTORY" == /var/cache/exec-ctx-test ]]'
+          rm -rf /var/cache/exec-ctx-test
+
+          : "LogsDirectory= tests"
+          systemd-run --wait --pipe -p LogsDirectory=exec-ctx-test \
+              bash -xec '[[ -d /var/log/exec-ctx-test ]]; [[ "$LOGS_DIRECTORY" == /var/log/exec-ctx-test ]]'
+          rm -rf /var/log/exec-ctx-test
+
+          : "ConfigurationDirectory= tests"
+          systemd-run --wait --pipe -p ConfigurationDirectory=exec-ctx-test \
+              bash -xec '[[ -d /etc/exec-ctx-test ]]; [[ "$CONFIGURATION_DIRECTORY" == /etc/exec-ctx-test ]]'
+          rm -rf /etc/exec-ctx-test
+
+          : "PrivateTmp= tests"
+          touch /tmp/exec-ctx-marker
+          systemd-run --wait --pipe -p PrivateTmp=yes \
+              bash -xec '[[ ! -e /tmp/exec-ctx-marker ]]; touch /tmp/private-marker; [[ -e /tmp/private-marker ]]'
+          [[ -e /tmp/exec-ctx-marker ]]
+          rm -f /tmp/exec-ctx-marker
+
+          : "PrivateDevices= tests"
+          systemd-run --wait --pipe -p PrivateDevices=yes \
+              bash -xec '[[ -e /dev/null ]]; [[ -e /dev/zero ]]; (! [[ -e /dev/sda ]] 2>/dev/null || true)'
+
+          : "ProtectKernelTunables= tests"
+          systemd-run --wait --pipe -p ProtectKernelTunables=yes \
+              bash -xec '(! touch /proc/sys/kernel/domainname 2>/dev/null)'
+
+          : "ProtectKernelModules= tests"
+          systemd-run --wait --pipe -p ProtectKernelModules=yes \
+              bash -xec '(! ls /usr/lib/modules 2>/dev/null)'
+
+          : "ProtectControlGroups= tests"
+          systemd-run --wait --pipe -p ProtectControlGroups=yes \
+              bash -xec '(! touch /sys/fs/cgroup/test-file 2>/dev/null)'
+
+          : "ProtectKernelLogs= tests"
+          systemd-run --wait --pipe -p ProtectKernelLogs=yes \
+              bash -xec '[[ "$(stat -c %t:%T /dev/kmsg)" == "$(stat -c %t:%T /dev/null)" ]]'
+
+          : "BindPaths= tests"
+          mkdir -p /tmp/bind-source
+          echo "bind-test" > /tmp/bind-source/marker
+          systemd-run --wait --pipe -p BindPaths="/tmp/bind-source:/tmp/bind-target" \
+              bash -xec '[[ "$(cat /tmp/bind-target/marker)" == "bind-test" ]]'
+          rm -rf /tmp/bind-source
+
+          : "BindReadOnlyPaths= tests"
+          mkdir -p /tmp/bind-ro-source
+          echo "bind-ro-test" > /tmp/bind-ro-source/marker
+          systemd-run --wait --pipe -p BindReadOnlyPaths="/tmp/bind-ro-source:/tmp/bind-ro-target" \
+              bash -xec '[[ "$(cat /tmp/bind-ro-target/marker)" == "bind-ro-test" ]]'
+          rm -rf /tmp/bind-ro-source
+
+          : "InaccessiblePaths= tests"
+          mkdir -p /tmp/inaccessible-test
+          echo "secret" > /tmp/inaccessible-test/data
+          systemd-run --wait --pipe -p InaccessiblePaths="/tmp/inaccessible-test" \
+              bash -xec '(! cat /tmp/inaccessible-test/data 2>/dev/null)'
+          rm -rf /tmp/inaccessible-test
+
+          : "TemporaryFileSystem= tests"
+          systemd-run --wait --pipe -p TemporaryFileSystem="/tmp/tmpfs-test" \
+              bash -xec '[[ -d /tmp/tmpfs-test ]]; touch /tmp/tmpfs-test/file; [[ -e /tmp/tmpfs-test/file ]]'
+
+          : "ReadWritePaths= with ProtectSystem=strict tests"
+          mkdir -p /tmp/rw-test
+          systemd-run --wait --pipe -p ProtectSystem=strict -p ReadWritePaths="/tmp/rw-test" \
+              bash -xec 'touch /tmp/rw-test/new-file; [[ -e /tmp/rw-test/new-file ]]; (! touch /etc/should-fail 2>/dev/null)'
+          rm -rf /tmp/rw-test
+
+          : "UMask= tests"
+          systemd-run --wait --pipe -p UMask=0077 \
+              bash -xec 'touch /tmp/umask-test; [[ "$(stat -c %a /tmp/umask-test)" == "600" ]]'
+          rm -f /tmp/umask-test
+
+          : "Nice= tests"
+          systemd-run --wait --pipe -p Nice=15 \
+              bash -xec 'read -r -a SELF_STAT </proc/self/stat; [[ "''${SELF_STAT[18]}" -eq 15 ]]'
+
+          : "OOMScoreAdjust= tests"
+          systemd-run --wait --pipe -p OOMScoreAdjust=500 \
+              bash -xec '[[ "$(cat /proc/self/oom_score_adj)" == "500" ]]'
 
           : "Error handling for clean-up codepaths"
           (! systemd-run --wait --pipe false)
