@@ -222,6 +222,7 @@ fn run() -> i32 {
     // Execute based on mode
     if let Some(cmd) = command_string {
         shell.dash_c_mode = true;
+        shell.vars.insert("_BASH_C_STRING".to_string(), cmd.clone());
         let status = shell.run_string(&cmd);
         shell.run_exit_trap();
         return status;

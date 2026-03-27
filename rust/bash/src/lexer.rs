@@ -960,6 +960,7 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                 let mut brace_depth = 0i32; // track ${...} nesting
                 let mut cmd = String::new();
                 let mut case_depth = 0i32;
+                let mut compound_depth = 0i32; // tracks do/done, then/fi nesting
                 while *i < chars.len() && depth > 0 {
                     match chars[*i] {
                         '\'' if !in_dquote || brace_depth > 0 => {
@@ -1110,7 +1111,7 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                             }
                         }
                         ')' => {
-                            if case_depth <= 0 {
+                            if case_depth <= 0 && compound_depth <= 0 {
                                 depth -= 1;
                                 if depth == 0 {
                                     *i += 1;
@@ -1168,6 +1169,16 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                             case_depth += 1;
                         } else if kw == "esac" || word == "esac" {
                             case_depth -= 1;
+                        }
+                        // Track compound commands (do/done, then/fi) to prevent ) from
+                        // closing the comsub when inside an incomplete compound
+                        if matches!(kw, "do" | "then") {
+                            compound_depth += 1;
+                        } else if (matches!(kw, "done" | "fi")
+                            || matches!(word.as_str(), "done" | "fi"))
+                            && compound_depth > 0
+                        {
+                            compound_depth -= 1;
                         }
                         // Count ( and ) in alias expansion to adjust depth
                         if let Some(ref exp) = effective {

@@ -290,6 +290,8 @@ pub struct Shell {
     pub dir_stack: Vec<String>,
     pub func_names: Vec<String>,
     pub traps: HashMap<String, String>,
+    /// True when running inside a command substitution (for error messages)
+    pub in_comsub: bool,
     /// Signals that were ignored (SIG_IGN) at shell startup — cannot be trapped
     pub original_ignored_signals: HashSet<String>,
     pub namerefs: HashMap<String, String>,
@@ -448,6 +450,7 @@ impl Shell {
             dir_stack: Vec::new(),
             func_names: Vec::new(),
             traps: HashMap::new(),
+            in_comsub: false,
             original_ignored_signals: HashSet::new(),
             namerefs: HashMap::new(),
             local_scopes: Vec::new(),
@@ -761,10 +764,16 @@ impl Shell {
                         return 2;
                     }
                     let token = parser.current_token_str();
+                    let comsub_suffix = if self.in_comsub {
+                        " while looking for matching `)'"
+                    } else {
+                        ""
+                    };
                     eprintln!(
-                        "{}: syntax error near unexpected token `{}'",
+                        "{}: syntax error near unexpected token `{}'{}",
                         self.syntax_error_prefix(),
-                        token
+                        token,
+                        comsub_suffix
                     );
                     let lineno: usize = self
                         .vars
@@ -916,7 +925,12 @@ impl Shell {
                     } else if let Some(msg) = e.strip_prefix("RUNTIME:") {
                         eprintln!("{}: {}", self.error_prefix(), msg);
                     } else if self.dash_c_mode {
-                        eprintln!("{}: {}", self.syntax_error_prefix(), e);
+                        let comsub_suffix = if self.in_comsub && e.contains("syntax error") {
+                            " while looking for matching `)'"
+                        } else {
+                            ""
+                        };
+                        eprintln!("{}: {}{}", self.syntax_error_prefix(), e, comsub_suffix);
                         if e.contains("syntax error") {
                             // Show the line where the error occurred
                             let lineno: usize = self
@@ -924,10 +938,22 @@ impl Shell {
                                 .get("LINENO")
                                 .and_then(|s| s.parse().ok())
                                 .unwrap_or(1);
-                            let line = input
-                                .lines()
-                                .nth(lineno.saturating_sub(1))
-                                .unwrap_or(input.lines().next().unwrap_or(input));
+                            // Use outer -c string when in comsub for source line display
+                            let display_source = if self.in_comsub {
+                                self.vars.get("_BASH_C_STRING").cloned()
+                            } else {
+                                None
+                            };
+                            let line = if let Some(ref src) = display_source {
+                                src.lines()
+                                    .nth(lineno.saturating_sub(1))
+                                    .unwrap_or(src.lines().next().unwrap_or(src))
+                            } else {
+                                input
+                                    .lines()
+                                    .nth(lineno.saturating_sub(1))
+                                    .unwrap_or(input.lines().next().unwrap_or(input))
+                            };
                             // "syntax error: X" → second line gets "syntax error: `...'"
                             // "syntax error near X" → second line gets just "`...'"
                             if e.starts_with("syntax error:") {
@@ -1515,6 +1541,7 @@ impl Shell {
                         .and_then(|s| s.parse().ok())
                         .unwrap_or(1);
                     self.comsub_line_offset = lineno.saturating_sub(1);
+                    self.in_comsub = true;
                     let status = self.run_string(cmd_str);
                     std::io::Write::flush(&mut std::io::stdout()).ok();
                     std::process::exit(status);
@@ -2314,17 +2341,33 @@ impl Shell {
                 .iter()
                 .any(|f| f == "INCOMPLETE_COMSUB" || f.contains("INCOMPLETE_COMSUB"))
             {
-                let name = self
-                    .vars
-                    .get("_BASH_SOURCE_FILE")
-                    .or_else(|| self.positional.first())
-                    .map(|s| s.as_str())
-                    .unwrap_or("bash");
-                let lineno = self.vars.get("LINENO").map(|s| s.as_str()).unwrap_or("0");
-                eprintln!(
-                    "{}: command substitution: line {}: unexpected EOF while looking for matching `)'",
-                    name, lineno
-                );
+                if self.dash_c_mode {
+                    // In -c mode, report as syntax error near ')' with source line
+                    let prefix = self.syntax_error_prefix();
+                    eprintln!("{}: syntax error near unexpected token `)'", prefix);
+                    // Show the source line from the original -c input
+                    if let Some(src) = self.vars.get("_BASH_C_STRING") {
+                        let lineno: usize = self
+                            .vars
+                            .get("LINENO")
+                            .and_then(|s| s.parse().ok())
+                            .unwrap_or(1);
+                        let line = src.lines().nth(lineno.saturating_sub(1)).unwrap_or(src);
+                        eprintln!("{}: `{}'", prefix, line);
+                    }
+                } else {
+                    let name = self
+                        .vars
+                        .get("_BASH_SOURCE_FILE")
+                        .or_else(|| self.positional.first())
+                        .map(|s| s.as_str())
+                        .unwrap_or("bash");
+                    let lineno = self.vars.get("LINENO").map(|s| s.as_str()).unwrap_or("0");
+                    eprintln!(
+                        "{}: command substitution: line {}: unexpected EOF while looking for matching `)'",
+                        name, lineno
+                    );
+                }
                 return 1;
             }
             // Check if this word has unquoted tilde (for assignment tilde expansion)
