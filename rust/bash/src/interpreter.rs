@@ -1360,7 +1360,7 @@ impl Shell {
                     // Move pipe fds away from 0/1 to avoid conflicts with
                     // stdin/stdout (can happen if fd 0 or 1 was closed)
                     if rfd < 2 {
-                        let new = nix::fcntl::fcntl(rfd, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(10))
+                        let new = nix::fcntl::fcntl(rfd, nix::fcntl::FcntlArg::F_DUPFD(10))
                             .unwrap_or(rfd);
                         if new != rfd {
                             nix::unistd::close(rfd).ok();
@@ -1368,7 +1368,7 @@ impl Shell {
                         }
                     }
                     if wfd < 2 {
-                        let new = nix::fcntl::fcntl(wfd, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(10))
+                        let new = nix::fcntl::fcntl(wfd, nix::fcntl::FcntlArg::F_DUPFD(10))
                             .unwrap_or(wfd);
                         if new != wfd {
                             nix::unistd::close(wfd).ok();
