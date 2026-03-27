@@ -311,7 +311,8 @@ pub struct Shell {
     pub opt_noexec: bool,
     pub opt_posix: bool,
     pub opt_hashall: bool,
-    pub opt_monitor: bool, // set -m / set -o monitor (job control)
+    pub opt_monitor: bool,         // set -m / set -o monitor (job control)
+    pub exec_stdin_redirect: bool, // set when exec 0< redirects stdin
     pub login_shell: bool,
     /// Name of the currently executing builtin (for error messages)
     pub current_builtin: Option<String>,
@@ -467,6 +468,7 @@ impl Shell {
             opt_posix: false,
             opt_hashall: true, // enabled by default
             opt_monitor: false,
+            exec_stdin_redirect: false,
             login_shell: false,
             current_builtin: None,
             opt_allexport: false,
@@ -876,6 +878,17 @@ impl Shell {
                         std::process::exit(self.last_status);
                     }
                     self.errexit_suppressed = false;
+                    // If exec redirected stdin, read the rest from new stdin
+                    if self.exec_stdin_redirect {
+                        self.exec_stdin_redirect = false;
+                        let mut new_input = String::new();
+                        use std::io::Read;
+                        std::io::stdin().read_to_string(&mut new_input).ok();
+                        if !new_input.is_empty() {
+                            status = self.run_string(&new_input);
+                        }
+                        return status;
+                    }
                     // Check for pending signals after each command
                     self.check_pending_signals();
                     if self.returning || self.breaking > 0 || self.continuing > 0 {
@@ -2812,6 +2825,13 @@ impl Shell {
         let is_exec_no_cmd = command_name == "exec" && args.is_empty();
         if !is_exec_no_cmd {
             self.restore_redirections(saved_fds);
+        } else {
+            // Check if stdin (fd 0) was redirected
+            for &(fd, _) in &saved_fds {
+                if fd == 0 {
+                    self.exec_stdin_redirect = true;
+                }
+            }
         }
 
         // Close any file descriptors opened by process substitutions
