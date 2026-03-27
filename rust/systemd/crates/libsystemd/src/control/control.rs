@@ -3069,54 +3069,27 @@ pub fn execute_command(
             // succeeded, and the exit handler runs asynchronously, so we
             // poll briefly to catch the failure status.
             {
-                let (is_oneshot, is_exec) = {
+                let is_oneshot = {
                     let ri = run_info.read_poisoned();
                     ri.unit_table
                         .get(&id)
                         .map(|u| {
                             if let Specific::Service(srvc) = &u.specific {
-                                (
-                                    srvc.conf.srcv_type == crate::units::ServiceType::OneShot,
-                                    srvc.conf.srcv_type == crate::units::ServiceType::Exec,
-                                )
+                                srvc.conf.srcv_type == crate::units::ServiceType::OneShot
                             } else {
-                                (false, false)
+                                false
                             }
                         })
-                        .unwrap_or((false, false))
+                        .unwrap_or(false)
                 };
 
-                // For Type=exec, poll briefly to let fork_parent's 50ms
-                // exec check and the exit handler update the unit status.
-                if is_exec {
-                    for _ in 0..10 {
-                        std::thread::sleep(std::time::Duration::from_millis(20));
-                        let ri = run_info.read_poisoned();
-                        if let Some(unit) = ri.unit_table.get(&id) {
-                            let status = unit.common.status.read_poisoned();
-                            match &*status {
-                                crate::units::UnitStatus::Stopped(
-                                    crate::units::StatusStopped::StoppedUnexpected,
-                                    errors,
-                                ) => {
-                                    let msg = if let Some(e) = errors.first() {
-                                        format!("{e}")
-                                    } else {
-                                        "unit failed".to_string()
-                                    };
-                                    return Err(format!(
-                                        "Failed to start transient unit {unit_name}: {msg}"
-                                    ));
-                                }
-                                crate::units::UnitStatus::Started(_)
-                                | crate::units::UnitStatus::Starting => {
-                                    break; // exec succeeded
-                                }
-                                _ => {} // still setting up, keep polling
-                            }
-                        }
-                    }
-                }
+                // For Type=exec, the start succeeds as long as exec()
+                // succeeded (the binary was found and executed).  The
+                // program's own exit code is handled by the normal exit
+                // handler — it should not cause the start command to
+                // fail.  Only exec failures (exit 203 from the exec
+                // helper) are caught synchronously in wait_for_service,
+                // so no additional polling is needed here.
 
                 if is_oneshot {
                     let ri = run_info.read_poisoned();

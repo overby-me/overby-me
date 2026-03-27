@@ -1863,7 +1863,11 @@ pub fn run_exec_helper() {
         Ok(_infallible) => unreachable!(),
         Err(e) => {
             log::error!("execv FAILED for {}: {}", cmd.to_string_lossy(), e,);
-            std::process::exit(1);
+            // Use EXIT_EXEC (203) so that the Type=exec check in
+            // wait_for_service can distinguish exec failures from
+            // normal program exits (which forward the program's own
+            // exit code).
+            std::process::exit(203);
         }
     }
 }

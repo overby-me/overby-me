@@ -171,10 +171,17 @@ pub fn wait_for_service(
             std::thread::sleep(exec_check_delay);
             {
                 let mut pid_table_locked = pid_table.lock_poisoned();
-                if let Some(PidEntry::ServiceExited(code)) = pid_table_locked.get(&pid)
-                    && !conf.success_exit_status.is_success(code)
+                // Only treat EXIT_EXEC (203) as a start failure — this
+                // is the code the exec helper uses when execv() itself
+                // fails (binary not found, permission denied, etc.).
+                // Any other exit code means exec() succeeded but the
+                // program exited quickly; that is handled by the normal
+                // exit handler, not the start path.
+                if let Some(PidEntry::ServiceExited(
+                    crate::signal_handler::ChildTermination::Exit(203),
+                )) = pid_table_locked.get(&pid)
                 {
-                    let code = *code;
+                    let code = crate::signal_handler::ChildTermination::Exit(203);
                     pid_table_locked.remove(&pid);
                     return Err(RunCmdError::BadExitCode(
                         conf.exec

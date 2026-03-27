@@ -342,17 +342,17 @@ impl ServiceState {
             }
             Err(e) => {
                 let mut status = status.write_poisoned();
-                // Only set StoppedUnexpected if the exit handler hasn't
-                // already transitioned the unit to Restarting.  For oneshot
-                // services, the exit handler thread runs concurrently and may
-                // have already decided to restart the unit by the time
-                // wait_for_service returns the BadExitCode error here.
-                if !matches!(&*status, UnitStatus::Restarting) {
-                    *status = UnitStatus::Stopped(
-                        StatusStopped::StoppedUnexpected,
-                        vec![e.reason.clone()],
-                    );
-                }
+                // Always set StoppedUnexpected on failure.  The service
+                // state lock is held by the caller (unit.activate /
+                // unit.reactivate), so the exit handler thread cannot
+                // concurrently modify the status — no guard needed.
+                // Previously a Restarting guard existed here, but it
+                // caused services restarted via the exit handler to get
+                // permanently stuck in "activating" (Restarting) when the
+                // reactivation path called activate() and the error path
+                // skipped the status update.
+                *status =
+                    UnitStatus::Stopped(StatusStopped::StoppedUnexpected, vec![e.reason.clone()]);
                 Err(e)
             }
         }
