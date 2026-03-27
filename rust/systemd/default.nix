@@ -350,6 +350,12 @@
           # background with a kill-timeout since the connection close
           # depends on async exit handling timing.
           perl -i -pe 's/^socat (.*)$/socat $1 \&\nSOCAT_PID=\$!\nsleep 2\nkill \$SOCAT_PID 2>\/dev\/null || true\nwait \$SOCAT_PID 2>\/dev\/null || true/' TEST-07-PID1.issue-30412.sh
+          # Remove DynamicUser tests from working-directory (DynamicUser not implemented)
+          perl -i -0pe 's/\(! systemd-run[^)]*DynamicUser[^)]*\)\n?//g' TEST-07-PID1.working-directory.sh
+          # NixOS has nobody's home at /var/empty, not /
+          perl -i -pe 's{"\/"$}{"/var/empty"}' TEST-07-PID1.working-directory.sh
+          # Ensure /home/testuser exists (NixOS creates it via users-groups.service)
+          sed -i '3a mkdir -p /home/testuser && chown testuser:testuser /home/testuser' TEST-07-PID1.working-directory.sh
           rm -f TEST-07-PID1.attach_processes.sh \
                TEST-07-PID1.concurrency.sh \
                TEST-07-PID1.DeferReactivation.sh \
@@ -378,8 +384,7 @@
                TEST-07-PID1.start-limit.sh \
                TEST-07-PID1.subgroup-kill.sh \
                TEST-07-PID1.transient-unit-container.sh \
-               TEST-07-PID1.user-namespace-path.sh \
-               TEST-07-PID1.working-directory.sh
+               TEST-07-PID1.user-namespace-path.sh
         '';
         extraPackages = pkgs: [pkgs.e2fsprogs pkgs.socat]; # chattr for socket-on-failure, socat for issue-30412
       }

@@ -238,6 +238,7 @@ in
           testuser = {
             isNormalUser = true;
             group = "testuser";
+            createHome = true;
           };
         };
         groups.daemon = {};

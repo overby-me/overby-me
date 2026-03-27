@@ -1692,11 +1692,19 @@ pub fn run_exec_helper() {
     // change working directory if configured
     if let Some(ref dir) = config.working_directory {
         let dir = if dir == Path::new("~") {
-            // Resolve ~ to the home directory of the current user
-            match std::env::var("HOME") {
-                Ok(home) => PathBuf::from(home),
-                Err(_) => {
-                    log::error!("WorkingDirectory=~ but $HOME is not set");
+            // Resolve ~ to the home directory from config.env (which is
+            // populated from User= in start_service) or fall back to the
+            // process environment.
+            let home = config
+                .env
+                .iter()
+                .find(|(k, _)| k == "HOME")
+                .map(|(_, v)| v.clone())
+                .or_else(|| std::env::var("HOME").ok());
+            match home {
+                Some(h) => PathBuf::from(h),
+                None => {
+                    log::error!("WorkingDirectory=~ but HOME is not set");
                     std::process::exit(1);
                 }
             }

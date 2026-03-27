@@ -228,6 +228,16 @@ fn start_service_with_filedescriptors(
                     std::env::var("PATH").unwrap_or_else(|_| default_path.to_owned()),
                 ),
             ];
+            // Set HOME, USER, LOGNAME, SHELL from the User= setting.
+            // systemd populates these automatically when User= is set.
+            if let Some(ref user_str) = conf.exec_config.user
+                && let Ok(pwentry) = crate::platform::pwnam::getpwnam_r(user_str)
+            {
+                env.push(("USER".to_owned(), user_str.clone()));
+                env.push(("LOGNAME".to_owned(), user_str.clone()));
+                env.push(("HOME".to_owned(), pwentry.home.clone()));
+                env.push(("SHELL".to_owned(), pwentry.shell.clone()));
+            }
             // Load EnvironmentFile= files first (lower priority than Environment=).
             // Each file contains lines of KEY=VALUE pairs.
             for (path, optional) in &conf.exec_config.environment_files {

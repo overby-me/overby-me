@@ -5,6 +5,8 @@ pub struct PwEntry {
     pub pw: Option<Vec<u8>>,
     pub uid: nix::unistd::Uid,
     pub gid: nix::unistd::Gid,
+    pub home: String,
+    pub shell: String,
 }
 
 fn make_user_from_libc(username: &str, user: &libc::passwd) -> Result<PwEntry, String> {
@@ -25,11 +27,27 @@ fn make_user_from_libc(username: &str, user: &libc::passwd) -> Result<PwEntry, S
         }
         Some(vec)
     };
+    let home = if user.pw_dir.is_null() {
+        "/".to_string()
+    } else {
+        unsafe { std::ffi::CStr::from_ptr(user.pw_dir) }
+            .to_string_lossy()
+            .into_owned()
+    };
+    let shell = if user.pw_shell.is_null() {
+        "/bin/sh".to_string()
+    } else {
+        unsafe { std::ffi::CStr::from_ptr(user.pw_shell) }
+            .to_string_lossy()
+            .into_owned()
+    };
     Ok(PwEntry {
         name: username.to_string(),
         uid,
         gid,
         pw,
+        home,
+        shell,
     })
 }
 
