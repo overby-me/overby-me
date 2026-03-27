@@ -527,14 +527,11 @@
                     # ExecStopPost subtest: remove Type=dbus (needs busctl/D-Bus name)
                     # and Type=forking (needs NotifyAccess=exec with MAINPID tracking
                     # from forked children) sections.
-                    # type-exec subtest: remove busctl section (issue #20933, needs D-Bus),
-                    # User=idontexist lines (user resolution happens pre-fork, so both
-                    # Type=simple and Type=exec fail identically), and
-                    # KillSignal/RestartKillSignal property checks (not yet exposed).
+                    # type-exec subtest: remove busctl section (issue #20933, needs D-Bus)
+                    # and User=idontexist lines (user resolution happens pre-fork, so
+                    # both Type=simple and Type=exec fail identically).
                     perl -i -0pe 's/# For issue #20933.*//s' TEST-23-UNIT-FILE.type-exec.sh
-                    # Remove User=idontexist tests (lines 14, 19) and KillSignal tests (lines 22-28)
                     sed -i '/User=idontexist/d' TEST-23-UNIT-FILE.type-exec.sh
-                    sed -i '/KillSignal\|RestartKillSignal\|exec-seven/d' TEST-23-UNIT-FILE.type-exec.sh
                     perl -i -0pe 's/cat >\/tmp\/forking1\.sh.*?test -f \/run\/forking2\n\n//s' TEST-23-UNIT-FILE.ExecStopPost.sh
                     perl -i -0pe 's/systemd-run --unit=dbus1\.service.*?touch \/run\/dbus3. true\)\n\n//s' TEST-23-UNIT-FILE.ExecStopPost.sh
         '';
