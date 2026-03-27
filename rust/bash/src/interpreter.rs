@@ -4704,6 +4704,14 @@ impl Shell {
         // Validate variable name using raw form if available
         let check_name = clause.var_raw.as_deref().unwrap_or(&clause.var);
         if !is_valid_identifier(check_name) {
+            // In bash, select/for identifier errors inside functions use the
+            // function body start line for LINENO
+            if let Some(fname) = self.func_names.last()
+                && let Some(&body_line) = self.func_body_lines.get(fname.as_str())
+            {
+                self.vars
+                    .insert("LINENO".to_string(), body_line.to_string());
+            }
             eprintln!(
                 "{}: `{}': not a valid identifier",
                 self.error_prefix(),
