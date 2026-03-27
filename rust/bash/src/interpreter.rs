@@ -2514,6 +2514,90 @@ impl Shell {
             }
             result
         } else if let Some(builtin) = self.builtins.get(command_name.as_str()).copied() {
+            // For assignment builtins (readonly, export, declare, local), handle
+            // compound array assignments: name=(val) — perform the assignment and
+            // pass just the name to the builtin (bash parser-level assignment behavior)
+            let is_assign_builtin = matches!(
+                command_name.as_str(),
+                "readonly" | "export" | "declare" | "typeset" | "local"
+            );
+            if is_assign_builtin {
+                let mut new_args = Vec::new();
+                let mut modified = false;
+                for (arg_idx, arg) in args.iter().enumerate() {
+                    // Check for name=(value) pattern from inline array parsing
+                    // Only if the original word had unquoted array syntax (not from 'name=(val)')
+                    let word_idx = arg_idx + 1; // skip command name
+                    let is_quoted_arg = word_idx < cmd.words.len()
+                        && cmd.words[word_idx].iter().any(|p| {
+                            matches!(p, WordPart::SingleQuoted(_) | WordPart::DoubleQuoted(_))
+                        });
+                    if !is_quoted_arg && let Some(eq_pos) = arg.find('=') {
+                        let name = &arg[..eq_pos];
+                        let value = &arg[eq_pos + 1..];
+                        if value.starts_with('(')
+                            && value.ends_with(')')
+                            && !name.is_empty()
+                            && name.chars().all(|c| c.is_alphanumeric() || c == '_')
+                            && !name.starts_with(|c: char| c.is_ascii_digit())
+                        {
+                            // Perform the array assignment
+                            if self.readonly_vars.contains(name) {
+                                if let Some(fname) = self.func_names.last() {
+                                    eprintln!(
+                                        "{}: {}: {}: readonly variable",
+                                        self.error_prefix(),
+                                        fname,
+                                        name
+                                    );
+                                } else {
+                                    eprintln!(
+                                        "{}: {}: readonly variable",
+                                        self.error_prefix(),
+                                        name
+                                    );
+                                }
+                                self.last_status = 1;
+                            } else {
+                                let arr = crate::builtins::parse_array_literal(value);
+                                self.arrays.insert(name.to_string(), arr);
+                            }
+                            new_args.push(name.to_string());
+                            modified = true;
+                            continue;
+                        }
+                    }
+                    new_args.push(arg.clone());
+                }
+                if modified {
+                    // Use the modified args with array assignments handled
+                    let all_words: Vec<String> = std::iter::once(command_name.clone())
+                        .chain(new_args)
+                        .collect();
+                    // Re-bind args to the new allocation
+                    let args = &all_words[1..];
+                    // Fall through to the builtin call below with the modified args
+                    // (but we need to handle it inline since args lifetime changes)
+                    let prefix_exports: Vec<(String, String)> = vec![];
+                    let saved: Vec<(String, Option<String>)> = vec![];
+                    self.current_builtin = Some(command_name.clone());
+                    let result = builtin(self, args);
+                    self.current_builtin = None;
+                    for (k, old) in saved {
+                        match old {
+                            Some(v) => {
+                                self.vars.insert(k, v);
+                            }
+                            None => {
+                                self.vars.remove(&k);
+                            }
+                        }
+                    }
+                    drop(prefix_exports);
+                    self.restore_redirections(saved_fds);
+                    return result;
+                }
+            }
             let prefix_exports: Vec<(String, String)> = if !expanded_words.is_empty() {
                 cmd.assignments
                     .iter()

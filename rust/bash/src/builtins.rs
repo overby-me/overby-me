@@ -2933,7 +2933,7 @@ fn parse_assoc_literal(s: &str) -> crate::interpreter::AssocArray {
 }
 
 /// Parse a bash array literal like `(val1 val2 val3)` into a Vec.
-fn parse_array_literal(s: &str) -> Vec<String> {
+pub fn parse_array_literal(s: &str) -> Vec<String> {
     let trimmed = s.trim();
     let inner = if trimmed.starts_with('(') && trimmed.ends_with(')') {
         &trimmed[1..trimmed.len() - 1]
