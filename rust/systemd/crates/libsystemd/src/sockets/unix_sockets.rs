@@ -1,6 +1,7 @@
 use std::{
     os::unix::fs::PermissionsExt,
     os::unix::io::AsRawFd,
+    os::unix::io::BorrowedFd,
     os::unix::io::RawFd,
     os::unix::net::{UnixDatagram, UnixListener},
 };
@@ -16,31 +17,73 @@ pub enum UnixSocketConfig {
     Datagram(String),
 }
 
+/// Returns true if the path uses the abstract socket namespace (`@` prefix).
+fn is_abstract(path: &str) -> bool {
+    path.starts_with('@')
+}
+
+/// Wrapper around a raw file descriptor for sockets created via libc
+/// (abstract namespace sockets and SOCK_SEQPACKET).
 #[derive(Debug)]
-struct UnixSeqPacket(Option<i32>, std::path::PathBuf);
+struct RawSocket {
+    fd: Option<i32>,
+    /// Filesystem path, if any. Abstract sockets have no path.
+    path: Option<std::path::PathBuf>,
+}
 
-impl AsRawFd for UnixSeqPacket {
+impl AsRawFd for RawSocket {
     fn as_raw_fd(&self) -> i32 {
-        self.0.unwrap()
+        self.fd.unwrap()
     }
 }
 
-impl Drop for UnixSeqPacket {
+impl Drop for RawSocket {
     fn drop(&mut self) {
-        if self.1.exists() {
-            self.close();
-            std::fs::remove_file(&self.1).unwrap();
-        }
-    }
-}
-
-impl UnixSeqPacket {
-    fn close(&mut self) {
-        if let Some(fd) = self.0 {
+        if let Some(fd) = self.fd {
             super::close_raw_fd(fd);
         }
-        self.0 = None;
+        self.fd = None;
+        if let Some(ref path) = self.path
+            && path.exists()
+        {
+            let _ = std::fs::remove_file(path);
+        }
     }
+}
+
+/// Create, bind, and listen on an abstract namespace Unix socket.
+fn bind_abstract(name: &str, sock_type: libc::c_int) -> Result<RawSocket, String> {
+    // Strip the leading '@' to get the abstract name
+    let abstract_name = &name[1..];
+    let unix_addr = nix::sys::socket::UnixAddr::new_abstract(abstract_name.as_bytes())
+        .map_err(|e| format!("failed to create abstract socket address @{abstract_name}: {e}"))?;
+
+    let fd = unsafe { libc::socket(libc::AF_UNIX, sock_type, 0) };
+    if fd < 0 {
+        return Err(format!(
+            "failed to create abstract socket @{abstract_name}: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    nix::sys::socket::bind(fd, &unix_addr).map_err(|e| {
+        unsafe { libc::close(fd) };
+        format!("failed to bind abstract socket @{abstract_name}: {e}")
+    })?;
+
+    if sock_type == libc::SOCK_STREAM || sock_type == libc::SOCK_SEQPACKET {
+        let borrowed = unsafe { BorrowedFd::borrow_raw(fd) };
+        nix::sys::socket::listen(&borrowed, nix::sys::socket::Backlog::new(128).unwrap()).map_err(
+            |e| {
+                unsafe { libc::close(fd) };
+                format!("failed to listen on abstract socket @{abstract_name}: {e}")
+            },
+        )?;
+    }
+
+    Ok(RawSocket {
+        fd: Some(fd),
+        path: None,
+    })
 }
 
 /// Prepare the directory and remove old socket file if it exists.
@@ -70,16 +113,35 @@ fn prepare_unix_socket_path(path: &std::path::Path, conf: &SocketConfig) -> Resu
     Ok(())
 }
 
+/// Apply SO_PASSCRED if PassCredentials= is set.
+fn apply_passcred(fd: RawFd, conf: &SocketConfig) {
+    if conf.pass_credentials {
+        let val: libc::c_int = 1;
+        unsafe {
+            libc::setsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_PASSCRED,
+                &val as *const _ as *const libc::c_void,
+                std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+            );
+        }
+    }
+}
+
 impl UnixSocketConfig {
     pub fn close(&self, rawfd: RawFd, remove_on_stop: bool) -> Result<(), String> {
         if remove_on_stop {
             let strpath = match self {
                 Self::Stream(s) | Self::Datagram(s) | Self::Sequential(s) => s,
             };
-            let path = std::path::PathBuf::from(strpath);
-            if path.exists() {
-                std::fs::remove_file(&path)
-                    .map_err(|e| format!("Error removing file {path:?}: {e}"))?;
+            // Abstract sockets have no filesystem entry to remove.
+            if !is_abstract(strpath) {
+                let path = std::path::PathBuf::from(strpath);
+                if path.exists() {
+                    std::fs::remove_file(&path)
+                        .map_err(|e| format!("Error removing file {path:?}: {e}"))?;
+                }
             }
         }
 
@@ -90,27 +152,21 @@ impl UnixSocketConfig {
     pub fn open(&self, conf: &SocketConfig) -> Result<Box<dyn AsRawFd + Send + Sync>, String> {
         match self {
             Self::Stream(path) => {
+                trace!("opening streaming unix socket: {path:?}");
+
+                if is_abstract(path) {
+                    let sock = bind_abstract(path, libc::SOCK_STREAM)?;
+                    apply_passcred(sock.as_raw_fd(), conf);
+                    return Ok(Box::new(sock));
+                }
+
                 let spath = std::path::Path::new(path);
                 prepare_unix_socket_path(spath, conf)?;
 
-                trace!("opening streaming unix socket: {path:?}");
                 let stream = UnixListener::bind(spath)
                     .map_err(|e| format!("failed to bind unix stream socket {path}: {e}"))?;
 
-                // Apply PassCredentials via SO_PASSCRED on the raw fd
-                if conf.pass_credentials {
-                    let fd = stream.as_raw_fd();
-                    let val: libc::c_int = 1;
-                    unsafe {
-                        libc::setsockopt(
-                            fd,
-                            libc::SOL_SOCKET,
-                            libc::SO_PASSCRED,
-                            &val as *const _ as *const libc::c_void,
-                            std::mem::size_of::<libc::c_int>() as libc::socklen_t,
-                        );
-                    }
-                }
+                apply_passcred(stream.as_raw_fd(), conf);
 
                 // Apply SocketUser=/SocketGroup=/SocketMode=
                 super::apply_socket_ownership(spath, conf);
@@ -118,27 +174,21 @@ impl UnixSocketConfig {
                 Ok(Box::new(stream))
             }
             Self::Datagram(path) => {
+                trace!("opening datagram unix socket: {path:?}");
+
+                if is_abstract(path) {
+                    let sock = bind_abstract(path, libc::SOCK_DGRAM)?;
+                    apply_passcred(sock.as_raw_fd(), conf);
+                    return Ok(Box::new(sock));
+                }
+
                 let spath = std::path::Path::new(path);
                 prepare_unix_socket_path(spath, conf)?;
 
-                trace!("opening datagram unix socket: {path:?}");
                 let dgram = UnixDatagram::bind(spath)
                     .map_err(|e| format!("failed to bind unix datagram socket {path}: {e}"))?;
 
-                // Apply PassCredentials via SO_PASSCRED on the raw fd
-                if conf.pass_credentials {
-                    let fd = dgram.as_raw_fd();
-                    let val: libc::c_int = 1;
-                    unsafe {
-                        libc::setsockopt(
-                            fd,
-                            libc::SOL_SOCKET,
-                            libc::SO_PASSCRED,
-                            &val as *const _ as *const libc::c_void,
-                            std::mem::size_of::<libc::c_int>() as libc::socklen_t,
-                        );
-                    }
-                }
+                apply_passcred(dgram.as_raw_fd(), conf);
 
                 // Apply SocketUser=/SocketGroup=/SocketMode=
                 super::apply_socket_ownership(spath, conf);
@@ -146,31 +196,29 @@ impl UnixSocketConfig {
                 Ok(Box::new(dgram))
             }
             Self::Sequential(path) => {
+                trace!("opening sequential packet unix socket: {path:?}");
+
+                if is_abstract(path) {
+                    let sock = bind_abstract(path, libc::SOCK_SEQPACKET)?;
+                    apply_passcred(sock.as_raw_fd(), conf);
+                    return Ok(Box::new(sock));
+                }
+
                 let spath = std::path::Path::new(path);
                 prepare_unix_socket_path(spath, conf)?;
 
                 let path = std::path::PathBuf::from(path);
-                trace!("opening sequential packet unix socket: {path:?}");
                 match crate::platform::make_seqpacket_socket(&path) {
                     Ok(fd) => {
-                        // Apply PassCredentials
-                        if conf.pass_credentials {
-                            let val: libc::c_int = 1;
-                            unsafe {
-                                libc::setsockopt(
-                                    fd,
-                                    libc::SOL_SOCKET,
-                                    libc::SO_PASSCRED,
-                                    &val as *const _ as *const libc::c_void,
-                                    std::mem::size_of::<libc::c_int>() as libc::socklen_t,
-                                );
-                            }
-                        }
+                        apply_passcred(fd, conf);
 
                         // Apply SocketUser=/SocketGroup=/SocketMode=
                         super::apply_socket_ownership(&path, conf);
 
-                        Ok(Box::new(UnixSeqPacket(Some(fd), path)))
+                        Ok(Box::new(RawSocket {
+                            fd: Some(fd),
+                            path: Some(path),
+                        }))
                     }
                     Err(e) => Err(e),
                 }

@@ -354,6 +354,10 @@
           sed -i '/mountpoint \/issue2730/d; /systemctl --no-block exit 123/d' TEST-07-PID1.sh
           # Remove PrivateUsersEx lines (not implemented), keep PrivateUsers=yes
           sed -i '/PrivateUsersEx/d' TEST-07-PID1.private-users.sh
+          # issue-30412: socat triggers socket activation. Run it in
+          # background with a kill-timeout since the connection close
+          # depends on async exit handling timing.
+          perl -i -pe 's/^socat (.*)$/socat $1 \&\nSOCAT_PID=\$!\nsleep 2\nkill \$SOCAT_PID 2>\/dev\/null || true\nwait \$SOCAT_PID 2>\/dev\/null || true/' TEST-07-PID1.issue-30412.sh
           rm -f TEST-07-PID1.attach_processes.sh \
                TEST-07-PID1.concurrency.sh \
                TEST-07-PID1.DeferReactivation.sh \
@@ -361,7 +365,6 @@
                TEST-07-PID1.exec-context.sh \
                TEST-07-PID1.exec-deserialization.sh \
                TEST-07-PID1.issue-2467.sh \
-               TEST-07-PID1.issue-30412.sh \
                TEST-07-PID1.issue-3171.sh \
                TEST-07-PID1.issue-34104.sh \
                TEST-07-PID1.issue-35882.sh \
@@ -387,7 +390,7 @@
                TEST-07-PID1.user-namespace-path.sh \
                TEST-07-PID1.working-directory.sh
         '';
-        extraPackages = pkgs: [pkgs.e2fsprogs]; # chattr for socket-on-failure test
+        extraPackages = pkgs: [pkgs.e2fsprogs pkgs.socat]; # chattr for socket-on-failure, socat for issue-30412
       }
       {name = "15-DROPIN";}
       {

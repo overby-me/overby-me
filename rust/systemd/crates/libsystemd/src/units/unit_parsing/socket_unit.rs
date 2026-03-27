@@ -71,7 +71,7 @@ fn parse_ipv6_addr(addr: &str) -> Result<std::net::SocketAddrV6, std::net::AddrP
 }
 
 fn parse_unix_addr(addr: &str) -> Result<String, ()> {
-    if addr.starts_with('/') || addr.starts_with("./") {
+    if addr.starts_with('/') || addr.starts_with("./") || addr.starts_with('@') {
         Ok(addr.to_owned())
     } else {
         Err(())

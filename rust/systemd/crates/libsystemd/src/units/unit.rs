@@ -280,6 +280,18 @@ impl SocketState {
     }
 }
 
+/// Flush pending connections/data on all fds belonging to a socket unit.
+/// Called when `FlushPending=yes` is configured, before re-arming a socket
+/// for activation, so that stale traffic doesn't immediately re-trigger.
+fn flush_socket_fds(socket_id: &UnitId, run_info: &RuntimeInfo) {
+    let fd_store = run_info.fd_store.read_poisoned();
+    if let Some(fds) = fd_store.get_global(&socket_id.name) {
+        for (_, _, fd_box) in fds {
+            crate::sockets::flush_pending_connections(fd_box.as_raw_fd());
+        }
+    }
+}
+
 impl ServiceState {
     fn activate(
         &mut self,
@@ -333,6 +345,12 @@ impl ServiceState {
                     if let Some(unit) = run_info.unit_table.get(socket_id)
                         && let Specific::Socket(sock) = &unit.specific
                     {
+                        // FlushPending=yes: drain queued connections/data before
+                        // re-arming, so that stale traffic doesn't immediately
+                        // re-trigger socket activation.
+                        if sock.conf.flush_pending {
+                            flush_socket_fds(socket_id, run_info);
+                        }
                         let mut_state = &mut *sock.state.write_poisoned();
                         mut_state.sock.activated = false;
                     }
@@ -390,6 +408,9 @@ impl ServiceState {
                 if let Some(unit) = run_info.unit_table.get(socket_id)
                     && let Specific::Socket(sock) = &unit.specific
                 {
+                    if sock.conf.flush_pending {
+                        flush_socket_fds(socket_id, run_info);
+                    }
                     let mut_state = &mut *sock.state.write_poisoned();
                     mut_state.sock.activated = false;
                 }
@@ -509,6 +530,9 @@ impl ServiceState {
                     if let Some(unit) = run_info.unit_table.get(socket_id)
                         && let Specific::Socket(sock) = &unit.specific
                     {
+                        if sock.conf.flush_pending {
+                            flush_socket_fds(socket_id, run_info);
+                        }
                         let mut_state = &mut *sock.state.write_poisoned();
                         mut_state.sock.activated = false;
                     }

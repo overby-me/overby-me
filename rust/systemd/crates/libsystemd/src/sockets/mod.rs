@@ -18,6 +18,74 @@ use std::os::unix::io::{AsRawFd, BorrowedFd, RawFd};
 use crate::fd_store::FDStore;
 use crate::units::{BindIPv6Only, SocketConfig, UnitId};
 
+/// Drain all pending connections/data from a socket fd.
+///
+/// For stream/seqpacket sockets, this accepts and immediately closes all
+/// queued connections. For datagram sockets, it reads and discards pending
+/// datagrams. This implements the `FlushPending=yes` behavior from
+/// systemd.socket(5).
+pub fn flush_pending_connections(fd: RawFd) {
+    // Determine socket type
+    let mut sock_type: libc::c_int = 0;
+    let mut optlen = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
+    let rc = unsafe {
+        libc::getsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_TYPE,
+            &mut sock_type as *mut _ as *mut libc::c_void,
+            &mut optlen,
+        )
+    };
+    if rc < 0 {
+        trace!("flush_pending: getsockopt failed, skipping flush");
+        return;
+    }
+
+    // Temporarily set the socket to non-blocking so accept/recv don't block
+    // when there are no more pending connections/data.
+    let old_flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if old_flags >= 0 {
+        unsafe { libc::fcntl(fd, libc::F_SETFL, old_flags | libc::O_NONBLOCK) };
+    }
+
+    if sock_type == libc::SOCK_DGRAM {
+        // For datagram sockets, recv and discard pending data
+        let mut buf = [0u8; 4096];
+        loop {
+            let n = unsafe {
+                libc::recvfrom(
+                    fd,
+                    buf.as_mut_ptr() as *mut libc::c_void,
+                    buf.len(),
+                    libc::MSG_DONTWAIT,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                )
+            };
+            if n <= 0 {
+                break;
+            }
+        }
+    } else {
+        // For stream/seqpacket sockets, accept and close pending connections
+        loop {
+            let accepted =
+                unsafe { libc::accept4(fd, std::ptr::null_mut(), std::ptr::null_mut(), 0) };
+            if accepted < 0 {
+                break;
+            }
+            unsafe { libc::close(accepted) };
+        }
+    }
+
+    // Restore original flags
+    if old_flags >= 0 {
+        unsafe { libc::fcntl(fd, libc::F_SETFL, old_flags) };
+    }
+    trace!("flush_pending: drained pending data/connections on fd {fd}");
+}
+
 pub fn close_raw_fd(fd: RawFd) {
     loop {
         let ret = unsafe { libc::close(fd) };
