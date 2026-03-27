@@ -14,6 +14,38 @@ impl Shell {
                 has_function_keyword,
                 redirections,
             } => {
+                // In POSIX mode, cannot define functions with names of special builtins
+                if self.opt_posix
+                    && matches!(
+                        name.as_str(),
+                        "break"
+                            | "."
+                            | "source"
+                            | "continue"
+                            | "eval"
+                            | "exec"
+                            | "exit"
+                            | "export"
+                            | "readonly"
+                            | "return"
+                            | "set"
+                            | "shift"
+                            | "trap"
+                            | "unset"
+                    )
+                {
+                    eprintln!("{}: `{}': is a special builtin", self.error_prefix(), name);
+                    return 2;
+                }
+                // Validate function name
+                if self.opt_posix && !name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                    eprintln!(
+                        "{}: `{}': not a valid identifier",
+                        self.error_prefix(),
+                        name
+                    );
+                    return 1;
+                }
                 if self.readonly_funcs.contains(name) {
                     eprintln!("{}: {}: readonly function", self.error_prefix(), name);
                     1
