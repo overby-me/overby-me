@@ -3064,32 +3064,56 @@ pub fn execute_command(
             // them to Ok) for dependency-graph walking purposes, but for
             // oneshot and Type=exec transient units we need to detect
             // failure so that `systemd-run` can exit non-zero.
-            //
-            // For Type=exec, fork_parent sleeps 50ms to check if exec
-            // succeeded, and the exit handler runs asynchronously, so we
-            // poll briefly to catch the failure status.
             {
-                let is_oneshot = {
+                let srvc_type = {
                     let ri = run_info.read_poisoned();
-                    ri.unit_table
-                        .get(&id)
-                        .map(|u| {
-                            if let Specific::Service(srvc) = &u.specific {
-                                srvc.conf.srcv_type == crate::units::ServiceType::OneShot
-                            } else {
-                                false
-                            }
-                        })
-                        .unwrap_or(false)
+                    ri.unit_table.get(&id).and_then(|u| {
+                        if let Specific::Service(srvc) = &u.specific {
+                            Some(srvc.conf.srcv_type)
+                        } else {
+                            None
+                        }
+                    })
                 };
 
-                // For Type=exec, the start succeeds as long as exec()
-                // succeeded (the binary was found and executed).  The
-                // program's own exit code is handled by the normal exit
-                // handler — it should not cause the start command to
-                // fail.  Only exec failures (exit 203 from the exec
-                // helper) are caught synchronously in wait_for_service,
-                // so no additional polling is needed here.
+                let is_oneshot = srvc_type == Some(crate::units::ServiceType::OneShot);
+                let is_exec = srvc_type == Some(crate::units::ServiceType::Exec);
+
+                // For Type=exec, wait_for_service catches exec()
+                // failures (exit 203) synchronously and sets
+                // StoppedUnexpected, but activate_unit swallows the
+                // error.  Only check for start-path errors (which
+                // contain ServiceStartError), NOT exit-handler errors
+                // from the program exiting normally after a successful
+                // exec().
+                if is_exec {
+                    let ri = run_info.read_poisoned();
+                    if let Some(unit) = ri.unit_table.get(&id) {
+                        let status = unit.common.status.read_poisoned();
+                        if let crate::units::UnitStatus::Stopped(
+                            crate::units::StatusStopped::StoppedUnexpected,
+                            errors,
+                        ) = &*status
+                        {
+                            let has_start_error = errors.iter().any(|e| {
+                                matches!(
+                                    e,
+                                    crate::units::UnitOperationErrorReason::ServiceStartError(_)
+                                )
+                            });
+                            if has_start_error {
+                                let msg = if let Some(e) = errors.first() {
+                                    format!("{e}")
+                                } else {
+                                    "unit failed".to_string()
+                                };
+                                return Err(format!(
+                                    "Failed to start transient unit {unit_name}: {msg}"
+                                ));
+                            }
+                        }
+                    }
+                }
 
                 if is_oneshot {
                     let ri = run_info.read_poisoned();

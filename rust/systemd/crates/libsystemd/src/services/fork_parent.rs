@@ -162,37 +162,49 @@ pub fn wait_for_service(
             // Type=exec is like Simple, but we briefly verify that the
             // process actually started (i.e. the exec() call succeeded)
             // by checking that it hasn't already exited with an error.
-            trace!("[FORK_PARENT] Waiting briefly for exec confirmation for service {name}");
+            trace!("[FORK_PARENT] Waiting for exec confirmation for service {name}");
             let pid = srvc.pid.unwrap();
-            // Give the process a short window to fail on exec() errors
-            // (e.g. binary not found, permission denied). If it's still
-            // running after this, exec() succeeded.
-            let exec_check_delay = std::time::Duration::from_millis(50);
-            std::thread::sleep(exec_check_delay);
-            {
-                let mut pid_table_locked = pid_table.lock_poisoned();
-                // Only treat EXIT_EXEC (203) as a start failure — this
-                // is the code the exec helper uses when execv() itself
-                // fails (binary not found, permission denied, etc.).
-                // Any other exit code means exec() succeeded but the
-                // program exited quickly; that is handled by the normal
-                // exit handler, not the start path.
-                if let Some(PidEntry::ServiceExited(
-                    crate::signal_handler::ChildTermination::Exit(203),
-                )) = pid_table_locked.get(&pid)
+            // Poll the pid table for up to 500ms to catch exec() failures.
+            // The exec helper exits with code 203 when execv() fails
+            // (binary not found, permission denied, etc.). If the process
+            // is still running after this window, exec() succeeded.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(10));
                 {
-                    let code = crate::signal_handler::ChildTermination::Exit(203);
-                    pid_table_locked.remove(&pid);
-                    return Err(RunCmdError::BadExitCode(
-                        conf.exec
-                            .last()
-                            .map(|e| e.to_string())
-                            .unwrap_or_else(|| "(no exec)".to_owned()),
-                        code,
-                    ));
+                    let mut pid_table_locked = pid_table.lock_poisoned();
+                    let entry = pid_table_locked.get(&pid);
+                    trace!(
+                        "[FORK_PARENT] exec check for {name}: pid={pid}, entry={entry:?}, elapsed={:?}",
+                        std::time::Instant::now()
+                            .duration_since(deadline - std::time::Duration::from_millis(500))
+                    );
+                    if let Some(PidEntry::ServiceExited(
+                        crate::signal_handler::ChildTermination::Exit(203),
+                    )) = entry
+                    {
+                        let code = crate::signal_handler::ChildTermination::Exit(203);
+                        pid_table_locked.remove(&pid);
+                        return Err(RunCmdError::BadExitCode(
+                            conf.exec
+                                .last()
+                                .map(|e| e.to_string())
+                                .unwrap_or_else(|| "(no exec)".to_owned()),
+                            code,
+                        ));
+                    }
+                    // Process exited with a non-203 code — exec() succeeded
+                    // but the program itself exited. Not a start failure.
+                    if matches!(entry, Some(PidEntry::ServiceExited(_))) {
+                        break;
+                    }
+                }
+                if std::time::Instant::now() >= deadline {
+                    trace!("[FORK_PARENT] exec check timed out for service {name}");
+                    break;
                 }
             }
-            trace!("[FORK_PARENT] exec check passed for service {name}");
+            trace!("[FORK_PARENT] exec check done for service {name}");
         }
         ServiceType::OneShot => {
             trace!("[FORK_PARENT] Waiting for oneshot service to exit: {name}");

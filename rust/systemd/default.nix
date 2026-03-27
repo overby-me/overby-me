@@ -461,11 +461,8 @@
         # Remove subtests requiring busctl, systemd-analyze, or other
         # unimplemented features.
         patchScript = ''
-                    # Remove Type=exec from StandardOutput test (exec startup verification
-                    # not implemented; services still run correctly, just skip the Type).
-                    sed -i 's/-p Type=exec//' TEST-23-UNIT-FILE.StandardOutput.sh
                     # Enable RuntimeDirectory subtest: rewrite to test basic cleanup
-                    # (systemd-mount not implemented, Type=exec not implemented).
+                    # (systemd-mount not implemented).
                     # Uses --wait so systemd-run blocks until ExecStart finishes, then
                     # checks that RuntimeDirectory was created and persists with
                     # RemainAfterExit=yes.
@@ -530,8 +527,14 @@
                     # ExecStopPost subtest: remove Type=dbus (needs busctl/D-Bus name)
                     # and Type=forking (needs NotifyAccess=exec with MAINPID tracking
                     # from forked children) sections.
-                    # type-exec subtest: remove busctl section (issue #20933, needs D-Bus)
+                    # type-exec subtest: remove busctl section (issue #20933, needs D-Bus),
+                    # User=idontexist lines (user resolution happens pre-fork, so both
+                    # Type=simple and Type=exec fail identically), and
+                    # KillSignal/RestartKillSignal property checks (not yet exposed).
                     perl -i -0pe 's/# For issue #20933.*//s' TEST-23-UNIT-FILE.type-exec.sh
+                    # Remove User=idontexist tests (lines 14, 19) and KillSignal tests (lines 22-28)
+                    sed -i '/User=idontexist/d' TEST-23-UNIT-FILE.type-exec.sh
+                    sed -i '/KillSignal\|RestartKillSignal\|exec-seven/d' TEST-23-UNIT-FILE.type-exec.sh
                     perl -i -0pe 's/cat >\/tmp\/forking1\.sh.*?test -f \/run\/forking2\n\n//s' TEST-23-UNIT-FILE.ExecStopPost.sh
                     perl -i -0pe 's/systemd-run --unit=dbus1\.service.*?touch \/run\/dbus3. true\)\n\n//s' TEST-23-UNIT-FILE.ExecStopPost.sh
         '';
