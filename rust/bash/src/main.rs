@@ -239,8 +239,10 @@ fn run() -> i32 {
                     use std::os::unix::io::IntoRawFd;
                     if let Ok(f) = std::fs::File::open(&file) {
                         let raw = f.into_raw_fd();
-                        // Keep a dup of the script file for inode comparison
-                        let script_dup = nix::unistd::dup(raw).ok();
+                        // Keep a dup of the script file on a high fd for inode comparison
+                        // Use fcntl F_DUPFD_CLOEXEC to get a fd >= 100 to avoid conflicts
+                        let script_dup =
+                            nix::fcntl::fcntl(raw, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(100)).ok();
                         // Replace fd 0 with the script file
                         nix::unistd::dup2(raw, 0).ok();
                         nix::unistd::close(raw).ok();
