@@ -2,7 +2,7 @@ use crate::control::unit_properties;
 use crate::lock_ext::RwLockExt;
 use crate::runtime_info::{ArcMutRuntimeInfo, UnitTable};
 use crate::units::{
-    ActivationSource, Specific, Unit, UnitIdKind, UnitStatus, find_symlink_aliases,
+    ActivationSource, Specific, Unit, UnitId, UnitIdKind, UnitStatus, find_symlink_aliases,
     insert_new_units, load_all_units_no_prune, load_new_unit,
 };
 
@@ -1969,6 +1969,36 @@ fn apply_dropins_to_transient(unit: &mut Unit, unit_dirs: &[std::path::PathBuf])
     }
 }
 
+/// Create a `UnitId` from a unit name string, inferring the kind from the suffix.
+fn unit_id_from_name(name: &str) -> UnitId {
+    use crate::units::UnitIdKind;
+    let kind = if name.ends_with(".service") {
+        UnitIdKind::Service
+    } else if name.ends_with(".socket") {
+        UnitIdKind::Socket
+    } else if name.ends_with(".target") {
+        UnitIdKind::Target
+    } else if name.ends_with(".timer") {
+        UnitIdKind::Timer
+    } else if name.ends_with(".path") {
+        UnitIdKind::Path
+    } else if name.ends_with(".mount") {
+        UnitIdKind::Mount
+    } else if name.ends_with(".swap") {
+        UnitIdKind::Swap
+    } else if name.ends_with(".slice") {
+        UnitIdKind::Slice
+    } else if name.ends_with(".device") {
+        UnitIdKind::Device
+    } else {
+        UnitIdKind::Service // default
+    };
+    UnitId {
+        kind,
+        name: name.to_string(),
+    }
+}
+
 /// Read the DefaultLimitNOFILE setting from system.conf.d drop-ins.
 /// Returns `None` if no default is configured.
 fn read_default_limit_nofile() -> Option<crate::units::ResourceLimit> {
@@ -2324,6 +2354,10 @@ fn create_transient_unit(
     let mut failure_action_units: Vec<String> = vec![];
     let mut start_limit_burst: Option<u32> = None;
     let mut start_limit_interval_sec: Option<crate::units::unit_parsing::Timeout> = None;
+    let mut dep_wants: Vec<String> = vec![];
+    let mut dep_requires: Vec<String> = vec![];
+    let mut dep_after: Vec<String> = vec![];
+    let mut dep_before: Vec<String> = vec![];
     for prop in &params.properties {
         if let Some((key, value)) = prop.split_once('=') {
             match key {
@@ -2656,6 +2690,26 @@ fn create_transient_unit(
                     service_conf.limit_nofile =
                         crate::units::unit_parsing::parse_resource_limit(value);
                 }
+                "Wants" => {
+                    for u in value.split_whitespace() {
+                        dep_wants.push(u.to_string());
+                    }
+                }
+                "Requires" => {
+                    for u in value.split_whitespace() {
+                        dep_requires.push(u.to_string());
+                    }
+                }
+                "After" => {
+                    for u in value.split_whitespace() {
+                        dep_after.push(u.to_string());
+                    }
+                }
+                "Before" => {
+                    for u in value.split_whitespace() {
+                        dep_before.push(u.to_string());
+                    }
+                }
                 _ => {
                     log::debug!("Ignoring unknown transient unit property: {key}={value}");
                 }
@@ -2725,14 +2779,14 @@ fn create_transient_unit(
                 loaded_dropin_files: Vec::new(),
             },
             dependencies: Dependencies {
-                wants: vec![],
+                wants: dep_wants.iter().map(|n| unit_id_from_name(n)).collect(),
                 wanted_by: vec![],
-                requires: vec![],
+                requires: dep_requires.iter().map(|n| unit_id_from_name(n)).collect(),
                 required_by: vec![],
                 conflicts: vec![],
                 conflicted_by: vec![],
-                before: vec![],
-                after: vec![],
+                before: dep_before.iter().map(|n| unit_id_from_name(n)).collect(),
+                after: dep_after.iter().map(|n| unit_id_from_name(n)).collect(),
                 part_of: vec![],
                 part_of_by: vec![],
                 binds_to: vec![],

@@ -325,17 +325,25 @@ pub fn resolve_specifiers(
                         }
                     }
                     'j' => {
-                        // First component of the instance or prefix
-                        // (part before the first `-`).
-                        let raw = instance_or_prefix;
-                        let first_dash = raw.find('-').unwrap_or(raw.len());
-                        result.push_str(&raw[..first_dash]);
+                        // For instantiated units: part before first `-` in instance.
+                        // For non-instantiated units: part after last `-` in prefix.
+                        if !instance.is_empty() {
+                            let first_dash = instance.find('-').unwrap_or(instance.len());
+                            result.push_str(&instance[..first_dash]);
+                        } else {
+                            let last_dash = prefix.rfind('-').map(|p| p + 1).unwrap_or(0);
+                            result.push_str(&prefix[last_dash..]);
+                        }
                     }
                     'J' => {
                         // Unescaped %j.
-                        let raw = instance_or_prefix;
-                        let first_dash = raw.find('-').unwrap_or(raw.len());
-                        let part = &raw[..first_dash];
+                        let part = if !instance.is_empty() {
+                            let first_dash = instance.find('-').unwrap_or(instance.len());
+                            &instance[..first_dash]
+                        } else {
+                            let last_dash = prefix.rfind('-').map(|p| p + 1).unwrap_or(0);
+                            &prefix[last_dash..]
+                        };
                         let unescaped = unit_name_unescape(part).unwrap_or(part.to_string());
                         result.push_str(&unescaped);
                     }
@@ -1011,6 +1019,23 @@ mod tests {
             resolve_specifiers("%J", "foo@dev-sda1.service", "dev-sda1", &c),
             "dev"
         );
+    }
+
+    #[test]
+    fn test_j_non_instantiated_last_component() {
+        let c = ctx();
+        // For non-instantiated units, %j is the part after the last dash
+        assert_eq!(
+            resolve_specifiers("%j", "TEST-23-UNIT-FILE-specifier-j-wants.service", "", &c),
+            "wants"
+        );
+    }
+
+    #[test]
+    fn test_j_non_instantiated_no_dash() {
+        let c = ctx();
+        // No dash in prefix: %j returns the whole prefix
+        assert_eq!(resolve_specifiers("%j", "foo.service", "", &c), "foo");
     }
 
     // --- compound expressions ---
