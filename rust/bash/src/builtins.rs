@@ -1503,12 +1503,18 @@ fn builtin_readonly(shell: &mut Shell, args: &[String]) -> i32 {
             } else if shell.functions.contains_key(name) {
                 shell.readonly_funcs.insert(name.to_string());
             }
-        } else if shell.readonly_vars.contains(name)
+        } else if (shell.readonly_vars.contains(name)
             || name
                 .find('=')
-                .is_some_and(|eq| shell.readonly_vars.contains(&name[..eq]))
+                .is_some_and(|eq| shell.readonly_vars.contains(&name[..eq])))
+            && !(array_mode
+                && name.find('=').is_some_and(|eq| {
+                    let v = &name[eq + 1..];
+                    v.starts_with('(') && v.ends_with(')')
+                }))
         {
             // Already readonly — report error if trying to change value
+            // (but skip when -a flag with (...) value — let it fall through for proper error)
             if name.contains('=') {
                 let vname = name.split('=').next().unwrap();
                 eprintln!("{}: {}: readonly variable", shell.error_prefix(), vname);

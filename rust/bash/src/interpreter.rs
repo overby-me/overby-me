@@ -2522,6 +2522,10 @@ impl Shell {
                 "readonly" | "export" | "declare" | "typeset" | "local"
             );
             if is_assign_builtin {
+                // Check if -a flag is present (affects error prefix for readonly errors)
+                let has_array_flag = args
+                    .iter()
+                    .any(|a| a.starts_with('-') && a.len() > 1 && a.contains('a'));
                 let mut new_args = Vec::new();
                 let mut modified = false;
                 for (arg_idx, arg) in args.iter().enumerate() {
@@ -2543,8 +2547,28 @@ impl Shell {
                         {
                             // Perform the array assignment
                             if self.readonly_vars.contains(name) {
-                                // Parser-level assignment error: no builtin/function prefix
-                                eprintln!("{}: {}: readonly variable", self.error_prefix(), name);
+                                if has_array_flag {
+                                    if let Some(fname) = self.func_names.last() {
+                                        eprintln!(
+                                            "{}: {}: {}: readonly variable",
+                                            self.error_prefix(),
+                                            fname,
+                                            name
+                                        );
+                                    } else {
+                                        eprintln!(
+                                            "{}: {}: readonly variable",
+                                            self.error_prefix(),
+                                            name
+                                        );
+                                    }
+                                } else {
+                                    eprintln!(
+                                        "{}: {}: readonly variable",
+                                        self.error_prefix(),
+                                        name
+                                    );
+                                }
                                 self.last_status = 1;
                             } else {
                                 let arr = crate::builtins::parse_array_literal(value);
