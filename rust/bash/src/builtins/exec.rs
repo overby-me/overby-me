@@ -398,11 +398,9 @@ pub(super) fn builtin_type(shell: &mut Shell, args: &[String]) -> i32 {
                 println!("{} is a shell keyword", name);
             } else if let Some(body) = shell.functions.get(name) {
                 println!("{} is a function", name);
-                let prefix = if shell.func_has_keyword.contains(name) {
-                    "function "
-                } else {
-                    ""
-                };
+                let needs_keyword = shell.func_has_keyword.contains(name)
+                    && !name.chars().all(|c| c.is_alphanumeric() || c == '_');
+                let prefix = if needs_keyword { "function " } else { "" };
                 let body_str = format_func_body(body, 0);
                 let redir_str = if let Some(redirs) = shell.func_redirections.get(name) {
                     let parts: Vec<String> = redirs.iter().map(format_redirection).collect();

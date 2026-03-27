@@ -667,11 +667,10 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             return 0;
         }
         let print_func = |name: &str, body: &CompoundCommand, shell: &Shell| {
-            let prefix = if shell.func_has_keyword.contains(name) {
-                "function "
-            } else {
-                ""
-            };
+            // Bash prints 'function' keyword when the name is not a valid identifier
+            let needs_keyword = shell.func_has_keyword.contains(name)
+                && !name.chars().all(|c| c.is_alphanumeric() || c == '_');
+            let prefix = if needs_keyword { "function " } else { "" };
             let body_str = format_func_body(body, 0);
             let redir_str = if let Some(redirs) = shell.func_redirections.get(name) {
                 let parts: Vec<String> = redirs.iter().map(format_redirection).collect();
