@@ -1355,27 +1355,7 @@ impl Shell {
 
                 let (read_fd, write_fd): (Option<RawFd>, Option<RawFd>) = if !is_last {
                     let (r, w) = nix::unistd::pipe().expect("pipe failed");
-                    let mut rfd = r.into_raw_fd();
-                    let mut wfd = w.into_raw_fd();
-                    // Move pipe fds away from 0/1 to avoid conflicts with
-                    // stdin/stdout (can happen if fd 0 or 1 was closed)
-                    if rfd < 2 {
-                        let new = nix::fcntl::fcntl(rfd, nix::fcntl::FcntlArg::F_DUPFD(10))
-                            .unwrap_or(rfd);
-                        if new != rfd {
-                            nix::unistd::close(rfd).ok();
-                            rfd = new;
-                        }
-                    }
-                    if wfd < 2 {
-                        let new = nix::fcntl::fcntl(wfd, nix::fcntl::FcntlArg::F_DUPFD(10))
-                            .unwrap_or(wfd);
-                        if new != wfd {
-                            nix::unistd::close(wfd).ok();
-                            wfd = new;
-                        }
-                    }
-                    (Some(rfd), Some(wfd))
+                    (Some(r.into_raw_fd()), Some(w.into_raw_fd()))
                 } else {
                     (None, None)
                 };
