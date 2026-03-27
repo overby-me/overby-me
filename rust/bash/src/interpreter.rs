@@ -267,6 +267,7 @@ pub struct Shell {
     pub arrays: HashMap<String, Vec<String>>,
     pub assoc_arrays: HashMap<String, AssocArray>,
     pub functions: HashMap<String, CompoundCommand>,
+    pub func_body_lines: HashMap<String, usize>, // function name → body start line
     pub traced_funcs: HashSet<String>,
     pub hash_table: HashMap<String, (String, u32)>,
     pub positional: Vec<String>,
@@ -426,6 +427,7 @@ impl Shell {
             arrays: HashMap::new(),
             assoc_arrays: HashMap::new(),
             functions: HashMap::new(),
+            func_body_lines: HashMap::new(),
             traced_funcs: HashSet::new(),
             hash_table: HashMap::new(),
             positional: vec!["bash".to_string()],
@@ -539,7 +541,7 @@ impl Shell {
                     if program.len() == 1
                         && program[0].list.first.commands.len() == 1
                         && program[0].list.rest.is_empty()
-                        && let crate::ast::Command::FunctionDef(fname, fbody) =
+                        && let crate::ast::Command::FunctionDef(fname, fbody, _) =
                             &program[0].list.first.commands[0]
                     {
                         shell.functions.insert(fname.clone(), *fbody.clone());
@@ -1569,12 +1571,13 @@ impl Shell {
             Command::Compound(compound, redirections) => {
                 self.run_compound_with_redirects(compound, redirections)
             }
-            Command::FunctionDef(name, body) => {
+            Command::FunctionDef(name, body, body_line) => {
                 if self.readonly_funcs.contains(name) {
                     eprintln!("{}: {}: readonly function", self.error_prefix(), name);
                     1
                 } else {
                     self.functions.insert(name.clone(), *body.clone());
+                    self.func_body_lines.insert(name.clone(), *body_line);
                     0
                 }
             }
@@ -4237,6 +4240,11 @@ impl Shell {
         // Fire DEBUG trap at function entry (bash fires it once at the call site
         // and once at the start of the function body for traced functions)
         if inherit_debug {
+            // Set LINENO to the function body start line (where { is)
+            if let Some(&body_line) = self.func_body_lines.get(name) {
+                self.vars
+                    .insert("LINENO".to_string(), body_line.to_string());
+            }
             self.run_debug_trap();
         }
 

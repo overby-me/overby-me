@@ -41,7 +41,7 @@ pub struct Pipeline {
 pub enum Command {
     Simple(SimpleCommand),
     Compound(CompoundCommand, Vec<Redirection>),
-    FunctionDef(String, Box<CompoundCommand>),
+    FunctionDef(String, Box<CompoundCommand>, usize), // name, body, body_start_line
     Coproc(Option<String>, Box<Command>),
 }
 
