@@ -1910,9 +1910,12 @@ fn format_redirection(redir: &Redirection) -> String {
             RedirFd::Number(n) => {
                 // Only print fd number when it differs from the default
                 match redir.kind {
+                    RedirectKind::DupInput | RedirectKind::DupOutput => {
+                        // Always print fd for dup redirects
+                        s.push_str(&n.to_string());
+                    }
                     RedirectKind::Input
                     | RedirectKind::ReadWrite
-                    | RedirectKind::DupInput
                     | RedirectKind::HereDoc(_, _)
                     | RedirectKind::HereString
                     | RedirectKind::ProcessSubIn => {
