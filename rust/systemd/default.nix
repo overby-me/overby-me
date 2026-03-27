@@ -769,12 +769,11 @@
                TEST-74-AUX-UTILS.battery-check.sh \
                TEST-74-AUX-UTILS.userdbctl.sh \
                TEST-74-AUX-UTILS.mount.sh \
-               TEST-74-AUX-UTILS.sbsign.sh \
-               TEST-74-AUX-UTILS.keyutil.sh \
                TEST-74-AUX-UTILS.sysusers.sh \
                TEST-74-AUX-UTILS.defer_reactivation.sh \
                TEST-74-AUX-UTILS.socket.sh
         '';
+        extraPackages = pkgs: [pkgs.openssl];
       }
     ];
   in
