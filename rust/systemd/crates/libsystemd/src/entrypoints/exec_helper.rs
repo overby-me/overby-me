@@ -1131,34 +1131,10 @@ pub fn run_exec_helper() {
         }
     }
 
-    // ── Apply all LimitXXX= resource limits before anything else ──────
-    apply_resource_limit("RLIMIT_NOFILE", libc::RLIMIT_NOFILE, &config.limit_nofile);
-    apply_resource_limit("RLIMIT_CORE", libc::RLIMIT_CORE, &config.limit_core);
-    apply_resource_limit("RLIMIT_FSIZE", libc::RLIMIT_FSIZE, &config.limit_fsize);
-    apply_resource_limit("RLIMIT_DATA", libc::RLIMIT_DATA, &config.limit_data);
-    apply_resource_limit("RLIMIT_STACK", libc::RLIMIT_STACK, &config.limit_stack);
-    apply_resource_limit("RLIMIT_RSS", libc::RLIMIT_RSS, &config.limit_rss);
-    apply_resource_limit("RLIMIT_NPROC", libc::RLIMIT_NPROC, &config.limit_nproc);
-    apply_resource_limit(
-        "RLIMIT_MEMLOCK",
-        libc::RLIMIT_MEMLOCK,
-        &config.limit_memlock,
-    );
-    apply_resource_limit("RLIMIT_AS", libc::RLIMIT_AS, &config.limit_as);
-    apply_resource_limit("RLIMIT_LOCKS", libc::RLIMIT_LOCKS, &config.limit_locks);
-    apply_resource_limit(
-        "RLIMIT_SIGPENDING",
-        libc::RLIMIT_SIGPENDING,
-        &config.limit_sigpending,
-    );
-    apply_resource_limit(
-        "RLIMIT_MSGQUEUE",
-        libc::RLIMIT_MSGQUEUE,
-        &config.limit_msgqueue,
-    );
-    apply_resource_limit("RLIMIT_NICE", libc::RLIMIT_NICE, &config.limit_nice);
-    apply_resource_limit("RLIMIT_RTPRIO", libc::RLIMIT_RTPRIO, &config.limit_rtprio);
-    apply_resource_limit("RLIMIT_RTTIME", libc::RLIMIT_RTTIME, &config.limit_rttime);
+    // NOTE: Resource limits (LimitXXX=) are applied later, just before
+    // execv(), so that restrictive limits like LimitNOFILE=7 don't prevent
+    // the exec helper from opening files during setup (cgroup, mount
+    // namespace, etc.).
 
     if let Err(e) =
         crate::services::fork_os_specific::post_fork_os_specific(&config.platform_specific)
@@ -1866,6 +1842,37 @@ pub fn run_exec_helper() {
         Path::new("/dev/urandom").exists(),
         Path::new("/proc").exists()
     );
+
+    // ── Apply all LimitXXX= resource limits just before exec ──────────
+    // Applied last so restrictive limits (e.g. LimitNOFILE=7) don't
+    // prevent the exec helper from opening files during setup.
+    apply_resource_limit("RLIMIT_NOFILE", libc::RLIMIT_NOFILE, &config.limit_nofile);
+    apply_resource_limit("RLIMIT_CORE", libc::RLIMIT_CORE, &config.limit_core);
+    apply_resource_limit("RLIMIT_FSIZE", libc::RLIMIT_FSIZE, &config.limit_fsize);
+    apply_resource_limit("RLIMIT_DATA", libc::RLIMIT_DATA, &config.limit_data);
+    apply_resource_limit("RLIMIT_STACK", libc::RLIMIT_STACK, &config.limit_stack);
+    apply_resource_limit("RLIMIT_RSS", libc::RLIMIT_RSS, &config.limit_rss);
+    apply_resource_limit("RLIMIT_NPROC", libc::RLIMIT_NPROC, &config.limit_nproc);
+    apply_resource_limit(
+        "RLIMIT_MEMLOCK",
+        libc::RLIMIT_MEMLOCK,
+        &config.limit_memlock,
+    );
+    apply_resource_limit("RLIMIT_AS", libc::RLIMIT_AS, &config.limit_as);
+    apply_resource_limit("RLIMIT_LOCKS", libc::RLIMIT_LOCKS, &config.limit_locks);
+    apply_resource_limit(
+        "RLIMIT_SIGPENDING",
+        libc::RLIMIT_SIGPENDING,
+        &config.limit_sigpending,
+    );
+    apply_resource_limit(
+        "RLIMIT_MSGQUEUE",
+        libc::RLIMIT_MSGQUEUE,
+        &config.limit_msgqueue,
+    );
+    apply_resource_limit("RLIMIT_NICE", libc::RLIMIT_NICE, &config.limit_nice);
+    apply_resource_limit("RLIMIT_RTPRIO", libc::RLIMIT_RTPRIO, &config.limit_rtprio);
+    apply_resource_limit("RLIMIT_RTTIME", libc::RLIMIT_RTTIME, &config.limit_rttime);
 
     match nix::unistd::execv(&cmd, &args) {
         Ok(_infallible) => unreachable!(),

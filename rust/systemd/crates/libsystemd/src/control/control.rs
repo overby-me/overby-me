@@ -2762,6 +2762,28 @@ fn create_transient_unit(
                             service_conf.exec_config.private_users =
                                 matches!(value, "yes" | "true" | "1");
                         }
+                        "ProtectSystem" => {
+                            service_conf.exec_config.protect_system = match value {
+                                "yes" | "true" | "1" => crate::units::ProtectSystem::Yes,
+                                "full" => crate::units::ProtectSystem::Full,
+                                "strict" => crate::units::ProtectSystem::Strict,
+                                _ => crate::units::ProtectSystem::No,
+                            };
+                        }
+                        "ProtectHome" => {
+                            service_conf.exec_config.protect_home = match value {
+                                "yes" | "true" | "1" => crate::units::ProtectHome::Yes,
+                                "read-only" => crate::units::ProtectHome::ReadOnly,
+                                "tmpfs" => crate::units::ProtectHome::Tmpfs,
+                                _ => crate::units::ProtectHome::No,
+                            };
+                        }
+                        "TemporaryFileSystem" => {
+                            service_conf
+                                .exec_config
+                                .temporary_file_system
+                                .push(value.to_string());
+                        }
                         _ => {}
                     }
                 }
@@ -3018,8 +3040,140 @@ fn create_transient_unit(
                     service_conf.exec_config.limit_core =
                         crate::units::unit_parsing::parse_resource_limit(value);
                 }
+                "LimitFSIZE" => {
+                    service_conf.exec_config.limit_fsize =
+                        crate::units::unit_parsing::parse_resource_limit(value);
+                }
+                "LimitDATA" => {
+                    service_conf.exec_config.limit_data =
+                        crate::units::unit_parsing::parse_resource_limit(value);
+                }
+                "LimitSTACK" => {
+                    service_conf.exec_config.limit_stack =
+                        crate::units::unit_parsing::parse_resource_limit(value);
+                }
+                "LimitRSS" => {
+                    service_conf.exec_config.limit_rss =
+                        crate::units::unit_parsing::parse_resource_limit(value);
+                }
+                "LimitNPROC" => {
+                    service_conf.exec_config.limit_nproc =
+                        crate::units::unit_parsing::parse_resource_limit(value);
+                }
+                "LimitMEMLOCK" => {
+                    service_conf.exec_config.limit_memlock =
+                        crate::units::unit_parsing::parse_resource_limit(value);
+                }
+                "LimitAS" => {
+                    service_conf.exec_config.limit_as =
+                        crate::units::unit_parsing::parse_resource_limit(value);
+                }
+                "LimitLOCKS" => {
+                    service_conf.exec_config.limit_locks =
+                        crate::units::unit_parsing::parse_resource_limit(value);
+                }
+                "LimitSIGPENDING" => {
+                    service_conf.exec_config.limit_sigpending =
+                        crate::units::unit_parsing::parse_resource_limit(value);
+                }
+                "LimitMSGQUEUE" => {
+                    service_conf.exec_config.limit_msgqueue =
+                        crate::units::unit_parsing::parse_resource_limit(value);
+                }
+                "LimitNICE" => {
+                    service_conf.exec_config.limit_nice =
+                        crate::units::unit_parsing::parse_resource_limit(value);
+                }
+                "LimitRTPRIO" => {
+                    service_conf.exec_config.limit_rtprio =
+                        crate::units::unit_parsing::parse_resource_limit(value);
+                }
+                "LimitRTTIME" => {
+                    service_conf.exec_config.limit_rttime =
+                        crate::units::unit_parsing::parse_resource_limit(value);
+                }
                 "PrivateTmp" => {
                     service_conf.exec_config.private_tmp = matches!(value, "yes" | "true" | "1");
+                }
+                "PrivateMounts" => {
+                    service_conf.exec_config.private_mounts = matches!(value, "yes" | "true" | "1");
+                }
+                "ReadWritePaths" => {
+                    for p in value.split_whitespace() {
+                        service_conf
+                            .exec_config
+                            .read_write_paths
+                            .push(p.to_string());
+                    }
+                }
+                "ReadOnlyPaths" => {
+                    for p in value.split_whitespace() {
+                        service_conf.exec_config.read_only_paths.push(p.to_string());
+                    }
+                }
+                "InaccessiblePaths" => {
+                    for p in value.split_whitespace() {
+                        service_conf
+                            .exec_config
+                            .inaccessible_paths
+                            .push(p.to_string());
+                    }
+                }
+                "BindPaths" => {
+                    for p in value.split_whitespace() {
+                        service_conf.exec_config.bind_paths.push(p.to_string());
+                    }
+                }
+                "BindReadOnlyPaths" => {
+                    for p in value.split_whitespace() {
+                        service_conf
+                            .exec_config
+                            .bind_read_only_paths
+                            .push(p.to_string());
+                    }
+                }
+                "ProtectKernelTunables" => {
+                    service_conf.exec_config.protect_kernel_tunables =
+                        matches!(value, "yes" | "true" | "1");
+                }
+                "ProtectKernelModules" => {
+                    service_conf.exec_config.protect_kernel_modules =
+                        matches!(value, "yes" | "true" | "1");
+                }
+                "ProtectKernelLogs" => {
+                    service_conf.exec_config.protect_kernel_logs =
+                        matches!(value, "yes" | "true" | "1");
+                }
+                "ProtectControlGroups" => {
+                    service_conf.exec_config.protect_control_groups =
+                        matches!(value, "yes" | "true" | "1");
+                }
+                "ProtectClock" => {
+                    service_conf.exec_config.protect_clock = matches!(value, "yes" | "true" | "1");
+                }
+                "ProtectHostname" => {
+                    service_conf.exec_config.protect_hostname =
+                        matches!(value, "yes" | "true" | "1");
+                }
+                "NoNewPrivileges" => {
+                    service_conf.exec_config.no_new_privileges =
+                        matches!(value, "yes" | "true" | "1");
+                }
+                "MemoryDenyWriteExecute" => {
+                    service_conf.exec_config.memory_deny_write_execute =
+                        matches!(value, "yes" | "true" | "1");
+                }
+                "LockPersonality" => {
+                    service_conf.exec_config.lock_personality =
+                        matches!(value, "yes" | "true" | "1");
+                }
+                "RestrictRealtime" => {
+                    service_conf.exec_config.restrict_realtime =
+                        matches!(value, "yes" | "true" | "1");
+                }
+                "RestrictSUIDSGID" => {
+                    service_conf.exec_config.restrict_suid_sgid =
+                        matches!(value, "yes" | "true" | "1");
                 }
                 _ => {
                     log::debug!("Ignoring unknown transient unit property: {key}={value}");

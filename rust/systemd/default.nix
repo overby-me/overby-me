@@ -356,11 +356,77 @@
           perl -i -pe 's{"\/"$}{"/var/empty"}' TEST-07-PID1.working-directory.sh
           # Ensure /home/testuser exists (NixOS creates it via users-groups.service)
           sed -i '3a mkdir -p /home/testuser && chown testuser:testuser /home/testuser' TEST-07-PID1.working-directory.sh
+          # Rewrite exec-context test: keep ProtectSystem, ProtectHome, and Limit tests.
+          # Remove PrivateMounts/MountAPIVFS, ProtectProc, ProcSubset, ProtectKernelLogs,
+          # BindPaths, RestrictFileSystems, DynamicUser, env file serialization,
+          # IO/CPU/Device directives, SocketBind, and RestrictNamespaces sections.
+          cat > TEST-07-PID1.exec-context.sh << 'TESTEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "ProtectSystem= tests"
+          systemd-run --wait --pipe -p ProtectSystem=yes \
+              bash -xec "test ! -w /usr; test -w /etc; test -w /var"
+          systemd-run --wait --pipe -p ProtectSystem=full \
+              bash -xec "test ! -w /usr; test ! -w /etc; test -w /var"
+          systemd-run --wait --pipe -p ProtectSystem=strict \
+              bash -xec "test ! -w /; test ! -w /etc; test ! -w /var; test -w /dev; test -w /proc"
+          systemd-run --wait --pipe -p ProtectSystem=no \
+              bash -xec "test -w /; test -w /etc; test -w /var; test -w /dev; test -w /proc"
+
+          : "ProtectHome= tests"
+          MARK="$(mktemp /root/.exec-context.XXX)"
+          systemd-run --wait --pipe -p ProtectHome=yes \
+              bash -xec "test ! -w /home; test ! -w /root; test ! -w /run/user; test ! -e $MARK"
+          systemd-run --wait --pipe -p ProtectHome=read-only \
+              bash -xec "test ! -w /home; test ! -w /root; test ! -w /run/user; test -e $MARK"
+          systemd-run --wait --pipe -p ProtectHome=no \
+              bash -xec "test -w /home; test -w /root; test -w /run/user; test -e $MARK"
+          rm -f "$MARK"
+
+          : "Comprehensive Limit tests"
+          systemd-run --wait --pipe \
+              -p LimitFSIZE=96G \
+              -p LimitDATA=infinity \
+              -p LimitSTACK=8M \
+              -p LimitCORE=17M \
+              -p LimitRSS=27G \
+              -p LimitNOFILE=64:127 \
+              -p LimitAS=infinity \
+              -p LimitNPROC=64:infinity \
+              -p LimitMEMLOCK=37M \
+              -p LimitLOCKS=19:1021 \
+              -p LimitSIGPENDING=21 \
+              -p LimitMSGQUEUE=666 \
+              -p LimitNICE=4 \
+              -p LimitRTPRIO=8 \
+              bash -xec 'KB=1; MB=$((KB * 1024)); GB=$((MB * 1024));
+                         : FSIZE;      [[ $(ulimit -Sf) -eq $((96 * GB)) ]]; [[ $(ulimit -Hf) -eq $((96 * GB)) ]];
+                         : DATA;       [[ $(ulimit -Sd) == unlimited  ]];    [[ $(ulimit -Hd) == unlimited ]];
+                         : STACK;      [[ $(ulimit -Ss) -eq $((8 * MB)) ]];  [[ $(ulimit -Hs) -eq $((8 * MB)) ]];
+                         : CORE;       [[ $(ulimit -Sc) -eq $((17 * MB)) ]]; [[ $(ulimit -Hc) -eq $((17 * MB)) ]];
+                         : RSS;        [[ $(ulimit -Sm) -eq $((27 * GB)) ]]; [[ $(ulimit -Hm) -eq $((27 * GB)) ]];
+                         : NOFILE;     [[ $(ulimit -Sn) -eq 64 ]];           [[ $(ulimit -Hn) -eq 127 ]];
+                         : AS;         [[ $(ulimit -Sv) == unlimited ]];     [[ $(ulimit -Hv) == unlimited ]];
+                         : NPROC;      [[ $(ulimit -Su) -eq 64 ]];           [[ $(ulimit -Hu) == unlimited ]];
+                         : MEMLOCK;    [[ $(ulimit -Sl) -eq $((37 * MB)) ]]; [[ $(ulimit -Hl) -eq $((37 * MB)) ]];
+                         : LOCKS;      [[ $(ulimit -Sx) -eq 19 ]];           [[ $(ulimit -Hx) -eq 1021 ]];
+                         : SIGPENDING; [[ $(ulimit -Si) -eq 21 ]];           [[ $(ulimit -Hi) -eq 21 ]];
+                         : MSGQUEUE;   [[ $(ulimit -Sq) -eq 666 ]];          [[ $(ulimit -Hq) -eq 666 ]];
+                         : NICE;       [[ $(ulimit -Se) -eq 4 ]];            [[ $(ulimit -He) -eq 4 ]];
+                         : RTPRIO;     [[ $(ulimit -Sr) -eq 8 ]];            [[ $(ulimit -Hr) -eq 8 ]];'
+
+          : "Error handling for clean-up codepaths"
+          (! systemd-run --wait --pipe false)
+          TESTEOF
+          chmod +x TEST-07-PID1.exec-context.sh
           rm -f TEST-07-PID1.attach_processes.sh \
                TEST-07-PID1.concurrency.sh \
                TEST-07-PID1.DeferReactivation.sh \
                TEST-07-PID1.delegate-namespaces.sh \
-               TEST-07-PID1.exec-context.sh \
                TEST-07-PID1.exec-deserialization.sh \
                TEST-07-PID1.issue-2467.sh \
                TEST-07-PID1.issue-3171.sh \
