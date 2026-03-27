@@ -1168,6 +1168,20 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                             }
                             continue;
                         }
+                        // Backslash: escape next char (prevents ) from closing comsub)
+                        '\\' if *i + 1 < chars.len() && chars[*i + 1] != '\n' => {
+                            cmd.push(chars[*i]);
+                            *i += 1;
+                            cmd.push(chars[*i]);
+                            *i += 1;
+                            continue;
+                        }
+                        // Backslash-newline: line continuation
+                        '\\' if *i + 1 < chars.len() && chars[*i + 1] == '\n' => {
+                            // Skip both \ and newline
+                            *i += 2;
+                            continue;
+                        }
                         // Heredoc: << or <<- inside comsub
                         '<' if *i + 1 < chars.len()
                             && chars[*i + 1] == '<'
