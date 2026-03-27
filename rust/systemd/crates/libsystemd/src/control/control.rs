@@ -2777,8 +2777,15 @@ fn create_transient_unit(
                     };
                 }
                 "Environment" => {
-                    // Append to environment
+                    // Append to environment (strip surrounding quotes from value)
                     if let Some((k, v)) = value.split_once('=') {
+                        let v = if (v.starts_with('\'') && v.ends_with('\''))
+                            || (v.starts_with('"') && v.ends_with('"'))
+                        {
+                            &v[1..v.len() - 1]
+                        } else {
+                            v
+                        };
                         let env = service_conf.exec_config.environment.get_or_insert_with(|| {
                             crate::units::unit_parsing::EnvVars { vars: vec![] }
                         });

@@ -791,7 +791,17 @@
                       --setenv=ENV_HELLO="env world" \
                       --setenv=EMPTY= \
                       --setenv=PARENT_FOO \
-                      bash -xec '[[ "$ENV_HELLO" == "env world" && -z "$EMPTY" && "$PARENT_FOO" == bar ]]'
+                      --property=Environment="ALSO_HELLO='also world'" \
+                      bash -xec '[[ "$ENV_HELLO" == "env world" && -z "$EMPTY" && "$PARENT_FOO" == bar && "$ALSO_HELLO" == "also world" ]]'
+
+          : "WorkingDirectory=~ tilde expansion"
+          mkdir -p /home/testuser && chown testuser:testuser /home/testuser
+          assert_eq "$(systemd-run --pipe --uid=root -p WorkingDirectory='~' pwd)" "/root"
+          assert_eq "$(systemd-run --pipe --uid=testuser -p WorkingDirectory='~' pwd)" "/home/testuser"
+
+          : "Transient service with USER/HOME/SHELL env vars from User="
+          systemd-run --wait --pipe --uid=testuser \
+                      bash -xec '[[ "$USER" == testuser && "$HOME" == /home/testuser && -n "$SHELL" ]]'
 
           : "Verbose mode (-v)"
           systemd-run -v echo wampfl | grep wampfl
