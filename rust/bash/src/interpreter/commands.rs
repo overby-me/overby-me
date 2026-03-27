@@ -1162,7 +1162,7 @@ impl Shell {
                 && result != 0
                 && !matches!(
                     command_name.as_str(),
-                    "trap" | "return" | "break" | "continue" | "shift" | "exit"
+                    "trap" | "return" | "break" | "continue" | "shift" | "exit" | "." | "source"
                 )
             {
                 self.restore_redirections(saved_fds);
