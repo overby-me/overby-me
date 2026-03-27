@@ -308,7 +308,6 @@
                TEST-07-PID1.delegate-namespaces.sh \
                TEST-07-PID1.exec-context.sh \
                TEST-07-PID1.exec-deserialization.sh \
-               TEST-07-PID1.exec-timestamps.sh \
                TEST-07-PID1.issue-2467.sh \
                TEST-07-PID1.issue-30412.sh \
                TEST-07-PID1.issue-3171.sh \
