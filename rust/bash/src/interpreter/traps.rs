@@ -7,12 +7,12 @@ impl Shell {
         {
             // Check signals 1-64
             for signum in 1..=64 {
+                if signum == libc::SIGCHLD && self.in_foreground_wait {
+                    // Don't consume SIGCHLD during foreground waits — leave it
+                    // pending so builtin_wait can fire the trap
+                    continue;
+                }
                 if take_pending_signal(signum) {
-                    // Skip SIGCHLD during foreground waits — bash only fires
-                    // SIGCHLD trap for background/async jobs, not foreground children
-                    if signum == libc::SIGCHLD && self.in_foreground_wait {
-                        continue;
-                    }
                     // Convert signal number to name
                     let sig_name = match signum {
                         libc::SIGHUP => "HUP",
