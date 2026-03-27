@@ -5978,6 +5978,12 @@ impl Shell {
                 RedirectKind::DupOutput => {
                     let fd = self.resolve_redir_fd(&redir.fd, 1);
                     if target_str == "-" {
+                        // Save fd before closing so it can be restored
+                        if !is_var_fd(redir)
+                            && let Ok(saved_fd) = nix::unistd::dup(fd)
+                        {
+                            saved.push((fd, saved_fd));
+                        }
                         self.coproc_checkfd(fd);
                         nix::unistd::close(fd).ok();
                     } else if let Some(src_str) = target_str.strip_suffix('-') {
@@ -6024,6 +6030,12 @@ impl Shell {
                 RedirectKind::DupInput => {
                     let fd = self.resolve_redir_fd(&redir.fd, 0);
                     if target_str == "-" {
+                        // Save fd before closing so it can be restored
+                        if !is_var_fd(redir)
+                            && let Ok(saved_fd) = nix::unistd::dup(fd)
+                        {
+                            saved.push((fd, saved_fd));
+                        }
                         self.coproc_checkfd(fd);
                         nix::unistd::close(fd).ok();
                     } else if let Some(src_str) = target_str.strip_suffix('-') {
