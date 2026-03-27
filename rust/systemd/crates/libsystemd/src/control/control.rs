@@ -3195,6 +3195,18 @@ fn create_transient_unit(
                     service_conf.exec_config.restrict_suid_sgid =
                         matches!(value, "yes" | "true" | "1");
                 }
+                "CapabilityBoundingSet" => {
+                    service_conf
+                        .exec_config
+                        .capability_bounding_set
+                        .extend(value.split_whitespace().map(|s| s.to_string()));
+                }
+                "AmbientCapabilities" => {
+                    service_conf
+                        .exec_config
+                        .ambient_capabilities
+                        .extend(value.split_whitespace().map(|s| s.to_string()));
+                }
                 _ => {
                     log::debug!("Ignoring unknown transient unit property: {key}={value}");
                 }

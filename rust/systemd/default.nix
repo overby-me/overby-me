@@ -520,6 +520,30 @@
           systemd-run --wait --pipe -p OOMScoreAdjust=500 \
               bash -xec '[[ "$(cat /proc/self/oom_score_adj)" == "500" ]]'
 
+          : "NoNewPrivileges= tests"
+          systemd-run --wait --pipe -p NoNewPrivileges=yes \
+              bash -xec '[[ "$(grep NoNewPrivs /proc/self/status | awk "{print \$2}")" == "1" ]]'
+
+          : "ProtectClock= tests"
+          systemd-run --wait --pipe -p ProtectClock=yes \
+              bash -xec 'if [[ -e /dev/rtc0 ]]; then
+                           [[ "$(stat -c %t:%T /dev/rtc0)" == "$(stat -c %t:%T /dev/null)" ]];
+                         fi'
+
+          : "LockPersonality= tests"
+          systemd-run --wait --pipe -p LockPersonality=yes -p NoNewPrivileges=yes \
+              bash -xec '[[ "$(uname -m)" != "" ]]'
+
+          : "CapabilityBoundingSet= tests"
+          systemd-run --wait --pipe -p CapabilityBoundingSet=CAP_NET_RAW \
+              bash -xec 'CAPBND=$(grep CapBnd /proc/self/status | awk "{print \$2}");
+                         [[ "$CAPBND" != "0000003fffffffff" ]]'
+
+          : "AmbientCapabilities= tests"
+          systemd-run --wait --pipe -p AmbientCapabilities=CAP_NET_RAW -p User=testuser \
+              bash -xec 'CAPAMB=$(grep CapAmb /proc/self/status | awk "{print \$2}");
+                         [[ "$CAPAMB" != "0000000000000000" ]]'
+
           : "Error handling for clean-up codepaths"
           (! systemd-run --wait --pipe false)
           TESTEOF
@@ -907,7 +931,12 @@
         # Skip sections needing DynamicUser, ImportCredential, varlink, run0.
         patchScript = ''
           sed -i '/^(! unshare -m/d' TEST-54-CREDS.sh
-          sed -i '/^# Verify that the creds are properly loaded/i touch /testok; exit 0' TEST-54-CREDS.sh
+          # Remove the DynamicUser credential loading block (lines starting at
+          # "Verify that the creds are properly loaded") up through its rm line
+          sed -i '/^# Verify that the creds are properly loaded/,/^rm \/tmp\/ts54-concat/d' TEST-54-CREDS.sh
+          # Exit before the qemu/nspawn credential checks and remaining
+          # DynamicUser-dependent sections
+          sed -i '/^if systemd-detect-virt -q -c/i touch /testok; exit 0' TEST-54-CREDS.sh
         '';
       }
       {name = "31-DEVICE-ENUMERATION";}
