@@ -231,23 +231,56 @@ fn run() -> i32 {
     if let Some(file) = script_file
         && !read_stdin
     {
-        match std::fs::read_to_string(&file) {
-            Ok(content) => {
-                let status = shell.run_string(&content);
-                shell.run_exit_trap();
-                return status;
+        // Open the script file on fd 0 (stdin) so that `exec 0<` redirections
+        // affect subsequent command reading. Then read incrementally from fd 0.
+        #[cfg(unix)]
+        {
+            use std::os::unix::io::IntoRawFd;
+            match std::fs::File::open(&file) {
+                Ok(f) => {
+                    let raw = f.into_raw_fd();
+                    if raw != 0 {
+                        nix::unistd::dup2(raw, 0).ok();
+                        nix::unistd::close(raw).ok();
+                    }
+                    let status = shell.run_from_stdin();
+                    shell.run_exit_trap();
+                    return status;
+                }
+                Err(e) => {
+                    let argv0 = std::env::args()
+                        .next()
+                        .unwrap_or_else(|| "bash".to_string());
+                    let msg = match e.kind() {
+                        std::io::ErrorKind::NotFound => "No such file or directory",
+                        std::io::ErrorKind::PermissionDenied => "Permission denied",
+                        _ => "No such file or directory",
+                    };
+                    eprintln!("{}: {}: {}", argv0, file, msg);
+                    return 127;
+                }
             }
-            Err(e) => {
-                let argv0 = std::env::args()
-                    .next()
-                    .unwrap_or_else(|| "bash".to_string());
-                let msg = match e.kind() {
-                    std::io::ErrorKind::NotFound => "No such file or directory",
-                    std::io::ErrorKind::PermissionDenied => "Permission denied",
-                    _ => "No such file or directory",
-                };
-                eprintln!("{}: {}: {}", argv0, file, msg);
-                return 127;
+        }
+        #[cfg(not(unix))]
+        {
+            match std::fs::read_to_string(&file) {
+                Ok(content) => {
+                    let status = shell.run_string(&content);
+                    shell.run_exit_trap();
+                    return status;
+                }
+                Err(e) => {
+                    let argv0 = std::env::args()
+                        .next()
+                        .unwrap_or_else(|| "bash".to_string());
+                    let msg = match e.kind() {
+                        std::io::ErrorKind::NotFound => "No such file or directory",
+                        std::io::ErrorKind::PermissionDenied => "Permission denied",
+                        _ => "No such file or directory",
+                    };
+                    eprintln!("{}: {}: {}", argv0, file, msg);
+                    return 127;
+                }
             }
         }
     }

@@ -311,7 +311,9 @@ pub struct Shell {
     pub opt_noexec: bool,
     pub opt_posix: bool,
     pub opt_hashall: bool,
-    pub opt_monitor: bool, // set -m / set -o monitor (job control)
+    pub opt_monitor: bool,         // set -m / set -o monitor (job control)
+    pub exec_stdin_redirect: bool, // set when exec redirects fd 0
+    pub reading_from_fd0: bool,    // true when running via run_from_stdin
     pub login_shell: bool,
     /// Name of the currently executing builtin (for error messages)
     pub current_builtin: Option<String>,
@@ -467,6 +469,8 @@ impl Shell {
             opt_posix: false,
             opt_hashall: true, // enabled by default
             opt_monitor: false,
+            exec_stdin_redirect: false,
+            reading_from_fd0: false,
             login_shell: false,
             current_builtin: None,
             opt_allexport: false,
@@ -725,6 +729,27 @@ impl Shell {
         self.arrays.insert(resolved, values);
     }
 
+    /// Run commands by reading from fd 0 (stdin).
+    /// This supports `exec 0<` redirections that change the input source.
+    pub fn run_from_stdin(&mut self) -> i32 {
+        self.reading_from_fd0 = true;
+        loop {
+            let mut content = String::new();
+            std::io::Read::read_to_string(&mut std::io::stdin(), &mut content).ok();
+            if content.is_empty() {
+                self.reading_from_fd0 = false;
+                return self.last_status;
+            }
+            self.exec_stdin_redirect = false;
+            let status = self.run_string(&content);
+            if !self.exec_stdin_redirect {
+                self.reading_from_fd0 = false;
+                return status;
+            }
+            // exec redirected stdin — loop to read from the new fd 0
+        }
+    }
+
     pub fn run_string(&mut self, input: &str) -> i32 {
         let mut parser = Parser::new_with_aliases(
             input,
@@ -876,6 +901,11 @@ impl Shell {
                         std::process::exit(self.last_status);
                     }
                     self.errexit_suppressed = false;
+                    // If exec redirected stdin and we're reading from fd 0,
+                    // stop processing current input (caller will re-read from new fd 0)
+                    if self.exec_stdin_redirect && self.reading_from_fd0 {
+                        break;
+                    }
                     // Check for pending signals after each command
                     self.check_pending_signals();
                     if self.returning || self.breaking > 0 || self.continuing > 0 {
@@ -2774,6 +2804,14 @@ impl Shell {
         // For `exec` with no command args, don't restore redirections
         // (they should persist in the current shell)
         let is_exec_no_cmd = command_name == "exec" && args.is_empty();
+        if is_exec_no_cmd {
+            // Check if fd 0 was redirected
+            for &(fd, _) in &saved_fds {
+                if fd == 0 {
+                    self.exec_stdin_redirect = true;
+                }
+            }
+        }
         if !is_exec_no_cmd {
             self.restore_redirections(saved_fds);
         }
