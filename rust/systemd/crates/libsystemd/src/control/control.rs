@@ -3062,21 +3062,65 @@ pub fn execute_command(
             // After activate_unit returns, check if the unit actually
             // started.  activate_unit swallows some errors (converting
             // them to Ok) for dependency-graph walking purposes, but for
-            // oneshot transient units we need to detect failure so that
-            // `systemd-run` can exit non-zero.
+            // oneshot and Type=exec transient units we need to detect
+            // failure so that `systemd-run` can exit non-zero.
             //
-            // Only check oneshot services — for Type=simple/exec/notify
-            // the process may exit immediately after fork, but that's a
-            // runtime failure, not a start failure.
+            // For Type=exec, fork_parent sleeps 50ms to check if exec
+            // succeeded, and the exit handler runs asynchronously, so we
+            // poll briefly to catch the failure status.
             {
-                let ri = run_info.read_poisoned();
-                if let Some(unit) = ri.unit_table.get(&id) {
-                    let is_oneshot = if let Specific::Service(srvc) = &unit.specific {
-                        srvc.conf.srcv_type == crate::units::ServiceType::OneShot
-                    } else {
-                        false
-                    };
-                    if is_oneshot {
+                let (is_oneshot, is_exec) = {
+                    let ri = run_info.read_poisoned();
+                    ri.unit_table
+                        .get(&id)
+                        .map(|u| {
+                            if let Specific::Service(srvc) = &u.specific {
+                                (
+                                    srvc.conf.srcv_type == crate::units::ServiceType::OneShot,
+                                    srvc.conf.srcv_type == crate::units::ServiceType::Exec,
+                                )
+                            } else {
+                                (false, false)
+                            }
+                        })
+                        .unwrap_or((false, false))
+                };
+
+                // For Type=exec, poll briefly to let fork_parent's 50ms
+                // exec check and the exit handler update the unit status.
+                if is_exec {
+                    for _ in 0..10 {
+                        std::thread::sleep(std::time::Duration::from_millis(20));
+                        let ri = run_info.read_poisoned();
+                        if let Some(unit) = ri.unit_table.get(&id) {
+                            let status = unit.common.status.read_poisoned();
+                            match &*status {
+                                crate::units::UnitStatus::Stopped(
+                                    crate::units::StatusStopped::StoppedUnexpected,
+                                    errors,
+                                ) => {
+                                    let msg = if let Some(e) = errors.first() {
+                                        format!("{e}")
+                                    } else {
+                                        "unit failed".to_string()
+                                    };
+                                    return Err(format!(
+                                        "Failed to start transient unit {unit_name}: {msg}"
+                                    ));
+                                }
+                                crate::units::UnitStatus::Started(_)
+                                | crate::units::UnitStatus::Starting => {
+                                    break; // exec succeeded
+                                }
+                                _ => {} // still setting up, keep polling
+                            }
+                        }
+                    }
+                }
+
+                if is_oneshot {
+                    let ri = run_info.read_poisoned();
+                    if let Some(unit) = ri.unit_table.get(&id) {
                         let status = unit.common.status.read_poisoned();
                         match &*status {
                             crate::units::UnitStatus::Stopped(
@@ -5190,13 +5234,11 @@ pub fn execute_command(
             };
             {
                 let ri = run_info.read_poisoned();
-                crate::units::reactivate_unit(id, &ri)
-                    .map_err(|e| format!("{e}"))?;
+                crate::units::reactivate_unit(id, &ri).map_err(|e| format!("{e}"))?;
             }
             // Start any newly-discovered NeverStarted deps.
             for dep_id in new_dep_ids {
-                let errs =
-                    crate::units::activate_needed_units(dep_id, run_info.clone());
+                let errs = crate::units::activate_needed_units(dep_id, run_info.clone());
                 for err in &errs {
                     warn!("Error starting dependency after restart: {err}");
                 }

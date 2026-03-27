@@ -501,8 +501,7 @@ pub fn insert_new_unit_lenient(mut unit: units::Unit, run_info: &mut RuntimeInfo
         {
             trace!(
                 "Restoring pruned dep: {} wants {} (from refs_by_name)",
-                existing.id.name,
-                new_id.name
+                existing.id.name, new_id.name
             );
             existing.common.dependencies.wants.push(new_id.clone());
             unit.common.dependencies.wanted_by.push(existing.id.clone());
