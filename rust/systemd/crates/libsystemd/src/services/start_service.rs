@@ -474,6 +474,7 @@ fn start_service_with_filedescriptors(
         private_network: conf.exec_config.private_network,
         private_users: conf.exec_config.private_users,
         private_mounts: conf.exec_config.private_mounts,
+        private_pids: conf.exec_config.private_pids.unwrap_or(false),
         protect_kernel_tunables: conf.exec_config.protect_kernel_tunables,
         protect_kernel_modules: conf.exec_config.protect_kernel_modules,
         protect_kernel_logs: conf.exec_config.protect_kernel_logs,
@@ -578,7 +579,33 @@ fn start_service_with_filedescriptors(
         "Start main executable for service: {name}: {:?} {:?}",
         exec_helper_conf.cmd, exec_helper_conf.args
     );
-    match unsafe { nix::unistd::fork() } {
+    // When PrivatePIDs= is set, use clone(CLONE_NEWPID) so the child is
+    // PID 1 in a new PID namespace from the start — no extra fork needed
+    // in exec_helper.
+    let fork_result = if exec_helper_conf.private_pids {
+        let pid = unsafe {
+            libc::syscall(
+                libc::SYS_clone,
+                (libc::SIGCHLD | libc::CLONE_NEWPID) as libc::c_ulong,
+                std::ptr::null::<libc::c_void>(),
+                std::ptr::null::<libc::c_int>(),
+                std::ptr::null::<libc::c_int>(),
+                0 as libc::c_ulong,
+            )
+        };
+        if pid < 0 {
+            Err(nix::errno::Errno::last())
+        } else if pid == 0 {
+            Ok(nix::unistd::ForkResult::Child)
+        } else {
+            Ok(nix::unistd::ForkResult::Parent {
+                child: nix::unistd::Pid::from_raw(pid as i32),
+            })
+        }
+    } else {
+        unsafe { nix::unistd::fork() }
+    };
+    match fork_result {
         Ok(nix::unistd::ForkResult::Parent { child, .. }) => {
             // make sure the file exists until after we fork before closing it
             drop(exec_helper_conf_file);

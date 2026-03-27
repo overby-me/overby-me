@@ -2746,6 +2746,7 @@ fn create_transient_unit(
                 | "PrivateNetwork"
                 | "PrivateDevices"
                 | "PrivateUsers"
+                | "PrivatePIDs"
                 | "ProtectSystem"
                 | "ProtectHome" => {
                     // These sandbox properties are parsed but may not all be
@@ -2762,6 +2763,10 @@ fn create_transient_unit(
                         "PrivateUsers" => {
                             service_conf.exec_config.private_users =
                                 matches!(value, "yes" | "true" | "1");
+                        }
+                        "PrivatePIDs" => {
+                            service_conf.exec_config.private_pids =
+                                Some(matches!(value, "yes" | "true" | "1"));
                         }
                         "ProtectSystem" => {
                             service_conf.exec_config.protect_system = match value {

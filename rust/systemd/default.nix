@@ -524,6 +524,30 @@
           (! systemd-run --wait --pipe false)
           TESTEOF
           chmod +x TEST-07-PID1.exec-context.sh
+          # Rewrite private-pids test: keep only testcase_basic.
+          # Remove testcase_analyze (systemd-analyze not implemented),
+          # testcase_multiple_features (unsquashfs/PrivateUsersEx/PrivateIPC),
+          # testcase_unpriv (--user mode not implemented).
+          cat > TEST-07-PID1.private-pids.sh << 'PPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "PrivatePIDs=yes basic test"
+          assert_eq "$(systemd-run -p PrivatePIDs=yes --wait --pipe readlink /proc/self)" "1"
+          assert_eq "$(systemd-run -p PrivatePIDs=yes --wait --pipe ps aux --no-heading | wc -l)" "1"
+
+          : "PrivatePIDs=yes procfs mount options"
+          systemd-run -p PrivatePIDs=yes --wait --pipe \
+              bash -xec 'OPTS=$(findmnt --mountpoint /proc --noheadings -o VFS-OPTIONS);
+                         [[ "$OPTS" =~ rw ]];
+                         [[ "$OPTS" =~ nosuid ]];
+                         [[ "$OPTS" =~ nodev ]];
+                         [[ "$OPTS" =~ noexec ]];'
+          PPEOF
+          chmod +x TEST-07-PID1.private-pids.sh
           rm -f TEST-07-PID1.attach_processes.sh \
                TEST-07-PID1.concurrency.sh \
                TEST-07-PID1.DeferReactivation.sh \
@@ -541,7 +565,6 @@
                TEST-07-PID1.poll-limit.sh \
                TEST-07-PID1.prefix-shell.sh \
                TEST-07-PID1.private-bpf.sh \
-               TEST-07-PID1.private-pids.sh \
                TEST-07-PID1.protect-control-groups.sh \
                TEST-07-PID1.protect-hostname.sh \
                TEST-07-PID1.quota.sh \

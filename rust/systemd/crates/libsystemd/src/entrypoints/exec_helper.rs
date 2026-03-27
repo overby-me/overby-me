@@ -406,6 +406,12 @@ pub struct ExecHelperConfig {
     #[serde(default)]
     pub private_mounts: bool,
 
+    /// PrivatePIDs= — if true, a new PID namespace is created and /proc is
+    /// remounted so the service process becomes PID 1 in the new namespace.
+    /// See systemd.exec(5).
+    #[serde(default)]
+    pub private_pids: bool,
+
     /// ProtectKernelTunables= — if true, /proc/sys and similar are read-only.
     /// See systemd.exec(5).
     #[serde(default)]
@@ -1403,6 +1409,7 @@ pub fn run_exec_helper() {
         && (config.private_tmp
             || config.private_devices
             || config.private_mounts
+            || config.private_pids
             || config.protect_kernel_tunables
             || config.protect_kernel_modules
             || config.protect_kernel_logs
@@ -1478,6 +1485,28 @@ pub fn run_exec_helper() {
             // Must deny setgroups before writing gid_map (kernel requirement)
             let _ = std::fs::write("/proc/self/setgroups", "deny\n");
             let _ = std::fs::write("/proc/self/gid_map", format!("0 {gid} 1\n"));
+        }
+    }
+
+    // ── PrivatePIDs= — PID namespace /proc remount ─────────────────────
+    // The process is already PID 1 in a new PID namespace (clone was called
+    // with CLONE_NEWPID in start_service). We just need to remount /proc to
+    // reflect the new namespace.
+    if config.private_pids && !config.privileged_prefix {
+        let ret = unsafe {
+            libc::mount(
+                c"proc".as_ptr(),
+                c"/proc".as_ptr(),
+                c"proc".as_ptr(),
+                libc::MS_NOSUID | libc::MS_NODEV | libc::MS_NOEXEC,
+                std::ptr::null(),
+            )
+        };
+        if ret != 0 {
+            log::warn!(
+                "Failed to remount /proc for PrivatePIDs=: {}",
+                std::io::Error::last_os_error()
+            );
         }
     }
 
