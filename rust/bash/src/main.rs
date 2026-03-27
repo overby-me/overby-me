@@ -27,9 +27,10 @@ fn run() -> i32 {
     let args: Vec<String> = std::env::args().collect();
     let mut shell = Shell::new();
 
-    // SIGPIPE is handled internally (SIG_IGN) but not in the trap table
+    // Record the SIGPIPE ignore in the trap table
     #[cfg(unix)]
     {
+        shell.traps.insert("PIPE".to_string(), String::new());
         // Check which signals were already ignored (SIG_IGN) at startup.
         // These cannot be trapped by the shell (POSIX requirement).
         let signals_to_check: &[(i32, &str)] = &[

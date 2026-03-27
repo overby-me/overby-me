@@ -3290,7 +3290,9 @@ fn builtin_exit(shell: &mut Shell, args: &[String]) -> i32 {
         .unwrap_or(shell.last_status);
     shell.last_status = code;
     shell.run_exit_trap();
-    std::process::exit(code);
+    std::io::Write::flush(&mut std::io::stdout()).ok();
+    std::io::Write::flush(&mut std::io::stderr()).ok();
+    unsafe { libc::_exit(code) };
 }
 
 fn builtin_return(shell: &mut Shell, args: &[String]) -> i32 {
