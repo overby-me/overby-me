@@ -1516,8 +1516,15 @@ fn load_dependency_units(unit_id: &crate::units::UnitId, run_info: &ArcMutRuntim
                 .chain(deps.requires.iter())
                 .chain(deps.after.iter())
                 .chain(deps.binds_to.iter())
+                // Also check refs_by_name: it preserves original dependency
+                // references that may have been pruned from the active dep
+                // lists because the referenced unit didn't exist at load time.
+                // This allows on-demand discovery of units created after
+                // daemon-reload (e.g. a service file dropped in after a target
+                // with Wants= was already loaded).
+                .chain(unit.common.unit.refs_by_name.iter())
             {
-                if !ri.unit_table.contains_key(dep_id) {
+                if !ri.unit_table.contains_key(dep_id) && !to_load.contains(dep_id) {
                     to_load.push(dep_id.clone());
                 }
             }
@@ -5151,8 +5158,49 @@ pub fn execute_command(
         }
         Command::Restart(unit_name) => {
             let id = find_or_load_unit(&unit_name, &run_info)?;
-            let ri = run_info.read_poisoned();
-            crate::units::reactivate_unit(id, &ri).map_err(|e| format!("{e}"))?;
+            // Load dependency units from disk (e.g. Wants= targets that were
+            // created since the unit was first loaded) and refresh on-disk
+            // .wants/.requires directories, matching Start behaviour.
+            load_dependency_units(&id, &run_info);
+            refresh_directory_deps(&id.name, &run_info);
+            // Collect NeverStarted Wants/Requires deps before reactivation.
+            // These are deps that were just loaded from disk and need to be
+            // started after the restart (e.g. services created on disk after
+            // the target was initially loaded).
+            let new_dep_ids: Vec<crate::units::UnitId> = {
+                let ri = run_info.read_poisoned();
+                let mut ids = Vec::new();
+                if let Some(unit) = ri.unit_table.get(&id) {
+                    for dep_id in unit
+                        .common
+                        .dependencies
+                        .wants
+                        .iter()
+                        .chain(unit.common.dependencies.requires.iter())
+                    {
+                        if let Some(dep) = ri.unit_table.get(dep_id) {
+                            let status = dep.common.status.read_poisoned();
+                            if matches!(&*status, crate::units::UnitStatus::NeverStarted) {
+                                ids.push(dep_id.clone());
+                            }
+                        }
+                    }
+                }
+                ids
+            };
+            {
+                let ri = run_info.read_poisoned();
+                crate::units::reactivate_unit(id, &ri)
+                    .map_err(|e| format!("{e}"))?;
+            }
+            // Start any newly-discovered NeverStarted deps.
+            for dep_id in new_dep_ids {
+                let errs =
+                    crate::units::activate_needed_units(dep_id, run_info.clone());
+                for err in &errs {
+                    warn!("Error starting dependency after restart: {err}");
+                }
+            }
         }
         Command::TryRestart(unit_name) => {
             // try-restart: restart the unit only if it is currently active.

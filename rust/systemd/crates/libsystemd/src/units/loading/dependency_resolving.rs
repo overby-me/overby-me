@@ -307,13 +307,10 @@ pub fn fill_dependencies(units: &mut HashMap<UnitId, Unit>) -> Result<(), String
         deps.part_of_by.retain(|id| existing_ids.contains(id));
         deps.binds_to.retain(|id| existing_ids.contains(id));
         deps.bound_by.retain(|id| existing_ids.contains(id));
-        // Clean up refs_by_name for pruning/validation — ordering deps (After/Before)
-        // are kept in their actual dep vectors but don't need to be in refs_by_name
-        // since they don't imply the referenced unit must exist.
-        unit.common
-            .unit
-            .refs_by_name
-            .retain(|id| existing_ids.contains(id));
+        // Keep refs_by_name un-pruned: it preserves the original dependency
+        // references from the unit file so that on-demand loading (e.g.
+        // `systemctl restart` of a target whose Wants= service didn't exist
+        // at daemon-reload time) can discover and load those units later.
     }
 
     for srvc in units.values_mut() {

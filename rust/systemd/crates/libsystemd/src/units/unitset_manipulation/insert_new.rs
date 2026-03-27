@@ -376,10 +376,15 @@ fn check_all_names_exist(
         }
     }
     if !names_needed.is_empty() {
-        return Err(format!(
+        // Log missing references but don't fail — real systemd does not reject
+        // units that reference non-existent dependencies (Wants= is soft, and
+        // even Requires= is only enforced at activation time). Failing here
+        // would break daemon-reload when refs_by_name contains original dep
+        // names for units that haven't been created yet.
+        log::trace!(
             "Names referenced by unit but not found in the known set of units: {:?}",
             names_needed.keys().collect::<Vec<_>>()
-        ));
+        );
     }
     Ok(())
 }
@@ -478,6 +483,29 @@ pub fn insert_new_unit_lenient(mut unit: units::Unit, run_info: &mut RuntimeInfo
         }
         if existing.common.dependencies.bound_by.contains(&new_id) {
             unit.common.dependencies.binds_to.push(existing.id.clone());
+        }
+
+        // Direction 2 (refs_by_name fallback): if the existing unit originally
+        // referenced the new unit (recorded in refs_by_name) but the dep was
+        // pruned because the new unit didn't exist at load time, restore it as
+        // a Wants dependency. This enables on-demand loading of units created
+        // after daemon-reload (e.g. a service file dropped in after a target
+        // with Wants= was loaded).
+        if existing.common.unit.refs_by_name.contains(&new_id)
+            && !existing.common.dependencies.wants.contains(&new_id)
+            && !existing.common.dependencies.requires.contains(&new_id)
+            && !existing.common.dependencies.after.contains(&new_id)
+            && !existing.common.dependencies.before.contains(&new_id)
+            && !existing.common.dependencies.binds_to.contains(&new_id)
+            && !existing.common.dependencies.conflicts.contains(&new_id)
+        {
+            trace!(
+                "Restoring pruned dep: {} wants {} (from refs_by_name)",
+                existing.id.name,
+                new_id.name
+            );
+            existing.common.dependencies.wants.push(new_id.clone());
+            unit.common.dependencies.wanted_by.push(existing.id.clone());
         }
     }
 

@@ -509,7 +509,6 @@
                          TEST-23-UNIT-FILE.openfile.sh \
                          TEST-23-UNIT-FILE.percentj-wantedby.sh \
                          TEST-23-UNIT-FILE.runtime-bind-paths.sh \
-                         TEST-23-UNIT-FILE.start-stop-no-reload.sh \
                          TEST-23-UNIT-FILE.statedir.sh \
                          TEST-23-UNIT-FILE.type-exec.sh \
                          TEST-23-UNIT-FILE.Upholds.sh \
