@@ -5623,6 +5623,13 @@ fn builtin_trap(shell: &mut Shell, args: &[String]) -> i32 {
                 let signal = norm.strip_prefix("SIG").unwrap_or(&norm).to_string();
                 if !shell.original_ignored_signals.contains(&signal) {
                     shell.traps.remove(&signal);
+                    // Also try the original arg form (e.g., "0" stored as "0" not "EXIT")
+                    let raw_signal = args[0]
+                        .to_uppercase()
+                        .strip_prefix("SIG")
+                        .unwrap_or(&args[0].to_uppercase())
+                        .to_string();
+                    shell.traps.remove(&raw_signal);
                 }
                 return 0;
             }
