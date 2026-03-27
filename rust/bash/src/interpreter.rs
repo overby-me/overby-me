@@ -881,7 +881,7 @@ impl Shell {
                     // Check if exec redirected fd 0 (stdin) — if so, read new
                     // content from fd 0 and continue execution from there
                     #[cfg(unix)]
-                    if self.script_fd.is_some() {
+                    if self.script_fd.is_some() && !self.in_pipeline_child {
                         // Detect if exec changed fd 0:
                         // - Different inode (different file)
                         // - Same inode but fd 0 is a new open file descriptor
