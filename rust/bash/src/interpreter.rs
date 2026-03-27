@@ -846,7 +846,9 @@ impl Shell {
                     {
                         std::io::Write::flush(&mut std::io::stdout()).ok();
                         std::io::Write::flush(&mut std::io::stderr()).ok();
-                        std::process::exit(status);
+                        self.last_status = status;
+                        self.run_exit_trap();
+                        std::process::exit(self.last_status);
                     }
                     self.errexit_suppressed = false;
                     // Check for pending signals after each command
@@ -1078,11 +1080,9 @@ impl Shell {
 
     /// Execute the EXIT trap if set
     pub fn run_exit_trap(&mut self) {
-        if let Some(handler) = self
-            .traps
-            .get("EXIT")
-            .or_else(|| self.traps.get("0"))
-            .cloned()
+        // Remove the trap to prevent recursive invocation (exit inside EXIT trap)
+        let handler = self.traps.remove("EXIT").or_else(|| self.traps.remove("0"));
+        if let Some(handler) = handler
             && !handler.is_empty()
         {
             self.run_string(&handler);
@@ -1110,7 +1110,9 @@ impl Shell {
             if self.opt_errexit && status != 0 && !self.in_condition && !self.errexit_suppressed {
                 std::io::Write::flush(&mut std::io::stdout()).ok();
                 std::io::Write::flush(&mut std::io::stderr()).ok();
-                std::process::exit(status);
+                self.last_status = status;
+                self.run_exit_trap();
+                std::process::exit(self.last_status);
             }
             self.errexit_suppressed = false;
         }
@@ -4104,6 +4106,12 @@ impl Shell {
         };
         // Without functrace, the function doesn't inherit the parent's DEBUG trap,
         // but any trap set inside the function IS visible after the function returns.
+
+        // Fire DEBUG trap at function entry (bash fires it once at the call site
+        // and once at the start of the function body for traced functions)
+        if inherit_debug {
+            self.run_debug_trap();
+        }
 
         let mut status = self.run_compound_command(body);
         // If returning was set (by builtin_return or a trap handler), use last_status
