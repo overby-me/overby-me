@@ -376,7 +376,6 @@
                TEST-07-PID1.socket-max-connection.sh \
                TEST-07-PID1.socket-pass-fds.sh \
                TEST-07-PID1.start-limit.sh \
-               TEST-07-PID1.startv.sh \
                TEST-07-PID1.subgroup-kill.sh \
                TEST-07-PID1.transient-unit-container.sh \
                TEST-07-PID1.user-namespace-path.sh \

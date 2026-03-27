@@ -181,6 +181,10 @@ struct Cli {
     #[arg(long, value_name = "NAME=VALUE")]
     socket_property: Vec<String>,
 
+    /// Shortcut for --pipe --wait --service-type=exec. Shows command output.
+    #[arg(short = 'v')]
+    verbose: bool,
+
     /// Connect to the user service manager instead of the system one.
     #[arg(long)]
     user: bool,
@@ -637,7 +641,16 @@ fn try_create_transient_unit(
 }
 
 fn main() {
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
+
+    // -v is shorthand for --pipe --wait --service-type=exec
+    if cli.verbose {
+        cli.pipe = true;
+        cli.wait = true;
+        if cli.service_type.is_empty() {
+            cli.service_type.push("exec".to_string());
+        }
+    }
 
     // Determine the command to run
     let command = if cli.command.is_empty() && cli.shell {
