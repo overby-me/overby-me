@@ -659,6 +659,10 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
     }
 
     if flag_func_body && !flag_readonly && !flag_unset_readonly && !flag_trace {
+        // declare -xf: only exported functions (not implemented → print nothing)
+        if flag_export && names.is_empty() {
+            return 0;
+        }
         let print_func = |name: &str, body: &CompoundCommand| {
             println!("{} () \n{}", name, format_compound_command(body));
         };
