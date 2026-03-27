@@ -247,7 +247,8 @@ pub struct Shell {
     pub assoc_arrays: HashMap<String, AssocArray>,
     pub functions: HashMap<String, CompoundCommand>,
     pub func_redirections: HashMap<String, Vec<Redirection>>, // function name → redirects
-    pub func_body_lines: HashMap<String, usize>,              // function name → body start line
+    pub func_has_keyword: HashSet<String>, // functions defined with 'function' keyword
+    pub func_body_lines: HashMap<String, usize>, // function name → body start line
     pub traced_funcs: HashSet<String>,
     pub hash_table: HashMap<String, (String, u32)>,
     pub positional: Vec<String>,
@@ -413,6 +414,7 @@ impl Shell {
             assoc_arrays: HashMap::new(),
             functions: HashMap::new(),
             func_redirections: HashMap::new(),
+            func_has_keyword: HashSet::new(),
             func_body_lines: HashMap::new(),
             traced_funcs: HashSet::new(),
             hash_table: HashMap::new(),

@@ -11,8 +11,8 @@ impl Shell {
                 name,
                 body,
                 body_line,
+                has_function_keyword,
                 redirections,
-                ..
             } => {
                 if self.readonly_funcs.contains(name) {
                     eprintln!("{}: {}: readonly function", self.error_prefix(), name);
@@ -20,6 +20,9 @@ impl Shell {
                 } else {
                     self.functions.insert(name.clone(), *body.clone());
                     self.func_body_lines.insert(name.clone(), *body_line);
+                    if *has_function_keyword {
+                        self.func_has_keyword.insert(name.clone());
+                    }
                     if !redirections.is_empty() {
                         self.func_redirections
                             .insert(name.clone(), redirections.clone());

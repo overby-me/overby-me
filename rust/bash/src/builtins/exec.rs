@@ -398,6 +398,11 @@ pub(super) fn builtin_type(shell: &mut Shell, args: &[String]) -> i32 {
                 println!("{} is a shell keyword", name);
             } else if let Some(body) = shell.functions.get(name) {
                 println!("{} is a function", name);
+                let prefix = if shell.func_has_keyword.contains(name) {
+                    "function "
+                } else {
+                    ""
+                };
                 let body_str = format_func_body(body, 0);
                 let redir_str = if let Some(redirs) = shell.func_redirections.get(name) {
                     let parts: Vec<String> = redirs.iter().map(format_redirection).collect();
@@ -405,7 +410,7 @@ pub(super) fn builtin_type(shell: &mut Shell, args: &[String]) -> i32 {
                 } else {
                     String::new()
                 };
-                println!("{} () \n{}{}", name, body_str, redir_str);
+                println!("{}{} () \n{}{}", prefix, name, body_str, redir_str);
             } else if builtin_map.contains_key(name) {
                 println!("{} is a shell builtin", name);
             } else if let Some(path) = find_in_path_opt(name) {
@@ -519,6 +524,11 @@ pub(super) fn builtin_command(shell: &mut Shell, args: &[String]) -> i32 {
                     println!("{} is aliased to `{}'", name, value);
                 } else if let Some(func_body) = shell.functions.get(name.as_str()) {
                     println!("{} is a function", name);
+                    let prefix = if shell.func_has_keyword.contains(name.as_str()) {
+                        "function "
+                    } else {
+                        ""
+                    };
                     let body = format_func_body(func_body, 0);
                     let redir_str = if let Some(redirs) = shell.func_redirections.get(name.as_str())
                     {
@@ -527,7 +537,7 @@ pub(super) fn builtin_command(shell: &mut Shell, args: &[String]) -> i32 {
                     } else {
                         String::new()
                     };
-                    println!("{} () \n{}{}", name, body, redir_str);
+                    println!("{}{} () \n{}{}", prefix, name, body, redir_str);
                 } else if builtin_map.contains_key(name.as_str()) {
                     println!("{} is a shell builtin", name);
                 } else if let Some(path) = find_in_path_opt(name) {

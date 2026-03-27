@@ -594,14 +594,17 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             return 1;
         }
         // Cannot use declare -f to define functions (name=value)
-        for name in &names {
-            if name.contains('=') {
-                eprintln!(
-                    "{}: declare: cannot use `-f' to make functions",
-                    shell.error_prefix()
-                );
-                return 1;
-            }
+        // But allow names with = as function names for lookup (function a=2)
+        if !flag_print
+            && names
+                .iter()
+                .any(|n| n.contains('=') && !shell.functions.contains_key(n.as_str()))
+        {
+            eprintln!(
+                "{}: declare: cannot use `-f' to make functions",
+                shell.error_prefix()
+            );
+            return 1;
         }
     }
 
@@ -664,6 +667,11 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             return 0;
         }
         let print_func = |name: &str, body: &CompoundCommand, shell: &Shell| {
+            let prefix = if shell.func_has_keyword.contains(name) {
+                "function "
+            } else {
+                ""
+            };
             let body_str = format_func_body(body, 0);
             let redir_str = if let Some(redirs) = shell.func_redirections.get(name) {
                 let parts: Vec<String> = redirs.iter().map(format_redirection).collect();
@@ -671,7 +679,7 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             } else {
                 String::new()
             };
-            println!("{} () \n{}{}", name, body_str, redir_str);
+            println!("{}{} () \n{}{}", prefix, name, body_str, redir_str);
         };
         if names.is_empty() {
             let mut fnames: Vec<&String> = shell.functions.keys().collect();
