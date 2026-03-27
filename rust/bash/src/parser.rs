@@ -474,9 +474,16 @@ impl Parser {
                 if self.current == Token::RParen {
                     self.advance();
                     self.skip_newlines();
-                    let body_line = self.current_line();
+                    let body_start = self.current_line();
                     let body = self.parse_compound_command()?;
-                    return Ok(Command::FunctionDef(name, Box::new(body), body_line));
+                    // body_end is the line of }, which is 1 before current position
+                    let body_end = self.current_line().saturating_sub(1).max(body_start);
+                    return Ok(Command::FunctionDef(
+                        name,
+                        Box::new(body),
+                        body_start,
+                        body_end,
+                    ));
                 }
                 // Backtrack from inner lookahead
                 self.lexer.restore_position(saved2_lexer_pos);
@@ -503,9 +510,15 @@ impl Parser {
                 }
             }
             self.skip_newlines();
-            let body_line = self.current_line();
+            let body_start = self.current_line();
             let body = self.parse_compound_command()?;
-            return Ok(Command::FunctionDef(name, Box::new(body), body_line));
+            let body_end = self.current_line().saturating_sub(1).max(body_start);
+            return Ok(Command::FunctionDef(
+                name,
+                Box::new(body),
+                body_start,
+                body_end,
+            ));
         }
 
         // Check for coproc

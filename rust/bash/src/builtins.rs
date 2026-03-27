@@ -28,7 +28,7 @@ fn program_has_incomplete_funsub(program: &Program) -> bool {
             Command::Compound(cc, redirs) => {
                 redirs.iter().any(|r| word_check(&r.target)) || compound_check(cc)
             }
-            Command::FunctionDef(_, body, _) => compound_check(body),
+            Command::FunctionDef(_, body, _, _) => compound_check(body),
             Command::Coproc(_, inner) => cmd_check(inner),
         }
     }
@@ -2030,7 +2030,7 @@ fn format_command_indent(cmd: &Command, indent: usize) -> String {
             }
             s
         }
-        Command::FunctionDef(name, body, _) => {
+        Command::FunctionDef(name, body, _, _) => {
             format!("{} () \n{}", name, format_compound_command(body))
         }
         Command::Coproc(name, inner) => {

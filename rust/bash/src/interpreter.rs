@@ -544,7 +544,7 @@ impl Shell {
                     if program.len() == 1
                         && program[0].list.first.commands.len() == 1
                         && program[0].list.rest.is_empty()
-                        && let crate::ast::Command::FunctionDef(fname, fbody, _) =
+                        && let crate::ast::Command::FunctionDef(fname, fbody, _, _) =
                             &program[0].list.first.commands[0]
                     {
                         shell.functions.insert(fname.clone(), *fbody.clone());
@@ -1598,13 +1598,19 @@ impl Shell {
             Command::Compound(compound, redirections) => {
                 self.run_compound_with_redirects(compound, redirections)
             }
-            Command::FunctionDef(name, body, body_line) => {
+            Command::FunctionDef(name, body, body_start, body_end) => {
                 if self.readonly_funcs.contains(name) {
+                    // Use body_end (closing }) line for the error, like bash
+                    let saved = self.vars.get("LINENO").cloned();
+                    self.vars.insert("LINENO".to_string(), body_end.to_string());
                     eprintln!("{}: {}: readonly function", self.error_prefix(), name);
+                    if let Some(s) = saved {
+                        self.vars.insert("LINENO".to_string(), s);
+                    }
                     1
                 } else {
                     self.functions.insert(name.clone(), *body.clone());
-                    self.func_body_lines.insert(name.clone(), *body_line);
+                    self.func_body_lines.insert(name.clone(), *body_start);
                     0
                 }
             }
