@@ -3014,6 +3014,13 @@ fn create_transient_unit(
                         service_conf.exec_config.nice = Some(n);
                     }
                 }
+                "LimitCORE" => {
+                    service_conf.exec_config.limit_core =
+                        crate::units::unit_parsing::parse_resource_limit(value);
+                }
+                "PrivateTmp" => {
+                    service_conf.exec_config.private_tmp = matches!(value, "yes" | "true" | "1");
+                }
                 _ => {
                     log::debug!("Ignoring unknown transient unit property: {key}={value}");
                 }

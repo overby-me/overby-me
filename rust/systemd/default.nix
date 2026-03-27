@@ -808,6 +808,14 @@
                       --nice=10 \
                       bash -xec 'read -r -a SELF_STAT </proc/self/stat && [[ "''${SELF_STAT[18]}" -eq 10 ]]'
 
+          : "Transient service with LimitCORE and PrivateTmp"
+          touch /tmp/public-marker
+          systemd-run --wait --pipe \
+                      --property=LimitCORE=1M:2M \
+                      --property=LimitCORE=16M:32M \
+                      --property=PrivateTmp=yes \
+                      bash -xec '[[ "$(ulimit -c -S)" -eq 16384 && "$(ulimit -c -H)" -eq 32768 && ! -e /tmp/public-marker ]]'
+
           : "Verbose mode (-v)"
           systemd-run -v echo wampfl | grep wampfl
 

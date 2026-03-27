@@ -3718,6 +3718,28 @@ pub struct ResourceLimit {
 
 /// Parse a resource limit value string like "10000", "10000:16384", or "infinity".
 /// Returns `None` if the value is empty or cannot be parsed.
+/// Parse a single rlimit value string with optional byte suffix (K/M/G/T).
+fn parse_rlimit_value_with_suffix(s: &str) -> Option<RLimitValue> {
+    let s = s.trim();
+    if s.eq_ignore_ascii_case("infinity") {
+        return Some(RLimitValue::Infinity);
+    }
+    let (num_str, multiplier) =
+        if let Some(prefix) = s.strip_suffix('M').or_else(|| s.strip_suffix('m')) {
+            (prefix, 1024u64 * 1024)
+        } else if let Some(prefix) = s.strip_suffix('G').or_else(|| s.strip_suffix('g')) {
+            (prefix, 1024u64 * 1024 * 1024)
+        } else if let Some(prefix) = s.strip_suffix('T').or_else(|| s.strip_suffix('t')) {
+            (prefix, 1024u64 * 1024 * 1024 * 1024)
+        } else if let Some(prefix) = s.strip_suffix('K').or_else(|| s.strip_suffix('k')) {
+            (prefix, 1024u64)
+        } else {
+            (s, 1u64)
+        };
+    let num = num_str.parse::<u64>().ok()?;
+    Some(RLimitValue::Value(num.saturating_mul(multiplier)))
+}
+
 pub fn parse_resource_limit(val: &str) -> Option<ResourceLimit> {
     let val = val.trim();
     if val.is_empty() {
@@ -3730,23 +3752,12 @@ pub fn parse_resource_limit(val: &str) -> Option<ResourceLimit> {
         });
     }
     if let Some((soft_str, hard_str)) = val.split_once(':') {
-        let soft = if soft_str.trim().eq_ignore_ascii_case("infinity") {
-            RLimitValue::Infinity
-        } else {
-            RLimitValue::Value(soft_str.trim().parse::<u64>().ok()?)
-        };
-        let hard = if hard_str.trim().eq_ignore_ascii_case("infinity") {
-            RLimitValue::Infinity
-        } else {
-            RLimitValue::Value(hard_str.trim().parse::<u64>().ok()?)
-        };
+        let soft = parse_rlimit_value_with_suffix(soft_str)?;
+        let hard = parse_rlimit_value_with_suffix(hard_str)?;
         Some(ResourceLimit { soft, hard })
     } else {
-        let num = val.parse::<u64>().ok()?;
-        Some(ResourceLimit {
-            soft: RLimitValue::Value(num),
-            hard: RLimitValue::Value(num),
-        })
+        let v = parse_rlimit_value_with_suffix(val)?;
+        Some(ResourceLimit { soft: v, hard: v })
     }
 }
 
