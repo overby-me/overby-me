@@ -2347,25 +2347,15 @@ fn read_param_word_impl(chars: &[char], i: &mut usize, delim: char, in_dquote: b
                 }
                 *i += 1;
                 let mut cmd = String::new();
-                let mut in_squote = false;
                 while *i < chars.len() && chars[*i] != '`' {
-                    if in_squote {
-                        if chars[*i] == '\'' {
-                            in_squote = false;
-                        }
-                        cmd.push(chars[*i]);
-                        *i += 1;
-                    } else if chars[*i] == '\'' {
-                        in_squote = true;
-                        cmd.push(chars[*i]);
-                        *i += 1;
-                    } else if chars[*i] == '\\' && *i + 1 < chars.len() {
+                    if chars[*i] == '\\' && *i + 1 < chars.len() {
                         let next = chars[*i + 1];
                         if matches!(next, '$' | '`' | '\\') {
+                            // \\→\, \`→`, \$→$ (processed first)
                             cmd.push(next);
                             *i += 2;
                         } else if next == '\n' {
-                            // \<newline> line continuation (only outside quotes)
+                            // \<newline> is line continuation — remove both
                             *i += 2;
                         } else {
                             cmd.push(chars[*i]);
@@ -2914,26 +2904,19 @@ impl Lexer {
                     }
                     self.advance();
                     let mut cmd = String::new();
-                    let mut bq_in_squote = false;
                     loop {
                         match self.peek() {
-                            None => break,
-                            Some('`') if !bq_in_squote => {
+                            None | Some('`') => {
                                 self.advance();
                                 break;
                             }
-                            Some('\'') => {
-                                bq_in_squote = !bq_in_squote;
-                                cmd.push('\'');
-                                self.advance();
-                            }
-                            Some('\\') if !bq_in_squote => {
+                            Some('\\') => {
                                 self.advance();
                                 if let Some(c) = self.advance() {
                                     if matches!(c, '$' | '`' | '\\') {
                                         cmd.push(c);
                                     } else if c == '\n' {
-                                        // \<newline> is line continuation (outside quotes)
+                                        // \<newline> is line continuation — remove both
                                     } else {
                                         cmd.push('\\');
                                         cmd.push(c);
