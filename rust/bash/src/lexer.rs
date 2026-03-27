@@ -2914,19 +2914,26 @@ impl Lexer {
                     }
                     self.advance();
                     let mut cmd = String::new();
+                    let mut bq_in_squote = false;
                     loop {
                         match self.peek() {
-                            None | Some('`') => {
+                            None => break,
+                            Some('`') if !bq_in_squote => {
                                 self.advance();
                                 break;
                             }
-                            Some('\\') => {
+                            Some('\'') => {
+                                bq_in_squote = !bq_in_squote;
+                                cmd.push('\'');
+                                self.advance();
+                            }
+                            Some('\\') if !bq_in_squote => {
                                 self.advance();
                                 if let Some(c) = self.advance() {
                                     if matches!(c, '$' | '`' | '\\') {
                                         cmd.push(c);
                                     } else if c == '\n' {
-                                        // \<newline> is line continuation — remove both
+                                        // \<newline> is line continuation (outside quotes)
                                     } else {
                                         cmd.push('\\');
                                         cmd.push(c);
