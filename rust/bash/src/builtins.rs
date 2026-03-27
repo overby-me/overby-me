@@ -4791,7 +4791,34 @@ fn builtin_eval(shell: &mut Shell, args: &[String]) -> i32 {
                 );
                 return 2;
             }
-            eprintln!("{}: eval: {}", shell.error_prefix(), e);
+            let name = shell
+                .positional
+                .first()
+                .map(|s| s.as_str())
+                .unwrap_or("bash");
+            let lineno: usize = shell
+                .vars
+                .get("LINENO")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0);
+            if name == "bash" || name.is_empty() {
+                eprintln!("{}: eval: {}", shell.error_prefix(), e);
+            } else {
+                eprintln!("{}: eval: line {}: {}", name, lineno, e);
+            }
+            if e.contains("syntax error") {
+                let cmd = &command;
+                if name == "bash" || name.is_empty() {
+                    eprintln!(
+                        "{}: eval: line {}: `{}'",
+                        shell.error_prefix(),
+                        lineno,
+                        cmd.trim()
+                    );
+                } else {
+                    eprintln!("{}: eval: line {}: `{}'", name, lineno, cmd.trim());
+                }
+            }
             2
         }
     };
