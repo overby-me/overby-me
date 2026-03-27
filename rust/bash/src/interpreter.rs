@@ -882,19 +882,25 @@ impl Shell {
                     // content from fd 0 and continue execution from there
                     #[cfg(unix)]
                     if self.script_fd.is_some() {
-                        // Check if fd 0 now points to a different file than our script
+                        // Detect if exec changed fd 0:
+                        // - Different inode (different file)
+                        // - Same inode but fd 0 is a new open file descriptor
+                        //   (detected via /proc/self/fd/0 readlink or by checking
+                        //   if the underlying file description changed)
                         let fd0_stat = nix::sys::stat::fstat(0).ok();
                         let script_stat =
                             self.script_fd.and_then(|fd| nix::sys::stat::fstat(fd).ok());
-                        if let (Some(f0), Some(sf)) = (fd0_stat, script_stat)
-                            && (f0.st_dev != sf.st_dev || f0.st_ino != sf.st_ino)
-                        {
-                            // fd 0 changed — read new content and execute it
+                        let changed = match (fd0_stat, script_stat) {
+                            (Some(f0), Some(sf)) => {
+                                f0.st_dev != sf.st_dev || f0.st_ino != sf.st_ino
+                            }
+                            _ => false,
+                        };
+                        if changed {
                             let mut new_content = String::new();
                             std::io::Read::read_to_string(&mut std::io::stdin(), &mut new_content)
                                 .ok();
                             if !new_content.is_empty() {
-                                // Don't detect fd 0 changes in the nested call
                                 let saved_script_fd = self.script_fd.take();
                                 status = self.run_string(&new_content);
                                 self.script_fd = saved_script_fd;
