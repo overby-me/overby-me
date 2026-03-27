@@ -5957,6 +5957,24 @@ impl Shell {
                         }
                         nix::unistd::dup2(src_fd, fd)
                             .map_err(|e| Self::dup_error_message(src_fd, &e))?;
+                    } else if redir.fd.is_none() {
+                        // >&word where word is not a number and no explicit fd —
+                        // redirect both stdout and stderr to the file
+                        if let Ok(saved_fd1) = nix::unistd::dup(1) {
+                            saved.push((1, saved_fd1));
+                        }
+                        if let Ok(saved_fd2) = nix::unistd::dup(2) {
+                            saved.push((2, saved_fd2));
+                        }
+                        let file = std::fs::File::create(&target_str).map_err(|e| {
+                            format!("{}: {}", target_str, Self::io_error_message(&e))
+                        })?;
+                        let raw = file.into_raw_fd();
+                        nix::unistd::dup2(raw, 1).ok();
+                        nix::unistd::dup2(raw, 2).ok();
+                        if raw != 1 && raw != 2 {
+                            nix::unistd::close(raw).ok();
+                        }
                     }
                 }
                 RedirectKind::DupInput => {
