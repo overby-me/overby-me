@@ -275,6 +275,7 @@ pub struct Shell {
     /// PID of the top-level shell (for $$)
     pub top_level_pid: u32,
     pub returning: bool,
+    pub return_explicit_arg: bool, // true if `return N` had explicit argument
     pub breaking: i32,
     pub continuing: i32,
     pub in_condition: bool,
@@ -431,6 +432,7 @@ impl Shell {
             last_bg_pid: 0,
             top_level_pid: std::process::id(),
             returning: false,
+            return_explicit_arg: false,
             breaking: 0,
             continuing: 0,
             in_condition: false,
@@ -1001,6 +1003,12 @@ impl Shell {
                         if self.returning {
                             if !self.func_names.is_empty() {
                                 // Inside a function — propagate return
+                                // POSIX interp 1602: "return" without argument in a trap action
+                                // causes the function to return with the pre-trap exit status.
+                                // "return N" with explicit argument uses N.
+                                if !self.return_explicit_arg {
+                                    self.last_status = saved_status;
+                                }
                                 if let Some(v) = old_trapsig {
                                     self.vars.insert("BASH_TRAPSIG".to_string(), v);
                                 } else {
@@ -4222,6 +4230,7 @@ impl Shell {
             self.positional[0] = current_zero;
         }
         self.returning = false;
+        self.return_explicit_arg = false;
         status
     }
 

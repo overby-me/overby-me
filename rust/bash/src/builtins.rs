@@ -3296,6 +3296,7 @@ fn builtin_exit(shell: &mut Shell, args: &[String]) -> i32 {
 }
 
 fn builtin_return(shell: &mut Shell, args: &[String]) -> i32 {
+    let has_explicit_arg = args.first().and_then(|s| s.parse::<i32>().ok()).is_some();
     let code: i32 = args
         .first()
         .and_then(|s| s.parse().ok())
@@ -3309,6 +3310,7 @@ fn builtin_return(shell: &mut Shell, args: &[String]) -> i32 {
         return 1;
     }
     shell.returning = true;
+    shell.return_explicit_arg = has_explicit_arg;
     code
 }
 
