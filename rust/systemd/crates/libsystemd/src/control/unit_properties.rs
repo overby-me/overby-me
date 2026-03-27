@@ -109,6 +109,13 @@ pub fn collect_properties(unit: &Unit) -> BTreeMap<String, String> {
     match &unit.specific {
         Specific::Service(svc) => {
             insert(&mut props, "Type", &format_service_type(svc.conf.srcv_type));
+            // ControlGroup — cgroup path for this service
+            #[cfg(target_os = "linux")]
+            insert(
+                &mut props,
+                "ControlGroup",
+                &svc.conf.platform_specific.cgroup_path.display().to_string(),
+            );
             insert_service_config(&mut props, &svc.conf);
             insert_exec_config(&mut props, &svc.conf.exec_config);
 
@@ -461,6 +468,18 @@ pub fn collect_properties(unit: &Unit) -> BTreeMap<String, String> {
     // NeedDaemonReload — stub value, overridden by control.rs with real check
     // when unit_dirs are available.
     insert(&mut props, "NeedDaemonReload", "no");
+
+    // Transient — whether the unit was created via start-transient (systemd-run)
+    let is_transient = unit
+        .common
+        .unit
+        .fragment_path
+        .as_ref()
+        .map(|p| {
+            p.starts_with("/run/systemd/transient") || p.starts_with("/run/systemd/transient/")
+        })
+        .unwrap_or(false);
+    insert_bool(&mut props, "Transient", is_transient);
 
     props
 }
@@ -919,19 +938,19 @@ fn insert_unit_config(props: &mut BTreeMap<String, String>, conf: &UnitConfig) {
     insert(
         props,
         "SuccessAction",
-        &format!("{:?}", conf.success_action),
+        format_unit_action(&conf.success_action),
     );
     insert(
         props,
         "FailureAction",
-        &format!("{:?}", conf.failure_action),
+        format_unit_action(&conf.failure_action),
     );
 
     insert_timeout(props, "JobTimeoutUSec", &conf.job_timeout_sec);
     insert(
         props,
         "JobTimeoutAction",
-        &format!("{:?}", conf.job_timeout_action),
+        format_unit_action(&conf.job_timeout_action),
     );
 
     if !conf.on_success.is_empty() {
@@ -957,7 +976,7 @@ fn insert_unit_config(props: &mut BTreeMap<String, String>, conf: &UnitConfig) {
     insert(
         props,
         "StartLimitAction",
-        &format!("{:?}", conf.start_limit_action),
+        format_unit_action(&conf.start_limit_action),
     );
 
     if !conf.conditions.is_empty() {
@@ -1762,6 +1781,27 @@ fn format_kill_mode(m: KillMode) -> String {
         KillMode::None => "none",
     }
     .to_owned()
+}
+
+fn format_unit_action(a: &crate::units::UnitAction) -> &'static str {
+    use crate::units::UnitAction;
+    match a {
+        UnitAction::None => "none",
+        UnitAction::Exit => "exit",
+        UnitAction::ExitForce => "exit-force",
+        UnitAction::Reboot => "reboot",
+        UnitAction::RebootForce => "reboot-force",
+        UnitAction::RebootImmediate => "reboot-immediate",
+        UnitAction::Poweroff => "poweroff",
+        UnitAction::PoweroffForce => "poweroff-force",
+        UnitAction::PoweroffImmediate => "poweroff-immediate",
+        UnitAction::Halt => "halt",
+        UnitAction::HaltForce => "halt-force",
+        UnitAction::HaltImmediate => "halt-immediate",
+        UnitAction::Kexec => "kexec",
+        UnitAction::KexecForce => "kexec-force",
+        UnitAction::KexecImmediate => "kexec-immediate",
+    }
 }
 
 fn format_notify_access(n: NotifyKind) -> String {
