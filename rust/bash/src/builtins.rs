@@ -6847,15 +6847,41 @@ fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
             ("noexec", shell.opt_noexec),
             ("noglob", shell.opt_noglob),
             ("nolog", false),
-            ("notify", false),
+            (
+                "notify",
+                shell.shopt_options.get("notify").copied().unwrap_or(false),
+            ),
             ("nounset", shell.opt_nounset),
-            ("onecmd", false),
-            ("physical", false),
+            (
+                "onecmd",
+                shell.shopt_options.get("onecmd").copied().unwrap_or(false),
+            ),
+            (
+                "physical",
+                shell
+                    .shopt_options
+                    .get("physical")
+                    .copied()
+                    .unwrap_or(false),
+            ),
             ("pipefail", shell.opt_pipefail),
             ("posix", shell.opt_posix),
-            ("privileged", false),
-            ("verbose", false),
-            ("vi", false),
+            (
+                "privileged",
+                shell
+                    .shopt_options
+                    .get("privileged")
+                    .copied()
+                    .unwrap_or(false),
+            ),
+            (
+                "verbose",
+                shell.shopt_options.get("verbose").copied().unwrap_or(false),
+            ),
+            (
+                "vi",
+                shell.shopt_options.get("vi").copied().unwrap_or(false),
+            ),
             ("xtrace", shell.opt_xtrace),
         ];
 
