@@ -745,9 +745,47 @@
           chmod +x TEST-74-AUX-UTILS.cgls.sh
           # Patch id128 test: remove the 65-zeros error test (bash printf expansion differs).
           sed -i '/printf.*%0.s0.*{0..64}/d' TEST-74-AUX-UTILS.id128.sh
+          # Patch run.sh: keep basic transient service tests.
+          # Remove user daemon, scope, run0, ProtectProc, interactive,
+          # systemd-analyze, systemctl cat, and transient file verification sections.
+          cat > TEST-74-AUX-UTILS.run.sh << 'TESTEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          systemd-run --help --no-pager
+          systemd-run --version
+          systemd-run --no-ask-password true
+          systemd-run --no-block --collect true
+
+          : "Basic transient service"
+          systemd-run --wait --pipe bash -xec '[[ -z "$PARENT_FOO" ]]'
+          systemd-run --wait --pipe bash -xec '[[ "$PWD" == / && -n "$INVOCATION_ID" ]]'
+          systemd-run --wait --pipe \
+                      --send-sighup \
+                      --working-directory=/tmp \
+                      bash -xec '[[ "$PWD" == /tmp ]]'
+
+          : "Transient service with --remain-after-exit"
+          UNIT="service-0-$RANDOM"
+          systemd-run --remain-after-exit --unit="$UNIT" \
+                      --service-type=simple \
+                      --service-type=oneshot \
+                      true
+          systemctl stop "$UNIT"
+
+          : "Error handling"
+          (! systemd-run)
+          (! systemd-run "")
+          (! systemd-run --foo=bar)
+
+          echo "run.sh test passed"
+          TESTEOF
+          chmod +x TEST-74-AUX-UTILS.run.sh
           rm -f TEST-74-AUX-UTILS.busctl.sh \
                TEST-74-AUX-UTILS.capsule.sh \
-               TEST-74-AUX-UTILS.run.sh \
                TEST-74-AUX-UTILS.firstboot.sh \
                TEST-74-AUX-UTILS.ssh.sh \
                TEST-74-AUX-UTILS.vpick.sh \

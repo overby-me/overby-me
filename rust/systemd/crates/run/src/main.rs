@@ -70,8 +70,9 @@ struct Cli {
     property: Vec<String>,
 
     /// Set the service type (simple, forking, oneshot, exec, notify, idle, dbus).
+    /// Can be specified multiple times; the last value wins.
     #[arg(long, value_name = "TYPE")]
-    service_type: Option<String>,
+    service_type: Vec<String>,
 
     /// Run the command as the specified user.
     #[arg(long, value_name = "USER")]
@@ -304,7 +305,7 @@ fn print_unit_info(cli: &Cli, unit_name: &str) {
         eprintln!("Slice: {slice}");
     }
 
-    if let Some(ref stype) = cli.service_type {
+    if let Some(stype) = cli.service_type.last() {
         eprintln!("Service type: {stype}");
     }
 
@@ -487,7 +488,7 @@ fn try_create_transient_unit(
         properties.insert("slice".into(), Value::String(slice.clone()));
     }
 
-    if let Some(ref service_type) = cli.service_type {
+    if let Some(service_type) = cli.service_type.last() {
         properties.insert("service_type".into(), Value::String(service_type.clone()));
     }
 
@@ -598,6 +599,14 @@ fn main() {
 
     if command.is_empty() && !has_timer {
         eprintln!("Error: No command specified. Use --shell to start a shell.");
+        process::exit(1);
+    }
+
+    // Reject empty command strings (e.g. `systemd-run ""`)
+    if let Some(first) = command.first()
+        && first.is_empty()
+    {
+        eprintln!("Error: Empty command specified.");
         process::exit(1);
     }
 
