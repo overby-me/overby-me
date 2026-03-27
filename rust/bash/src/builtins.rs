@@ -3127,13 +3127,11 @@ fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
                         | "history"
                         | "ignoreeof"
                         | "interactive-comments"
-                        | "monitor"
-                        | "notify"
-                        | "onecmd"
-                        | "physical"
-                        | "privileged"
-                        | "verbose"
-                        | "vi" => {
+                        | "monitor" => {
+                            shell.shopt_options.insert(option.to_string(), enable);
+                            shell.opt_monitor = enable;
+                        }
+                        "notify" | "onecmd" | "physical" | "privileged" | "verbose" | "vi" => {
                             shell.shopt_options.insert(option.to_string(), enable);
                         }
                         _ => {
@@ -3201,7 +3199,8 @@ fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
                         'C' => shell.opt_noclobber = enable,
                         'n' => shell.opt_noexec = enable,
                         'h' => shell.opt_hashall = enable,
-                        'a' | 'b' | 'm' | 'p' | 't' | 'v' | 'B' | 'E' | 'H' | 'P' | 'T' => {
+                        'm' => shell.opt_monitor = enable,
+                        'a' | 'b' | 'p' | 't' | 'v' | 'B' | 'E' | 'H' | 'P' | 'T' => {
                             // Known but not fully implemented flags — accept silently
                         }
                         _ => {
@@ -5746,7 +5745,7 @@ fn signal_name_to_number(name: &str) -> Option<i32> {
 fn builtin_wait(shell: &mut Shell, args: &[String]) -> i32 {
     #[cfg(unix)]
     {
-        use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
+        use nix::sys::wait::{WaitStatus, waitpid};
         use nix::unistd::Pid;
 
         // Handle -n flag (wait for any single job)
@@ -5767,28 +5766,37 @@ fn builtin_wait(shell: &mut Shell, args: &[String]) -> i32 {
 
         if args.is_empty() {
             // Wait for all background children
-            loop {
-                match waitpid(Pid::from_raw(-1), Some(WaitPidFlag::WNOHANG)) {
-                    Ok(WaitStatus::StillAlive) => break,
-                    Ok(WaitStatus::Exited(_, code)) => {
-                        shell.last_status = code;
-                    }
-                    Ok(WaitStatus::Signaled(_, sig, _)) => {
-                        shell.last_status = 128 + sig as i32;
-                    }
-                    Ok(_) => continue,
-                    Err(nix::errno::Errno::ECHILD) => break,
-                    Err(_) => break,
-                }
-            }
-            // Also do a blocking wait for any remaining
+            // Use blocking wait with SIGCHLD trap support
+            let has_chld_trap = shell.traps.contains_key("CHLD");
             loop {
                 match waitpid(Pid::from_raw(-1), None) {
                     Ok(WaitStatus::Exited(_, code)) => {
                         shell.last_status = code;
+                        if has_chld_trap {
+                            // Clear any pending SIGCHLD from the signal handler
+                            // to avoid double-firing
+                            crate::interpreter::take_pending_signal(libc::SIGCHLD);
+                            if let Some(handler) = shell.traps.get("CHLD").cloned()
+                                && !handler.is_empty()
+                            {
+                                shell.in_trap_handler += 1;
+                                shell.run_string(&handler);
+                                shell.in_trap_handler -= 1;
+                            }
+                        }
                     }
                     Ok(WaitStatus::Signaled(_, sig, _)) => {
                         shell.last_status = 128 + sig as i32;
+                        if has_chld_trap {
+                            crate::interpreter::take_pending_signal(libc::SIGCHLD);
+                            if let Some(handler) = shell.traps.get("CHLD").cloned()
+                                && !handler.is_empty()
+                            {
+                                shell.in_trap_handler += 1;
+                                shell.run_string(&handler);
+                                shell.in_trap_handler -= 1;
+                            }
+                        }
                     }
                     Ok(_) => continue,
                     Err(_) => break,

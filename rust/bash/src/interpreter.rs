@@ -311,6 +311,7 @@ pub struct Shell {
     pub opt_noexec: bool,
     pub opt_posix: bool,
     pub opt_hashall: bool,
+    pub opt_monitor: bool, // set -m / set -o monitor (job control)
     pub login_shell: bool,
     /// Name of the currently executing builtin (for error messages)
     pub current_builtin: Option<String>,
@@ -465,6 +466,7 @@ impl Shell {
             opt_noexec: false,
             opt_posix: false,
             opt_hashall: true, // enabled by default
+            opt_monitor: false,
             login_shell: false,
             current_builtin: None,
             opt_allexport: false,
