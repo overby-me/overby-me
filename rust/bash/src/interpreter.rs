@@ -4320,7 +4320,11 @@ impl Shell {
         }
 
         // Run RETURN trap before restoring scope
-        self.run_return_trap();
+        // RETURN trap is only inherited by functions when functrace is set
+        // or the function is traced
+        if inherit_debug {
+            self.run_return_trap();
+        }
 
         // Restore procsub fds
         for fd in saved_fds {
