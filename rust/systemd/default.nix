@@ -508,8 +508,7 @@
                     head -89 TEST-23-UNIT-FILE.clean-unit.sh > /tmp/clean-unit-patched.sh
                     chmod +x /tmp/clean-unit-patched.sh
                     mv /tmp/clean-unit-patched.sh TEST-23-UNIT-FILE.clean-unit.sh
-                    rm -f TEST-23-UNIT-FILE.exec-command-ex.sh \
-                         TEST-23-UNIT-FILE.ExtraFileDescriptors.sh \
+                    rm -f TEST-23-UNIT-FILE.ExtraFileDescriptors.sh \
                          TEST-23-UNIT-FILE.JoinsNamespaceOf.sh \
                          TEST-23-UNIT-FILE.openfile.sh \
                          TEST-23-UNIT-FILE.percentj-wantedby.sh \

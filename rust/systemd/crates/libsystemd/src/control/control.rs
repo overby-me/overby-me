@@ -1887,16 +1887,21 @@ fn apply_dropins_to_transient(unit: &mut Unit, unit_dirs: &[std::path::PathBuf])
                     let value = value.trim();
 
                     let parse_cmd = |s: &str| -> crate::units::Commandline {
-                        let parts: Vec<String> =
-                            shlex::split(s).unwrap_or_else(|| vec![s.to_string()]);
-                        crate::units::Commandline {
-                            cmd: parts.first().cloned().unwrap_or_default(),
-                            args: parts.into_iter().skip(1).collect(),
-                            prefixes: vec![],
-                        }
+                        crate::units::unit_parsing::parse_cmdline(s).unwrap_or_else(|_| {
+                            let parts: Vec<String> =
+                                shlex::split(s).unwrap_or_else(|| vec![s.to_string()]);
+                            crate::units::Commandline {
+                                cmd: parts.first().cloned().unwrap_or_default(),
+                                args: parts.into_iter().skip(1).collect(),
+                                prefixes: vec![],
+                            }
+                        })
                     };
 
-                    match key {
+                    // Strip "Ex" suffix to map ExecStartEx -> ExecStart, etc.
+                    let base_key = key.strip_suffix("Ex").unwrap_or(key);
+
+                    match base_key {
                         "ExecCondition" => {
                             if value.is_empty() {
                                 svc.conf.exec_condition.clear();
@@ -1911,11 +1916,25 @@ fn apply_dropins_to_transient(unit: &mut Unit, unit_dirs: &[std::path::PathBuf])
                                 svc.conf.startpre.push(parse_cmd(value));
                             }
                         }
+                        "ExecStart" => {
+                            if value.is_empty() {
+                                svc.conf.exec.clear();
+                            } else {
+                                svc.conf.exec.push(parse_cmd(value));
+                            }
+                        }
                         "ExecStartPost" => {
                             if value.is_empty() {
                                 svc.conf.startpost.clear();
                             } else {
                                 svc.conf.startpost.push(parse_cmd(value));
+                            }
+                        }
+                        "ExecReload" => {
+                            if value.is_empty() {
+                                svc.conf.reload.clear();
+                            } else {
+                                svc.conf.reload.push(parse_cmd(value));
                             }
                         }
                         "ExecStop" => {
@@ -1932,6 +1951,9 @@ fn apply_dropins_to_transient(unit: &mut Unit, unit_dirs: &[std::path::PathBuf])
                                 svc.conf.stoppost.push(parse_cmd(value));
                             }
                         }
+                        _ => {}
+                    }
+                    match key {
                         "Description" => {
                             if !value.is_empty() {
                                 unit.common.unit.description = value.to_string();
@@ -2529,32 +2551,28 @@ fn create_transient_unit(
                             ));
                     }
                 }
-                "ExecStart" => {
-                    if value.is_empty() {
-                        service_conf.exec.clear();
-                    } else {
-                        let parts: Vec<String> =
-                            shlex::split(value).unwrap_or_else(|| vec![value.to_string()]);
-                        service_conf.exec.push(crate::units::Commandline {
-                            cmd: parts.first().cloned().unwrap_or_default(),
-                            args: parts.into_iter().skip(1).collect(),
-                            prefixes: vec![],
-                        });
-                    }
-                }
-                "ExecStartPre" | "ExecStartPost" | "ExecStop" | "ExecStopPost" => {
+                "ExecStart" | "ExecStartEx" | "ExecStartPre" | "ExecStartPreEx"
+                | "ExecStartPost" | "ExecStartPostEx" | "ExecCondition" | "ExecConditionEx"
+                | "ExecReload" | "ExecReloadEx" | "ExecStop" | "ExecStopEx" | "ExecStopPost"
+                | "ExecStopPostEx" => {
                     let parse_cmd = |s: &str| -> crate::units::Commandline {
-                        let parts: Vec<String> =
-                            shlex::split(s).unwrap_or_else(|| vec![s.to_string()]);
-                        crate::units::Commandline {
-                            cmd: parts.first().cloned().unwrap_or_default(),
-                            args: parts.into_iter().skip(1).collect(),
-                            prefixes: vec![],
-                        }
+                        crate::units::unit_parsing::parse_cmdline(s).unwrap_or_else(|_| {
+                            let parts: Vec<String> =
+                                shlex::split(s).unwrap_or_else(|| vec![s.to_string()]);
+                            crate::units::Commandline {
+                                cmd: parts.first().cloned().unwrap_or_default(),
+                                args: parts.into_iter().skip(1).collect(),
+                                prefixes: vec![],
+                            }
+                        })
                     };
-                    let target = match key {
+                    let base_key = key.strip_suffix("Ex").unwrap_or(key);
+                    let target = match base_key {
+                        "ExecStart" => &mut service_conf.exec,
                         "ExecStartPre" => &mut service_conf.startpre,
                         "ExecStartPost" => &mut service_conf.startpost,
+                        "ExecCondition" => &mut service_conf.exec_condition,
+                        "ExecReload" => &mut service_conf.reload,
                         "ExecStop" => &mut service_conf.stop,
                         "ExecStopPost" => &mut service_conf.stoppost,
                         _ => unreachable!(),

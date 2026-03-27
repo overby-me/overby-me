@@ -318,7 +318,7 @@ pub(super) fn parse_cmdlines(
     Ok(cmdlines)
 }
 
-fn parse_cmdline(raw_line: &str) -> Result<Commandline, ParsingErrorReason> {
+pub(crate) fn parse_cmdline(raw_line: &str) -> Result<Commandline, ParsingErrorReason> {
     let mut split = shlex::split(raw_line).ok_or(ParsingErrorReason::Generic(format!(
         "Could not parse cmdline: {raw_line}"
     )))?;

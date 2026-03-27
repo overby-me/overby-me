@@ -7,9 +7,9 @@
 
 use crate::lock_ext::RwLockExt;
 use crate::units::{
-    Commandline, ExecConfig, FreezerState, KillMode, MountConfig, NotifyKind, ServiceConfig,
-    ServiceRestart, ServiceType, SliceConfig, SocketConfig, Specific, SwapConfig, Timeout, Unit,
-    UnitConfig, UnitStatus,
+    Commandline, CommandlinePrefix, ExecConfig, FreezerState, KillMode, MountConfig, NotifyKind,
+    ServiceConfig, ServiceRestart, ServiceType, SliceConfig, SocketConfig, Specific, SwapConfig,
+    Timeout, Unit, UnitConfig, UnitStatus,
 };
 
 use std::collections::BTreeMap;
@@ -959,11 +959,15 @@ fn insert_commandlines(props: &mut BTreeMap<String, String>, key: &str, cmds: &[
         return;
     }
     // systemctl show formats multi-command ExecStart as
-    //   { path=/bin/foo ; argv[]=/bin/foo arg1 ; ... }
-    // We use a simpler but compatible format.
+    //   { path=/bin/foo ; argv[]=/bin/foo arg1 ; ignore_errors=no ; ... }
     let parts: Vec<String> = cmds
         .iter()
         .map(|cmd| {
+            let ignore_errors = if cmd.prefixes.contains(&CommandlinePrefix::Minus) {
+                "yes"
+            } else {
+                "no"
+            };
             let mut s = String::new();
             s.push_str("{ path=");
             s.push_str(&cmd.cmd);
@@ -973,6 +977,51 @@ fn insert_commandlines(props: &mut BTreeMap<String, String>, key: &str, cmds: &[
                 s.push(' ');
                 s.push_str(arg);
             }
+            s.push_str(" ; ignore_errors=");
+            s.push_str(ignore_errors);
+            s.push_str(" ; }");
+            s
+        })
+        .collect();
+    props.insert(key.to_owned(), parts.join(" ; "));
+}
+
+/// Format exec commandlines for ExecXYZEx properties with flags instead of ignore_errors.
+fn insert_commandlines_ex(props: &mut BTreeMap<String, String>, key: &str, cmds: &[Commandline]) {
+    if cmds.is_empty() {
+        props.insert(key.to_owned(), String::new());
+        return;
+    }
+    let parts: Vec<String> = cmds
+        .iter()
+        .map(|cmd| {
+            let mut flags = Vec::new();
+            for prefix in &cmd.prefixes {
+                match prefix {
+                    CommandlinePrefix::Minus => flags.push("ignore-failure"),
+                    CommandlinePrefix::Colon => flags.push("no-env-expand"),
+                    CommandlinePrefix::Plus => flags.push("ambient"),
+                    CommandlinePrefix::Exclamation => flags.push("no-setuid"),
+                    CommandlinePrefix::DoubleExclamation => flags.push("sandbox"),
+                    CommandlinePrefix::AtSign => flags.push("no-argv0"),
+                }
+            }
+            let flags_str = if flags.is_empty() {
+                String::new()
+            } else {
+                flags.join(" ")
+            };
+            let mut s = String::new();
+            s.push_str("{ path=");
+            s.push_str(&cmd.cmd);
+            s.push_str(" ; argv[]=");
+            s.push_str(&cmd.cmd);
+            for arg in &cmd.args {
+                s.push(' ');
+                s.push_str(arg);
+            }
+            s.push_str(" ; flags=");
+            s.push_str(&flags_str);
             s.push_str(" ; }");
             s
         })
@@ -1155,12 +1204,19 @@ fn insert_service_config(props: &mut BTreeMap<String, String>, conf: &ServiceCon
 
     // Exec lines
     insert_commandlines(props, "ExecStart", &conf.exec);
+    insert_commandlines_ex(props, "ExecStartEx", &conf.exec);
     insert_commandlines(props, "ExecCondition", &conf.exec_condition);
+    insert_commandlines_ex(props, "ExecConditionEx", &conf.exec_condition);
     insert_commandlines(props, "ExecStartPre", &conf.startpre);
+    insert_commandlines_ex(props, "ExecStartPreEx", &conf.startpre);
     insert_commandlines(props, "ExecStartPost", &conf.startpost);
+    insert_commandlines_ex(props, "ExecStartPostEx", &conf.startpost);
     insert_commandlines(props, "ExecReload", &conf.reload);
+    insert_commandlines_ex(props, "ExecReloadEx", &conf.reload);
     insert_commandlines(props, "ExecStop", &conf.stop);
+    insert_commandlines_ex(props, "ExecStopEx", &conf.stop);
     insert_commandlines(props, "ExecStopPost", &conf.stoppost);
+    insert_commandlines_ex(props, "ExecStopPostEx", &conf.stoppost);
 
     // Kill mode / signal
     insert(props, "KillMode", &format_kill_mode(conf.kill_mode));
