@@ -311,7 +311,8 @@ pub struct Shell {
     pub opt_noexec: bool,
     pub opt_posix: bool,
     pub opt_hashall: bool,
-    pub opt_monitor: bool, // set -m / set -o monitor (job control)
+    pub opt_monitor: bool,      // set -m / set -o monitor (job control)
+    pub script_fd: Option<i32>, // original script fd (for exec 0< detection)
     pub login_shell: bool,
     /// Name of the currently executing builtin (for error messages)
     pub current_builtin: Option<String>,
@@ -467,6 +468,7 @@ impl Shell {
             opt_posix: false,
             opt_hashall: true, // enabled by default
             opt_monitor: false,
+            script_fd: None,
             login_shell: false,
             current_builtin: None,
             opt_allexport: false,
@@ -876,6 +878,30 @@ impl Shell {
                         std::process::exit(self.last_status);
                     }
                     self.errexit_suppressed = false;
+                    // Check if exec redirected fd 0 (stdin) — if so, read new
+                    // content from fd 0 and continue execution from there
+                    #[cfg(unix)]
+                    if self.script_fd.is_some() {
+                        // Check if fd 0 now points to a different file than our script
+                        let fd0_stat = nix::sys::stat::fstat(0).ok();
+                        let script_stat =
+                            self.script_fd.and_then(|fd| nix::sys::stat::fstat(fd).ok());
+                        if let (Some(f0), Some(sf)) = (fd0_stat, script_stat)
+                            && (f0.st_dev != sf.st_dev || f0.st_ino != sf.st_ino)
+                        {
+                            // fd 0 changed — read new content and execute it
+                            let mut new_content = String::new();
+                            std::io::Read::read_to_string(&mut std::io::stdin(), &mut new_content)
+                                .ok();
+                            if !new_content.is_empty() {
+                                // Don't detect fd 0 changes in the nested call
+                                let saved_script_fd = self.script_fd.take();
+                                status = self.run_string(&new_content);
+                                self.script_fd = saved_script_fd;
+                            }
+                            return status;
+                        }
+                    }
                     // Check for pending signals after each command
                     self.check_pending_signals();
                     if self.returning || self.breaking > 0 || self.continuing > 0 {

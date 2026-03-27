@@ -233,7 +233,30 @@ fn run() -> i32 {
     {
         match std::fs::read_to_string(&file) {
             Ok(content) => {
+                // Open script on fd 0 so exec 0< can redirect subsequent reading
+                #[cfg(unix)]
+                {
+                    use std::os::unix::io::IntoRawFd;
+                    if let Ok(f) = std::fs::File::open(&file) {
+                        let raw = f.into_raw_fd();
+                        // Keep a dup of the script file for inode comparison
+                        let script_dup = nix::unistd::dup(raw).ok();
+                        // Replace fd 0 with the script file
+                        nix::unistd::dup2(raw, 0).ok();
+                        nix::unistd::close(raw).ok();
+                        // Seek fd 0 past the content we already read
+                        nix::unistd::lseek(0, content.len() as i64, nix::unistd::Whence::SeekSet)
+                            .ok();
+                        // Store the script fd for exec 0< detection
+                        shell.script_fd = script_dup;
+                    }
+                }
                 let status = shell.run_string(&content);
+                // Close the script fd dup
+                #[cfg(unix)]
+                if let Some(fd) = shell.script_fd.take() {
+                    nix::unistd::close(fd).ok();
+                }
                 shell.run_exit_trap();
                 return status;
             }
