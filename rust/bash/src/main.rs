@@ -231,34 +231,39 @@ fn run() -> i32 {
     if let Some(file) = script_file
         && !read_stdin
     {
-        match std::fs::read_to_string(&file) {
-            Ok(content) => {
-                // Open script on fd 0 so exec 0< can redirect subsequent reading
-                #[cfg(unix)]
-                {
-                    use std::os::unix::io::IntoRawFd;
-                    if let Ok(f) = std::fs::File::open(&file) {
-                        let raw = f.into_raw_fd();
-                        // Keep a dup of the script file on a high fd for inode comparison
-                        // Use fcntl F_DUPFD_CLOEXEC to get a fd >= 100 to avoid conflicts
-                        let script_dup =
-                            nix::fcntl::fcntl(raw, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(100)).ok();
-                        // Replace fd 0 with the script file
+        // Open script file on fd 0 and run incrementally so exec 0< works
+        #[cfg(unix)]
+        {
+            use std::os::unix::io::IntoRawFd;
+            match std::fs::File::open(&file) {
+                Ok(f) => {
+                    let raw = f.into_raw_fd();
+                    if raw != 0 {
                         nix::unistd::dup2(raw, 0).ok();
                         nix::unistd::close(raw).ok();
-                        // Seek fd 0 past the content we already read
-                        nix::unistd::lseek(0, content.len() as i64, nix::unistd::Whence::SeekSet)
-                            .ok();
-                        // Store the script fd for exec 0< detection
-                        shell.script_fd = script_dup;
                     }
+                    let status = shell.run_script_fd0();
+                    shell.run_exit_trap();
+                    return status;
                 }
+                Err(e) => {
+                    let argv0 = std::env::args()
+                        .next()
+                        .unwrap_or_else(|| "bash".to_string());
+                    let msg = match e.kind() {
+                        std::io::ErrorKind::NotFound => "No such file or directory",
+                        std::io::ErrorKind::PermissionDenied => "Permission denied",
+                        _ => "No such file or directory",
+                    };
+                    eprintln!("{}: {}: {}", argv0, file, msg);
+                    return 127;
+                }
+            }
+        }
+        #[cfg(not(unix))]
+        match std::fs::read_to_string(&file) {
+            Ok(content) => {
                 let status = shell.run_string(&content);
-                // Close the script fd dup
-                #[cfg(unix)]
-                if let Some(fd) = shell.script_fd.take() {
-                    nix::unistd::close(fd).ok();
-                }
                 shell.run_exit_trap();
                 return status;
             }
