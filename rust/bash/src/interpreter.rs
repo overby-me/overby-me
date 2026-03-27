@@ -1354,27 +1354,7 @@ impl Shell {
                 let is_last = i == pipeline.commands.len() - 1;
 
                 let (read_fd, write_fd): (Option<RawFd>, Option<RawFd>) = if !is_last {
-                    // Ensure fd 0 and 1 are open before pipe() to prevent
-                    // pipe from reusing them (can happen after exec <&-)
-                    let mut guard_fds = Vec::new();
-                    for guard_fd in 0..=1 {
-                        if nix::fcntl::fcntl(guard_fd, nix::fcntl::FcntlArg::F_GETFD).is_err()
-                            && let Ok(f) = std::fs::File::open("/dev/null")
-                        {
-                            use std::os::unix::io::IntoRawFd;
-                            let fd = f.into_raw_fd();
-                            if fd != guard_fd {
-                                nix::unistd::dup2(fd, guard_fd).ok();
-                                nix::unistd::close(fd).ok();
-                            }
-                            guard_fds.push(guard_fd);
-                        }
-                    }
                     let (r, w) = nix::unistd::pipe().expect("pipe failed");
-                    // Close the guard fds (they were just placeholders)
-                    for fd in guard_fds {
-                        nix::unistd::close(fd).ok();
-                    }
                     (Some(r.into_raw_fd()), Some(w.into_raw_fd()))
                 } else {
                     (None, None)
