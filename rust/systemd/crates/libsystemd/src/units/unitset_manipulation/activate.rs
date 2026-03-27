@@ -440,8 +440,6 @@ pub fn activate_unit(
     }
 
     let next_services_ids = unit.common.dependencies.before.clone();
-    let success_action = unit.common.unit.success_action.clone();
-    let failure_action = unit.common.unit.failure_action.clone();
 
     // Remember whether the unit was already started before we call activate().
     // If it was, we must NOT re-dispatch the before-chain — doing so would
@@ -505,27 +503,13 @@ pub fn activate_unit(
             // `systemctl is-active <slice>` returns "active".
             activate_slice_hierarchy(unit, run_info);
 
-            if success_action != UnitAction::None {
-                info!(
-                    "Unit {} succeeded, triggering SuccessAction={:?}",
-                    id_to_start.name, success_action
-                );
-                execute_unit_action(&success_action, &id_to_start.name);
-            }
             Ok(StartResult::Started(next_services_ids))
         }
         Err(e) => {
-            if failure_action != UnitAction::None {
-                // Don't trigger FailureAction for dependency errors — those
-                // just mean the unit is waiting and will be retried.
-                if !matches!(e.reason, UnitOperationErrorReason::DependencyError(_)) {
-                    info!(
-                        "Unit {} failed, triggering FailureAction={:?}",
-                        id_to_start.name, failure_action
-                    );
-                    execute_unit_action(&failure_action, &id_to_start.name);
-                }
-            }
+            // FailureAction is handled in the deactivation path (unit.rs
+            // deactivate / service_exit_handler) so that it fires when the
+            // unit actually transitions to the failed state, not when the
+            // start job itself returns an error.
 
             // For non-dependency errors (i.e. the unit genuinely failed to
             // start), still propagate the `before` chain so that units
