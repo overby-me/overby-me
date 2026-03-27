@@ -733,7 +733,8 @@ fn format_command_indent(cmd: &Command, indent: usize) -> String {
             } else {
                 ""
             };
-            let body_str = format_compound_command_indent(body, indent);
+            // Bash always wraps function bodies in { ... } even if originally ( ... )
+            let body_str = format_func_body(body, indent);
             let redir_str = if redirections.is_empty() {
                 String::new()
             } else {
@@ -824,7 +825,21 @@ fn format_cond_expr(expr: &CondExpr) -> String {
     }
 }
 
-fn format_compound_command(cmd: &CompoundCommand) -> String {
+/// Format a function body — bash always wraps in { ... } even for subshell bodies
+pub fn format_func_body(body: &CompoundCommand, indent: usize) -> String {
+    match body {
+        CompoundCommand::BraceGroup(_) => format_compound_command_indent(body, indent),
+        // Non-brace body (e.g., subshell): wrap in { ... }
+        other => {
+            let iprefix = "    ".repeat(indent);
+            let inner_prefix = "    ".repeat(indent + 1);
+            let inner = format_compound_command_indent(other, 0);
+            format!("{}{{ \n{}{}\n{}}}", iprefix, inner_prefix, inner, iprefix)
+        }
+    }
+}
+
+pub fn format_compound_command(cmd: &CompoundCommand) -> String {
     format_compound_command_indent(cmd, 0)
 }
 

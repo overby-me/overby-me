@@ -398,7 +398,7 @@ pub(super) fn builtin_type(shell: &mut Shell, args: &[String]) -> i32 {
                 println!("{} is a shell keyword", name);
             } else if let Some(body) = shell.functions.get(name) {
                 println!("{} is a function", name);
-                let body_str = format_compound_command(body);
+                let body_str = format_func_body(body, 0);
                 let redir_str = if let Some(redirs) = shell.func_redirections.get(name) {
                     let parts: Vec<String> = redirs.iter().map(format_redirection).collect();
                     format!(" {}", parts.join(" "))
@@ -519,7 +519,7 @@ pub(super) fn builtin_command(shell: &mut Shell, args: &[String]) -> i32 {
                     println!("{} is aliased to `{}'", name, value);
                 } else if let Some(func_body) = shell.functions.get(name.as_str()) {
                     println!("{} is a function", name);
-                    let body = format_compound_command_indent(func_body, 0);
+                    let body = format_func_body(func_body, 0);
                     let redir_str = if let Some(redirs) = shell.func_redirections.get(name.as_str())
                     {
                         let parts: Vec<String> = redirs.iter().map(format_redirection).collect();

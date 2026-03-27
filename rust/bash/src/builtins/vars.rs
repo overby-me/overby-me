@@ -664,7 +664,7 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             return 0;
         }
         let print_func = |name: &str, body: &CompoundCommand, shell: &Shell| {
-            let body_str = format_compound_command(body);
+            let body_str = format_func_body(body, 0);
             let redir_str = if let Some(redirs) = shell.func_redirections.get(name) {
                 let parts: Vec<String> = redirs.iter().map(format_redirection).collect();
                 format!(" {}", parts.join(" "))
