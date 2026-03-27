@@ -1995,7 +1995,12 @@ fn expand_pattern_word(word: &Word, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
                 // Use quote_glob_chars to protect glob metacharacters
                 result.push_str(&quote_glob_chars(t));
             }
-            Segment::Unquoted(t) | Segment::Literal(t) => result.push_str(t),
+            Segment::Unquoted(t) | Segment::Literal(t) => {
+                // Strip \x00 markers from unquoted segments so that backslashes
+                // from command substitution results act as pattern escape characters
+                // (e.g., backtick result \\ means "match one literal \")
+                result.push_str(&t.replace('\x00', ""));
+            }
             Segment::SplitHere => result.push(' '),
         }
     }
