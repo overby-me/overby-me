@@ -1220,19 +1220,20 @@ impl Unit {
                     // Dont need activation
                     return Ok(self_status.clone());
                 }
-                UnitStatus::Stopped(StatusStopped::StoppedUnexpected, _) => {
+                UnitStatus::Stopped(StatusStopped::StoppedUnexpected, _)
+                    if !source.is_socket_activation() =>
+                {
                     // Unit already tried to start and failed.  Don't retry
                     // during the initial activation graph walk — only the
                     // restart mechanism (service_exit_handler / reactivate)
                     // should retry failed units if Restart= policy allows it.
+                    // Socket activation is allowed through so that incoming
+                    // connections can still trigger a restart.
                     return Ok(self_status.clone());
                 }
                 UnitStatus::Stopped(_, _) => {
-                    if source == ActivationSource::SocketActivation {
-                        // Dont need activation
-                        return Ok(self_status.clone());
-                    }
-                    // Need activation
+                    // Need activation — both regular and socket activation
+                    // should start a stopped unit.
                 }
                 _ => {
                     // Need activation

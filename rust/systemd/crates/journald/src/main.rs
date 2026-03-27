@@ -29,6 +29,7 @@ use std::fs;
 use std::io::{self, BufRead, BufReader, Write};
 
 use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::io::FromRawFd;
 use std::os::unix::net::{UnixDatagram, UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -1186,6 +1187,87 @@ fn parse_kmsg_line(line: &str) -> Option<JournalEntry> {
 }
 
 // ---------------------------------------------------------------------------
+// Socket activation
+// ---------------------------------------------------------------------------
+
+/// Pre-opened sockets from socket activation (LISTEN_FDS).
+struct SocketActivationFds {
+    /// Native journal socket (datagram) — `/run/systemd/journal/socket`
+    native: Option<UnixDatagram>,
+    /// Stdout capture socket (stream) — `/run/systemd/journal/stdout`
+    stdout: Option<UnixListener>,
+}
+
+/// Parse LISTEN_FDS and convert raw FDs to typed sockets.
+///
+/// PID 1 passes socket FDs starting at FD 3. We identify each FD's type
+/// using `getsockopt(SO_TYPE)` — SOCK_DGRAM for the native journal socket,
+/// SOCK_STREAM for the stdout listener.
+fn receive_socket_activation_fds() -> SocketActivationFds {
+    let mut result = SocketActivationFds {
+        native: None,
+        stdout: None,
+    };
+
+    let fd_count: usize = match std::env::var("LISTEN_FDS") {
+        Ok(val) => match val.parse() {
+            Ok(n) => n,
+            Err(_) => return result,
+        },
+        Err(_) => return result,
+    };
+
+    if fd_count == 0 {
+        return result;
+    }
+
+    const SD_LISTEN_FDS_START: i32 = 3;
+
+    for i in 0..fd_count {
+        let fd = SD_LISTEN_FDS_START + i as i32;
+
+        // Determine socket type via getsockopt(SO_TYPE)
+        let mut sock_type: libc::c_int = 0;
+        let mut len = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
+        let ret = unsafe {
+            libc::getsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_TYPE,
+                std::ptr::from_mut(&mut sock_type).cast(),
+                &mut len,
+            )
+        };
+
+        if ret != 0 {
+            eprintln!("journald: getsockopt(SO_TYPE) failed for fd {fd}, skipping");
+            continue;
+        }
+
+        if sock_type == libc::SOCK_DGRAM && result.native.is_none() {
+            eprintln!("journald: Using socket-activated datagram fd {fd} as native socket");
+            result.native = Some(unsafe { UnixDatagram::from_raw_fd(fd) });
+        } else if sock_type == libc::SOCK_STREAM && result.stdout.is_none() {
+            eprintln!("journald: Using socket-activated stream fd {fd} as stdout socket");
+            result.stdout = Some(unsafe { UnixListener::from_raw_fd(fd) });
+        } else {
+            eprintln!("journald: Ignoring socket-activated fd {fd} (type={sock_type})");
+        }
+    }
+
+    // Clear the env vars — sd_listen_fds() convention: unset after consuming.
+    // SAFETY: journald is single-threaded at this point (called from main
+    // before spawning listener threads).
+    unsafe {
+        std::env::remove_var("LISTEN_FDS");
+        std::env::remove_var("LISTEN_FDNAMES");
+        std::env::remove_var("LISTEN_PID");
+    }
+
+    result
+}
+
+// ---------------------------------------------------------------------------
 // Socket setup
 // ---------------------------------------------------------------------------
 
@@ -1234,13 +1316,19 @@ fn create_stream_listener(path: &str) -> io::Result<UnixListener> {
 // ---------------------------------------------------------------------------
 
 /// Listen on the native journal socket for datagram messages.
-fn native_socket_listener(state: Arc<JournaldState>) {
-    let sock = match create_datagram_socket(JOURNAL_SOCKET_PATH) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("journald: Failed to create native socket: {}", e);
-            return;
+fn native_socket_listener(state: Arc<JournaldState>, activated_sock: Option<UnixDatagram>) {
+    let sock = match activated_sock {
+        Some(s) => {
+            eprintln!("journald: Using socket-activated native socket");
+            s
         }
+        None => match create_datagram_socket(JOURNAL_SOCKET_PATH) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("journald: Failed to create native socket: {}", e);
+                return;
+            }
+        },
     };
 
     eprintln!("journald: Listening on {}", JOURNAL_SOCKET_PATH);
@@ -1349,16 +1437,22 @@ fn syslog_socket_listener(state: Arc<JournaldState>) {
 ///
 /// Services connected here send one log line per line, optionally prefixed
 /// with a header that specifies the syslog identifier, priority, etc.
-fn stdout_socket_listener(state: Arc<JournaldState>) {
-    let listener = match create_stream_listener(STDOUT_SOCKET_PATH) {
-        Ok(l) => l,
-        Err(e) => {
-            eprintln!(
-                "journald: Failed to create stdout socket {}: {}",
-                STDOUT_SOCKET_PATH, e
-            );
-            return;
+fn stdout_socket_listener(state: Arc<JournaldState>, activated_listener: Option<UnixListener>) {
+    let listener = match activated_listener {
+        Some(l) => {
+            eprintln!("journald: Using socket-activated stdout socket");
+            l
         }
+        None => match create_stream_listener(STDOUT_SOCKET_PATH) {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!(
+                    "journald: Failed to create stdout socket {}: {}",
+                    STDOUT_SOCKET_PATH, e
+                );
+                return;
+            }
+        },
     };
 
     eprintln!("journald: Listening on {}", STDOUT_SOCKET_PATH);
@@ -1866,11 +1960,16 @@ fn main() {
         );
     }
 
+    // Check for socket activation (LISTEN_FDS from PID 1)
+    let activated = receive_socket_activation_fds();
+    let socket_activated = activated.native.is_some() || activated.stdout.is_some();
+
     // Start listener threads
     let state_native = Arc::clone(&state);
+    let activated_native = activated.native;
     let _native_handle = thread::Builder::new()
         .name("native-socket".into())
-        .spawn(move || native_socket_listener(state_native))
+        .spawn(move || native_socket_listener(state_native, activated_native))
         .expect("failed to spawn native socket thread");
 
     let state_syslog = Arc::clone(&state);
@@ -1880,9 +1979,10 @@ fn main() {
         .expect("failed to spawn syslog socket thread");
 
     let state_stdout = Arc::clone(&state);
+    let activated_stdout = activated.stdout;
     let _stdout_handle = thread::Builder::new()
         .name("stdout-socket".into())
-        .spawn(move || stdout_socket_listener(state_stdout))
+        .spawn(move || stdout_socket_listener(state_stdout, activated_stdout))
         .expect("failed to spawn stdout socket thread");
 
     let state_kmsg = Arc::clone(&state);
@@ -1943,10 +2043,15 @@ fn main() {
         let _ = storage.flush();
     }
 
-    // Clean up socket and PID files
+    // Clean up PID file. Only remove socket files if we created them ourselves
+    // (not socket-activated). When socket-activated, PID 1 owns the socket FDs
+    // and the filesystem entries — removing them would break re-activation.
     let _ = fs::remove_file(PID_FILE_PATH);
-    let _ = fs::remove_file(JOURNAL_SOCKET_PATH);
-    let _ = fs::remove_file(STDOUT_SOCKET_PATH);
+    if !socket_activated {
+        let _ = fs::remove_file(JOURNAL_SOCKET_PATH);
+        let _ = fs::remove_file(STDOUT_SOCKET_PATH);
+    }
+    // Syslog socket is never socket-activated — always clean it up
     let _ = fs::remove_file(SYSLOG_SOCKET_PATH);
 
     sd_notify("STOPPING=1");

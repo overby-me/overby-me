@@ -312,6 +312,30 @@
         '';
       }
       {
+        name = "04-JOURNAL";
+        # Start with only the stopped-socket-activation subtest.
+        # Other subtests need varlinkctl, journal namespaces, FSS, journal-remote,
+        # journal-gatewayd, or other unimplemented features.
+        patchScript = ''
+          # Use upstream stopped-socket-activation test as-is (it works now).
+          # Remove subtests needing varlinkctl, journal namespaces, FSS,
+          # journal-remote, journal-gatewayd, or other unimplemented features.
+          rm -f TEST-04-JOURNAL.bsod.sh \
+               TEST-04-JOURNAL.cat.sh \
+               TEST-04-JOURNAL.corrupted-journals.sh \
+               TEST-04-JOURNAL.fss.sh \
+               TEST-04-JOURNAL.invocation.sh \
+               TEST-04-JOURNAL.journal-append.sh \
+               TEST-04-JOURNAL.journal-corrupt.sh \
+               TEST-04-JOURNAL.journal-gatewayd.sh \
+               TEST-04-JOURNAL.journal-remote.sh \
+               TEST-04-JOURNAL.journal.sh \
+               TEST-04-JOURNAL.LogFilterPatterns.sh \
+               TEST-04-JOURNAL.reload.sh \
+               TEST-04-JOURNAL.SYSTEMD_JOURNAL_COMPRESS.sh
+        '';
+      }
+      {
         name = "05-RLIMITS";
         # Skip rlimit.sh which needs DefaultLimitNOFILE inheritance and actual
         # rlimit enforcement. Keep effective-limit.sh which tests set-property

@@ -334,6 +334,9 @@ pub fn activate_unit(
     // Early return if the unit has already been activated (or skipped/failed).
     // This prevents duplicate condition-check logs and redundant work when the
     // same unit appears in multiple before-chains.
+    //
+    // Socket activation bypasses the Stopped guards: when a socket receives
+    // traffic the service must restart regardless of how it was stopped.
     {
         let status = unit.common.status.read_poisoned();
         match &*status {
@@ -341,16 +344,21 @@ pub fn activate_unit(
                 // Already running — nothing to do, don't re-dispatch before-chain
                 return Ok(StartResult::Started(vec![]));
             }
-            UnitStatus::Stopped(StatusStopped::StoppedFinal, _) => {
+            UnitStatus::Stopped(StatusStopped::StoppedFinal, _)
+                if !source.is_socket_activation() =>
+            {
                 // Already finished (e.g. condition-skipped oneshot) — don't re-check
                 return Ok(StartResult::Started(vec![]));
             }
-            UnitStatus::Stopped(StatusStopped::StoppedUnexpected, _) => {
+            UnitStatus::Stopped(StatusStopped::StoppedUnexpected, _)
+                if !source.is_socket_activation() =>
+            {
                 // Already failed — don't retry during initial activation
                 return Ok(StartResult::Started(vec![]));
             }
             _ => {
-                // NeverStarted, Starting, Stopping, Restarting — proceed
+                // NeverStarted, Starting, Stopping, Restarting — proceed.
+                // Also: Stopped + SocketActivation — restart via socket traffic.
             }
         }
     }
