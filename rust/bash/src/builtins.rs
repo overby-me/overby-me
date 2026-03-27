@@ -4876,7 +4876,7 @@ fn builtin_exec(shell: &mut Shell, args: &[String]) -> i32 {
                 // Login shell — prefix argv[0] with -
                 // Will be applied below
             }
-            s if s.starts_with('-') && s.len() > 1 && s.as_bytes()[1].is_ascii_alphabetic() => {
+            s if s.starts_with('-') && s.len() > 1 => {
                 eprintln!("{}: exec: {}: invalid option", shell.error_prefix(), s);
                 eprintln!(
                     "exec: usage: exec [-cl] [-a name] [command [argument ...]] [redirection ...]"
