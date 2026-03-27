@@ -1150,6 +1150,141 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                             }
                             continue;
                         }
+                        // Heredoc: << or <<- inside comsub
+                        '<' if *i + 1 < chars.len()
+                            && chars[*i + 1] == '<'
+                            && (*i + 2 >= chars.len() || chars[*i + 2] != '<') =>
+                        {
+                            cmd.push(chars[*i]); // first <
+                            *i += 1;
+                            cmd.push(chars[*i]); // second <
+                            *i += 1;
+                            // Optional - for <<-
+                            let strip_tabs = *i < chars.len() && chars[*i] == '-';
+                            if strip_tabs {
+                                cmd.push(chars[*i]);
+                                *i += 1;
+                            }
+                            // Skip whitespace
+                            while *i < chars.len() && (chars[*i] == ' ' || chars[*i] == '\t') {
+                                cmd.push(chars[*i]);
+                                *i += 1;
+                            }
+                            // Read the delimiter (handle quoting)
+                            let mut delim = String::new();
+                            let mut heredoc_quoted = false;
+                            while *i < chars.len()
+                                && chars[*i] != '\n'
+                                && chars[*i] != ' '
+                                && chars[*i] != '\t'
+                                && chars[*i] != ';'
+                                && chars[*i] != '&'
+                                && chars[*i] != ')'
+                                && chars[*i] != '|'
+                            {
+                                let ch = chars[*i];
+                                if ch == '\'' {
+                                    heredoc_quoted = true;
+                                    cmd.push(ch);
+                                    *i += 1;
+                                    while *i < chars.len() && chars[*i] != '\'' {
+                                        delim.push(chars[*i]);
+                                        cmd.push(chars[*i]);
+                                        *i += 1;
+                                    }
+                                    if *i < chars.len() {
+                                        cmd.push(chars[*i]);
+                                        *i += 1;
+                                    }
+                                } else if ch == '"' {
+                                    heredoc_quoted = true;
+                                    cmd.push(ch);
+                                    *i += 1;
+                                    while *i < chars.len() && chars[*i] != '"' {
+                                        delim.push(chars[*i]);
+                                        cmd.push(chars[*i]);
+                                        *i += 1;
+                                    }
+                                    if *i < chars.len() {
+                                        cmd.push(chars[*i]);
+                                        *i += 1;
+                                    }
+                                } else if ch == '\\' {
+                                    heredoc_quoted = true;
+                                    cmd.push(ch);
+                                    *i += 1;
+                                    if *i < chars.len() && chars[*i] == '\n' {
+                                        // Line continuation: \<newline> joins next line
+                                        cmd.push(chars[*i]);
+                                        *i += 1;
+                                    } else if *i < chars.len() {
+                                        delim.push(chars[*i]);
+                                        cmd.push(chars[*i]);
+                                        *i += 1;
+                                    }
+                                } else {
+                                    delim.push(ch);
+                                    cmd.push(ch);
+                                    *i += 1;
+                                }
+                            }
+                            let _ = heredoc_quoted; // used later if needed
+                            // Skip to end of line (rest of command after heredoc redirect)
+                            while *i < chars.len() && chars[*i] != '\n' {
+                                cmd.push(chars[*i]);
+                                *i += 1;
+                            }
+                            if *i < chars.len() {
+                                cmd.push(chars[*i]); // newline
+                                *i += 1;
+                            }
+                            // Read heredoc body lines until delimiter
+                            if !delim.is_empty() {
+                                loop {
+                                    if *i >= chars.len() {
+                                        break; // EOF
+                                    }
+                                    // Read one line
+                                    let line_start = *i;
+                                    while *i < chars.len() && chars[*i] != '\n' {
+                                        *i += 1;
+                                    }
+                                    let line: String = chars[line_start..*i].iter().collect();
+                                    let check = if strip_tabs {
+                                        line.trim_start_matches('\t').to_string()
+                                    } else {
+                                        line.clone()
+                                    };
+                                    if check == delim {
+                                        cmd.push_str(&line);
+                                        if *i < chars.len() {
+                                            cmd.push('\n');
+                                            *i += 1;
+                                        }
+                                        break;
+                                    }
+                                    // Check if line is delimiter followed by optional
+                                    // whitespace then ) — heredoc ends here
+                                    if check.starts_with(&delim)
+                                        && check[delim.len()..].trim_start().starts_with(')')
+                                    {
+                                        // Put delimiter on its own line in the content
+                                        cmd.push_str(&delim);
+                                        cmd.push('\n');
+                                        // Position at the ) character
+                                        let offset = line.find(')').unwrap_or(line.len());
+                                        *i = line_start + offset;
+                                        break;
+                                    }
+                                    cmd.push_str(&line);
+                                    if *i < chars.len() {
+                                        cmd.push('\n');
+                                        *i += 1;
+                                    }
+                                }
+                            }
+                            continue;
+                        }
                         _ => {}
                     }
                     // Track case/esac keywords
