@@ -1481,6 +1481,28 @@ pub fn run_exec_helper() {
         }
     }
 
+    // ── PrivateUsers= — user namespace ─────────────────────────────────
+    if config.private_users && !config.privileged_prefix {
+        // Capture uid/gid BEFORE unshare — after creating the user namespace
+        // the process has no mapping yet and getuid()/getgid() return 65534.
+        let uid = unsafe { libc::getuid() };
+        let gid = unsafe { libc::getgid() };
+        let ret = unsafe { libc::unshare(libc::CLONE_NEWUSER) };
+        if ret != 0 {
+            log::warn!(
+                "Failed to create user namespace for PrivateUsers=: {}",
+                std::io::Error::last_os_error()
+            );
+        } else {
+            // Write uid_map and gid_map for minimal identity mapping
+            // (map root inside the namespace to the original uid outside).
+            let _ = std::fs::write("/proc/self/uid_map", format!("0 {uid} 1\n"));
+            // Must deny setgroups before writing gid_map (kernel requirement)
+            let _ = std::fs::write("/proc/self/setgroups", "deny\n");
+            let _ = std::fs::write("/proc/self/gid_map", format!("0 {gid} 1\n"));
+        }
+    }
+
     // ── CapabilityBoundingSet= — drop capabilities from bounding set ──
     if !config.capability_bounding_set.is_empty() && !config.privileged_prefix {
         apply_capability_bounding_set(&config);

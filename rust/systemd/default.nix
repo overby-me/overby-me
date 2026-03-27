@@ -302,6 +302,8 @@
         # remove subtests requiring unimplemented features.
         patchScript = ''
           sed -i '/mountpoint \/issue2730/d; /systemctl --no-block exit 123/d' TEST-07-PID1.sh
+          # Remove PrivateUsersEx lines (not implemented), keep PrivateUsers=yes
+          sed -i '/PrivateUsersEx/d' TEST-07-PID1.private-users.sh
           rm -f TEST-07-PID1.attach_processes.sh \
                TEST-07-PID1.concurrency.sh \
                TEST-07-PID1.DeferReactivation.sh \
@@ -323,7 +325,6 @@
                TEST-07-PID1.prefix-shell.sh \
                TEST-07-PID1.private-bpf.sh \
                TEST-07-PID1.private-pids.sh \
-               TEST-07-PID1.private-users.sh \
                TEST-07-PID1.protect-control-groups.sh \
                TEST-07-PID1.protect-hostname.sh \
                TEST-07-PID1.quota.sh \
