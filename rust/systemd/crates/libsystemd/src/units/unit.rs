@@ -1229,12 +1229,28 @@ impl Unit {
             }
             LockedState::Mount(_, conf) => activate_mount(&self.id, conf, &self.common.status),
             LockedState::Swap(_, conf) => activate_swap(&self.id, conf, &self.common.status),
-            LockedState::Timer(_, _) => {
+            LockedState::Timer(mut timer_state, conf) => {
                 // Timer units are "started" by marking them as running.
                 // The actual scheduling is handled by the timer thread.
                 let mut status = self.common.status.write_poisoned();
                 if status.is_started() {
                     return Ok(status.clone());
+                }
+                // If Persistent=true, read the stamp file to recover
+                // LastTriggerUSec from a previous boot.
+                if conf.persistent {
+                    let stamp_path = format!("/var/lib/systemd/timers/stamp-{}", self.id.name);
+                    if let Ok(meta) = std::fs::metadata(&stamp_path)
+                        && let Ok(mtime) = meta.modified()
+                        && let Ok(dur) = mtime.duration_since(std::time::SystemTime::UNIX_EPOCH)
+                    {
+                        let usec = dur.as_micros() as u64;
+                        trace!(
+                            "Timer {}: read stamp file {}, last_trigger={}",
+                            self.id.name, stamp_path, usec
+                        );
+                        timer_state.last_trigger_usec = Some(usec);
+                    }
                 }
                 *status = UnitStatus::Started(StatusStarted::Running);
                 trace!("Started timer {}", self.id.name);

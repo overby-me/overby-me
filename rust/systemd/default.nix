@@ -529,8 +529,7 @@
         # (persistent stamps, reload, restart-trigger). Keep issue-16347 which
         # tests basic systemd-run --on-calendar timer creation.
         patchScript = ''
-          rm -f TEST-53-TIMER.RandomizedDelaySec-persistent.sh \
-                TEST-53-TIMER.RandomizedDelaySec-reload.sh \
+          rm -f TEST-53-TIMER.RandomizedDelaySec-reload.sh \
                 TEST-53-TIMER.restart-trigger.sh
         '';
       }

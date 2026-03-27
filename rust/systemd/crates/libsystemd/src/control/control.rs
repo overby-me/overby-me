@@ -3964,6 +3964,19 @@ pub fn execute_command(
                 return Err(format!("Unit {unit_name} is active, cannot clean."));
             }
 
+            // For timer units, clean --what=state removes the persistent
+            // stamp file in /var/lib/systemd/timers/.
+            if matches!(&unit.specific, Specific::Timer(_)) {
+                let what = what.as_deref();
+                if matches!(what, Some("state") | Some("all")) {
+                    let stamp_path = format!("/var/lib/systemd/timers/stamp-{}", unit_name);
+                    if std::path::Path::new(&stamp_path).exists() {
+                        let _ = std::fs::remove_file(&stamp_path);
+                    }
+                }
+                return Ok(serde_json::json!({ "cleaned": unit_name }));
+            }
+
             // Extract exec_config from the unit's specific config
             let exec_config = match &unit.specific {
                 Specific::Service(svc) => Some(&svc.conf.exec_config),

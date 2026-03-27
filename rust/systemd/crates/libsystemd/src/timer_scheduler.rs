@@ -96,7 +96,7 @@ fn check_and_fire_timers(
         );
         last_fired.insert(timer_id.name.clone(), now);
 
-        // Record LastTriggerUSec on the timer unit's state
+        // Record LastTriggerUSec on the timer unit's state and write stamp file
         {
             let ri = run_info.read_poisoned();
             if let Some(unit) = ri.unit_table.values().find(|u| u.id == timer_id)
@@ -107,6 +107,20 @@ fn check_and_fire_timers(
                     .map(|d| d.as_micros() as u64)
                     .unwrap_or(0);
                 tmr.state.write_poisoned().last_trigger_usec = Some(trigger_usec);
+
+                // Write persistent stamp file so the last trigger time
+                // survives reboots.
+                if tmr.conf.persistent {
+                    let stamp_dir = "/var/lib/systemd/timers";
+                    let stamp_path = format!("{}/stamp-{}", stamp_dir, timer_id.name);
+                    let _ = std::fs::create_dir_all(stamp_dir);
+                    if let Err(e) = std::fs::write(&stamp_path, "") {
+                        warn!(
+                            "Timer {}: failed to write stamp file {}: {}",
+                            timer_id.name, stamp_path, e
+                        );
+                    }
+                }
             }
         }
 
