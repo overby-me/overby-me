@@ -1940,6 +1940,42 @@ impl Shell {
         )
     }
 
+    /// Expand a word with field splitting, returning multiple fields.
+    /// Used for redirect targets to detect ambiguous redirects.
+    pub fn expand_word_to_fields(&mut self, word: &Word) -> Vec<String> {
+        self.apply_assign_defaults(word);
+        let word = self.eval_arith_in_word(word);
+        let mut vars = self.vars.clone();
+        self.inject_transform_attrs(&word, &mut vars);
+        let arrays = self.arrays.clone();
+        let assoc_arrays = self.assoc_arrays.clone();
+        let namerefs = self.namerefs.clone();
+        let positional = self.positional.clone();
+        let last_status = self.last_status;
+        let last_bg_pid = self.last_bg_pid;
+        let top_pid = self.top_level_pid;
+        let opt_flags = self.get_opt_flags();
+        let ifs = vars
+            .get("IFS")
+            .cloned()
+            .unwrap_or_else(|| " \t\n".to_string());
+        let mut cmd_sub = |cmd: &str| -> String { self.capture_output(cmd) };
+        expand::expand_word(
+            &word,
+            &vars,
+            &arrays,
+            &assoc_arrays,
+            &namerefs,
+            &positional,
+            last_status,
+            last_bg_pid,
+            top_pid,
+            &opt_flags,
+            &ifs,
+            &mut cmd_sub,
+        )
+    }
+
     /// Expand tilde in assignment context: `~` at start and after `:` are expanded
     pub fn expand_assignment_tilde(&self, value: &str) -> String {
         if !value.contains('~') {
@@ -5747,7 +5783,38 @@ impl Shell {
         let is_var_fd = |redir: &Redirection| matches!(&redir.fd, Some(RedirFd::Var(_)));
 
         for redir in redirections {
-            let target_str = self.expand_word_single(&redir.target);
+            // Expand redirect target with field splitting to detect ambiguous redirects
+            let target_str = if matches!(
+                redir.kind,
+                RedirectKind::HereDoc(_, _) | RedirectKind::HereString
+            ) {
+                self.expand_word_single(&redir.target)
+            } else {
+                let fields = self.expand_word_to_fields(&redir.target);
+                if fields.len() > 1 {
+                    // Ambiguous redirect: target expanded to multiple words
+                    let raw = crate::ast::word_to_string(&redir.target);
+                    self.restore_redirections(saved);
+                    return Err(format!("{}: ambiguous redirect", raw));
+                }
+                fields.into_iter().next().unwrap_or_default()
+            };
+
+            // Check for empty target (unset variable)
+            if target_str.is_empty()
+                && !matches!(
+                    redir.kind,
+                    RedirectKind::HereDoc(_, _) | RedirectKind::HereString
+                )
+                && redir
+                    .target
+                    .iter()
+                    .any(|p| matches!(p, WordPart::Variable(_) | WordPart::Param(_)))
+            {
+                let raw = crate::ast::word_to_string(&redir.target);
+                self.restore_redirections(saved);
+                return Err(format!("{}: ambiguous redirect", raw));
+            }
 
             match &redir.kind {
                 RedirectKind::Output | RedirectKind::Clobber => {
