@@ -7,19 +7,18 @@ impl Shell {
             Command::Compound(compound, redirections) => {
                 self.run_compound_with_redirects(compound, redirections)
             }
-            Command::FunctionDef(name, body, body_start, body_end) => {
+            Command::FunctionDef {
+                name,
+                body,
+                body_line,
+                ..
+            } => {
                 if self.readonly_funcs.contains(name) {
-                    // Use body_end (closing }) line for the error, like bash
-                    let saved = self.vars.get("LINENO").cloned();
-                    self.vars.insert("LINENO".to_string(), body_end.to_string());
                     eprintln!("{}: {}: readonly function", self.error_prefix(), name);
-                    if let Some(s) = saved {
-                        self.vars.insert("LINENO".to_string(), s);
-                    }
                     1
                 } else {
                     self.functions.insert(name.clone(), *body.clone());
-                    self.func_body_lines.insert(name.clone(), *body_start);
+                    self.func_body_lines.insert(name.clone(), *body_line);
                     0
                 }
             }

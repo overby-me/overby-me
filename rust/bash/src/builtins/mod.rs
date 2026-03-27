@@ -38,7 +38,7 @@ fn program_has_incomplete_funsub(program: &Program) -> bool {
             Command::Compound(cc, redirs) => {
                 redirs.iter().any(|r| word_check(&r.target)) || compound_check(cc)
             }
-            Command::FunctionDef(_, body, _, _) => compound_check(body),
+            Command::FunctionDef { body, .. } => compound_check(body),
             Command::Coproc(_, inner) => cmd_check(inner),
         }
     }
@@ -712,8 +712,26 @@ fn format_command_indent(cmd: &Command, indent: usize) -> String {
             }
             s
         }
-        Command::FunctionDef(name, body, _, _) => {
-            format!("{} () \n{}", name, format_compound_command(body))
+        Command::FunctionDef {
+            name,
+            body,
+            has_function_keyword,
+            redirections,
+            ..
+        } => {
+            let prefix = if *has_function_keyword {
+                "function "
+            } else {
+                ""
+            };
+            let body_str = format_compound_command(body);
+            let redir_str = if redirections.is_empty() {
+                String::new()
+            } else {
+                let parts: Vec<String> = redirections.iter().map(format_redirection).collect();
+                format!(" {}", parts.join(" "))
+            };
+            format!("{}{} () \n{}{}", prefix, name, body_str, redir_str)
         }
         Command::Coproc(name, inner) => {
             let inner_str = format_command_indent(inner, indent);

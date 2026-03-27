@@ -529,8 +529,11 @@ impl Shell {
                     if program.len() == 1
                         && program[0].list.first.commands.len() == 1
                         && program[0].list.rest.is_empty()
-                        && let crate::ast::Command::FunctionDef(fname, fbody, _, _) =
-                            &program[0].list.first.commands[0]
+                        && let crate::ast::Command::FunctionDef {
+                            name: fname,
+                            body: fbody,
+                            ..
+                        } = &program[0].list.first.commands[0]
                     {
                         shell.functions.insert(fname.clone(), *fbody.clone());
                     }

@@ -476,14 +476,14 @@ impl Parser {
                     self.skip_newlines();
                     let body_start = self.current_line();
                     let body = self.parse_compound_command()?;
-                    // body_end is the line of }, which is 1 before current position
-                    let body_end = self.current_line().saturating_sub(1).max(body_start);
-                    return Ok(Command::FunctionDef(
+                    let redirections = self.parse_redirections()?;
+                    return Ok(Command::FunctionDef {
                         name,
-                        Box::new(body),
-                        body_start,
-                        body_end,
-                    ));
+                        body: Box::new(body),
+                        body_line: body_start,
+                        has_function_keyword: false,
+                        redirections,
+                    });
                 }
                 // Backtrack from inner lookahead
                 self.lexer.restore_position(saved2_lexer_pos);
@@ -512,13 +512,14 @@ impl Parser {
             self.skip_newlines();
             let body_start = self.current_line();
             let body = self.parse_compound_command()?;
-            let body_end = self.current_line().saturating_sub(1).max(body_start);
-            return Ok(Command::FunctionDef(
+            let redirections = self.parse_redirections()?;
+            return Ok(Command::FunctionDef {
                 name,
-                Box::new(body),
-                body_start,
-                body_end,
-            ));
+                body: Box::new(body),
+                body_line: body_start,
+                has_function_keyword: true,
+                redirections,
+            });
         }
 
         // Check for coproc
