@@ -584,6 +584,14 @@ fn format_param_expr(name: &str, op: &ParamOp) -> String {
 
 fn format_redirection(redir: &Redirection) -> String {
     let mut s = String::new();
+    // For dup redirects with no explicit fd, print the default
+    if redir.fd.is_none() {
+        match redir.kind {
+            RedirectKind::DupOutput => s.push('1'),
+            RedirectKind::DupInput => s.push('0'),
+            _ => {}
+        }
+    }
     if let Some(ref fd) = redir.fd {
         match fd {
             RedirFd::Number(n) => {
@@ -724,7 +732,7 @@ fn format_command_indent(cmd: &Command, indent: usize) -> String {
             } else {
                 ""
             };
-            let body_str = format_compound_command(body);
+            let body_str = format_compound_command_indent(body, indent);
             let redir_str = if redirections.is_empty() {
                 String::new()
             } else {
@@ -824,10 +832,11 @@ fn format_compound_command_indent(cmd: &CompoundCommand, indent: usize) -> Strin
     match cmd {
         CompoundCommand::BraceGroup(program) => {
             if program.is_empty() {
-                "{ \n}".to_string()
+                format!("{}{{ \n{}}}", iprefix, iprefix)
             } else {
                 format!(
-                    "{{ \n{}\n{}}}",
+                    "{}{{ \n{}\n{}}}",
+                    iprefix,
                     format_program_impl(program, indent + 1, false),
                     iprefix
                 )
