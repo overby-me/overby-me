@@ -279,6 +279,7 @@ pub struct Shell {
     pub breaking: i32,
     pub continuing: i32,
     pub in_condition: bool,
+    pub comsub_line_offset: usize, // line offset for command substitution LINENO
     pub in_debug_trap: bool,
     pub in_trap_handler: i32,
     pub errexit_suppressed: bool,
@@ -436,6 +437,7 @@ impl Shell {
             breaking: 0,
             continuing: 0,
             in_condition: false,
+            comsub_line_offset: 0,
             in_debug_trap: false,
             in_trap_handler: 0,
             errexit_suppressed: false,
@@ -723,6 +725,11 @@ impl Shell {
             self.shopt_expand_aliases,
             self.opt_posix,
         );
+        // Apply command substitution line offset so LINENO reflects the script line
+        if self.comsub_line_offset > 0 {
+            parser.set_line_offset(self.comsub_line_offset);
+            self.comsub_line_offset = 0; // consume the offset
+        }
 
         // Incremental parse-execute loop (for both scripts and -c mode)
         // Parse one command at a time, execute it, then parse the next
@@ -1499,6 +1506,13 @@ impl Shell {
                     // Clear EXIT trap in command substitution subshell
                     self.traps.remove("EXIT");
                     self.traps.remove("0");
+                    // Set comsub_line_offset so LINENO inside comsub reflects the script line
+                    let lineno: usize = self
+                        .vars
+                        .get("LINENO")
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(1);
+                    self.comsub_line_offset = lineno.saturating_sub(1);
                     let status = self.run_string(cmd_str);
                     std::io::Write::flush(&mut std::io::stdout()).ok();
                     std::process::exit(status);
