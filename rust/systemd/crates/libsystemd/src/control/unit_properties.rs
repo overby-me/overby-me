@@ -153,6 +153,23 @@ pub fn collect_properties(unit: &Unit) -> BTreeMap<String, String> {
                     "ExecMainExitTimestampMonotonic",
                     &fmt_usec(state.srvc.exec_main_exit_timestamp),
                 );
+                // StatusText from sd_notify STATUS=
+                insert(
+                    &mut props,
+                    "StatusText",
+                    state
+                        .srvc
+                        .status_msgs
+                        .last()
+                        .map(|s| s.as_str())
+                        .unwrap_or(""),
+                );
+                // StatusErrno from sd_notify ERRNO=
+                insert(
+                    &mut props,
+                    "StatusErrno",
+                    &state.srvc.notify_errno.unwrap_or(0).to_string(),
+                );
             } else {
                 // State lock is contended (service is activating).
                 // Provide sensible defaults so `systemctl show` doesn't hang.
