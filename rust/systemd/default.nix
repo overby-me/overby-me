@@ -385,13 +385,23 @@
       }
       {
         name = "18-FAILUREACTION";
-        # Skip until SuccessAction/FailureAction reboot/exit handling is
-        # properly implemented. The test triggers a VM reboot via
-        # SuccessAction=reboot which causes unrecoverable BrokenPipeError.
+        # Test that FailureAction/SuccessAction do NOT trigger on the wrong
+        # outcome. Skip the reboot/exit portions of the test that would
+        # terminate the VM.
         patchScript = ''
-          echo '#!/bin/bash' > TEST-18-FAILUREACTION.sh
-          echo 'echo "Skipped: SuccessAction/FailureAction reboot not yet implemented"' >> TEST-18-FAILUREACTION.sh
-          echo 'touch /testok' >> TEST-18-FAILUREACTION.sh
+          cat > TEST-18-FAILUREACTION.sh << 'TESTEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          # FailureAction=poweroff should NOT fire when the command succeeds
+          systemd-run --wait -p FailureAction=poweroff true
+          # SuccessAction=poweroff should NOT fire when the command fails
+          (! systemd-run --wait -p SuccessAction=poweroff false)
+
+          touch /testok
+          TESTEOF
+          chmod +x TEST-18-FAILUREACTION.sh
         '';
       }
       {
