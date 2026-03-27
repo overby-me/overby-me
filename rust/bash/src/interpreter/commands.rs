@@ -1156,10 +1156,14 @@ impl Shell {
                     | "unset"
             );
             // In POSIX mode, errors from special builtins are fatal (exit the shell)
+            // Exclude return/break/continue/shift — their non-zero codes are normal
             if self.opt_posix
                 && is_special
                 && result != 0
-                && !matches!(command_name.as_str(), "trap")
+                && !matches!(
+                    command_name.as_str(),
+                    "trap" | "return" | "break" | "continue" | "shift" | "exit"
+                )
             {
                 self.restore_redirections(saved_fds);
                 std::process::exit(result);
