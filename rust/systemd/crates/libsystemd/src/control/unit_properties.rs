@@ -886,6 +886,24 @@ fn insert_unit_config(props: &mut BTreeMap<String, String>, conf: &UnitConfig) {
         None => insert(props, "FragmentPath", ""),
     }
 
+    // SourcePath (same as FragmentPath for our purposes)
+    match &conf.fragment_path {
+        Some(p) => insert(props, "SourcePath", &p.display().to_string()),
+        None => insert(props, "SourcePath", ""),
+    }
+
+    // Drop-in files
+    if conf.loaded_dropin_files.is_empty() {
+        insert(props, "DropInPaths", "");
+    } else {
+        let paths: Vec<String> = conf
+            .loaded_dropin_files
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect();
+        insert(props, "DropInPaths", &paths.join(" "));
+    }
+
     insert_bool(props, "DefaultDependencies", conf.default_dependencies);
     insert_bool(props, "RefuseManualStart", conf.refuse_manual_start);
     insert_bool(props, "RefuseManualStop", conf.refuse_manual_stop);
