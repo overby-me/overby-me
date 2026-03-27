@@ -502,8 +502,14 @@
           systemctl daemon-reload
           RDEOF
                     chmod +x TEST-23-UNIT-FILE.RuntimeDirectory.sh
-                    rm -f TEST-23-UNIT-FILE.clean-unit.sh \
-                         TEST-23-UNIT-FILE.exec-command-ex.sh \
+                    # clean-unit: keep only non-DynamicUser service section (first 89 lines)
+                    # Remove DynamicUser, mount, and socket sections (not implemented)
+                    sed -i '90,$ { /^$/!d; }' TEST-23-UNIT-FILE.clean-unit.sh
+                    # Remove the trap and everything after line 89, replace with clean exit
+                    head -89 TEST-23-UNIT-FILE.clean-unit.sh > /tmp/clean-unit-patched.sh
+                    chmod +x /tmp/clean-unit-patched.sh
+                    mv /tmp/clean-unit-patched.sh TEST-23-UNIT-FILE.clean-unit.sh
+                    rm -f TEST-23-UNIT-FILE.exec-command-ex.sh \
                          TEST-23-UNIT-FILE.ExtraFileDescriptors.sh \
                          TEST-23-UNIT-FILE.JoinsNamespaceOf.sh \
                          TEST-23-UNIT-FILE.openfile.sh \
