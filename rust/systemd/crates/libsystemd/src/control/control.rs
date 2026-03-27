@@ -565,7 +565,8 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
                         .and_then(|v| v.as_str())
                         .map(|s| s.to_owned());
                     let service_type = obj
-                        .get("type")
+                        .get("service_type")
+                        .or_else(|| obj.get("type"))
                         .and_then(|v| v.as_str())
                         .map(|s| s.to_owned());
                     let remain_after_exit = obj
@@ -2033,6 +2034,106 @@ fn read_default_limit_nofile() -> Option<crate::units::ResourceLimit> {
 /// Transient units are not backed by a unit file on disk — they exist only in
 /// memory for the lifetime of the service manager (or until explicitly removed).
 /// This is the mechanism behind `systemd-run`.
+/// Write a transient service unit file to disk so `systemctl cat` can display it.
+fn write_transient_service_file(
+    path: &std::path::Path,
+    params: &TransientUnitParams,
+) -> Result<(), std::io::Error> {
+    use std::io::Write;
+    let mut f = std::fs::File::create(path)?;
+
+    // [Unit] section
+    let mut has_unit = false;
+    if let Some(ref desc) = params.description {
+        if !has_unit {
+            writeln!(f, "[Unit]")?;
+            has_unit = true;
+        }
+        writeln!(f, "Description={desc}")?;
+    }
+
+    // Check properties for unit-section keys
+    for prop in &params.properties {
+        if let Some((key, value)) = prop.split_once('=') {
+            match key {
+                "Description" if !has_unit => {
+                    writeln!(f, "[Unit]")?;
+                    has_unit = true;
+                    writeln!(f, "Description={value}")?;
+                }
+                "Description" => writeln!(f, "Description={value}")?,
+                _ => {}
+            }
+        }
+    }
+
+    // [Service] section
+    writeln!(f)?;
+    writeln!(f, "[Service]")?;
+
+    if let Some(ref stype) = params.service_type {
+        writeln!(f, "Type={stype}")?;
+    }
+
+    if params.remain_after_exit {
+        writeln!(f, "RemainAfterExit=yes")?;
+    }
+
+    if let Some(ref wd) = params.working_directory {
+        writeln!(f, "WorkingDirectory={wd}")?;
+    }
+
+    if let Some(ref user) = params.user {
+        writeln!(f, "User={user}")?;
+    }
+
+    if let Some(ref group) = params.group {
+        writeln!(f, "Group={group}")?;
+    }
+
+    // Write properties from -p flags
+    for prop in &params.properties {
+        if let Some((key, _)) = prop.split_once('=') {
+            // Skip unit-section keys already handled above
+            if key == "Description" {
+                continue;
+            }
+            writeln!(f, "{prop}")?;
+        }
+    }
+
+    // Write environment variables
+    if !params.environment.is_empty() {
+        let env_str = params
+            .environment
+            .iter()
+            .map(|e| format!("\"{e}\""))
+            .collect::<Vec<_>>()
+            .join(" ");
+        writeln!(f, "Environment={env_str}")?;
+    }
+
+    // Write ExecStart
+    if let Some(ref cmd) = params.command
+        && !cmd.is_empty()
+    {
+        let cmd_str = cmd
+            .iter()
+            .map(|s| {
+                if s.contains(' ') || s.contains('"') {
+                    format!("\"{}\"", s.replace('"', "\\\""))
+                } else {
+                    s.clone()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        writeln!(f, "ExecStart={cmd_str}")?;
+    }
+
+    Ok(())
+}
+
 fn create_transient_unit(
     params: &TransientUnitParams,
     run_info: &ArcMutRuntimeInfo,
@@ -2753,7 +2854,7 @@ fn create_transient_unit(
                     .or_else(|| params.description.clone())
                     .unwrap_or_else(|| format!("Transient unit {unit_name}")),
                 documentation: vec![],
-                fragment_path: None, // transient — no file on disk
+                fragment_path: None, // set below after writing transient file
                 refs_by_name: vec![],
                 default_dependencies: false,
                 conditions: vec![],
@@ -2845,6 +2946,14 @@ fn create_transient_unit(
     // Apply drop-in overrides from the filesystem (e.g., service.d/, a-.service.d/)
     // to the transient unit, matching systemd behavior.
     apply_dropins_to_transient(&mut unit, &run_info.read_poisoned().config.unit_dirs);
+
+    // Write transient service unit file to /run/systemd/transient/
+    let transient_dir = std::path::Path::new("/run/systemd/transient");
+    let _ = std::fs::create_dir_all(transient_dir);
+    let transient_path = transient_dir.join(unit_name);
+    if let Ok(()) = write_transient_service_file(&transient_path, params) {
+        unit.common.unit.fragment_path = Some(transient_path);
+    }
 
     // Insert the transient unit into the unit table.
     let mut ri = run_info.write_poisoned();

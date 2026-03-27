@@ -768,12 +768,14 @@
                       --working-directory=/tmp \
                       bash -xec '[[ "$PWD" == /tmp ]]'
 
-          : "Transient service with --remain-after-exit"
+          : "Transient service with --remain-after-exit and systemctl cat"
           UNIT="service-0-$RANDOM"
           systemd-run --remain-after-exit --unit="$UNIT" \
                       --service-type=simple \
                       --service-type=oneshot \
                       true
+          systemctl cat "$UNIT"
+          grep -q "^Type=oneshot" "/run/systemd/transient/$UNIT.service"
           systemctl stop "$UNIT"
 
           : "Error handling"
