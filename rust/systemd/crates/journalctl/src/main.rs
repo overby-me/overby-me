@@ -523,6 +523,16 @@ fn parse_timestamp(s: &str) -> Result<u64, String> {
         }
     }
 
+    // UNIX epoch format: @<seconds> or @<microseconds>
+    if let Some(rest) = s.strip_prefix('@')
+        && let Ok(n) = rest.parse::<u64>()
+    {
+        if n > 4_000_000_000 {
+            return Ok(n);
+        }
+        return Ok(n * 1_000_000);
+    }
+
     // Try UNIX timestamp (seconds or microseconds)
     if let Ok(n) = s.parse::<u64>() {
         // If it looks like microseconds (> year 2100 in seconds), treat as µs
@@ -2283,6 +2293,12 @@ mod tests {
             .as_micros() as u64;
         // Should be within 1 second
         assert!((ts as i128 - now as i128).unsigned_abs() < 1_000_000);
+    }
+
+    #[test]
+    fn test_parse_timestamp_at_epoch() {
+        let ts = parse_timestamp("@1700000000").unwrap();
+        assert_eq!(ts, 1_700_000_000_000_000);
     }
 
     #[test]

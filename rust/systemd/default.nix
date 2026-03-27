@@ -589,9 +589,8 @@
       {name = "52-HONORFIRSTSHUTDOWN";}
       {
         name = "53-TIMER";
-        # Skip subtests that require full timer unit lifecycle management
-        # (persistent stamps, reload, restart-trigger). Keep issue-16347 which
-        # tests basic systemd-run --on-calendar timer creation.
+        # Skip subtests that require timer recalculation after system time jumps
+        # and journalctl @epoch timestamp parsing.
         patchScript = ''
           rm -f TEST-53-TIMER.RandomizedDelaySec-reload.sh \
                 TEST-53-TIMER.restart-trigger.sh
