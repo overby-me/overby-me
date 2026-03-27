@@ -5957,6 +5957,10 @@ impl Shell {
                             nix::unistd::close(src_fd).ok();
                         }
                     } else if let Ok(src_fd) = target_str.parse::<i32>() {
+                        if src_fd < 0 {
+                            self.restore_redirections(saved);
+                            return Err(format!("{}: ambiguous redirect", target_str));
+                        }
                         if let Ok(saved_fd) = nix::unistd::dup(fd) {
                             saved.push((fd, saved_fd));
                         }
@@ -5988,8 +5992,11 @@ impl Shell {
                         self.coproc_checkfd(fd);
                         nix::unistd::close(fd).ok();
                     } else if let Some(src_str) = target_str.strip_suffix('-') {
-                        // Move fd: dup src to fd, then close src
                         if let Ok(src_fd) = src_str.parse::<i32>() {
+                            if src_fd < 0 {
+                                self.restore_redirections(saved);
+                                return Err(format!("{}: ambiguous redirect", target_str));
+                            }
                             if let Ok(saved_fd) = nix::unistd::dup(fd) {
                                 saved.push((fd, saved_fd));
                             }
@@ -5999,6 +6006,10 @@ impl Shell {
                             nix::unistd::close(src_fd).ok();
                         }
                     } else if let Ok(src_fd) = target_str.parse::<i32>() {
+                        if src_fd < 0 {
+                            self.restore_redirections(saved);
+                            return Err(format!("{}: ambiguous redirect", target_str));
+                        }
                         if let Ok(saved_fd) = nix::unistd::dup(fd) {
                             saved.push((fd, saved_fd));
                         }
