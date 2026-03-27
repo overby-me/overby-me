@@ -587,7 +587,7 @@ impl Parser {
             let saved_pos = self.lexer.save_position();
             let saved_tok = self.current.clone();
             self.advance(); // consume first (
-            if self.current == Token::LParen {
+            if self.current == Token::LParen && !self.lexer.had_whitespace_before_token {
                 // Try (( expression )) first, but fall back to nested subshell
                 // if the content contains command separators (;, |, &)
                 let arith_saved_pos = self.lexer.save_position();
