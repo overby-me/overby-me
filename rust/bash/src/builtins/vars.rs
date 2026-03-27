@@ -688,6 +688,11 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
     // declare -F: list function names
     if flag_functions {
         if names.is_empty() {
+            // With -x flag, only list exported functions
+            if flag_export {
+                // No function export mechanism implemented yet — print nothing
+                return 0;
+            }
             let mut all_funcs: Vec<String> = shell.func_names.to_vec();
             for name in shell.functions.keys() {
                 if !all_funcs.contains(name) {
@@ -700,15 +705,18 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 if flag_readonly && !is_ro {
                     continue;
                 }
-                let flags = if is_ro { "-fr" } else { "-f" };
-                println!("declare {} {}", flags, name);
+                if flag_print {
+                    let flags = if is_ro { "-fr" } else { "-f" };
+                    println!("declare {} {}", flags, name);
+                } else {
+                    println!("{}", name);
+                }
             }
         } else {
             for name in &names {
                 if shell.functions.contains_key(name.as_str()) || shell.func_names.contains(name) {
-                    let is_ro = shell.readonly_funcs.contains(name.as_str());
-                    let flags = if is_ro { "-fr" } else { "-f" };
-                    println!("declare {} {}", flags, name);
+                    // declare -F name: just print the name (no declare prefix)
+                    println!("{}", name);
                 } else {
                     return 1;
                 }

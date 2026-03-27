@@ -66,6 +66,16 @@ pub(super) fn builtin_return(shell: &mut Shell, args: &[String]) -> i32 {
         .unwrap_or(shell.last_status);
     // return is valid in functions, sourced scripts, and trap handlers
     if shell.local_scopes.is_empty() && !shell.sourcing && shell.in_trap_handler == 0 {
+        // In a subshell (forked child), return acts like exit
+        #[cfg(unix)]
+        {
+            let current_pid = unsafe { libc::getpid() } as u32;
+            if current_pid != shell.top_level_pid {
+                // We're in a subshell — exit with the code
+                std::process::exit(code);
+            }
+        }
+        // Not in a valid context for return
         eprintln!(
             "{}: return: can only `return' from a function or sourced script",
             shell.error_prefix()
