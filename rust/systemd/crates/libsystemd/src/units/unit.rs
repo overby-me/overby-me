@@ -383,6 +383,19 @@ impl ServiceState {
                 *status = UnitStatus::Stopped(StatusStopped::StoppedFinal, vec![e.reason.clone()]);
             }
         }
+        // Reset socket activated flags so socket activation can restart
+        // this service when a new connection arrives on its socket.
+        if !conf.sockets.is_empty() {
+            for socket_id in &conf.sockets {
+                if let Some(unit) = run_info.unit_table.get(socket_id)
+                    && let Specific::Socket(sock) = &unit.specific
+                {
+                    let mut_state = &mut *sock.state.write_poisoned();
+                    mut_state.sock.activated = false;
+                }
+            }
+            run_info.notify_eventfds();
+        }
         // Clean up RuntimeDirectory= dirs unless RuntimeDirectoryPreserve=yes
         if conf.exec_config.runtime_directory_preserve != RuntimeDirectoryPreserve::Yes {
             for dir_name in &conf.exec_config.runtime_directory {

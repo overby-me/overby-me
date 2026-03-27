@@ -309,6 +309,7 @@
                TEST-07-PID1.exec-context.sh \
                TEST-07-PID1.exec-deserialization.sh \
                TEST-07-PID1.issue-2467.sh \
+               TEST-07-PID1.issue-3166.sh \
                TEST-07-PID1.issue-30412.sh \
                TEST-07-PID1.issue-3171.sh \
                TEST-07-PID1.issue-34104.sh \
