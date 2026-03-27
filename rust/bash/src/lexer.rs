@@ -9,6 +9,13 @@ thread_local! {
     static PATTERN_WORD: Cell<bool> = const { Cell::new(false) };
     /// Aliases available for comsub keyword expansion
     static COMSUB_ALIASES: std::cell::RefCell<HashMap<String, String>> = std::cell::RefCell::new(HashMap::new());
+    /// Heredoc EOF warnings from comsub scanner (line, start_line, delimiter)
+    static COMSUB_HEREDOC_WARNINGS: std::cell::RefCell<Vec<(usize, usize, String)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Take and clear comsub heredoc warnings
+pub fn take_comsub_heredoc_warnings() -> Vec<(usize, usize, String)> {
+    COMSUB_HEREDOC_WARNINGS.with(|w| std::mem::take(&mut *w.borrow_mut()))
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -629,6 +636,13 @@ impl Lexer {
             }
         }
 
+        // Drain any heredoc warnings from comsub scanning
+        let comsub_warnings = take_comsub_heredoc_warnings();
+        for (eof_line, start_line, delim) in comsub_warnings {
+            self.heredoc_eof_warnings
+                .push((eof_line, start_line, delim));
+        }
+
         token
     }
 
@@ -1155,6 +1169,7 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                             && chars[*i + 1] == '<'
                             && (*i + 2 >= chars.len() || chars[*i + 2] != '<') =>
                         {
+                            let hd_start = *i;
                             cmd.push(chars[*i]); // first <
                             *i += 1;
                             cmd.push(chars[*i]); // second <
@@ -1268,6 +1283,22 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                                     if check.starts_with(&delim)
                                         && check[delim.len()..].trim_start().starts_with(')')
                                     {
+                                        // Warn: heredoc delimited by end-of-file (delimiter
+                                        // on same line as comsub closing ))
+                                        let current_line =
+                                            chars[..*i].iter().filter(|&&c| c == '\n').count() + 1;
+                                        let heredoc_start_line = chars[..hd_start]
+                                            .iter()
+                                            .filter(|&&c| c == '\n')
+                                            .count()
+                                            + 1;
+                                        COMSUB_HEREDOC_WARNINGS.with(|w| {
+                                            w.borrow_mut().push((
+                                                current_line,
+                                                heredoc_start_line,
+                                                delim.clone(),
+                                            ));
+                                        });
                                         // Put delimiter on its own line in the content
                                         cmd.push_str(&delim);
                                         cmd.push('\n');
