@@ -771,11 +771,15 @@ impl Lexer {
                 }
                 if self.pos >= self.input.len() {
                     // EOF terminated here-document — emit warning
-                    self.heredoc_eof_warnings.push((
-                        self.line,
-                        hd.start_line,
-                        hd.delimiter.clone(),
-                    ));
+                    // Use line - 1 since the newline after the last content
+                    // incremented the line counter past the actual content
+                    let eof_line = if self.line > hd.start_line {
+                        self.line - 1
+                    } else {
+                        self.line
+                    };
+                    self.heredoc_eof_warnings
+                        .push((eof_line, hd.start_line, hd.delimiter.clone()));
                     break;
                 }
             }
