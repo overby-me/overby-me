@@ -2457,6 +2457,7 @@ fn create_transient_unit(
         nice: params.nice,
         remove_ipc: false,
         pam_name: None,
+        limit_cpu: None,
         limit_core: None,
         limit_fsize: None,
         limit_data: None,
@@ -3035,6 +3036,10 @@ fn create_transient_unit(
                     if let Ok(n) = value.parse::<i32>() {
                         service_conf.exec_config.nice = Some(n);
                     }
+                }
+                "LimitCPU" => {
+                    service_conf.exec_config.limit_cpu =
+                        crate::units::unit_parsing::parse_resource_limit(value);
                 }
                 "LimitCORE" => {
                     service_conf.exec_config.limit_core =

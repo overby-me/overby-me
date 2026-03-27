@@ -2700,6 +2700,9 @@ pub struct ExecConfig {
     pub pam_name: Option<String>,
 
     // ── Resource limits (LimitXXX=) ──────────────────────────────────
+    /// LimitCPU= — maximum CPU time in seconds. Applied via
+    /// `setrlimit(RLIMIT_CPU)`. See systemd.exec(5).
+    pub limit_cpu: Option<ResourceLimit>,
     /// LimitCORE= — maximum size of core dump files. Applied via
     /// `setrlimit(RLIMIT_CORE)`. See systemd.exec(5).
     pub limit_core: Option<ResourceLimit>,

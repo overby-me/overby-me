@@ -1343,6 +1343,7 @@ pub fn parse_exec_section(
     let pam_name = section.remove("PAMNAME");
 
     // ── Resource limits (LimitXXX=) ──────────────────────────────────
+    let limit_cpu = section.remove("LIMITCPU");
     let limit_core = section.remove("LIMITCORE");
     let limit_fsize = section.remove("LIMITFSIZE");
     let limit_data = section.remove("LIMITDATA");
@@ -2914,6 +2915,7 @@ pub fn parse_exec_section(
         // ── Resource limits (LimitXXX=) ──────────────────────────────
         // Byte-oriented limits accept K/M/G/T/P/E suffixes; non-byte limits
         // accept plain integers only.
+        limit_cpu: parse_resource_limit("LimitCPU", limit_cpu, false)?,
         limit_core: parse_resource_limit("LimitCORE", limit_core, true)?,
         limit_fsize: parse_resource_limit("LimitFSIZE", limit_fsize, true)?,
         limit_data: parse_resource_limit("LimitDATA", limit_data, true)?,

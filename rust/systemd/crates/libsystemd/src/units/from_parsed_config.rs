@@ -669,6 +669,7 @@ impl std::convert::TryFrom<ParsedExecSection> for ExecConfig {
             pam_name: parsed.pam_name,
 
             // Resource limits
+            limit_cpu: parsed.limit_cpu,
             limit_core: parsed.limit_core,
             limit_fsize: parsed.limit_fsize,
             limit_data: parsed.limit_data,

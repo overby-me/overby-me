@@ -507,6 +507,7 @@ fn start_service_with_filedescriptors(
         },
 
         // Resource limits
+        limit_cpu: conf.exec_config.limit_cpu,
         limit_core: conf.exec_config.limit_core,
         limit_fsize: conf.exec_config.limit_fsize,
         limit_data: conf.exec_config.limit_data,

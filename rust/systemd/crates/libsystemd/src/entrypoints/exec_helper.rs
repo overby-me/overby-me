@@ -503,6 +503,8 @@ pub struct ExecHelperConfig {
     // All Limit* directives follow the same format: a numeric value, a
     // soft:hard pair, or "infinity". Applied via setrlimit() before exec.
     #[serde(default)]
+    pub limit_cpu: Option<ResourceLimit>,
+    #[serde(default)]
     pub limit_core: Option<ResourceLimit>,
     #[serde(default)]
     pub limit_fsize: Option<ResourceLimit>,
@@ -1847,6 +1849,7 @@ pub fn run_exec_helper() {
     // Applied last so restrictive limits (e.g. LimitNOFILE=7) don't
     // prevent the exec helper from opening files during setup.
     apply_resource_limit("RLIMIT_NOFILE", libc::RLIMIT_NOFILE, &config.limit_nofile);
+    apply_resource_limit("RLIMIT_CPU", libc::RLIMIT_CPU, &config.limit_cpu);
     apply_resource_limit("RLIMIT_CORE", libc::RLIMIT_CORE, &config.limit_core);
     apply_resource_limit("RLIMIT_FSIZE", libc::RLIMIT_FSIZE, &config.limit_fsize);
     apply_resource_limit("RLIMIT_DATA", libc::RLIMIT_DATA, &config.limit_data);

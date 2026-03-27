@@ -389,6 +389,7 @@
 
           : "Comprehensive Limit tests"
           systemd-run --wait --pipe \
+              -p LimitCPU=10:15 \
               -p LimitFSIZE=96G \
               -p LimitDATA=infinity \
               -p LimitSTACK=8M \
@@ -404,6 +405,7 @@
               -p LimitNICE=4 \
               -p LimitRTPRIO=8 \
               bash -xec 'KB=1; MB=$((KB * 1024)); GB=$((MB * 1024));
+                         : CPU;        [[ $(ulimit -St) -eq 10 ]];           [[ $(ulimit -Ht) -eq 15 ]];
                          : FSIZE;      [[ $(ulimit -Sf) -eq $((96 * GB)) ]]; [[ $(ulimit -Hf) -eq $((96 * GB)) ]];
                          : DATA;       [[ $(ulimit -Sd) == unlimited  ]];    [[ $(ulimit -Hd) == unlimited ]];
                          : STACK;      [[ $(ulimit -Ss) -eq $((8 * MB)) ]];  [[ $(ulimit -Hs) -eq $((8 * MB)) ]];
