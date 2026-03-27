@@ -98,6 +98,7 @@ pub fn expand_word(
     positional: &[String],
     last_status: i32,
     last_bg_pid: i32,
+    top_level_pid: u32,
     opt_flags: &str,
     ifs: &str,
     cmd_sub: CmdSubFn,
@@ -110,6 +111,7 @@ pub fn expand_word(
         positional,
         last_status,
         last_bg_pid,
+        top_level_pid,
         opt_flags,
     };
     // Pre-expansion brace expansion: expand braces at the word level before
@@ -162,6 +164,7 @@ pub fn expand_word_nosplit(
     positional: &[String],
     last_status: i32,
     last_bg_pid: i32,
+    top_level_pid: u32,
     opt_flags: &str,
     cmd_sub: CmdSubFn,
 ) -> String {
@@ -173,6 +176,7 @@ pub fn expand_word_nosplit(
         positional,
         last_status,
         last_bg_pid,
+        top_level_pid,
         opt_flags,
     };
     let segments = expand_word_to_segments(word, &ctx, cmd_sub);
@@ -198,6 +202,7 @@ pub fn expand_word_pattern(
     positional: &[String],
     last_status: i32,
     last_bg_pid: i32,
+    top_level_pid: u32,
     opt_flags: &str,
     cmd_sub: CmdSubFn,
 ) -> String {
@@ -209,6 +214,7 @@ pub fn expand_word_pattern(
         positional,
         last_status,
         last_bg_pid,
+        top_level_pid,
         opt_flags,
     };
     let segments = expand_word_to_segments(word, &ctx, cmd_sub);
@@ -230,6 +236,7 @@ struct ExpCtx<'a> {
     positional: &'a [String],
     last_status: i32,
     last_bg_pid: i32,
+    top_level_pid: u32,
     opt_flags: &'a str,
 }
 
@@ -1067,7 +1074,7 @@ fn get_array_elements(expr: &ParamExpr, ctx: &ExpCtx) -> Vec<String> {
 fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
     match name {
         "?" => ctx.last_status.to_string(),
-        "$" => std::process::id().to_string(),
+        "$" => ctx.top_level_pid.to_string(),
         "RANDOM" => {
             // Simple pseudo-random using time and pid
             let t = std::time::SystemTime::now()
@@ -2065,6 +2072,7 @@ fn resolve_arith_vars(
                     positional,
                     last_status,
                     last_bg_pid: 0,
+                    top_level_pid: std::process::id(),
                     opt_flags: "",
                 };
                 let val = lookup_var(&name, &ctx_dummy);

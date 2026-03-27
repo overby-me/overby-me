@@ -272,6 +272,8 @@ pub struct Shell {
     pub positional: Vec<String>,
     pub last_status: i32,
     pub last_bg_pid: i32,
+    /// PID of the top-level shell (for $$)
+    pub top_level_pid: u32,
     pub returning: bool,
     pub breaking: i32,
     pub continuing: i32,
@@ -427,6 +429,7 @@ impl Shell {
             positional: vec!["bash".to_string()],
             last_status: 0,
             last_bg_pid: 0,
+            top_level_pid: std::process::id(),
             returning: false,
             breaking: 0,
             continuing: 0,
@@ -1739,6 +1742,7 @@ impl Shell {
         let positional = self.positional.clone();
         let last_status = self.last_status;
         let last_bg_pid = self.last_bg_pid;
+        let top_pid = self.top_level_pid;
         let opt_flags = self.get_opt_flags();
         // Set error prefix for expansion error messages
         crate::expand::EXPAND_ERROR_PREFIX.with(|p| {
@@ -1754,6 +1758,7 @@ impl Shell {
             &positional,
             last_status,
             last_bg_pid,
+            top_pid,
             &opt_flags,
             ifs,
             &mut cmd_sub,
@@ -1825,6 +1830,7 @@ impl Shell {
         let positional = self.positional.clone();
         let last_status = self.last_status;
         let last_bg_pid = self.last_bg_pid;
+        let top_pid = self.top_level_pid;
         let opt_flags = self.get_opt_flags();
         crate::expand::EXPAND_ERROR_PREFIX.with(|p| {
             *p.borrow_mut() = self.error_prefix();
@@ -1839,6 +1845,7 @@ impl Shell {
             &positional,
             last_status,
             last_bg_pid,
+            top_pid,
             &opt_flags,
             &mut cmd_sub,
         )
@@ -1855,6 +1862,7 @@ impl Shell {
         let positional = self.positional.clone();
         let last_status = self.last_status;
         let last_bg_pid = self.last_bg_pid;
+        let top_pid = self.top_level_pid;
         let opt_flags = self.get_opt_flags();
         let mut cmd_sub = |cmd: &str| -> String { self.capture_output(cmd) };
         expand::expand_word_pattern(
@@ -1866,6 +1874,7 @@ impl Shell {
             &positional,
             last_status,
             last_bg_pid,
+            top_pid,
             &opt_flags,
             &mut cmd_sub,
         )
