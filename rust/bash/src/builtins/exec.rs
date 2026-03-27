@@ -398,7 +398,14 @@ pub(super) fn builtin_type(shell: &mut Shell, args: &[String]) -> i32 {
                 println!("{} is a shell keyword", name);
             } else if let Some(body) = shell.functions.get(name) {
                 println!("{} is a function", name);
-                println!("{} () \n{}", name, format_compound_command(body));
+                let body_str = format_compound_command(body);
+                let redir_str = if let Some(redirs) = shell.func_redirections.get(name) {
+                    let parts: Vec<String> = redirs.iter().map(format_redirection).collect();
+                    format!(" {}", parts.join(" "))
+                } else {
+                    String::new()
+                };
+                println!("{} () \n{}{}", name, body_str, redir_str);
             } else if builtin_map.contains_key(name) {
                 println!("{} is a shell builtin", name);
             } else if let Some(path) = find_in_path_opt(name) {
@@ -513,7 +520,14 @@ pub(super) fn builtin_command(shell: &mut Shell, args: &[String]) -> i32 {
                 } else if let Some(func_body) = shell.functions.get(name.as_str()) {
                     println!("{} is a function", name);
                     let body = format_compound_command_indent(func_body, 0);
-                    println!("{} () \n{}", name, body);
+                    let redir_str = if let Some(redirs) = shell.func_redirections.get(name.as_str())
+                    {
+                        let parts: Vec<String> = redirs.iter().map(format_redirection).collect();
+                        format!(" {}", parts.join(" "))
+                    } else {
+                        String::new()
+                    };
+                    println!("{} () \n{}{}", name, body, redir_str);
                 } else if builtin_map.contains_key(name.as_str()) {
                     println!("{} is a shell builtin", name);
                 } else if let Some(path) = find_in_path_opt(name) {

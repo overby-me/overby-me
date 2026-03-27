@@ -663,22 +663,29 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
         if flag_export && names.is_empty() {
             return 0;
         }
-        let print_func = |name: &str, body: &CompoundCommand| {
-            println!("{} () \n{}", name, format_compound_command(body));
+        let print_func = |name: &str, body: &CompoundCommand, shell: &Shell| {
+            let body_str = format_compound_command(body);
+            let redir_str = if let Some(redirs) = shell.func_redirections.get(name) {
+                let parts: Vec<String> = redirs.iter().map(format_redirection).collect();
+                format!(" {}", parts.join(" "))
+            } else {
+                String::new()
+            };
+            println!("{} () \n{}{}", name, body_str, redir_str);
         };
         if names.is_empty() {
             let mut fnames: Vec<&String> = shell.functions.keys().collect();
             fnames.sort();
             for name in fnames {
                 if let Some(body) = shell.functions.get(name.as_str()) {
-                    print_func(name, body);
+                    print_func(name, body, shell);
                 }
             }
         } else {
             let mut found = false;
             for name in &names {
                 if let Some(body) = shell.functions.get(name.as_str()) {
-                    print_func(name, body);
+                    print_func(name, body, shell);
                     found = true;
                 }
             }

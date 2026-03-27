@@ -11,6 +11,7 @@ impl Shell {
                 name,
                 body,
                 body_line,
+                redirections,
                 ..
             } => {
                 if self.readonly_funcs.contains(name) {
@@ -19,6 +20,10 @@ impl Shell {
                 } else {
                     self.functions.insert(name.clone(), *body.clone());
                     self.func_body_lines.insert(name.clone(), *body_line);
+                    if !redirections.is_empty() {
+                        self.func_redirections
+                            .insert(name.clone(), redirections.clone());
+                    }
                     0
                 }
             }

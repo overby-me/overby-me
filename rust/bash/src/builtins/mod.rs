@@ -727,7 +727,8 @@ fn format_command_indent(cmd: &Command, indent: usize) -> String {
             redirections,
             ..
         } => {
-            let prefix = if *has_function_keyword {
+            // Bash always prints 'function' for nested definitions
+            let prefix = if *has_function_keyword || indent > 0 {
                 "function "
             } else {
                 ""
