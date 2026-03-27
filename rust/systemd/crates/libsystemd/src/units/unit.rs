@@ -728,6 +728,25 @@ pub struct CommonState {
     pub restart_count: u64,
     /// Timestamps of recent start attempts for StartLimitBurst/StartLimitIntervalSec enforcement.
     pub start_timestamps: Vec<std::time::Instant>,
+    /// Cgroup freezer state: "running" or "frozen".
+    pub freezer_state: FreezerState,
+}
+
+/// Cgroup freezer state for a unit.
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+pub enum FreezerState {
+    #[default]
+    Running,
+    Frozen,
+}
+
+impl FreezerState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            FreezerState::Running => "running",
+            FreezerState::Frozen => "frozen",
+        }
+    }
 }
 
 pub struct ServiceState {

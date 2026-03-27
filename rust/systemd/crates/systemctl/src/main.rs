@@ -1076,6 +1076,15 @@ fn main() {
             arr.push(Value::String(format!("--root={root}")));
         }
         Some(Value::Array(arr))
+    } else if method == "freeze" || method == "thaw" {
+        // freeze/thaw <unit> — freeze or thaw a unit's cgroup
+        if positional.len() < 2 {
+            if !quiet {
+                eprintln!("Error: {method} requires a unit name.");
+            }
+            std::process::exit(1);
+        }
+        Some(Value::String(positional[1].clone()))
     } else if method == "reset-failed" {
         // reset-failed [unit] — optional unit name
         if positional.len() >= 2 {
@@ -1483,6 +1492,8 @@ fn handle_response(
         }
         "reset-failed"
         | "kill"
+        | "freeze"
+        | "thaw"
         | "suspend"
         | "hibernate"
         | "hybrid-sleep"

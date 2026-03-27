@@ -7,12 +7,42 @@
 
 use crate::lock_ext::RwLockExt;
 use crate::units::{
-    Commandline, ExecConfig, KillMode, MountConfig, NotifyKind, ServiceConfig, ServiceRestart,
-    ServiceType, SliceConfig, SocketConfig, Specific, SwapConfig, Timeout, Unit, UnitConfig,
-    UnitStatus,
+    Commandline, ExecConfig, FreezerState, KillMode, MountConfig, NotifyKind, ServiceConfig,
+    ServiceRestart, ServiceType, SliceConfig, SocketConfig, Specific, SwapConfig, Timeout, Unit,
+    UnitConfig, UnitStatus,
 };
 
 use std::collections::BTreeMap;
+
+/// Read the FreezerState from a unit's common state.
+fn get_freezer_state(unit: &Unit) -> FreezerState {
+    match &unit.specific {
+        Specific::Service(s) => s.state.read_poisoned().common.freezer_state,
+        Specific::Socket(s) => s.state.read_poisoned().common.freezer_state,
+        Specific::Target(s) => s.state.read_poisoned().common.freezer_state,
+        Specific::Slice(s) => s.state.read_poisoned().common.freezer_state,
+        Specific::Timer(s) => s.state.read_poisoned().common.freezer_state,
+        Specific::Path(s) => s.state.read_poisoned().common.freezer_state,
+        Specific::Mount(s) => s.state.read_poisoned().common.freezer_state,
+        Specific::Swap(s) => s.state.read_poisoned().common.freezer_state,
+        Specific::Device(s) => s.state.read_poisoned().common.freezer_state,
+    }
+}
+
+/// Set the FreezerState on a unit's common state.
+pub fn set_freezer_state(unit: &Unit, state: FreezerState) {
+    match &unit.specific {
+        Specific::Service(s) => s.state.write_poisoned().common.freezer_state = state,
+        Specific::Socket(s) => s.state.write_poisoned().common.freezer_state = state,
+        Specific::Target(s) => s.state.write_poisoned().common.freezer_state = state,
+        Specific::Slice(s) => s.state.write_poisoned().common.freezer_state = state,
+        Specific::Timer(s) => s.state.write_poisoned().common.freezer_state = state,
+        Specific::Path(s) => s.state.write_poisoned().common.freezer_state = state,
+        Specific::Mount(s) => s.state.write_poisoned().common.freezer_state = state,
+        Specific::Swap(s) => s.state.write_poisoned().common.freezer_state = state,
+        Specific::Device(s) => s.state.write_poisoned().common.freezer_state = state,
+    }
+}
 
 /// Collect all properties of a unit into an ordered map.
 ///
@@ -66,8 +96,8 @@ pub fn collect_properties(unit: &Unit) -> BTreeMap<String, String> {
     insert_timestamps(&mut props, unit);
 
     // ── FreezerState (cgroup freezer) ────────────────────────────────
-    // We don't implement cgroup freezing, so always report "running".
-    insert(&mut props, "FreezerState", "running");
+    let freezer_state = get_freezer_state(unit);
+    insert(&mut props, "FreezerState", freezer_state.as_str());
 
     // ── Can* capability booleans ─────────────────────────────────────
     let can_start = if unit.common.unit.refuse_manual_start {

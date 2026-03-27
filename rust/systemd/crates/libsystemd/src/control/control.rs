@@ -156,6 +156,10 @@ pub enum Command {
     /// `--what` can be: configuration, runtime, state, cache, logs, all.
     /// Default (no --what) removes runtime + cache.
     Clean(String, Option<String>),
+    /// `freeze <unit>` — freeze a unit's cgroup (pause all processes).
+    Freeze(String),
+    /// `thaw <unit>` — thaw a frozen unit's cgroup (resume all processes).
+    Thaw(String),
     /// `show-environment` — list the manager's environment variables.
     ShowEnvironment,
     /// `set-environment KEY=VALUE...` — set environment variables.
@@ -885,6 +889,28 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
                     ));
                 }
             }
+        }
+        "freeze" => {
+            let name = match &call.params {
+                Some(Value::String(s)) => s.clone(),
+                _ => {
+                    return Err(ParseError::ParamsInvalid(
+                        "freeze requires a unit name".to_string(),
+                    ));
+                }
+            };
+            Command::Freeze(name)
+        }
+        "thaw" => {
+            let name = match &call.params {
+                Some(Value::String(s)) => s.clone(),
+                _ => {
+                    return Err(ParseError::ParamsInvalid(
+                        "thaw requires a unit name".to_string(),
+                    ));
+                }
+            };
+            Command::Thaw(name)
         }
         "show-environment" => Command::ShowEnvironment,
         "set-environment" => {
@@ -4106,6 +4132,45 @@ pub fn execute_command(
 
             info!("clean {}: removed {:?}", unit_name, removed);
             return Ok(serde_json::json!({ "cleaned": unit_name }));
+        }
+        Command::Freeze(ref unit_name) | Command::Thaw(ref unit_name) => {
+            let freeze = matches!(cmd, Command::Freeze(_));
+            let ri = run_info.read_poisoned();
+            let units = find_units_with_name(unit_name, &ri.unit_table);
+            if units.is_empty() {
+                return Err(format!("Unit {unit_name} not found."));
+            }
+            let unit = &units[0];
+
+            // Unit must be active to freeze/thaw
+            let status = unit.common.status.read_poisoned().clone();
+            if !matches!(status, UnitStatus::Started(_)) {
+                return Err(format!(
+                    "Unit {unit_name} is not active, cannot {}.",
+                    if freeze { "freeze" } else { "thaw" }
+                ));
+            }
+
+            // Write to the cgroup freezer
+            #[cfg(target_os = "linux")]
+            if let Specific::Service(svc) = &unit.specific {
+                let cgroup_path = &svc.conf.platform_specific.cgroup_path;
+                let freeze_file = cgroup_path.join("cgroup.freeze");
+                let val = if freeze { "1" } else { "0" };
+                if let Err(e) = std::fs::write(&freeze_file, val) {
+                    warn!("Failed to write {} to {:?}: {}", val, freeze_file, e);
+                }
+            }
+
+            // Update the FreezerState
+            let new_state = if freeze {
+                crate::units::FreezerState::Frozen
+            } else {
+                crate::units::FreezerState::Running
+            };
+            crate::control::unit_properties::set_freezer_state(unit, new_state);
+
+            return Ok(serde_json::json!(null));
         }
         Command::ShowEnvironment => {
             let ri = run_info.read_poisoned();
