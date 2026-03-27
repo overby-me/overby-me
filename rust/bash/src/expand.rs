@@ -19,6 +19,10 @@ pub fn set_script_name(name: &str) {
     SCRIPT_NAME.with(|f| *f.borrow_mut() = name.to_string());
 }
 
+pub fn get_script_name() -> String {
+    SCRIPT_NAME.with(|f| f.borrow().clone())
+}
+
 pub fn warn_incomplete_comsub_in_pattern_impl(word: &Word, lineno: &str) {
     let parts: Vec<&WordPart> = word.iter().collect();
     for (idx, part) in parts.iter().enumerate() {

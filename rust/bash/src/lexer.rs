@@ -637,9 +637,8 @@ impl Lexer {
         }
 
         // Drain any heredoc warnings from comsub scanning
-        // Transfer comsub heredoc warnings to the lexer's warning list
-        let comsub_warnings = take_comsub_heredoc_warnings();
-        self.heredoc_eof_warnings.extend(comsub_warnings);
+        // Drain comsub heredoc warnings (already printed directly)
+        let _ = take_comsub_heredoc_warnings();
 
         token
     }
@@ -1308,13 +1307,18 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                                             .filter(|&&c| c == '\n')
                                             .count()
                                             + 1;
-                                        COMSUB_HEREDOC_WARNINGS.with(|w| {
-                                            w.borrow_mut().push((
-                                                current_line,
-                                                heredoc_start_line,
-                                                delim.clone(),
-                                            ));
-                                        });
+                                        // Print directly to stderr (not via COMSUB_HEREDOC_WARNINGS
+                                        // to avoid duplication)
+                                        let script = crate::expand::get_script_name();
+                                        let name = if script.is_empty() {
+                                            "bash".to_string()
+                                        } else {
+                                            script
+                                        };
+                                        eprintln!(
+                                            "{}: line {}: warning: here-document at line {} delimited by end-of-file (wanted `{}')",
+                                            name, current_line, heredoc_start_line, delim
+                                        );
                                         // Put delimiter on its own line in the content
                                         cmd.push_str(&delim);
                                         cmd.push('\n');
