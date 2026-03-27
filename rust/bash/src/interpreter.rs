@@ -2513,6 +2513,18 @@ impl Shell {
         }
 
         if expanded_words.is_empty() {
+            // No command words — apply redirections for null commands (e.g., `> file`)
+            if !cmd.redirections.is_empty() {
+                match self.setup_redirections(&cmd.redirections) {
+                    Ok(saved_fds) => {
+                        self.restore_redirections(saved_fds);
+                    }
+                    Err(e) => {
+                        eprintln!("{}: {}", self.error_prefix(), e);
+                        return 1;
+                    }
+                }
+            }
             // For assignment-only commands, return the status of the last
             // command substitution (if any), not 0.
             // If no command substitution ran, last_status is unchanged from
