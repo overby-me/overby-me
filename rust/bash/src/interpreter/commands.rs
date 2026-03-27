@@ -37,15 +37,8 @@ impl Shell {
                     eprintln!("{}: `{}': is a special builtin", self.error_prefix(), name);
                     return 2;
                 }
-                // Validate function name
-                if self.opt_posix && !name.chars().all(|c| c.is_alphanumeric() || c == '_') {
-                    eprintln!(
-                        "{}: `{}': not a valid identifier",
-                        self.error_prefix(),
-                        name
-                    );
-                    return 1;
-                }
+                // In POSIX mode, invalid identifiers are warnings, not fatal
+                // (bash 5.3 allows defining them)
                 if self.readonly_funcs.contains(name) {
                     eprintln!("{}: {}: readonly function", self.error_prefix(), name);
                     1
