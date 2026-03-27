@@ -544,6 +544,10 @@
               bash -xec 'CAPAMB=$(grep CapAmb /proc/self/status | awk "{print \$2}");
                          [[ "$CAPAMB" != "0000000000000000" ]]'
 
+          : "CPUSchedulingPolicy= tests"
+          systemd-run --wait --pipe -p CPUSchedulingPolicy=fifo -p CPUSchedulingPriority=10 \
+              bash -xec 'grep -E "^policy\s*:\s*1$" /proc/self/sched; grep -E "^prio\s*:\s*89$" /proc/self/sched'
+
           : "Error handling for clean-up codepaths"
           (! systemd-run --wait --pipe false)
           TESTEOF

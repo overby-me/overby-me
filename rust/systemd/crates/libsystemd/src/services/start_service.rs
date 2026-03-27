@@ -449,6 +449,9 @@ fn start_service_with_filedescriptors(
         no_new_privileges: conf.exec_config.no_new_privileges,
         umask: conf.exec_config.umask,
         nice: conf.exec_config.nice,
+        cpu_scheduling_policy: conf.exec_config.cpu_scheduling_policy.clone(),
+        cpu_scheduling_priority: conf.exec_config.cpu_scheduling_priority,
+        cpu_scheduling_reset_on_fork: conf.exec_config.cpu_scheduling_reset_on_fork,
         io_scheduling_class: match conf.exec_config.io_scheduling_class {
             crate::units::IOSchedulingClass::None => 0,
             crate::units::IOSchedulingClass::Realtime => 1,

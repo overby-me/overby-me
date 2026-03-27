@@ -3195,6 +3195,18 @@ fn create_transient_unit(
                     service_conf.exec_config.restrict_suid_sgid =
                         matches!(value, "yes" | "true" | "1");
                 }
+                "CPUSchedulingPolicy" => {
+                    service_conf.exec_config.cpu_scheduling_policy = Some(value.to_string());
+                }
+                "CPUSchedulingPriority" => {
+                    if let Ok(n) = value.parse::<u32>() {
+                        service_conf.exec_config.cpu_scheduling_priority = Some(n);
+                    }
+                }
+                "CPUSchedulingResetOnFork" => {
+                    service_conf.exec_config.cpu_scheduling_reset_on_fork =
+                        Some(matches!(value, "yes" | "true" | "1"));
+                }
                 "CapabilityBoundingSet" => {
                     service_conf
                         .exec_config

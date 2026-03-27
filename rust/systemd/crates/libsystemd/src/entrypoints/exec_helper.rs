@@ -351,6 +351,23 @@ pub struct ExecHelperConfig {
     #[serde(default)]
     pub nice: Option<i32>,
 
+    /// CPUSchedulingPolicy= — CPU scheduling policy. Applied via
+    /// sched_setscheduler(). Values: "other", "batch", "idle", "fifo", "rr".
+    /// See systemd.exec(5).
+    #[serde(default)]
+    pub cpu_scheduling_policy: Option<String>,
+
+    /// CPUSchedulingPriority= — CPU scheduling priority (1-99 for
+    /// real-time policies). Applied via sched_setscheduler().
+    /// See systemd.exec(5).
+    #[serde(default)]
+    pub cpu_scheduling_priority: Option<u32>,
+
+    /// CPUSchedulingResetOnFork= — if true, the scheduling policy is
+    /// reset to SCHED_OTHER on fork(). See systemd.exec(5).
+    #[serde(default)]
+    pub cpu_scheduling_reset_on_fork: Option<bool>,
+
     /// IOSchedulingClass= — I/O scheduling class. Applied via ioprio_set().
     /// 0=none, 1=realtime, 2=best-effort, 3=idle. See systemd.exec(5).
     #[serde(default)]
@@ -1171,6 +1188,57 @@ pub fn run_exec_helper() {
                 );
                 // Non-fatal: log and continue, matching systemd's lenient behavior
             }
+        }
+    }
+
+    // ── Apply CPUSchedulingPolicy= / CPUSchedulingPriority= ───────────
+    if let Some(ref policy_str) = config.cpu_scheduling_policy {
+        let mut policy = match policy_str.as_str() {
+            "other" => libc::SCHED_OTHER,
+            "batch" => libc::SCHED_BATCH,
+            "idle" => libc::SCHED_IDLE,
+            "fifo" => libc::SCHED_FIFO,
+            "rr" => libc::SCHED_RR,
+            _ => {
+                log::warn!("Unknown CPUSchedulingPolicy={}, ignoring", policy_str);
+                -1
+            }
+        };
+        if policy >= 0 {
+            if config.cpu_scheduling_reset_on_fork.unwrap_or(false) {
+                policy |= libc::SCHED_RESET_ON_FORK;
+            }
+            // For FIFO/RR the priority must be 1-99; for OTHER/BATCH/IDLE it must be 0.
+            let prio = if matches!(policy_str.as_str(), "fifo" | "rr") {
+                config.cpu_scheduling_priority.unwrap_or(1) as libc::c_int
+            } else {
+                0
+            };
+            let param = libc::sched_param {
+                sched_priority: prio,
+            };
+            let ret = unsafe { libc::sched_setscheduler(0, policy, &param) };
+            if ret != 0 {
+                log::warn!(
+                    "Failed to set CPUSchedulingPolicy={} priority={}: {}",
+                    policy_str,
+                    prio,
+                    std::io::Error::last_os_error()
+                );
+            }
+        }
+    } else if let Some(prio) = config.cpu_scheduling_priority {
+        // Priority without explicit policy — set for current policy
+        let param = libc::sched_param {
+            sched_priority: prio as libc::c_int,
+        };
+        let ret = unsafe { libc::sched_setscheduler(0, libc::SCHED_RR, &param) };
+        if ret != 0 {
+            log::warn!(
+                "Failed to set CPUSchedulingPriority={}: {}",
+                prio,
+                std::io::Error::last_os_error()
+            );
         }
     }
 
