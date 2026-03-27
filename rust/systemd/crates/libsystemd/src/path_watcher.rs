@@ -866,18 +866,13 @@ fn fire_path_target(
             let status = unit.common.status.read_poisoned().clone();
             match status {
                 UnitStatus::Started(_) => {
-                    debug!(
-                        "Path target {} is already running, attempting restart",
+                    // Real systemd stops monitoring once the target is active
+                    // and only re-checks when the target deactivates.  Skip
+                    // the trigger to avoid unnecessary stop→start cycles.
+                    trace!(
+                        "Path target {} is already running, skipping trigger",
                         target_unit_name
                     );
-                    match unit.reactivate(&ri, ActivationSource::Regular) {
-                        Ok(()) => {
-                            info!("Path triggered: restarted {}", target_unit_name);
-                        }
-                        Err(e) => {
-                            warn!("Path failed to restart {}: {}", target_unit_name, e);
-                        }
-                    }
                 }
                 _ => {
                     let id = unit.id.clone();
