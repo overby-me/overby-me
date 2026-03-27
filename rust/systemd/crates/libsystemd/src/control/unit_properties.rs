@@ -65,6 +65,46 @@ pub fn collect_properties(unit: &Unit) -> BTreeMap<String, String> {
     // ── Lifecycle timestamps ─────────────────────────────────────────
     insert_timestamps(&mut props, unit);
 
+    // ── FreezerState (cgroup freezer) ────────────────────────────────
+    // We don't implement cgroup freezing, so always report "running".
+    insert(&mut props, "FreezerState", "running");
+
+    // ── Can* capability booleans ─────────────────────────────────────
+    let can_start = if unit.common.unit.refuse_manual_start {
+        "no"
+    } else {
+        "yes"
+    };
+    let can_stop = if unit.common.unit.refuse_manual_stop {
+        "no"
+    } else {
+        "yes"
+    };
+    insert(&mut props, "CanStart", can_start);
+    insert(&mut props, "CanStop", can_stop);
+    let can_reload = match &unit.specific {
+        Specific::Service(svc) => {
+            if svc.conf.reload.is_empty() {
+                "no"
+            } else {
+                "yes"
+            }
+        }
+        _ => "no",
+    };
+    insert(&mut props, "CanReload", can_reload);
+    insert(
+        &mut props,
+        "CanIsolate",
+        if unit.common.unit.allow_isolate {
+            "yes"
+        } else {
+            "no"
+        },
+    );
+    insert(&mut props, "CanFreeze", "yes");
+    insert(&mut props, "CanClean", "no"); // TODO: implement systemctl clean
+
     // ── Type-specific properties ──────────────────────────────────────
     match &unit.specific {
         Specific::Service(svc) => {
