@@ -637,11 +637,9 @@ impl Lexer {
         }
 
         // Drain any heredoc warnings from comsub scanning
+        // Transfer comsub heredoc warnings to the lexer's warning list
         let comsub_warnings = take_comsub_heredoc_warnings();
-        for (eof_line, start_line, delim) in comsub_warnings {
-            self.heredoc_eof_warnings
-                .push((eof_line, start_line, delim));
-        }
+        self.heredoc_eof_warnings.extend(comsub_warnings);
 
         token
     }
@@ -1320,9 +1318,9 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                                         // Put delimiter on its own line in the content
                                         cmd.push_str(&delim);
                                         cmd.push('\n');
-                                        // Position at the ) character
-                                        let offset = line.find(')').unwrap_or(line.len());
-                                        *i = line_start + offset;
+                                        // Position at the ) that closes the comsub
+                                        // (after the delimiter match)
+                                        *i = line_start + delim.len();
                                         break;
                                     }
                                     cmd.push_str(&line);
