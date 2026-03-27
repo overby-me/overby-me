@@ -36,6 +36,11 @@ pub struct Common {
     /// InactiveExitTimestamp, ActiveEnterTimestamp, ActiveExitTimestamp,
     /// InactiveEnterTimestamp and StateChangeTimestamp.
     pub timestamps: RwLock<UnitTimestamps>,
+    /// Atomic restart counter readable without the per-service state lock.
+    /// The exit handler increments this before spawning a restart thread,
+    /// so `systemctl show -P NRestarts` can read it even while the service
+    /// state write-lock is held during `reactivate` → `wait_for_service`.
+    pub n_restarts: std::sync::atomic::AtomicU64,
 }
 
 /// Lifecycle timestamps for a unit, tracking when it transitions between
@@ -337,8 +342,17 @@ impl ServiceState {
             }
             Err(e) => {
                 let mut status = status.write_poisoned();
-                *status =
-                    UnitStatus::Stopped(StatusStopped::StoppedUnexpected, vec![e.reason.clone()]);
+                // Only set StoppedUnexpected if the exit handler hasn't
+                // already transitioned the unit to Restarting.  For oneshot
+                // services, the exit handler thread runs concurrently and may
+                // have already decided to restart the unit by the time
+                // wait_for_service returns the BadExitCode error here.
+                if !matches!(&*status, UnitStatus::Restarting) {
+                    *status = UnitStatus::Stopped(
+                        StatusStopped::StoppedUnexpected,
+                        vec![e.reason.clone()],
+                    );
+                }
                 Err(e)
             }
         }

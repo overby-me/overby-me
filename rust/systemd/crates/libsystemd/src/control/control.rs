@@ -2676,6 +2676,7 @@ fn create_transient_unit(
             },
             status: RwLock::new(UnitStatus::NeverStarted),
             timestamps: RwLock::new(UnitTimestamps::default()),
+            n_restarts: std::sync::atomic::AtomicU64::new(0),
         },
         specific: Specific::Service(ServiceSpecific {
             conf: service_conf,
@@ -2856,6 +2857,7 @@ fn create_transient_unit(
                 },
                 status: RwLock::new(UnitStatus::Started(crate::units::StatusStarted::Running)),
                 timestamps: RwLock::new(UnitTimestamps::default()),
+                n_restarts: std::sync::atomic::AtomicU64::new(0),
             },
             specific: Specific::Timer(crate::units::TimerSpecific {
                 conf: timer_config,
@@ -6270,6 +6272,7 @@ mod tests {
                 },
                 status: RwLock::new(UnitStatus::NeverStarted),
                 timestamps: RwLock::new(UnitTimestamps::default()),
+                n_restarts: std::sync::atomic::AtomicU64::new(0),
             },
             specific: Specific::Target(TargetSpecific {
                 state: RwLock::new(TargetState {

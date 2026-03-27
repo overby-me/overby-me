@@ -15,17 +15,56 @@ use crate::units::{
 use std::collections::BTreeMap;
 
 /// Read the FreezerState from a unit's common state.
+/// Uses `try_read` to avoid blocking when the state write-lock is held
+/// (e.g. during `reactivate`), preventing an ABBA deadlock with the
+/// unit-status lock in `collect_properties`.
 fn get_freezer_state(unit: &Unit) -> FreezerState {
     match &unit.specific {
-        Specific::Service(s) => s.state.read_poisoned().common.freezer_state,
-        Specific::Socket(s) => s.state.read_poisoned().common.freezer_state,
-        Specific::Target(s) => s.state.read_poisoned().common.freezer_state,
-        Specific::Slice(s) => s.state.read_poisoned().common.freezer_state,
-        Specific::Timer(s) => s.state.read_poisoned().common.freezer_state,
-        Specific::Path(s) => s.state.read_poisoned().common.freezer_state,
-        Specific::Mount(s) => s.state.read_poisoned().common.freezer_state,
-        Specific::Swap(s) => s.state.read_poisoned().common.freezer_state,
-        Specific::Device(s) => s.state.read_poisoned().common.freezer_state,
+        Specific::Service(s) => s
+            .state
+            .try_read()
+            .map(|g| g.common.freezer_state)
+            .unwrap_or_default(),
+        Specific::Socket(s) => s
+            .state
+            .try_read()
+            .map(|g| g.common.freezer_state)
+            .unwrap_or_default(),
+        Specific::Target(s) => s
+            .state
+            .try_read()
+            .map(|g| g.common.freezer_state)
+            .unwrap_or_default(),
+        Specific::Slice(s) => s
+            .state
+            .try_read()
+            .map(|g| g.common.freezer_state)
+            .unwrap_or_default(),
+        Specific::Timer(s) => s
+            .state
+            .try_read()
+            .map(|g| g.common.freezer_state)
+            .unwrap_or_default(),
+        Specific::Path(s) => s
+            .state
+            .try_read()
+            .map(|g| g.common.freezer_state)
+            .unwrap_or_default(),
+        Specific::Mount(s) => s
+            .state
+            .try_read()
+            .map(|g| g.common.freezer_state)
+            .unwrap_or_default(),
+        Specific::Swap(s) => s
+            .state
+            .try_read()
+            .map(|g| g.common.freezer_state)
+            .unwrap_or_default(),
+        Specific::Device(s) => s
+            .state
+            .try_read()
+            .map(|g| g.common.freezer_state)
+            .unwrap_or_default(),
     }
 }
 
@@ -89,8 +128,14 @@ pub fn collect_properties(unit: &Unit) -> BTreeMap<String, String> {
     insert_dep_list(&mut props, "BoundBy", &unit.common.dependencies.bound_by);
 
     // ── Status ────────────────────────────────────────────────────────
-    let status = unit.common.status.read_poisoned();
-    insert_status(&mut props, &status);
+    // Drop the unit-status READ lock before reading type-specific state
+    // to avoid an ABBA deadlock with `reactivate` which acquires the
+    // service-state WRITE lock first, then the unit-status WRITE lock
+    // (via `state_transition_restarting`).
+    {
+        let status = unit.common.status.read_poisoned();
+        insert_status(&mut props, &status);
+    }
 
     // ── Lifecycle timestamps ─────────────────────────────────────────
     insert_timestamps(&mut props, unit);
@@ -191,7 +236,11 @@ pub fn collect_properties(unit: &Unit) -> BTreeMap<String, String> {
                 insert(
                     &mut props,
                     "NRestarts",
-                    &state.common.restart_count.to_string(),
+                    &unit
+                        .common
+                        .n_restarts
+                        .load(std::sync::atomic::Ordering::Relaxed)
+                        .to_string(),
                 );
                 // ExecMain timestamps
                 let fmt_ts = |v: Option<u64>| match v {
@@ -256,7 +305,15 @@ pub fn collect_properties(unit: &Unit) -> BTreeMap<String, String> {
                 insert(&mut props, "MainPID", "0");
                 insert(&mut props, "ExecMainPID", "0");
                 insert(&mut props, "ExecMainStatus", "0");
-                insert(&mut props, "NRestarts", "0");
+                insert(
+                    &mut props,
+                    "NRestarts",
+                    &unit
+                        .common
+                        .n_restarts
+                        .load(std::sync::atomic::Ordering::Relaxed)
+                        .to_string(),
+                );
             }
 
             insert(

@@ -589,6 +589,66 @@ fn main() {
         return;
     }
 
+    // Handle `whoami` client-side: map PIDs to their owning unit via /proc/{pid}/cgroup.
+    if positional[0] == "whoami" {
+        let pids: Vec<u32> = if positional.len() > 1 {
+            positional[1..]
+                .iter()
+                .map(|s| {
+                    s.parse::<u32>().unwrap_or_else(|_| {
+                        eprintln!("Invalid PID: {s}");
+                        std::process::exit(1);
+                    })
+                })
+                .collect()
+        } else {
+            // Default to own PID
+            vec![std::process::id()]
+        };
+
+        for pid in &pids {
+            let cgroup_file = format!("/proc/{pid}/cgroup");
+            let unit_name = match std::fs::read_to_string(&cgroup_file) {
+                Ok(contents) => {
+                    // cgroupv2 format: "0::/path/to/unit"
+                    // cgroupv1 format: "N:name:/path/to/unit"
+                    // We want the last component of the path that looks like a unit name.
+                    let mut name = None;
+                    for line in contents.lines() {
+                        let parts: Vec<&str> = line.splitn(3, ':').collect();
+                        if parts.len() == 3 {
+                            let path = parts[2];
+                            // Extract the last path component as the unit name
+                            if let Some(last) = path.rsplit('/').next()
+                                && !last.is_empty()
+                            {
+                                name = Some(last.to_string());
+                                break;
+                            }
+                        }
+                    }
+                    name.unwrap_or_else(|| {
+                        if *pid == 1 {
+                            "init.scope".to_string()
+                        } else {
+                            format!("unknown (PID {pid})")
+                        }
+                    })
+                }
+                Err(_) => {
+                    if *pid == 1 {
+                        "init.scope".to_string()
+                    } else {
+                        eprintln!("Failed to read cgroup for PID {pid}");
+                        std::process::exit(1);
+                    }
+                }
+            };
+            println!("{unit_name}");
+        }
+        return;
+    }
+
     // Handle `edit` client-side: query PID 1 for unit info, open editor, then daemon-reload.
     if positional[0] == "edit" {
         if positional.len() < 2 {
@@ -1804,6 +1864,7 @@ Examples:
 
 fn send_unix(path: &str, payload: &str) -> Result<Value, Box<dyn std::error::Error>> {
     let mut stream = std::os::unix::net::UnixStream::connect(path)?;
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(60)))?;
     stream.write_all(payload.as_bytes())?;
     stream.shutdown(std::net::Shutdown::Write)?;
     let resp: Value = serde_json::from_reader(&mut stream)?;

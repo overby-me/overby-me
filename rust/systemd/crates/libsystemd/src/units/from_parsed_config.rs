@@ -854,6 +854,7 @@ fn make_common_from_parsed(
             bound_by: Vec::new(),
         },
         timestamps: RwLock::new(UnitTimestamps::default()),
+        n_restarts: std::sync::atomic::AtomicU64::new(0),
     })
 }
 

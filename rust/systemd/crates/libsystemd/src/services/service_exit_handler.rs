@@ -457,10 +457,17 @@ pub(crate) fn service_exit_handler(
                     *status = crate::units::UnitStatus::Restarting;
                 }
 
-                // Increment NRestarts counter
+                // Increment NRestarts counter (both the state-locked field
+                // and the lock-free atomic on Common so that `systemctl show`
+                // can read it without acquiring the service state lock).
                 {
                     let mut state = srvc.state.write_poisoned();
                     state.common.restart_count += 1;
+                }
+                if let Some(unit) = run_info.unit_table.get(&srvc_id) {
+                    unit.common
+                        .n_restarts
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
 
                 // Sleep for RestartSec, checking for shortcut restart
@@ -522,7 +529,23 @@ pub(crate) fn service_exit_handler(
                 }
 
                 info!("Restarting oneshot service {name}");
-                crate::units::reactivate_unit(srvc_id, run_info).map_err(|e| format!("{e}"))?;
+                // Spawn the restart on a separate thread so that this exit
+                // handler can return and release the RuntimeInfo read lock.
+                // Oneshot reactivation blocks in wait_for_service until the
+                // new process exits, which can take a long time.  Holding
+                // the read lock during that window triggers a priority
+                // inversion with glibc's writer-preferring rwlock: any
+                // pending write lock (e.g. from find_or_load_unit loading a
+                // unit from disk) will block all new readers, deadlocking
+                // control-socket commands like `systemctl show`.
+                let arc_ri = arc_run_info.clone();
+                let restart_id = srvc_id.clone();
+                std::thread::spawn(move || {
+                    let ri = arc_ri.read_poisoned();
+                    if let Err(e) = crate::units::reactivate_unit(restart_id, &ri) {
+                        error!("Failed to restart oneshot service: {e}");
+                    }
+                });
                 return Ok(None);
             }
 
@@ -766,12 +789,15 @@ pub(crate) fn service_exit_handler(
             *status = crate::units::UnitStatus::Restarting;
         }
 
-        // Increment NRestarts counter.
-        if let Some(unit) = run_info.unit_table.get(&srvc_id)
-            && let Specific::Service(svc) = &unit.specific
-        {
-            let mut state = svc.state.write_poisoned();
-            state.common.restart_count += 1;
+        // Increment NRestarts counter (both state-locked and lock-free atomic).
+        if let Some(unit) = run_info.unit_table.get(&srvc_id) {
+            if let Specific::Service(svc) = &unit.specific {
+                let mut state = svc.state.write_poisoned();
+                state.common.restart_count += 1;
+            }
+            unit.common
+                .n_restarts
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
 
         if let Some(ref timeout) = restart_sec {
