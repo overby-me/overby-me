@@ -156,6 +156,7 @@ pub fn builtins() -> HashMap<&'static str, BuiltinFn> {
     map.insert("source", builtin_source);
     map.insert(".", builtin_source);
     map.insert("type", builtin_type);
+    map.insert("help", builtin_help);
     map.insert("builtin", builtin_builtin);
     map.insert("command", builtin_command);
     map.insert("which", builtin_which);
@@ -5034,6 +5035,12 @@ fn builtin_source(shell: &mut Shell, args: &[String]) -> i32 {
             1
         }
     }
+}
+
+fn builtin_help(_shell: &mut Shell, _args: &[String]) -> i32 {
+    // Minimal help builtin — just enough to not fail as "command not found"
+    println!("GNU bash, version 5.3");
+    0
 }
 
 fn builtin_type(shell: &mut Shell, args: &[String]) -> i32 {
