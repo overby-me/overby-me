@@ -195,8 +195,19 @@ pub struct TransientUnitParams {
     pub slice: Option<String>,
     /// Timer properties — if any are set, a companion .timer unit is created.
     pub on_calendar: Option<String>,
-    pub on_active: Option<String>,
+    pub on_active: Vec<String>,
     pub on_boot: Option<String>,
+    pub on_startup: Option<String>,
+    pub on_unit_active: Option<String>,
+    pub on_unit_inactive: Option<String>,
+    pub on_clock_change: bool,
+    pub on_timezone_change: bool,
+    /// Additional timer properties (e.g. After=...).
+    pub timer_properties: Vec<String>,
+    /// Path properties (e.g. PathExists=/tmp).
+    pub path_properties: Vec<String>,
+    /// Socket properties (e.g. ListenFIFO=/tmp/foo).
+    pub socket_properties: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -603,14 +614,65 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
                         .get("on_calendar")
                         .and_then(|v| v.as_str())
                         .map(|s| s.to_owned());
-                    let on_active = obj
-                        .get("on_active")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_owned());
+                    let on_active: Vec<String> = match obj.get("on_active") {
+                        Some(Value::Array(arr)) => arr
+                            .iter()
+                            .filter_map(|v| v.as_str().map(|s| s.to_owned()))
+                            .collect(),
+                        Some(Value::String(s)) => vec![s.clone()],
+                        _ => vec![],
+                    };
                     let on_boot = obj
                         .get("on_boot")
                         .and_then(|v| v.as_str())
                         .map(|s| s.to_owned());
+                    let on_startup = obj
+                        .get("on_startup")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_owned());
+                    let on_unit_active = obj
+                        .get("on_unit_active")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_owned());
+                    let on_unit_inactive = obj
+                        .get("on_unit_inactive")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_owned());
+                    let on_clock_change = obj
+                        .get("on_clock_change")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    let on_timezone_change = obj
+                        .get("on_timezone_change")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    let timer_properties: Vec<String> = obj
+                        .get("timer_properties")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|v| v.as_str().map(|s| s.to_owned()))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let path_properties: Vec<String> = obj
+                        .get("path_properties")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|v| v.as_str().map(|s| s.to_owned()))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let socket_properties: Vec<String> = obj
+                        .get("socket_properties")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|v| v.as_str().map(|s| s.to_owned()))
+                                .collect()
+                        })
+                        .unwrap_or_default();
 
                     Command::StartTransient(TransientUnitParams {
                         unit_name,
@@ -630,6 +692,14 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
                         on_calendar,
                         on_active,
                         on_boot,
+                        on_startup,
+                        on_unit_active,
+                        on_unit_inactive,
+                        on_clock_change,
+                        on_timezone_change,
+                        timer_properties,
+                        path_properties,
+                        socket_properties,
                     })
                 }
                 Some(_) | None => {
@@ -2134,6 +2204,119 @@ fn write_transient_service_file(
     Ok(())
 }
 
+/// Write a transient timer unit file to disk.
+fn write_transient_timer_file(
+    path: &std::path::Path,
+    params: &TransientUnitParams,
+    service_unit_name: &str,
+) -> Result<(), std::io::Error> {
+    use std::io::Write;
+    let mut f = std::fs::File::create(path)?;
+
+    // [Unit] section
+    let mut has_unit = false;
+    if let Some(ref desc) = params.description {
+        writeln!(f, "[Unit]")?;
+        has_unit = true;
+        writeln!(f, "Description={desc}")?;
+    }
+
+    // Timer properties from --timer-property that belong in [Unit]
+    for prop in &params.timer_properties {
+        if let Some((key, _)) = prop.split_once('=')
+            && (key == "After" || key == "Before" || key == "Wants" || key == "Requires")
+        {
+            if !has_unit {
+                writeln!(f, "[Unit]")?;
+                has_unit = true;
+            }
+            writeln!(f, "{prop}")?;
+        }
+    }
+    let _ = has_unit; // suppress unused warning
+
+    // [Timer] section
+    writeln!(f)?;
+    writeln!(f, "[Timer]")?;
+
+    for on_active in &params.on_active {
+        if let Some(d) = parse_timespan(on_active) {
+            writeln!(f, "OnActiveSec={}", format_duration(&d))?;
+        }
+    }
+    if let Some(ref on_boot) = params.on_boot
+        && let Some(d) = parse_timespan(on_boot)
+    {
+        writeln!(f, "OnBootSec={}", format_duration(&d))?;
+    }
+    if let Some(ref on_startup) = params.on_startup
+        && let Some(d) = parse_timespan(on_startup)
+    {
+        writeln!(f, "OnStartupSec={}", format_duration(&d))?;
+    }
+    if let Some(ref on_unit_active) = params.on_unit_active
+        && let Some(d) = parse_timespan(on_unit_active)
+    {
+        writeln!(f, "OnUnitActiveSec={}", format_duration(&d))?;
+    }
+    if let Some(ref on_unit_inactive) = params.on_unit_inactive
+        && let Some(d) = parse_timespan(on_unit_inactive)
+    {
+        writeln!(f, "OnUnitInactiveSec={}", format_duration(&d))?;
+    }
+    if let Some(ref on_calendar) = params.on_calendar {
+        writeln!(f, "OnCalendar={on_calendar}")?;
+    }
+    if params.on_clock_change {
+        writeln!(f, "OnClockChange=yes")?;
+    }
+    if params.on_timezone_change {
+        writeln!(f, "OnTimezoneChange=yes")?;
+    }
+
+    // Additional timer properties (non-unit-section ones)
+    for prop in &params.timer_properties {
+        if let Some((key, _)) = prop.split_once('=')
+            && key != "After"
+            && key != "Before"
+            && key != "Wants"
+            && key != "Requires"
+        {
+            writeln!(f, "{prop}")?;
+        }
+    }
+
+    writeln!(f, "Unit={service_unit_name}")?;
+
+    Ok(())
+}
+
+/// Write a transient auxiliary unit file (path or socket) to disk.
+fn write_transient_auxiliary_file(
+    path: &std::path::Path,
+    section: &str,
+    section_properties: &[String],
+    params: &TransientUnitParams,
+) -> Result<(), std::io::Error> {
+    use std::io::Write;
+    let mut f = std::fs::File::create(path)?;
+
+    // [Unit] section
+    if let Some(ref desc) = params.description {
+        writeln!(f, "[Unit]")?;
+        writeln!(f, "Description={desc}")?;
+        writeln!(f)?;
+    }
+
+    // Main section ([Path] or [Socket])
+    writeln!(f, "[{section}]")?;
+    for prop in section_properties {
+        writeln!(f, "{prop}")?;
+    }
+
+    Ok(())
+}
+
 fn create_transient_unit(
     params: &TransientUnitParams,
     run_info: &ArcMutRuntimeInfo,
@@ -2980,8 +3163,17 @@ fn create_transient_unit(
     crate::units::insert_new_unit_lenient(unit, &mut ri);
 
     // If timer properties are set, create a companion .timer unit
-    let has_timer =
-        params.on_calendar.is_some() || params.on_active.is_some() || params.on_boot.is_some();
+    let has_timer = params.on_calendar.is_some()
+        || !params.on_active.is_empty()
+        || params.on_boot.is_some()
+        || params.on_startup.is_some()
+        || params.on_unit_active.is_some()
+        || params.on_unit_inactive.is_some()
+        || params.on_clock_change
+        || params.on_timezone_change
+        || !params.timer_properties.is_empty();
+    let has_path = !params.path_properties.is_empty();
+    let has_socket = !params.socket_properties.is_empty();
     if has_timer {
         let timer_name = if unit_name.ends_with(".service") {
             format!("{}.timer", unit_name.strip_suffix(".service").unwrap())
@@ -2997,12 +3189,11 @@ fn create_transient_unit(
 
         let on_calendar = params.on_calendar.iter().cloned().collect::<Vec<String>>();
 
-        let on_active_sec = params
+        let on_active_sec: Vec<_> = params
             .on_active
-            .as_ref()
-            .and_then(|s| parse_timespan(s))
-            .into_iter()
-            .collect::<Vec<_>>();
+            .iter()
+            .filter_map(|s| parse_timespan(s))
+            .collect();
 
         let on_boot_sec = params
             .on_boot
@@ -3011,12 +3202,33 @@ fn create_transient_unit(
             .into_iter()
             .collect::<Vec<_>>();
 
+        let on_startup_sec = params
+            .on_startup
+            .as_ref()
+            .and_then(|s| parse_timespan(s))
+            .into_iter()
+            .collect::<Vec<_>>();
+
+        let on_unit_active_sec = params
+            .on_unit_active
+            .as_ref()
+            .and_then(|s| parse_timespan(s))
+            .into_iter()
+            .collect::<Vec<_>>();
+
+        let on_unit_inactive_sec = params
+            .on_unit_inactive
+            .as_ref()
+            .and_then(|s| parse_timespan(s))
+            .into_iter()
+            .collect::<Vec<_>>();
+
         let timer_config = crate::units::TimerConfig {
             on_active_sec,
             on_boot_sec,
-            on_startup_sec: vec![],
-            on_unit_active_sec: vec![],
-            on_unit_inactive_sec: vec![],
+            on_startup_sec,
+            on_unit_active_sec,
+            on_unit_inactive_sec,
             on_calendar,
             accuracy_sec: std::time::Duration::from_secs(60),
             randomized_delay_sec: std::time::Duration::ZERO,
@@ -3024,9 +3236,9 @@ fn create_transient_unit(
             persistent: false,
             wake_system: false,
             remain_after_elapse: true,
-            on_clock_change: false,
-            on_timezone_change: false,
-            unit: service_unit_name,
+            on_clock_change: params.on_clock_change,
+            on_timezone_change: params.on_timezone_change,
+            unit: service_unit_name.clone(),
         };
 
         let timer_id = UnitId {
@@ -3043,7 +3255,12 @@ fn create_transient_unit(
                         .clone()
                         .unwrap_or_else(|| format!("Timer for {unit_name}")),
                     documentation: vec![],
-                    fragment_path: None,
+                    fragment_path: {
+                        let timer_path = transient_dir.join(&timer_name);
+                        write_transient_timer_file(&timer_path, params, &service_unit_name)
+                            .ok()
+                            .map(|()| timer_path)
+                    },
                     refs_by_name: vec![],
                     default_dependencies: false,
                     conditions: vec![],
@@ -3110,6 +3327,33 @@ fn create_transient_unit(
             ri.unit_table.remove(&id);
         }
         crate::units::insert_new_unit_lenient(timer_unit, &mut ri);
+    }
+
+    // If path properties are set, write a companion .path transient file
+    if has_path {
+        let path_name = if unit_name.ends_with(".service") {
+            format!("{}.path", unit_name.strip_suffix(".service").unwrap())
+        } else {
+            format!("{unit_name}.path")
+        };
+        let path_file = transient_dir.join(&path_name);
+        let _ = write_transient_auxiliary_file(&path_file, "Path", &params.path_properties, params);
+    }
+
+    // If socket properties are set, write a companion .socket transient file
+    if has_socket {
+        let socket_name = if unit_name.ends_with(".service") {
+            format!("{}.socket", unit_name.strip_suffix(".service").unwrap())
+        } else {
+            format!("{unit_name}.socket")
+        };
+        let socket_file = transient_dir.join(&socket_name);
+        let _ = write_transient_auxiliary_file(
+            &socket_file,
+            "Socket",
+            &params.socket_properties,
+            params,
+        );
     }
 
     Ok(unit_id)

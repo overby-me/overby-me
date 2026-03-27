@@ -56,9 +56,9 @@ struct Cli {
     #[arg(short = 'u', long, value_name = "NAME")]
     unit: Option<String>,
 
-    /// Set a human-readable description for the unit.
+    /// Set a human-readable description for the unit. Can be specified multiple times; the last value wins.
     #[arg(long, value_name = "TEXT")]
-    description: Option<String>,
+    description: Vec<String>,
 
     /// Place the transient unit in the specified slice.
     #[arg(long, value_name = "SLICE")]
@@ -136,13 +136,25 @@ struct Cli {
     no_block: bool,
 
     /// Define a relative timer: run the command after the specified delay.
-    /// Accepts a time span like "5min" or "2h 30min".
+    /// Accepts a time span like "5min" or "2h 30min". Can be specified multiple times.
     #[arg(long, value_name = "TIMESPAN")]
-    on_active: Option<String>,
+    on_active: Vec<String>,
 
     /// Define a timer relative to system boot.
     #[arg(long, value_name = "TIMESPAN")]
     on_boot: Option<String>,
+
+    /// Define a timer relative to when the service manager was first started.
+    #[arg(long, value_name = "TIMESPAN")]
+    on_startup: Option<String>,
+
+    /// Define a timer relative to when the unit was last activated.
+    #[arg(long, value_name = "TIMESPAN")]
+    on_unit_active: Option<String>,
+
+    /// Define a timer relative to when the unit was last deactivated.
+    #[arg(long, value_name = "TIMESPAN")]
+    on_unit_inactive: Option<String>,
 
     /// Define a calendar-based timer (e.g. "Mon *-*-* 03:00:00").
     #[arg(long, value_name = "SPEC")]
@@ -150,16 +162,24 @@ struct Cli {
 
     /// Run the command when the system clock (CLOCK_REALTIME) jumps
     /// relative to the monotonic clock.
-    #[arg(long)]
-    on_clock_change: bool,
+    #[arg(long, action = clap::ArgAction::Count)]
+    on_clock_change: u8,
 
     /// Run the command when the system timezone changes.
-    #[arg(long)]
-    on_timezone_change: bool,
+    #[arg(long, action = clap::ArgAction::Count)]
+    on_timezone_change: u8,
 
     /// Set a property on the timer unit. Can be specified multiple times.
     #[arg(long, value_name = "NAME=VALUE")]
     timer_property: Vec<String>,
+
+    /// Set a property on the path unit. Can be specified multiple times.
+    #[arg(long, value_name = "NAME=VALUE")]
+    path_property: Vec<String>,
+
+    /// Set a property on the socket unit. Can be specified multiple times.
+    #[arg(long, value_name = "NAME=VALUE")]
+    socket_property: Vec<String>,
 
     /// Connect to the user service manager instead of the system one.
     #[arg(long)]
@@ -297,7 +317,7 @@ fn print_unit_info(cli: &Cli, unit_name: &str) {
     }
     eprintln!("Running as unit: {unit_name}");
 
-    if let Some(ref desc) = cli.description {
+    if let Some(desc) = cli.description.last() {
         eprintln!("Description: {desc}");
     }
 
@@ -341,7 +361,7 @@ fn print_unit_info(cli: &Cli, unit_name: &str) {
         eprintln!("Wait: yes");
     }
 
-    if let Some(ref on_active) = cli.on_active {
+    for on_active in &cli.on_active {
         eprintln!("OnActiveSec: {on_active}");
     }
 
@@ -444,7 +464,7 @@ fn try_create_transient_unit(
     let mut properties = serde_json::Map::new();
     properties.insert("unit".into(), Value::String(unit_name.to_string()));
 
-    if let Some(ref desc) = cli.description {
+    if let Some(desc) = cli.description.last() {
         properties.insert("description".into(), Value::String(desc.clone()));
     }
 
@@ -520,16 +540,36 @@ fn try_create_transient_unit(
     if let Some(ref on_calendar) = cli.on_calendar {
         properties.insert("on_calendar".into(), Value::String(on_calendar.clone()));
     }
-    if let Some(ref on_active) = cli.on_active {
-        properties.insert("on_active".into(), Value::String(on_active.clone()));
+    if !cli.on_active.is_empty() {
+        let vals: Vec<Value> = cli
+            .on_active
+            .iter()
+            .map(|s| Value::String(s.clone()))
+            .collect();
+        properties.insert("on_active".into(), Value::Array(vals));
     }
     if let Some(ref on_boot) = cli.on_boot {
         properties.insert("on_boot".into(), Value::String(on_boot.clone()));
     }
-    if cli.on_clock_change {
+    if let Some(ref on_startup) = cli.on_startup {
+        properties.insert("on_startup".into(), Value::String(on_startup.clone()));
+    }
+    if let Some(ref on_unit_active) = cli.on_unit_active {
+        properties.insert(
+            "on_unit_active".into(),
+            Value::String(on_unit_active.clone()),
+        );
+    }
+    if let Some(ref on_unit_inactive) = cli.on_unit_inactive {
+        properties.insert(
+            "on_unit_inactive".into(),
+            Value::String(on_unit_inactive.clone()),
+        );
+    }
+    if cli.on_clock_change > 0 {
         properties.insert("on_clock_change".into(), Value::Bool(true));
     }
-    if cli.on_timezone_change {
+    if cli.on_timezone_change > 0 {
         properties.insert("on_timezone_change".into(), Value::Bool(true));
     }
     if !cli.timer_property.is_empty() {
@@ -539,6 +579,22 @@ fn try_create_transient_unit(
             .map(|s| Value::String(s.clone()))
             .collect();
         properties.insert("timer_properties".into(), Value::Array(tprops));
+    }
+    if !cli.path_property.is_empty() {
+        let pprops: Vec<Value> = cli
+            .path_property
+            .iter()
+            .map(|s| Value::String(s.clone()))
+            .collect();
+        properties.insert("path_properties".into(), Value::Array(pprops));
+    }
+    if !cli.socket_property.is_empty() {
+        let sprops: Vec<Value> = cli
+            .socket_property
+            .iter()
+            .map(|s| Value::String(s.clone()))
+            .collect();
+        properties.insert("socket_properties".into(), Value::Array(sprops));
     }
 
     let params = Value::Object(properties);
@@ -590,12 +646,18 @@ fn main() {
         cli.command.clone()
     };
 
-    // If a timer is requested but no command, that's an error
-    let has_timer = cli.on_active.is_some()
+    // If a timer/path/socket is requested but no command, that's an error
+    let has_timer = !cli.on_active.is_empty()
         || cli.on_boot.is_some()
+        || cli.on_startup.is_some()
+        || cli.on_unit_active.is_some()
+        || cli.on_unit_inactive.is_some()
         || cli.on_calendar.is_some()
-        || cli.on_clock_change
-        || cli.on_timezone_change;
+        || cli.on_clock_change > 0
+        || cli.on_timezone_change > 0
+        || !cli.timer_property.is_empty()
+        || !cli.path_property.is_empty()
+        || !cli.socket_property.is_empty();
 
     if command.is_empty() && !has_timer {
         eprintln!("Error: No command specified. Use --shell to start a shell.");

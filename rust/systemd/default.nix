@@ -778,6 +778,88 @@
           grep -q "^Type=oneshot" "/run/systemd/transient/$UNIT.service"
           systemctl stop "$UNIT"
 
+          : "Transient timer unit"
+          UNIT="timer-0-$RANDOM"
+          systemd-run --remain-after-exit \
+                      --unit="$UNIT" \
+                      --timer-property=OnUnitInactiveSec=16h \
+                      true
+          systemctl cat "$UNIT.service"
+          systemctl cat "$UNIT.timer"
+          grep -q "^OnUnitInactiveSec=16h$" "/run/systemd/transient/$UNIT.timer"
+          grep -qE "^ExecStart=.*true.*$" "/run/systemd/transient/$UNIT.service"
+          systemctl stop "$UNIT.timer" || :
+          systemctl stop "$UNIT.service" || :
+
+          UNIT="timer-1-$RANDOM"
+          systemd-run --remain-after-exit \
+                      --unit="$UNIT" \
+                      --on-active=10 \
+                      --on-active=30s \
+                      --on-boot=1s \
+                      --on-startup=2m \
+                      --on-unit-active=3h20m \
+                      --on-unit-inactive="5d 4m 32s" \
+                      --on-calendar="mon,fri *-1/2-1,3 *:30:45" \
+                      --on-clock-change \
+                      --on-clock-change \
+                      --on-timezone-change \
+                      --timer-property=After=systemd-journald.service \
+                      --description="Hello world" \
+                      --description="My Fancy Timer" \
+                      true
+          systemctl cat "$UNIT.service"
+          systemctl cat "$UNIT.timer"
+          grep -q "^Description=My Fancy Timer$" "/run/systemd/transient/$UNIT.timer"
+          grep -q "^OnActiveSec=10s$" "/run/systemd/transient/$UNIT.timer"
+          grep -q "^OnActiveSec=30s$" "/run/systemd/transient/$UNIT.timer"
+          grep -q "^OnBootSec=1s$" "/run/systemd/transient/$UNIT.timer"
+          grep -q "^OnStartupSec=2min$" "/run/systemd/transient/$UNIT.timer"
+          grep -q "^OnUnitActiveSec=3h 20min$" "/run/systemd/transient/$UNIT.timer"
+          grep -q "^OnUnitInactiveSec=5d 4min 32s$" "/run/systemd/transient/$UNIT.timer"
+          grep -q "^OnCalendar=mon,fri \*\-1/2\-1,3 \*:30:45$" "/run/systemd/transient/$UNIT.timer"
+          grep -q "^OnClockChange=yes$" "/run/systemd/transient/$UNIT.timer"
+          grep -q "^OnTimezoneChange=yes$" "/run/systemd/transient/$UNIT.timer"
+          grep -q "^After=systemd-journald.service$" "/run/systemd/transient/$UNIT.timer"
+          grep -q "^Description=My Fancy Timer$" "/run/systemd/transient/$UNIT.service"
+          grep -q "^RemainAfterExit=yes$" "/run/systemd/transient/$UNIT.service"
+          grep -qE "^ExecStart=.*true.*$" "/run/systemd/transient/$UNIT.service"
+          (! grep -q "^After=systemd-journald.service$" "/run/systemd/transient/$UNIT.service")
+          systemctl stop "$UNIT.timer" || :
+          systemctl stop "$UNIT.service" || :
+
+          : "Transient path unit"
+          UNIT="path-0-$RANDOM"
+          systemd-run --remain-after-exit \
+                      --unit="$UNIT" \
+                      --path-property=PathExists=/tmp \
+                      --path-property=PathExists=/tmp/foo \
+                      --path-property=PathChanged=/root/bar \
+                      true
+          systemctl cat "$UNIT.service"
+          test -f "/run/systemd/transient/$UNIT.path"
+          grep -q "^PathExists=/tmp$" "/run/systemd/transient/$UNIT.path"
+          grep -q "^PathExists=/tmp/foo$" "/run/systemd/transient/$UNIT.path"
+          grep -q "^PathChanged=/root/bar$" "/run/systemd/transient/$UNIT.path"
+          grep -qE "^ExecStart=.*true.*$" "/run/systemd/transient/$UNIT.service"
+          systemctl stop "$UNIT.service" || :
+
+          : "Transient socket unit"
+          UNIT="socket-0-$RANDOM"
+          systemd-run --remain-after-exit \
+                      --unit="$UNIT" \
+                      --socket-property=ListenFIFO=/tmp/socket.fifo \
+                      --socket-property=SocketMode=0666 \
+                      --socket-property=SocketMode=0644 \
+                      true
+          systemctl cat "$UNIT.service"
+          test -f "/run/systemd/transient/$UNIT.socket"
+          grep -q "^ListenFIFO=/tmp/socket.fifo$" "/run/systemd/transient/$UNIT.socket"
+          grep -q "^SocketMode=0666$" "/run/systemd/transient/$UNIT.socket"
+          grep -q "^SocketMode=0644$" "/run/systemd/transient/$UNIT.socket"
+          grep -qE "^ExecStart=.*true.*$" "/run/systemd/transient/$UNIT.service"
+          systemctl stop "$UNIT.service" || :
+
           : "Error handling"
           (! systemd-run)
           (! systemd-run "")
