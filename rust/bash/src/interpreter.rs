@@ -1455,14 +1455,11 @@ impl Shell {
                                 nix::unistd::close(fd).ok();
                             }
                         }
-                        if let Some(fd) = read_fd {
-                            // Close the read end of the pipe meant for the next
-                            // command. Close even if fd==0 — when stdin was closed
-                            // before pipe(), pipe() may reuse fd 0 for the read end
-                            // which would make `read` block on this pipe.
-                            if Some(fd) != prev_read_fd && Some(fd) != write_fd {
-                                nix::unistd::close(fd).ok();
-                            }
+                        if let Some(fd) = read_fd
+                            && fd != 0
+                            && fd != 1
+                        {
+                            nix::unistd::close(fd).ok();
                         }
 
                         let status = self.run_command(cmd);
