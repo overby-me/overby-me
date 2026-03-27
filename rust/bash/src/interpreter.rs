@@ -1354,8 +1354,43 @@ impl Shell {
                 let is_last = i == pipeline.commands.len() - 1;
 
                 let (read_fd, write_fd): (Option<RawFd>, Option<RawFd>) = if !is_last {
+                    // If fd 0 or 1 is closed, pipe() may reuse them.
+                    // Open /dev/null on closed fds to prevent pipe() from
+                    // reusing them (which would cause pipeline children to
+                    // block reading from a pipe meant for the next command).
+                    let guard_fd0 = if nix::fcntl::fcntl(0, nix::fcntl::FcntlArg::F_GETFD).is_err()
+                    {
+                        nix::fcntl::open(
+                            "/dev/null",
+                            nix::fcntl::OFlag::O_RDONLY,
+                            nix::sys::stat::Mode::empty(),
+                        )
+                        .ok()
+                    } else {
+                        None
+                    };
+                    let guard_fd1 = if nix::fcntl::fcntl(1, nix::fcntl::FcntlArg::F_GETFD).is_err()
+                    {
+                        nix::fcntl::open(
+                            "/dev/null",
+                            nix::fcntl::OFlag::O_WRONLY,
+                            nix::sys::stat::Mode::empty(),
+                        )
+                        .ok()
+                    } else {
+                        None
+                    };
                     let (r, w) = nix::unistd::pipe().expect("pipe failed");
-                    (Some(r.into_raw_fd()), Some(w.into_raw_fd()))
+                    let rfd = r.into_raw_fd();
+                    let wfd = w.into_raw_fd();
+                    // Close the guard fds (restore closed state)
+                    if let Some(fd) = guard_fd0 {
+                        nix::unistd::close(fd).ok();
+                    }
+                    if let Some(fd) = guard_fd1 {
+                        nix::unistd::close(fd).ok();
+                    }
+                    (Some(rfd), Some(wfd))
                 } else {
                     (None, None)
                 };
