@@ -1969,6 +1969,36 @@ fn apply_dropins_to_transient(unit: &mut Unit, unit_dirs: &[std::path::PathBuf])
     }
 }
 
+/// Read the DefaultLimitNOFILE setting from system.conf.d drop-ins.
+/// Returns `None` if no default is configured.
+fn read_default_limit_nofile() -> Option<crate::units::ResourceLimit> {
+    for dir in &[
+        "/run/systemd/system.conf.d",
+        "/etc/systemd/system.conf.d",
+        "/usr/lib/systemd/system.conf.d",
+    ] {
+        let dir = std::path::Path::new(dir);
+        if !dir.is_dir() {
+            continue;
+        }
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            let mut files: Vec<_> = entries.flatten().collect();
+            files.sort_by_key(|e| e.file_name());
+            for entry in files {
+                if let Ok(content) = std::fs::read_to_string(entry.path()) {
+                    for line in content.lines() {
+                        let line = line.trim();
+                        if let Some(val) = line.strip_prefix("DefaultLimitNOFILE=") {
+                            return crate::units::unit_parsing::parse_resource_limit(val);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 ///
 /// Transient units are not backed by a unit file on disk — they exist only in
 /// memory for the lifetime of the service manager (or until explicitly removed).
@@ -2622,11 +2652,20 @@ fn create_transient_unit(
                         service_conf.final_kill_signal = Some(sig);
                     }
                 }
+                "LimitNOFILE" => {
+                    service_conf.limit_nofile =
+                        crate::units::unit_parsing::parse_resource_limit(value);
+                }
                 _ => {
                     log::debug!("Ignoring unknown transient unit property: {key}={value}");
                 }
             }
         }
+    }
+
+    // Inherit DefaultLimitNOFILE from manager defaults if not explicitly set.
+    if service_conf.limit_nofile.is_none() {
+        service_conf.limit_nofile = read_default_limit_nofile();
     }
 
     // Append the main command (from the trailing command line) after any
@@ -4741,7 +4780,21 @@ pub fn execute_command(
                 props.insert("SubState".to_string(), "dead".to_string());
                 props.insert("UnitFileState".to_string(), String::new());
                 props.insert("FragmentPath".to_string(), String::new());
-                props.insert("Description".to_string(), full_name);
+                props.insert("Description".to_string(), full_name.clone());
+
+                // For service units, inherit DefaultLimitNOFILE from manager
+                if full_name.ends_with(".service")
+                    && let Some(rl) = read_default_limit_nofile()
+                {
+                    use crate::units::RLimitValue;
+                    let fmt = |v: &RLimitValue| match v {
+                        RLimitValue::Infinity => "infinity".to_string(),
+                        RLimitValue::Value(n) => n.to_string(),
+                    };
+                    props.insert("LimitNOFILE".to_string(), fmt(&rl.hard));
+                    props.insert("LimitNOFILESoft".to_string(), fmt(&rl.soft));
+                }
+
                 let text = unit_properties::format_properties(&props, filter.as_deref());
                 return Ok(serde_json::json!({ "show": text }));
             }

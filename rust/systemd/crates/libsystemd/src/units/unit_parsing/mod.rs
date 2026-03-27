@@ -3716,6 +3716,40 @@ pub struct ResourceLimit {
     pub hard: RLimitValue,
 }
 
+/// Parse a resource limit value string like "10000", "10000:16384", or "infinity".
+/// Returns `None` if the value is empty or cannot be parsed.
+pub fn parse_resource_limit(val: &str) -> Option<ResourceLimit> {
+    let val = val.trim();
+    if val.is_empty() {
+        return None;
+    }
+    if val.eq_ignore_ascii_case("infinity") {
+        return Some(ResourceLimit {
+            soft: RLimitValue::Infinity,
+            hard: RLimitValue::Infinity,
+        });
+    }
+    if let Some((soft_str, hard_str)) = val.split_once(':') {
+        let soft = if soft_str.trim().eq_ignore_ascii_case("infinity") {
+            RLimitValue::Infinity
+        } else {
+            RLimitValue::Value(soft_str.trim().parse::<u64>().ok()?)
+        };
+        let hard = if hard_str.trim().eq_ignore_ascii_case("infinity") {
+            RLimitValue::Infinity
+        } else {
+            RLimitValue::Value(hard_str.trim().parse::<u64>().ok()?)
+        };
+        Some(ResourceLimit { soft, hard })
+    } else {
+        let num = val.parse::<u64>().ok()?;
+        Some(ResourceLimit {
+            soft: RLimitValue::Value(num),
+            hard: RLimitValue::Value(num),
+        })
+    }
+}
+
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub enum ServiceRestart {
     /// Never restart the service automatically.

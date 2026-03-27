@@ -335,15 +335,7 @@
                TEST-04-JOURNAL.SYSTEMD_JOURNAL_COMPRESS.sh
         '';
       }
-      {
-        name = "05-RLIMITS";
-        # Skip rlimit.sh which needs DefaultLimitNOFILE inheritance and actual
-        # rlimit enforcement. Keep effective-limit.sh which tests set-property
-        # and Effective* properties via slice hierarchy traversal.
-        patchScript = ''
-          rm -f TEST-05-RLIMITS.rlimit.sh
-        '';
-      }
+      {name = "05-RLIMITS";}
       {
         name = "07-PID1";
         # Patch main script to remove mountpoint check and exit, keep run_subtests.
