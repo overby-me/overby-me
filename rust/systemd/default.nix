@@ -217,19 +217,44 @@
       {name = "01-BASIC";}
       {
         name = "03-JOBS";
-        # Keep: daemon-reexec, --wait, shortcut restart.
-        # Remove: job merging/list-jobs (needs async job tracking), JOB_NOP,
-        # --show-transaction, InvocationID, unstoppable (ExecStop),
-        # systemd-run, varlinkctl, PropagatesStopTo, RestartMode=direct.
+        # Use upstream test with sections removed that need unimplemented
+        # features: InvocationID, --job-mode=replace-irreversibly,
+        # systemd-run --scope, varlinkctl, PropagatesStopTo, RestartMode=direct.
         patchScript = ''
           cat > TEST-03-JOBS.sh << 'TESTEOF'
           #!/usr/bin/env bash
           set -eux
           set -o pipefail
+
           . "$(dirname "$0")"/util.sh
 
-          # daemon-reexec
           systemctl daemon-reexec
+
+          # Job merging / list-jobs
+          systemctl start --no-block hello-after-sleep.target
+
+          timeout 10 bash -c "until systemctl list-jobs | tee /root/list-jobs.txt | grep 'sleep\.service.*running'; do sleep .1; done"
+          grep 'hello\.service.*waiting' /root/list-jobs.txt
+
+          timeout 10 systemctl start --job-mode=ignore-dependencies hello
+
+          systemctl list-jobs >/root/list-jobs.txt
+          grep 'sleep\.service.*running' /root/list-jobs.txt
+          (! grep 'hello\.service' /root/list-jobs.txt)
+          systemctl stop sleep.service hello-after-sleep.target
+
+          # systemd-importd start/stop via -T
+          (! systemctl is-active systemd-importd)
+          systemctl -T start systemd-importd
+          systemctl is-active systemd-importd
+          systemctl --show-transaction stop systemd-importd
+          (! systemctl is-active systemd-importd)
+
+          # try-restart
+          systemctl start --no-block hello-after-sleep.target
+          systemctl try-restart --job-mode=fail hello.service
+          systemctl try-restart hello.service
+          systemctl stop hello.service sleep.service hello-after-sleep.target
 
           # Test waiting for started units to terminate again
           cat <<EOF >/run/systemd/system/wait2.service
@@ -260,6 +285,7 @@
           # Test shortcutting auto restart
           export UNIT_NAME="TEST-03-JOBS-shortcut-restart.service"
           TMP_FILE="/tmp/test-03-shortcut-restart-test$RANDOM"
+
           cat >"/run/systemd/system/$UNIT_NAME" <<EOF
           [Service]
           Type=oneshot

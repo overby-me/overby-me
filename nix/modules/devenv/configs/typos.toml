@@ -39,6 +39,7 @@ extend-ignore-re = [
   "Tre",
   "tre",
   "Importd",
+  "importd",
   "Localed",
   "Iinclude",
   "localed",
