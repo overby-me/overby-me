@@ -887,6 +887,13 @@
           SRVC_IPC="$(systemd-run --wait --pipe -p PrivateIPC=yes readlink /proc/self/ns/ipc)"
           [[ "$HOST_IPC" != "$SRVC_IPC" ]]
 
+          : "NetworkNamespacePath= joins existing network namespace"
+          ip netns add test-ns-path || true
+          EXPECTED_NS="$(readlink /proc/1/ns/net)"
+          SRVC_NS="$(systemd-run --wait --pipe -p NetworkNamespacePath=/run/netns/test-ns-path readlink /proc/self/ns/net)"
+          [[ "$EXPECTED_NS" != "$SRVC_NS" ]]
+          ip netns del test-ns-path || true
+
           : "Error handling for clean-up codepaths"
           (! systemd-run --wait --pipe false)
           TESTEOF
