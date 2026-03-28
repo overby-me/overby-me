@@ -536,10 +536,20 @@ impl Shell {
                         && let crate::ast::Command::FunctionDef {
                             name: fname,
                             body: fbody,
+                            has_function_keyword,
+                            redirections,
                             ..
                         } = &program[0].list.first.commands[0]
                     {
                         shell.functions.insert(fname.clone(), *fbody.clone());
+                        if *has_function_keyword {
+                            shell.func_has_keyword.insert(fname.clone());
+                        }
+                        if !redirections.is_empty() {
+                            shell
+                                .func_redirections
+                                .insert(fname.clone(), redirections.clone());
+                        }
                     }
                 }
             }
