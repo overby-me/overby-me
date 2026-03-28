@@ -839,10 +839,6 @@ pub fn format_func_body(body: &CompoundCommand, indent: usize) -> String {
     }
 }
 
-pub fn format_compound_command(cmd: &CompoundCommand) -> String {
-    format_compound_command_indent(cmd, 0)
-}
-
 fn format_compound_command_indent(cmd: &CompoundCommand, indent: usize) -> String {
     let iprefix = "    ".repeat(indent);
     match cmd {

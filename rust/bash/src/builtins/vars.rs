@@ -43,8 +43,14 @@ pub(super) fn builtin_export(shell: &mut Shell, args: &[String]) -> i32 {
                 continue;
             }
             if let Some(body) = shell.functions.get(name.as_str()) {
-                let body_str = format_compound_command(body);
-                let env_val = format!("() {}", body_str);
+                let body_str = format_func_body(body, 0);
+                let redir_str = if let Some(redirs) = shell.func_redirections.get(name.as_str()) {
+                    let parts: Vec<String> = redirs.iter().map(format_redirection).collect();
+                    format!(" {}", parts.join(" "))
+                } else {
+                    String::new()
+                };
+                let env_val = format!("() {}{}", body_str, redir_str);
                 let env_key = format!("BASH_FUNC_{}%%", name);
                 unsafe { std::env::set_var(&env_key, &env_val) };
             } else {
