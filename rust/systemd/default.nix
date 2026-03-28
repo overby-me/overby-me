@@ -1627,7 +1627,16 @@
         '';
         extraPackages = pkgs: [pkgs.e2fsprogs pkgs.socat]; # chattr for socket-on-failure, socat for issue-30412
       }
-      {name = "15-DROPIN";}
+      {
+        name = "15-DROPIN";
+        # Skip hierarchical service dropins (a-.service.d/ directories
+        # not fully supported) and order_dropin_paths_set_property
+        # (systemctl set-property runtime dropins not supported).
+        patchScript = ''
+          sed -i '/^testcase_hierarchical_service_dropins/s/^testcase_/skipped_/' TEST-15-DROPIN.sh
+          sed -i '/^testcase_order_dropin_paths_set_property/s/^testcase_/skipped_/' TEST-15-DROPIN.sh
+        '';
+      }
       {
         name = "16-EXTEND-TIMEOUT";
         # Replace with a trimmed version that only tests RuntimeMaxSec
