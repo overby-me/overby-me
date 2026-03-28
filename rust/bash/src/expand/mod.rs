@@ -1758,10 +1758,30 @@ fn glob_expand(field: &str) -> Vec<String> {
             }
         }
         // Check if pattern has extglob chars that the glob crate can't handle
-        let has_extglob = pattern.contains("+(")
-            || pattern.contains("@(")
-            || pattern.contains("?(")
-            || pattern.contains("!(");
+        let has_extglob = {
+            // Check for balanced extglob patterns: X(...) where X is +@?!*
+            let pb = pattern.as_bytes();
+            let mut found = false;
+            for i in 0..pb.len().saturating_sub(1) {
+                if pb[i + 1] == b'('
+                    && matches!(pb[i], b'+' | b'@' | b'?' | b'!' | b'*')
+                {
+                    // Check for matching closing )
+                    let mut depth = 1;
+                    let mut j = i + 2;
+                    while j < pb.len() && depth > 0 {
+                        if pb[j] == b'(' { depth += 1; }
+                        if pb[j] == b')' { depth -= 1; }
+                        j += 1;
+                    }
+                    if depth == 0 {
+                        found = true;
+                        break;
+                    }
+                }
+            }
+            found
+        };
         if has_extglob {
             // Use our case_pattern_match for extglob support
             // For simple (non-path) patterns, match against current directory entries
