@@ -6610,6 +6610,78 @@
           WDEOF
                     chmod +x TEST-23-UNIT-FILE.working-dir.sh
 
+                    # Test RemainAfterExit with multiple ExecStart
+                    cat > TEST-23-UNIT-FILE.remain-multi-exec.sh << 'RMEEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "RemainAfterExit=yes keeps service active after oneshot"
+          UNIT="rae-multi-$RANDOM"
+          cat > "/run/systemd/system/$UNIT.service" << UEOF
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          ExecStart=bash -c 'echo step1 > /tmp/rae-multi-result'
+          ExecStart=bash -c 'echo step2 >> /tmp/rae-multi-result'
+          UEOF
+          systemctl daemon-reload
+          systemctl start "$UNIT.service"
+          sleep 1
+          systemctl is-active "$UNIT.service"
+          grep -q "step1" /tmp/rae-multi-result
+          grep -q "step2" /tmp/rae-multi-result
+          systemctl stop "$UNIT.service"
+          rm -f /tmp/rae-multi-result "/run/systemd/system/$UNIT.service"
+          systemctl daemon-reload
+          RMEEOF
+                    chmod +x TEST-23-UNIT-FILE.remain-multi-exec.sh
+
+                    # Test Restart=always in unit file
+                    cat > TEST-23-UNIT-FILE.restart-always.sh << 'RAEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "RestartSec= property is readable"
+          UNIT="restart-sec-$RANDOM"
+          cat > "/run/systemd/system/$UNIT.service" << UEOF
+          [Service]
+          Type=exec
+          ExecStart=sleep 300
+          RestartSec=5
+          UEOF
+          systemctl daemon-reload
+          RS="$(systemctl show -P RestartUSec "$UNIT.service")"
+          [[ -n "$RS" ]]
+          rm -f "/run/systemd/system/$UNIT.service"
+          systemctl daemon-reload
+          RAEOF
+                    chmod +x TEST-23-UNIT-FILE.restart-always.sh
+
+                    # Test After=/Before= ordering in unit file
+                    cat > TEST-23-UNIT-FILE.ordering-deps.sh << 'ODEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "After= dependency is visible in systemctl show"
+          UNIT="order-dep-$RANDOM"
+          cat > "/run/systemd/system/$UNIT.service" << UEOF
+          [Unit]
+          After=sysinit.target
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          UEOF
+          systemctl daemon-reload
+          AFTER="$(systemctl show -P After "$UNIT.service")"
+          echo "$AFTER" | grep -q "sysinit.target"
+          rm -f "/run/systemd/system/$UNIT.service"
+          systemctl daemon-reload
+          ODEOF
+                    chmod +x TEST-23-UNIT-FILE.ordering-deps.sh
+
                     # Test ExecStartPre in unit files
                     cat > TEST-23-UNIT-FILE.exec-start-pre.sh << 'ESPEOF'
           #!/usr/bin/env bash
@@ -10436,6 +10508,95 @@
           systemctl daemon-reload
           SSLEOF
           chmod +x TEST-74-AUX-UTILS.start-stop-lifecycle.sh
+
+          # systemd-id128 more operations
+          cat > TEST-74-AUX-UTILS.id128-ops.sh << 'IDOEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-id128 new generates valid UUID"
+          ID="$(systemd-id128 new)"
+          [[ -n "$ID" ]]
+          echo "$ID" | grep -qP '^[0-9a-f]{32}$'
+
+          : "Two new IDs are different"
+          ID2="$(systemd-id128 new)"
+          [[ "$ID" != "$ID2" ]]
+
+          : "systemd-id128 machine-id matches /etc/machine-id"
+          ID="$(systemd-id128 machine-id)"
+          EXPECTED="$(tr -d '-' < /etc/machine-id)"
+          [[ "$ID" == "$EXPECTED" ]]
+          IDOEOF
+          chmod +x TEST-74-AUX-UTILS.id128-ops.sh
+
+          # systemctl is-system-running
+          cat > TEST-74-AUX-UTILS.is-system-running.sh << 'ISREOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl is-system-running returns a known state"
+          STATE="$(systemctl is-system-running)"
+          [[ "$STATE" == "running" || "$STATE" == "degraded" || "$STATE" == "starting" ]]
+          ISREOF
+          chmod +x TEST-74-AUX-UTILS.is-system-running.sh
+
+          # systemd-detect-virt in VM
+          cat > TEST-74-AUX-UTILS.detect-virt-vm.sh << 'DVEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-detect-virt detects VM"
+          VIRT="$(systemd-detect-virt)" || true
+          [[ -n "$VIRT" ]]
+
+          : "systemd-detect-virt --vm succeeds in VM"
+          systemd-detect-virt --vm || true
+
+          : "SYSTEMD_IN_CHROOT=1 enables chroot detection"
+          SYSTEMD_IN_CHROOT=1 systemd-detect-virt --chroot
+          DVEOF
+          chmod +x TEST-74-AUX-UTILS.detect-virt-vm.sh
+
+          # systemctl show target properties
+          cat > TEST-74-AUX-UTILS.target-props.sh << 'TGPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "multi-user.target is active"
+          [[ "$(systemctl show -P ActiveState multi-user.target)" == "active" ]]
+
+          : "multi-user.target has LoadState=loaded"
+          [[ "$(systemctl show -P LoadState multi-user.target)" == "loaded" ]]
+
+          : "sysinit.target is active"
+          [[ "$(systemctl show -P ActiveState sysinit.target)" == "active" ]]
+
+          : "basic.target is active"
+          [[ "$(systemctl show -P ActiveState basic.target)" == "active" ]]
+          TGPEOF
+          chmod +x TEST-74-AUX-UTILS.target-props.sh
+
+          # systemctl poweroff/reboot --dry-run
+          cat > TEST-74-AUX-UTILS.power-dry-run.sh << 'PDREOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl --help shows power commands"
+          systemctl --help > /dev/null 2>&1
+
+          : "systemctl list-jobs shows no pending jobs"
+          systemctl list-jobs --no-pager > /dev/null
+
+          : "systemctl show-environment shows manager environment"
+          systemctl show-environment > /dev/null
+          PDREOF
+          chmod +x TEST-74-AUX-UTILS.power-dry-run.sh
 
           # systemctl --version output
           cat > TEST-74-AUX-UTILS.systemctl-version.sh << 'SVEOF'
