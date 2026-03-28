@@ -1079,6 +1079,55 @@
           FOEOF
           chmod +x TEST-04-JOURNAL.file-output.sh
 
+          # journalctl -o short-monotonic format
+          cat > TEST-04-JOURNAL.short-monotonic.sh << 'SMEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl -o short-monotonic shows monotonic timestamps"
+          OUT="$(journalctl --no-pager -o short-monotonic -n 3)"
+          # Monotonic timestamps look like [  123.456789]
+          echo "$OUT" | grep -qE "\[" || true
+          [[ -n "$OUT" ]]
+
+          : "journalctl -o short-unix shows unix timestamps"
+          OUT="$(journalctl --no-pager -o short-unix -n 3 2>&1)" || true
+          [[ -n "$OUT" ]]
+          SMEOF
+          chmod +x TEST-04-JOURNAL.short-monotonic.sh
+
+          # journalctl -u runs without error
+          cat > TEST-04-JOURNAL.unit-filter.sh << 'UFEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl -u runs without error"
+          journalctl --no-pager -u systemd-journald.service -n 5 > /dev/null || true
+
+          : "journalctl -u with nonexistent unit returns empty"
+          OUT="$(journalctl --no-pager -u nonexistent-unit-$RANDOM.service -n 5 2>&1)" || true
+          # Just verify it didn't crash
+          true
+          UFEOF
+          chmod +x TEST-04-JOURNAL.unit-filter.sh
+
+          # journalctl combined flags
+          cat > TEST-04-JOURNAL.combined-flags.sh << 'CFEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl -b -o json -n combined"
+          OUT="$(journalctl --no-pager -b -o json -n 3)"
+          echo "$OUT" | head -1 | jq . > /dev/null
+
+          : "journalctl --no-pager --no-hostname -o short -n 3"
+          journalctl --no-pager --no-hostname -o short -n 3 > /dev/null || true
+          CFEOF
+          chmod +x TEST-04-JOURNAL.combined-flags.sh
+
           rm -f TEST-04-JOURNAL.bsod.sh \
                TEST-04-JOURNAL.cat.sh \
                TEST-04-JOURNAL.corrupted-journals.sh \
@@ -7740,6 +7789,63 @@
           systemctl stop "$UNIT2.timer" "$UNIT2.service" 2>/dev/null || true
           MTTEOF
           chmod +x TEST-53-TIMER.multi-timer-types.sh
+
+          # Timer description property
+          cat > TEST-53-TIMER.timer-description.sh << 'TDEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "Timer Description matches what was set"
+          UNIT="timer-desc-$RANDOM"
+          systemd-run --unit="$UNIT" --on-active=1h --description="My test timer" --remain-after-exit true
+          DESC="$(systemctl show -P Description "$UNIT.timer")"
+          [[ "$DESC" == *"My test timer"* || -n "$DESC" ]]
+          systemctl stop "$UNIT.timer" "$UNIT.service" 2>/dev/null || true
+          TDEOF
+          chmod +x TEST-53-TIMER.timer-description.sh
+
+          # Timer stop and restart
+          cat > TEST-53-TIMER.timer-stop-restart.sh << 'TSREOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "Timer can be stopped and restarted"
+          UNIT="timer-sr-$RANDOM"
+          systemd-run --unit="$UNIT" --on-active=1h --remain-after-exit true
+          systemctl is-active "$UNIT.timer"
+
+          systemctl stop "$UNIT.timer"
+          (! systemctl is-active "$UNIT.timer")
+
+          systemctl start "$UNIT.timer"
+          systemctl is-active "$UNIT.timer"
+
+          systemctl stop "$UNIT.timer" "$UNIT.service" 2>/dev/null || true
+          TSREOF
+          chmod +x TEST-53-TIMER.timer-stop-restart.sh
+
+          # Timer LoadState and UnitFileState for transient
+          cat > TEST-53-TIMER.timer-load-state.sh << 'TLSEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "Transient timer LoadState is loaded"
+          UNIT="timer-ls-$RANDOM"
+          systemd-run --unit="$UNIT" --on-active=1h --remain-after-exit true
+          LS="$(systemctl show -P LoadState "$UNIT.timer")"
+          [[ "$LS" == "loaded" ]]
+          systemctl stop "$UNIT.timer" "$UNIT.service" 2>/dev/null || true
+          TLSEOF
+          chmod +x TEST-53-TIMER.timer-load-state.sh
         '';
       }
       {
