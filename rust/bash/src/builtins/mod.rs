@@ -38,7 +38,11 @@ fn program_has_incomplete_funsub(program: &Program) -> bool {
             Command::Compound(cc, redirs) => {
                 redirs.iter().any(|r| word_check(&r.target)) || compound_check(cc)
             }
-            Command::FunctionDef { body, .. } => compound_check(body),
+            Command::FunctionDef {
+                body, redirections, ..
+            } => {
+                redirections.iter().any(|r| word_check(&r.target)) || compound_check(body)
+            }
             Command::Coproc(_, inner) => cmd_check(inner),
         }
     }

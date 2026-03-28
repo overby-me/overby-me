@@ -60,9 +60,13 @@ pub(super) fn builtin_eval(shell: &mut Shell, args: &[String]) -> i32 {
                         .map(|s| s.as_str())
                         .unwrap_or("bash");
                     let lineno = shell
-                        .vars
-                        .get("LINENO")
-                        .and_then(|s| s.parse::<usize>().ok())
+                        .cmd_end_line
+                        .or_else(|| {
+                            shell
+                                .vars
+                                .get("LINENO")
+                                .and_then(|s| s.parse::<usize>().ok())
+                        })
                         .unwrap_or(0);
                     eprintln!(
                         "{}: eval: line {}: unexpected EOF while looking for matching `}}'",
