@@ -9284,6 +9284,80 @@
           SSEOF
           chmod +x TEST-74-AUX-UTILS.show-socket.sh
 
+          # systemctl show UnitFileState
+          cat > TEST-74-AUX-UTILS.unit-file-state.sh << 'UFSEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "UnitFileState for enabled unit"
+          UFS="$(systemctl show -P UnitFileState systemd-journald.service)"
+          [[ "$UFS" == "static" || "$UFS" == "enabled" || "$UFS" == "indirect" ]]
+
+          : "UnitFileState for transient unit"
+          UNIT="ufs-test-$RANDOM"
+          systemd-run --wait --unit="$UNIT" true
+          UFS="$(systemctl show -P UnitFileState "$UNIT.service")"
+          [[ -n "$UFS" ]]
+          UFSEOF
+          chmod +x TEST-74-AUX-UTILS.unit-file-state.sh
+
+          # systemd-run with multiple ExecStartPre
+          cat > TEST-74-AUX-UTILS.run-multi-pre.sh << 'RMPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-run with -p ExecStartPre runs pre-command"
+          UNIT="run-pre-$RANDOM"
+          systemd-run --wait --unit="$UNIT" \
+              -p ExecStartPre="touch /tmp/$UNIT-pre" \
+              true
+          [[ -f "/tmp/$UNIT-pre" ]]
+          rm -f "/tmp/$UNIT-pre"
+          RMPEOF
+          chmod +x TEST-74-AUX-UTILS.run-multi-pre.sh
+
+          # systemctl show for mount units
+          cat > TEST-74-AUX-UTILS.show-mount.sh << 'SMTEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl show for root mount"
+          systemctl show "-.mount" -P Where | grep -q "/"
+
+          : "systemctl list-units --type=mount lists mounts"
+          OUT="$(systemctl list-units --no-pager --type=mount)"
+          echo "$OUT" | grep -q "\.mount"
+          SMTEOF
+          chmod +x TEST-74-AUX-UTILS.show-mount.sh
+
+          # systemctl show FragmentPath
+          cat > TEST-74-AUX-UTILS.fragment-path.sh << 'FPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "FragmentPath points to unit file"
+          FP="$(systemctl show -P FragmentPath systemd-journald.service)"
+          [[ -f "$FP" ]]
+          grep -q "journald" "$FP"
+          FPEOF
+          chmod +x TEST-74-AUX-UTILS.fragment-path.sh
+
+          # systemctl show for scope units
+          cat > TEST-74-AUX-UTILS.show-scope.sh << 'SCEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "init.scope exists and is active"
+          systemctl show init.scope -P ActiveState | grep -q "active"
+          systemctl show init.scope -P Id | grep -q "init.scope"
+          SCEOF
+          chmod +x TEST-74-AUX-UTILS.show-scope.sh
+
           rm -f TEST-74-AUX-UTILS.busctl.sh \
                TEST-74-AUX-UTILS.capsule.sh \
                TEST-74-AUX-UTILS.firstboot.sh \
