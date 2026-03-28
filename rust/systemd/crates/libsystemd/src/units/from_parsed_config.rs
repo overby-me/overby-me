@@ -650,6 +650,7 @@ impl std::convert::TryFrom<ParsedExecSection> for ExecConfig {
             ambient_capabilities: parsed.ambient_capabilities,
             protect_home: parsed.protect_home,
             protect_hostname: parsed.protect_hostname,
+            protect_hostname_mode: None, // Extended syntax only via transient units
             protect_hostname_name: None, // Extended syntax only via transient units
             system_call_architectures: parsed.system_call_architectures,
             read_write_paths: parsed.read_write_paths,

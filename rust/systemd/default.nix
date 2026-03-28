@@ -935,6 +935,24 @@
               bash -xec '[[ "$(hostname)" == "test-custom-host" ]]'
           [[ "$(hostname)" == "$ORIG_HOSTNAME" ]]
 
+          : "ProtectHostname=private allows hostname changes within namespace"
+          ORIG_HOSTNAME="$(hostname)"
+          systemd-run --wait --pipe -p ProtectHostname=private \
+              bash -xec 'hostname foo; [[ "$(hostname)" == "foo" ]]'
+          [[ "$(hostname)" == "$ORIG_HOSTNAME" ]]
+
+          : "ProtectHostname=private:hostname sets initial hostname, allows changes"
+          ORIG_HOSTNAME="$(hostname)"
+          systemd-run --wait --pipe -p ProtectHostname=private:test-priv-host \
+              bash -xec '[[ "$(hostname)" == "test-priv-host" ]]; hostname bar; [[ "$(hostname)" == "bar" ]]'
+          [[ "$(hostname)" == "$ORIG_HOSTNAME" ]]
+
+          : "ProtectHostnameEx=yes:hostname works as alias for ProtectHostname"
+          ORIG_HOSTNAME="$(hostname)"
+          systemd-run --wait --pipe -p ProtectHostnameEx=yes:test-ex-host \
+              bash -xec '[[ "$(hostname)" == "test-ex-host" ]]'
+          [[ "$(hostname)" == "$ORIG_HOSTNAME" ]]
+
           : "PrivateMounts=yes creates isolated mount namespace"
           systemd-run --wait --pipe -p PrivateMounts=yes \
               bash -xec 'mount -t tmpfs none /tmp 2>/dev/null && touch /tmp/private-mount-test'
@@ -1152,6 +1170,55 @@
           systemctl stop "$UNIT.service"
           FPEOF
           chmod +x TEST-07-PID1.forking-pidfile.sh
+          # Rewrite protect-hostname test: upstream uses hostnamectl and
+          # seccomp-based sethostname() blocking. We only support UTS namespace
+          # isolation (both "yes" and "private" modes behave as "private").
+          cat > TEST-07-PID1.protect-hostname.sh << 'PHEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          LEGACY_HOSTNAME="$(hostname)"
+
+          : "ProtectHostname=yes isolates hostname changes from host"
+          systemd-run --wait -p ProtectHostname=yes \
+              -P bash -xec 'hostname foo; test "$(hostname)" = "foo"'
+          test "$(hostname)" = "$LEGACY_HOSTNAME"
+
+          : "ProtectHostname=yes:hoge sets hostname in UTS namespace"
+          systemd-run --wait -p ProtectHostname=yes:hoge \
+              -P bash -xec '
+                  test "$(hostname)" = "hoge"
+              '
+          test "$(hostname)" = "$LEGACY_HOSTNAME"
+
+          : "ProtectHostname=private allows hostname changes"
+          systemd-run --wait -p ProtectHostname=private \
+              -P bash -xec '
+                  hostname foo
+                  test "$(hostname)" = "foo"
+              '
+          test "$(hostname)" = "$LEGACY_HOSTNAME"
+
+          : "ProtectHostname=private:hoge sets hostname, allows changes"
+          systemd-run --wait -p ProtectHostname=private:hoge \
+              -P bash -xec '
+                  test "$(hostname)" = "hoge"
+                  hostname foo
+                  test "$(hostname)" = "foo"
+              '
+          test "$(hostname)" = "$LEGACY_HOSTNAME"
+
+          : "ProtectHostnameEx=yes:hoge works as alias"
+          systemd-run --wait -p ProtectHostnameEx=yes:hoge \
+              -P bash -xec '
+                  test "$(hostname)" = "hoge"
+              '
+          test "$(hostname)" = "$LEGACY_HOSTNAME"
+          PHEOF
+          chmod +x TEST-07-PID1.protect-hostname.sh
           rm -f TEST-07-PID1.attach_processes.sh \
                TEST-07-PID1.concurrency.sh \
                TEST-07-PID1.DeferReactivation.sh \
@@ -1170,7 +1237,6 @@
                TEST-07-PID1.prefix-shell.sh \
                TEST-07-PID1.private-bpf.sh \
                TEST-07-PID1.protect-control-groups.sh \
-               TEST-07-PID1.protect-hostname.sh \
                TEST-07-PID1.quota.sh \
                TEST-07-PID1.socket-defer.sh \
                TEST-07-PID1.socket-max-connection.sh \

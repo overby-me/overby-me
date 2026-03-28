@@ -2602,6 +2602,10 @@ pub struct ExecConfig {
     /// Defaults to false. Parsed and stored; no runtime enforcement yet
     /// (requires UTS namespace and seccomp support). See systemd.exec(5).
     pub protect_hostname: bool,
+    /// ProtectHostname= mode — "yes" (read-only, prevents sethostname) or
+    /// "private" (new UTS namespace, allows sethostname within it).
+    /// None means not set explicitly (defaults to "yes" when protect_hostname=true).
+    pub protect_hostname_mode: Option<String>,
     /// ProtectHostname= hostname — optional hostname to set in the UTS
     /// namespace when using `ProtectHostname=yes:hostname` syntax.
     pub protect_hostname_name: Option<String>,

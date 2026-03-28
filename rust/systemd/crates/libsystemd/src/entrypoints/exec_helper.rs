@@ -490,10 +490,15 @@ pub struct ExecHelperConfig {
     #[serde(default)]
     pub protect_clock: bool,
 
-    /// ProtectHostname= — if true, a new UTS namespace is created and
-    /// hostname/domainname changes are denied. See systemd.exec(5).
+    /// ProtectHostname= — if true, a new UTS namespace is created.
+    /// See systemd.exec(5).
     #[serde(default)]
     pub protect_hostname: bool,
+
+    /// ProtectHostname= mode — "yes" (read-only, prevents sethostname) or
+    /// "private" (new UTS namespace, allows sethostname within it).
+    #[serde(default)]
+    pub protect_hostname_mode: Option<String>,
 
     /// ProtectHostname= hostname — optional hostname to set in the new UTS
     /// namespace when ProtectHostname=yes:hostname or private:hostname.
@@ -1573,6 +1578,10 @@ pub fn run_exec_helper() {
     }
 
     // ── ProtectHostname= — UTS namespace ──────────────────────────────
+    // Both "yes" and "private" modes create a new UTS namespace, isolating
+    // hostname changes from the host. In real systemd, "yes" also uses
+    // seccomp to block sethostname()/setdomainname() within the namespace;
+    // we don't have seccomp yet, so both modes behave like "private" for now.
     if config.protect_hostname && !config.privileged_prefix {
         let ret = unsafe { libc::unshare(libc::CLONE_NEWUTS) };
         if ret != 0 {

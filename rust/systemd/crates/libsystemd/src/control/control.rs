@@ -2440,6 +2440,7 @@ fn create_transient_unit(
         ambient_capabilities: vec![],
         protect_home: crate::units::ProtectHome::No,
         protect_hostname: false,
+        protect_hostname_mode: None,
         protect_hostname_name: None,
         system_call_architectures: vec![],
         read_write_paths: vec![],
@@ -3344,17 +3345,31 @@ fn create_transient_unit(
                 "ProtectClock" => {
                     service_conf.exec_config.protect_clock = matches!(value, "yes" | "true" | "1");
                 }
-                "ProtectHostname" => {
+                "ProtectHostname" | "ProtectHostnameEx" => {
                     // Support `yes`, `yes:hostname`, `private`, `private:hostname`
                     if let Some(hostname) = value.strip_prefix("yes:") {
                         service_conf.exec_config.protect_hostname = true;
+                        service_conf.exec_config.protect_hostname_mode = Some("yes".to_string());
                         service_conf.exec_config.protect_hostname_name = Some(hostname.to_string());
                     } else if let Some(hostname) = value.strip_prefix("private:") {
                         service_conf.exec_config.protect_hostname = true;
+                        service_conf.exec_config.protect_hostname_mode =
+                            Some("private".to_string());
                         service_conf.exec_config.protect_hostname_name = Some(hostname.to_string());
+                    } else if value == "private" {
+                        service_conf.exec_config.protect_hostname = true;
+                        service_conf.exec_config.protect_hostname_mode =
+                            Some("private".to_string());
+                        service_conf.exec_config.protect_hostname_name = None;
                     } else {
                         service_conf.exec_config.protect_hostname =
-                            matches!(value, "yes" | "true" | "1" | "private");
+                            matches!(value, "yes" | "true" | "1");
+                        if service_conf.exec_config.protect_hostname {
+                            service_conf.exec_config.protect_hostname_mode =
+                                Some("yes".to_string());
+                        } else {
+                            service_conf.exec_config.protect_hostname_mode = None;
+                        }
                         service_conf.exec_config.protect_hostname_name = None;
                     }
                 }
