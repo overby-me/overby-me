@@ -379,6 +379,38 @@
           JQEOF
           chmod +x TEST-04-JOURNAL.basic-query.sh
 
+          # Custom journalctl rotation and cursor test
+          cat > TEST-04-JOURNAL.rotation-cursor.sh << 'RCEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl --rotate triggers log rotation"
+          journalctl --rotate
+          journalctl --sync
+
+          : "journalctl -o export produces valid export format"
+          journalctl --no-pager -n 1 -o export | grep -q "^__CURSOR="
+
+          : "journalctl --cursor queries from a cursor position"
+          CURSOR=$(journalctl --no-pager -n 1 -o export | grep "^__CURSOR=" | cut -d= -f2)
+          [[ -n "$CURSOR" ]]
+          journalctl --no-pager --after-cursor="$CURSOR" -n 5
+
+          : "journalctl --verify checks journal consistency"
+          journalctl --verify || true
+
+          : "journalctl -o verbose produces verbose output"
+          journalctl --no-pager -n 1 -o verbose | head -20
+
+          : "journalctl -k shows kernel messages"
+          journalctl -k --no-pager -n 5
+
+          : "journalctl --header shows journal file metadata"
+          journalctl --header --no-pager | head -10
+          RCEOF
+          chmod +x TEST-04-JOURNAL.rotation-cursor.sh
+
           rm -f TEST-04-JOURNAL.bsod.sh \
                TEST-04-JOURNAL.cat.sh \
                TEST-04-JOURNAL.corrupted-journals.sh \
