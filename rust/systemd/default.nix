@@ -873,6 +873,15 @@
           systemd-run --wait --pipe -p PrivateMounts=yes -p ProcSubset=pid \
               bash -xec '(! test -d /proc/sys)'
 
+          : "SyslogIdentifier via transient property"
+          systemd-run --wait --pipe -p SyslogIdentifier=custom-ident true
+
+          : "TTYPath via transient property (no-op when stdin=null)"
+          systemd-run --wait --pipe -p TTYPath=/dev/console true
+
+          : "LogLevelMax via transient property"
+          systemd-run --wait --pipe -p LogLevelMax=warning true
+
           : "Error handling for clean-up codepaths"
           (! systemd-run --wait --pipe false)
           TESTEOF

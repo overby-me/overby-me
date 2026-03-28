@@ -3439,6 +3439,99 @@ fn create_transient_unit(
                         _ => crate::units::unit_parsing::ProcSubset::All,
                     };
                 }
+                "TTYPath" => {
+                    service_conf.exec_config.tty_path =
+                        Some(std::path::PathBuf::from(value));
+                }
+                "TTYReset" => {
+                    service_conf.exec_config.tty_reset =
+                        matches!(value, "yes" | "true" | "1");
+                }
+                "TTYVHangup" => {
+                    service_conf.exec_config.tty_vhangup =
+                        matches!(value, "yes" | "true" | "1");
+                }
+                "TTYVTDisallocate" => {
+                    service_conf.exec_config.tty_vt_disallocate =
+                        matches!(value, "yes" | "true" | "1");
+                }
+                "RemoveIPC" => {
+                    service_conf.exec_config.remove_ipc =
+                        matches!(value, "yes" | "true" | "1");
+                }
+                "PrivateIPC" => {
+                    service_conf.exec_config.private_ipc =
+                        Some(matches!(value, "yes" | "true" | "1"));
+                }
+                "NetworkNamespacePath" => {
+                    service_conf.exec_config.network_namespace_path =
+                        Some(value.to_string());
+                }
+                "IPCNamespacePath" => {
+                    service_conf.exec_config.ipc_namespace_path =
+                        Some(value.to_string());
+                }
+                "LogLevelMax" => {
+                    service_conf.exec_config.log_level_max =
+                        Some(value.to_string());
+                }
+                "LogRateLimitIntervalSec" => {
+                    service_conf.exec_config.log_rate_limit_interval_sec =
+                        Some(value.to_string());
+                }
+                "LogRateLimitBurst" => {
+                    if let Ok(n) = value.parse::<u32>() {
+                        service_conf.exec_config.log_rate_limit_burst = Some(n);
+                    }
+                }
+                "SyslogFacility" => {
+                    service_conf.exec_config.syslog_facility =
+                        Some(value.to_string());
+                }
+                "SyslogLevel" => {
+                    service_conf.exec_config.syslog_level =
+                        Some(value.to_string());
+                }
+                "SyslogLevelPrefix" => {
+                    service_conf.exec_config.syslog_level_prefix =
+                        Some(matches!(value, "yes" | "true" | "1"));
+                }
+                "SecureBits" => {
+                    if value.is_empty() {
+                        service_conf.exec_config.secure_bits.clear();
+                    } else {
+                        for b in value.split_whitespace() {
+                            service_conf
+                                .exec_config
+                                .secure_bits
+                                .push(b.to_string());
+                        }
+                    }
+                }
+                "NoExecPaths" => {
+                    if value.is_empty() {
+                        service_conf.exec_config.no_exec_paths.clear();
+                    } else {
+                        for p in value.split_whitespace() {
+                            service_conf
+                                .exec_config
+                                .no_exec_paths
+                                .push(p.to_string());
+                        }
+                    }
+                }
+                "ExecPaths" => {
+                    if value.is_empty() {
+                        service_conf.exec_config.exec_paths.clear();
+                    } else {
+                        for p in value.split_whitespace() {
+                            service_conf
+                                .exec_config
+                                .exec_paths
+                                .push(p.to_string());
+                        }
+                    }
+                }
                 _ => {
                     log::debug!("Ignoring unknown transient unit property: {key}={value}");
                 }
