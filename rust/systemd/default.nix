@@ -6331,6 +6331,69 @@
           rm -f "/tmp/timer-zero-$UNIT3"
           TAEOF
           chmod +x TEST-53-TIMER.timer-accuracy.sh
+
+          # Timer stop/start and status transitions test
+          cat > TEST-53-TIMER.timer-states.sh << 'TSEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "Timer unit starts inactive"
+          UNIT="timer-state-$RANDOM"
+          printf '[Timer]\nOnActiveSec=1h\n' > "/run/systemd/system/$UNIT.timer"
+          printf '[Service]\nType=oneshot\nExecStart=true\n' > "/run/systemd/system/$UNIT.service"
+          systemctl daemon-reload
+
+          [[ "$(systemctl show -P ActiveState "$UNIT.timer")" == "inactive" ]]
+
+          : "Timer transitions to active on start"
+          systemctl start "$UNIT.timer"
+          [[ "$(systemctl show -P ActiveState "$UNIT.timer")" == "active" ]]
+
+          : "Timer transitions to inactive on stop"
+          systemctl stop "$UNIT.timer"
+          [[ "$(systemctl show -P ActiveState "$UNIT.timer")" == "inactive" ]]
+
+          : "Timer can be restarted"
+          systemctl start "$UNIT.timer"
+          systemctl restart "$UNIT.timer"
+          [[ "$(systemctl show -P ActiveState "$UNIT.timer")" == "active" ]]
+
+          systemctl stop "$UNIT.timer"
+          rm -f "/run/systemd/system/$UNIT.timer" "/run/systemd/system/$UNIT.service"
+          systemctl daemon-reload
+          TSEOF
+          chmod +x TEST-53-TIMER.timer-states.sh
+
+          # Timer with --on-unit-inactive test
+          cat > TEST-53-TIMER.on-unit-inactive.sh << 'OUEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "systemd-run --on-unit-inactive creates timer"
+          UNIT="timer-inact-$RANDOM"
+          systemd-run --unit="$UNIT" --on-unit-inactive=30s --remain-after-exit true
+          systemctl is-active "$UNIT.timer"
+          grep -q "OnUnitInactiveSec=" "/run/systemd/transient/$UNIT.timer"
+          systemctl stop "$UNIT.timer" "$UNIT.service" 2>/dev/null || true
+
+          : "Multiple timer triggers in single transient unit"
+          UNIT2="timer-multi-$RANDOM"
+          systemd-run --unit="$UNIT2" \
+              --on-active=300s \
+              --on-boot=600s \
+              --remain-after-exit true
+          systemctl is-active "$UNIT2.timer"
+          grep -q "OnActiveSec=" "/run/systemd/transient/$UNIT2.timer"
+          grep -q "OnBootSec=" "/run/systemd/transient/$UNIT2.timer"
+          systemctl stop "$UNIT2.timer" "$UNIT2.service" 2>/dev/null || true
+          OUEOF
+          chmod +x TEST-53-TIMER.on-unit-inactive.sh
         '';
       }
       {
@@ -6411,6 +6474,25 @@
           [[ -f "/tmp/path-uf-result-$PUNIT" ]]
           systemctl stop "$PUNIT.path" "$PUNIT.service" 2>/dev/null || true
           rm -f "/tmp/path-uf-trigger-$PUNIT" "/tmp/path-uf-result-$PUNIT"
+          rm -f "/run/systemd/system/$PUNIT.path" "/run/systemd/system/$PUNIT.service"
+          systemctl daemon-reload
+
+          : "Path unit lifecycle: start, stop, restart"
+          PUNIT="path-lifecycle-$RANDOM"
+          printf '[Path]\nPathExists=/tmp/path-lc-trigger-%s\n' "$PUNIT" \
+              > "/run/systemd/system/$PUNIT.path"
+          printf '[Service]\nType=oneshot\nExecStart=true\n' \
+              > "/run/systemd/system/$PUNIT.service"
+          systemctl daemon-reload
+
+          systemctl start "$PUNIT.path"
+          [[ "$(systemctl show -P ActiveState "$PUNIT.path")" == "active" ]]
+          systemctl stop "$PUNIT.path"
+          [[ "$(systemctl show -P ActiveState "$PUNIT.path")" == "inactive" ]]
+          systemctl start "$PUNIT.path"
+          systemctl restart "$PUNIT.path"
+          [[ "$(systemctl show -P ActiveState "$PUNIT.path")" == "active" ]]
+          systemctl stop "$PUNIT.path"
           rm -f "/run/systemd/system/$PUNIT.path" "/run/systemd/system/$PUNIT.service"
           systemctl daemon-reload
 
