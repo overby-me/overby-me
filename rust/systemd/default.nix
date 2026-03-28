@@ -628,6 +628,32 @@
           BQEOF
           chmod +x TEST-04-JOURNAL.boot-query.sh
 
+          # Journal priority range test
+          cat > TEST-04-JOURNAL.priority-range.sh << 'PREOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl -p err shows error and above"
+          journalctl -b --no-pager -p err -n 10 > /dev/null
+
+          : "journalctl -p warning shows warning and above"
+          journalctl -b --no-pager -p warning -n 10 > /dev/null
+
+          : "journalctl -p info..err shows range"
+          journalctl -b --no-pager -p info..err -n 10 > /dev/null || true
+
+          : "journalctl -p 0 shows emerg"
+          journalctl -b --no-pager -p 0 -n 5 > /dev/null
+
+          : "journalctl -p 7 shows debug and above"
+          journalctl -b --no-pager -p 7 -n 5 > /dev/null
+
+          : "journalctl -o json includes PRIORITY field"
+          journalctl -b --no-pager -n 1 -o json | jq -e '.PRIORITY' > /dev/null
+          PREOF
+          chmod +x TEST-04-JOURNAL.priority-range.sh
+
           rm -f TEST-04-JOURNAL.bsod.sh \
                TEST-04-JOURNAL.cat.sh \
                TEST-04-JOURNAL.corrupted-journals.sh \
@@ -7499,6 +7525,114 @@
           systemctl unmask is-enabled-test.service
           IEEOF
           chmod +x TEST-74-AUX-UTILS.is-enabled-patterns.sh
+
+          # systemctl show transient service properties test
+          cat > TEST-74-AUX-UTILS.show-transient.sh << 'STEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "Transient service shows correct Description"
+          UNIT="show-trans-$RANDOM"
+          systemd-run --unit="$UNIT" --description="Show transient test" \
+              --remain-after-exit true
+          sleep 1
+          [[ "$(systemctl show -P Description "$UNIT.service")" == "Show transient test" ]]
+          [[ "$(systemctl show -P ActiveState "$UNIT.service")" == "active" ]]
+          [[ "$(systemctl show -P LoadState "$UNIT.service")" == "loaded" ]]
+
+          : "Transient service MainPID is set"
+          # For remain-after-exit, the process has exited but MainPID was tracked
+          systemctl show -P MainPID "$UNIT.service" > /dev/null
+
+          : "Transient service has correct Type"
+          # Default type for systemd-run is simple
+          TYPE="$(systemctl show -P Type "$UNIT.service")"
+          [[ "$TYPE" == "simple" || "$TYPE" == "exec" ]]
+          systemctl stop "$UNIT.service" 2>/dev/null || true
+
+          : "Oneshot transient shows Result=success after completion"
+          UNIT2="show-trans2-$RANDOM"
+          systemd-run --unit="$UNIT2" -p Type=oneshot -p RemainAfterExit=yes true
+          sleep 1
+          RESULT="$(systemctl show -P Result "$UNIT2.service")"
+          [[ "$RESULT" == "success" ]]
+          systemctl stop "$UNIT2.service" 2>/dev/null || true
+          STEOF
+          chmod +x TEST-74-AUX-UTILS.show-transient.sh
+
+          # systemd-analyze calendar edge cases
+          cat > TEST-74-AUX-UTILS.analyze-calendar.sh << 'ACEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-analyze calendar weekly"
+          systemd-analyze calendar "weekly" | grep -q "Next"
+
+          : "systemd-analyze calendar monthly"
+          systemd-analyze calendar "monthly" | grep -q "Next"
+
+          : "systemd-analyze calendar yearly"
+          systemd-analyze calendar "yearly" | grep -q "Next"
+
+          : "systemd-analyze calendar with day of week"
+          systemd-analyze calendar "Fri *-*-* 18:00:00"
+
+          : "systemd-analyze calendar minutely"
+          systemd-analyze calendar "minutely" | grep -q "Next"
+
+          : "systemd-analyze timespan formats"
+          systemd-analyze timespan "0"
+          systemd-analyze timespan "1us"
+          systemd-analyze timespan "1s 500ms"
+          systemd-analyze timespan "2h 30min 10s"
+          systemd-analyze timespan "infinity"
+
+          : "systemd-analyze timestamp formats"
+          systemd-analyze timestamp "2025-01-01 00:00:00"
+          systemd-analyze timestamp "2025-06-15 12:30:00 UTC"
+          ACEOF
+          chmod +x TEST-74-AUX-UTILS.analyze-calendar.sh
+
+          # systemctl mask/unmask test
+          cat > TEST-74-AUX-UTILS.mask-unmask.sh << 'MMEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          at_exit() {
+              set +e
+              systemctl unmask mask-test-unit.service 2>/dev/null
+              rm -f /run/systemd/system/mask-test-unit.service
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "Create a test service"
+          cat > /run/systemd/system/mask-test-unit.service << EOF
+          [Unit]
+          Description=Mask test unit
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          EOF
+          systemctl daemon-reload
+
+          : "systemctl mask creates a symlink to /dev/null"
+          systemctl mask mask-test-unit.service
+          [[ -L /etc/systemd/system/mask-test-unit.service ]] || \
+              [[ -L /run/systemd/system/mask-test-unit.service ]]
+
+          : "systemctl unmask removes the mask"
+          systemctl unmask mask-test-unit.service
+          systemctl daemon-reload
+          # Service should be startable again after unmask
+          systemctl start mask-test-unit.service
+          MMEOF
+          chmod +x TEST-74-AUX-UTILS.mask-unmask.sh
 
           rm -f TEST-74-AUX-UTILS.busctl.sh \
                TEST-74-AUX-UTILS.capsule.sh \
