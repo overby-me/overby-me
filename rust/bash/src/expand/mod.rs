@@ -1800,9 +1800,20 @@ fn glob_expand(field: &str) -> Vec<String> {
                         .filter_map(|e| e.ok())
                         .map(|e| e.file_name().to_string_lossy().to_string())
                         .filter(|name| {
-                            // Skip dotfiles unless pattern starts with .
-                            if name.starts_with('.') && !pattern.starts_with('.') {
-                                return false;
+                            // Skip dotfiles unless pattern explicitly matches dots
+                            if name.starts_with('.') {
+                                // Check if the pattern explicitly starts with or contains dot alternatives
+                                let allows_dot = pattern.starts_with('.')
+                                    || pattern.starts_with("@(.")
+                                    || pattern.starts_with("+(.")
+                                    || pattern.starts_with("*(.")
+                                    || pattern.starts_with("?(.")
+                                    || pattern.starts_with("@(*")
+                                    || pattern.starts_with("+(* ")
+                                    || pattern.contains("|.");
+                                if !allows_dot {
+                                    return false;
+                                }
                             }
                             crate::interpreter::commands::case_pattern_match(name, &pattern)
                         })
