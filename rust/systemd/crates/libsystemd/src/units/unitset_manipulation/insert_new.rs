@@ -521,47 +521,85 @@ pub fn insert_new_units(new_units: UnitTable, run_info: &mut RuntimeInfo) -> Res
         trace!("Check all names exist");
         check_all_names_exist(&new_units, unit_table)?;
 
+        // Collect new unit IDs and their forward dependencies before insertion,
+        // so we can wire up reverse deps in a second pass. This avoids
+        // order-dependent bugs when multiple new units reference each other
+        // (e.g., unit A has BindsTo=B and both A and B are new).
+        let new_dep_info: Vec<_> = new_units
+            .iter()
+            .map(|(id, unit)| {
+                (
+                    id.clone(),
+                    unit.common.dependencies.after.clone(),
+                    unit.common.dependencies.before.clone(),
+                    unit.common.dependencies.requires.clone(),
+                    unit.common.dependencies.wants.clone(),
+                    unit.common.dependencies.required_by.clone(),
+                    unit.common.dependencies.wanted_by.clone(),
+                    unit.common.dependencies.conflicts.clone(),
+                    unit.common.dependencies.conflicted_by.clone(),
+                    unit.common.dependencies.binds_to.clone(),
+                    unit.common.dependencies.bound_by.clone(),
+                )
+            })
+            .collect();
+
+        // First pass: insert all new units into the table
         for (new_id, new_unit) in new_units {
             trace!("Add new unit: {}", new_unit.id.name);
-            // Setup relations of before <-> after / requires <-> requiredby
+            unit_table.insert(new_id, new_unit);
+        }
+
+        // Second pass: wire up reverse dependencies now that all units exist
+        for (
+            new_id,
+            dep_after,
+            dep_before,
+            dep_requires,
+            dep_wants,
+            dep_required_by,
+            dep_wanted_by,
+            dep_conflicts,
+            dep_conflicted_by,
+            dep_binds_to,
+            dep_bound_by,
+        ) in new_dep_info
+        {
             for unit in unit_table.values_mut() {
-                if new_unit.common.dependencies.after.contains(&unit.id) {
+                if unit.id == new_id {
+                    continue;
+                }
+                if dep_after.contains(&unit.id) {
                     unit.common.dependencies.before.push(new_id.clone());
                 }
-                if new_unit.common.dependencies.before.contains(&unit.id) {
+                if dep_before.contains(&unit.id) {
                     unit.common.dependencies.after.push(new_id.clone());
                 }
-                if new_unit.common.dependencies.requires.contains(&unit.id) {
+                if dep_requires.contains(&unit.id) {
                     unit.common.dependencies.required_by.push(new_id.clone());
                 }
-                if new_unit.common.dependencies.wants.contains(&unit.id) {
+                if dep_wants.contains(&unit.id) {
                     unit.common.dependencies.wanted_by.push(new_id.clone());
                 }
-                if new_unit.common.dependencies.required_by.contains(&unit.id) {
+                if dep_required_by.contains(&unit.id) {
                     unit.common.dependencies.requires.push(new_id.clone());
                 }
-                if new_unit.common.dependencies.wanted_by.contains(&unit.id) {
+                if dep_wanted_by.contains(&unit.id) {
                     unit.common.dependencies.wants.push(new_id.clone());
                 }
-                if new_unit.common.dependencies.conflicts.contains(&unit.id) {
+                if dep_conflicts.contains(&unit.id) {
                     unit.common.dependencies.conflicted_by.push(new_id.clone());
                 }
-                if new_unit
-                    .common
-                    .dependencies
-                    .conflicted_by
-                    .contains(&unit.id)
-                {
+                if dep_conflicted_by.contains(&unit.id) {
                     unit.common.dependencies.conflicts.push(new_id.clone());
                 }
-                if new_unit.common.dependencies.binds_to.contains(&unit.id) {
+                if dep_binds_to.contains(&unit.id) {
                     unit.common.dependencies.bound_by.push(new_id.clone());
                 }
-                if new_unit.common.dependencies.bound_by.contains(&unit.id) {
+                if dep_bound_by.contains(&unit.id) {
                     unit.common.dependencies.binds_to.push(new_id.clone());
                 }
             }
-            unit_table.insert(new_id, new_unit);
         }
     }
     Ok(())

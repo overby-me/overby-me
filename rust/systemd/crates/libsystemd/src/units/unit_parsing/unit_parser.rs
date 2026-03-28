@@ -338,9 +338,6 @@ pub fn parse_unit_section(
     let reload_propagated_from = section.remove("RELOADPROPAGATEDFROM");
     let propagates_stop_to = section.remove("PROPAGATESSTOPTO");
     let stop_propagated_from = section.remove("STOPPROPAGATEDFROM");
-    // StopPropagatedFrom= is the reverse of PropagatesStopTo= — merge into propagates_stop_to
-    // for now since both express the same relationship from different perspectives.
-    let _ = stop_propagated_from; // consumed but not yet used for reverse dep injection
     let joins_namespace_of = section.remove("JOINSNAMESPACEOF");
     let start_limit_interval_sec = section.remove("STARTLIMITINTERVALSEC");
     let start_limit_burst = section.remove("STARTLIMITBURST");
@@ -759,7 +756,19 @@ pub fn parse_unit_section(
         after: after_list,
         before: map_tuples_to_second(split_list_values(before.unwrap_or_default())),
         part_of: map_tuples_to_second(split_list_values(part_of.unwrap_or_default())),
-        binds_to: map_tuples_to_second(split_list_values(binds_to.unwrap_or_default())),
+        binds_to: {
+            let mut bt = map_tuples_to_second(split_list_values(binds_to.unwrap_or_default()));
+            // StopPropagatedFrom=B means "when B stops, stop me" — same stop-propagation
+            // semantics as BindsTo=B, so merge into binds_to.
+            let spf =
+                map_tuples_to_second(split_list_values(stop_propagated_from.unwrap_or_default()));
+            for name in spf {
+                if !bt.contains(&name) {
+                    bt.push(name);
+                }
+            }
+            bt
+        },
         default_dependencies,
         ignore_on_isolate,
         conditions,

@@ -6960,7 +6960,8 @@ pub fn execute_command(
                     units[0].id.clone()
                 };
 
-                crate::units::deactivate_unit(&id, run_info).map_err(|e| format!("{e}"))?;
+                crate::units::deactivate_unit_recursive(&id, run_info)
+                    .map_err(|e| format!("{e}"))?;
             }
         }
         Command::StopNoBlock(unit_names) => {
@@ -6978,7 +6979,7 @@ pub fn execute_command(
                 let run_info_clone = run_info.clone();
                 std::thread::spawn(move || {
                     let ri = run_info_clone.read_poisoned();
-                    if let Err(e) = crate::units::deactivate_unit(&id, &ri) {
+                    if let Err(e) = crate::units::deactivate_unit_recursive(&id, &ri) {
                         log::error!("Background stop error for {}: {e}", id.name);
                     }
                 });

@@ -1814,6 +1814,74 @@
                     head -89 TEST-23-UNIT-FILE.clean-unit.sh > /tmp/clean-unit-patched.sh
                     chmod +x /tmp/clean-unit-patched.sh
                     mv /tmp/clean-unit-patched.sh TEST-23-UNIT-FILE.clean-unit.sh
+                    # Custom BindsTo and StopPropagatedFrom dependency test
+                    cat > TEST-23-UNIT-FILE.binds-to.sh << 'BTEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              systemctl stop binds-to-test-{a,b}.service stop-prop-test-{1,2}.service 2>/dev/null
+              rm -f /run/systemd/system/binds-to-test-{a,b}.service
+              rm -f /run/systemd/system/stop-prop-test-{1,2}.service
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "BindsTo= stops dependent when bound unit stops"
+          cat > /run/systemd/system/binds-to-test-b.service << EOF
+          [Service]
+          ExecStart=sleep infinity
+          EOF
+
+          cat > /run/systemd/system/binds-to-test-a.service << EOF
+          [Unit]
+          BindsTo=binds-to-test-b.service
+          After=binds-to-test-b.service
+          [Service]
+          ExecStart=sleep infinity
+          EOF
+
+          systemctl daemon-reload
+          systemctl start binds-to-test-a.service
+          systemctl is-active binds-to-test-a.service
+          systemctl is-active binds-to-test-b.service
+
+          # Stopping b should pull down a (BindsTo semantics)
+          systemctl stop binds-to-test-b.service
+          timeout 10 bash -c 'until ! systemctl is-active binds-to-test-a.service 2>/dev/null; do sleep 0.5; done'
+          (! systemctl is-active binds-to-test-a.service)
+
+          : "StopPropagatedFrom= stops receiver when sender stops"
+          cat > /run/systemd/system/stop-prop-test-2.service << EOF
+          [Service]
+          ExecStart=sleep 999
+          EOF
+
+          cat > /run/systemd/system/stop-prop-test-1.service << EOF
+          [Unit]
+          Wants=stop-prop-test-2.service
+          After=stop-prop-test-2.service
+          StopPropagatedFrom=stop-prop-test-2.service
+          [Service]
+          ExecStart=sleep infinity
+          EOF
+
+          systemctl daemon-reload
+          systemctl start stop-prop-test-1.service
+          systemctl is-active stop-prop-test-1.service
+          systemctl is-active stop-prop-test-2.service
+
+          # Stopping unit 2 should propagate stop to unit 1
+          systemctl stop stop-prop-test-2.service
+          timeout 10 bash -c 'until ! systemctl is-active stop-prop-test-1.service 2>/dev/null; do sleep 0.5; done'
+          (! systemctl is-active stop-prop-test-1.service)
+          BTEOF
+                    chmod +x TEST-23-UNIT-FILE.binds-to.sh
+
                     rm -f TEST-23-UNIT-FILE.ExtraFileDescriptors.sh \
                          TEST-23-UNIT-FILE.JoinsNamespaceOf.sh \
                          TEST-23-UNIT-FILE.openfile.sh \
