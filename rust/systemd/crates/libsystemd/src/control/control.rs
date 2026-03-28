@@ -3067,6 +3067,16 @@ fn create_transient_unit(
                         signals: vec![],
                     };
                 }
+                "RestartPreventExitStatus" => {
+                    for token in value.split_whitespace() {
+                        if let Ok(code) = token.parse::<i32>() {
+                            service_conf
+                                .restart_prevent_exit_status
+                                .exit_codes
+                                .push(code);
+                        }
+                    }
+                }
                 "RestartSec" => {
                     let trimmed = value.trim_end_matches('s');
                     if let Ok(secs) = trimmed.parse::<u64>() {
@@ -3141,6 +3151,18 @@ fn create_transient_unit(
                         let id = id.trim();
                         if !id.is_empty() {
                             target.push((id.to_owned(), data.to_owned()));
+                        }
+                    }
+                }
+                "ImportCredential" => {
+                    if value.is_empty() {
+                        service_conf.exec_config.import_credentials.clear();
+                    } else {
+                        for pattern in value.split_whitespace() {
+                            service_conf
+                                .exec_config
+                                .import_credentials
+                                .push(pattern.to_string());
                         }
                     }
                 }
