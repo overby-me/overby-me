@@ -919,6 +919,34 @@ impl Shell {
             return 1;
         }
 
+        // Check for incomplete comsub in assignment values
+        for assign in &cmd.assignments {
+            let incomplete_line = match &assign.value {
+                AssignValue::Scalar(w) => w.iter().find_map(|p| {
+                    if let crate::ast::WordPart::CommandSub(s) = p {
+                        s.strip_prefix("\x00INCOMPLETE_COMSUB:")
+                            .and_then(|n| n.parse::<usize>().ok())
+                    } else {
+                        None
+                    }
+                }),
+                _ => None,
+            };
+            if let Some(eof_line) = incomplete_line {
+                let name = self
+                    .vars
+                    .get("_BASH_SOURCE_FILE")
+                    .or_else(|| self.positional.first())
+                    .map(|s| s.as_str())
+                    .unwrap_or("bash");
+                eprintln!(
+                    "{}: line {}: unexpected EOF while looking for matching `)'",
+                    name, eof_line
+                );
+                return 2;
+            }
+        }
+
         // Handle assignments
         let saved_last_status = self.last_status;
         if !cmd.assignments.is_empty() {

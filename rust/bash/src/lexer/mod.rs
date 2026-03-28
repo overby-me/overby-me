@@ -2,7 +2,7 @@ mod dollar;
 mod heredoc;
 mod word;
 
-pub use dollar::{parse_dollar, warn_incomplete_comsub_in_pattern};
+pub use dollar::{parse_dollar, parse_dollar_with_warnings, warn_incomplete_comsub_in_pattern};
 pub use heredoc::parse_word_string;
 
 use word::read_param_word_impl;
@@ -67,6 +67,7 @@ pub struct LexerSaveState {
     pos: usize,
     pending_heredocs: Vec<HereDocPending>,
     heredoc_bodies_len: usize,
+    heredoc_eof_warnings_len: usize,
     line: usize,
     // Note: alias expansion state (expand_alias_next, expanding_aliases,
     // alias_end_markers) is NOT saved/restored because alias expansion
@@ -163,6 +164,7 @@ impl Lexer {
             pos: self.pos,
             pending_heredocs: self.pending_heredocs.clone(),
             heredoc_bodies_len: self.heredoc_bodies.len(),
+            heredoc_eof_warnings_len: self.heredoc_eof_warnings.len(),
             line: self.line,
         }
     }
@@ -171,6 +173,8 @@ impl Lexer {
         self.pos = saved.pos;
         self.pending_heredocs = saved.pending_heredocs;
         self.heredoc_bodies.truncate(saved.heredoc_bodies_len);
+        self.heredoc_eof_warnings
+            .truncate(saved.heredoc_eof_warnings_len);
         self.line = saved.line;
     }
 

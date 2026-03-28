@@ -139,11 +139,23 @@ impl Lexer {
                 }
             }
 
-            let word = if hd.quoted {
+            let mut word = if hd.quoted {
                 vec![WordPart::SingleQuoted(body)]
             } else {
                 parse_double_quoted_content(&body)
             };
+            // Fix up INCOMPLETE_COMSUB line numbers: offset by heredoc start line
+            // (since parse_dollar only sees body-relative chars without file context)
+            for part in &mut word {
+                if let WordPart::CommandSub(s) = part
+                    && let Some(rest) = s.strip_prefix("\x00INCOMPLETE_COMSUB:")
+                    && let Ok(body_line) = rest.parse::<usize>()
+                {
+                    // File line = start_line + 1 (body starts after <<) + body_eof_line
+                    let file_line = hd.start_line + 1 + body_line;
+                    *s = format!("\x00INCOMPLETE_COMSUB:{}", file_line);
+                }
+            }
             self.heredoc_bodies.push(word);
         }
     }

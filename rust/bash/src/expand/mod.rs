@@ -78,6 +78,7 @@ pub fn set_globskipdots(enabled: bool) {
     GLOBSKIPDOTS_ENABLED.with(|d| *d.borrow_mut() = enabled);
 }
 
+#[allow(dead_code)]
 pub fn get_script_name() -> String {
     SCRIPT_NAME.with(|f| f.borrow().clone())
 }
@@ -248,6 +249,15 @@ pub fn expand_word_nosplit(
         opt_flags,
     };
     let segments = expand_word_to_segments(word, &ctx, cmd_sub);
+    // Check for incomplete comsub marker before stripping \x00
+    for seg in &segments {
+        match seg {
+            Segment::Unquoted(t) | Segment::Quoted(t) if t.starts_with("\x00INCOMPLETE_COMSUB") => {
+                return t.clone();
+            }
+            _ => {}
+        }
+    }
     let result: String = segments
         .iter()
         .map(|s| match s {
@@ -357,7 +367,7 @@ fn expand_word_to_segments(word: &Word, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> Vec<
     // If any segment came from an incomplete comsub/funsub, suppress output
     let has_any_incomplete = segments.iter().any(|s| match s {
         Segment::Unquoted(t) | Segment::Quoted(t) => {
-            t == "\x00INCOMPLETE_COMSUB"
+            t.starts_with("\x00INCOMPLETE_COMSUB")
                 || t == "\x00SILENT_COMSUB"
                 || t.contains("\x00INCOMPLETE_FUNSUB")
         }
@@ -374,11 +384,23 @@ fn expand_word_to_segments(word: &Word, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> Vec<
         }
         // Check if it's a noisy (error) or silent suppression
         let is_error = segments.iter().any(|s| match s {
-            Segment::Unquoted(t) | Segment::Quoted(t) => t == "\x00INCOMPLETE_COMSUB",
+            Segment::Unquoted(t) | Segment::Quoted(t) => t.starts_with("\x00INCOMPLETE_COMSUB"),
             _ => false,
         });
         if is_error {
-            return vec![Segment::Unquoted("\x00INCOMPLETE_COMSUB".to_string())];
+            // Preserve the line info from the marker
+            let marker = segments
+                .iter()
+                .find_map(|s| match s {
+                    Segment::Unquoted(t) | Segment::Quoted(t)
+                        if t.starts_with("\x00INCOMPLETE_COMSUB") =>
+                    {
+                        Some(t.clone())
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| "\x00INCOMPLETE_COMSUB".to_string());
+            return vec![Segment::Unquoted(marker)];
         }
         // Silent — suppress with marker so interpreter can detect
         return vec![Segment::Unquoted("\x00SILENT_COMSUB".to_string())];
@@ -1075,6 +1097,15 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
 
 fn expand_word_nosplit_ctx(word: &Word, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
     let segments = expand_word_to_segments(word, ctx, cmd_sub);
+    // Check for incomplete comsub marker before stripping \x00
+    for seg in &segments {
+        match seg {
+            Segment::Unquoted(t) | Segment::Quoted(t) if t.starts_with("\x00INCOMPLETE_COMSUB") => {
+                return t.clone();
+            }
+            _ => {}
+        }
+    }
     let result: String = segments
         .iter()
         .map(|s| match s {

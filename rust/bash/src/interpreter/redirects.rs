@@ -302,6 +302,33 @@ impl Shell {
                         saved.push((fd, saved_fd));
                     }
 
+                    // Check for incomplete comsub in heredoc body
+                    let target_str = if let Some(marker_pos) =
+                        target_str.find("\x00INCOMPLETE_COMSUB:")
+                    {
+                        let after = &target_str[marker_pos + "\x00INCOMPLETE_COMSUB:".len()..];
+                        let file_line: usize = after
+                            .chars()
+                            .take_while(|c| c.is_ascii_digit())
+                            .collect::<String>()
+                            .parse()
+                            .unwrap_or(0);
+                        let name = self
+                            .vars
+                            .get("_BASH_SOURCE_FILE")
+                            .or_else(|| self.positional.first())
+                            .map(|s| s.as_str())
+                            .unwrap_or("bash");
+                        eprintln!(
+                            "{}: command substitution: line {}: unexpected EOF while looking for matching `)'",
+                            name, file_line
+                        );
+                        // Strip the marker, keep any content before it
+                        target_str[..marker_pos].to_string()
+                    } else {
+                        target_str
+                    };
+
                     // Use raw byte conversion for heredoc/herestring content
                     // so that chars like U+00CD (from $'\315') produce single bytes
                     let mut content_bytes = crate::builtins::string_to_raw_bytes(&target_str);

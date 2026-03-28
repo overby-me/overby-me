@@ -1,6 +1,24 @@
 use super::*;
 
 pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart {
+    parse_dollar_inner(chars, i, in_dquote, &mut Vec::new())
+}
+
+pub fn parse_dollar_with_warnings(
+    chars: &[char],
+    i: &mut usize,
+    in_dquote: bool,
+    warnings: &mut Vec<(usize, usize, String)>,
+) -> WordPart {
+    parse_dollar_inner(chars, i, in_dquote, warnings)
+}
+
+fn parse_dollar_inner(
+    chars: &[char],
+    i: &mut usize,
+    in_dquote: bool,
+    heredoc_eof_warnings: &mut Vec<(usize, usize, String)>,
+) -> WordPart {
     if *i >= chars.len() {
         return WordPart::Literal("$".to_string());
     }
@@ -380,7 +398,22 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                             if !delim.is_empty() {
                                 loop {
                                     if *i >= chars.len() {
-                                        break; // EOF
+                                        // EOF while reading heredoc in comsub — warn
+                                        // Use newline count (not +1) since we're at EOF past
+                                        // the last newline
+                                        let current_line =
+                                            chars.iter().filter(|&&c| c == '\n').count();
+                                        let heredoc_start_line = chars[..hd_start]
+                                            .iter()
+                                            .filter(|&&c| c == '\n')
+                                            .count()
+                                            + 1;
+                                        heredoc_eof_warnings.push((
+                                            current_line,
+                                            heredoc_start_line,
+                                            delim.clone(),
+                                        ));
+                                        break;
                                     }
                                     // Read one line
                                     let line_start = *i;
@@ -415,18 +448,13 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                                             .filter(|&&c| c == '\n')
                                             .count()
                                             + 1;
-                                        // Print directly to stderr (not via COMSUB_HEREDOC_WARNINGS
-                                        // to avoid duplication)
-                                        let script = crate::expand::get_script_name();
-                                        let name = if script.is_empty() {
-                                            "bash".to_string()
-                                        } else {
-                                            script
-                                        };
-                                        eprintln!(
-                                            "{}: line {}: warning: here-document at line {} delimited by end-of-file (wanted `{}')",
-                                            name, current_line, heredoc_start_line, delim
-                                        );
+                                        // Collect warning for the lexer to emit (not eprintln!
+                                        // directly, to avoid duplication on parser backtrack)
+                                        heredoc_eof_warnings.push((
+                                            current_line,
+                                            heredoc_start_line,
+                                            delim.clone(),
+                                        ));
                                         // Put delimiter on its own line in the content
                                         cmd.push_str(&delim);
                                         cmd.push('\n');
@@ -507,7 +535,9 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                 }
                 if depth > 0 {
                     // Incomplete comsub — signal error via special marker
-                    WordPart::CommandSub("\x00INCOMPLETE_COMSUB".to_string())
+                    // Embed the EOF line number for error reporting
+                    let eof_line = chars.iter().filter(|&&c| c == '\n').count() + 1;
+                    WordPart::CommandSub(format!("\x00INCOMPLETE_COMSUB:{}", eof_line))
                 } else {
                     WordPart::CommandSub(cmd)
                 }
@@ -654,7 +684,7 @@ pub fn parse_dollar(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart 
                                 dq_parts.push(WordPart::Literal(std::mem::take(&mut dq_lit)));
                             }
                             *i += 1;
-                            dq_parts.push(parse_dollar(chars, i, true));
+                            dq_parts.push(parse_dollar_inner(chars, i, true, heredoc_eof_warnings));
                         }
                     }
                     ch => {

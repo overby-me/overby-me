@@ -374,7 +374,12 @@ impl Lexer {
                                     }
                                     self.advance();
                                     let input_clone = self.input.clone();
-                                    let part = parse_dollar(&input_clone, &mut self.pos, true);
+                                    let part = parse_dollar_with_warnings(
+                                        &input_clone,
+                                        &mut self.pos,
+                                        true,
+                                        &mut self.heredoc_eof_warnings,
+                                    );
                                     dq_parts.push(part);
                                 }
                             }
@@ -466,7 +471,12 @@ impl Lexer {
                                     }
                                     self.advance();
                                     let input_clone = self.input.clone();
-                                    let part = parse_dollar(&input_clone, &mut self.pos, true);
+                                    let part = parse_dollar_with_warnings(
+                                        &input_clone,
+                                        &mut self.pos,
+                                        true,
+                                        &mut self.heredoc_eof_warnings,
+                                    );
                                     dq_parts.push(part);
                                 }
                                 Some('`') => {
@@ -700,7 +710,12 @@ impl Lexer {
                         parts.push(WordPart::SingleQuoted(s));
                     } else {
                         let input_clone = self.input.clone();
-                        let part = parse_dollar(&input_clone, &mut self.pos, false);
+                        let part = parse_dollar_with_warnings(
+                            &input_clone,
+                            &mut self.pos,
+                            false,
+                            &mut self.heredoc_eof_warnings,
+                        );
                         parts.push(part);
                     }
                 }
