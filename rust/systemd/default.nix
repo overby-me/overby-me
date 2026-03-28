@@ -9973,6 +9973,75 @@
           RUEOF
           chmod +x TEST-74-AUX-UTILS.restart-usec.sh
 
+          # systemctl show GID/UID properties
+          cat > TEST-74-AUX-UTILS.uid-gid-props.sh << 'UGEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "ExecMainPID property is numeric"
+          PID="$(systemctl show -P MainPID systemd-journald.service)"
+          [[ "$PID" -ge 0 ]]
+
+          : "UID property exists for service"
+          systemctl show -P UID systemd-journald.service > /dev/null
+
+          : "GID property exists for service"
+          systemctl show -P GID systemd-journald.service > /dev/null
+          UGEOF
+          chmod +x TEST-74-AUX-UTILS.uid-gid-props.sh
+
+          # systemd-analyze timespan
+          cat > TEST-74-AUX-UTILS.analyze-timespan.sh << 'ATEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-analyze timespan parses time strings"
+          OUT="$(systemd-analyze timespan "5s")"
+          echo "$OUT" | grep -q "5s"
+
+          : "systemd-analyze timespan handles complex strings"
+          OUT="$(systemd-analyze timespan "1h 30min")"
+          echo "$OUT" | grep -q "1h 30min"
+
+          : "systemd-analyze timespan handles microseconds"
+          OUT="$(systemd-analyze timespan "500ms")"
+          echo "$OUT" | grep -q "500ms"
+          ATEOF
+          chmod +x TEST-74-AUX-UTILS.analyze-timespan.sh
+
+          # systemctl start/stop lifecycle
+          cat > TEST-74-AUX-UTILS.start-stop-lifecycle.sh << 'SSLEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "Full start/stop lifecycle"
+          UNIT="lifecycle-$RANDOM"
+          cat > "/run/systemd/system/$UNIT.service" << UEOF
+          [Unit]
+          Description=Lifecycle test
+          [Service]
+          Type=exec
+          ExecStart=sleep 300
+          UEOF
+          systemctl daemon-reload
+
+          : "Start the service"
+          systemctl start "$UNIT.service"
+          sleep 1
+          systemctl is-active "$UNIT.service"
+
+          : "Stop the service"
+          systemctl stop "$UNIT.service"
+          (! systemctl is-active "$UNIT.service")
+
+          rm -f "/run/systemd/system/$UNIT.service"
+          systemctl daemon-reload
+          SSLEOF
+          chmod +x TEST-74-AUX-UTILS.start-stop-lifecycle.sh
+
           rm -f TEST-74-AUX-UTILS.busctl.sh \
                TEST-74-AUX-UTILS.capsule.sh \
                TEST-74-AUX-UTILS.firstboot.sh \
