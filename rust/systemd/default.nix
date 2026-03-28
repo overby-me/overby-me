@@ -557,6 +557,16 @@
                            [[ "$(stat -c %t:%T /dev/rtc0)" == "$(stat -c %t:%T /dev/null)" ]];
                          fi'
 
+          : "PrivateNetwork= tests"
+          systemd-run --wait --pipe -p PrivateNetwork=yes \
+              bash -xec '(! ip link show eth0 2>/dev/null); ip link show lo'
+
+          : "ProtectHostname= tests"
+          ORIG_HOSTNAME="$(hostname)"
+          systemd-run --wait --pipe -p ProtectHostname=yes \
+              bash -xec 'hostname test-change 2>/dev/null && [[ "$(hostname)" != "test-change" ]] || true'
+          [[ "$(hostname)" == "$ORIG_HOSTNAME" ]]
+
           : "LockPersonality= tests"
           systemd-run --wait --pipe -p LockPersonality=yes -p NoNewPrivileges=yes \
               bash -xec '[[ "$(uname -m)" != "" ]]'
