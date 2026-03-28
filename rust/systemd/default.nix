@@ -9207,6 +9207,83 @@
           IIEOF
           chmod +x TEST-74-AUX-UTILS.invocation-id.sh
 
+          # systemctl kill signal delivery
+          cat > TEST-74-AUX-UTILS.kill-signal.sh << 'KSEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl kill sends signal to service"
+          UNIT="kill-test-$RANDOM"
+          systemd-run --unit="$UNIT" sleep 300
+          sleep 1
+          systemctl is-active "$UNIT.service"
+          systemctl kill "$UNIT.service"
+          sleep 1
+          (! systemctl is-active "$UNIT.service")
+          systemctl reset-failed "$UNIT.service" 2>/dev/null || true
+          KSEOF
+          chmod +x TEST-74-AUX-UTILS.kill-signal.sh
+
+          # systemctl show for timer properties
+          cat > TEST-74-AUX-UTILS.timer-show-props.sh << 'TPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl show for transient timer"
+          UNIT="timer-show-$RANDOM"
+          systemd-run --on-active=999h --unit="$UNIT" true
+          systemctl show "$UNIT.timer" -P ActiveState | grep -q "active"
+          systemctl show "$UNIT.timer" -P Id | grep -q "$UNIT.timer"
+          systemctl stop "$UNIT.timer"
+          TPEOF
+          chmod +x TEST-74-AUX-UTILS.timer-show-props.sh
+
+          # systemctl show LoadState
+          cat > TEST-74-AUX-UTILS.load-state.sh << 'LSEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "LoadState=loaded for existing unit"
+          LS="$(systemctl show -P LoadState systemd-journald.service)"
+          [[ "$LS" == "loaded" ]]
+
+          : "LoadState=not-found for nonexistent unit"
+          LS="$(systemctl show -P LoadState nonexistent-$RANDOM.service)"
+          [[ "$LS" == "not-found" ]]
+          LSEOF
+          chmod +x TEST-74-AUX-UTILS.load-state.sh
+
+          # systemd-run with --property=WorkingDirectory
+          cat > TEST-74-AUX-UTILS.run-workdir.sh << 'RWEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-run with WorkingDirectory"
+          UNIT="run-wd-$RANDOM"
+          systemd-run --wait --unit="$UNIT" \
+              -p WorkingDirectory=/tmp \
+              bash -c 'pwd > /tmp/workdir-result'
+          [[ "$(cat /tmp/workdir-result)" == "/tmp" ]]
+          rm -f /tmp/workdir-result
+          RWEOF
+          chmod +x TEST-74-AUX-UTILS.run-workdir.sh
+
+          # systemctl show for socket units
+          cat > TEST-74-AUX-UTILS.show-socket.sh << 'SSEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl show for systemd-journald.socket"
+          systemctl show systemd-journald.socket -P ActiveState > /dev/null
+          systemctl show systemd-journald.socket -P Id | grep -q "systemd-journald.socket"
+          SSEOF
+          chmod +x TEST-74-AUX-UTILS.show-socket.sh
+
           rm -f TEST-74-AUX-UTILS.busctl.sh \
                TEST-74-AUX-UTILS.capsule.sh \
                TEST-74-AUX-UTILS.firstboot.sh \
