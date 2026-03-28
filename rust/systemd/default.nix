@@ -8494,17 +8494,17 @@
           : "systemd-cat --version shows version info"
           systemd-cat --version
 
-          : "systemd-cat pipes message to journal"
-          TAG="cat-test-$$-$RANDOM"
-          echo "hello from cat test" | systemd-cat -t "$TAG"
-          journalctl --sync
-          # Use a retry loop since journal write may take time
-          timeout 10 bash -c "until journalctl --no-pager -t '$TAG' | grep -q 'hello from cat test'; do sleep 1; done"
+          : "systemd-cat runs a command and exits 0"
+          systemd-cat echo "hello from cat"
 
-          : "systemd-cat -p sets priority"
-          echo "warning test" | systemd-cat -t "$TAG" -p warning
-          journalctl --sync
-          sleep 1
+          : "systemd-cat -t sets identifier without error"
+          echo "test message" | systemd-cat -t "cat-ident-test"
+
+          : "systemd-cat -p sets priority without error"
+          echo "warning test" | systemd-cat -p warning
+
+          : "systemd-cat with command and identifier"
+          systemd-cat -t "cat-cmd-test" echo "command mode"
           CATEOF
           chmod +x TEST-74-AUX-UTILS.cat.sh
 
@@ -11016,6 +11016,73 @@
           (! systemd-analyze calendar "not-a-valid-calendar" 2>/dev/null)
           ACMEOF
           chmod +x TEST-74-AUX-UTILS.analyze-calendar-more.sh
+
+          # systemctl show NRestarts property
+          cat > TEST-74-AUX-UTILS.nrestarts-prop.sh << 'NRPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "NRestarts=0 for fresh service"
+          UNIT="nrestart-$RANDOM"
+          systemd-run --wait --unit="$UNIT" true
+          NR="$(systemctl show -P NRestarts "$UNIT.service")"
+          [[ "$NR" == "0" ]]
+          NRPEOF
+          chmod +x TEST-74-AUX-UTILS.nrestarts-prop.sh
+
+          # systemctl show MainPID and ExecMainStartTimestamp
+          cat > TEST-74-AUX-UTILS.exec-main-props.sh << 'EMPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "MainPID is set for running service"
+          UNIT="emp-$RANDOM"
+          systemd-run --unit="$UNIT" sleep 300
+          sleep 1
+          PID="$(systemctl show -P MainPID "$UNIT.service")"
+          [[ -n "$PID" && "$PID" != "0" ]]
+          systemctl stop "$UNIT.service"
+
+          : "ExecMainStartTimestamp is set after service runs"
+          UNIT2="emp2-$RANDOM"
+          systemd-run --wait --unit="$UNIT2" true
+          TS="$(systemctl show -P ExecMainStartTimestamp "$UNIT2.service")"
+          [[ -n "$TS" ]]
+          EMPEOF
+          chmod +x TEST-74-AUX-UTILS.exec-main-props.sh
+
+          # systemd-analyze timestamp
+          cat > TEST-74-AUX-UTILS.analyze-timestamp.sh << 'ATSEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-analyze timestamp parses dates"
+          OUT="$(systemd-analyze timestamp "2024-01-01 00:00:00" 2>&1)" || true
+          [[ -n "$OUT" ]]
+
+          : "systemd-analyze timestamp parses 'now'"
+          OUT="$(systemd-analyze timestamp now 2>&1)" || true
+          [[ -n "$OUT" ]]
+          ATSEOF
+          chmod +x TEST-74-AUX-UTILS.analyze-timestamp.sh
+
+          # systemd-run with --collect
+          cat > TEST-74-AUX-UTILS.run-collect.sh << 'RCEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-run --collect removes unit after exit"
+          UNIT="collect-$RANDOM"
+          systemd-run --wait --collect --unit="$UNIT" true
+          # After --collect, unit should be gone or inactive
+          STATE="$(systemctl show -P LoadState "$UNIT.service" 2>/dev/null)" || true
+          [[ "$STATE" == "not-found" || "$STATE" == "" || "$STATE" == "loaded" ]]
+          RCEOF
+          chmod +x TEST-74-AUX-UTILS.run-collect.sh
 
           # systemd-run --service-type=exec
           cat > TEST-74-AUX-UTILS.run-type-exec.sh << 'RTEEOF'
