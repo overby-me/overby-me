@@ -9097,6 +9097,116 @@
           IAEOF
           chmod +x TEST-74-AUX-UTILS.is-active-states.sh
 
+          # systemctl enable/disable for generated units
+          cat > TEST-74-AUX-UTILS.enable-disable.sh << 'ENEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl enable creates symlink"
+          UNIT="en-test-$RANDOM"
+          cat > "/run/systemd/system/$UNIT.service" << UEOF
+          [Unit]
+          Description=Enable test
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          [Install]
+          WantedBy=multi-user.target
+          UEOF
+          systemctl daemon-reload
+          systemctl enable "$UNIT.service"
+          systemctl is-enabled "$UNIT.service"
+          systemctl disable "$UNIT.service"
+          (! systemctl is-enabled "$UNIT.service" 2>/dev/null) || true
+          rm -f "/run/systemd/system/$UNIT.service"
+          systemctl daemon-reload
+          ENEOF
+          chmod +x TEST-74-AUX-UTILS.enable-disable.sh
+
+          # systemctl mask/unmask
+          cat > TEST-74-AUX-UTILS.mask-ops.sh << 'MKEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl mask creates /dev/null symlink"
+          UNIT="mask-ops-$RANDOM"
+          cat > "/run/systemd/system/$UNIT.service" << UEOF
+          [Unit]
+          Description=Mask test
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          UEOF
+          systemctl daemon-reload
+          systemctl mask "$UNIT.service"
+          STATE="$(systemctl is-enabled "$UNIT.service" 2>&1 || true)"
+          [[ "$STATE" == "masked" || "$STATE" == *"masked"* ]]
+          systemctl unmask "$UNIT.service"
+          rm -f "/run/systemd/system/$UNIT.service"
+          systemctl daemon-reload
+          MKEOF
+          chmod +x TEST-74-AUX-UTILS.mask-ops.sh
+
+          # systemd-run with --description
+          cat > TEST-74-AUX-UTILS.run-description.sh << 'RDEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-run --description sets unit description"
+          UNIT="run-desc-$RANDOM"
+          systemd-run --unit="$UNIT" --description="My test description" --remain-after-exit true
+          sleep 1
+          DESC="$(systemctl show -P Description "$UNIT.service")"
+          [[ "$DESC" == "My test description" ]]
+          systemctl stop "$UNIT.service"
+          RDEOF
+          chmod +x TEST-74-AUX-UTILS.run-description.sh
+
+          # systemctl show for PID properties
+          cat > TEST-74-AUX-UTILS.show-pid-props.sh << 'PPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl show MainPID for running service"
+          UNIT="pid-test-$RANDOM"
+          systemd-run --unit="$UNIT" sleep 300
+          sleep 1
+          PID="$(systemctl show -P MainPID "$UNIT.service")"
+          [[ "$PID" -gt 0 ]]
+          kill -0 "$PID"
+          systemctl stop "$UNIT.service"
+
+          : "systemctl show ExecMainPID for completed service"
+          UNIT2="pid-done-$RANDOM"
+          systemd-run --wait --unit="$UNIT2" true
+          # After completion, MainPID should be 0
+          PID="$(systemctl show -P MainPID "$UNIT2.service")"
+          [[ "$PID" -eq 0 ]]
+          PPEOF
+          chmod +x TEST-74-AUX-UTILS.show-pid-props.sh
+
+          # systemctl show InvocationID
+          cat > TEST-74-AUX-UTILS.invocation-id.sh << 'IIEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl show InvocationID is non-empty for active service"
+          INV="$(systemctl show -P InvocationID systemd-journald.service)"
+          [[ -n "$INV" ]]
+
+          : "InvocationID changes on restart"
+          UNIT="inv-test-$RANDOM"
+          systemd-run --wait --unit="$UNIT" true
+          INV1="$(systemctl show -P InvocationID "$UNIT.service")"
+          systemd-run --wait --unit="$UNIT" true 2>/dev/null || true
+          IIEOF
+          chmod +x TEST-74-AUX-UTILS.invocation-id.sh
+
           rm -f TEST-74-AUX-UTILS.busctl.sh \
                TEST-74-AUX-UTILS.capsule.sh \
                TEST-74-AUX-UTILS.firstboot.sh \
