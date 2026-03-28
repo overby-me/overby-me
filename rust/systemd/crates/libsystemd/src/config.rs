@@ -32,6 +32,7 @@ pub struct Config {
 /// Well-known systemd unit search directories (system instance), in priority
 /// order.  This matches the paths systemd itself searches.
 const SYSTEM_UNIT_DIRS: &[&str] = &[
+    "/run/systemd/transient",
     "/etc/systemd/system",
     "/run/systemd/system",
     "/usr/local/lib/systemd/system",
