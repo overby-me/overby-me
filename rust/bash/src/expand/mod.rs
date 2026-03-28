@@ -970,7 +970,10 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                         }
                         // Try to run inline using the registered shell runner
                         // (preserves error prefix and signal handling)
+                        // SIGPIPE stays as SIG_IGN so echo detects EPIPE and reports it
                         if let Some(status) = run_procsub_inline(cmd) {
+                            std::io::Write::flush(&mut std::io::stdout()).ok();
+                            std::io::Write::flush(&mut std::io::stderr()).ok();
                             std::process::exit(status);
                         }
                         // Fallback: exec a new shell
