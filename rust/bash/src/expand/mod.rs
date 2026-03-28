@@ -1753,6 +1753,101 @@ fn split_brace_alternatives(s: &str) -> Vec<String> {
     result
 }
 
+/// Expand a pattern containing ** (globstar) by recursively walking directories
+fn globstar_expand(pattern: &str) -> Vec<String> {
+    let dotglob = DOTGLOB_ENABLED.with(|d| *d.borrow());
+    let skipdots = GLOBSKIPDOTS_ENABLED.with(|d| *d.borrow());
+
+    // Split pattern around **
+    // Common patterns: **, **/*.o, dir/**, dir/**/*.o, **/name
+    let mut results = Vec::new();
+
+    // Collect all files recursively from the appropriate directory
+    fn walk_dir(
+        dir: &std::path::Path,
+        prefix: &str,
+        dotglob: bool,
+        skipdots: bool,
+    ) -> Vec<String> {
+        let mut entries = Vec::new();
+        if let Ok(rd) = std::fs::read_dir(dir) {
+            for entry in rd.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.starts_with('.') && !dotglob {
+                    continue;
+                }
+                if (name == "." || name == "..") && skipdots {
+                    continue;
+                }
+                let path = if prefix.is_empty() {
+                    name.clone()
+                } else {
+                    format!("{}/{}", prefix, name)
+                };
+                entries.push(path.clone());
+                if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                    // Add directory with trailing /
+                    entries.push(format!("{}/", path));
+                    // Recurse into subdirectory
+                    entries.extend(walk_dir(&entry.path(), &path, dotglob, skipdots));
+                }
+            }
+        }
+        entries
+    }
+
+    // Determine the base directory and the suffix pattern after **
+    let parts: Vec<&str> = pattern.splitn(2, "**").collect();
+    let base = parts[0].trim_end_matches('/');
+    let suffix = if parts.len() > 1 {
+        parts[1].trim_start_matches('/')
+    } else {
+        ""
+    };
+
+    let base_dir = if base.is_empty() {
+        std::env::current_dir().unwrap_or_default()
+    } else {
+        std::path::PathBuf::from(base)
+    };
+
+    let all_entries = walk_dir(&base_dir, base, dotglob, skipdots);
+
+    if suffix.is_empty() {
+        // ** alone or dir/**: include the base dir/ entry if base is not empty
+        if !base.is_empty() && base_dir.is_dir() {
+            results.push(format!("{}/", base));
+        }
+        results.extend(all_entries);
+    } else {
+        // **/suffix: filter entries matching the suffix pattern
+        for entry in &all_entries {
+            let name = entry
+                .rsplit('/')
+                .next()
+                .unwrap_or(entry);
+            if crate::interpreter::commands::case_pattern_match(name, suffix) {
+                results.push(entry.clone());
+            }
+        }
+    }
+
+    // Keep directory entries with trailing slash for dir/** patterns,
+    // but remove trailing slashes from subdirectory entries
+    results
+        .into_iter()
+        .filter(|s| {
+            // Keep entries like "dir/" (explicit base), filter out sub/
+            if s.ends_with('/') {
+                // Keep the base dir/ entry
+                s.trim_end_matches('/') == base
+            } else {
+                true
+            }
+        })
+        .collect()
+}
+
 fn glob_expand(field: &str) -> Vec<String> {
     // Only glob if there are unescaped (unquoted) glob metacharacters
     if has_glob_chars(field) {
@@ -1914,6 +2009,15 @@ fn glob_expand(field: &str) -> Vec<String> {
                     }
                     Err(_) => vec![remove_quotes(field)],
                 }
+            }
+        } else if pattern.contains("**") {
+            // Globstar: ** matches recursively
+            let mut results = globstar_expand(&pattern);
+            if results.is_empty() {
+                vec![remove_quotes(field)]
+            } else {
+                results.sort();
+                results
             }
         } else {
             let dotglob = DOTGLOB_ENABLED.with(|d| *d.borrow());
