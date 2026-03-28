@@ -1722,13 +1722,22 @@
 
           runtime_max_sec=5
 
+          : "RuntimeMaxSec on service unit"
           systemd-run \
               --property=RuntimeMaxSec=''${runtime_max_sec}s \
               -u runtime-max-sec-test-1.service \
               sh -c "while true; do sleep 1; done"
           wait_for_timeout runtime-max-sec-test-1.service $((runtime_max_sec + 10))
 
-          echo "RuntimeMaxSec enforcement test passed"
+          : "RuntimeMaxSec on scope unit"
+          systemd-run \
+              --property=RuntimeMaxSec=''${runtime_max_sec}s \
+              --scope \
+              -u runtime-max-sec-test-2.scope \
+              sh -c "while true; do sleep 1; done" &
+          wait_for_timeout runtime-max-sec-test-2.scope $((runtime_max_sec + 10))
+
+          echo "RuntimeMaxSec enforcement tests passed"
           touch /testok
           TESTEOF
           chmod +x TEST-16-EXTEND-TIMEOUT.sh
