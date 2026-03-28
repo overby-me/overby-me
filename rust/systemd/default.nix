@@ -1262,6 +1262,58 @@
                          test ! -e /root/home-marker'
           rm -f /root/home-marker
 
+          : "ProtectControlGroups=yes makes cgroup fs read-only"
+          systemd-run --wait --pipe -p ProtectControlGroups=yes \
+              bash -xec '(! mkdir /sys/fs/cgroup/test-readonly 2>/dev/null)'
+
+          : "ProtectKernelModules=yes denies module loading"
+          systemd-run --wait --pipe -p ProtectKernelModules=yes \
+              bash -xec '(! ls /usr/lib/modules 2>/dev/null) || true'
+
+          : "ProtectKernelLogs=yes hides kernel log"
+          systemd-run --wait --pipe -p ProtectKernelLogs=yes \
+              bash -xec '[[ "$(stat -c %t:%T /dev/kmsg)" == "$(stat -c %t:%T /dev/null)" ]]'
+
+          : "ProtectKernelTunables=yes makes sysfs read-only"
+          systemd-run --wait --pipe -p ProtectKernelTunables=yes -p PrivateMounts=yes \
+              bash -xec '(! sysctl -w kernel.domainname=test-tunables 2>/dev/null)'
+
+          : "RuntimeDirectoryPreserve=yes keeps directory after service stop"
+          UNIT="rtdir-preserve-$RANDOM"
+          systemd-run --unit="$UNIT" -p RuntimeDirectory=test-preserve \
+              -p RuntimeDirectoryPreserve=yes -p RemainAfterExit=yes -p Type=oneshot \
+              bash -xec 'touch /run/test-preserve/marker'
+          sleep 1
+          systemctl stop "$UNIT.service"
+          sleep 1
+          [[ -f /run/test-preserve/marker ]]
+          rm -rf /run/test-preserve
+
+          : "RuntimeDirectoryPreserve=no removes directory after service stop"
+          UNIT="rtdir-nopreserve-$RANDOM"
+          systemd-run --unit="$UNIT" -p RuntimeDirectory=test-nopreserve \
+              -p RuntimeDirectoryPreserve=no -p RemainAfterExit=yes -p Type=oneshot \
+              bash -xec 'touch /run/test-nopreserve/marker'
+          sleep 1
+          systemctl stop "$UNIT.service"
+          sleep 1
+          [[ ! -d /run/test-nopreserve ]]
+
+          : "BindPaths= makes host path available inside service"
+          mkdir -p /tmp/bind-src
+          echo "bind-data" > /tmp/bind-src/file
+          systemd-run --wait --pipe -p BindPaths=/tmp/bind-src:/tmp/bind-dst \
+              bash -xec '[[ "$(cat /tmp/bind-dst/file)" == "bind-data" ]]'
+          rm -rf /tmp/bind-src
+
+          : "BindReadOnlyPaths= makes path read-only inside service"
+          mkdir -p /tmp/bind-ro-src
+          echo "ro-data" > /tmp/bind-ro-src/file
+          systemd-run --wait --pipe -p BindReadOnlyPaths=/tmp/bind-ro-src:/tmp/bind-ro-dst \
+              bash -xec '[[ "$(cat /tmp/bind-ro-dst/file)" == "ro-data" ]];
+                         (! touch /tmp/bind-ro-dst/new-file 2>/dev/null)'
+          rm -rf /tmp/bind-ro-src
+
           : "Error handling for clean-up codepaths"
           (! systemd-run --wait --pipe false)
           TESTEOF
