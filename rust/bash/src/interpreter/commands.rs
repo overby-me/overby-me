@@ -281,12 +281,7 @@ impl Shell {
             *p.borrow_mut() = self.error_prefix();
         });
         // Set glob options for expansion
-        crate::expand::set_dotglob(
-            self.shopt_options
-                .get("dotglob")
-                .copied()
-                .unwrap_or(false),
-        );
+        crate::expand::set_dotglob(self.shopt_options.get("dotglob").copied().unwrap_or(false));
         crate::expand::set_globskipdots(
             self.shopt_options
                 .get("globskipdots")
@@ -382,12 +377,7 @@ impl Shell {
     pub fn expand_word_single(&mut self, word: &Word) -> String {
         self.apply_assign_defaults(word);
         let word = self.eval_arith_in_word(word);
-        crate::expand::set_dotglob(
-            self.shopt_options
-                .get("dotglob")
-                .copied()
-                .unwrap_or(false),
-        );
+        crate::expand::set_dotglob(self.shopt_options.get("dotglob").copied().unwrap_or(false));
         crate::expand::set_globskipdots(
             self.shopt_options
                 .get("globskipdots")
@@ -2062,8 +2052,7 @@ impl Shell {
             && self.in_preparsed_program
         {
             let old = self.vars.get("LINENO").cloned();
-            self.vars
-                .insert("LINENO".to_string(), end_line.to_string());
+            self.vars.insert("LINENO".to_string(), end_line.to_string());
             old
         } else {
             None

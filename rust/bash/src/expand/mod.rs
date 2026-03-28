@@ -971,10 +971,10 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                 let w_raw = pipe_w.as_raw_fd();
                 // Move procsub pipe fds to high numbers (>=10) to avoid conflicts
                 // with user-requested fds like `exec 3< <(cmd)`
-                let r_fd = nix::fcntl::fcntl(r_raw, nix::fcntl::FcntlArg::F_DUPFD(10))
-                    .unwrap_or(r_raw);
-                let w_fd = nix::fcntl::fcntl(w_raw, nix::fcntl::FcntlArg::F_DUPFD(10))
-                    .unwrap_or(w_raw);
+                let r_fd =
+                    nix::fcntl::fcntl(r_raw, nix::fcntl::FcntlArg::F_DUPFD(10)).unwrap_or(r_raw);
+                let w_fd =
+                    nix::fcntl::fcntl(w_raw, nix::fcntl::FcntlArg::F_DUPFD(10)).unwrap_or(w_raw);
                 if r_fd != r_raw {
                     nix::unistd::close(r_raw).ok();
                 }
@@ -1119,8 +1119,13 @@ pub use arithmetic::eval_arith_full;
 /// Uses \x00 as escape prefix (cannot appear in normal shell text).
 fn quote_glob_chars(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
-    for ch in s.chars() {
+    let chars: Vec<char> = s.chars().collect();
+    for (i, &ch) in chars.iter().enumerate() {
         if matches!(ch, '*' | '?' | '[' | ']' | '{' | '}' | ',' | '\\') {
+            out.push('\x00');
+        }
+        // Also quote extglob operators (@+!*?) before ( to prevent glob expansion
+        if matches!(ch, '@' | '+' | '!') && i + 1 < chars.len() && chars[i + 1] == '(' {
             out.push('\x00');
         }
         out.push(ch);
@@ -1776,9 +1781,7 @@ fn glob_expand(field: &str) -> Vec<String> {
             let mut found = false;
             // Check for balanced extglob patterns (parens AND brackets must be balanced)
             for i in 0..pb.len().saturating_sub(1) {
-                if pb[i + 1] == b'('
-                    && matches!(pb[i], b'+' | b'@' | b'?' | b'!' | b'*')
-                {
+                if pb[i + 1] == b'(' && matches!(pb[i], b'+' | b'@' | b'?' | b'!' | b'*') {
                     let mut depth = 1;
                     let mut j = i + 2;
                     let mut bracket_depth = 0i32;

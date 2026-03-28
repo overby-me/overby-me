@@ -431,20 +431,18 @@ pub fn word_to_string(word: &Word) -> String {
                 s.push_str(&expr.name);
                 s.push('}');
             }
-            WordPart::ProcessSub(kind, cmd) => {
-                match kind {
-                    ProcessSubKind::Input => {
-                        s.push_str("<(");
-                        s.push_str(cmd);
-                        s.push(')');
-                    }
-                    ProcessSubKind::Output => {
-                        s.push_str(">(");
-                        s.push_str(cmd);
-                        s.push(')');
-                    }
+            WordPart::ProcessSub(kind, cmd) => match kind {
+                ProcessSubKind::Input => {
+                    s.push_str("<(");
+                    s.push_str(cmd);
+                    s.push(')');
                 }
-            }
+                ProcessSubKind::Output => {
+                    s.push_str(">(");
+                    s.push_str(cmd);
+                    s.push(')');
+                }
+            },
             _ => {}
         }
     }

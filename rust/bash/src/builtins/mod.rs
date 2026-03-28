@@ -40,9 +40,7 @@ fn program_has_incomplete_funsub(program: &Program) -> bool {
             }
             Command::FunctionDef {
                 body, redirections, ..
-            } => {
-                redirections.iter().any(|r| word_check(&r.target)) || compound_check(body)
-            }
+            } => redirections.iter().any(|r| word_check(&r.target)) || compound_check(body),
             Command::Coproc(_, inner) => cmd_check(inner),
         }
     }
