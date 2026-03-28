@@ -5639,6 +5639,126 @@
           RAEOF
                     chmod +x TEST-23-UNIT-FILE.remain-after-exit.sh
 
+                    # Extended conditions test (more ConditionXxx= types)
+                    cat > TEST-23-UNIT-FILE.conditions-extended.sh << 'CEEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              rm -f /run/systemd/system/cond-ext-test.service
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "ConditionFileIsExecutable= works"
+          cat > /run/systemd/system/cond-ext-test.service << EOF
+          [Unit]
+          ConditionFileIsExecutable=/bin/sh
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          EOF
+          systemctl daemon-reload
+          systemctl start cond-ext-test.service
+
+          : "ConditionFileIsExecutable= blocks non-executable"
+          cat > /run/systemd/system/cond-ext-test.service << EOF
+          [Unit]
+          ConditionFileIsExecutable=/etc/hostname
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          EOF
+          systemctl daemon-reload
+          (! systemctl start cond-ext-test.service) || \
+              [[ "$(systemctl show -P ActiveState cond-ext-test.service)" == "inactive" ]]
+
+          : "ConditionDirectoryNotEmpty= works"
+          cat > /run/systemd/system/cond-ext-test.service << EOF
+          [Unit]
+          ConditionDirectoryNotEmpty=/etc
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          EOF
+          systemctl daemon-reload
+          systemctl start cond-ext-test.service
+
+          : "ConditionKernelVersion= works"
+          cat > /run/systemd/system/cond-ext-test.service << EOF
+          [Unit]
+          ConditionKernelVersion=>1.0
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          EOF
+          systemctl daemon-reload
+          systemctl start cond-ext-test.service
+
+          : "ConditionVirtualization= works in VM"
+          cat > /run/systemd/system/cond-ext-test.service << EOF
+          [Unit]
+          ConditionVirtualization=yes
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          EOF
+          systemctl daemon-reload
+          systemctl start cond-ext-test.service
+          CEEOF
+                    chmod +x TEST-23-UNIT-FILE.conditions-extended.sh
+
+                    # Multiple After/Before dependencies test
+                    cat > TEST-23-UNIT-FILE.multi-deps.sh << 'MDEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              systemctl stop multi-dep-a.service multi-dep-b.service multi-dep-main.service 2>/dev/null
+              rm -f /run/systemd/system/multi-dep-a.service /run/systemd/system/multi-dep-b.service /run/systemd/system/multi-dep-main.service
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "Requires= with multiple dependencies"
+          cat > /run/systemd/system/multi-dep-a.service << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          RemainAfterExit=yes
+          EOF
+          cat > /run/systemd/system/multi-dep-b.service << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          RemainAfterExit=yes
+          EOF
+          cat > /run/systemd/system/multi-dep-main.service << EOF
+          [Unit]
+          Requires=multi-dep-a.service multi-dep-b.service
+          After=multi-dep-a.service multi-dep-b.service
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          RemainAfterExit=yes
+          EOF
+          systemctl daemon-reload
+          systemctl start multi-dep-main.service
+          # All three should be active
+          [[ "$(systemctl show -P ActiveState multi-dep-a.service)" == "active" ]]
+          [[ "$(systemctl show -P ActiveState multi-dep-b.service)" == "active" ]]
+          [[ "$(systemctl show -P ActiveState multi-dep-main.service)" == "active" ]]
+          MDEOF
+                    chmod +x TEST-23-UNIT-FILE.multi-deps.sh
+
                     # Slice= placement test
                     cat > TEST-23-UNIT-FILE.slice-placement.sh << 'SLEOF'
           #!/usr/bin/env bash
