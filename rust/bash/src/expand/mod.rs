@@ -1817,14 +1817,16 @@ fn glob_expand(field: &str) -> Vec<String> {
                 if let Ok(entries) = std::fs::read_dir(&dir) {
                     let dotglob = DOTGLOB_ENABLED.with(|d| *d.borrow());
                     let skipdots = GLOBSKIPDOTS_ENABLED.with(|d| *d.borrow());
-                    // Add . and .. when globskipdots is off and pattern allows dots
+                    // Add . and .. when globskipdots is off and pattern explicitly matches
+                    // dot-only patterns (not negation or mixed patterns)
                     let extra: Vec<String> = if !skipdots
-                        && (pattern.starts_with('.')
-                            || pattern.starts_with("@(.")
-                            || pattern.starts_with("*(.")
-                            || pattern.starts_with("+(.")
-                            || pattern.starts_with("?(.")
-                            || dotglob)
+                        && !pattern.starts_with("!(")
+                        && (pattern.starts_with(".*")
+                            || pattern.starts_with(".?")
+                            || pattern.starts_with("@(.*")
+                            || pattern.starts_with("@(.?")
+                            || pattern.starts_with("*(.?")
+                            || pattern.starts_with("+(.?"))
                     {
                         vec![".".to_string(), "..".to_string()]
                     } else {
