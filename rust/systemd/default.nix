@@ -528,6 +528,12 @@
           systemd-run --wait --pipe -p TemporaryFileSystem="/tmp/tmpfs-test" \
               bash -xec '[[ -d /tmp/tmpfs-test ]]; touch /tmp/tmpfs-test/file; [[ -e /tmp/tmpfs-test/file ]]'
 
+          : "ReadOnlyPaths= tests"
+          mkdir -p /tmp/ro-test && echo "data" > /tmp/ro-test/file
+          systemd-run --wait --pipe -p ReadOnlyPaths="/tmp/ro-test" \
+              bash -xec 'cat /tmp/ro-test/file; (! touch /tmp/ro-test/new-file 2>/dev/null)'
+          rm -rf /tmp/ro-test
+
           : "ReadWritePaths= with ProtectSystem=strict tests"
           mkdir -p /tmp/rw-test
           systemd-run --wait --pipe -p ProtectSystem=strict -p ReadWritePaths="/tmp/rw-test" \
@@ -556,6 +562,10 @@
               bash -xec 'if [[ -e /dev/rtc0 ]]; then
                            [[ "$(stat -c %t:%T /dev/rtc0)" == "$(stat -c %t:%T /dev/null)" ]];
                          fi'
+
+          : "PrivateUsers= tests"
+          systemd-run --wait --pipe -p PrivateUsers=yes \
+              bash -xec '[[ "$(cat /proc/self/uid_map | awk "{print \$1}")" == "0" ]]'
 
           : "PrivateNetwork= tests"
           systemd-run --wait --pipe -p PrivateNetwork=yes \
