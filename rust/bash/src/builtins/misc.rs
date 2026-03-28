@@ -29,10 +29,7 @@ pub(super) fn builtin_getopts(shell: &mut Shell, args: &[String]) -> i32 {
 
     // Validate variable name
     if !varname.chars().all(|c| c.is_alphanumeric() || c == '_')
-        || varname
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_ascii_digit())
+        || varname.chars().next().is_some_and(|c| c.is_ascii_digit())
         || varname.is_empty()
     {
         eprintln!(
@@ -153,12 +150,12 @@ pub(super) fn builtin_getopts(shell: &mut Shell, args: &[String]) -> i32 {
                         shell.set_var("OPTARG", opt_char.to_string());
                     } else {
                         if !suppress_errors {
-                            let name = shell.positional.first().map(|s| s.as_str()).unwrap_or("bash");
-                            eprintln!(
-                                "{}: option requires an argument -- {}",
-                                name,
-                                opt_char
-                            );
+                            let name = shell
+                                .positional
+                                .first()
+                                .map(|s| s.as_str())
+                                .unwrap_or("bash");
+                            eprintln!("{}: option requires an argument -- {}", name, opt_char);
                         }
                         shell.set_var(varname, "?".to_string());
                         shell.vars.remove("OPTARG");
@@ -194,7 +191,11 @@ pub(super) fn builtin_getopts(shell: &mut Shell, args: &[String]) -> i32 {
                 shell.set_var("OPTARG", opt_char.to_string());
             } else {
                 if !suppress_errors {
-                    let name = shell.positional.first().map(|s| s.as_str()).unwrap_or("bash");
+                    let name = shell
+                        .positional
+                        .first()
+                        .map(|s| s.as_str())
+                        .unwrap_or("bash");
                     eprintln!("{}: illegal option -- {}", name, opt_char);
                 }
                 shell.set_var(varname, "?".to_string());

@@ -1251,17 +1251,28 @@ impl Shell {
                     | "unset"
             );
             // In POSIX mode, errors from special builtins are fatal (exit the shell)
-            // Exclude return/break/continue/shift — their non-zero codes are normal
-            if self.opt_posix
-                && is_special
-                && result != 0
-                && !matches!(
-                    command_name.as_str(),
-                    "trap" | "return" | "break" | "continue" | "shift" | "exit" | "." | "source"
-                )
-            {
-                self.restore_redirections(saved_fds);
-                std::process::exit(result);
+            if self.opt_posix && is_special && result != 0 {
+                // Determine if this error should be fatal
+                let is_fatal = match command_name.as_str() {
+                    // return: fatal only if not inside a function (invalid context)
+                    "return" => !self.returning,
+                    // break/continue: never fatal (silently ignored outside loops)
+                    "break" | "continue" => false,
+                    // shift: not fatal (shift count out of range)
+                    "shift" => false,
+                    // trap: not fatal (invalid signal)
+                    "trap" => false,
+                    // exit: never fatal (it's already exiting)
+                    "exit" => false,
+                    // . and source: fatal on error (file not found etc.)
+                    "." | "source" => true,
+                    // All other special builtins: fatal
+                    _ => true,
+                };
+                if is_fatal {
+                    self.restore_redirections(saved_fds);
+                    std::process::exit(result);
+                }
             }
             if !(expanded_words.is_empty() || self.opt_posix && is_special) {
                 for (k, old) in saved {
