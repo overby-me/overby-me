@@ -2831,6 +2831,177 @@
           SPEOF
           chmod +x TEST-07-PID1.systemctl-show-props.sh
 
+          # Custom ExecStopPost= runs after failure test
+          cat > TEST-07-PID1.exec-stop-post-failure.sh << 'ESPFEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              rm -f /run/systemd/system/stoppost-test.service
+              rm -f /tmp/stoppost-marker
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          # Helper: retry a command up to 5 times with 1s delay (works around EAGAIN)
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep 1; done; "$@"; }
+
+          : "ExecStopPost= runs even when service fails"
+          cat > /run/systemd/system/stoppost-test.service << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=false
+          ExecStopPost=touch /tmp/stoppost-marker
+          EOF
+          retry systemctl daemon-reload
+          rm -f /tmp/stoppost-marker
+          (! systemctl start stoppost-test.service)
+          # ExecStopPost should have run despite failure
+          sleep 1
+          [[ -f /tmp/stoppost-marker ]]
+
+          : "ExecStopPost= runs after normal stop"
+          cat > /run/systemd/system/stoppost-test.service << EOF
+          [Service]
+          ExecStart=sleep infinity
+          ExecStopPost=touch /tmp/stoppost-marker
+          EOF
+          retry systemctl daemon-reload
+          rm -f /tmp/stoppost-marker
+          retry systemctl start stoppost-test.service
+          systemctl stop stoppost-test.service
+          sleep 1
+          [[ -f /tmp/stoppost-marker ]]
+          ESPFEOF
+          chmod +x TEST-07-PID1.exec-stop-post-failure.sh
+
+          # Custom SuccessExitStatus= test
+          cat > TEST-07-PID1.success-exit-status-custom.sh << 'SESEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              rm -f /run/systemd/system/success-exit-test.service
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          # Helper: retry a command up to 5 times with 1s delay (works around EAGAIN)
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep 1; done; "$@"; }
+
+          : "SuccessExitStatus= treats custom exit codes as success"
+          cat > /run/systemd/system/success-exit-test.service << EOF
+          [Service]
+          Type=oneshot
+          SuccessExitStatus=42
+          ExecStart=bash -c 'exit 42'
+          EOF
+          retry systemctl daemon-reload
+          # Should succeed because exit 42 is in SuccessExitStatus
+          retry systemctl start success-exit-test.service
+          [[ "$(systemctl show -P Result success-exit-test.service)" == "success" ]]
+
+          : "Without SuccessExitStatus=, same exit code is failure"
+          cat > /run/systemd/system/success-exit-test.service << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=bash -c 'exit 42'
+          EOF
+          retry systemctl daemon-reload
+          (! systemctl start success-exit-test.service)
+          SESEOF
+          chmod +x TEST-07-PID1.success-exit-status-custom.sh
+
+          # Custom RemainAfterExit= with ExecStop= test
+          cat > TEST-07-PID1.remain-after-exit.sh << 'RAEEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              systemctl stop remain-test.service 2>/dev/null
+              rm -f /run/systemd/system/remain-test.service
+              rm -f /tmp/remain-stop-marker /tmp/remain-start-marker
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          # Helper: retry a command up to 5 times with 1s delay (works around EAGAIN)
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep 1; done; "$@"; }
+
+          : "RemainAfterExit=yes keeps service active after ExecStart finishes"
+          cat > /run/systemd/system/remain-test.service << EOF
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          ExecStart=bash -c 'touch /tmp/remain-start-marker'
+          ExecStop=bash -c 'touch /tmp/remain-stop-marker'
+          EOF
+          retry systemctl daemon-reload
+          retry systemctl start remain-test.service
+          [[ -f /tmp/remain-start-marker ]]
+          # Service should still be active
+          systemctl is-active remain-test.service
+
+          : "ExecStop= runs when stopping RemainAfterExit service"
+          systemctl stop remain-test.service
+          [[ -f /tmp/remain-stop-marker ]]
+          (! systemctl is-active remain-test.service)
+          RAEEOF
+          chmod +x TEST-07-PID1.remain-after-exit.sh
+
+          # Custom Restart=on-failure for oneshot test
+          cat > TEST-07-PID1.restart-on-failure-oneshot.sh << 'ROFEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              systemctl stop restart-oneshot-test.service 2>/dev/null
+              rm -f /run/systemd/system/restart-oneshot-test.service
+              rm -f /tmp/restart-oneshot-count
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          # Helper: retry a command up to 5 times with 1s delay (works around EAGAIN)
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep 1; done; "$@"; }
+
+          : "Restart=on-failure restarts oneshot on failure"
+          # This service fails on first two runs, succeeds on third
+          cat > /run/systemd/system/restart-oneshot-test.service << EOF
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          Restart=on-failure
+          RestartSec=1
+          ExecStart=bash -c 'COUNT=0; [[ -f /tmp/restart-oneshot-count ]] && COUNT=\$(cat /tmp/restart-oneshot-count); echo \$((COUNT + 1)) > /tmp/restart-oneshot-count; [[ \$COUNT -ge 2 ]]'
+          EOF
+          retry systemctl daemon-reload
+          rm -f /tmp/restart-oneshot-count
+          systemctl start restart-oneshot-test.service || true
+          # Wait for the service to eventually succeed after retries
+          timeout 30 bash -c 'until systemctl is-active restart-oneshot-test.service 2>/dev/null; do sleep 1; done'
+          systemctl is-active restart-oneshot-test.service
+          # Should have run at least 3 times
+          [[ "$(cat /tmp/restart-oneshot-count)" -ge 3 ]]
+          ROFEOF
+          chmod +x TEST-07-PID1.restart-on-failure-oneshot.sh
+
           # Custom ExecReload= failure doesn't kill service test
           cat > TEST-07-PID1.exec-reload-failure.sh << 'ERFEOF'
           #!/usr/bin/env bash
