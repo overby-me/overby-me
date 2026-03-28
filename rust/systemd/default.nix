@@ -1934,6 +1934,88 @@
           BTEOF
                     chmod +x TEST-23-UNIT-FILE.binds-to.sh
 
+                    # Custom conditions test
+                    cat > TEST-23-UNIT-FILE.conditions.sh << 'CONDEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              rm -f /run/systemd/system/cond-test-*.service
+              rm -f /tmp/cond-test-marker
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "ConditionPathExists= succeeds when path exists"
+          cat > /run/systemd/system/cond-test-exists.service << EOF
+          [Unit]
+          ConditionPathExists=/etc/hostname
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          RemainAfterExit=yes
+          EOF
+          systemctl daemon-reload
+          systemctl start cond-test-exists.service
+          systemctl is-active cond-test-exists.service
+          systemctl stop cond-test-exists.service
+
+          : "ConditionPathExists= skips unit when path does not exist"
+          cat > /run/systemd/system/cond-test-noexist.service << EOF
+          [Unit]
+          ConditionPathExists=/nonexistent/path/that/should/not/exist
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          RemainAfterExit=yes
+          EOF
+          systemctl daemon-reload
+          systemctl start cond-test-noexist.service
+          # Unit should NOT be active (condition not met → skipped)
+          (! systemctl is-active cond-test-noexist.service)
+
+          : "ConditionPathExists= negated succeeds when path does not exist"
+          cat > /run/systemd/system/cond-test-negated.service << EOF
+          [Unit]
+          ConditionPathExists=!/nonexistent/path
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          RemainAfterExit=yes
+          EOF
+          systemctl daemon-reload
+          systemctl start cond-test-negated.service
+          systemctl is-active cond-test-negated.service
+          systemctl stop cond-test-negated.service
+
+          : "ConditionFileNotEmpty= succeeds for non-empty file"
+          echo "content" > /tmp/cond-test-marker
+          cat > /run/systemd/system/cond-test-notempty.service << EOF
+          [Unit]
+          ConditionFileNotEmpty=/tmp/cond-test-marker
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          RemainAfterExit=yes
+          EOF
+          systemctl daemon-reload
+          systemctl start cond-test-notempty.service
+          systemctl is-active cond-test-notempty.service
+          systemctl stop cond-test-notempty.service
+
+          : "ConditionFileNotEmpty= skips unit for empty file"
+          truncate -s 0 /tmp/cond-test-marker
+          systemctl start cond-test-notempty.service
+          (! systemctl is-active cond-test-notempty.service)
+
+          rm -f /tmp/cond-test-marker
+          CONDEOF
+                    chmod +x TEST-23-UNIT-FILE.conditions.sh
+
                     rm -f TEST-23-UNIT-FILE.ExtraFileDescriptors.sh \
                          TEST-23-UNIT-FILE.JoinsNamespaceOf.sh \
                          TEST-23-UNIT-FILE.openfile.sh \
