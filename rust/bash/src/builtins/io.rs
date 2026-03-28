@@ -947,27 +947,7 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
                     if revents.intersects(PollFlags::POLLNVAL | PollFlags::POLLERR) {
                         return 1; // invalid fd
                     }
-                    // For regular files, poll always returns POLLIN even at EOF.
-                    // Check if there's actual data by trying a peek read.
-                    if revents.contains(PollFlags::POLLHUP) {
-                        return 1; // peer closed
-                    }
-                    // Check if fd is at EOF by attempting a non-consuming read
-                    let mut peek_buf = [0u8; 1];
-                    match nix::unistd::read(read_fd, &mut peek_buf) {
-                        Ok(0) => return 1, // EOF — no data available
-                        Ok(_) => {
-                            // Data available — seek back 1 byte to undo the read
-                            nix::unistd::lseek(
-                                read_fd,
-                                -1,
-                                nix::unistd::Whence::SeekCur,
-                            )
-                            .ok();
-                            return 0;
-                        }
-                        Err(_) => return 1, // read error
-                    }
+                    return 0; // data available
                 }
             }
         }
