@@ -489,6 +489,11 @@ pub struct ExecHelperConfig {
     #[serde(default)]
     pub protect_hostname: bool,
 
+    /// ProtectHostname= hostname — optional hostname to set in the new UTS
+    /// namespace when ProtectHostname=yes:hostname or private:hostname.
+    #[serde(default)]
+    pub protect_hostname_name: Option<String>,
+
     /// Personality= — set the execution domain (personality).
     /// See systemd.exec(5).
     #[serde(default)]
@@ -1552,6 +1557,17 @@ pub fn run_exec_helper() {
                 std::io::Error::last_os_error()
             );
             // Non-fatal: continue without UTS isolation
+        } else if let Some(ref hostname) = config.protect_hostname_name {
+            // Set the hostname in the new UTS namespace
+            let cname = std::ffi::CString::new(hostname.as_str()).unwrap_or_default();
+            let ret = unsafe { libc::sethostname(cname.as_ptr(), hostname.len()) };
+            if ret != 0 {
+                log::warn!(
+                    "Failed to set hostname '{}' in UTS namespace: {}",
+                    hostname,
+                    std::io::Error::last_os_error()
+                );
+            }
         }
     }
 

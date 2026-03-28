@@ -2602,6 +2602,9 @@ pub struct ExecConfig {
     /// Defaults to false. Parsed and stored; no runtime enforcement yet
     /// (requires UTS namespace and seccomp support). See systemd.exec(5).
     pub protect_hostname: bool,
+    /// ProtectHostname= hostname — optional hostname to set in the UTS
+    /// namespace when using `ProtectHostname=yes:hostname` syntax.
+    pub protect_hostname_name: Option<String>,
     /// SystemCallArchitectures= — a space-separated list of architecture
     /// identifiers (e.g. `native`, `x86`, `x86-64`) restricting which
     /// architectures system calls may be invoked from. Multiple directives

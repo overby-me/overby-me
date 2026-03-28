@@ -929,6 +929,12 @@
               bash -xec 'hostname test-ph-change; [[ "$(hostname)" == "test-ph-change" ]]'
           [[ "$(hostname)" == "$ORIG_HOSTNAME" ]]
 
+          : "ProtectHostname=yes:hostname sets hostname in UTS namespace"
+          ORIG_HOSTNAME="$(hostname)"
+          systemd-run --wait --pipe -p ProtectHostname=yes:test-custom-host \
+              bash -xec '[[ "$(hostname)" == "test-custom-host" ]]'
+          [[ "$(hostname)" == "$ORIG_HOSTNAME" ]]
+
           : "PrivateMounts=yes creates isolated mount namespace"
           systemd-run --wait --pipe -p PrivateMounts=yes \
               bash -xec 'mount -t tmpfs none /tmp 2>/dev/null && touch /tmp/private-mount-test'

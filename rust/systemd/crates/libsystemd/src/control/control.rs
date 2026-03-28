@@ -2440,6 +2440,7 @@ fn create_transient_unit(
         ambient_capabilities: vec![],
         protect_home: crate::units::ProtectHome::No,
         protect_hostname: false,
+        protect_hostname_name: None,
         system_call_architectures: vec![],
         read_write_paths: vec![],
         memory_deny_write_execute: false,
@@ -3340,8 +3341,18 @@ fn create_transient_unit(
                     service_conf.exec_config.protect_clock = matches!(value, "yes" | "true" | "1");
                 }
                 "ProtectHostname" => {
-                    service_conf.exec_config.protect_hostname =
-                        matches!(value, "yes" | "true" | "1");
+                    // Support `yes`, `yes:hostname`, `private`, `private:hostname`
+                    if let Some(hostname) = value.strip_prefix("yes:") {
+                        service_conf.exec_config.protect_hostname = true;
+                        service_conf.exec_config.protect_hostname_name = Some(hostname.to_string());
+                    } else if let Some(hostname) = value.strip_prefix("private:") {
+                        service_conf.exec_config.protect_hostname = true;
+                        service_conf.exec_config.protect_hostname_name = Some(hostname.to_string());
+                    } else {
+                        service_conf.exec_config.protect_hostname =
+                            matches!(value, "yes" | "true" | "1" | "private");
+                        service_conf.exec_config.protect_hostname_name = None;
+                    }
                 }
                 "NoNewPrivileges" => {
                     service_conf.exec_config.no_new_privileges =
