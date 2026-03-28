@@ -9606,6 +9606,83 @@
           SEEOF
           chmod +x TEST-74-AUX-UTILS.status-errno.sh
 
+          # systemctl show WatchdogTimestamp
+          cat > TEST-74-AUX-UTILS.watchdog-ts.sh << 'WTEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "WatchdogTimestamp property exists"
+          systemctl show -P WatchdogTimestamp systemd-journald.service > /dev/null
+
+          : "WatchdogTimestampMonotonic property exists"
+          systemctl show -P WatchdogTimestampMonotonic systemd-journald.service > /dev/null
+          WTEOF
+          chmod +x TEST-74-AUX-UTILS.watchdog-ts.sh
+
+          # systemctl show memory/tasks properties
+          cat > TEST-74-AUX-UTILS.resource-props.sh << 'RPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "MemoryCurrent property exists for service"
+          systemctl show -P MemoryCurrent systemd-journald.service > /dev/null
+
+          : "TasksCurrent property exists for service"
+          systemctl show -P TasksCurrent systemd-journald.service > /dev/null
+
+          : "CPUUsageNSec property exists for service"
+          systemctl show -P CPUUsageNSec systemd-journald.service > /dev/null
+          RPEOF
+          chmod +x TEST-74-AUX-UTILS.resource-props.sh
+
+          # systemctl show Description consistency
+          cat > TEST-74-AUX-UTILS.description-check.sh << 'DCEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "Description matches for well-known units"
+          DESC="$(systemctl show -P Description multi-user.target)"
+          [[ -n "$DESC" ]]
+
+          : "Description for transient service"
+          UNIT="desc-chk-$RANDOM"
+          systemd-run --wait --unit="$UNIT" --description="Desc Check Test" true
+          DESC="$(systemctl show -P Description "$UNIT.service")"
+          [[ "$DESC" == "Desc Check Test" ]]
+          DCEOF
+          chmod +x TEST-74-AUX-UTILS.description-check.sh
+
+          # systemctl show DefaultDependencies
+          cat > TEST-74-AUX-UTILS.default-deps.sh << 'DDEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "DefaultDependencies property exists"
+          DD="$(systemctl show -P DefaultDependencies systemd-journald.service)"
+          [[ "$DD" == "yes" || "$DD" == "no" ]]
+          DDEOF
+          chmod +x TEST-74-AUX-UTILS.default-deps.sh
+
+          # systemctl show Wants/After/Before
+          cat > TEST-74-AUX-UTILS.dep-props.sh << 'DPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "After property is non-empty for multi-user.target"
+          AFTER="$(systemctl show -P After multi-user.target)"
+          [[ -n "$AFTER" ]]
+
+          : "Wants property is non-empty for multi-user.target"
+          WANTS="$(systemctl show -P Wants multi-user.target)"
+          [[ -n "$WANTS" ]]
+          DPEOF
+          chmod +x TEST-74-AUX-UTILS.dep-props.sh
+
           rm -f TEST-74-AUX-UTILS.busctl.sh \
                TEST-74-AUX-UTILS.capsule.sh \
                TEST-74-AUX-UTILS.firstboot.sh \
