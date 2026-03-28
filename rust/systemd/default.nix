@@ -5497,6 +5497,131 @@
           SEEOF
                     chmod +x TEST-23-UNIT-FILE.success-exit-status.sh
 
+                    # PartOf= dependency test
+                    cat > TEST-23-UNIT-FILE.part-of.sh << 'POEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              systemctl stop part-of-parent.service part-of-child.service 2>/dev/null
+              rm -f /run/systemd/system/part-of-parent.service /run/systemd/system/part-of-child.service
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "PartOf= causes child to stop when parent stops"
+          cat > /run/systemd/system/part-of-parent.service << EOF
+          [Service]
+          ExecStart=sleep infinity
+          EOF
+          cat > /run/systemd/system/part-of-child.service << EOF
+          [Unit]
+          PartOf=part-of-parent.service
+          After=part-of-parent.service
+          [Service]
+          ExecStart=sleep infinity
+          EOF
+          systemctl daemon-reload
+          systemctl start part-of-parent.service
+          systemctl start part-of-child.service
+          [[ "$(systemctl show -P ActiveState part-of-child.service)" == "active" ]]
+          # Stopping parent should also stop child via PartOf=
+          systemctl stop part-of-parent.service
+          timeout 15 bash -c 'until [[ "$(systemctl show -P ActiveState part-of-child.service)" != "active" ]]; do sleep 0.5; done'
+
+          : "Stopping child does NOT stop parent"
+          systemctl start part-of-parent.service
+          systemctl start part-of-child.service
+          systemctl stop part-of-child.service
+          [[ "$(systemctl show -P ActiveState part-of-parent.service)" == "active" ]]
+          systemctl stop part-of-parent.service
+          POEOF
+                    chmod +x TEST-23-UNIT-FILE.part-of.sh
+
+                    # RemainAfterExit= test
+                    cat > TEST-23-UNIT-FILE.remain-after-exit.sh << 'RAEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              systemctl stop remain-test.service 2>/dev/null
+              rm -f /run/systemd/system/remain-test.service
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "RemainAfterExit=yes keeps service active after exit"
+          cat > /run/systemd/system/remain-test.service << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          RemainAfterExit=yes
+          EOF
+          systemctl daemon-reload
+          systemctl start remain-test.service
+          [[ "$(systemctl show -P ActiveState remain-test.service)" == "active" ]]
+
+          : "Explicit stop deactivates the service"
+          systemctl stop remain-test.service
+          [[ "$(systemctl show -P ActiveState remain-test.service)" == "inactive" ]]
+
+          : "Without RemainAfterExit, oneshot goes inactive"
+          cat > /run/systemd/system/remain-test.service << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          EOF
+          systemctl daemon-reload
+          systemctl start remain-test.service
+          [[ "$(systemctl show -P ActiveState remain-test.service)" == "inactive" ]]
+          RAEOF
+                    chmod +x TEST-23-UNIT-FILE.remain-after-exit.sh
+
+                    # Slice= placement test
+                    cat > TEST-23-UNIT-FILE.slice-placement.sh << 'SLEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "Transient service placed in custom slice"
+          UNIT="slice-test-$RANDOM"
+          systemd-run --unit="$UNIT" --slice=testsuite --remain-after-exit true
+          sleep 1
+          SLICE="$(systemctl show -P Slice "$UNIT.service")"
+          echo "Slice=$SLICE"
+          # rust-systemd returns 'testsuite' not 'testsuite.slice'
+          [[ "$SLICE" == "testsuite" || "$SLICE" == "testsuite.slice" ]]
+          systemctl stop "$UNIT.service" 2>/dev/null || true
+
+          : "Unit file Slice= is respected"
+          UNIT2="slice-unit-test-$RANDOM"
+          cat > "/run/systemd/system/$UNIT2.service" << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          RemainAfterExit=yes
+          Slice=testsuite.slice
+          EOF
+          systemctl daemon-reload
+          systemctl start "$UNIT2.service"
+          SLICE2="$(systemctl show -P Slice "$UNIT2.service")"
+          [[ "$SLICE2" == "testsuite" || "$SLICE2" == "testsuite.slice" ]]
+          systemctl stop "$UNIT2.service"
+          rm -f "/run/systemd/system/$UNIT2.service"
+          systemctl daemon-reload
+          SLEOF
+                    chmod +x TEST-23-UNIT-FILE.slice-placement.sh
+
                     rm -f TEST-23-UNIT-FILE.ExtraFileDescriptors.sh \
                          TEST-23-UNIT-FILE.JoinsNamespaceOf.sh \
                          TEST-23-UNIT-FILE.openfile.sh \
