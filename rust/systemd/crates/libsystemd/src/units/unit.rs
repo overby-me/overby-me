@@ -2664,6 +2664,10 @@ pub struct ExecConfig {
     /// Defaults to false. Parsed and stored; no runtime mount-namespace
     /// enforcement yet. See systemd.exec(5).
     pub private_mounts: bool,
+    /// MountFlags= — mount propagation flags for the mount namespace.
+    /// "shared" = MS_SHARED, "slave" = MS_SLAVE (default), "private" = MS_PRIVATE.
+    /// See systemd.exec(5).
+    pub mount_flags: Option<String>,
     /// IOSchedulingClass= — sets the I/O scheduling class for executed
     /// processes. Takes one of "none" (or "0"), "realtime" (or "1"),
     /// "best-effort" (or "2"), or "idle" (or "3"). Defaults to None

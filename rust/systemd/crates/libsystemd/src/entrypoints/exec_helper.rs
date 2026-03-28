@@ -423,6 +423,12 @@ pub struct ExecHelperConfig {
     #[serde(default)]
     pub private_mounts: bool,
 
+    /// MountFlags= — mount propagation flags for the mount namespace.
+    /// "shared" = MS_SHARED, "slave" = MS_SLAVE (default), "private" = MS_PRIVATE.
+    /// See systemd.exec(5).
+    #[serde(default)]
+    pub mount_flags: Option<String>,
+
     /// PrivateIPC= — if true, a new IPC namespace is created, isolating
     /// System V IPC objects and POSIX message queues. See systemd.exec(5).
     #[serde(default)]
@@ -1545,7 +1551,11 @@ pub fn run_exec_helper() {
             || !config.bind_read_only_paths.is_empty()
             || !config.temporary_file_system.is_empty()
             || matches!(config.protect_system.as_str(), "yes" | "full" | "strict")
-            || matches!(config.protect_home.as_str(), "yes" | "read-only" | "tmpfs"));
+            || matches!(config.protect_home.as_str(), "yes" | "read-only" | "tmpfs")
+            || matches!(
+                config.mount_flags.as_deref(),
+                Some("slave") | Some("private")
+            ));
 
     if needs_mount_ns {
         log::trace!(
@@ -2362,15 +2372,23 @@ fn setup_mount_namespace(config: &ExecHelperConfig) {
         return; // Non-fatal: continue without mount isolation
     }
 
-    log::trace!("mount_ns: making / rslave...");
-    // Make all mounts in the new namespace slave so that mount changes from
-    // the host propagate in, but our changes don't propagate out.
+    // MountFlags= — set mount propagation type.
+    // "shared" = MS_SHARED, "slave" = MS_SLAVE (default), "private" = MS_PRIVATE.
+    let mount_prop_flag = match config.mount_flags.as_deref() {
+        Some("shared") => libc::MS_SHARED,
+        Some("private") => libc::MS_PRIVATE,
+        _ => libc::MS_SLAVE, // default
+    };
+    log::trace!(
+        "mount_ns: making / {:?}...",
+        config.mount_flags.as_deref().unwrap_or("slave")
+    );
     let ret = unsafe {
         libc::mount(
             std::ptr::null(),
             c"/".as_ptr(),
             std::ptr::null(),
-            libc::MS_SLAVE | libc::MS_REC,
+            mount_prop_flag | libc::MS_REC,
             std::ptr::null(),
         )
     };

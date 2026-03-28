@@ -2451,6 +2451,7 @@ fn create_transient_unit(
         private_network: false,
         private_users: false,
         private_mounts: false,
+        mount_flags: None,
         io_scheduling_class: crate::units::IOSchedulingClass::None,
         io_scheduling_priority: None,
         umask: None,
@@ -3286,6 +3287,9 @@ fn create_transient_unit(
                 }
                 "PrivateMounts" => {
                     service_conf.exec_config.private_mounts = matches!(value, "yes" | "true" | "1");
+                }
+                "MountFlags" => {
+                    service_conf.exec_config.mount_flags = Some(value.to_string());
                 }
                 "ReadWritePaths" => {
                     for p in value.split_whitespace() {

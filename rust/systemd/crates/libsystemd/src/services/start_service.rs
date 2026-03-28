@@ -477,6 +477,7 @@ fn start_service_with_filedescriptors(
         private_network: conf.exec_config.private_network,
         private_users: conf.exec_config.private_users,
         private_mounts: conf.exec_config.private_mounts,
+        mount_flags: conf.exec_config.mount_flags.clone(),
         private_ipc: conf.exec_config.private_ipc.unwrap_or(false),
         network_namespace_path: conf.exec_config.network_namespace_path.clone(),
         ipc_namespace_path: conf.exec_config.ipc_namespace_path.clone(),

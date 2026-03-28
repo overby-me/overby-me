@@ -1049,6 +1049,16 @@
               bash -xec '[[ "$ENVFILE_VAR" == "hello_from_file" && "$ENVFILE_VAR2" == "second_val" ]]'
           rm -f /tmp/test-envfile
 
+          : "MountFlags=slave creates mount namespace with slave propagation"
+          systemd-run --wait --pipe -p MountFlags=slave \
+              bash -xec 'mount -t tmpfs none /tmp 2>/dev/null; touch /tmp/slave-test'
+          [[ ! -e /tmp/slave-test ]]
+
+          : "MountFlags=private creates mount namespace with private propagation"
+          systemd-run --wait --pipe -p MountFlags=private \
+              bash -xec 'mount -t tmpfs none /tmp 2>/dev/null; touch /tmp/private-test'
+          [[ ! -e /tmp/private-test ]]
+
           : "Error handling for clean-up codepaths"
           (! systemd-run --wait --pipe false)
           TESTEOF
