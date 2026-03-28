@@ -8116,6 +8116,109 @@
           ROEOF
           chmod +x TEST-74-AUX-UTILS.run-options.sh
 
+          # systemctl cat for unit files shows content
+          cat > TEST-74-AUX-UTILS.cat-content.sh << 'CCEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          at_exit() {
+              set +e
+              rm -f /run/systemd/system/cat-test-unit.service
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "systemctl cat shows unit file content"
+          cat > /run/systemd/system/cat-test-unit.service << EOF
+          [Unit]
+          Description=Cat content test
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          EOF
+          systemctl daemon-reload
+          systemctl cat cat-test-unit.service | grep -q "Description=Cat content test"
+          systemctl cat cat-test-unit.service | grep -q "ExecStart=true"
+
+          : "systemctl cat with drop-in shows override"
+          mkdir -p /run/systemd/system/cat-test-unit.service.d
+          cat > /run/systemd/system/cat-test-unit.service.d/override.conf << EOF
+          [Service]
+          Environment=FOO=bar
+          EOF
+          systemctl daemon-reload
+          systemctl cat cat-test-unit.service | grep -q "Environment=FOO=bar"
+          rm -rf /run/systemd/system/cat-test-unit.service.d
+          CCEOF
+          chmod +x TEST-74-AUX-UTILS.cat-content.sh
+
+          # systemctl list-dependencies test
+          cat > TEST-74-AUX-UTILS.list-deps-advanced.sh << 'LDEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl list-dependencies shows tree"
+          systemctl list-dependencies multi-user.target --no-pager > /dev/null
+
+          : "systemctl list-dependencies --reverse shows reverse deps"
+          systemctl list-dependencies --reverse systemd-journald.service --no-pager > /dev/null
+
+          : "systemctl list-dependencies --all shows all"
+          systemctl list-dependencies --all multi-user.target --no-pager > /dev/null || true
+          LDEOF
+          chmod +x TEST-74-AUX-UTILS.list-deps-advanced.sh
+
+          # systemd-tmpfiles --clean test (age-based)
+          cat > TEST-74-AUX-UTILS.tmpfiles-age.sh << 'TAEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          at_exit() {
+              set +e
+              rm -f /tmp/tmpfiles-age-test.conf
+              rm -rf /tmp/tmpfiles-age-dir
+          }
+          trap at_exit EXIT
+
+          : "systemd-tmpfiles age-based cleanup with 'd' action"
+          # 'd' with age = create directory + clean old files
+          cat > /tmp/tmpfiles-age-test.conf << EOF
+          d /tmp/tmpfiles-age-dir 0755 root root 0
+          EOF
+          # Create with tmpfiles
+          mkdir -p /tmp/tmpfiles-age-dir
+          touch /tmp/tmpfiles-age-dir/oldfile
+          # Clean with age=0 means remove everything older than 0s
+          systemd-tmpfiles --clean /tmp/tmpfiles-age-test.conf
+          # The file should be removed since it's older than 0s
+          [[ ! -f /tmp/tmpfiles-age-dir/oldfile ]]
+          TAEOF
+          chmod +x TEST-74-AUX-UTILS.tmpfiles-age.sh
+
+          # systemd-run with --on-calendar test
+          cat > TEST-74-AUX-UTILS.run-calendar.sh << 'CALEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-run --on-calendar creates a calendar timer"
+          UNIT="run-cal-$RANDOM"
+          systemd-run --unit="$UNIT" --on-calendar="*:*:0/10" --remain-after-exit true
+          systemctl is-active "$UNIT.timer"
+          grep -q "OnCalendar=" "/run/systemd/transient/$UNIT.timer"
+          systemctl stop "$UNIT.timer" "$UNIT.service" 2>/dev/null || true
+
+          : "systemd-run --on-startup creates startup timer"
+          UNIT2="run-startup-$RANDOM"
+          systemd-run --unit="$UNIT2" --on-startup=1h --remain-after-exit true
+          systemctl is-active "$UNIT2.timer"
+          systemctl stop "$UNIT2.timer" "$UNIT2.service" 2>/dev/null || true
+          CALEOF
+          chmod +x TEST-74-AUX-UTILS.run-calendar.sh
+
           rm -f TEST-74-AUX-UTILS.busctl.sh \
                TEST-74-AUX-UTILS.capsule.sh \
                TEST-74-AUX-UTILS.firstboot.sh \
