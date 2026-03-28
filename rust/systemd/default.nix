@@ -2831,6 +2831,210 @@
           SPEOF
           chmod +x TEST-07-PID1.systemctl-show-props.sh
 
+          # Custom StandardOutput=file: test via unit files
+          cat > TEST-07-PID1.standard-output-file.sh << 'SOEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              rm -f /run/systemd/system/stdout-test.service
+              rm -f /tmp/stdout-test-out /tmp/stdout-test-err
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          # Helper: retry a command up to 5 times with 1s delay (works around EAGAIN)
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep 1; done; "$@"; }
+
+          : "StandardOutput=file: writes stdout to file"
+          cat > /run/systemd/system/stdout-test.service << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=bash -c 'echo hello-stdout'
+          StandardOutput=file:/tmp/stdout-test-out
+          StandardError=file:/tmp/stdout-test-err
+          EOF
+          retry systemctl daemon-reload
+          retry systemctl start stdout-test.service
+          [[ "$(cat /tmp/stdout-test-out)" == "hello-stdout" ]]
+
+          : "StandardOutput=append: appends to file"
+          cat > /run/systemd/system/stdout-test.service << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=bash -c 'echo second-line'
+          StandardOutput=append:/tmp/stdout-test-out
+          EOF
+          retry systemctl daemon-reload
+          retry systemctl start stdout-test.service
+          # Should have both lines
+          grep -q "hello-stdout" /tmp/stdout-test-out
+          grep -q "second-line" /tmp/stdout-test-out
+
+          : "StandardOutput=truncate: overwrites file"
+          cat > /run/systemd/system/stdout-test.service << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=bash -c 'echo only-this'
+          StandardOutput=truncate:/tmp/stdout-test-out
+          EOF
+          retry systemctl daemon-reload
+          retry systemctl start stdout-test.service
+          [[ "$(cat /tmp/stdout-test-out)" == "only-this" ]]
+          SOEOF
+          chmod +x TEST-07-PID1.standard-output-file.sh
+
+          # Custom RuntimeDirectory= test
+          cat > TEST-07-PID1.runtime-directory.sh << 'RDEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              systemctl stop runtime-dir-test.service 2>/dev/null
+              rm -f /run/systemd/system/runtime-dir-test.service
+              rm -rf /run/runtime-dir-test
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          # Helper: retry a command up to 5 times with 1s delay (works around EAGAIN)
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep 1; done; "$@"; }
+
+          : "RuntimeDirectory= creates directory on start"
+          cat > /run/systemd/system/runtime-dir-test.service << EOF
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          RuntimeDirectory=runtime-dir-test
+          ExecStart=bash -c 'touch /run/runtime-dir-test/marker'
+          EOF
+          retry systemctl daemon-reload
+          retry systemctl start runtime-dir-test.service
+          [[ -d /run/runtime-dir-test ]]
+          [[ -f /run/runtime-dir-test/marker ]]
+
+          : "RuntimeDirectory= removed on stop"
+          systemctl stop runtime-dir-test.service
+          [[ ! -d /run/runtime-dir-test ]]
+          RDEOF
+          chmod +x TEST-07-PID1.runtime-directory.sh
+
+          # Custom Environment= and EnvironmentFile= test
+          cat > TEST-07-PID1.environment.sh << 'ENVEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              rm -f /run/systemd/system/env-test.service
+              rm -f /tmp/env-test-out /tmp/env-file
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          # Helper: retry a command up to 5 times with 1s delay (works around EAGAIN)
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep 1; done; "$@"; }
+
+          : "Environment= passes variables to service"
+          cat > /run/systemd/system/env-test.service << EOF
+          [Service]
+          Type=oneshot
+          Environment=MY_VAR=hello MY_OTHER=world
+          ExecStart=bash -c 'echo "\$MY_VAR \$MY_OTHER" > /tmp/env-test-out'
+          EOF
+          retry systemctl daemon-reload
+          retry systemctl start env-test.service
+          [[ "$(cat /tmp/env-test-out)" == "hello world" ]]
+
+          : "EnvironmentFile= loads variables from file"
+          cat > /tmp/env-file << EOF
+          FROM_FILE=loaded
+          ANOTHER=value
+          EOF
+          cat > /run/systemd/system/env-test.service << EOF
+          [Service]
+          Type=oneshot
+          EnvironmentFile=/tmp/env-file
+          ExecStart=bash -c 'echo "\$FROM_FILE \$ANOTHER" > /tmp/env-test-out'
+          EOF
+          retry systemctl daemon-reload
+          retry systemctl start env-test.service
+          [[ "$(cat /tmp/env-test-out)" == "loaded value" ]]
+
+          : "Environment= overrides EnvironmentFile="
+          cat > /run/systemd/system/env-test.service << EOF
+          [Service]
+          Type=oneshot
+          EnvironmentFile=/tmp/env-file
+          Environment=FROM_FILE=override
+          ExecStart=bash -c 'echo "\$FROM_FILE" > /tmp/env-test-out'
+          EOF
+          retry systemctl daemon-reload
+          retry systemctl start env-test.service
+          [[ "$(cat /tmp/env-test-out)" == "override" ]]
+          ENVEOF
+          chmod +x TEST-07-PID1.environment.sh
+
+          # Custom ExecStartPre/ExecStartPost ordering test
+          cat > TEST-07-PID1.exec-start-pre-post-order.sh << 'EOEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              rm -f /run/systemd/system/order-test.service
+              rm -f /tmp/exec-order-log
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          # Helper: retry a command up to 5 times with 1s delay (works around EAGAIN)
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep 1; done; "$@"; }
+
+          : "ExecStartPre runs before ExecStart, ExecStartPost runs after"
+          cat > /run/systemd/system/order-test.service << EOF
+          [Service]
+          Type=oneshot
+          ExecStartPre=bash -c 'echo PRE >> /tmp/exec-order-log'
+          ExecStart=bash -c 'echo MAIN >> /tmp/exec-order-log'
+          ExecStartPost=bash -c 'echo POST >> /tmp/exec-order-log'
+          EOF
+          retry systemctl daemon-reload
+          rm -f /tmp/exec-order-log
+          retry systemctl start order-test.service
+          [[ "$(sed -n '1p' /tmp/exec-order-log)" == "PRE" ]]
+          [[ "$(sed -n '2p' /tmp/exec-order-log)" == "MAIN" ]]
+          [[ "$(sed -n '3p' /tmp/exec-order-log)" == "POST" ]]
+
+          : "ExecStartPre failure prevents ExecStart"
+          cat > /run/systemd/system/order-test.service << EOF
+          [Service]
+          Type=oneshot
+          ExecStartPre=false
+          ExecStart=bash -c 'echo SHOULD-NOT-RUN >> /tmp/exec-order-log'
+          EOF
+          retry systemctl daemon-reload
+          rm -f /tmp/exec-order-log
+          (! systemctl start order-test.service)
+          # ExecStart should not have run
+          [[ ! -f /tmp/exec-order-log ]] || (! grep -q "SHOULD-NOT-RUN" /tmp/exec-order-log)
+          EOEOF
+          chmod +x TEST-07-PID1.exec-start-pre-post-order.sh
+
           rm -f TEST-07-PID1.attach_processes.sh \
                TEST-07-PID1.concurrency.sh \
                TEST-07-PID1.DeferReactivation.sh \
