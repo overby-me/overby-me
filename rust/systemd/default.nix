@@ -839,6 +839,22 @@
               -p UnsetEnvironment=DROP_ME \
               bash -xec '[[ "$KEEP_ME" == yes && -z "$DROP_ME" ]]'
 
+          : "daemon-reload picks up new unit files"
+          printf '[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=true\n' > /run/systemd/system/reload-test.service
+          systemctl daemon-reload
+          systemctl start reload-test.service
+          systemctl is-active reload-test.service
+          systemctl stop reload-test.service
+          rm -f /run/systemd/system/reload-test.service
+          systemctl daemon-reload
+
+          : "systemctl show -P for service properties"
+          systemd-run --unit=show-prop-test -p RemainAfterExit=yes -p Type=oneshot true
+          sleep 1
+          [[ "$(systemctl show -P Type show-prop-test.service)" == oneshot ]]
+          [[ "$(systemctl show -P RemainAfterExit show-prop-test.service)" == yes ]]
+          systemctl stop show-prop-test.service
+
           : "Error handling for clean-up codepaths"
           (! systemd-run --wait --pipe false)
           TESTEOF
