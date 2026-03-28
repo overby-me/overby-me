@@ -1702,6 +1702,102 @@
           RESTARTEOF
           chmod +x TEST-07-PID1.restart-behavior.sh
 
+          # Custom ExecStartPre/ExecStartPost ordering test
+          cat > TEST-07-PID1.exec-start-pre-post.sh << 'ESPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              rm -f /run/systemd/system/exec-order-*.service
+              rm -f /tmp/exec-order-*
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "ExecStartPre= runs before ExecStart="
+          cat > /run/systemd/system/exec-order-pre.service << EOF
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          ExecStartPre=bash -c 'echo pre > /tmp/exec-order-pre'
+          ExecStart=bash -c 'test -f /tmp/exec-order-pre && echo main > /tmp/exec-order-main'
+          EOF
+          systemctl daemon-reload
+          systemctl start exec-order-pre.service
+          systemctl is-active exec-order-pre.service
+          [[ -f /tmp/exec-order-pre ]]
+          [[ -f /tmp/exec-order-main ]]
+          systemctl stop exec-order-pre.service
+          rm -f /tmp/exec-order-pre /tmp/exec-order-main
+
+          : "ExecStartPost= runs after ExecStart="
+          cat > /run/systemd/system/exec-order-post.service << EOF
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          ExecStart=bash -c 'echo main > /tmp/exec-order-main2'
+          ExecStartPost=bash -c 'test -f /tmp/exec-order-main2 && echo post > /tmp/exec-order-post'
+          EOF
+          systemctl daemon-reload
+          systemctl start exec-order-post.service
+          systemctl is-active exec-order-post.service
+          [[ -f /tmp/exec-order-main2 ]]
+          [[ -f /tmp/exec-order-post ]]
+          systemctl stop exec-order-post.service
+          rm -f /tmp/exec-order-main2 /tmp/exec-order-post
+
+          : "Multiple ExecStartPre= commands run in order"
+          cat > /run/systemd/system/exec-order-multi-pre.service << EOF
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          ExecStartPre=bash -c 'echo 1 >> /tmp/exec-order-seq'
+          ExecStartPre=bash -c 'echo 2 >> /tmp/exec-order-seq'
+          ExecStart=bash -c 'echo 3 >> /tmp/exec-order-seq'
+          ExecStartPost=bash -c 'echo 4 >> /tmp/exec-order-seq'
+          EOF
+          rm -f /tmp/exec-order-seq
+          systemctl daemon-reload
+          systemctl start exec-order-multi-pre.service
+          systemctl is-active exec-order-multi-pre.service
+          [[ "$(cat /tmp/exec-order-seq)" == "$(printf '1\n2\n3\n4')" ]]
+          systemctl stop exec-order-multi-pre.service
+          rm -f /tmp/exec-order-seq
+
+          : "ExecStartPre= failure prevents ExecStart="
+          cat > /run/systemd/system/exec-order-pre-fail.service << EOF
+          [Service]
+          Type=oneshot
+          ExecStartPre=false
+          ExecStart=bash -c 'echo should-not-run > /tmp/exec-order-nope'
+          EOF
+          rm -f /tmp/exec-order-nope
+          systemctl daemon-reload
+          systemctl start exec-order-pre-fail.service || true
+          [[ ! -f /tmp/exec-order-nope ]]
+
+          : "ExecStartPre= with - prefix ignores failure"
+          cat > /run/systemd/system/exec-order-pre-dash.service << EOF
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          ExecStartPre=-false
+          ExecStart=bash -c 'echo ran > /tmp/exec-order-dash'
+          EOF
+          rm -f /tmp/exec-order-dash
+          systemctl daemon-reload
+          systemctl start exec-order-pre-dash.service
+          systemctl is-active exec-order-pre-dash.service
+          [[ -f /tmp/exec-order-dash ]]
+          systemctl stop exec-order-pre-dash.service
+          rm -f /tmp/exec-order-dash
+          ESPEOF
+          chmod +x TEST-07-PID1.exec-start-pre-post.sh
+
           rm -f TEST-07-PID1.attach_processes.sh \
                TEST-07-PID1.concurrency.sh \
                TEST-07-PID1.DeferReactivation.sh \
@@ -1995,7 +2091,8 @@
           at_exit() {
               set +e
               rm -f /run/systemd/system/cond-test-*.service
-              rm -f /tmp/cond-test-marker
+              rm -f /tmp/cond-test-marker /tmp/cond-test-file /tmp/cond-test-symlink /tmp/cond-test-notlink
+              rm -rf /tmp/cond-test-dir
               systemctl daemon-reload
           }
           trap at_exit EXIT
@@ -2063,6 +2160,88 @@
           (! systemctl is-active cond-test-notempty.service)
 
           rm -f /tmp/cond-test-marker
+
+          : "ConditionPathIsDirectory= succeeds for directory"
+          cat > /run/systemd/system/cond-test-isdir.service << EOF
+          [Unit]
+          ConditionPathIsDirectory=/tmp
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          RemainAfterExit=yes
+          EOF
+          systemctl daemon-reload
+          systemctl start cond-test-isdir.service
+          systemctl is-active cond-test-isdir.service
+          systemctl stop cond-test-isdir.service
+
+          : "ConditionPathIsDirectory= skips for regular file"
+          touch /tmp/cond-test-file
+          cat > /run/systemd/system/cond-test-notdir.service << EOF
+          [Unit]
+          ConditionPathIsDirectory=/tmp/cond-test-file
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          RemainAfterExit=yes
+          EOF
+          systemctl daemon-reload
+          systemctl start cond-test-notdir.service
+          (! systemctl is-active cond-test-notdir.service)
+          rm -f /tmp/cond-test-file
+
+          : "ConditionDirectoryNotEmpty= succeeds for non-empty dir"
+          mkdir -p /tmp/cond-test-dir
+          touch /tmp/cond-test-dir/file
+          cat > /run/systemd/system/cond-test-dirnotempty.service << EOF
+          [Unit]
+          ConditionDirectoryNotEmpty=/tmp/cond-test-dir
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          RemainAfterExit=yes
+          EOF
+          systemctl daemon-reload
+          systemctl start cond-test-dirnotempty.service
+          systemctl is-active cond-test-dirnotempty.service
+          systemctl stop cond-test-dirnotempty.service
+
+          : "ConditionDirectoryNotEmpty= skips for empty dir"
+          rm -f /tmp/cond-test-dir/file
+          systemctl start cond-test-dirnotempty.service
+          (! systemctl is-active cond-test-dirnotempty.service)
+          rm -rf /tmp/cond-test-dir
+
+          : "ConditionPathIsSymbolicLink= succeeds for symlink"
+          ln -sfn /tmp /tmp/cond-test-symlink
+          cat > /run/systemd/system/cond-test-symlink.service << EOF
+          [Unit]
+          ConditionPathIsSymbolicLink=/tmp/cond-test-symlink
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          RemainAfterExit=yes
+          EOF
+          systemctl daemon-reload
+          systemctl start cond-test-symlink.service
+          systemctl is-active cond-test-symlink.service
+          systemctl stop cond-test-symlink.service
+          rm -f /tmp/cond-test-symlink
+
+          : "ConditionPathIsSymbolicLink= skips for regular file"
+          touch /tmp/cond-test-notlink
+          cat > /run/systemd/system/cond-test-notlink.service << EOF
+          [Unit]
+          ConditionPathIsSymbolicLink=/tmp/cond-test-notlink
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          RemainAfterExit=yes
+          EOF
+          systemctl daemon-reload
+          systemctl start cond-test-notlink.service
+          (! systemctl is-active cond-test-notlink.service)
+          rm -f /tmp/cond-test-notlink
           CONDEOF
                     chmod +x TEST-23-UNIT-FILE.conditions.sh
 
@@ -2639,6 +2818,61 @@
           systemd-run --unit="$UNIT" --on-active=30s --remain-after-exit true
           grep -q "^OnActiveSec=30s$" "/run/systemd/transient/$UNIT.timer"
           systemctl stop "$UNIT.timer" "$UNIT.service" 2>/dev/null || true
+
+          : "StandardOutput=file: redirects stdout to file"
+          OUTFILE="/tmp/stdout-test-$RANDOM"
+          rm -f "$OUTFILE"
+          systemd-run --wait -p StandardOutput="file:$OUTFILE" echo "hello-stdout"
+          [[ "$(cat "$OUTFILE")" == "hello-stdout" ]]
+          rm -f "$OUTFILE"
+
+          : "StandardError=file: redirects stderr to file"
+          ERRFILE="/tmp/stderr-test-$RANDOM"
+          rm -f "$ERRFILE"
+          systemd-run --wait -p StandardOutput=null -p StandardError="file:$ERRFILE" bash -c 'echo hello-stderr >&2'
+          [[ "$(cat "$ERRFILE")" == "hello-stderr" ]]
+          rm -f "$ERRFILE"
+
+          : "EnvironmentFile= loads env vars from file"
+          ENVFILE="/tmp/envfile-test-$RANDOM"
+          printf 'ENVF_VAR1=hello\nENVF_VAR2=world\n' > "$ENVFILE"
+          systemd-run --wait --pipe \
+                      -p EnvironmentFile="$ENVFILE" \
+                      bash -xec '[[ "$ENVF_VAR1" == hello && "$ENVF_VAR2" == world ]]'
+          rm -f "$ENVFILE"
+
+          : "SuccessExitStatus= treats custom exit code as success"
+          UNIT="success-exit-$RANDOM"
+          cat > "/run/systemd/system/$UNIT.service" << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=bash -c 'exit 42'
+          SuccessExitStatus=42
+          RemainAfterExit=yes
+          EOF
+          systemctl daemon-reload
+          systemctl start "$UNIT.service"
+          systemctl is-active "$UNIT.service"
+          [[ "$(systemctl show -P Result "$UNIT.service")" == "success" ]]
+          systemctl stop "$UNIT.service"
+          rm -f "/run/systemd/system/$UNIT.service"
+          systemctl daemon-reload
+
+          : "TimeoutStopSec= kills service after timeout"
+          UNIT="timeout-stop-$RANDOM"
+          cat > "/run/systemd/system/$UNIT.service" << EOF
+          [Service]
+          ExecStart=sleep infinity
+          TimeoutStopSec=2
+          EOF
+          systemctl daemon-reload
+          systemctl start "$UNIT.service"
+          systemctl is-active "$UNIT.service"
+          systemctl stop "$UNIT.service"
+          (! systemctl is-active "$UNIT.service")
+          [[ "$(systemctl show -P Result "$UNIT.service")" == "success" ]]
+          rm -f "/run/systemd/system/$UNIT.service"
+          systemctl daemon-reload
 
           : "Error handling"
           (! systemd-run)
