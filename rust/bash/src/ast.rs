@@ -9,6 +9,7 @@ pub struct CompleteCommand {
     pub list: AndOrList,
     pub background: bool,
     pub line: usize,
+    #[allow(dead_code)]
     pub end_line: usize,
 }
 

@@ -253,27 +253,28 @@ fn run() -> i32 {
                 // `read -t 0` and `read` from stdin work correctly.
                 // Only do this if fd 0 is NOT explicitly redirected (pipe, regular file).
                 // If fd 0 is a tty or /dev/null, replace it with the script file.
-                // Open script file on fd 0 (matching bash behavior) only when
-                // fd 0 is a terminal (interactive inherited stdin).
-                // Don't replace when: redirected (pipe/file), or closed.
+                // Open script file on fd 0 (matching bash behavior).
+                // Replace fd 0 unless it's explicitly redirected (pipe or regular file).
+                // This ensures `read -t 0` on inherited stdin works correctly.
                 #[cfg(unix)]
                 {
                     use std::os::unix::io::IntoRawFd;
-                    let fd0_is_tty = nix::unistd::isatty(0).unwrap_or(false);
-                    if fd0_is_tty {
-                        if let Ok(f) = std::fs::File::open(&file) {
-                            let raw = f.into_raw_fd();
-                            if raw != 0 {
-                                nix::unistd::dup2(raw, 0).ok();
-                                nix::unistd::close(raw).ok();
-                            }
-                            nix::unistd::lseek(
-                                0,
-                                content.len() as i64,
-                                nix::unistd::Whence::SeekSet,
-                            )
-                            .ok();
+                    let fd0_is_redirected = nix::sys::stat::fstat(0)
+                        .map(|s| {
+                            use nix::sys::stat::SFlag;
+                            let mode = SFlag::from_bits_truncate(s.st_mode);
+                            // Pipes and regular files indicate explicit redirects
+                            mode.contains(SFlag::S_IFIFO) || mode.contains(SFlag::S_IFREG)
+                        })
+                        .unwrap_or(false); // closed fd → not redirected
+                    if !fd0_is_redirected && let Ok(f) = std::fs::File::open(&file) {
+                        let raw = f.into_raw_fd();
+                        if raw != 0 {
+                            nix::unistd::dup2(raw, 0).ok();
+                            nix::unistd::close(raw).ok();
                         }
+                        nix::unistd::lseek(0, content.len() as i64, nix::unistd::Whence::SeekSet)
+                            .ok();
                     }
                 }
                 let status = shell.run_string(&content);
