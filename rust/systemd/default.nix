@@ -1353,6 +1353,75 @@
 
           : "Error handling for clean-up codepaths"
           (! systemd-run --wait --pipe false)
+
+          : "ExecStop= runs on service stop"
+          UNIT="execstop-test-$RANDOM"
+          systemd-run --unit="$UNIT" -p Type=notify \
+              -p ExecStop="touch /tmp/execstop-marker-$UNIT" \
+              bash -c 'systemd-notify --ready; sleep 60'
+          sleep 1
+          systemctl is-active "$UNIT.service"
+          systemctl stop "$UNIT.service"
+          sleep 1
+          [[ -f "/tmp/execstop-marker-$UNIT" ]]
+          rm -f "/tmp/execstop-marker-$UNIT"
+
+          : "ExecStopPost= runs after service stops"
+          UNIT="execstoppost-test-$RANDOM"
+          systemd-run --unit="$UNIT" -p Type=notify \
+              -p ExecStopPost="touch /tmp/execstoppost-marker-$UNIT" \
+              bash -c 'systemd-notify --ready; sleep 60'
+          sleep 1
+          systemctl stop "$UNIT.service"
+          sleep 1
+          [[ -f "/tmp/execstoppost-marker-$UNIT" ]]
+          rm -f "/tmp/execstoppost-marker-$UNIT"
+
+          : "RestartForceExitStatus= forces restart on specific exit code"
+          UNIT="force-restart-$RANDOM"
+          systemd-run --unit="$UNIT" -p Restart=no -p RestartSec=0 \
+              -p 'RestartForceExitStatus=42' \
+              bash -c 'exit 42'
+          sleep 2
+          # Despite Restart=no, exit 42 should force a restart
+          [[ "$(systemctl show -P NRestarts "$UNIT.service")" -ge "1" ]]
+          systemctl stop "$UNIT.service" 2>/dev/null || true
+          systemctl reset-failed "$UNIT.service" 2>/dev/null || true
+
+          : "SendSIGKILL=no is accepted as a property"
+          systemd-run --wait --pipe -p SendSIGKILL=no -p Type=oneshot true
+
+          : "FinalKillSignal= is accepted as a property"
+          systemd-run --wait --pipe -p FinalKillSignal=9 -p Type=oneshot true
+
+          : "RestartKillSignal= is accepted as a property"
+          systemd-run --wait --pipe -p RestartKillSignal=15 -p Type=oneshot true
+
+          : "LimitRTTIME= real-time scheduling time limit"
+          systemd-run --wait --pipe -p LimitRTTIME=666666 \
+              bash -xec 'if ulimit -R 2>/dev/null; then [[ $(ulimit -SR) -eq 666666 ]]; fi'
+
+          : "Multiple ExecStart= with Type=oneshot runs all commands"
+          UNIT="multi-exec-$RANDOM"
+          printf '[Service]\nType=oneshot\nExecStart=touch /tmp/multi-exec-1-%s\nExecStart=touch /tmp/multi-exec-2-%s\n' \
+              "$UNIT" "$UNIT" > "/run/systemd/system/$UNIT.service"
+          systemctl daemon-reload
+          systemctl start "$UNIT.service"
+          sleep 1
+          [[ -f "/tmp/multi-exec-1-$UNIT" ]]
+          [[ -f "/tmp/multi-exec-2-$UNIT" ]]
+          rm -f "/tmp/multi-exec-1-$UNIT" "/tmp/multi-exec-2-$UNIT"
+          rm -f "/run/systemd/system/$UNIT.service"
+          systemctl daemon-reload
+
+          : "Condition checks via systemctl show"
+          UNIT="condcheck-$RANDOM"
+          systemd-run --unit="$UNIT" -p RemainAfterExit=yes -p Type=oneshot true
+          sleep 1
+          # Basic property check
+          [[ "$(systemctl show -P Type "$UNIT.service")" == "oneshot" ]]
+          [[ "$(systemctl show -P RemainAfterExit "$UNIT.service")" == "yes" ]]
+          systemctl stop "$UNIT.service"
           TESTEOF
           chmod +x TEST-07-PID1.exec-context.sh
           # Rewrite private-pids test: keep only testcase_basic.
