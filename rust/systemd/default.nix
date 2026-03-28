@@ -869,6 +869,10 @@
           systemd-run --wait --pipe -p StandardInput=null \
               bash -xec '[[ ! -t 0 ]]'
 
+          : "ProcSubset=pid hides non-PID entries in /proc"
+          systemd-run --wait --pipe -p PrivateMounts=yes -p ProcSubset=pid \
+              bash -xec '(! test -d /proc/sys)'
+
           : "Error handling for clean-up codepaths"
           (! systemd-run --wait --pipe false)
           TESTEOF

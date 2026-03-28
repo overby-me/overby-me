@@ -1578,6 +1578,51 @@ pub fn run_exec_helper() {
         }
     }
 
+    // ── ProtectProc= / ProcSubset= — remount /proc with hidepid=/subset= ──
+    // These require a mount namespace to be effective. The mount namespace is
+    // typically set up by PrivateMounts=, ProtectSystem=, PrivateTmp=, etc.
+    if !config.privileged_prefix {
+        let hidepid = match config.protect_proc.as_str() {
+            "noaccess" => Some("2"),
+            "invisible" => Some("1"),
+            "ptraceable" => Some("ptraceable"),
+            _ => None,
+        };
+        let subset = match config.proc_subset.as_str() {
+            "pid" => Some("pid"),
+            _ => None,
+        };
+        if hidepid.is_some() || subset.is_some() {
+            let mut opts = String::new();
+            if let Some(h) = hidepid {
+                opts.push_str(&format!("hidepid={h}"));
+            }
+            if let Some(s) = subset {
+                if !opts.is_empty() {
+                    opts.push(',');
+                }
+                opts.push_str(&format!("subset={s}"));
+            }
+            let opts_c = std::ffi::CString::new(opts.as_str()).unwrap();
+            let ret = unsafe {
+                libc::mount(
+                    c"proc".as_ptr(),
+                    c"/proc".as_ptr(),
+                    c"proc".as_ptr(),
+                    libc::MS_NOSUID | libc::MS_NODEV | libc::MS_NOEXEC,
+                    opts_c.as_ptr() as *const libc::c_void,
+                )
+            };
+            if ret != 0 {
+                log::warn!(
+                    "Failed to remount /proc with {}: {}",
+                    opts,
+                    std::io::Error::last_os_error()
+                );
+            }
+        }
+    }
+
     // ── CapabilityBoundingSet= — drop capabilities from bounding set ──
     if !config.capability_bounding_set.is_empty() && !config.privileged_prefix {
         apply_capability_bounding_set(&config);
