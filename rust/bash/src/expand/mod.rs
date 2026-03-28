@@ -1758,15 +1758,15 @@ fn glob_expand(field: &str) -> Vec<String> {
             }
         }
         // Check if pattern has extglob chars that the glob crate can't handle
-        let has_extglob = {
-            // Check for balanced extglob patterns: X(...) where X is +@?!*
+        // Check if pattern needs our custom matcher (extglob or POSIX char classes)
+        let needs_custom_match = {
             let pb = pattern.as_bytes();
             let mut found = false;
+            // Check for balanced extglob patterns
             for i in 0..pb.len().saturating_sub(1) {
                 if pb[i + 1] == b'('
                     && matches!(pb[i], b'+' | b'@' | b'?' | b'!' | b'*')
                 {
-                    // Check for matching closing )
                     let mut depth = 1;
                     let mut j = i + 2;
                     while j < pb.len() && depth > 0 {
@@ -1780,8 +1780,16 @@ fn glob_expand(field: &str) -> Vec<String> {
                     }
                 }
             }
+            // Check for POSIX character classes [[:class:]] or [^...] negation
+            if !found && pattern.contains("[[:") {
+                found = true;
+            }
+            if !found && pattern.contains("[^") {
+                found = true;
+            }
             found
         };
+        let has_extglob = needs_custom_match;
         if has_extglob {
             // Use our case_pattern_match for extglob support
             // For simple (non-path) patterns, match against current directory entries
