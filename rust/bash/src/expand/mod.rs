@@ -932,6 +932,10 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                                 nix::unistd::close(r_fd).ok();
                             }
                         }
+                        // Restore SIGPIPE default handler so broken pipe kills child silently
+                        unsafe {
+                            libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+                        }
                         // Export all shell variables so child process inherits them
                         for (k, v) in ctx.vars {
                             unsafe { std::env::set_var(k, v) };

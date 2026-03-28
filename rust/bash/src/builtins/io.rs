@@ -55,9 +55,7 @@ pub(super) fn builtin_echo(shell: &mut Shell, args: &[String]) -> i32 {
         match nix::unistd::write(std::io::stdout(), &bytes) {
             Ok(_) => 0,
             Err(nix::Error::EPIPE) => {
-                if !shell.in_pipeline_child {
-                    eprintln!("{}: echo: write error: Broken pipe", shell.error_prefix());
-                }
+                eprintln!("{}: echo: write error: Broken pipe", shell.error_prefix());
                 1
             }
             Err(e) => {
