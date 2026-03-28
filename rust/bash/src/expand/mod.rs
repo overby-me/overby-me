@@ -1838,16 +1838,24 @@ fn glob_expand(field: &str) -> Vec<String> {
                                 .map(|e| e.file_name().to_string_lossy().to_string()),
                         )
                         .filter(|name| {
+                            // Negation patterns !(...)  never match . and ..
+                            if (name == "." || name == "..") && pattern.starts_with("!(") {
+                                return false;
+                            }
                             // Skip dotfiles unless dotglob is set or pattern explicitly matches dots
                             if name.starts_with('.') {
                                 if !dotglob {
+                                    // Check if pattern can match a leading dot
                                     let allows_dot = pattern.starts_with('.')
                                         || pattern.starts_with("@(.")
                                         || pattern.starts_with("+(.")
                                         || pattern.starts_with("*(.")
                                         || pattern.starts_with("?(.")
                                         || pattern.starts_with("@(*")
-                                        || pattern.contains("|.");
+                                        || pattern.contains("|.")
+                                        // *(...).X and ?(...).X can match .X with zero matches
+                                        || (pattern.starts_with("*(") || pattern.starts_with("?("))
+                                            && pattern.contains(").");
                                     if !allows_dot {
                                         return false;
                                     }
