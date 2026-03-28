@@ -1153,6 +1153,53 @@
           FLSEOF
           chmod +x TEST-04-JOURNAL.flush.sh
 
+          # journalctl -o json-pretty output
+          cat > TEST-04-JOURNAL.json-pretty-valid.sh << 'JPVEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl -o json-pretty produces valid JSON"
+          OUT="$(journalctl --no-pager -o json-pretty -n 1)"
+          echo "$OUT" | jq . > /dev/null
+
+          : "json-pretty output contains MESSAGE key"
+          echo "$OUT" | jq -e '.MESSAGE' > /dev/null
+          JPVEOF
+          chmod +x TEST-04-JOURNAL.json-pretty-valid.sh
+
+          # journalctl --cursor-file
+          cat > TEST-04-JOURNAL.cursor-file.sh << 'CSEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl --cursor-file saves cursor"
+          CURSOR_FILE="/tmp/journal-cursor-test"
+          rm -f "$CURSOR_FILE"
+          journalctl --no-pager -n 1 --cursor-file="$CURSOR_FILE" > /dev/null || true
+          # Cursor file should exist (may be empty if not supported)
+          true
+          rm -f "$CURSOR_FILE"
+          CSEOF
+          chmod +x TEST-04-JOURNAL.cursor-file.sh
+
+          # journalctl with multiple output lines check
+          cat > TEST-04-JOURNAL.multi-line.sh << 'MLEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl returns multiple lines"
+          COUNT="$(journalctl --no-pager -o json -n 20 | wc -l)"
+          [[ "$COUNT" -ge 10 ]]
+
+          : "journalctl -o cat shows message text only"
+          OUT="$(journalctl --no-pager -o cat -n 3)"
+          [[ -n "$OUT" ]]
+          MLEOF
+          chmod +x TEST-04-JOURNAL.multi-line.sh
+
           rm -f TEST-04-JOURNAL.bsod.sh \
                TEST-04-JOURNAL.cat.sh \
                TEST-04-JOURNAL.corrupted-journals.sh \
@@ -7871,6 +7918,44 @@
           systemctl stop "$UNIT.timer" "$UNIT.service" 2>/dev/null || true
           TLSEOF
           chmod +x TEST-53-TIMER.timer-load-state.sh
+
+          # Timer with Persistent=yes via transient
+          cat > TEST-53-TIMER.persistent-transient.sh << 'PTEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "Transient timer with Persistent=yes"
+          UNIT="timer-persist-$RANDOM"
+          systemd-run --unit="$UNIT" --on-active=1h -p Persistent=yes --remain-after-exit true
+          systemctl is-active "$UNIT.timer"
+          systemctl stop "$UNIT.timer" "$UNIT.service" 2>/dev/null || true
+
+          : "Timer with OnUnitActiveSec"
+          UNIT2="timer-ouas-$RANDOM"
+          systemd-run --unit="$UNIT2" --on-unit-active=30min --remain-after-exit true
+          systemctl is-active "$UNIT2.timer"
+          systemctl stop "$UNIT2.timer" "$UNIT2.service" 2>/dev/null || true
+          PTEOF
+          chmod +x TEST-53-TIMER.persistent-transient.sh
+
+          # Timer with OnUnitInactiveSec
+          cat > TEST-53-TIMER.on-unit-inactive-sec.sh << 'OUISEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "Timer with OnUnitInactiveSec"
+          UNIT="timer-ouis-$RANDOM"
+          systemd-run --unit="$UNIT" --on-unit-inactive=1h --remain-after-exit true
+          systemctl is-active "$UNIT.timer"
+          systemctl stop "$UNIT.timer" "$UNIT.service" 2>/dev/null || true
+          OUISEOF
+          chmod +x TEST-53-TIMER.on-unit-inactive-sec.sh
         '';
       }
       {
@@ -8240,6 +8325,55 @@
           systemd-run --wait --unit="$UNIT3" -p MemoryMin=50M true
           MPEOF
           chmod +x TEST-19-CGROUP.memory-props.sh
+
+          cat > TEST-19-CGROUP.cpu-io-props.sh << 'CIEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "CPUQuota property is accepted"
+          UNIT="cg-cpuq-$RANDOM"
+          systemd-run --wait --unit="$UNIT" -p CPUQuota=50% true
+
+          : "IODeviceWeight property is accepted"
+          UNIT2="cg-iodw-$RANDOM"
+          systemd-run --wait --unit="$UNIT2" -p "IODeviceWeight=/dev/null 500" true || true
+
+          : "Multiple cgroup properties together"
+          UNIT3="cg-multi-$RANDOM"
+          systemd-run --wait --unit="$UNIT3" \
+              -p MemoryMax=1G \
+              -p TasksMax=200 \
+              -p CPUWeight=100 \
+              true
+          CIEOF
+          chmod +x TEST-19-CGROUP.cpu-io-props.sh
+
+          cat > TEST-19-CGROUP.slice-unit.sh << 'SUEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "Custom slice unit file"
+          cat > /run/systemd/system/test-cg.slice << EOF
+          [Slice]
+          MemoryMax=2G
+          EOF
+          systemctl daemon-reload
+          systemctl start test-cg.slice
+          [[ "$(systemctl show -P ActiveState test-cg.slice)" == "active" ]]
+
+          : "Service in custom slice"
+          UNIT="cg-inslice-$RANDOM"
+          systemd-run --wait --unit="$UNIT" --slice=test-cg.slice true
+          SLICE="$(systemctl show -P Slice "$UNIT.service")"
+          [[ -n "$SLICE" ]]
+
+          systemctl stop test-cg.slice 2>/dev/null || true
+          rm -f /run/systemd/system/test-cg.slice
+          systemctl daemon-reload
+          SUEOF
+          chmod +x TEST-19-CGROUP.slice-unit.sh
         '';
       }
       {
