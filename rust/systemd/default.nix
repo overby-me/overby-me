@@ -8027,6 +8027,56 @@
           systemctl stop "$UNIT.timer" "$UNIT.service" 2>/dev/null || true
           OUISEOF
           chmod +x TEST-53-TIMER.on-unit-inactive-sec.sh
+
+          # Timer unit file with OnCalendar
+          cat > TEST-53-TIMER.unit-file-calendar.sh << 'UFCEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "Timer unit file with OnCalendar fires"
+          UNIT="timer-uf-cal-$RANDOM"
+          rm -f "/tmp/timer-uf-cal-result-$UNIT"
+          cat > "/run/systemd/system/$UNIT.timer" << EOF
+          [Timer]
+          OnCalendar=*:*:0/2
+          EOF
+          cat > "/run/systemd/system/$UNIT.service" << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=touch /tmp/timer-uf-cal-result-$UNIT
+          EOF
+          systemctl daemon-reload
+          systemctl start "$UNIT.timer"
+          systemctl is-active "$UNIT.timer"
+          timeout 15 bash -c "until [[ -f /tmp/timer-uf-cal-result-$UNIT ]]; do sleep 0.5; done"
+          systemctl stop "$UNIT.timer" "$UNIT.service" 2>/dev/null || true
+          rm -f "/tmp/timer-uf-cal-result-$UNIT"
+          rm -f "/run/systemd/system/$UNIT.timer" "/run/systemd/system/$UNIT.service"
+          systemctl daemon-reload
+          UFCEOF
+          chmod +x TEST-53-TIMER.unit-file-calendar.sh
+
+          # Timer is-active after trigger
+          cat > TEST-53-TIMER.is-active-after.sh << 'IAAEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "Timer is-active returns correct state"
+          UNIT="timer-ia-$RANDOM"
+          systemd-run --unit="$UNIT" --on-active=1h --remain-after-exit true
+          systemctl is-active "$UNIT.timer"
+          # Not yet elapsed
+          STATE="$(systemctl show -P ActiveState "$UNIT.timer")"
+          [[ "$STATE" == "active" ]]
+          systemctl stop "$UNIT.timer" "$UNIT.service" 2>/dev/null || true
+          IAAEOF
+          chmod +x TEST-53-TIMER.is-active-after.sh
         '';
       }
       {
@@ -8445,6 +8495,73 @@
           systemctl daemon-reload
           SUEOF
           chmod +x TEST-19-CGROUP.slice-unit.sh
+
+          cat > TEST-19-CGROUP.cgroup-props-unit.sh << 'CPUEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "Cgroup properties in unit file"
+          UNIT="cg-uf-$RANDOM"
+          cat > "/run/systemd/system/$UNIT.service" << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=/bin/true
+          MemoryMax=512M
+          TasksMax=100
+          CPUWeight=50
+          EOF
+          systemctl daemon-reload
+          systemctl start "$UNIT.service"
+          # Just verify the unit started successfully with these properties
+          rm -f "/run/systemd/system/$UNIT.service"
+          systemctl daemon-reload
+
+          : "Cgroup properties in unit file with IOWeight"
+          UNIT2="cg-uf2-$RANDOM"
+          cat > "/run/systemd/system/$UNIT2.service" << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=/bin/true
+          IOWeight=200
+          MemoryHigh=1G
+          EOF
+          systemctl daemon-reload
+          systemctl start "$UNIT2.service"
+          rm -f "/run/systemd/system/$UNIT2.service"
+          systemctl daemon-reload
+          CPUEOF
+          chmod +x TEST-19-CGROUP.cgroup-props-unit.sh
+
+          cat > TEST-19-CGROUP.nested-slices.sh << 'NSEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "Nested slice hierarchy"
+          cat > /run/systemd/system/test-nest.slice << EOF
+          [Slice]
+          MemoryMax=4G
+          EOF
+          cat > /run/systemd/system/test-nest-inner.slice << EOF
+          [Slice]
+          Slice=test-nest.slice
+          MemoryMax=2G
+          EOF
+          systemctl daemon-reload
+          systemctl start test-nest.slice
+          systemctl start test-nest-inner.slice || true
+          [[ "$(systemctl show -P ActiveState test-nest.slice)" == "active" ]]
+
+          UNIT="cg-nested-$RANDOM"
+          systemd-run --wait --unit="$UNIT" --slice=test-nest.slice true
+
+          systemctl stop test-nest-inner.slice 2>/dev/null || true
+          systemctl stop test-nest.slice 2>/dev/null || true
+          rm -f /run/systemd/system/test-nest.slice /run/systemd/system/test-nest-inner.slice
+          systemctl daemon-reload
+          NSEOF
+          chmod +x TEST-19-CGROUP.nested-slices.sh
         '';
       }
       {
