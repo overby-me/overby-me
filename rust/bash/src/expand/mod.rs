@@ -1824,14 +1824,24 @@ fn glob_expand(field: &str) -> Vec<String> {
                     // dot-only patterns (not negation or mixed patterns)
                     let extra: Vec<String> = if !skipdots
                         && !pattern.starts_with("!(")
-                        && (pattern.starts_with(".*")
-                            || pattern.starts_with(".?")
+                    {
+                        let starts_dot_star = pattern.starts_with(".*")
                             || pattern.starts_with("@(.*")
+                            || pattern.contains("|.*");
+                        let starts_dot_q = pattern.starts_with(".?")
                             || pattern.starts_with("@(.?")
                             || pattern.starts_with("*(.?")
-                            || pattern.starts_with("+(.?"))
-                    {
-                        vec![".".to_string(), "..".to_string()]
+                            || pattern.starts_with("+(.?")
+                            || pattern.contains("|.?");
+                        if starts_dot_star {
+                            // .* matches both . and ..
+                            vec![".".to_string(), "..".to_string()]
+                        } else if starts_dot_q {
+                            // .? matches .. but not . (. is only 1 char)
+                            vec!["..".to_string()]
+                        } else {
+                            vec![]
+                        }
                     } else {
                         vec![]
                     };
