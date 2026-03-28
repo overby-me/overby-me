@@ -103,7 +103,14 @@ pub(super) fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
                     if enable {
                         // set -o: human-readable option listing
                         for (name, val) in &options {
-                            println!("{:<15}\t{}", name, if *val { "on" } else { "off" });
+                            {
+                        let status_str = if *val { "on" } else { "off" };
+                        let line = format!("{:<20}\t{}\n", name, status_str);
+                        #[cfg(unix)]
+                        nix::unistd::write(std::io::stdout(), line.as_bytes()).ok();
+                        #[cfg(not(unix))]
+                        print!("{}", line);
+                    }
                         }
                     } else {
                         // set +o: reusable format
@@ -323,15 +330,22 @@ pub(super) fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
                     } else if set {
                         // shopt -s -o: list only ON options (human-readable)
                         if *val {
-                            println!("{:<15}\ton", name);
+                            println!("{:<20}\ton", name);
                         }
                     } else if unset {
                         // shopt -u -o: list only OFF options (human-readable)
                         if !*val {
-                            println!("{:<15}\toff", name);
+                            println!("{:<20}\toff", name);
                         }
                     } else {
-                        println!("{:<15}\t{}", name, if *val { "on" } else { "off" });
+                        {
+                        let status_str = if *val { "on" } else { "off" };
+                        let line = format!("{:<20}\t{}\n", name, status_str);
+                        #[cfg(unix)]
+                        nix::unistd::write(std::io::stdout(), line.as_bytes()).ok();
+                        #[cfg(not(unix))]
+                        print!("{}", line);
+                    }
                     }
                 }
             }
@@ -375,7 +389,7 @@ pub(super) fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
                     if print_mode {
                         println!("set {}o {}", if *val { "-" } else { "+" }, opt);
                     } else {
-                        println!("{:<15}\t{}", opt, if *val { "on" } else { "off" });
+                        println!("{:<20}\t{}", opt, if *val { "on" } else { "off" });
                     }
                 } else if !*val {
                     status = 1;
@@ -582,7 +596,14 @@ pub(super) fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
                 if print_mode {
                     println!("shopt {} {}", if *val { "-s" } else { "-u" }, name);
                 } else {
-                    println!("{:<20}\t{}", name, if *val { "on" } else { "off" });
+                    {
+                        let status_str = if *val { "on" } else { "off" };
+                        let line = format!("{:<20}\t{}\n", name, status_str);
+                        #[cfg(unix)]
+                        nix::unistd::write(std::io::stdout(), line.as_bytes()).ok();
+                        #[cfg(not(unix))]
+                        print!("{}", line);
+                    }
                 }
             }
         }
@@ -597,7 +618,14 @@ pub(super) fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
                     if print_mode {
                         println!("shopt {} {}", if *val { "-s" } else { "-u" }, name);
                     } else {
-                        println!("{:<20}\t{}", name, if *val { "on" } else { "off" });
+                        {
+                        let status_str = if *val { "on" } else { "off" };
+                        let line = format!("{:<20}\t{}\n", name, status_str);
+                        #[cfg(unix)]
+                        nix::unistd::write(std::io::stdout(), line.as_bytes()).ok();
+                        #[cfg(not(unix))]
+                        print!("{}", line);
+                    }
                     }
                 }
             }
@@ -615,7 +643,7 @@ pub(super) fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
                     shell.shopt_nullglob = false;
                 } else if !query {
                     println!(
-                        "{:<24}{}",
+                        "{:<20}\t{}",
                         "nullglob",
                         if shell.shopt_nullglob { "on" } else { "off" }
                     );
@@ -630,7 +658,7 @@ pub(super) fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
                     shell.shopt_globstar = false;
                 } else if !query {
                     println!(
-                        "{:<24}{}",
+                        "{:<20}\t{}",
                         "globstar",
                         if shell.shopt_globstar { "on" } else { "off" }
                     );
@@ -645,7 +673,7 @@ pub(super) fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
                     shell.shopt_extglob = false;
                 } else if !query {
                     println!(
-                        "{:<24}{}",
+                        "{:<20}\t{}",
                         "extglob",
                         if shell.shopt_extglob { "on" } else { "off" }
                     );
