@@ -1969,6 +1969,23 @@
           sed -i '/^test "$(busctl/d' TEST-63-PATH.sh
           sed -i '/^# tests for issue.*24577/,/^# Test for race condition/{ /^# Test for race condition/!d }' TEST-63-PATH.sh
           sed -i '/^# Test for race condition/,/^touch \/testok/{/^touch \/testok/!d}' TEST-63-PATH.sh
+          # Replace 'touch /testok' with transient path test + touch /testok
+          sed -i '/^touch \/testok/d' TEST-63-PATH.sh
+          cat >> TEST-63-PATH.sh << 'PATHEOF'
+
+          : "Transient PathExists= unit fires when file is created"
+          PUNIT="transient-path-$RANDOM"
+          rm -f "/tmp/path-trigger-$PUNIT"
+          systemd-run --unit="$PUNIT" --path-property=PathExists="/tmp/path-trigger-$PUNIT" --remain-after-exit touch "/tmp/path-result-$PUNIT"
+          systemctl is-active "$PUNIT.path"
+          touch "/tmp/path-trigger-$PUNIT"
+          timeout 15 bash -c "until [[ -f /tmp/path-result-$PUNIT ]]; do sleep 0.5; done"
+          [[ -f "/tmp/path-result-$PUNIT" ]]
+          systemctl stop "$PUNIT.path" "$PUNIT.service" 2>/dev/null || true
+          rm -f "/tmp/path-trigger-$PUNIT" "/tmp/path-result-$PUNIT"
+
+          touch /testok
+          PATHEOF
         '';
       }
       {

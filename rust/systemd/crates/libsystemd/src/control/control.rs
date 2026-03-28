@@ -3927,15 +3927,148 @@ fn create_transient_unit(
         crate::units::insert_new_unit_lenient(timer_unit, &mut ri);
     }
 
-    // If path properties are set, write a companion .path transient file
+    // If path properties are set, create a companion .path unit and insert it
     if has_path {
         let path_name = if unit_name.ends_with(".service") {
             format!("{}.path", unit_name.strip_suffix(".service").unwrap())
         } else {
             format!("{unit_name}.path")
         };
-        let path_file = transient_dir.join(&path_name);
-        let _ = write_transient_auxiliary_file(&path_file, "Path", &params.path_properties, params);
+
+        let service_unit_name = if unit_name.ends_with(".service") {
+            unit_name.clone()
+        } else {
+            format!("{unit_name}.service")
+        };
+
+        // Parse path properties into PathCondition entries
+        let mut conditions = Vec::new();
+        for prop in &params.path_properties {
+            if let Some((key, value)) = prop.split_once('=') {
+                let condition = match key {
+                    "PathExists" => {
+                        Some(crate::units::PathCondition::PathExists(value.to_string()))
+                    }
+                    "PathExistsGlob" => Some(crate::units::PathCondition::PathExistsGlob(
+                        value.to_string(),
+                    )),
+                    "PathChanged" => {
+                        Some(crate::units::PathCondition::PathChanged(value.to_string()))
+                    }
+                    "PathModified" => {
+                        Some(crate::units::PathCondition::PathModified(value.to_string()))
+                    }
+                    "DirectoryNotEmpty" => Some(crate::units::PathCondition::DirectoryNotEmpty(
+                        value.to_string(),
+                    )),
+                    _ => None,
+                };
+                if let Some(c) = condition {
+                    conditions.push(c);
+                }
+            }
+        }
+
+        let path_config = crate::units::PathConfig {
+            conditions,
+            make_directory: false,
+            directory_mode: 0o755,
+            trigger_limit_interval_sec: std::time::Duration::from_secs(2),
+            trigger_limit_burst: 200,
+            unit: service_unit_name,
+        };
+
+        let path_id = UnitId {
+            kind: crate::units::UnitIdKind::Path,
+            name: path_name.clone(),
+        };
+
+        let path_unit = crate::units::Unit {
+            id: path_id.clone(),
+            common: Common {
+                unit: UnitConfig {
+                    description: params
+                        .description
+                        .clone()
+                        .unwrap_or_else(|| format!("Path for {unit_name}")),
+                    documentation: vec![],
+                    fragment_path: {
+                        let path_file = transient_dir.join(&path_name);
+                        write_transient_auxiliary_file(
+                            &path_file,
+                            "Path",
+                            &params.path_properties,
+                            params,
+                        )
+                        .ok()
+                        .map(|()| path_file)
+                    },
+                    refs_by_name: vec![],
+                    default_dependencies: false,
+                    conditions: vec![],
+                    assertions: vec![],
+                    success_action: crate::units::UnitAction::None,
+                    failure_action: crate::units::UnitAction::None,
+                    aliases: vec![],
+                    ignore_on_isolate: false,
+                    default_instance: None,
+                    allow_isolate: false,
+                    job_timeout_sec: None,
+                    job_timeout_action: crate::units::UnitAction::None,
+                    refuse_manual_start: false,
+                    refuse_manual_stop: false,
+                    on_success: vec![],
+                    on_success_job_mode: crate::units::OnFailureJobMode::default(),
+                    on_failure: vec![],
+                    on_failure_job_mode: crate::units::OnFailureJobMode::default(),
+                    start_limit_interval_sec: None,
+                    start_limit_burst: None,
+                    start_limit_action: crate::units::UnitAction::None,
+                    loaded_at: std::time::SystemTime::now(),
+                    loaded_dropin_files: Vec::new(),
+                },
+                dependencies: Dependencies {
+                    wants: vec![],
+                    wanted_by: vec![],
+                    requires: vec![],
+                    required_by: vec![],
+                    conflicts: vec![],
+                    conflicted_by: vec![],
+                    before: vec![],
+                    after: vec![],
+                    part_of: vec![],
+                    part_of_by: vec![],
+                    binds_to: vec![],
+                    bound_by: vec![],
+                },
+                status: RwLock::new(UnitStatus::Started(crate::units::StatusStarted::Running)),
+                timestamps: RwLock::new(UnitTimestamps::default()),
+                n_restarts: std::sync::atomic::AtomicU64::new(0),
+            },
+            specific: Specific::Path(crate::units::PathSpecific {
+                conf: path_config,
+                state: RwLock::new(crate::units::PathState {
+                    common: CommonState::default(),
+                    result: crate::units::PathResult::default(),
+                }),
+            }),
+        };
+
+        // Remove existing path unit if stopped
+        let existing_path = ri
+            .unit_table
+            .values()
+            .find(|u| u.id.name == path_name)
+            .map(|u| {
+                let status = u.common.status.read_poisoned();
+                let is_done =
+                    matches!(&*status, UnitStatus::NeverStarted | UnitStatus::Stopped(..));
+                (u.id.clone(), is_done)
+            });
+        if let Some((id, true)) = existing_path {
+            ri.unit_table.remove(&id);
+        }
+        crate::units::insert_new_unit_lenient(path_unit, &mut ri);
     }
 
     // If socket properties are set, write a companion .socket transient file
