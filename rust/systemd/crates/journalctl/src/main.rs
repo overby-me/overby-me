@@ -1603,6 +1603,13 @@ fn main() {
         drop(writer);
         follow_journal(&cli, output_format, &fmt_opts, &storage);
     }
+
+    // Exit 1 when --grep was used and no entries matched (matches real
+    // journalctl behavior). This is important for scripts that use
+    // `journalctl --grep=X` to check if a message appeared in the log.
+    if filtered.is_empty() && !cli.follow && cli.grep.is_some() {
+        process::exit(1);
+    }
 }
 
 /// Follow the journal, printing new entries as they appear.

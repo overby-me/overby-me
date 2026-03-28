@@ -599,9 +599,8 @@
           : "journalctl --grep with --priority combined"
           journalctl -b --no-pager --grep="." -p info -n 5 > /dev/null
 
-          : "journalctl --grep with no matches returns empty"
-          COUNT=$(journalctl -b --no-pager --grep="XYZZY_IMPOSSIBLE_STRING_42" | wc -l)
-          [[ "$COUNT" -eq 0 ]]
+          : "journalctl --grep with no matches exits non-zero"
+          (! journalctl -b --no-pager --grep="XYZZY_IMPOSSIBLE_STRING_42")
           GFEOF
           chmod +x TEST-04-JOURNAL.grep-filter.sh
 
@@ -5154,8 +5153,7 @@
         # and journalctl @epoch timestamp parsing.
         patchScript = ''
           rm -f TEST-53-TIMER.RandomizedDelaySec-reload.sh \
-                TEST-53-TIMER.restart-trigger.sh \
-                TEST-53-TIMER.issue-16347.sh
+                TEST-53-TIMER.restart-trigger.sh
           # Custom timer test: verify OnActiveSec transient timer fires
           cat > TEST-53-TIMER.basic-timer.sh << 'BTEOF'
           #!/usr/bin/env bash
