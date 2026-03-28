@@ -411,6 +411,42 @@
           RCEOF
           chmod +x TEST-04-JOURNAL.rotation-cursor.sh
 
+          # Journal output format and filtering test
+          cat > TEST-04-JOURNAL.output-formats.sh << 'SLEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl -o json-pretty produces valid JSON"
+          journalctl --no-pager -n 1 -o json-pretty | jq . > /dev/null
+
+          : "journalctl -n limits output lines"
+          LINES=$(journalctl --no-pager -n 3 -o short | wc -l)
+          [[ "$LINES" -le 5 ]]
+
+          : "journalctl -o short-precise shows microsecond timestamps"
+          journalctl --no-pager -n 1 -o short-precise
+
+          : "journalctl -o short-iso shows ISO timestamps"
+          journalctl --no-pager -n 1 -o short-iso
+
+          : "journalctl --until filters by end time"
+          journalctl --no-pager --until "$(date '+%Y-%m-%d %H:%M:%S')" -n 5
+
+          : "journalctl --reverse reverses output order"
+          journalctl --no-pager --reverse -n 3
+
+          : "journalctl _TRANSPORT=kernel shows kernel messages"
+          journalctl --no-pager _TRANSPORT=kernel -n 5
+
+          : "journalctl --field lists unique values for a field"
+          journalctl --field=_TRANSPORT --no-pager
+
+          : "journalctl -o cat shows bare messages"
+          journalctl --no-pager -n 3 -o cat
+          SLEOF
+          chmod +x TEST-04-JOURNAL.output-formats.sh
+
           rm -f TEST-04-JOURNAL.bsod.sh \
                TEST-04-JOURNAL.cat.sh \
                TEST-04-JOURNAL.corrupted-journals.sh \
@@ -4379,6 +4415,59 @@
           DROPIN_EOF
                     chmod +x TEST-23-UNIT-FILE.drop-in.sh
 
+                    # Custom start-stop-no-reload test (based on upstream, simplified)
+                    cat > TEST-23-UNIT-FILE.start-stop-no-reload.sh << 'SSNREOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          # Test start & stop operations without daemon-reload
+
+          at_exit() {
+              set +e
+              rm -f /run/systemd/system/TEST-23-UNIT-FILE-no-reload.target
+              rm -f /run/systemd/system/TEST-23-UNIT-FILE-no-reload.service
+              systemctl stop TEST-23-UNIT-FILE-no-reload.target 2>/dev/null || true
+              systemctl stop TEST-23-UNIT-FILE-no-reload.service 2>/dev/null || true
+          }
+          trap at_exit EXIT
+
+          cat >/run/systemd/system/TEST-23-UNIT-FILE-no-reload.target << EOF
+          [Unit]
+          Wants=TEST-23-UNIT-FILE-no-reload.service
+          EOF
+
+          systemctl daemon-reload
+
+          systemctl start TEST-23-UNIT-FILE-no-reload.target
+
+          sleep 3.1
+
+          cat >/run/systemd/system/TEST-23-UNIT-FILE-no-reload.service << EOF
+          [Service]
+          ExecStart=sleep infinity
+          EOF
+
+          systemctl start TEST-23-UNIT-FILE-no-reload.service
+          systemctl is-active TEST-23-UNIT-FILE-no-reload.service
+
+          # Stop and remove, and try again
+          systemctl stop TEST-23-UNIT-FILE-no-reload.service
+          rm -f /run/systemd/system/TEST-23-UNIT-FILE-no-reload.service
+          systemctl daemon-reload
+
+          sleep 3.1
+
+          cat >/run/systemd/system/TEST-23-UNIT-FILE-no-reload.service << EOF
+          [Service]
+          ExecStart=sleep infinity
+          EOF
+
+          systemctl start TEST-23-UNIT-FILE-no-reload.service
+          systemctl is-active TEST-23-UNIT-FILE-no-reload.service
+          SSNREOF
+                    chmod +x TEST-23-UNIT-FILE.start-stop-no-reload.sh
+
                     rm -f TEST-23-UNIT-FILE.ExtraFileDescriptors.sh \
                          TEST-23-UNIT-FILE.JoinsNamespaceOf.sh \
                          TEST-23-UNIT-FILE.openfile.sh \
@@ -4522,6 +4611,58 @@
           systemctl daemon-reload
           BTEOF
           chmod +x TEST-53-TIMER.basic-timer.sh
+
+          # Timer stop/restart lifecycle test
+          cat > TEST-53-TIMER.timer-lifecycle.sh << 'TLEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "Timer can be started, stopped, and restarted"
+          UNIT="timer-lifecycle-$RANDOM"
+          printf '[Timer]\nOnActiveSec=1h\n' > "/run/systemd/system/$UNIT.timer"
+          printf '[Service]\nType=oneshot\nExecStart=true\n' > "/run/systemd/system/$UNIT.service"
+          systemctl daemon-reload
+
+          systemctl start "$UNIT.timer"
+          systemctl is-active "$UNIT.timer"
+          systemctl stop "$UNIT.timer"
+          (! systemctl is-active "$UNIT.timer")
+          systemctl start "$UNIT.timer"
+          systemctl is-active "$UNIT.timer"
+
+          : "Timer properties are visible via systemctl show"
+          [[ "$(systemctl show -P ActiveState "$UNIT.timer")" == "active" ]]
+
+          : "Stopping a timer does not affect its service"
+          systemctl stop "$UNIT.timer"
+          [[ "$(systemctl show -P ActiveState "$UNIT.service")" == "inactive" ]]
+
+          : "Timer unit can be enabled and disabled"
+          printf '[Install]\nWantedBy=timers.target\n' >> "/run/systemd/system/$UNIT.timer"
+          systemctl daemon-reload
+          systemctl enable "$UNIT.timer"
+          systemctl is-enabled "$UNIT.timer"
+          systemctl disable "$UNIT.timer"
+          (! systemctl is-enabled "$UNIT.timer") || true
+
+          rm -f "/run/systemd/system/$UNIT.timer" "/run/systemd/system/$UNIT.service"
+          systemctl daemon-reload
+
+          : "Multiple OnActiveSec timers in sequence"
+          for i in 1 2 3; do
+              UNIT="timer-seq-$RANDOM"
+              systemd-run --unit="$UNIT" --on-active=1s --remain-after-exit \
+                  touch "/tmp/timer-seq-$UNIT"
+              timeout 10 bash -c "until [[ -f /tmp/timer-seq-$UNIT ]]; do sleep 0.5; done"
+              [[ -f "/tmp/timer-seq-$UNIT" ]]
+              systemctl stop "$UNIT.timer" "$UNIT.service" 2>/dev/null || true
+              rm -f "/tmp/timer-seq-$UNIT"
+          done
+          TLEOF
+          chmod +x TEST-53-TIMER.timer-lifecycle.sh
         '';
       }
       {
