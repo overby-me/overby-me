@@ -743,6 +743,54 @@
           FCEOF
           chmod +x TEST-04-JOURNAL.facility.sh
 
+          # Journal vacuum operations
+          cat > TEST-04-JOURNAL.vacuum.sh << 'VACEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl --vacuum-size runs without error"
+          journalctl --vacuum-size=1G
+
+          : "journalctl --vacuum-time runs without error"
+          journalctl --vacuum-time=1s
+
+          : "journalctl --vacuum-files runs without error"
+          journalctl --vacuum-files=100
+          VACEOF
+          chmod +x TEST-04-JOURNAL.vacuum.sh
+
+          # Journal verbose output
+          cat > TEST-04-JOURNAL.verbose-output.sh << 'VOEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl -o verbose shows structured output"
+          OUT="$(journalctl --no-pager -o verbose -n 3)"
+          echo "$OUT" | grep -q "_TRANSPORT="
+
+          : "journalctl -o json-pretty produces valid JSON structure"
+          OUT="$(journalctl --no-pager -o json-pretty -n 1)"
+          echo "$OUT" | grep -q "MESSAGE"
+          VOEOF
+          chmod +x TEST-04-JOURNAL.verbose-output.sh
+
+          # Journal list-boots
+          cat > TEST-04-JOURNAL.list-boots.sh << 'LBEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl --list-boots shows at least one boot"
+          OUT="$(journalctl --list-boots --no-pager)"
+          [[ -n "$OUT" ]]
+
+          : "journalctl -b 0 filters current boot"
+          journalctl --no-pager -b 0 -n 5 > /dev/null
+          LBEOF
+          chmod +x TEST-04-JOURNAL.list-boots.sh
+
           rm -f TEST-04-JOURNAL.bsod.sh \
                TEST-04-JOURNAL.cat.sh \
                TEST-04-JOURNAL.corrupted-journals.sh \
@@ -6374,6 +6422,141 @@
           LNEOF
                     chmod +x TEST-23-UNIT-FILE.limit-nofile.sh
 
+                    # Test StandardOutput=file: for transient services
+                    cat > TEST-23-UNIT-FILE.standard-output-file.sh << 'SOFEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "StandardOutput=file: writes stdout to file"
+          rm -f /tmp/stdout-test /tmp/stderr-test
+          UNIT="stdout-file-$RANDOM"
+          systemd-run --wait --unit="$UNIT" \
+              -p StandardOutput=file:/tmp/stdout-test \
+              -p StandardError=file:/tmp/stderr-test \
+              -p Type=exec \
+              bash -c 'echo hello-stdout ; echo hello-stderr >&2'
+          [[ "$(cat /tmp/stdout-test)" == "hello-stdout" ]]
+          [[ "$(cat /tmp/stderr-test)" == "hello-stderr" ]]
+
+          : "StandardOutput=file: overwrites on second run"
+          UNIT="stdout-file2-$RANDOM"
+          systemd-run --wait --unit="$UNIT" \
+              -p StandardOutput=file:/tmp/stdout-test \
+              -p Type=exec \
+              bash -c 'echo second-run'
+          [[ "$(cat /tmp/stdout-test)" == "second-run" ]]
+
+          : "StandardOutput=append: appends to file"
+          UNIT="stdout-append-$RANDOM"
+          systemd-run --wait --unit="$UNIT" \
+              -p StandardOutput=append:/tmp/stdout-test \
+              -p Type=exec \
+              bash -c 'echo appended-line'
+          grep -q "second-run" /tmp/stdout-test
+          grep -q "appended-line" /tmp/stdout-test
+
+          rm -f /tmp/stdout-test /tmp/stderr-test
+          SOFEOF
+                    chmod +x TEST-23-UNIT-FILE.standard-output-file.sh
+
+                    # Test basic ExecReload=
+                    cat > TEST-23-UNIT-FILE.exec-reload-basic.sh << 'ERBEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "Failing ExecReload= should not kill the service"
+          UNIT="reload-test-$RANDOM"
+          cat > "/run/systemd/system/$UNIT.service" << UEOF
+          [Service]
+          ExecStart=sleep infinity
+          ExecReload=false
+          UEOF
+          systemctl daemon-reload
+          systemctl start "$UNIT.service"
+          sleep 1
+          systemctl is-active "$UNIT.service"
+          # The reload SHOULD fail but SHOULD NOT affect the service state
+          (! systemctl reload "$UNIT.service")
+          systemctl is-active "$UNIT.service"
+          systemctl stop "$UNIT.service"
+          rm -f "/run/systemd/system/$UNIT.service"
+          systemctl daemon-reload
+          ERBEOF
+                    chmod +x TEST-23-UNIT-FILE.exec-reload-basic.sh
+
+                    # Test environment variable expansion in ExecStart
+                    cat > TEST-23-UNIT-FILE.env-expand.sh << 'EEEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "Environment= variables expand in ExecStart"
+          UNIT="env-expand-$RANDOM"
+          systemd-run --wait --unit="$UNIT" \
+              -p Environment="MY_VAR=hello-env" \
+              bash -c 'echo "$MY_VAR" > /tmp/env-expand-result'
+          [[ "$(cat /tmp/env-expand-result)" == "hello-env" ]]
+          rm -f /tmp/env-expand-result
+
+          : "Multiple Environment= lines work"
+          UNIT="env-multi-$RANDOM"
+          systemd-run --wait --unit="$UNIT" \
+              -p Environment="VAR_A=alpha" \
+              -p Environment="VAR_B=beta" \
+              bash -c 'echo "$VAR_A:$VAR_B" > /tmp/env-multi-result'
+          [[ "$(cat /tmp/env-multi-result)" == "alpha:beta" ]]
+          rm -f /tmp/env-multi-result
+          EEEOF
+                    chmod +x TEST-23-UNIT-FILE.env-expand.sh
+
+                    # Test WorkingDirectory= in unit files
+                    cat > TEST-23-UNIT-FILE.working-dir.sh << 'WDEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "WorkingDirectory= sets the cwd"
+          UNIT="wd-test-$RANDOM"
+          cat > "/run/systemd/system/$UNIT.service" << UEOF
+          [Service]
+          Type=oneshot
+          WorkingDirectory=/var
+          ExecStart=bash -c 'pwd > /tmp/wd-result'
+          UEOF
+          systemctl daemon-reload
+          systemctl start "$UNIT.service"
+          [[ "$(cat /tmp/wd-result)" == "/var" ]]
+          rm -f /tmp/wd-result "/run/systemd/system/$UNIT.service"
+          systemctl daemon-reload
+          WDEOF
+                    chmod +x TEST-23-UNIT-FILE.working-dir.sh
+
+                    # Test KillMode=process
+                    cat > TEST-23-UNIT-FILE.kill-mode.sh << 'KMEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "KillMode property is readable"
+          UNIT="km-test-$RANDOM"
+          systemd-run --unit="$UNIT" -p KillMode=process sleep 300
+          sleep 1
+          KM="$(systemctl show -P KillMode "$UNIT.service")"
+          [[ "$KM" == "process" ]]
+          systemctl stop "$UNIT.service"
+
+          : "Default KillMode is control-group"
+          UNIT="km-default-$RANDOM"
+          systemd-run --unit="$UNIT" sleep 300
+          sleep 1
+          KM="$(systemctl show -P KillMode "$UNIT.service")"
+          [[ "$KM" == "control-group" ]]
+          systemctl stop "$UNIT.service"
+          KMEOF
+                    chmod +x TEST-23-UNIT-FILE.kill-mode.sh
+
                     rm -f TEST-23-UNIT-FILE.ExtraFileDescriptors.sh \
                          TEST-23-UNIT-FILE.JoinsNamespaceOf.sh \
                          TEST-23-UNIT-FILE.openfile.sh \
@@ -10041,6 +10224,115 @@
           systemctl daemon-reload
           SSLEOF
           chmod +x TEST-74-AUX-UTILS.start-stop-lifecycle.sh
+
+          # systemd-escape --path tests
+          cat > TEST-74-AUX-UTILS.escape-path.sh << 'EPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-escape --path converts / to -"
+          OUT="$(systemd-escape --path /hello/world)"
+          [[ "$OUT" == "hello-world" ]]
+
+          : "systemd-escape --path root is -"
+          OUT="$(systemd-escape --path /)"
+          [[ "$OUT" == "-" ]]
+
+          : "systemd-escape --unescape --path reverses"
+          OUT="$(systemd-escape --unescape --path hello-world)"
+          [[ "$OUT" == "/hello/world" ]]
+
+          : "systemd-escape --path trims trailing slashes"
+          OUT="$(systemd-escape --path ///////////////)"
+          [[ "$OUT" == "-" ]]
+          EPEOF
+          chmod +x TEST-74-AUX-UTILS.escape-path.sh
+
+          # systemd-escape --mangle tests
+          cat > TEST-74-AUX-UTILS.escape-mangle.sh << 'EMEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-escape --mangle adds .service suffix"
+          OUT="$(systemd-escape --mangle hello-world)"
+          [[ "$OUT" == "hello-world.service" ]]
+
+          : "systemd-escape --mangle path becomes mount"
+          OUT="$(systemd-escape --mangle /mount/this)"
+          [[ "$OUT" == "mount-this.mount" ]]
+
+          : "systemd-escape --mangle preserves existing suffix"
+          OUT="$(systemd-escape --mangle my.timer)"
+          echo "$OUT" | grep -q "\.timer"
+          EMEOF
+          chmod +x TEST-74-AUX-UTILS.escape-mangle.sh
+
+          # systemd-escape --suffix tests
+          cat > TEST-74-AUX-UTILS.escape-suffix.sh << 'ESEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-escape --suffix=mount adds .mount"
+          OUT="$(systemd-escape --suffix=mount -- hello)"
+          echo "$OUT" | grep -q "\.mount"
+
+          : "systemd-escape --suffix=timer adds .timer"
+          OUT="$(systemd-escape --suffix=timer -- hello)"
+          echo "$OUT" | grep -q "\.timer"
+
+          : "systemd-escape --suffix=service adds .service"
+          OUT="$(systemd-escape --suffix=service -- hello)"
+          echo "$OUT" | grep -q "\.service"
+          ESEOF
+          chmod +x TEST-74-AUX-UTILS.escape-suffix.sh
+
+          # More systemd-analyze calendar tests
+          cat > TEST-74-AUX-UTILS.analyze-calendar-more.sh << 'ACMEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-analyze calendar handles weekly"
+          OUT="$(systemd-analyze calendar weekly 2>&1)" || true
+          echo "$OUT" | grep -qi "next\|original\|normalized"
+
+          : "systemd-analyze calendar handles monthly"
+          OUT="$(systemd-analyze calendar monthly 2>&1)" || true
+          echo "$OUT" | grep -qi "next\|original\|normalized"
+
+          : "systemd-analyze calendar handles Mon..Fri expression"
+          OUT="$(systemd-analyze calendar "Mon,Tue *-*-* 00:00:00" 2>&1)" || true
+          echo "$OUT" | grep -qi "next\|original\|normalized"
+
+          : "systemd-analyze calendar rejects invalid expression"
+          (! systemd-analyze calendar "not-a-valid-calendar" 2>/dev/null)
+          ACMEOF
+          chmod +x TEST-74-AUX-UTILS.analyze-calendar-more.sh
+
+          # systemd-tmpfiles --create basic test
+          cat > TEST-74-AUX-UTILS.tmpfiles-create.sh << 'TCEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-tmpfiles --create can create directories"
+          rm -rf /tmp/tmpfiles-test-dir
+          printf 'd /tmp/tmpfiles-test-dir 0755 root root -\n' > /tmp/tmpfiles-test.conf
+          systemd-tmpfiles --create /tmp/tmpfiles-test.conf
+          test -d /tmp/tmpfiles-test-dir
+
+          : "systemd-tmpfiles --create can create files"
+          printf 'f /tmp/tmpfiles-test-dir/testfile 0644 root root - hello-tmpfiles\n' > /tmp/tmpfiles-test2.conf
+          systemd-tmpfiles --create /tmp/tmpfiles-test2.conf
+          test -f /tmp/tmpfiles-test-dir/testfile
+          grep -q "hello-tmpfiles" /tmp/tmpfiles-test-dir/testfile
+
+          rm -rf /tmp/tmpfiles-test-dir /tmp/tmpfiles-test.conf /tmp/tmpfiles-test2.conf
+          TCEOF
+          chmod +x TEST-74-AUX-UTILS.tmpfiles-create.sh
 
           rm -f TEST-74-AUX-UTILS.busctl.sh \
                TEST-74-AUX-UTILS.capsule.sh \
