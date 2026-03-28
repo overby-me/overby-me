@@ -683,17 +683,33 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
                         break;
                     }
                     'u' => {
-                        i += 1;
-                        if i < args.len() {
-                            match args[i].parse::<i32>() {
+                        // Check if fd number follows in same arg (e.g., -ru3 → fd=3)
+                        let remaining: String = fchars[j + 1..].iter().collect();
+                        if !remaining.is_empty() {
+                            match remaining.parse::<i32>() {
                                 Ok(f) => fd = Some(f),
                                 Err(_) => {
                                     eprintln!(
                                         "{}: read: {}: invalid file descriptor specification",
                                         shell.error_prefix(),
-                                        args[i]
+                                        remaining
                                     );
                                     return 1;
+                                }
+                            }
+                        } else {
+                            i += 1;
+                            if i < args.len() {
+                                match args[i].parse::<i32>() {
+                                    Ok(f) => fd = Some(f),
+                                    Err(_) => {
+                                        eprintln!(
+                                            "{}: read: {}: invalid file descriptor specification",
+                                            shell.error_prefix(),
+                                            args[i]
+                                        );
+                                        return 1;
+                                    }
                                 }
                             }
                         }
