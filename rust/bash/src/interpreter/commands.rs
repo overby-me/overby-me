@@ -1092,6 +1092,9 @@ impl Shell {
                 let has_array_flag = args
                     .iter()
                     .any(|a| a.starts_with('-') && a.len() > 1 && a.contains('a'));
+                let has_assoc_flag = args
+                    .iter()
+                    .any(|a| a.starts_with('-') && a.len() > 1 && a.contains('A'));
                 let mut new_args = Vec::new();
                 let mut modified = false;
                 for (arg_idx, arg) in args.iter().enumerate() {
@@ -1136,6 +1139,9 @@ impl Shell {
                                     );
                                 }
                                 self.last_status = 1;
+                            } else if has_assoc_flag {
+                                let map = crate::builtins::parse_assoc_literal(value);
+                                self.assoc_arrays.insert(name.to_string(), map);
                             } else {
                                 let arr = crate::builtins::parse_array_literal(value);
                                 self.arrays.insert(name.to_string(), arr);

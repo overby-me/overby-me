@@ -1146,7 +1146,7 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
     status
 }
 
-pub(super) fn parse_assoc_literal(s: &str) -> crate::interpreter::AssocArray {
+pub fn parse_assoc_literal(s: &str) -> crate::interpreter::AssocArray {
     let trimmed = s.trim();
     let inner = if trimmed.starts_with('(') && trimmed.ends_with(')') {
         &trimmed[1..trimmed.len() - 1]

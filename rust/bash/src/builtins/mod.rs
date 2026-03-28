@@ -1031,6 +1031,8 @@ fn format_compound_command_indent(cmd: &CompoundCommand, indent: usize) -> Strin
     }
 }
 
+pub use vars::parse_assoc_literal;
+
 pub fn parse_array_literal(s: &str) -> Vec<String> {
     let trimmed = s.trim();
     let inner = if trimmed.starts_with('(') && trimmed.ends_with(')') {
