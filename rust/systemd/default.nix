@@ -9903,6 +9903,76 @@
           AUPEOF
           chmod +x TEST-74-AUX-UTILS.analyze-unit-paths.sh
 
+          # systemd-run with --working-directory
+          cat > TEST-74-AUX-UTILS.run-working-dir.sh << 'RWDEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-run --working-directory sets cwd"
+          UNIT="run-cwd-$RANDOM"
+          systemd-run --wait --unit="$UNIT" --working-directory=/var true
+          WD="$(systemctl show -P WorkingDirectory "$UNIT.service")"
+          [[ "$WD" == "/var" ]]
+          RWDEOF
+          chmod +x TEST-74-AUX-UTILS.run-working-dir.sh
+
+          # systemd-run with --nice
+          cat > TEST-74-AUX-UTILS.run-nice.sh << 'RNEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-run with --nice sets priority"
+          UNIT="run-nice-$RANDOM"
+          systemd-run --wait --unit="$UNIT" -p Nice=5 \
+              bash -c 'nice > /tmp/nice-result'
+          [[ "$(cat /tmp/nice-result)" == "5" ]]
+          rm -f /tmp/nice-result
+          RNEOF
+          chmod +x TEST-74-AUX-UTILS.run-nice.sh
+
+          # systemctl show for path units
+          cat > TEST-74-AUX-UTILS.show-path-unit.sh << 'SPUEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "Can create and load path unit"
+          UNIT="path-show-$RANDOM"
+          cat > "/run/systemd/system/$UNIT.path" << UEOF
+          [Path]
+          PathExists=/tmp
+          UEOF
+          cat > "/run/systemd/system/$UNIT.service" << UEOF
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          UEOF
+          systemctl daemon-reload
+          systemctl show "$UNIT.path" -P Id | grep -q "$UNIT.path"
+          rm -f "/run/systemd/system/$UNIT.path" "/run/systemd/system/$UNIT.service"
+          systemctl daemon-reload
+          SPUEOF
+          chmod +x TEST-74-AUX-UTILS.show-path-unit.sh
+
+          # systemctl show RestartUSec
+          cat > TEST-74-AUX-UTILS.restart-usec.sh << 'RUEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "RestartUSec property exists"
+          systemctl show -P RestartUSec systemd-journald.service > /dev/null
+
+          : "TimeoutStartUSec property exists"
+          systemctl show -P TimeoutStartUSec systemd-journald.service > /dev/null
+
+          : "TimeoutStopUSec property exists"
+          systemctl show -P TimeoutStopUSec systemd-journald.service > /dev/null
+          RUEOF
+          chmod +x TEST-74-AUX-UTILS.restart-usec.sh
+
           rm -f TEST-74-AUX-UTILS.busctl.sh \
                TEST-74-AUX-UTILS.capsule.sh \
                TEST-74-AUX-UTILS.firstboot.sh \
