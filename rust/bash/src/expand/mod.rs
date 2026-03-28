@@ -24,6 +24,8 @@ thread_local! {
     static LAST_PROCSUB_PID: RefCell<Option<i32>> = const { RefCell::new(None) };
     /// Whether dotglob shopt is enabled (for glob expansion)
     static DOTGLOB_ENABLED: RefCell<bool> = const { RefCell::new(false) };
+    /// Whether globskipdots shopt is enabled (skip . and .. in glob results)
+    static GLOBSKIPDOTS_ENABLED: RefCell<bool> = const { RefCell::new(true) };
     /// Callback for running process substitution commands inline (instead of exec'ing
     /// a new shell). Set by the interpreter before word expansion.
     static PROCSUB_RUNNER: RefCell<Option<*mut dyn FnMut(&str) -> i32>> = const { RefCell::new(None) };
@@ -68,6 +70,10 @@ pub fn set_script_name(name: &str) {
 
 pub fn set_dotglob(enabled: bool) {
     DOTGLOB_ENABLED.with(|d| *d.borrow_mut() = enabled);
+}
+
+pub fn set_globskipdots(enabled: bool) {
+    GLOBSKIPDOTS_ENABLED.with(|d| *d.borrow_mut() = enabled);
 }
 
 pub fn get_script_name() -> String {
@@ -1810,9 +1816,27 @@ fn glob_expand(field: &str) -> Vec<String> {
                 let dir = std::env::current_dir().unwrap_or_default();
                 if let Ok(entries) = std::fs::read_dir(&dir) {
                     let dotglob = DOTGLOB_ENABLED.with(|d| *d.borrow());
-                    let mut results: Vec<String> = entries
-                        .filter_map(|e| e.ok())
-                        .map(|e| e.file_name().to_string_lossy().to_string())
+                    let skipdots = GLOBSKIPDOTS_ENABLED.with(|d| *d.borrow());
+                    // Add . and .. when globskipdots is off and pattern allows dots
+                    let extra: Vec<String> = if !skipdots
+                        && (pattern.starts_with('.')
+                            || pattern.starts_with("@(.")
+                            || pattern.starts_with("*(.")
+                            || pattern.starts_with("+(.")
+                            || pattern.starts_with("?(.")
+                            || dotglob)
+                    {
+                        vec![".".to_string(), "..".to_string()]
+                    } else {
+                        vec![]
+                    };
+                    let mut results: Vec<String> = extra
+                        .into_iter()
+                        .chain(
+                            entries
+                                .filter_map(|e| e.ok())
+                                .map(|e| e.file_name().to_string_lossy().to_string()),
+                        )
                         .filter(|name| {
                             // Skip dotfiles unless dotglob is set or pattern explicitly matches dots
                             if name.starts_with('.') {
@@ -1880,8 +1904,15 @@ fn glob_expand(field: &str) -> Vec<String> {
                                 s
                             }
                         })
-                        // Exclude . and .. (bash's globskipdots is on by default)
-                        .filter(|s| s != "." && s != ".." && s != "./" && s != "../")
+                        // Exclude . and .. when globskipdots is on (default)
+                        .filter(|s| {
+                            let skipdots = GLOBSKIPDOTS_ENABLED.with(|d| *d.borrow());
+                            if skipdots {
+                                s != "." && s != ".." && s != "./" && s != "../"
+                            } else {
+                                true
+                            }
+                        })
                         .collect();
                     if results.is_empty() {
                         vec![remove_quotes(field)]

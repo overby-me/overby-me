@@ -280,12 +280,18 @@ impl Shell {
         crate::expand::EXPAND_ERROR_PREFIX.with(|p| {
             *p.borrow_mut() = self.error_prefix();
         });
-        // Set dotglob state for glob expansion
+        // Set glob options for expansion
         crate::expand::set_dotglob(
             self.shopt_options
                 .get("dotglob")
                 .copied()
                 .unwrap_or(false),
+        );
+        crate::expand::set_globskipdots(
+            self.shopt_options
+                .get("globskipdots")
+                .copied()
+                .unwrap_or(true),
         );
         // Register inline runner for process substitutions using raw pointer
         // Safety: the pointer is valid for the duration of this function call
@@ -381,6 +387,12 @@ impl Shell {
                 .get("dotglob")
                 .copied()
                 .unwrap_or(false),
+        );
+        crate::expand::set_globskipdots(
+            self.shopt_options
+                .get("globskipdots")
+                .copied()
+                .unwrap_or(true),
         );
         let mut vars = self.vars.clone();
         self.inject_transform_attrs(&word, &mut vars);
