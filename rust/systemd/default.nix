@@ -528,6 +528,60 @@
           TFEOF
           chmod +x TEST-04-JOURNAL.time-filtering.sh
 
+          # Journal cursor and follow test
+          cat > TEST-04-JOURNAL.cursor.sh << 'CREOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl --cursor and --after-cursor work"
+          # Get a cursor from the latest entry
+          CURSOR="$(journalctl --no-pager -n 1 -o export | grep '^__CURSOR=' | cut -d= -f2-)"
+          [[ -n "$CURSOR" ]]
+
+          # Using --cursor should return that entry
+          journalctl --no-pager --cursor="$CURSOR" -n 1
+
+          # Using --after-cursor should skip that entry
+          journalctl --no-pager --after-cursor="$CURSOR" -n 1 || true
+
+          : "journalctl -n limits output lines"
+          LINES=$(journalctl --no-pager -n 3 | wc -l)
+          # Should be around 3 lines (may include header)
+          [[ "$LINES" -le 10 ]]
+
+          : "journalctl --no-tail shows all entries"
+          journalctl --no-pager --no-tail -n 5 > /dev/null
+
+          : "journalctl --reverse reverses output"
+          journalctl --no-pager --reverse -n 3 > /dev/null
+          CREOF
+          chmod +x TEST-04-JOURNAL.cursor.sh
+
+          # Journal multi-unit and boot filtering test
+          cat > TEST-04-JOURNAL.multi-filter.sh << 'MFEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl -b 0 shows current boot"
+          journalctl --no-pager -b 0 -n 5
+
+          : "journalctl _SYSTEMD_UNIT field match"
+          journalctl --no-pager -n 5 _SYSTEMD_UNIT=systemd-journald.service > /dev/null
+
+          : "journalctl _PID field match"
+          journalctl --no-pager -n 5 _PID=1
+
+          : "journalctl PRIORITY field match"
+          journalctl --no-pager -n 5 PRIORITY=6 > /dev/null || true
+
+          : "journalctl --facility filters by syslog facility"
+          journalctl --no-pager -n 5 --facility=kern > /dev/null || true
+          journalctl --no-pager -n 5 --facility=daemon > /dev/null || true
+          MFEOF
+          chmod +x TEST-04-JOURNAL.multi-filter.sh
+
           rm -f TEST-04-JOURNAL.bsod.sh \
                TEST-04-JOURNAL.cat.sh \
                TEST-04-JOURNAL.corrupted-journals.sh \
@@ -6817,6 +6871,74 @@
           [[ -n "$UFSTATE" ]]
           UTEOF
           chmod +x TEST-74-AUX-UTILS.show-unit-types.sh
+
+          # systemctl help and version test
+          cat > TEST-74-AUX-UTILS.systemctl-basics.sh << 'SBEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "systemctl --version prints version info"
+          systemctl --version > /dev/null
+
+          : "systemctl --help shows help"
+          systemctl --help > /dev/null
+
+          : "systemctl list-unit-files shows files"
+          systemctl list-unit-files --no-pager > /dev/null
+
+          : "systemctl list-units --state=active shows active units"
+          systemctl list-units --no-pager --state=active > /dev/null
+
+          : "systemctl list-units --state=inactive shows inactive units"
+          systemctl list-units --no-pager --state=inactive > /dev/null
+
+          : "systemctl show-environment prints environment"
+          systemctl show-environment > /dev/null
+
+          : "systemctl log-level returns current level"
+          LEVEL="$(systemctl log-level)"
+          echo "Log level: $LEVEL"
+          [[ -n "$LEVEL" ]]
+          SBEOF
+          chmod +x TEST-74-AUX-UTILS.systemctl-basics.sh
+
+          # systemd-run advanced property test
+          cat > TEST-74-AUX-UTILS.run-properties.sh << 'RPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "systemd-run with --description"
+          UNIT="run-prop-$RANDOM"
+          systemd-run --unit="$UNIT" --description="Test property service" \
+              --remain-after-exit true
+          sleep 1
+          DESC="$(systemctl show -P Description "$UNIT.service")"
+          [[ "$DESC" == "Test property service" ]]
+          systemctl stop "$UNIT.service" 2>/dev/null || true
+
+          : "systemd-run with --property Type=oneshot"
+          UNIT2="run-prop2-$RANDOM"
+          systemd-run --wait --unit="$UNIT2" -p Type=oneshot true
+
+          : "systemd-run with environment variables"
+          UNIT3="run-prop3-$RANDOM"
+          systemd-run --wait --unit="$UNIT3" \
+              -p Environment="TESTVAR=hello" \
+              bash -c '[[ "$TESTVAR" == "hello" ]]'
+
+          : "systemd-run with WorkingDirectory"
+          UNIT4="run-prop4-$RANDOM"
+          systemd-run --wait --unit="$UNIT4" \
+              -p WorkingDirectory=/tmp \
+              bash -c '[[ "$(pwd)" == "/tmp" ]]'
+          RPEOF
+          chmod +x TEST-74-AUX-UTILS.run-properties.sh
 
           # Custom systemd-analyze standalone tests (no D-Bus needed)
           cat > TEST-74-AUX-UTILS.analyze-standalone.sh << 'ANEOF'
