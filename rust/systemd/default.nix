@@ -306,6 +306,23 @@
           [[ ! -f "$TMP_FILE" ]]
 
           rm /run/systemd/system/"$UNIT_NAME"
+
+          # Test transactions with cycles (should not crash/hang)
+          for i in {0..19}; do
+              cat >"/run/systemd/system/transaction-cycle$i.service" <<EOF
+          [Unit]
+          After=transaction-cycle$(((i + 1) % 20)).service
+          Requires=transaction-cycle$(((i + 1) % 20)).service
+
+          [Service]
+          ExecStart=true
+          EOF
+          done
+          systemctl daemon-reload
+          for i in {0..19}; do
+              timeout 10 systemctl start "transaction-cycle$i.service" || true
+          done
+
           touch /testok
           TESTEOF
           chmod +x TEST-03-JOBS.sh
