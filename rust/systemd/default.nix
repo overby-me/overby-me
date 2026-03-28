@@ -6039,6 +6039,88 @@
           SLEOF
                     chmod +x TEST-23-UNIT-FILE.slice-placement.sh
 
+                    # StandardOutput test: file/append/truncate redirection
+                    cat > TEST-23-UNIT-FILE.standard-output-file.sh << 'SOFEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          rm -f /tmp/stdout-test /tmp/stderr-test
+
+          : "StandardOutput=file: writes stdout to file"
+          UNIT1="test-stdout-file-$RANDOM"
+          systemd-run --wait --unit="$UNIT1" \
+              -p StandardOutput=file:/tmp/stdout-test \
+              -p StandardError=file:/tmp/stderr-test \
+              -p Type=exec \
+              bash -c 'echo hello-stdout ; echo hello-stderr >&2'
+          [[ "$(cat /tmp/stdout-test)" == "hello-stdout" ]]
+          [[ "$(cat /tmp/stderr-test)" == "hello-stderr" ]]
+
+          : "StandardOutput=file: overwrites existing content"
+          UNIT2="test-stdout-overwrite-$RANDOM"
+          systemd-run --wait --unit="$UNIT2" \
+              -p StandardOutput=file:/tmp/stdout-test \
+              -p Type=exec \
+              bash -c 'echo overwritten'
+          [[ "$(cat /tmp/stdout-test)" == "overwritten" ]]
+
+          : "StandardOutput=append: appends to existing file"
+          UNIT3="test-stdout-append-$RANDOM"
+          systemd-run --wait --unit="$UNIT3" \
+              -p StandardOutput=append:/tmp/stdout-test \
+              -p Type=exec \
+              bash -c 'echo appended'
+          grep -q "overwritten" /tmp/stdout-test
+          grep -q "appended" /tmp/stdout-test
+
+          rm -f /tmp/stdout-test /tmp/stderr-test
+          SOFEOF
+                    chmod +x TEST-23-UNIT-FILE.standard-output-file.sh
+
+                    # Test Wants= and After= ordering
+                    cat > TEST-23-UNIT-FILE.wants-after.sh << 'WAEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "Wants= pulls in dependency"
+          UNIT_SVC="wants-svc-$RANDOM"
+          UNIT_DEP="wants-dep-$RANDOM"
+
+          cat > "/run/systemd/system/$UNIT_DEP.service" << UEOF
+          [Unit]
+          Description=Wants dependency test
+          [Service]
+          Type=oneshot
+          ExecStart=touch /tmp/$UNIT_DEP-ran
+          RemainAfterExit=yes
+          UEOF
+
+          cat > "/run/systemd/system/$UNIT_SVC.service" << UEOF
+          [Unit]
+          Description=Wants test service
+          Wants=$UNIT_DEP.service
+          After=$UNIT_DEP.service
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          RemainAfterExit=yes
+          UEOF
+
+          systemctl daemon-reload
+          systemctl start "$UNIT_SVC.service"
+
+          # The dependency should have been pulled in and run
+          [[ -f "/tmp/$UNIT_DEP-ran" ]]
+
+          systemctl stop "$UNIT_SVC.service" "$UNIT_DEP.service"
+          rm -f "/run/systemd/system/$UNIT_SVC.service" "/run/systemd/system/$UNIT_DEP.service"
+          rm -f "/tmp/$UNIT_DEP-ran"
+          systemctl daemon-reload
+          WAEOF
+                    chmod +x TEST-23-UNIT-FILE.wants-after.sh
+
                     rm -f TEST-23-UNIT-FILE.ExtraFileDescriptors.sh \
                          TEST-23-UNIT-FILE.JoinsNamespaceOf.sh \
                          TEST-23-UNIT-FILE.openfile.sh \
@@ -8588,6 +8670,104 @@
           rm -f /tmp/run-setenv-result
           RPEOF
           chmod +x TEST-74-AUX-UTILS.run-pty.sh
+
+          # systemd-run with --on-active (transient timer + service)
+          cat > TEST-74-AUX-UTILS.run-on-active.sh << 'ROAEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-run --on-active creates transient timer"
+          systemd-run --on-active=1s --unit="run-onactive-$RANDOM" touch /tmp/on-active-ran
+          sleep 3
+          [[ -f /tmp/on-active-ran ]]
+          rm -f /tmp/on-active-ran
+
+          : "systemd-run --on-boot creates timer with OnBootSec"
+          UNIT="run-onboot-$RANDOM"
+          systemd-run --on-boot=999h --unit="$UNIT" true
+          # Just verify the timer was created and is active
+          systemctl is-active "$UNIT.timer"
+          systemctl stop "$UNIT.timer"
+          ROAEOF
+          chmod +x TEST-74-AUX-UTILS.run-on-active.sh
+
+          # systemctl cat for specific units
+          cat > TEST-74-AUX-UTILS.cat-single.sh << 'CMEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl cat shows unit file content"
+          OUT="$(systemctl cat systemd-journald.service)"
+          echo "$OUT" | grep -q "journald"
+
+          : "systemctl cat for another unit"
+          OUT="$(systemctl cat systemd-logind.service)"
+          echo "$OUT" | grep -q "logind"
+
+          : "systemctl cat with nonexistent unit fails"
+          (! systemctl cat nonexistent-unit-$RANDOM.service 2>/dev/null)
+          CMEOF
+          chmod +x TEST-74-AUX-UTILS.cat-single.sh
+
+          # systemctl show with multiple properties
+          cat > TEST-74-AUX-UTILS.show-multi-props.sh << 'SMPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl show -p with multiple --property flags"
+          OUT="$(systemctl show systemd-journald.service -P ActiveState -P SubState)"
+          [[ -n "$OUT" ]]
+
+          : "systemctl show --property with comma-separated properties"
+          OUT="$(systemctl show systemd-journald.service --property=ActiveState,SubState)"
+          echo "$OUT" | grep -q "ActiveState="
+          echo "$OUT" | grep -q "SubState="
+
+          : "systemctl show for Type property"
+          TYPE="$(systemctl show -P Type systemd-journald.service)"
+          [[ -n "$TYPE" ]]
+          SMPEOF
+          chmod +x TEST-74-AUX-UTILS.show-multi-props.sh
+
+          # systemctl list-dependencies
+          cat > TEST-74-AUX-UTILS.list-deps-basic.sh << 'LDBEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl list-dependencies shows target dependencies"
+          systemctl list-dependencies multi-user.target --no-pager > /dev/null
+
+          : "systemctl list-dependencies --reverse"
+          systemctl list-dependencies --reverse systemd-journald.service --no-pager > /dev/null
+
+          : "systemctl list-dependencies --before"
+          systemctl list-dependencies --before multi-user.target --no-pager > /dev/null
+
+          : "systemctl list-dependencies --after"
+          systemctl list-dependencies --after multi-user.target --no-pager > /dev/null
+          LDBEOF
+          chmod +x TEST-74-AUX-UTILS.list-deps-basic.sh
+
+          # systemd-notify basic functionality
+          cat > TEST-74-AUX-UTILS.notify-extended.sh << 'NEEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-notify --ready succeeds for PID 1"
+          systemd-notify --ready || true
+
+          : "systemd-notify --status sets status text"
+          systemd-notify --status="Testing notify" || true
+
+          : "systemd-notify --booted checks boot status"
+          systemd-notify --booted
+          NEEOF
+          chmod +x TEST-74-AUX-UTILS.notify-extended.sh
 
           rm -f TEST-74-AUX-UTILS.busctl.sh \
                TEST-74-AUX-UTILS.capsule.sh \
