@@ -217,6 +217,13 @@ pub struct ExecHelperConfig {
     pub user: libc::uid_t,
 
     pub working_directory: Option<PathBuf>,
+
+    /// RootDirectory= — sets the root directory for the executed process.
+    /// After setting up the mount namespace, chroot() is called to this path.
+    /// See systemd.exec(5).
+    #[serde(default)]
+    pub root_directory: Option<String>,
+
     pub state_directory: Vec<String>,
     pub logs_directory: Vec<String>,
     pub logs_directory_mode: Option<u32>,
@@ -1560,7 +1567,8 @@ pub fn run_exec_helper() {
             || matches!(
                 config.mount_flags.as_deref(),
                 Some("slave") | Some("private")
-            ));
+            )
+            || config.root_directory.is_some());
 
     if needs_mount_ns {
         log::trace!(
@@ -1575,6 +1583,31 @@ pub fn run_exec_helper() {
         log::trace!("mount namespace setup complete");
     } else {
         log::trace!("no mount namespace needed");
+    }
+
+    // ── RootDirectory= — chroot to specified root ─────────────────────
+    if let Some(ref root_dir) = config.root_directory
+        && !config.privileged_prefix
+    {
+        let c_root = std::ffi::CString::new(root_dir.as_str()).unwrap_or_default();
+        let ret = unsafe { libc::chroot(c_root.as_ptr()) };
+        if ret != 0 {
+            log::warn!(
+                "Failed to chroot to '{}': {}",
+                root_dir,
+                std::io::Error::last_os_error()
+            );
+        } else {
+            // After chroot, change to / so relative paths work
+            let ret = unsafe { libc::chdir(c"/".as_ptr()) };
+            if ret != 0 {
+                log::warn!(
+                    "Failed to chdir to / after chroot: {}",
+                    std::io::Error::last_os_error()
+                );
+            }
+            log::trace!("chroot to '{}' successful", root_dir);
+        }
     }
 
     // ── ProtectHostname= — UTS namespace ──────────────────────────────

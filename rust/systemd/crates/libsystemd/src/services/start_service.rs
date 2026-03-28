@@ -383,6 +383,7 @@ fn start_service_with_filedescriptors(
             .map_err(|e| RunCmdError::SpawnError(name.to_owned(), e))?,
 
         working_directory: conf.exec_config.working_directory.clone(),
+        root_directory: conf.exec_config.root_directory.clone(),
         state_directory: conf.exec_config.state_directory.clone(),
         logs_directory: conf.exec_config.logs_directory.clone(),
         logs_directory_mode: conf.exec_config.logs_directory_mode,
