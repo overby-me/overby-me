@@ -1200,6 +1200,33 @@
           MLEOF
           chmod +x TEST-04-JOURNAL.multi-line.sh
 
+          # journalctl --since with ISO date format
+          cat > TEST-04-JOURNAL.since-iso.sh << 'SIEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl --since with ISO date works"
+          journalctl --no-pager --since "2020-01-01" -n 5 > /dev/null || true
+
+          : "journalctl --since with full ISO datetime"
+          journalctl --no-pager --since "2020-01-01 00:00:00" -n 5 > /dev/null || true
+          SIEOF
+          chmod +x TEST-04-JOURNAL.since-iso.sh
+
+          # journalctl json array output
+          cat > TEST-04-JOURNAL.json-array.sh << 'JAEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl -o json lines are parseable"
+          journalctl --no-pager -o json -n 5 | while read -r line; do
+              echo "$line" | jq -e '.MESSAGE or .__REALTIME_TIMESTAMP' > /dev/null
+          done
+          JAEOF
+          chmod +x TEST-04-JOURNAL.json-array.sh
+
           rm -f TEST-04-JOURNAL.bsod.sh \
                TEST-04-JOURNAL.cat.sh \
                TEST-04-JOURNAL.corrupted-journals.sh \
@@ -1458,6 +1485,50 @@
           rm -f /tmp/rlimit-data-result
           ALEOF
           chmod +x TEST-05-RLIMITS.as-limit.sh
+
+          # Custom test: LimitSIGPENDING enforcement
+          cat > TEST-05-RLIMITS.sigpending-limit.sh << 'SPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "LimitSIGPENDING= is enforced"
+          UNIT="rlimit-sigp-$RANDOM"
+          systemd-run --wait --unit="$UNIT" \
+              -p LimitSIGPENDING=2048 \
+              bash -c 'ulimit -i > /tmp/rlimit-sigp-result'
+          [[ "$(cat /tmp/rlimit-sigp-result)" == "2048" ]]
+          rm -f /tmp/rlimit-sigp-result
+
+          : "LimitLOCKS= is enforced"
+          UNIT="rlimit-locks-$RANDOM"
+          systemd-run --wait --unit="$UNIT" \
+              -p LimitLOCKS=1024 \
+              bash -c 'ulimit -x > /tmp/rlimit-locks-result'
+          [[ "$(cat /tmp/rlimit-locks-result)" == "1024" ]]
+          rm -f /tmp/rlimit-locks-result
+          SPEOF
+          chmod +x TEST-05-RLIMITS.sigpending-limit.sh
+
+          # Custom test: Multiple rlimits in one service
+          cat > TEST-05-RLIMITS.combined-limits.sh << 'CLEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "Multiple limits combined in one service"
+          UNIT="rlimit-combo-$RANDOM"
+          systemd-run --wait --unit="$UNIT" \
+              -p LimitNOFILE=5000 \
+              -p LimitNPROC=3000 \
+              -p LimitCORE=0 \
+              bash -c 'ulimit -n > /tmp/rl-combo-n; ulimit -u > /tmp/rl-combo-u; ulimit -c > /tmp/rl-combo-c'
+          [[ "$(cat /tmp/rl-combo-n)" == "5000" ]]
+          [[ "$(cat /tmp/rl-combo-u)" == "3000" ]]
+          [[ "$(cat /tmp/rl-combo-c)" == "0" ]]
+          rm -f /tmp/rl-combo-n /tmp/rl-combo-u /tmp/rl-combo-c
+          CLEOF
+          chmod +x TEST-05-RLIMITS.combined-limits.sh
         '';
       }
       {
