@@ -259,15 +259,10 @@ fn run() -> i32 {
                 #[cfg(unix)]
                 {
                     use std::os::unix::io::IntoRawFd;
-                    let fd0_is_redirected = nix::sys::stat::fstat(0)
-                        .map(|s| {
-                            use nix::sys::stat::SFlag;
-                            let mode = SFlag::from_bits_truncate(s.st_mode);
-                            // Pipes and regular files indicate explicit redirects
-                            mode.contains(SFlag::S_IFIFO) || mode.contains(SFlag::S_IFREG)
-                        })
-                        .unwrap_or(false); // closed fd → not redirected
-                    if !fd0_is_redirected && let Ok(f) = std::fs::File::open(&file) {
+                    // Only replace fd 0 when it's a terminal (interactive use).
+                    // Don't replace for: pipes, regular files, /dev/null, closed fds.
+                    let fd0_is_tty = nix::unistd::isatty(0).unwrap_or(false);
+                    if fd0_is_tty && let Ok(f) = std::fs::File::open(&file) {
                         let raw = f.into_raw_fd();
                         if raw != 0 {
                             nix::unistd::dup2(raw, 0).ok();
