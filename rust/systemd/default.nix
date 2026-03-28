@@ -832,6 +832,13 @@
               bash -xec 'id -Gn | tr " " "\n" | grep -q audio;
                          id -Gn | tr " " "\n" | grep -q video'
 
+          : "ImportCredential= tests"
+          mkdir -p /run/credentials/@system
+          echo -n "imported-value" > /run/credentials/@system/test-import-cred
+          systemd-run --wait --pipe -p ImportCredential=test-import-cred \
+              bash -xec '[[ "$(cat "$CREDENTIALS_DIRECTORY/test-import-cred")" == imported-value ]]'
+          rm -f /run/credentials/@system/test-import-cred
+
           : "UnsetEnvironment= tests"
           systemd-run --wait --pipe \
               -p Environment=KEEP_ME=yes \
