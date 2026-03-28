@@ -2609,6 +2609,22 @@
           UNIT="scope-named-$RANDOM"
           systemd-run --scope --unit="$UNIT" true
 
+          : "Transient --on-active timer fires after delay"
+          UNIT="on-active-$RANDOM"
+          rm -f "/tmp/on-active-result-$UNIT"
+          systemd-run --unit="$UNIT" --on-active=2s --remain-after-exit touch "/tmp/on-active-result-$UNIT"
+          systemctl is-active "$UNIT.timer"
+          timeout 15 bash -c "until [[ -f /tmp/on-active-result-$UNIT ]]; do sleep 0.5; done"
+          [[ -f "/tmp/on-active-result-$UNIT" ]]
+          systemctl stop "$UNIT.timer" "$UNIT.service" 2>/dev/null || true
+          rm -f "/tmp/on-active-result-$UNIT"
+
+          : "Transient --on-active with --unit writes correct timer file"
+          UNIT="on-active-props-$RANDOM"
+          systemd-run --unit="$UNIT" --on-active=30s --remain-after-exit true
+          grep -q "^OnActiveSec=30s$" "/run/systemd/transient/$UNIT.timer"
+          systemctl stop "$UNIT.timer" "$UNIT.service" 2>/dev/null || true
+
           : "Error handling"
           (! systemd-run)
           (! systemd-run "")
