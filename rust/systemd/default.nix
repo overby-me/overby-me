@@ -1032,6 +1032,53 @@
           FMTEOF
           chmod +x TEST-04-JOURNAL.field-match.sh
 
+          # journalctl JSON output contains expected fields
+          cat > TEST-04-JOURNAL.json-fields.sh << 'JFEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl -o json contains MESSAGE field"
+          LINE="$(journalctl --no-pager -o json -n 1)"
+          echo "$LINE" | jq -e '.MESSAGE' > /dev/null
+
+          : "journalctl -o json contains __REALTIME_TIMESTAMP"
+          echo "$LINE" | jq -e '.__REALTIME_TIMESTAMP' > /dev/null
+
+          : "journalctl -o json contains _BOOT_ID"
+          echo "$LINE" | jq -e '._BOOT_ID' > /dev/null
+          JFEOF
+          chmod +x TEST-04-JOURNAL.json-fields.sh
+
+          # journalctl --system vs --user
+          cat > TEST-04-JOURNAL.system-flag.sh << 'SFEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl --system shows system journal"
+          journalctl --no-pager --system -n 5 > /dev/null
+
+          : "journalctl -k shows kernel messages"
+          journalctl --no-pager -k -n 5 > /dev/null || true
+          SFEOF
+          chmod +x TEST-04-JOURNAL.system-flag.sh
+
+          # journalctl with output to file
+          cat > TEST-04-JOURNAL.file-output.sh << 'FOEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl output can be redirected to file"
+          journalctl --no-pager -o json -n 10 > /tmp/journal-output.json
+          [[ -s /tmp/journal-output.json ]]
+          # Verify it's valid JSON (each line)
+          head -1 /tmp/journal-output.json | jq . > /dev/null
+          rm -f /tmp/journal-output.json
+          FOEOF
+          chmod +x TEST-04-JOURNAL.file-output.sh
+
           rm -f TEST-04-JOURNAL.bsod.sh \
                TEST-04-JOURNAL.cat.sh \
                TEST-04-JOURNAL.corrupted-journals.sh \
@@ -7958,6 +8005,41 @@
                TEST-19-CGROUP.ExitType-cgroup.sh \
                TEST-19-CGROUP.IPAddressAllow-Deny.sh \
                TEST-19-CGROUP.keyed-properties.sh
+
+          # Additional cgroup tests
+          cat > TEST-19-CGROUP.slice-hierarchy.sh << 'SHEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "Services in custom slice"
+          UNIT="cg-slice-$RANDOM"
+          systemd-run --wait --unit="$UNIT" --slice=system.slice true
+          SLICE="$(systemctl show -P Slice "$UNIT.service")"
+          [[ -n "$SLICE" ]]
+
+          : "Default slice for transient service"
+          UNIT2="cg-defslice-$RANDOM"
+          systemd-run --wait --unit="$UNIT2" true
+          SLICE2="$(systemctl show -P Slice "$UNIT2.service")"
+          [[ -n "$SLICE2" ]]
+          SHEOF
+          chmod +x TEST-19-CGROUP.slice-hierarchy.sh
+
+          cat > TEST-19-CGROUP.taskmax-prop.sh << 'TMEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "TasksMax property is accepted"
+          UNIT="cg-taskmax-$RANDOM"
+          systemd-run --wait --unit="$UNIT" -p TasksMax=100 true
+
+          : "MemoryMax property is accepted"
+          UNIT2="cg-memmax-$RANDOM"
+          systemd-run --wait --unit="$UNIT2" -p MemoryMax=1G true
+          TMEOF
+          chmod +x TEST-19-CGROUP.taskmax-prop.sh
         '';
       }
       {
