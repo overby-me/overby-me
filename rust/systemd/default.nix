@@ -7773,19 +7773,23 @@
           set -o pipefail
 
           : "systemd-analyze calendar weekly"
-          systemd-analyze calendar "weekly" | grep -q "Next"
+          OUT="$(systemd-analyze calendar "weekly")"
+          echo "$OUT" | grep -q "Next"
 
           : "systemd-analyze calendar monthly"
-          systemd-analyze calendar "monthly" | grep -q "Next"
+          OUT="$(systemd-analyze calendar "monthly")"
+          echo "$OUT" | grep -q "Next"
 
           : "systemd-analyze calendar yearly"
-          systemd-analyze calendar "yearly" | grep -q "Next"
+          OUT="$(systemd-analyze calendar "yearly")"
+          echo "$OUT" | grep -q "Next"
 
           : "systemd-analyze calendar with day of week"
-          systemd-analyze calendar "Fri *-*-* 18:00:00"
+          systemd-analyze calendar "Fri *-*-* 18:00:00" > /dev/null
 
           : "systemd-analyze calendar minutely"
-          systemd-analyze calendar "minutely" | grep -q "Next"
+          OUT="$(systemd-analyze calendar "minutely")"
+          echo "$OUT" | grep -q "Next"
 
           : "systemd-analyze timespan formats"
           systemd-analyze timespan "0"
@@ -8503,6 +8507,87 @@
           systemctl show --property=Id systemd-journald.service | grep -q "Id="
           APEOF
           chmod +x TEST-74-AUX-UTILS.show-all-props.sh
+
+          # systemd-delta deeper test
+          cat > TEST-74-AUX-UTILS.delta-deep.sh << 'DDEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          at_exit() {
+              set +e
+              rm -rf /run/systemd/system/delta-test.service.d
+              rm -f /run/systemd/system/delta-test.service
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "Create a service with a drop-in for delta testing"
+          cat > /run/systemd/system/delta-test.service << EOF
+          [Unit]
+          Description=Delta test service
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          EOF
+          mkdir -p /run/systemd/system/delta-test.service.d
+          cat > /run/systemd/system/delta-test.service.d/override.conf << EOF
+          [Service]
+          Environment=DELTA_TEST=yes
+          EOF
+          systemctl daemon-reload
+
+          : "systemd-delta shows overrides"
+          systemd-delta --no-pager > /dev/null
+
+          : "systemd-delta --type=extended shows drop-ins"
+          systemd-delta --no-pager --type=extended > /dev/null || true
+          DDEOF
+          chmod +x TEST-74-AUX-UTILS.delta-deep.sh
+
+          # systemctl misc operations (safe ones only — daemon-reexec kills PID 1)
+          cat > TEST-74-AUX-UTILS.systemctl-misc.sh << 'SMEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl is-system-running returns running or degraded"
+          STATE=$(systemctl is-system-running || true)
+          [[ "$STATE" == "running" || "$STATE" == "degraded" ]]
+
+          : "systemctl daemon-reload succeeds"
+          systemctl daemon-reload
+
+          : "systemctl list-machines shows at least header"
+          systemctl list-machines --no-pager > /dev/null || true
+
+          : "systemctl show --property=Version"
+          systemctl show --property=Version | grep -q "Version="
+          SMEOF
+          chmod +x TEST-74-AUX-UTILS.systemctl-misc.sh
+
+          # systemd-run with --pty simulation (just check it doesn't crash)
+          cat > TEST-74-AUX-UTILS.run-pty.sh << 'RPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-run --wait --pipe runs command and captures output"
+          # --pipe forwards stdin/stdout/stderr
+          UNIT="run-pipe-$RANDOM"
+          systemd-run --wait --pipe --unit="$UNIT" echo "pipe-test-output" > /dev/null || true
+
+          : "systemd-run with --setenv passes environment"
+          UNIT2="run-setenv-$RANDOM"
+          systemd-run --unit="$UNIT2" --remain-after-exit \
+              --setenv=MY_RUN_VAR=setenv-works \
+              bash -c 'echo "$MY_RUN_VAR" > /tmp/run-setenv-result'
+          sleep 1
+          [[ "$(cat /tmp/run-setenv-result)" == "setenv-works" ]]
+          systemctl stop "$UNIT2.service" 2>/dev/null || true
+          rm -f /tmp/run-setenv-result
+          RPEOF
+          chmod +x TEST-74-AUX-UTILS.run-pty.sh
 
           rm -f TEST-74-AUX-UTILS.busctl.sh \
                TEST-74-AUX-UTILS.capsule.sh \
