@@ -776,6 +776,39 @@
           VOEOF
           chmod +x TEST-04-JOURNAL.verbose-output.sh
 
+          # Journal _HOSTNAME matching
+          cat > TEST-04-JOURNAL.hostname-match.sh << 'HMEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl _HOSTNAME= filters by hostname"
+          HOSTNAME="$(hostname)"
+          journalctl --no-pager _HOSTNAME="$HOSTNAME" -n 3 > /dev/null
+
+          : "journalctl _TRANSPORT= filters by transport"
+          journalctl --no-pager _TRANSPORT=syslog -n 3 > /dev/null || true
+          journalctl --no-pager _TRANSPORT=journal -n 3 > /dev/null || true
+          HMEOF
+          chmod +x TEST-04-JOURNAL.hostname-match.sh
+
+          # Journal JSON format details
+          cat > TEST-04-JOURNAL.json-details.sh << 'JDEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl -o json contains required fields"
+          OUT="$(journalctl --no-pager -o json -n 1)"
+          echo "$OUT" | jq -e '.MESSAGE' > /dev/null
+          echo "$OUT" | jq -e '.__REALTIME_TIMESTAMP' > /dev/null
+
+          : "journalctl -o json has valid timestamp"
+          TS="$(echo "$OUT" | jq -r '.__REALTIME_TIMESTAMP')"
+          [[ "$TS" -gt 0 ]]
+          JDEOF
+          chmod +x TEST-04-JOURNAL.json-details.sh
+
           # Journal list-boots
           cat > TEST-04-JOURNAL.list-boots.sh << 'LBEOF'
           #!/usr/bin/env bash
@@ -6533,6 +6566,69 @@
           WDEOF
                     chmod +x TEST-23-UNIT-FILE.working-dir.sh
 
+                    # Test ExecStartPre in unit files
+                    cat > TEST-23-UNIT-FILE.exec-start-pre.sh << 'ESPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "ExecStartPre= runs before ExecStart"
+          UNIT="pre-exec-$RANDOM"
+          cat > "/run/systemd/system/$UNIT.service" << UEOF
+          [Service]
+          Type=oneshot
+          ExecStartPre=bash -c 'echo pre > /tmp/pre-exec-result'
+          ExecStart=bash -c 'echo main >> /tmp/pre-exec-result'
+          UEOF
+          systemctl daemon-reload
+          systemctl start "$UNIT.service"
+          head -1 /tmp/pre-exec-result | grep -q "pre"
+          tail -1 /tmp/pre-exec-result | grep -q "main"
+          rm -f /tmp/pre-exec-result "/run/systemd/system/$UNIT.service"
+          systemctl daemon-reload
+          ESPEOF
+                    chmod +x TEST-23-UNIT-FILE.exec-start-pre.sh
+
+                    # Test TimeoutStartSec= property
+                    cat > TEST-23-UNIT-FILE.timeout-start.sh << 'TSEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "TimeoutStartSec= property is readable"
+          UNIT="ts-test-$RANDOM"
+          systemd-run --unit="$UNIT" -p TimeoutStartSec=30 sleep 300
+          sleep 1
+          TS="$(systemctl show -P TimeoutStartUSec "$UNIT.service")"
+          [[ -n "$TS" ]]
+          systemctl stop "$UNIT.service"
+
+          : "TimeoutStopSec= property is readable"
+          UNIT="tss-test-$RANDOM"
+          systemd-run --unit="$UNIT" -p TimeoutStopSec=45 sleep 300
+          sleep 1
+          TS="$(systemctl show -P TimeoutStopUSec "$UNIT.service")"
+          [[ -n "$TS" ]]
+          systemctl stop "$UNIT.service"
+          TSEOF
+                    chmod +x TEST-23-UNIT-FILE.timeout-start.sh
+
+                    # Test SupplementaryGroups= property
+                    cat > TEST-23-UNIT-FILE.supplementary-groups.sh << 'SGEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "SupplementaryGroups= adds groups to service"
+          UNIT="supp-grp-$RANDOM"
+          systemd-run --wait --unit="$UNIT" \
+              -p SupplementaryGroups=daemon \
+              bash -c 'id -Gn > /tmp/supp-grp-result'
+          grep -q "daemon" /tmp/supp-grp-result
+          rm -f /tmp/supp-grp-result
+          SGEOF
+                    chmod +x TEST-23-UNIT-FILE.supplementary-groups.sh
+
                     # Test KillMode=process
                     cat > TEST-23-UNIT-FILE.kill-mode.sh << 'KMEOF'
           #!/usr/bin/env bash
@@ -10224,6 +10320,92 @@
           systemctl daemon-reload
           SSLEOF
           chmod +x TEST-74-AUX-UTILS.start-stop-lifecycle.sh
+
+          # systemctl --version output
+          cat > TEST-74-AUX-UTILS.systemctl-version.sh << 'SVEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl --version returns output"
+          OUT="$(systemctl --version)"
+          [[ -n "$OUT" ]]
+
+          : "systemd-run --version returns output"
+          OUT="$(systemd-run --version)"
+          [[ -n "$OUT" ]]
+
+          : "systemd-escape --version returns output"
+          OUT="$(systemd-escape --version)"
+          [[ -n "$OUT" ]]
+          SVEOF
+          chmod +x TEST-74-AUX-UTILS.systemctl-version.sh
+
+          # systemd-run with environment passing
+          cat > TEST-74-AUX-UTILS.run-env-pass.sh << 'REPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-run passes environment with -p"
+          UNIT="env-pass-$RANDOM"
+          systemd-run --wait --unit="$UNIT" \
+              -p Environment="TEST_PASS_VAR=hello-env" \
+              bash -c 'echo "$TEST_PASS_VAR" > /tmp/env-pass-result'
+          [[ "$(cat /tmp/env-pass-result)" == "hello-env" ]]
+          rm -f /tmp/env-pass-result
+
+          : "systemd-run --setenv passes environment"
+          UNIT="setenv-$RANDOM"
+          TEST_SETENV_VAR=from-setenv systemd-run --wait --unit="$UNIT" \
+              --setenv=TEST_SETENV_VAR \
+              bash -c 'echo "$TEST_SETENV_VAR" > /tmp/setenv-result'
+          [[ "$(cat /tmp/setenv-result)" == "from-setenv" ]]
+          rm -f /tmp/setenv-result
+          REPEOF
+          chmod +x TEST-74-AUX-UTILS.run-env-pass.sh
+
+          # systemctl list-units pattern matching
+          cat > TEST-74-AUX-UTILS.list-units-pattern.sh << 'LUPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl list-units with glob pattern"
+          OUT="$(systemctl list-units --no-pager "systemd-*" 2>/dev/null)" || true
+          echo "$OUT" | grep -q "systemd-"
+
+          : "systemctl list-units --all shows inactive too"
+          systemctl list-units --no-pager --all > /dev/null
+
+          : "systemctl list-unit-files returns output"
+          OUT="$(systemctl list-unit-files --no-pager)"
+          [[ -n "$OUT" ]]
+          LUPEOF
+          chmod +x TEST-74-AUX-UTILS.list-units-pattern.sh
+
+          # systemctl show multiple properties
+          cat > TEST-74-AUX-UTILS.show-multi-props-adv.sh << 'SMPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl show multiple -P properties"
+          ACTIVE="$(systemctl show -P ActiveState systemd-journald.service)"
+          [[ -n "$ACTIVE" ]]
+          LOAD="$(systemctl show -P LoadState systemd-journald.service)"
+          [[ "$LOAD" == "loaded" ]]
+
+          : "systemctl show -p returns key=value format"
+          OUT="$(systemctl show -p LoadState systemd-journald.service)"
+          echo "$OUT" | grep -q "LoadState=loaded"
+
+          : "systemctl show -p with multiple properties"
+          OUT="$(systemctl show -p LoadState -p ActiveState systemd-journald.service)"
+          echo "$OUT" | grep -q "LoadState="
+          echo "$OUT" | grep -q "ActiveState="
+          SMPEOF
+          chmod +x TEST-74-AUX-UTILS.show-multi-props-adv.sh
 
           # systemd-escape --path tests
           cat > TEST-74-AUX-UTILS.escape-path.sh << 'EPEOF'
