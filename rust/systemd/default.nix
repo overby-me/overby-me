@@ -1897,7 +1897,57 @@
         # and journalctl @epoch timestamp parsing.
         patchScript = ''
           rm -f TEST-53-TIMER.RandomizedDelaySec-reload.sh \
-                TEST-53-TIMER.restart-trigger.sh
+                TEST-53-TIMER.restart-trigger.sh \
+                TEST-53-TIMER.issue-16347.sh
+          # Custom timer test: verify OnActiveSec transient timer fires
+          cat > TEST-53-TIMER.basic-timer.sh << 'BTEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "OnActiveSec= transient timer fires after delay"
+          UNIT="timer-basic-$RANDOM"
+          systemd-run --unit="$UNIT" \
+              --on-active=2s \
+              --remain-after-exit \
+              touch "/tmp/timer-fired-$UNIT"
+          # Timer should be active
+          systemctl is-active "$UNIT.timer"
+          # Wait for it to fire
+          timeout 15 bash -c "until [[ -f /tmp/timer-fired-$UNIT ]]; do sleep 0.5; done"
+          [[ -f "/tmp/timer-fired-$UNIT" ]]
+          systemctl stop "$UNIT.timer" "$UNIT.service" 2>/dev/null || true
+          rm -f "/tmp/timer-fired-$UNIT"
+
+          : "OnCalendar= timer with systemd-run"
+          UNIT="timer-cal-$RANDOM"
+          systemd-run --unit="$UNIT" \
+              --on-calendar="*:*:0/10" \
+              --remain-after-exit \
+              touch "/tmp/timer-cal-fired-$UNIT"
+          systemctl is-active "$UNIT.timer"
+          # Verify the timer unit was created with correct properties
+          grep -q "^OnCalendar=" "/run/systemd/transient/$UNIT.timer"
+          systemctl stop "$UNIT.timer" "$UNIT.service" 2>/dev/null || true
+          rm -f "/tmp/timer-cal-fired-$UNIT"
+
+          : "Timer unit file with OnBootSec="
+          UNIT="timer-boot-$RANDOM"
+          printf '[Timer]\nOnBootSec=1s\n[Install]\nWantedBy=timers.target\n' \
+              > "/run/systemd/system/$UNIT.timer"
+          printf '[Service]\nType=oneshot\nExecStart=touch /tmp/timer-boot-fired-%s\n' \
+              "$UNIT" > "/run/systemd/system/$UNIT.service"
+          systemctl daemon-reload
+          systemctl start "$UNIT.timer"
+          timeout 15 bash -c "until [[ -f /tmp/timer-boot-fired-$UNIT ]]; do sleep 0.5; done"
+          [[ -f "/tmp/timer-boot-fired-$UNIT" ]]
+          systemctl stop "$UNIT.timer" "$UNIT.service" 2>/dev/null || true
+          rm -f "/tmp/timer-boot-fired-$UNIT" "/run/systemd/system/$UNIT.timer" "/run/systemd/system/$UNIT.service"
+          systemctl daemon-reload
+          BTEOF
+          chmod +x TEST-53-TIMER.basic-timer.sh
         '';
       }
       {
