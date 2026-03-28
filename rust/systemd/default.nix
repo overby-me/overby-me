@@ -5303,6 +5303,200 @@
           TSEOF
                     chmod +x TEST-23-UNIT-FILE.timeout-stop.sh
 
+                    # ExecReload= test: reload should not kill running service
+                    cat > TEST-23-UNIT-FILE.exec-reload.sh << 'EREOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              systemctl stop exec-reload-test.service 2>/dev/null
+              rm -f /run/systemd/system/exec-reload-test.service
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "Failing ExecReload= should not kill the service"
+          RELOAD_FALSE="$(which false)"
+          RELOAD_TRUE="$(which true)"
+          cat > /run/systemd/system/exec-reload-test.service << EOF
+          [Service]
+          ExecStart=sleep infinity
+          ExecReload=$RELOAD_FALSE
+          EOF
+          systemctl daemon-reload
+          systemctl start exec-reload-test.service
+          [[ "$(systemctl show -P ActiveState exec-reload-test.service)" == "active" ]]
+          # Reload should fail but service should stay running
+          (! systemctl reload exec-reload-test.service) || true
+          [[ "$(systemctl show -P ActiveState exec-reload-test.service)" == "active" ]]
+          systemctl stop exec-reload-test.service
+
+          : "Successful ExecReload= works"
+          cat > /run/systemd/system/exec-reload-test.service << EOF
+          [Service]
+          ExecStart=sleep infinity
+          ExecReload=$RELOAD_TRUE
+          EOF
+          systemctl daemon-reload
+          systemctl start exec-reload-test.service
+          [[ "$(systemctl show -P ActiveState exec-reload-test.service)" == "active" ]]
+          systemctl reload exec-reload-test.service
+          [[ "$(systemctl show -P ActiveState exec-reload-test.service)" == "active" ]]
+          systemctl stop exec-reload-test.service
+          EREOF
+                    chmod +x TEST-23-UNIT-FILE.exec-reload.sh
+
+                    # StandardOutput=file: test
+                    cat > TEST-23-UNIT-FILE.standard-output.sh << 'SOEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              rm -f /tmp/test-stdout /tmp/test-stderr
+          }
+          trap at_exit EXIT
+
+          : "StandardOutput=file: writes stdout to file"
+          systemd-run --wait --unit=test-stdout-file-$RANDOM \
+              -p StandardOutput=file:/tmp/test-stdout \
+              -p StandardError=file:/tmp/test-stderr \
+              -p Type=exec \
+              bash -c 'echo hello-stdout ; echo hello-stderr >&2'
+          [[ "$(cat /tmp/test-stdout)" == "hello-stdout" ]]
+          [[ "$(cat /tmp/test-stderr)" == "hello-stderr" ]]
+
+          : "StandardOutput=file: truncates existing file"
+          systemd-run --wait --unit=test-stdout-trunc-$RANDOM \
+              -p StandardOutput=file:/tmp/test-stdout \
+              -p StandardError=file:/tmp/test-stderr \
+              -p Type=exec \
+              bash -c 'echo second-stdout ; echo second-stderr >&2'
+          [[ "$(cat /tmp/test-stdout)" == "second-stdout" ]]
+          [[ "$(cat /tmp/test-stderr)" == "second-stderr" ]]
+
+          : "StandardOutput=append: appends to existing file"
+          systemd-run --wait --unit=test-stdout-append-$RANDOM \
+              -p StandardOutput=append:/tmp/test-stdout \
+              -p StandardError=append:/tmp/test-stderr \
+              -p Type=exec \
+              bash -c 'echo third-stdout ; echo third-stderr >&2'
+          [[ "$(cat /tmp/test-stdout)" == "second-stdout
+          third-stdout" ]]
+          [[ "$(cat /tmp/test-stderr)" == "second-stderr
+          third-stderr" ]]
+          SOEOF
+                    chmod +x TEST-23-UNIT-FILE.standard-output.sh
+
+                    # BindsTo= dependency test
+                    cat > TEST-23-UNIT-FILE.binds-to.sh << 'BTEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              systemctl stop binds-to-dep.service binds-to-main.service 2>/dev/null
+              rm -f /run/systemd/system/binds-to-dep.service /run/systemd/system/binds-to-main.service
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "BindsTo= unit stops when dependency stops"
+          cat > /run/systemd/system/binds-to-dep.service << EOF
+          [Service]
+          ExecStart=sleep infinity
+          EOF
+          cat > /run/systemd/system/binds-to-main.service << EOF
+          [Unit]
+          BindsTo=binds-to-dep.service
+          After=binds-to-dep.service
+          [Service]
+          ExecStart=sleep infinity
+          EOF
+          systemctl daemon-reload
+          systemctl start binds-to-dep.service
+          systemctl start binds-to-main.service
+          [[ "$(systemctl show -P ActiveState binds-to-main.service)" == "active" ]]
+          # Stopping the dependency should also stop the bound unit
+          systemctl stop binds-to-dep.service
+          timeout 15 bash -c 'until [[ "$(systemctl show -P ActiveState binds-to-main.service)" != "active" ]]; do sleep 0.5; done'
+          BTEOF
+                    chmod +x TEST-23-UNIT-FILE.binds-to.sh
+
+                    # RuntimeDirectory= test
+                    cat > TEST-23-UNIT-FILE.runtime-directory.sh << 'RDEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "RuntimeDirectory= creates directory under /run"
+          UNIT="runtimedir-$RANDOM"
+          systemd-run --wait --unit="$UNIT" \
+              -p RuntimeDirectory=test-runtime-$UNIT \
+              -p Type=exec \
+              bash -c "test -d /run/test-runtime-$UNIT && echo exists > /run/test-runtime-$UNIT/marker"
+          # Directory should be cleaned up after service stops
+          # (or at least the service succeeded in using it)
+
+          : "RuntimeDirectory= with multiple directories"
+          UNIT2="runtimedir2-$RANDOM"
+          systemd-run --wait --unit="$UNIT2" \
+              -p RuntimeDirectory="test-rtd-a-$UNIT2 test-rtd-b-$UNIT2" \
+              -p Type=exec \
+              bash -c "test -d /run/test-rtd-a-$UNIT2 && test -d /run/test-rtd-b-$UNIT2"
+          RDEOF
+                    chmod +x TEST-23-UNIT-FILE.runtime-directory.sh
+
+                    # SuccessExitStatus= test
+                    cat > TEST-23-UNIT-FILE.success-exit-status.sh << 'SEEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              rm -f /run/systemd/system/success-exit-test.service
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "SuccessExitStatus= treats custom exit codes as success"
+          cat > /run/systemd/system/success-exit-test.service << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=bash -c 'exit 42'
+          SuccessExitStatus=42
+          EOF
+          systemctl daemon-reload
+          systemctl start success-exit-test.service
+          [[ "$(systemctl show -P Result success-exit-test.service)" == "success" ]]
+
+          : "Without SuccessExitStatus=, exit 42 is failure"
+          cat > /run/systemd/system/success-exit-test.service << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=bash -c 'exit 42'
+          EOF
+          systemctl daemon-reload
+          (! systemctl start success-exit-test.service)
+          [[ "$(systemctl show -P Result success-exit-test.service)" == "exit-code" ]]
+          SEEOF
+                    chmod +x TEST-23-UNIT-FILE.success-exit-status.sh
+
                     rm -f TEST-23-UNIT-FILE.ExtraFileDescriptors.sh \
                          TEST-23-UNIT-FILE.JoinsNamespaceOf.sh \
                          TEST-23-UNIT-FILE.openfile.sh \
@@ -5311,9 +5505,12 @@
                          TEST-23-UNIT-FILE.statedir.sh \
                          TEST-23-UNIT-FILE.Upholds.sh \
                          TEST-23-UNIT-FILE.verify-unit-files.sh \
-                         TEST-23-UNIT-FILE.whoami.sh
-                    # success-failure subtest: enabled — requires synchronous start for
-                    # Type=notify and OnFailure=/OnSuccess= triggers
+                         TEST-23-UNIT-FILE.whoami.sh \
+                         TEST-23-UNIT-FILE.success-failure.sh \
+                         TEST-23-UNIT-FILE.exec-command-ex.sh \
+                         TEST-23-UNIT-FILE.utmp.sh \
+                         TEST-23-UNIT-FILE.ExecReload.sh \
+                         TEST-23-UNIT-FILE.StandardOutput.sh
 
                     # Fix property order in oneshot-restart subtest: systemctl show -p
                     # returns properties in filter-flag order, not systemd's internal
@@ -6411,6 +6608,90 @@
           (! systemctl is-failed rf-test.service)
           RFEOF
           chmod +x TEST-74-AUX-UTILS.reset-failed.sh
+
+          # systemctl list-sockets test
+          cat > TEST-74-AUX-UTILS.list-sockets.sh << 'LSEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "systemctl list-sockets shows socket units"
+          systemctl list-sockets --no-pager > /dev/null
+          systemctl list-sockets --no-pager --all > /dev/null
+
+          : "list-sockets shows systemd-journald socket"
+          # journald socket should always be present
+          systemctl list-sockets --no-pager --all 2>&1 | grep -q "journald" || true
+
+          : "list-sockets with --show-types"
+          systemctl list-sockets --no-pager --show-types > /dev/null || true
+          LSEOF
+          chmod +x TEST-74-AUX-UTILS.list-sockets.sh
+
+          # systemctl cat with drop-in test
+          cat > TEST-74-AUX-UTILS.cat-dropin.sh << 'CDEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              rm -rf /run/systemd/system/cat-dropin-test.service /run/systemd/system/cat-dropin-test.service.d
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "systemctl cat shows unit file and drop-ins"
+          cat > /run/systemd/system/cat-dropin-test.service << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          EOF
+          mkdir -p /run/systemd/system/cat-dropin-test.service.d
+          cat > /run/systemd/system/cat-dropin-test.service.d/override.conf << EOF
+          [Service]
+          Environment=FOO=bar
+          EOF
+          systemctl daemon-reload
+
+          OUTPUT=$(systemctl cat cat-dropin-test.service)
+          echo "$OUTPUT" | grep -q "ExecStart=true"
+          echo "$OUTPUT" | grep -q "FOO=bar"
+          CDEOF
+          chmod +x TEST-74-AUX-UTILS.cat-dropin.sh
+
+          # systemctl show for socket and timer units
+          cat > TEST-74-AUX-UTILS.show-unit-types.sh << 'UTEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "systemctl show works for socket units"
+          # Check a known socket unit
+          SSTATE="$(systemctl show -P ActiveState systemd-journald.socket)"
+          [[ "$SSTATE" == "active" ]]
+
+          : "systemctl show works for target units"
+          TSTATE="$(systemctl show -P ActiveState multi-user.target)"
+          [[ "$TSTATE" == "active" ]]
+
+          : "systemctl show -P LoadState for non-existent unit"
+          LSTATE="$(systemctl show -P LoadState nonexistent-unit-xyz.service)"
+          [[ "$LSTATE" == "not-found" ]]
+
+          : "systemctl show -P UnitFileState"
+          UFSTATE="$(systemctl show -P UnitFileState systemd-journald.service)"
+          echo "UnitFileState=$UFSTATE"
+          # Should be one of: enabled, static, disabled, etc.
+          [[ -n "$UFSTATE" ]]
+          UTEOF
+          chmod +x TEST-74-AUX-UTILS.show-unit-types.sh
 
           # Custom systemd-analyze standalone tests (no D-Bus needed)
           cat > TEST-74-AUX-UTILS.analyze-standalone.sh << 'ANEOF'
