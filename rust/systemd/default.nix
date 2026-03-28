@@ -468,6 +468,51 @@
               bash -xec '[[ -d /etc/exec-ctx-test ]]; [[ "$CONFIGURATION_DIRECTORY" == /etc/exec-ctx-test ]]'
           rm -rf /etc/exec-ctx-test
 
+          : "Multiple directory entries with modes"
+          systemd-run --wait --pipe \
+              -p CacheDirectory="foo" \
+              -p CacheDirectory="bar" \
+              -p CacheDirectoryMode=0700 \
+              bash -xec '[[ -d /var/cache/foo ]]; [[ -d /var/cache/bar ]];
+                         [[ "$CACHE_DIRECTORY" == "/var/cache/bar:/var/cache/foo" ]] ||
+                         [[ "$CACHE_DIRECTORY" == "/var/cache/foo:/var/cache/bar" ]];
+                         [[ $(stat -c "%a" /var/cache/bar) == 700 ]]'
+          rm -rf /var/cache/foo /var/cache/bar
+
+          : "RuntimeDirectoryMode= tests"
+          systemd-run --wait --pipe \
+              -p RuntimeDirectory=mode-test \
+              -p RuntimeDirectoryMode=0750 \
+              bash -xec '[[ -d /run/mode-test ]]; [[ $(stat -c "%a" /run/mode-test) == 750 ]]'
+
+          : "StateDirectoryMode= tests"
+          systemd-run --wait --pipe \
+              -p StateDirectory=mode-test \
+              -p StateDirectoryMode=0700 \
+              bash -xec '[[ -d /var/lib/mode-test ]]; [[ $(stat -c "%a" /var/lib/mode-test) == 700 ]]'
+          rm -rf /var/lib/mode-test
+
+          : "ConfigurationDirectoryMode= tests"
+          systemd-run --wait --pipe \
+              -p ConfigurationDirectory=mode-test \
+              -p ConfigurationDirectoryMode=0400 \
+              bash -xec '[[ -d /etc/mode-test ]]; [[ $(stat -c "%a" /etc/mode-test) == 400 ]]'
+          rm -rf /etc/mode-test
+
+          : "LogsDirectoryMode= tests"
+          systemd-run --wait --pipe \
+              -p LogsDirectory=mode-test \
+              -p LogsDirectoryMode=0750 \
+              bash -xec '[[ -d /var/log/mode-test ]]; [[ $(stat -c "%a" /var/log/mode-test) == 750 ]]'
+          rm -rf /var/log/mode-test
+
+          : "Space-separated directory entries"
+          systemd-run --wait --pipe \
+              -p RuntimeDirectory="multi-a multi-b" \
+              bash -xec '[[ -d /run/multi-a ]]; [[ -d /run/multi-b ]];
+                         [[ "$RUNTIME_DIRECTORY" == "/run/multi-a:/run/multi-b" ]] ||
+                         [[ "$RUNTIME_DIRECTORY" == "/run/multi-b:/run/multi-a" ]]'
+
           : "PrivateTmp= tests"
           touch /tmp/exec-ctx-marker
           systemd-run --wait --pipe -p PrivateTmp=yes \

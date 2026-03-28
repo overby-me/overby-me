@@ -2721,19 +2721,89 @@ fn create_transient_unit(
                         Some(std::path::PathBuf::from(value));
                 }
                 "StateDirectory" => {
-                    service_conf.exec_config.state_directory = vec![value.to_string()];
+                    if value.is_empty() {
+                        service_conf.exec_config.state_directory.clear();
+                    } else {
+                        for entry in value.split_whitespace() {
+                            service_conf
+                                .exec_config
+                                .state_directory
+                                .push(entry.to_string());
+                        }
+                    }
                 }
                 "RuntimeDirectory" => {
-                    service_conf.exec_config.runtime_directory = vec![value.to_string()];
+                    if value.is_empty() {
+                        service_conf.exec_config.runtime_directory.clear();
+                    } else {
+                        for entry in value.split_whitespace() {
+                            service_conf
+                                .exec_config
+                                .runtime_directory
+                                .push(entry.to_string());
+                        }
+                    }
                 }
                 "CacheDirectory" => {
-                    service_conf.exec_config.cache_directory = vec![value.to_string()];
+                    if value.is_empty() {
+                        service_conf.exec_config.cache_directory.clear();
+                    } else {
+                        for entry in value.split_whitespace() {
+                            service_conf
+                                .exec_config
+                                .cache_directory
+                                .push(entry.to_string());
+                        }
+                    }
                 }
                 "LogsDirectory" => {
-                    service_conf.exec_config.logs_directory = vec![value.to_string()];
+                    if value.is_empty() {
+                        service_conf.exec_config.logs_directory.clear();
+                    } else {
+                        for entry in value.split_whitespace() {
+                            service_conf
+                                .exec_config
+                                .logs_directory
+                                .push(entry.to_string());
+                        }
+                    }
                 }
                 "ConfigurationDirectory" => {
-                    service_conf.exec_config.configuration_directory = vec![value.to_string()];
+                    if value.is_empty() {
+                        service_conf.exec_config.configuration_directory.clear();
+                    } else {
+                        for entry in value.split_whitespace() {
+                            service_conf
+                                .exec_config
+                                .configuration_directory
+                                .push(entry.to_string());
+                        }
+                    }
+                }
+                "RuntimeDirectoryMode" => {
+                    if let Ok(m) = u32::from_str_radix(value.trim(), 8) {
+                        service_conf.exec_config.runtime_directory_mode = Some(m);
+                    }
+                }
+                "StateDirectoryMode" => {
+                    if let Ok(m) = u32::from_str_radix(value.trim(), 8) {
+                        service_conf.exec_config.state_directory_mode = Some(m);
+                    }
+                }
+                "CacheDirectoryMode" => {
+                    if let Ok(m) = u32::from_str_radix(value.trim(), 8) {
+                        service_conf.exec_config.cache_directory_mode = Some(m);
+                    }
+                }
+                "LogsDirectoryMode" => {
+                    if let Ok(m) = u32::from_str_radix(value.trim(), 8) {
+                        service_conf.exec_config.logs_directory_mode = Some(m);
+                    }
+                }
+                "ConfigurationDirectoryMode" => {
+                    if let Ok(m) = u32::from_str_radix(value.trim(), 8) {
+                        service_conf.exec_config.configuration_directory_mode = Some(m);
+                    }
                 }
                 "RuntimeDirectoryPreserve" => {
                     service_conf.exec_config.runtime_directory_preserve = match value {
