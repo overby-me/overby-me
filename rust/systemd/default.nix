@@ -2831,6 +2831,229 @@
           SPEOF
           chmod +x TEST-07-PID1.systemctl-show-props.sh
 
+          # Custom ExecReload= failure doesn't kill service test
+          cat > TEST-07-PID1.exec-reload-failure.sh << 'ERFEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              systemctl stop reload-fail-test.service 2>/dev/null
+              rm -f /run/systemd/system/reload-fail-test.service
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          # Helper: retry a command up to 5 times with 1s delay (works around EAGAIN)
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep 1; done; "$@"; }
+
+          : "Failing ExecReload= should not kill the service"
+          cat > /run/systemd/system/reload-fail-test.service << EOF
+          [Service]
+          ExecStart=sleep infinity
+          ExecReload=false
+          EOF
+          retry systemctl daemon-reload
+          retry systemctl start reload-fail-test.service
+          systemctl is-active reload-fail-test.service
+          # The reload SHOULD fail
+          (! systemctl reload reload-fail-test.service)
+          # But the service should still be running
+          systemctl is-active reload-fail-test.service
+
+          : "ExecReload=- prefix ignores failure"
+          cat > /run/systemd/system/reload-fail-test.service << EOF
+          [Service]
+          ExecStart=sleep infinity
+          ExecReload=-false
+          EOF
+          retry systemctl daemon-reload
+          retry systemctl start reload-fail-test.service
+          # Reload should succeed despite false, because of - prefix
+          systemctl reload reload-fail-test.service
+          systemctl is-active reload-fail-test.service
+          ERFEOF
+          chmod +x TEST-07-PID1.exec-reload-failure.sh
+
+          # Custom StateDirectory= and LogsDirectory= test
+          cat > TEST-07-PID1.state-logs-directory.sh << 'SLDEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              systemctl stop state-dir-test.service 2>/dev/null
+              rm -f /run/systemd/system/state-dir-test.service
+              rm -rf /var/lib/state-dir-test /var/log/log-dir-test /var/cache/cache-dir-test
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          # Helper: retry a command up to 5 times with 1s delay (works around EAGAIN)
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep 1; done; "$@"; }
+
+          : "StateDirectory= creates /var/lib/<name>"
+          cat > /run/systemd/system/state-dir-test.service << EOF
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          StateDirectory=state-dir-test
+          ExecStart=bash -c 'touch /var/lib/state-dir-test/marker'
+          EOF
+          retry systemctl daemon-reload
+          retry systemctl start state-dir-test.service
+          [[ -d /var/lib/state-dir-test ]]
+          [[ -f /var/lib/state-dir-test/marker ]]
+          systemctl stop state-dir-test.service
+
+          : "LogsDirectory= creates /var/log/<name>"
+          cat > /run/systemd/system/state-dir-test.service << EOF
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          LogsDirectory=log-dir-test
+          ExecStart=bash -c 'touch /var/log/log-dir-test/marker'
+          EOF
+          retry systemctl daemon-reload
+          retry systemctl start state-dir-test.service
+          [[ -d /var/log/log-dir-test ]]
+          [[ -f /var/log/log-dir-test/marker ]]
+          systemctl stop state-dir-test.service
+
+          : "CacheDirectory= creates /var/cache/<name>"
+          cat > /run/systemd/system/state-dir-test.service << EOF
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          CacheDirectory=cache-dir-test
+          ExecStart=bash -c 'touch /var/cache/cache-dir-test/marker'
+          EOF
+          retry systemctl daemon-reload
+          retry systemctl start state-dir-test.service
+          [[ -d /var/cache/cache-dir-test ]]
+          [[ -f /var/cache/cache-dir-test/marker ]]
+          systemctl stop state-dir-test.service
+          SLDEOF
+          chmod +x TEST-07-PID1.state-logs-directory.sh
+
+          # Custom condition negation test
+          cat > TEST-07-PID1.condition-negation.sh << 'CNEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              rm -f /run/systemd/system/cond-neg-*.service
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          # Helper: retry a command up to 5 times with 1s delay (works around EAGAIN)
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep 1; done; "$@"; }
+
+          : "ConditionPathExists=! negation succeeds when path does NOT exist"
+          cat > /run/systemd/system/cond-neg-exists.service << EOF
+          [Unit]
+          ConditionPathExists=!/nonexistent/path
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          RemainAfterExit=yes
+          EOF
+          retry systemctl daemon-reload
+          retry systemctl start cond-neg-exists.service
+          systemctl is-active cond-neg-exists.service
+          systemctl stop cond-neg-exists.service
+
+          : "ConditionPathExists=! negation skips when path exists"
+          cat > /run/systemd/system/cond-neg-exists-fail.service << EOF
+          [Unit]
+          ConditionPathExists=!/etc/hostname
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          RemainAfterExit=yes
+          EOF
+          retry systemctl daemon-reload
+          systemctl start cond-neg-exists-fail.service || true
+          (! systemctl is-active cond-neg-exists-fail.service)
+
+          : "ConditionPathIsDirectory=! negation succeeds for non-directory"
+          cat > /run/systemd/system/cond-neg-dir.service << EOF
+          [Unit]
+          ConditionPathIsDirectory=!/etc/hostname
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          RemainAfterExit=yes
+          EOF
+          retry systemctl daemon-reload
+          retry systemctl start cond-neg-dir.service
+          systemctl is-active cond-neg-dir.service
+          systemctl stop cond-neg-dir.service
+
+          : "ConditionFileNotEmpty=! negation succeeds for empty file"
+          touch /tmp/empty-for-neg-test
+          cat > /run/systemd/system/cond-neg-notempty.service << EOF
+          [Unit]
+          ConditionFileNotEmpty=!/tmp/empty-for-neg-test
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          RemainAfterExit=yes
+          EOF
+          retry systemctl daemon-reload
+          retry systemctl start cond-neg-notempty.service
+          systemctl is-active cond-neg-notempty.service
+          systemctl stop cond-neg-notempty.service
+          rm -f /tmp/empty-for-neg-test
+          CNEOF
+          chmod +x TEST-07-PID1.condition-negation.sh
+
+          # Custom WorkingDirectory= verification test
+          cat > TEST-07-PID1.working-directory-custom.sh << 'WDCEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              rm -f /run/systemd/system/wd-test.service
+              rm -f /tmp/wd-test-out
+              rm -rf /tmp/wd-test-dir
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          # Helper: retry a command up to 5 times with 1s delay (works around EAGAIN)
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep 1; done; "$@"; }
+
+          : "WorkingDirectory= sets cwd for ExecStart"
+          mkdir -p /tmp/wd-test-dir
+          cat > /run/systemd/system/wd-test.service << EOF
+          [Service]
+          Type=oneshot
+          WorkingDirectory=/tmp/wd-test-dir
+          ExecStart=bash -c 'pwd > /tmp/wd-test-out'
+          EOF
+          retry systemctl daemon-reload
+          retry systemctl start wd-test.service
+          [[ "$(cat /tmp/wd-test-out)" == "/tmp/wd-test-dir" ]]
+
+          WDCEOF
+          chmod +x TEST-07-PID1.working-directory-custom.sh
+
           # Custom StandardOutput=file: test via unit files
           cat > TEST-07-PID1.standard-output-file.sh << 'SOEOF'
           #!/usr/bin/env bash
