@@ -2980,6 +2980,33 @@ fn create_transient_unit(
                 "RootDirectory" => {
                     service_conf.exec_config.root_directory = Some(value.to_string());
                 }
+                "PassEnvironment" => {
+                    if value.is_empty() {
+                        service_conf.exec_config.pass_environment.clear();
+                    } else {
+                        for v in value.split_whitespace() {
+                            service_conf
+                                .exec_config
+                                .pass_environment
+                                .push(v.to_string());
+                        }
+                    }
+                }
+                "UnsetEnvironment" => {
+                    if value.is_empty() {
+                        service_conf.exec_config.unset_environment.clear();
+                    } else {
+                        for v in value.split_whitespace() {
+                            service_conf
+                                .exec_config
+                                .unset_environment
+                                .push(v.to_string());
+                        }
+                    }
+                }
+                "IgnoreSIGPIPE" => {
+                    service_conf.exec_config.ignore_sigpipe = matches!(value, "yes" | "true" | "1");
+                }
                 "OnSuccess" => {
                     for name in value.split_whitespace() {
                         let full = if name.contains('.') {

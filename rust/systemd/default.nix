@@ -832,6 +832,13 @@
               bash -xec 'id -Gn | tr " " "\n" | grep -q audio;
                          id -Gn | tr " " "\n" | grep -q video'
 
+          : "UnsetEnvironment= tests"
+          systemd-run --wait --pipe \
+              -p Environment=KEEP_ME=yes \
+              -p Environment=DROP_ME=yes \
+              -p UnsetEnvironment=DROP_ME \
+              bash -xec '[[ "$KEEP_ME" == yes && -z "$DROP_ME" ]]'
+
           : "Error handling for clean-up codepaths"
           (! systemd-run --wait --pipe false)
           TESTEOF
