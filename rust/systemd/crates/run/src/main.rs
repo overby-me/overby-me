@@ -675,6 +675,11 @@ fn try_create_transient_unit(
 }
 
 fn main() {
+    // Ignore SIGPIPE so piping output to grep/head/etc. doesn't panic.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_IGN);
+    }
+
     let mut cli = Cli::parse();
 
     // -v is shorthand for --pipe --wait --service-type=exec

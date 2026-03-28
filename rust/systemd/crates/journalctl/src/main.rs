@@ -1139,6 +1139,11 @@ fn open_storage(cli: &Cli) -> Result<JournalStorage, String> {
 // ---------------------------------------------------------------------------
 
 fn main() {
+    // Ignore SIGPIPE so piping output to grep/head/etc. doesn't panic.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_IGN);
+    }
+
     let cli = Cli::parse();
 
     // Handle special commands that don't need to read entries
