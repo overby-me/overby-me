@@ -3532,6 +3532,26 @@ fn create_transient_unit(
                         }
                     }
                 }
+                "TimerSlackNSec" => {
+                    service_conf.exec_config.timer_slack_nsec =
+                        Some(value.to_string());
+                }
+                "CoredumpFilter" => {
+                    service_conf.exec_config.coredump_filter =
+                        Some(value.to_string());
+                }
+                "Personality" => {
+                    service_conf.exec_config.personality =
+                        Some(value.to_string());
+                }
+                "SetLoginEnvironment" => {
+                    service_conf.exec_config.set_login_environment =
+                        Some(matches!(value, "yes" | "true" | "1"));
+                }
+                "MountAPIVFS" => {
+                    service_conf.exec_config.mount_api_vfs =
+                        Some(matches!(value, "yes" | "true" | "1"));
+                }
                 _ => {
                     log::debug!("Ignoring unknown transient unit property: {key}={value}");
                 }

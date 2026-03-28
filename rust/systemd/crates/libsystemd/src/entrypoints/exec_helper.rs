@@ -438,6 +438,11 @@ pub struct ExecHelperConfig {
     #[serde(default)]
     pub ipc_namespace_path: Option<String>,
 
+    /// TimerSlackNSec= — timer slack value in nanoseconds for the process.
+    /// Applied via prctl(PR_SET_TIMERSLACK). See systemd.exec(5).
+    #[serde(default)]
+    pub timer_slack_nsec: Option<u64>,
+
     /// PrivatePIDs= — if true, a new PID namespace is created and /proc is
     /// remounted so the service process becomes PID 1 in the new namespace.
     /// See systemd.exec(5).
@@ -1739,6 +1744,18 @@ pub fn run_exec_helper() {
             );
             // Non-fatal: log and continue, matching systemd's lenient behavior
             // when the kernel rejects the value or the file is unavailable.
+        }
+    }
+
+    // Apply TimerSlackNSec= setting via prctl(PR_SET_TIMERSLACK).
+    if let Some(nsec) = config.timer_slack_nsec {
+        let ret = unsafe { libc::prctl(libc::PR_SET_TIMERSLACK, nsec as libc::c_ulong) };
+        if ret != 0 {
+            log::warn!(
+                "Failed to set TimerSlackNSec to {}: {}",
+                nsec,
+                std::io::Error::last_os_error()
+            );
         }
     }
 

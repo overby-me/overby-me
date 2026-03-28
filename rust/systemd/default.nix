@@ -882,6 +882,11 @@
           : "LogLevelMax via transient property"
           systemd-run --wait --pipe -p LogLevelMax=warning true
 
+          : "TimerSlackNSec= sets timer slack"
+          SLACK="$(systemd-run --wait --pipe -p TimerSlackNSec=1000000 \
+              bash -xec 'cat /proc/self/timerslack_ns')"
+          [[ "$SLACK" == "1000000" ]]
+
           : "PrivateIPC=yes creates IPC namespace isolation"
           HOST_IPC="$(readlink /proc/1/ns/ipc)"
           SRVC_IPC="$(systemd-run --wait --pipe -p PrivateIPC=yes readlink /proc/self/ns/ipc)"

@@ -480,6 +480,11 @@ fn start_service_with_filedescriptors(
         private_ipc: conf.exec_config.private_ipc.unwrap_or(false),
         network_namespace_path: conf.exec_config.network_namespace_path.clone(),
         ipc_namespace_path: conf.exec_config.ipc_namespace_path.clone(),
+        timer_slack_nsec: conf
+            .exec_config
+            .timer_slack_nsec
+            .as_deref()
+            .and_then(|s| s.parse::<u64>().ok()),
         private_pids: conf.exec_config.private_pids.unwrap_or(false),
         protect_kernel_tunables: conf.exec_config.protect_kernel_tunables,
         protect_kernel_modules: conf.exec_config.protect_kernel_modules,
