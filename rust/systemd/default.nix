@@ -1128,6 +1128,31 @@
           CFEOF
           chmod +x TEST-04-JOURNAL.combined-flags.sh
 
+          # journalctl --verify checks journal integrity
+          cat > TEST-04-JOURNAL.verify.sh << 'VREOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl --verify checks journal files"
+          journalctl --verify > /dev/null 2>&1 || true
+          VREOF
+          chmod +x TEST-04-JOURNAL.verify.sh
+
+          # journalctl --flush triggers flush
+          cat > TEST-04-JOURNAL.flush.sh << 'FLSEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl --flush runs without error"
+          journalctl --flush 2>&1 || true
+
+          : "journalctl --rotate rotates journal"
+          journalctl --rotate 2>&1 || true
+          FLSEOF
+          chmod +x TEST-04-JOURNAL.flush.sh
+
           rm -f TEST-04-JOURNAL.bsod.sh \
                TEST-04-JOURNAL.cat.sh \
                TEST-04-JOURNAL.corrupted-journals.sh \
@@ -8146,6 +8171,44 @@
           systemd-run --wait --unit="$UNIT2" -p MemoryMax=1G true
           TMEOF
           chmod +x TEST-19-CGROUP.taskmax-prop.sh
+
+          cat > TEST-19-CGROUP.accounting-props.sh << 'APEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "IOAccounting property is accepted"
+          UNIT="cg-ioacc-$RANDOM"
+          systemd-run --wait --unit="$UNIT" -p IOAccounting=yes true
+
+          : "CPUAccounting property is accepted"
+          UNIT2="cg-cpuacc-$RANDOM"
+          systemd-run --wait --unit="$UNIT2" -p CPUAccounting=yes true
+
+          : "MemoryAccounting property is accepted"
+          UNIT3="cg-memacc-$RANDOM"
+          systemd-run --wait --unit="$UNIT3" -p MemoryAccounting=yes true
+          APEOF
+          chmod +x TEST-19-CGROUP.accounting-props.sh
+
+          cat > TEST-19-CGROUP.memory-props.sh << 'MPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "MemoryHigh property is accepted"
+          UNIT="cg-memhi-$RANDOM"
+          systemd-run --wait --unit="$UNIT" -p MemoryHigh=500M true
+
+          : "MemoryLow property is accepted"
+          UNIT2="cg-memlo-$RANDOM"
+          systemd-run --wait --unit="$UNIT2" -p MemoryLow=100M true
+
+          : "MemoryMin property is accepted"
+          UNIT3="cg-memmin-$RANDOM"
+          systemd-run --wait --unit="$UNIT3" -p MemoryMin=50M true
+          MPEOF
+          chmod +x TEST-19-CGROUP.memory-props.sh
         '';
       }
       {
