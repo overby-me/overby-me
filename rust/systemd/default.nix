@@ -1201,6 +1201,67 @@
           systemd-run --wait --pipe -p SendSIGHUP=yes \
               bash -xec 'true'
 
+          : "IPCNamespacePath= joins existing IPC namespace"
+          HOST_IPC="$(readlink /proc/1/ns/ipc)"
+          # Create a service with its own IPC namespace
+          systemd-run --unit=ipc-ns-provider -p PrivateIPC=yes -p RemainAfterExit=no \
+              sleep 60
+          sleep 1
+          PROVIDER_PID="$(systemctl show -P MainPID ipc-ns-provider.service)"
+          PROVIDER_IPC="$(readlink /proc/$PROVIDER_PID/ns/ipc)"
+          [[ "$HOST_IPC" != "$PROVIDER_IPC" ]]
+          # Join that IPC namespace
+          JOINED_IPC="$(systemd-run --wait --pipe -p IPCNamespacePath=/proc/$PROVIDER_PID/ns/ipc readlink /proc/self/ns/ipc)"
+          [[ "$JOINED_IPC" == "$PROVIDER_IPC" ]]
+          systemctl stop ipc-ns-provider.service 2>/dev/null || true
+
+          : "CacheDirectory= creates cache directory"
+          systemd-run --wait --pipe -p CacheDirectory=test-cache-dir \
+              bash -xec '[[ -d /var/cache/test-cache-dir ]]'
+          rm -rf /var/cache/test-cache-dir
+
+          : "ConfigurationDirectory= creates config directory"
+          systemd-run --wait --pipe -p ConfigurationDirectory=test-config-dir \
+              bash -xec '[[ -d /etc/test-config-dir ]]'
+          rm -rf /etc/test-config-dir
+
+          : "LogsDirectory= creates logs directory"
+          systemd-run --wait --pipe -p LogsDirectory=test-logs-dir \
+              bash -xec '[[ -d /var/log/test-logs-dir ]]'
+          rm -rf /var/log/test-logs-dir
+
+          : "SyslogLevel= and SyslogFacility= accepted without error"
+          systemd-run --wait --pipe -p SyslogLevel=debug -p SyslogFacility=local0 \
+              bash -xec 'true'
+
+          : "LogRateLimitBurst= and LogRateLimitIntervalSec= accepted"
+          systemd-run --wait --pipe -p LogRateLimitBurst=100 -p LogRateLimitIntervalSec=5s \
+              bash -xec 'true'
+
+          : "PrivateDevices=yes with PrivateIPC=yes combination"
+          systemd-run --wait --pipe -p PrivateDevices=yes -p PrivateIPC=yes \
+              bash -xec 'HOST_IPC=$(readlink /proc/1/ns/ipc);
+                         MY_IPC=$(readlink /proc/self/ns/ipc);
+                         [[ "$HOST_IPC" != "$MY_IPC" ]];
+                         [[ "$(stat -c %t:%T /dev/null)" == "1:3" ]]'
+
+          : "ProtectSystem=full makes /usr, /boot, and /etc read-only"
+          systemd-run --wait --pipe -p ProtectSystem=full \
+              bash -xec '(! touch /usr/should-fail 2>/dev/null);
+                         (! touch /etc/should-fail 2>/dev/null)'
+
+          : "ProtectHome=read-only makes home directories read-only"
+          systemd-run --wait --pipe -p ProtectHome=read-only \
+              bash -xec 'test -d /root;
+                         (! touch /root/should-fail 2>/dev/null)'
+
+          : "ProtectHome=tmpfs mounts tmpfs over home directories"
+          touch /root/home-marker
+          systemd-run --wait --pipe -p ProtectHome=tmpfs \
+              bash -xec 'test -d /root;
+                         test ! -e /root/home-marker'
+          rm -f /root/home-marker
+
           : "Error handling for clean-up codepaths"
           (! systemd-run --wait --pipe false)
           TESTEOF
