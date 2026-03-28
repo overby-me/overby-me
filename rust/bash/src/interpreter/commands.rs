@@ -3371,7 +3371,11 @@ fn pattern_match_impl(text: &[char], ti: usize, pattern: &[char], pi: usize) -> 
             }
             '*' => {
                 pi += 1;
-                while pi < pattern.len() && pattern[pi] == '*' {
+                // Skip consecutive '*' but NOT if the next '*' starts an extglob '*(...)'
+                while pi < pattern.len()
+                    && pattern[pi] == '*'
+                    && !(pi + 1 < pattern.len() && pattern[pi + 1] == '(')
+                {
                     pi += 1;
                 }
                 if pi == pattern.len() {
