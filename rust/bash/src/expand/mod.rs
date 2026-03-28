@@ -1809,13 +1809,13 @@ fn glob_expand(field: &str) -> Vec<String> {
             if !pattern.contains('/') {
                 let dir = std::env::current_dir().unwrap_or_default();
                 if let Ok(entries) = std::fs::read_dir(&dir) {
+                    let dotglob = DOTGLOB_ENABLED.with(|d| *d.borrow());
                     let mut results: Vec<String> = entries
                         .filter_map(|e| e.ok())
                         .map(|e| e.file_name().to_string_lossy().to_string())
                         .filter(|name| {
                             // Skip dotfiles unless dotglob is set or pattern explicitly matches dots
                             if name.starts_with('.') {
-                                let dotglob = DOTGLOB_ENABLED.with(|d| *d.borrow());
                                 if !dotglob {
                                     let allows_dot = pattern.starts_with('.')
                                         || pattern.starts_with("@(.")
@@ -1878,7 +1878,7 @@ fn glob_expand(field: &str) -> Vec<String> {
                                 s
                             }
                         })
-                        // Exclude . and .. from glob results (bash never includes them)
+                        // Exclude . and .. (bash's globskipdots is on by default)
                         .filter(|s| s != "." && s != ".." && s != "./" && s != "../")
                         .collect();
                     if results.is_empty() {
