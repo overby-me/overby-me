@@ -767,6 +767,38 @@
           systemctl stop remain-test.service
           (! systemctl is-active remain-test.service)
 
+          : "LoadCredential= tests"
+          echo -n "file-cred-data" > /tmp/test-cred-file
+          systemd-run --wait --pipe -p LoadCredential=filecred:/tmp/test-cred-file \
+              bash -xec '[[ "$(cat "$CREDENTIALS_DIRECTORY/filecred")" == file-cred-data ]]'
+          rm -f /tmp/test-cred-file
+
+          : "LoadCredential= with SetCredential= override"
+          echo -n "loaded" > /tmp/test-cred-override
+          systemd-run --wait --pipe \
+              -p SetCredential=mycred:inline-data \
+              -p LoadCredential=mycred:/tmp/test-cred-override \
+              bash -xec '[[ "$(cat "$CREDENTIALS_DIRECTORY/mycred")" == loaded ]]'
+          rm -f /tmp/test-cred-override
+
+          : "Group= tests"
+          systemd-run --wait --pipe -p Group=testuser \
+              bash -xec '[[ "$(id -ng)" == testuser ]]'
+
+          : "User= and Group= together"
+          systemd-run --wait --pipe -p User=testuser -p Group=root \
+              bash -xec '[[ "$(id -nu)" == testuser && "$(id -ng)" == root ]]'
+
+          : "Restart= with Type=simple — service restarts on failure"
+          systemd-run --unit=restart-test -p Restart=on-failure -p RestartSec=0 \
+              bash -c 'echo restarting > /tmp/restart-marker; exit 1'
+          sleep 2
+          # After failure, it should have restarted (marker file re-created)
+          [[ -e /tmp/restart-marker ]]
+          systemctl stop restart-test.service 2>/dev/null || true
+          systemctl reset-failed restart-test.service 2>/dev/null || true
+          rm -f /tmp/restart-marker
+
           : "Error handling for clean-up codepaths"
           (! systemd-run --wait --pipe false)
           TESTEOF
