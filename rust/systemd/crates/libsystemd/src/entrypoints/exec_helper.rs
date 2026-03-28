@@ -2304,6 +2304,12 @@ fn setup_mount_namespace(config: &ExecHelperConfig) {
             config.bind_paths.len()
         );
         for entry in &config.bind_paths {
+            // A leading '-' means the path is optional (no error if missing)
+            let (entry, optional) = if let Some(stripped) = entry.strip_prefix('-') {
+                (stripped, true)
+            } else {
+                (entry.as_str(), false)
+            };
             let parts: Vec<&str> = entry.splitn(3, ':').collect();
             let source = parts[0];
             let dest = if parts.len() > 1 { parts[1] } else { source };
@@ -2351,7 +2357,7 @@ fn setup_mount_namespace(config: &ExecHelperConfig) {
                         std::io::Error::last_os_error()
                     );
                 }
-            } else {
+            } else if !optional {
                 log::warn!("BindPaths= source does not exist: {}", source);
             }
         }
@@ -2365,6 +2371,12 @@ fn setup_mount_namespace(config: &ExecHelperConfig) {
             config.bind_read_only_paths.len()
         );
         for entry in &config.bind_read_only_paths {
+            // A leading '-' means the path is optional (no error if missing)
+            let (entry, optional) = if let Some(stripped) = entry.strip_prefix('-') {
+                (stripped, true)
+            } else {
+                (entry.as_str(), false)
+            };
             let parts: Vec<&str> = entry.splitn(3, ':').collect();
             let source = parts[0];
             let dest = if parts.len() > 1 { parts[1] } else { source };
@@ -2429,7 +2441,7 @@ fn setup_mount_namespace(config: &ExecHelperConfig) {
                         std::io::Error::last_os_error()
                     );
                 }
-            } else {
+            } else if !optional {
                 log::warn!("BindReadOnlyPaths= source does not exist: {}", source);
             }
         }

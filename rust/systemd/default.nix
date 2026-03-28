@@ -485,12 +485,20 @@
               bash -xec '[[ "$(cat /tmp/bind-target/marker)" == "bind-test" ]]'
           rm -rf /tmp/bind-source
 
+          : "BindPaths= multi-entry and optional prefix tests"
+          systemd-run --wait --pipe -p BindPaths="/etc /home:/mnt:norbind -/foo/bar/baz:/usr:rbind" \
+              bash -xec 'mountpoint /etc; test -d /etc/systemd; mountpoint /mnt; ! mountpoint /usr'
+
           : "BindReadOnlyPaths= tests"
           mkdir -p /tmp/bind-ro-source
           echo "bind-ro-test" > /tmp/bind-ro-source/marker
           systemd-run --wait --pipe -p BindReadOnlyPaths="/tmp/bind-ro-source:/tmp/bind-ro-target" \
               bash -xec '[[ "$(cat /tmp/bind-ro-target/marker)" == "bind-ro-test" ]]'
           rm -rf /tmp/bind-ro-source
+
+          : "BindReadOnlyPaths= multi-entry and optional prefix tests"
+          systemd-run --wait --pipe -p BindReadOnlyPaths="/etc /home:/mnt:norbind -/foo/bar/baz:/usr:rbind" \
+              bash -xec 'test ! -w /etc; test ! -w /mnt; ! mountpoint /usr'
 
           : "InaccessiblePaths= tests"
           mkdir -p /tmp/inaccessible-test
