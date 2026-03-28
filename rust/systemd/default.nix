@@ -664,6 +664,36 @@
                          test ! -e /tmp/combo-marker'
           rm -f /tmp/combo-marker
 
+          : "ExecStartPre= tests"
+          systemd-run --wait --pipe \
+              -p ExecStartPre="touch /tmp/exec-pre-marker" \
+              bash -xec '[[ -e /tmp/exec-pre-marker ]]'
+          rm -f /tmp/exec-pre-marker
+
+          : "ExecStartPre= failure prevents ExecStart"
+          (! systemd-run --wait --pipe \
+              -p ExecStartPre="false" \
+              bash -xec 'echo should-not-run')
+
+          : "ExecStartPre= with minus prefix ignores failure"
+          systemd-run --wait --pipe \
+              -p ExecStartPre="-false" \
+              bash -xec 'true'
+
+          : "Multiple ExecStartPre= commands run in order"
+          systemd-run --wait --pipe \
+              -p ExecStartPre="touch /tmp/pre-order-1" \
+              -p ExecStartPre="touch /tmp/pre-order-2" \
+              bash -xec '[[ -e /tmp/pre-order-1 && -e /tmp/pre-order-2 ]]'
+          rm -f /tmp/pre-order-1 /tmp/pre-order-2
+
+          : "ExecStartPost= tests"
+          systemd-run --wait --pipe \
+              -p ExecStartPost="touch /tmp/exec-post-marker" \
+              true
+          [[ -e /tmp/exec-post-marker ]]
+          rm -f /tmp/exec-post-marker
+
           : "Error handling for clean-up codepaths"
           (! systemd-run --wait --pipe false)
           TESTEOF
