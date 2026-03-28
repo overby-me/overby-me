@@ -651,6 +651,19 @@
           systemd-run --wait --pipe -p EnvironmentFile=-/nonexistent/env/file \
               bash -xec 'true'
 
+          : "User= with PrivateNetwork= and ProtectSystem= combination"
+          systemd-run --wait --pipe -p User=testuser -p PrivateNetwork=yes -p ProtectSystem=strict \
+              bash -xec '(! ip link show eth0 2>/dev/null); ip link show lo;
+                         test ! -w /usr; test ! -w /etc; test ! -w /var;
+                         [[ "$(id -nu)" == testuser ]]'
+
+          : "PrivateTmp= with PrivateNetwork= combination"
+          touch /tmp/combo-marker
+          systemd-run --wait --pipe -p PrivateTmp=yes -p PrivateNetwork=yes \
+              bash -xec '(! ip link show eth0 2>/dev/null);
+                         test ! -e /tmp/combo-marker'
+          rm -f /tmp/combo-marker
+
           : "Error handling for clean-up codepaths"
           (! systemd-run --wait --pipe false)
           TESTEOF

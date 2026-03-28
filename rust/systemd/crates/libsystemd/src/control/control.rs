@@ -2919,6 +2919,13 @@ fn create_transient_unit(
                 "SendSIGHUP" => {
                     service_conf.send_sighup = matches!(value, "yes" | "true" | "1");
                 }
+                "SuccessExitStatus" => {
+                    for token in value.split_whitespace() {
+                        if let Ok(code) = token.parse::<i32>() {
+                            service_conf.success_exit_status.exit_codes.push(code);
+                        }
+                    }
+                }
                 "StandardOutput" | "StandardError" => {
                     let opt = match value {
                         "null" | "" => Some(crate::units::StdIoOption::Null),
