@@ -3219,6 +3219,20 @@ fn create_transient_unit(
                         .ambient_capabilities
                         .extend(value.split_whitespace().map(|s| s.to_string()));
                 }
+                "EnvironmentFile" => {
+                    let trimmed = value.trim();
+                    if let Some(stripped) = trimmed.strip_prefix('-') {
+                        service_conf
+                            .exec_config
+                            .environment_files
+                            .push((std::path::PathBuf::from(stripped), true));
+                    } else {
+                        service_conf
+                            .exec_config
+                            .environment_files
+                            .push((std::path::PathBuf::from(trimmed), false));
+                    }
+                }
                 _ => {
                     log::debug!("Ignoring unknown transient unit property: {key}={value}");
                 }

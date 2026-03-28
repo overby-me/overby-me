@@ -548,6 +548,17 @@
           systemd-run --wait --pipe -p CPUSchedulingPolicy=fifo -p CPUSchedulingPriority=10 \
               bash -xec 'grep -E "^policy\s*:\s*1$" /proc/self/sched; grep -E "^prio\s*:\s*89$" /proc/self/sched'
 
+          : "EnvironmentFile= tests"
+          TEST_ENV_FILE="/tmp/test-env-file-$$"
+          printf 'FOO="hello world"\nBAR=simple\n# comment line\nBAZ="quoted value"\n' > "$TEST_ENV_FILE"
+          systemd-run --wait --pipe -p EnvironmentFile="$TEST_ENV_FILE" \
+              bash -xec '[[ "$FOO" == "hello world" && "$BAR" == "simple" && "$BAZ" == "quoted value" ]]'
+          rm -f "$TEST_ENV_FILE"
+
+          : "EnvironmentFile= with optional prefix tests"
+          systemd-run --wait --pipe -p EnvironmentFile=-/nonexistent/env/file \
+              bash -xec 'true'
+
           : "Error handling for clean-up codepaths"
           (! systemd-run --wait --pipe false)
           TESTEOF
