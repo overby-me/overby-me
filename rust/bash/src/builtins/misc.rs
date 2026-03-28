@@ -43,8 +43,14 @@ pub(super) fn builtin_getopts(shell: &mut Shell, args: &[String]) -> i32 {
         return 1;
     }
 
-    // Check for silent error mode (leading ':')
+    // Check for silent error mode (leading ':') and OPTERR
+    let opterr = shell
+        .vars
+        .get("OPTERR")
+        .and_then(|s| s.parse::<i32>().ok())
+        .unwrap_or(1);
     let silent = raw_optstring.starts_with(':');
+    let suppress_errors = silent || opterr == 0;
     let optstring = if silent {
         &raw_optstring[1..]
     } else {
@@ -146,12 +152,14 @@ pub(super) fn builtin_getopts(shell: &mut Shell, args: &[String]) -> i32 {
                         shell.set_var(varname, ":".to_string());
                         shell.set_var("OPTARG", opt_char.to_string());
                     } else {
-                        let name = shell.positional.first().map(|s| s.as_str()).unwrap_or("bash");
-                        eprintln!(
-                            "{}: option requires an argument -- {}",
-                            name,
-                            opt_char
-                        );
+                        if !suppress_errors {
+                            let name = shell.positional.first().map(|s| s.as_str()).unwrap_or("bash");
+                            eprintln!(
+                                "{}: option requires an argument -- {}",
+                                name,
+                                opt_char
+                            );
+                        }
                         shell.set_var(varname, "?".to_string());
                         shell.vars.remove("OPTARG");
                     }
@@ -185,8 +193,10 @@ pub(super) fn builtin_getopts(shell: &mut Shell, args: &[String]) -> i32 {
                 shell.set_var(varname, "?".to_string());
                 shell.set_var("OPTARG", opt_char.to_string());
             } else {
-                let name = shell.positional.first().map(|s| s.as_str()).unwrap_or("bash");
-                eprintln!("{}: illegal option -- {}", name, opt_char);
+                if !suppress_errors {
+                    let name = shell.positional.first().map(|s| s.as_str()).unwrap_or("bash");
+                    eprintln!("{}: illegal option -- {}", name, opt_char);
+                }
                 shell.set_var(varname, "?".to_string());
                 shell.vars.remove("OPTARG");
             }
