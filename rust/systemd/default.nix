@@ -337,6 +337,48 @@
           # Use upstream stopped-socket-activation test as-is (it works now).
           # Remove subtests needing varlinkctl, journal namespaces, FSS,
           # journal-remote, journal-gatewayd, or other unimplemented features.
+          # Custom journalctl basic query test
+          cat > TEST-04-JOURNAL.basic-query.sh << 'JQEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl shows boot logs"
+          journalctl -b --no-pager -n 10 | head -5
+
+          : "journalctl -u filters by unit"
+          journalctl -u systemd-journald.service --no-pager -n 5
+
+          : "journalctl -p filters by priority"
+          journalctl -p err --no-pager -n 5
+
+          : "journalctl -o json outputs valid JSON"
+          journalctl --no-pager -n 1 -o json | jq . > /dev/null
+
+          : "journalctl -o short-unix outputs timestamps"
+          journalctl --no-pager -n 1 -o short-unix
+
+          : "journalctl --output-fields limits fields"
+          journalctl --no-pager -n 1 -o json --output-fields=MESSAGE,_PID | jq -e '.MESSAGE or ._PID' > /dev/null
+
+          : "journalctl --since filters by time"
+          journalctl --no-pager --since "$(date -d '1 hour ago' '+%Y-%m-%d %H:%M:%S')" -n 5
+
+          : "systemd-cat writes to journal"
+          TAG="journal-test-$$-$RANDOM"
+          echo "test message from systemd-cat" | systemd-cat -t "$TAG"
+          journalctl --sync
+          sleep 1
+          journalctl --no-pager -t "$TAG" | grep -q "test message from systemd-cat"
+
+          : "journalctl --disk-usage shows usage"
+          journalctl --disk-usage
+
+          : "journalctl --list-boots lists boots"
+          journalctl --list-boots --no-pager
+          JQEOF
+          chmod +x TEST-04-JOURNAL.basic-query.sh
+
           rm -f TEST-04-JOURNAL.bsod.sh \
                TEST-04-JOURNAL.cat.sh \
                TEST-04-JOURNAL.corrupted-journals.sh \
