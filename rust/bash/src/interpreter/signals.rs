@@ -17,7 +17,10 @@ extern "C" fn shell_signal_handler(signum: libc::c_int) {
 /// Install a signal handler that marks the signal as pending
 pub fn install_signal_handler(signum: i32) {
     unsafe {
-        libc::signal(signum, shell_signal_handler as libc::sighandler_t);
+        libc::signal(
+            signum,
+            shell_signal_handler as *const () as libc::sighandler_t,
+        );
     }
 }
 

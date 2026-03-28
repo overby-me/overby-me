@@ -28,6 +28,7 @@ thread_local! {
     static GLOBSKIPDOTS_ENABLED: RefCell<bool> = const { RefCell::new(true) };
     /// Callback for running process substitution commands inline (instead of exec'ing
     /// a new shell). Set by the interpreter before word expansion.
+    #[allow(clippy::type_complexity)]
     static PROCSUB_RUNNER: RefCell<Option<*mut dyn FnMut(&str) -> i32>> = const { RefCell::new(None) };
 }
 
@@ -47,6 +48,7 @@ pub fn clear_procsub_runner() {
 }
 
 /// Run a process substitution command using the registered runner
+#[allow(dead_code)]
 fn run_procsub_inline(cmd: &str) -> Option<i32> {
     // Take the runner out to avoid RefCell borrow conflicts during recursive expansion
     let runner = PROCSUB_RUNNER.with(|r| r.borrow_mut().take());
@@ -1754,6 +1756,7 @@ fn split_brace_alternatives(s: &str) -> Vec<String> {
 }
 
 /// Expand a pattern containing ** (globstar) by recursively walking directories
+#[allow(dead_code)]
 fn globstar_expand(pattern: &str) -> Vec<String> {
     let dotglob = DOTGLOB_ENABLED.with(|d| *d.borrow());
     let skipdots = GLOBSKIPDOTS_ENABLED.with(|d| *d.borrow());
@@ -1763,12 +1766,7 @@ fn globstar_expand(pattern: &str) -> Vec<String> {
     let mut results = Vec::new();
 
     // Collect all files recursively from the appropriate directory
-    fn walk_dir(
-        dir: &std::path::Path,
-        prefix: &str,
-        dotglob: bool,
-        skipdots: bool,
-    ) -> Vec<String> {
+    fn walk_dir(dir: &std::path::Path, prefix: &str, dotglob: bool, skipdots: bool) -> Vec<String> {
         let mut entries = Vec::new();
         if let Ok(rd) = std::fs::read_dir(dir) {
             for entry in rd.flatten() {
@@ -1822,10 +1820,7 @@ fn globstar_expand(pattern: &str) -> Vec<String> {
     } else {
         // **/suffix: filter entries matching the suffix pattern
         for entry in &all_entries {
-            let name = entry
-                .rsplit('/')
-                .next()
-                .unwrap_or(entry);
+            let name = entry.rsplit('/').next().unwrap_or(entry);
             if crate::interpreter::commands::case_pattern_match(name, suffix) {
                 results.push(entry.clone());
             }
@@ -1968,12 +1963,12 @@ fn glob_expand(field: &str) -> Vec<String> {
                                     if let (Some(start), Some(end)) = (inner_start, inner_end) {
                                         let inner = &pattern[start..end];
                                         for alt in inner.split('|') {
-                                            if alt.starts_with('.') {
-                                                if crate::interpreter::commands::case_pattern_match(
+                                            if alt.starts_with('.')
+                                                && crate::interpreter::commands::case_pattern_match(
                                                     name, alt,
-                                                ) {
-                                                    return true;
-                                                }
+                                                )
+                                            {
+                                                return true;
                                             }
                                         }
                                     }
@@ -2009,15 +2004,6 @@ fn glob_expand(field: &str) -> Vec<String> {
                     }
                     Err(_) => vec![remove_quotes(field)],
                 }
-            }
-        } else if pattern.contains("**") {
-            // Globstar: ** matches recursively
-            let mut results = globstar_expand(&pattern);
-            if results.is_empty() {
-                vec![remove_quotes(field)]
-            } else {
-                results.sort();
-                results
             }
         } else {
             let dotglob = DOTGLOB_ENABLED.with(|d| *d.borrow());
