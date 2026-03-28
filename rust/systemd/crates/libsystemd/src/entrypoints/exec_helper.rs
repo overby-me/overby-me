@@ -433,6 +433,11 @@ pub struct ExecHelperConfig {
     #[serde(default)]
     pub network_namespace_path: Option<String>,
 
+    /// IPCNamespacePath= — path to an existing IPC namespace to join.
+    /// Mutually exclusive with PrivateIPC=.
+    #[serde(default)]
+    pub ipc_namespace_path: Option<String>,
+
     /// PrivatePIDs= — if true, a new PID namespace is created and /proc is
     /// remounted so the service process becomes PID 1 in the new namespace.
     /// See systemd.exec(5).
@@ -1561,6 +1566,28 @@ pub fn run_exec_helper() {
                 }
                 Err(e) => {
                     log::warn!("Failed to open NetworkNamespacePath={}: {}", ns_path, e);
+                }
+            }
+        }
+    }
+
+    // ── IPCNamespacePath= — join existing IPC namespace ────────────────
+    if let Some(ref ns_path) = config.ipc_namespace_path {
+        if !config.privileged_prefix {
+            match std::fs::File::open(ns_path) {
+                Ok(f) => {
+                    use std::os::unix::io::AsRawFd;
+                    let ret = unsafe { libc::setns(f.as_raw_fd(), libc::CLONE_NEWIPC) };
+                    if ret != 0 {
+                        log::warn!(
+                            "Failed to join IPC namespace {}: {}",
+                            ns_path,
+                            std::io::Error::last_os_error()
+                        );
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Failed to open IPCNamespacePath={}: {}", ns_path, e);
                 }
             }
         }
