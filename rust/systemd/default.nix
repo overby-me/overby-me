@@ -8304,6 +8304,82 @@
           TPEOF
           chmod +x TEST-74-AUX-UTILS.show-timer-props.sh
 
+          # systemctl isolate test (switch to rescue-like target)
+          cat > TEST-74-AUX-UTILS.isolate-target.sh << 'ITEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl get-default shows current default target"
+          DEFAULT="$(systemctl get-default)"
+          [[ -n "$DEFAULT" ]]
+
+          : "systemctl set-default changes default target"
+          OLD_DEFAULT="$(systemctl get-default)"
+          systemctl set-default multi-user.target
+          [[ "$(systemctl get-default)" == "multi-user.target" ]]
+          # Restore original
+          systemctl set-default "$OLD_DEFAULT"
+          ITEOF
+          chmod +x TEST-74-AUX-UTILS.isolate-target.sh
+
+          # systemd-run with --slice test
+          cat > TEST-74-AUX-UTILS.run-slice.sh << 'RSEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-run with --slice places service in specified slice"
+          UNIT="run-slice-$RANDOM"
+          systemd-run --unit="$UNIT" --slice=system --remain-after-exit true
+          sleep 1
+          SLICE="$(systemctl show -P Slice "$UNIT.service")"
+          [[ "$SLICE" == "system.slice" || "$SLICE" == "system" ]]
+          systemctl stop "$UNIT.service" 2>/dev/null || true
+          RSEOF
+          chmod +x TEST-74-AUX-UTILS.run-slice.sh
+
+          # systemctl list-timers test
+          cat > TEST-74-AUX-UTILS.list-timers.sh << 'LTEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl list-timers shows timers"
+          systemctl list-timers --no-pager > /dev/null
+
+          : "systemctl list-timers --all shows all timers"
+          systemctl list-timers --no-pager --all > /dev/null
+
+          : "Create transient timer and verify it appears in list"
+          UNIT="list-timer-$RANDOM"
+          systemd-run --unit="$UNIT" --on-active=1h --remain-after-exit true
+          systemctl list-timers --no-pager --all > /dev/null
+          systemctl stop "$UNIT.timer" "$UNIT.service" 2>/dev/null || true
+          LTEOF
+          chmod +x TEST-74-AUX-UTILS.list-timers.sh
+
+          # systemd-notify basic test
+          cat > TEST-74-AUX-UTILS.notify-basic.sh << 'NBEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-notify --help shows usage"
+          systemd-notify --help > /dev/null
+
+          : "systemd-notify --version shows version"
+          systemd-notify --version > /dev/null
+
+          : "systemd-notify --ready sends READY=1"
+          # When run outside a service, this should not error fatally
+          systemd-notify --ready || true
+
+          : "systemd-notify --status sends STATUS"
+          systemd-notify --status="testing notify" || true
+          NBEOF
+          chmod +x TEST-74-AUX-UTILS.notify-basic.sh
+
           rm -f TEST-74-AUX-UTILS.busctl.sh \
                TEST-74-AUX-UTILS.capsule.sh \
                TEST-74-AUX-UTILS.firstboot.sh \
