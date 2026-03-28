@@ -891,6 +891,11 @@
           systemd-run --wait --pipe -p IOSchedulingClass=best-effort -p IOSchedulingPriority=5 true
           systemd-run --wait --pipe -p IOSchedulingClass=idle true
 
+          : "CoredumpFilter= sets coredump filter"
+          FILTER="$(systemd-run --wait --pipe -p CoredumpFilter=0x33 \
+              bash -xec 'cat /proc/self/coredump_filter')"
+          [[ "$FILTER" == "00000033" ]]
+
           : "PrivateIPC=yes creates IPC namespace isolation"
           HOST_IPC="$(readlink /proc/1/ns/ipc)"
           SRVC_IPC="$(systemd-run --wait --pipe -p PrivateIPC=yes readlink /proc/self/ns/ipc)"

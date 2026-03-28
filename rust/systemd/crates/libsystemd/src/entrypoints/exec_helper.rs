@@ -443,6 +443,11 @@ pub struct ExecHelperConfig {
     #[serde(default)]
     pub timer_slack_nsec: Option<u64>,
 
+    /// CoredumpFilter= — bitmask written to /proc/self/coredump_filter.
+    /// Controls which memory mappings are written to core dumps.
+    #[serde(default)]
+    pub coredump_filter: Option<String>,
+
 
     /// PrivatePIDs= — if true, a new PID namespace is created and /proc is
     /// remounted so the service process becomes PID 1 in the new namespace.
@@ -1745,6 +1750,25 @@ pub fn run_exec_helper() {
             );
             // Non-fatal: log and continue, matching systemd's lenient behavior
             // when the kernel rejects the value or the file is unavailable.
+        }
+    }
+
+    // Apply CoredumpFilter= setting by writing to /proc/self/coredump_filter.
+    if let Some(ref filter) = config.coredump_filter {
+        // Parse the value: systemd supports hex (0x33), named flags, or decimal.
+        // We support hex (0x prefix) and decimal numeric values.
+        let numeric = if let Some(hex) = filter.strip_prefix("0x") {
+            u32::from_str_radix(hex, 16).ok()
+        } else if let Some(hex) = filter.strip_prefix("0X") {
+            u32::from_str_radix(hex, 16).ok()
+        } else {
+            filter.parse::<u32>().ok()
+        };
+        if let Some(val) = numeric {
+            let path = std::path::Path::new("/proc/self/coredump_filter");
+            if let Err(e) = std::fs::write(path, format!("0x{val:08x}")) {
+                log::warn!("Failed to set CoredumpFilter to {}: {}", filter, e);
+            }
         }
     }
 

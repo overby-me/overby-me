@@ -485,6 +485,7 @@ fn start_service_with_filedescriptors(
             .timer_slack_nsec
             .as_deref()
             .and_then(|s| s.parse::<u64>().ok()),
+        coredump_filter: conf.exec_config.coredump_filter.clone(),
         private_pids: conf.exec_config.private_pids.unwrap_or(false),
         protect_kernel_tunables: conf.exec_config.protect_kernel_tunables,
         protect_kernel_modules: conf.exec_config.protect_kernel_modules,
