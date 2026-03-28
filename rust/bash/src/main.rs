@@ -196,6 +196,19 @@ fn run() -> i32 {
         shell.positional = vec![file.clone()];
     }
 
+    // Close inherited fds with CLOEXEC flag (these are internal fds from
+    // the parent shell that shouldn't be visible to child shell processes)
+    #[cfg(unix)]
+    {
+        for fd in 3..256 {
+            if let Ok(flags) = nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_GETFD)
+                && flags & libc::FD_CLOEXEC != 0
+            {
+                nix::unistd::close(fd).ok();
+            }
+        }
+    }
+
     // Set script_name for error messages
     if let Some(ref file) = script_file {
         shell.script_name = file.clone();
