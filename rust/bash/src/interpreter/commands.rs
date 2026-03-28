@@ -268,8 +268,15 @@ impl Shell {
         crate::expand::EXPAND_ERROR_PREFIX.with(|p| {
             *p.borrow_mut() = self.error_prefix();
         });
+        // Register inline runner for process substitutions using raw pointer
+        // Safety: the pointer is valid for the duration of this function call
+        let self_ptr = self as *mut Shell;
+        let mut procsub_runner = move |cmd: &str| -> i32 {
+            unsafe { (*self_ptr).run_string(cmd) }
+        };
+        crate::expand::set_procsub_runner(&mut procsub_runner as *mut dyn FnMut(&str) -> i32);
         let mut cmd_sub = |cmd: &str| -> String { self.capture_output(cmd) };
-        expand::expand_word(
+        let result = expand::expand_word(
             &word,
             &vars,
             &arrays,
@@ -282,7 +289,9 @@ impl Shell {
             &opt_flags,
             ifs,
             &mut cmd_sub,
-        )
+        );
+        crate::expand::clear_procsub_runner();
+        result
     }
 
     /// Get the attribute string for a variable (for ${var@a})
@@ -355,8 +364,13 @@ impl Shell {
         crate::expand::EXPAND_ERROR_PREFIX.with(|p| {
             *p.borrow_mut() = self.error_prefix();
         });
+        let self_ptr2 = self as *mut Shell;
+        let mut procsub_runner = move |cmd: &str| -> i32 {
+            unsafe { (*self_ptr2).run_string(cmd) }
+        };
+        crate::expand::set_procsub_runner(&mut procsub_runner as *mut dyn FnMut(&str) -> i32);
         let mut cmd_sub = |cmd: &str| -> String { self.capture_output(cmd) };
-        expand::expand_word_nosplit(
+        let result = expand::expand_word_nosplit(
             &word,
             &vars,
             &arrays,
@@ -368,7 +382,9 @@ impl Shell {
             top_pid,
             &opt_flags,
             &mut cmd_sub,
-        )
+        );
+        crate::expand::clear_procsub_runner();
+        result
     }
 
     /// Expand a word as a pattern (for case, [[ = ]]). Quoted glob chars are escaped.

@@ -20,6 +20,42 @@ thread_local! {
     static SCRIPT_NAME: RefCell<String> = const { RefCell::new(String::new()) };
     /// Flag set when arithmetic evaluation encounters an error.
     static ARITH_ERROR: RefCell<bool> = const { RefCell::new(false) };
+    /// Callback for running process substitution commands inline (instead of exec'ing
+    /// a new shell). Set by the interpreter before word expansion.
+    static PROCSUB_RUNNER: RefCell<Option<*mut dyn FnMut(&str) -> i32>> = const { RefCell::new(None) };
+}
+
+/// Set the process substitution runner callback (called from the interpreter)
+/// Safety: caller must ensure the pointer remains valid until `clear_procsub_runner`
+pub fn set_procsub_runner(f: *mut dyn FnMut(&str) -> i32) {
+    PROCSUB_RUNNER.with(|r| {
+        *r.borrow_mut() = Some(f);
+    });
+}
+
+/// Clear the process substitution runner
+pub fn clear_procsub_runner() {
+    PROCSUB_RUNNER.with(|r| {
+        *r.borrow_mut() = None;
+    });
+}
+
+/// Run a process substitution command using the registered runner
+fn run_procsub_inline(cmd: &str) -> Option<i32> {
+    // Take the runner out to avoid RefCell borrow conflicts during recursive expansion
+    let runner = PROCSUB_RUNNER.with(|r| r.borrow_mut().take());
+    if let Some(ptr) = runner {
+        // Safety: the pointer is valid for the duration of the expansion call
+        let f = unsafe { &mut *ptr };
+        let result = f(cmd);
+        // Put it back
+        PROCSUB_RUNNER.with(|r| {
+            *r.borrow_mut() = Some(ptr);
+        });
+        Some(result)
+    } else {
+        None
+    }
 }
 
 pub fn set_script_name(name: &str) {
@@ -932,11 +968,15 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                                 nix::unistd::close(r_fd).ok();
                             }
                         }
-                        // Restore SIGPIPE default handler so broken pipe kills child silently
+                        // Try to run inline using the registered shell runner
+                        // (preserves error prefix and signal handling)
+                        if let Some(status) = run_procsub_inline(cmd) {
+                            std::process::exit(status);
+                        }
+                        // Fallback: exec a new shell
                         unsafe {
                             libc::signal(libc::SIGPIPE, libc::SIG_DFL);
                         }
-                        // Export all shell variables so child process inherits them
                         for (k, v) in ctx.vars {
                             unsafe { std::env::set_var(k, v) };
                         }
