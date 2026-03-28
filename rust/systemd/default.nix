@@ -1314,6 +1314,43 @@
                          (! touch /tmp/bind-ro-dst/new-file 2>/dev/null)'
           rm -rf /tmp/bind-ro-src
 
+          : "SuccessExitStatus= treats custom exit codes as success"
+          UNIT="success-exit-$RANDOM"
+          systemd-run --unit="$UNIT" -p SuccessExitStatus=42 -p Type=oneshot \
+              bash -c 'exit 42'
+          sleep 1
+          # The unit should show Result=success, not Result=exit-code
+          [[ "$(systemctl show -P Result "$UNIT.service")" == "success" ]]
+          systemctl reset-failed "$UNIT.service" 2>/dev/null || true
+
+          : "RestartPreventExitStatus= prevents restart on specific exit code"
+          UNIT="no-restart-on-42-$RANDOM"
+          systemd-run --unit="$UNIT" -p Restart=on-failure -p RestartSec=0 \
+              -p 'RestartPreventExitStatus=42' \
+              bash -c 'exit 42'
+          sleep 2
+          # Service should NOT have been restarted (42 prevents restart)
+          [[ "$(systemctl show -P NRestarts "$UNIT.service")" == "0" ]]
+          systemctl reset-failed "$UNIT.service" 2>/dev/null || true
+
+          : "ExecReload= via systemctl reload"
+          UNIT="reload-test-$RANDOM"
+          systemd-run --unit="$UNIT" -p Type=notify \
+              -p ExecReload="touch /tmp/reload-marker-$UNIT" \
+              bash -c 'systemd-notify --ready; sleep 60'
+          sleep 1
+          systemctl reload "$UNIT.service"
+          sleep 1
+          [[ -f "/tmp/reload-marker-$UNIT" ]]
+          systemctl stop "$UNIT.service"
+          rm -f "/tmp/reload-marker-$UNIT"
+
+          : "ExecStartPre= with plus prefix runs as root even with User="
+          systemd-run --wait --pipe -p User=testuser \
+              -p ExecStartPre="+touch /tmp/plus-prefix-marker" \
+              bash -xec '[[ -f /tmp/plus-prefix-marker ]]'
+          rm -f /tmp/plus-prefix-marker
+
           : "Error handling for clean-up codepaths"
           (! systemd-run --wait --pipe false)
           TESTEOF
