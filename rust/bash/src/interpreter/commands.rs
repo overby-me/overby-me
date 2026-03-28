@@ -1019,6 +1019,12 @@ impl Shell {
             self.xtrace_write(&format!("+ {}", quoted.join(" ")));
         }
 
+        // Update $! if a process substitution was created during expansion
+        if let Some(pid) = crate::expand::take_last_procsub_pid() {
+            self.last_bg_pid = pid;
+            self.vars.insert("!".to_string(), pid.to_string());
+        }
+
         let command_name = &expanded_words[0];
         let args = &expanded_words[1..];
 

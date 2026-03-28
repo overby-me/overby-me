@@ -20,6 +20,8 @@ thread_local! {
     static SCRIPT_NAME: RefCell<String> = const { RefCell::new(String::new()) };
     /// Flag set when arithmetic evaluation encounters an error.
     static ARITH_ERROR: RefCell<bool> = const { RefCell::new(false) };
+    /// PID of the last process substitution child (for $!)
+    static LAST_PROCSUB_PID: RefCell<Option<i32>> = const { RefCell::new(None) };
     /// Callback for running process substitution commands inline (instead of exec'ing
     /// a new shell). Set by the interpreter before word expansion.
     static PROCSUB_RUNNER: RefCell<Option<*mut dyn FnMut(&str) -> i32>> = const { RefCell::new(None) };
@@ -108,6 +110,11 @@ pub fn set_arith_error() {
 }
 
 /// Take all pending process substitution fds (draining the list).
+/// Get the PID of the last process substitution child (for $!)
+pub fn take_last_procsub_pid() -> Option<i32> {
+    LAST_PROCSUB_PID.with(|p| p.borrow_mut().take())
+}
+
 pub fn take_procsub_fds() -> Vec<i32> {
     PROCSUB_FDS.with(|fds| std::mem::take(&mut *fds.borrow_mut()))
 }
@@ -994,7 +1001,11 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                         nix::unistd::execvp(&bash, &[&bash, &c_flag, &c_cmd]).ok();
                         std::process::exit(127);
                     }
-                    Ok(nix::unistd::ForkResult::Parent { .. }) => {
+                    Ok(nix::unistd::ForkResult::Parent { child, .. }) => {
+                        // Store PID for $! (bash sets $! to last procsub PID)
+                        LAST_PROCSUB_PID.with(|p| {
+                            *p.borrow_mut() = Some(child.as_raw());
+                        });
                         let fd = match kind {
                             ProcessSubKind::Input => {
                                 nix::unistd::close(w_fd).ok();
