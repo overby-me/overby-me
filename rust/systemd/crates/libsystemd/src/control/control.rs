@@ -3549,6 +3549,12 @@ fn create_transient_unit(
                 "Personality" => {
                     service_conf.exec_config.personality = Some(value.to_string());
                 }
+                "KeyringMode" => match value {
+                    "inherit" => service_conf.keyring_mode = crate::units::KeyringMode::Inherit,
+                    "private" => service_conf.keyring_mode = crate::units::KeyringMode::Private,
+                    "shared" => service_conf.keyring_mode = crate::units::KeyringMode::Shared,
+                    _ => log::warn!("Unknown KeyringMode={}, ignoring", value),
+                },
                 "SetLoginEnvironment" => {
                     service_conf.exec_config.set_login_environment =
                         Some(matches!(value, "yes" | "true" | "1"));

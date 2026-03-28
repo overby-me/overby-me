@@ -497,6 +497,11 @@ fn start_service_with_filedescriptors(
         protect_hostname_name: conf.exec_config.protect_hostname_name.clone(),
         personality: conf.exec_config.personality.clone(),
         lock_personality: conf.exec_config.lock_personality,
+        keyring_mode: Some(match conf.keyring_mode {
+            crate::units::KeyringMode::Inherit => "inherit".to_owned(),
+            crate::units::KeyringMode::Private => "private".to_owned(),
+            crate::units::KeyringMode::Shared => "shared".to_owned(),
+        }),
         memory_deny_write_execute: conf.exec_config.memory_deny_write_execute,
         restrict_realtime: conf.exec_config.restrict_realtime,
         restrict_suid_sgid: conf.exec_config.restrict_suid_sgid,

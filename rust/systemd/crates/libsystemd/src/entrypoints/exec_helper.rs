@@ -504,6 +504,13 @@ pub struct ExecHelperConfig {
     #[serde(default)]
     pub lock_personality: bool,
 
+    /// KeyringMode= — controls the kernel session keyring setup.
+    /// "inherit" = no change, "private" = new anonymous session keyring,
+    /// "shared" = new session keyring linked to user keyring.
+    /// See systemd.exec(5).
+    #[serde(default)]
+    pub keyring_mode: Option<String>,
+
     /// MemoryDenyWriteExecute= — if true, W+X memory mappings are denied.
     /// See systemd.exec(5).
     #[serde(default)]
@@ -1841,6 +1848,71 @@ pub fn run_exec_helper() {
                     std::io::Error::last_os_error()
                 );
             }
+        }
+    }
+
+    // ── KeyringMode= — kernel session keyring setup ──────────────────
+    // KEYCTL_JOIN_SESSION_KEYRING (1) with NULL name creates a new
+    // anonymous session keyring.  KEYCTL_LINK (8) with
+    // KEY_SPEC_USER_KEYRING (-4) into KEY_SPEC_SESSION_KEYRING (-3)
+    // links the user keyring so keys are shared between units of the
+    // same user.
+    if !config.privileged_prefix {
+        const KEYCTL_JOIN_SESSION_KEYRING: libc::c_int = 1;
+        const KEYCTL_LINK: libc::c_int = 8;
+        const KEY_SPEC_USER_KEYRING: libc::c_int = -4;
+        const KEY_SPEC_SESSION_KEYRING: libc::c_int = -3;
+
+        match config.keyring_mode.as_deref() {
+            Some("private") => {
+                let ret = unsafe {
+                    libc::syscall(
+                        libc::SYS_keyctl,
+                        KEYCTL_JOIN_SESSION_KEYRING as libc::c_long,
+                        std::ptr::null::<libc::c_char>() as libc::c_long,
+                    )
+                };
+                if ret < 0 {
+                    log::warn!(
+                        "Failed to create private session keyring: {}",
+                        std::io::Error::last_os_error()
+                    );
+                }
+            }
+            Some("shared") => {
+                // Create a new session keyring first
+                let ret = unsafe {
+                    libc::syscall(
+                        libc::SYS_keyctl,
+                        KEYCTL_JOIN_SESSION_KEYRING as libc::c_long,
+                        std::ptr::null::<libc::c_char>() as libc::c_long,
+                    )
+                };
+                if ret < 0 {
+                    log::warn!(
+                        "Failed to create shared session keyring: {}",
+                        std::io::Error::last_os_error()
+                    );
+                } else {
+                    // Link the user keyring into the new session keyring
+                    let ret = unsafe {
+                        libc::syscall(
+                            libc::SYS_keyctl,
+                            KEYCTL_LINK as libc::c_long,
+                            KEY_SPEC_USER_KEYRING as libc::c_long,
+                            KEY_SPEC_SESSION_KEYRING as libc::c_long,
+                        )
+                    };
+                    if ret < 0 {
+                        log::warn!(
+                            "Failed to link user keyring into session keyring: {}",
+                            std::io::Error::last_os_error()
+                        );
+                    }
+                }
+            }
+            // "inherit" or None — do nothing
+            _ => {}
         }
     }
 

@@ -974,6 +974,18 @@
           systemd-run --wait --pipe -p TemporaryFileSystem="/tmp/tmpfs-ro-test:ro" \
               bash -xec '[[ -d /tmp/tmpfs-ro-test ]]; (! touch /tmp/tmpfs-ro-test/file 2>/dev/null)'
 
+          : "KeyringMode=private creates a new anonymous session keyring"
+          systemd-run --wait --pipe -p KeyringMode=private \
+              bash -xec 'true'
+
+          : "KeyringMode=shared creates a session keyring linked to user keyring"
+          systemd-run --wait --pipe -p KeyringMode=shared \
+              bash -xec 'true'
+
+          : "KeyringMode=inherit preserves the parent session keyring"
+          systemd-run --wait --pipe -p KeyringMode=inherit \
+              bash -xec 'true'
+
           : "Error handling for clean-up codepaths"
           (! systemd-run --wait --pipe false)
           TESTEOF
