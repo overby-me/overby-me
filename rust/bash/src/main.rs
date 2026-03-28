@@ -246,8 +246,40 @@ fn run() -> i32 {
     {
         match std::fs::read_to_string(&file) {
             Ok(content) => {
-                // For file-argument scripts, do NOT set script_fd — exec 0< should
-                // only affect stdin for commands, not switch the script source
+                // Open script file on fd 0 (matching bash behavior).
+                // This makes `read -t 0` work correctly on regular files.
+                // Save original fd 0 if it differs from the script (explicit redirect).
+                // Open script file on fd 0 (matching bash behavior) so that
+                // `read -t 0` and `read` from stdin work correctly.
+                // Only do this if fd 0 is NOT explicitly redirected (pipe, regular file).
+                // If fd 0 is a tty or /dev/null, replace it with the script file.
+                #[cfg(unix)]
+                {
+                    use std::os::unix::io::IntoRawFd;
+                    let fd0_is_redirected = nix::sys::stat::fstat(0)
+                        .map(|s| {
+                            use nix::sys::stat::SFlag;
+                            let mode = SFlag::from_bits_truncate(s.st_mode);
+                            // Pipes and regular files are explicit redirects (don't replace)
+                            mode.contains(SFlag::S_IFIFO) || mode.contains(SFlag::S_IFREG)
+                        })
+                        .unwrap_or(false);
+                    if !fd0_is_redirected {
+                        if let Ok(f) = std::fs::File::open(&file) {
+                            let raw = f.into_raw_fd();
+                            if raw != 0 {
+                                nix::unistd::dup2(raw, 0).ok();
+                                nix::unistd::close(raw).ok();
+                            }
+                            nix::unistd::lseek(
+                                0,
+                                content.len() as i64,
+                                nix::unistd::Whence::SeekSet,
+                            )
+                            .ok();
+                        }
+                    }
+                }
                 let status = shell.run_string(&content);
                 shell.run_exit_trap();
                 return status;
