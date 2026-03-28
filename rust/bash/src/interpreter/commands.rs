@@ -15,7 +15,8 @@ impl Shell {
                 has_function_keyword,
                 redirections,
             } => {
-                // Set LINENO to end of function definition (closing brace)
+                // Set LINENO to end of function definition
+                // Use end_line + 2 for POSIX errors (bash reports line after the complete command)
                 self.vars.insert("LINENO".to_string(), end_line.to_string());
                 // In POSIX mode, cannot define functions with names of special builtins
                 if self.opt_posix
@@ -37,6 +38,11 @@ impl Shell {
                             | "unset"
                     )
                 {
+                    // For POSIX special builtin errors, bash reports LINENO at the
+                    // end of the complete command (past the function body and newline)
+                    let posix_line = end_line + 2;
+                    self.vars
+                        .insert("LINENO".to_string(), posix_line.to_string());
                     eprintln!("{}: `{}': is a special builtin", self.error_prefix(), name);
                     // Fatal error in POSIX mode — exit the shell/subshell
                     std::process::exit(2);
@@ -53,10 +59,16 @@ impl Shell {
                     name.contains(' ') || name.starts_with('<') || name.starts_with('>')
                 };
                 if name_invalid {
+                    // Show the name with quotes if it contains spaces (matching bash)
+                    let display_name = if name.contains(' ') {
+                        format!("'{}'", name)
+                    } else {
+                        name.to_string()
+                    };
                     eprintln!(
                         "{}: `{}': not a valid identifier",
                         self.error_prefix(),
-                        name
+                        display_name
                     );
                     return 1;
                 }
