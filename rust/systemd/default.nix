@@ -706,6 +706,43 @@
           LPEOF
           chmod +x TEST-04-JOURNAL.lines-paging.sh
 
+          # Journal --since/--until filtering
+          cat > TEST-04-JOURNAL.since-until.sh << 'SUEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl --since with absolute timestamp"
+          journalctl --no-pager --since "2020-01-01 00:00:00" -n 5 > /dev/null
+
+          : "journalctl --since today"
+          journalctl --no-pager --since today -n 5 > /dev/null
+
+          : "journalctl --until with absolute timestamp"
+          journalctl --no-pager --until "2099-12-31 23:59:59" -n 5 > /dev/null
+
+          : "journalctl --since and --until combined"
+          journalctl --no-pager --since "2020-01-01 00:00:00" --until "2099-12-31 23:59:59" -n 5 > /dev/null
+          SUEOF
+          chmod +x TEST-04-JOURNAL.since-until.sh
+
+          # Journal facility filtering
+          cat > TEST-04-JOURNAL.facility.sh << 'FCEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl --facility kern shows kernel messages"
+          journalctl --facility kern --no-pager -n 3 > /dev/null
+
+          : "journalctl --facility daemon shows daemon messages"
+          journalctl --facility daemon --no-pager -n 3 > /dev/null
+
+          : "journalctl --facility user filters user messages"
+          journalctl --facility user --no-pager -n 3 > /dev/null
+          FCEOF
+          chmod +x TEST-04-JOURNAL.facility.sh
+
           rm -f TEST-04-JOURNAL.bsod.sh \
                TEST-04-JOURNAL.cat.sh \
                TEST-04-JOURNAL.corrupted-journals.sh \
@@ -8960,6 +8997,105 @@
           systemctl list-units --no-pager --type=slice > /dev/null
           SSEOF
           chmod +x TEST-74-AUX-UTILS.show-slices.sh
+
+          # systemd-escape operations
+          cat > TEST-74-AUX-UTILS.escape-ops.sh << 'ESEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-escape basic string escapes space"
+          OUT="$(systemd-escape 'hello world')"
+          # Verify the space was escaped (output should not contain literal space)
+          [[ "$OUT" != "hello world" ]]
+          [[ -n "$OUT" ]]
+
+          : "systemd-escape --path converts to mount unit"
+          OUT="$(systemd-escape -p /tmp/foo/bar)"
+          [[ "$OUT" == "tmp-foo-bar" ]]
+
+          : "systemd-escape --unescape --path"
+          OUT="$(systemd-escape -u -p tmp-foo-bar)"
+          [[ "$OUT" == "/tmp/foo/bar" ]]
+
+          : "systemd-escape round-trips"
+          ORIG="test-service"
+          ESCAPED="$(systemd-escape "$ORIG")"
+          UNESCAPED="$(systemd-escape -u "$ESCAPED")"
+          [[ "$ORIG" == "$UNESCAPED" ]]
+          ESEOF
+          chmod +x TEST-74-AUX-UTILS.escape-ops.sh
+
+          # systemctl show NRestarts tracking
+          cat > TEST-74-AUX-UTILS.show-nrestarts.sh << 'NREOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl show NRestarts for new service is 0"
+          UNIT="nrestart-$RANDOM"
+          systemd-run --wait --unit="$UNIT" true
+          NRESTARTS="$(systemctl show -P NRestarts "$UNIT.service")"
+          [[ "$NRESTARTS" == "0" ]]
+          NREOF
+          chmod +x TEST-74-AUX-UTILS.show-nrestarts.sh
+
+          # systemctl show for targets
+          cat > TEST-74-AUX-UTILS.show-targets.sh << 'STEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl show multi-user.target has correct properties"
+          systemctl show multi-user.target -P ActiveState | grep -q "active"
+          systemctl show multi-user.target -P Id | grep -q "multi-user.target"
+
+          : "systemctl list-units --type=target lists targets"
+          OUT="$(systemctl list-units --no-pager --type=target)"
+          echo "$OUT" | grep -q "multi-user.target"
+          STEOF
+          chmod +x TEST-74-AUX-UTILS.show-targets.sh
+
+          # journalctl basic operations
+          cat > TEST-74-AUX-UTILS.journal-ops.sh << 'JOEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl --disk-usage reports usage"
+          journalctl --disk-usage > /dev/null
+
+          : "journalctl --list-boots shows at least one boot"
+          OUT="$(journalctl --list-boots --no-pager)"
+          [[ -n "$OUT" ]]
+
+          : "journalctl --fields lists available fields"
+          OUT="$(journalctl --fields --no-pager)"
+          echo "$OUT" | grep -q "MESSAGE"
+
+          : "journalctl --header shows journal header"
+          journalctl --header --no-pager > /dev/null
+          JOEOF
+          chmod +x TEST-74-AUX-UTILS.journal-ops.sh
+
+          # systemctl is-active for various states
+          cat > TEST-74-AUX-UTILS.is-active-states.sh << 'IAEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl is-active returns active for running service"
+          systemctl is-active multi-user.target
+
+          : "systemctl is-active returns inactive for stopped service"
+          UNIT="isactive-$RANDOM"
+          systemd-run --wait --unit="$UNIT" true
+          (! systemctl is-active "$UNIT.service")
+
+          : "systemctl is-active for nonexistent unit returns inactive"
+          (! systemctl is-active nonexistent-unit-$RANDOM.service)
+          IAEOF
+          chmod +x TEST-74-AUX-UTILS.is-active-states.sh
 
           rm -f TEST-74-AUX-UTILS.busctl.sh \
                TEST-74-AUX-UTILS.capsule.sh \
