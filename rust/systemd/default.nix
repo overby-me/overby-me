@@ -1042,6 +1042,13 @@
           systemd-run --wait --pipe -p IOSchedulingClass=idle \
               bash -xec 'ionice -p $$ | grep -q idle'
 
+          : "EnvironmentFile= reads env vars from file"
+          echo 'ENVFILE_VAR=hello_from_file' > /tmp/test-envfile
+          echo 'ENVFILE_VAR2=second_val' >> /tmp/test-envfile
+          systemd-run --wait --pipe -p EnvironmentFile=/tmp/test-envfile \
+              bash -xec '[[ "$ENVFILE_VAR" == "hello_from_file" && "$ENVFILE_VAR2" == "second_val" ]]'
+          rm -f /tmp/test-envfile
+
           : "Error handling for clean-up codepaths"
           (! systemd-run --wait --pipe false)
           TESTEOF
