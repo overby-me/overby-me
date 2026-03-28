@@ -502,6 +502,7 @@ fn start_service_with_filedescriptors(
             crate::units::KeyringMode::Private => "private".to_owned(),
             crate::units::KeyringMode::Shared => "shared".to_owned(),
         }),
+        secure_bits: conf.exec_config.secure_bits.clone(),
         memory_deny_write_execute: conf.exec_config.memory_deny_write_execute,
         restrict_realtime: conf.exec_config.restrict_realtime,
         restrict_suid_sgid: conf.exec_config.restrict_suid_sgid,

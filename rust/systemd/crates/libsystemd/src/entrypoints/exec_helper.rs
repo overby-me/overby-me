@@ -511,6 +511,13 @@ pub struct ExecHelperConfig {
     #[serde(default)]
     pub keyring_mode: Option<String>,
 
+    /// SecureBits= — controls the secure-bits flags of the executed process.
+    /// Space-separated list of: keep-caps, keep-caps-locked, no-setuid-fixup,
+    /// no-setuid-fixup-locked, noroot, noroot-locked. Applied via
+    /// prctl(PR_SET_SECUREBITS). See systemd.exec(5).
+    #[serde(default)]
+    pub secure_bits: Vec<String>,
+
     /// MemoryDenyWriteExecute= — if true, W+X memory mappings are denied.
     /// See systemd.exec(5).
     #[serde(default)]
@@ -1913,6 +1920,34 @@ pub fn run_exec_helper() {
             }
             // "inherit" or None — do nothing
             _ => {}
+        }
+    }
+
+    // ── SecureBits= — set secure-bits flags ─────────────────────────
+    // Must be applied BEFORE privilege drop so keep-caps takes effect
+    // before the setuid() call.
+    if !config.secure_bits.is_empty() && !config.privileged_prefix {
+        let mut bits: libc::c_ulong = 0;
+        for flag in &config.secure_bits {
+            match flag.as_str() {
+                "keep-caps" => bits |= 1 << 4,              // SECBIT_KEEP_CAPS
+                "keep-caps-locked" => bits |= 1 << 5,       // SECBIT_KEEP_CAPS_LOCKED
+                "no-setuid-fixup" => bits |= 1 << 2,        // SECBIT_NO_SETUID_FIXUP
+                "no-setuid-fixup-locked" => bits |= 1 << 3, // SECBIT_NO_SETUID_FIXUP_LOCKED
+                "noroot" => bits |= 1 << 0,                 // SECBIT_NOROOT
+                "noroot-locked" => bits |= 1 << 1,          // SECBIT_NOROOT_LOCKED
+                _ => log::warn!("Unknown SecureBits flag '{}', ignoring", flag),
+            }
+        }
+        if bits != 0 {
+            let ret = unsafe { libc::prctl(libc::PR_SET_SECUREBITS, bits) };
+            if ret != 0 {
+                log::warn!(
+                    "Failed to set SecureBits to 0x{:x}: {}",
+                    bits,
+                    std::io::Error::last_os_error()
+                );
+            }
         }
     }
 

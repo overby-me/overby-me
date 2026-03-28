@@ -986,6 +986,14 @@
           systemd-run --wait --pipe -p KeyringMode=inherit \
               bash -xec 'true'
 
+          : "SecureBits= can be set without error"
+          systemd-run --wait --pipe -p SecureBits=keep-caps \
+              bash -xec 'true'
+
+          : "SecureBits= multiple flags combined"
+          systemd-run --wait --pipe -p "SecureBits=keep-caps noroot no-setuid-fixup" \
+              bash -xec 'true'
+
           : "Error handling for clean-up codepaths"
           (! systemd-run --wait --pipe false)
           TESTEOF
