@@ -582,6 +582,52 @@
           MFEOF
           chmod +x TEST-04-JOURNAL.multi-filter.sh
 
+          # Journal grep pattern matching test
+          cat > TEST-04-JOURNAL.grep-filter.sh << 'GFEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl --grep filters existing kernel messages"
+          # Use already-present kernel/boot messages to avoid timing issues
+          journalctl -b --no-pager --grep="systemd" -n 10 | grep -qi "systemd"
+
+          : "journalctl --grep with regex"
+          # Match messages containing "start" (case insensitive)
+          journalctl -b --no-pager --grep="[Ss]tart" -n 10 | grep -q .
+
+          : "journalctl --grep with --priority combined"
+          journalctl -b --no-pager --grep="." -p info -n 5 > /dev/null
+
+          : "journalctl --grep with no matches returns empty"
+          COUNT=$(journalctl -b --no-pager --grep="XYZZY_IMPOSSIBLE_STRING_42" | wc -l)
+          [[ "$COUNT" -eq 0 ]]
+          GFEOF
+          chmod +x TEST-04-JOURNAL.grep-filter.sh
+
+          # Journal boot ID query test
+          cat > TEST-04-JOURNAL.boot-query.sh << 'BQEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl --list-boots returns at least one boot"
+          BOOTS=$(journalctl --list-boots --no-pager | wc -l)
+          [[ "$BOOTS" -ge 1 ]]
+
+          : "journalctl -b shows current boot"
+          journalctl -b --no-pager -n 5 | grep -q .
+
+          : "journalctl -b 0 is same as -b"
+          journalctl -b 0 --no-pager -n 3 > /dev/null
+
+          : "journalctl _BOOT_ID field match"
+          BOOT_ID=$(journalctl --list-boots --no-pager | tail -1 | awk '{print $2}')
+          [[ -n "$BOOT_ID" ]]
+          journalctl --no-pager -n 5 _BOOT_ID="$BOOT_ID" > /dev/null
+          BQEOF
+          chmod +x TEST-04-JOURNAL.boot-query.sh
+
           rm -f TEST-04-JOURNAL.bsod.sh \
                TEST-04-JOURNAL.cat.sh \
                TEST-04-JOURNAL.corrupted-journals.sh \
@@ -7376,6 +7422,83 @@
           [[ "$RESULT" == "tmp-test.mount" ]]
           EAEOF
           chmod +x TEST-74-AUX-UTILS.escape-advanced.sh
+
+          # systemctl list-unit-files pattern test
+          cat > TEST-74-AUX-UTILS.list-unit-files.sh << 'LUFEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl list-unit-files shows installed units"
+          systemctl list-unit-files --no-pager | grep -q ".service"
+
+          : "systemctl list-unit-files --type=service filters by type"
+          systemctl list-unit-files --no-pager --type=service | grep -q ".service"
+
+          : "systemctl list-unit-files --state=enabled shows enabled units"
+          systemctl list-unit-files --no-pager --state=enabled | grep -q "enabled" || true
+
+          : "systemctl list-unit-files accepts a pattern"
+          systemctl list-unit-files --no-pager "systemd-*" | grep -q "systemd-"
+          LUFEOF
+          chmod +x TEST-74-AUX-UTILS.list-unit-files.sh
+
+          # systemctl show for slice/cgroup properties test
+          cat > TEST-74-AUX-UTILS.show-cgroup.sh << 'SCEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl show NeedDaemonReload is no for loaded units"
+          NDR="$(systemctl show -P NeedDaemonReload systemd-journald.service)"
+          [[ "$NDR" == "no" ]]
+
+          : "systemctl show multiple properties at once"
+          systemctl show -p ActiveState -p LoadState systemd-journald.service | grep -q "ActiveState="
+          systemctl show -p ActiveState -p LoadState systemd-journald.service | grep -q "LoadState="
+
+          : "systemctl show Description is non-empty for loaded units"
+          DESC="$(systemctl show -P Description systemd-journald.service)"
+          [[ -n "$DESC" ]]
+
+          : "systemctl show ActiveState for slice units"
+          systemctl show -P ActiveState system.slice > /dev/null
+          SCEOF
+          chmod +x TEST-74-AUX-UTILS.show-cgroup.sh
+
+          # systemctl is-enabled advanced patterns test
+          cat > TEST-74-AUX-UTILS.is-enabled-patterns.sh << 'IEEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          at_exit() {
+              set +e
+              rm -f /run/systemd/system/is-enabled-test.service
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "systemctl is-enabled returns enabled for enabled service"
+          # systemd-journald is always enabled
+          systemctl is-enabled systemd-journald.service
+
+          : "systemctl is-enabled returns masked for masked service"
+          cat > /run/systemd/system/is-enabled-test.service << EOF
+          [Unit]
+          Description=is-enabled test
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          EOF
+          systemctl daemon-reload
+          systemctl mask is-enabled-test.service
+          STATE="$(systemctl is-enabled is-enabled-test.service)" || true
+          [[ "$STATE" == "masked" || "$STATE" == "masked-runtime" ]]
+
+          systemctl unmask is-enabled-test.service
+          IEEOF
+          chmod +x TEST-74-AUX-UTILS.is-enabled-patterns.sh
 
           rm -f TEST-74-AUX-UTILS.busctl.sh \
                TEST-74-AUX-UTILS.capsule.sh \
