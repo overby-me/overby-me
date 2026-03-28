@@ -799,6 +799,28 @@
           systemctl reset-failed restart-test.service 2>/dev/null || true
           rm -f /tmp/restart-marker
 
+          : "ExecCondition= tests — condition passes"
+          systemd-run --wait --pipe \
+              -p ExecCondition="true" \
+              bash -xec 'echo condition-passed'
+
+          : "ExecStopPost= via transient unit"
+          systemd-run --unit=stop-post-test -p RemainAfterExit=yes \
+              -p ExecStopPost="touch /tmp/stop-post-marker" \
+              true
+          sleep 1
+          systemctl stop stop-post-test.service
+          sleep 1
+          [[ -e /tmp/stop-post-marker ]]
+          rm -f /tmp/stop-post-marker
+
+          : "Type=notify with READY=1"
+          systemd-run --unit=notify-ready-test -p Type=notify \
+              bash -c 'systemd-notify --ready; sleep 60'
+          sleep 1
+          systemctl is-active notify-ready-test.service
+          systemctl stop notify-ready-test.service
+
           : "Error handling for clean-up codepaths"
           (! systemd-run --wait --pipe false)
           TESTEOF
