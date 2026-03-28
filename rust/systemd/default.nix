@@ -5759,6 +5759,56 @@
           MDEOF
                     chmod +x TEST-23-UNIT-FILE.multi-deps.sh
 
+                    # StateDirectory= test
+                    cat > TEST-23-UNIT-FILE.state-directory.sh << 'SDEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              rm -f /run/systemd/system/statedir-test.service
+              rm -rf /var/lib/statedir-test
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "StateDirectory= creates directory"
+          cat > /run/systemd/system/statedir-test.service << EOF
+          [Service]
+          Type=oneshot
+          StateDirectory=statedir-test
+          ExecStart=bash -c 'test -d /var/lib/statedir-test && echo ok > /var/lib/statedir-test/marker'
+          EOF
+          systemctl daemon-reload
+          systemctl start statedir-test.service
+          [[ -f /var/lib/statedir-test/marker ]]
+          [[ "$(cat /var/lib/statedir-test/marker)" == "ok" ]]
+          SDEOF
+                    chmod +x TEST-23-UNIT-FILE.state-directory.sh
+
+                    # PrivateTmp= test
+                    cat > TEST-23-UNIT-FILE.private-tmp.sh << 'PTEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "PrivateTmp=yes gives service its own /tmp"
+          MARKER="privtmp-test-$RANDOM"
+          echo "outer" > "/tmp/$MARKER"
+          systemd-run --wait --unit="privtmp-$RANDOM" \
+              -p PrivateTmp=yes -p Type=exec \
+              bash -c "echo inner > /tmp/$MARKER && cat /tmp/$MARKER"
+          # The outer /tmp should still have "outer", not "inner"
+          [[ "$(cat "/tmp/$MARKER")" == "outer" ]]
+          rm -f "/tmp/$MARKER"
+          PTEOF
+                    chmod +x TEST-23-UNIT-FILE.private-tmp.sh
+
                     # Slice= placement test
                     cat > TEST-23-UNIT-FILE.slice-placement.sh << 'SLEOF'
           #!/usr/bin/env bash
