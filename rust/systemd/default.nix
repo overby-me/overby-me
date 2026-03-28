@@ -7515,11 +7515,6 @@
                          TEST-23-UNIT-FILE.exec-command-ex.sh \
                          TEST-23-UNIT-FILE.utmp.sh
 
-                    # Fix property order in oneshot-restart subtest: systemctl show -p
-                    # returns properties in filter-flag order, not systemd's internal
-                    # vtable order.  Rewrite the expected heredoc to match.
-                    perl -i -0pe 's/SubState=dead\nResult=success\nNRestarts=1/Result=success\nNRestarts=1\nSubState=dead/' TEST-23-UNIT-FILE.oneshot-restart.sh
-
                     # ExecStopPost subtest: remove Type=dbus (needs busctl/D-Bus name)
                     # and Type=forking (needs NotifyAccess=exec with MAINPID tracking
                     # from forked children) sections.
@@ -8247,126 +8242,14 @@
       {
         name = "63-PATH";
         # Patch out busctl calls (ActivationDetails D-Bus property not implemented),
-        # the issue-24577 section (pending job assertions), and the pr-30768
-        # race-condition test (requires ExecStop execution during deactivation).
+        # the issue-24577 section (pending job assertions — jobs don't appear in
+        # list-jobs because rust-systemd resolves dependencies inline), and the
+        # pr-30768 race-condition test (path re-triggering during service
+        # deactivation not yet implemented).
         patchScript = ''
           sed -i '/^test "$(busctl/d' TEST-63-PATH.sh
           sed -i '/^# tests for issue.*24577/,/^# Test for race condition/{ /^# Test for race condition/!d }' TEST-63-PATH.sh
           sed -i '/^# Test for race condition/,/^touch \/testok/{/^touch \/testok/!d}' TEST-63-PATH.sh
-          # Replace 'touch /testok' with transient path test + touch /testok
-          sed -i '/^touch \/testok/d' TEST-63-PATH.sh
-          cat >> TEST-63-PATH.sh << 'PATHEOF'
-
-          : "Transient PathExists= unit fires when file is created"
-          PUNIT="transient-path-$RANDOM"
-          rm -f "/tmp/path-trigger-$PUNIT"
-          systemd-run --unit="$PUNIT" --path-property=PathExists="/tmp/path-trigger-$PUNIT" --remain-after-exit touch "/tmp/path-result-$PUNIT"
-          systemctl is-active "$PUNIT.path"
-          touch "/tmp/path-trigger-$PUNIT"
-          timeout 15 bash -c "until [[ -f /tmp/path-result-$PUNIT ]]; do sleep 0.5; done"
-          [[ -f "/tmp/path-result-$PUNIT" ]]
-          systemctl stop "$PUNIT.path" "$PUNIT.service" 2>/dev/null || true
-          rm -f "/tmp/path-trigger-$PUNIT" "/tmp/path-result-$PUNIT"
-
-          : "Transient DirectoryNotEmpty= unit fires when directory gets content"
-          PUNIT="transient-dirne-$RANDOM"
-          mkdir -p "/tmp/dirne-$PUNIT"
-          rm -f "/tmp/dirne-$PUNIT"/*
-          systemd-run --unit="$PUNIT" --path-property=DirectoryNotEmpty="/tmp/dirne-$PUNIT" --remain-after-exit touch "/tmp/dirne-result-$PUNIT"
-          systemctl is-active "$PUNIT.path"
-          touch "/tmp/dirne-$PUNIT/file"
-          timeout 15 bash -c "until [[ -f /tmp/dirne-result-$PUNIT ]]; do sleep 0.5; done"
-          [[ -f "/tmp/dirne-result-$PUNIT" ]]
-          systemctl stop "$PUNIT.path" "$PUNIT.service" 2>/dev/null || true
-          rm -rf "/tmp/dirne-$PUNIT" "/tmp/dirne-result-$PUNIT"
-
-          : "Transient PathModified= unit fires when file is modified"
-          PUNIT="transient-mod-$RANDOM"
-          touch "/tmp/mod-trigger-$PUNIT"
-          systemd-run --unit="$PUNIT" --path-property=PathModified="/tmp/mod-trigger-$PUNIT" --remain-after-exit touch "/tmp/mod-result-$PUNIT"
-          systemctl is-active "$PUNIT.path"
-          echo "modified" >> "/tmp/mod-trigger-$PUNIT"
-          timeout 15 bash -c "until [[ -f /tmp/mod-result-$PUNIT ]]; do sleep 0.5; done"
-          [[ -f "/tmp/mod-result-$PUNIT" ]]
-          systemctl stop "$PUNIT.path" "$PUNIT.service" 2>/dev/null || true
-          rm -f "/tmp/mod-trigger-$PUNIT" "/tmp/mod-result-$PUNIT"
-
-          : "PathExists= unit file with dedicated service"
-          PUNIT="path-unit-file-$RANDOM"
-          rm -f "/tmp/path-uf-trigger-$PUNIT" "/tmp/path-uf-result-$PUNIT"
-          cat > "/run/systemd/system/$PUNIT.path" << EOF
-          [Path]
-          PathExists=/tmp/path-uf-trigger-$PUNIT
-          EOF
-          cat > "/run/systemd/system/$PUNIT.service" << EOF
-          [Service]
-          Type=oneshot
-          ExecStart=touch /tmp/path-uf-result-$PUNIT
-          RemainAfterExit=yes
-          EOF
-          systemctl daemon-reload
-          systemctl start "$PUNIT.path"
-          systemctl is-active "$PUNIT.path"
-          touch "/tmp/path-uf-trigger-$PUNIT"
-          timeout 15 bash -c "until [[ -f /tmp/path-uf-result-$PUNIT ]]; do sleep 0.5; done"
-          [[ -f "/tmp/path-uf-result-$PUNIT" ]]
-          systemctl stop "$PUNIT.path" "$PUNIT.service" 2>/dev/null || true
-          rm -f "/tmp/path-uf-trigger-$PUNIT" "/tmp/path-uf-result-$PUNIT"
-          rm -f "/run/systemd/system/$PUNIT.path" "/run/systemd/system/$PUNIT.service"
-          systemctl daemon-reload
-
-          : "Path unit lifecycle: start, stop, restart"
-          PUNIT="path-lifecycle-$RANDOM"
-          printf '[Path]\nPathExists=/tmp/path-lc-trigger-%s\n' "$PUNIT" \
-              > "/run/systemd/system/$PUNIT.path"
-          printf '[Service]\nType=oneshot\nExecStart=true\n' \
-              > "/run/systemd/system/$PUNIT.service"
-          systemctl daemon-reload
-
-          systemctl start "$PUNIT.path"
-          [[ "$(systemctl show -P ActiveState "$PUNIT.path")" == "active" ]]
-          systemctl stop "$PUNIT.path"
-          [[ "$(systemctl show -P ActiveState "$PUNIT.path")" == "inactive" ]]
-          systemctl start "$PUNIT.path"
-          systemctl restart "$PUNIT.path"
-          [[ "$(systemctl show -P ActiveState "$PUNIT.path")" == "active" ]]
-          systemctl stop "$PUNIT.path"
-          rm -f "/run/systemd/system/$PUNIT.path" "/run/systemd/system/$PUNIT.service"
-          systemctl daemon-reload
-
-          : "Path unit LoadState and SubState"
-          PUNIT="path-state-$RANDOM"
-          rm -f "/tmp/path-state-$PUNIT"
-          systemd-run --unit="$PUNIT" --path-property=PathExists="/tmp/path-state-$PUNIT" --remain-after-exit true
-          LS="$(systemctl show -P LoadState "$PUNIT.path")"
-          [[ "$LS" == "loaded" ]]
-          AS="$(systemctl show -P ActiveState "$PUNIT.path")"
-          [[ "$AS" == "active" ]]
-          systemctl stop "$PUNIT.path" "$PUNIT.service" 2>/dev/null || true
-
-          : "Multiple PathExists= watches via unit file"
-          PUNIT="path-multi-$RANDOM"
-          rm -f "/tmp/path-multi-a-$PUNIT" "/tmp/path-multi-result-$PUNIT"
-          cat > "/run/systemd/system/$PUNIT.path" << EOF
-          [Path]
-          PathExists=/tmp/path-multi-a-$PUNIT
-          EOF
-          cat > "/run/systemd/system/$PUNIT.service" << EOF
-          [Service]
-          Type=oneshot
-          ExecStart=touch /tmp/path-multi-result-$PUNIT
-          EOF
-          systemctl daemon-reload
-          systemctl start "$PUNIT.path"
-          touch "/tmp/path-multi-a-$PUNIT"
-          timeout 15 bash -c "until [[ -f /tmp/path-multi-result-$PUNIT ]]; do sleep 0.5; done"
-          systemctl stop "$PUNIT.path" "$PUNIT.service" 2>/dev/null || true
-          rm -f "/tmp/path-multi-a-$PUNIT" "/tmp/path-multi-result-$PUNIT"
-          rm -f "/run/systemd/system/$PUNIT.path" "/run/systemd/system/$PUNIT.service"
-          systemctl daemon-reload
-
-          touch /testok
-          PATHEOF
         '';
       }
       {

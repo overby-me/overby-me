@@ -5786,7 +5786,7 @@ pub fn execute_command(
         Command::Show(unit_name, filter) => {
             if unit_name == "__manager__" {
                 // Manager-level properties
-                let mut props = std::collections::BTreeMap::new();
+                let mut props = crate::control::unit_properties::PropertyMap::new();
                 props.insert("Version".to_string(), "258".to_string());
                 props.insert("Architecture".to_string(), "x86-64".to_string());
                 // Read persisted log-level
@@ -5846,7 +5846,7 @@ pub fn execute_command(
                     out
                 } else {
                     let mut out = String::new();
-                    for (k, v) in &props {
+                    for (k, v) in props.iter() {
                         out.push_str(&format!("{}={}\n", k, v));
                     }
                     out
@@ -5904,7 +5904,7 @@ pub fn execute_command(
             if units.is_empty() {
                 // Real systemd returns a stub property set with LoadState=not-found
                 // instead of an error for unknown units.
-                let mut props = std::collections::BTreeMap::new();
+                let mut props = crate::control::unit_properties::PropertyMap::new();
                 // Ensure the queried name has a unit suffix
                 let full_name = if unit_name.contains('.') {
                     unit_name.clone()
@@ -6111,7 +6111,7 @@ pub fn execute_command(
                                     {
                                         if let Some(val) = line.strip_prefix(prefix) {
                                             let current =
-                                                props.get(*prop_key).cloned().unwrap_or_default();
+                                                props.get(prop_key).cloned().unwrap_or_default();
                                             let mut parts: Vec<String> = if current.is_empty() {
                                                 Vec::new()
                                             } else {

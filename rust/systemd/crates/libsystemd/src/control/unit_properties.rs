@@ -12,7 +12,55 @@ use crate::units::{
     Timeout, Unit, UnitConfig, UnitStatus,
 };
 
-use std::collections::BTreeMap;
+/// Insertion-order-preserving property map.
+///
+/// Real systemd emits properties in vtable order (not alphabetical).
+/// By preserving the order properties are inserted in `collect_properties`,
+/// we can match that behavior when formatting output.
+#[derive(Debug, Clone, Default)]
+pub struct PropertyMap {
+    entries: Vec<(String, String)>,
+}
+
+impl PropertyMap {
+    pub fn new() -> Self {
+        Self {
+            entries: Vec::new(),
+        }
+    }
+
+    /// Insert or update a key-value pair.  If the key already exists
+    /// (case-sensitive), the value is updated in place, preserving position.
+    pub fn insert(&mut self, key: String, value: String) {
+        if let Some(entry) = self.entries.iter_mut().find(|(k, _)| *k == key) {
+            entry.1 = value;
+        } else {
+            self.entries.push((key, value));
+        }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &String)> {
+        self.entries.iter().map(|(k, v)| (k, v))
+    }
+
+    /// Case-insensitive lookup by key.
+    pub fn get_ci(&self, key: &str) -> Option<(&String, &String)> {
+        self.entries
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(key))
+            .map(|(k, v)| (k, v))
+    }
+
+    /// Exact-match lookup by key, returning the value.
+    pub fn get(&self, key: &str) -> Option<&String> {
+        self.entries.iter().find(|(k, _)| k == key).map(|(_, v)| v)
+    }
+
+    /// Check if a key exists (exact match).
+    pub fn contains_key(&self, key: &str) -> bool {
+        self.entries.iter().any(|(k, _)| k == key)
+    }
+}
 
 /// Read the FreezerState from a unit's common state.
 /// Uses `try_read` to avoid blocking when the state write-lock is held
@@ -87,8 +135,8 @@ pub fn set_freezer_state(unit: &Unit, state: FreezerState) {
 ///
 /// The returned `BTreeMap` keeps keys in alphabetical order, matching the
 /// default output of `systemctl show` (which lists properties sorted).
-pub fn collect_properties(unit: &Unit) -> BTreeMap<String, String> {
-    let mut props = BTreeMap::new();
+pub fn collect_properties(unit: &Unit) -> PropertyMap {
+    let mut props = PropertyMap::new();
 
     // ── Identity ──────────────────────────────────────────────────────
     insert(&mut props, "Id", &unit.id.name);
@@ -233,6 +281,23 @@ pub fn collect_properties(unit: &Unit) -> BTreeMap<String, String> {
                         .map(|s| s.to_string())
                         .unwrap_or_else(|| "0".to_string()),
                 );
+                // Result — "success" if stopped cleanly, "timeout" / "watchdog" /
+                // "exit-code" / "signal" on failure.
+                // Inserted here (before NRestarts) to match systemd's vtable order.
+                {
+                    let status = unit.common.status.read_poisoned();
+                    let result = if state.srvc.runtime_max_timeout_fired {
+                        "timeout"
+                    } else if state.srvc.watchdog_timeout_fired {
+                        "watchdog"
+                    } else {
+                        match &*status {
+                            UnitStatus::Stopped(_, errors) if !errors.is_empty() => "exit-code",
+                            _ => "success",
+                        }
+                    };
+                    insert(&mut props, "Result", result);
+                }
                 insert(
                     &mut props,
                     "NRestarts",
@@ -305,6 +370,14 @@ pub fn collect_properties(unit: &Unit) -> BTreeMap<String, String> {
                 insert(&mut props, "MainPID", "0");
                 insert(&mut props, "ExecMainPID", "0");
                 insert(&mut props, "ExecMainStatus", "0");
+                {
+                    let status = unit.common.status.read_poisoned();
+                    let result = match &*status {
+                        UnitStatus::Stopped(_, errors) if !errors.is_empty() => "exit-code",
+                        _ => "success",
+                    };
+                    insert(&mut props, "Result", result);
+                }
                 insert(
                     &mut props,
                     "NRestarts",
@@ -324,30 +397,6 @@ pub fn collect_properties(unit: &Unit) -> BTreeMap<String, String> {
                     crate::units::ExitType::Cgroup => "cgroup",
                 },
             );
-
-            // Result — "success" if stopped cleanly, "timeout" / "watchdog" /
-            // "exit-code" / "signal" on failure
-            {
-                let status = unit.common.status.read_poisoned();
-                let result = if let Some(st) = state_ref {
-                    if st.srvc.runtime_max_timeout_fired {
-                        "timeout"
-                    } else if st.srvc.watchdog_timeout_fired {
-                        "watchdog"
-                    } else {
-                        match &*status {
-                            UnitStatus::Stopped(_, errors) if !errors.is_empty() => "exit-code",
-                            _ => "success",
-                        }
-                    }
-                } else {
-                    match &*status {
-                        UnitStatus::Stopped(_, errors) if !errors.is_empty() => "exit-code",
-                        _ => "success",
-                    }
-                };
-                insert(&mut props, "Result", result);
-            }
 
             // ── sd_notify reported fields ─────────────────────────────
             if let Some(state) = state_ref {
@@ -868,49 +917,38 @@ fn next_calendar_event(spec: &str, now: u64) -> Option<u64> {
 
 /// Format properties as `Key=Value\n` lines, optionally filtered to a set of
 /// property names.
-pub fn format_properties(props: &BTreeMap<String, String>, filter: Option<&[String]>) -> String {
+pub fn format_properties(props: &PropertyMap, filter: Option<&[String]>) -> String {
     let mut out = String::new();
-    match filter {
-        Some(keys) => {
-            // Emit properties in the order they were requested (matches
-            // systemd's behaviour of honouring the -p flag order).
-            for requested in keys {
-                if let Some((key, value)) = props
-                    .iter()
-                    .find(|(k, _)| k.eq_ignore_ascii_case(requested))
-                {
-                    out.push_str(key);
-                    out.push('=');
-                    out.push_str(value);
-                    out.push('\n');
-                }
-            }
-        }
-        None => {
-            for (key, value) in props {
-                out.push_str(key);
-                out.push('=');
-                out.push_str(value);
-                out.push('\n');
-            }
+    // Always iterate in insertion order (which matches systemd's vtable
+    // order).  When a filter is provided, skip properties not in the set.
+    for (key, value) in props.iter() {
+        let include = match filter {
+            Some(keys) => keys.iter().any(|k| k.eq_ignore_ascii_case(key)),
+            None => true,
+        };
+        if include {
+            out.push_str(key);
+            out.push('=');
+            out.push_str(value);
+            out.push('\n');
         }
     }
     out
 }
 
 /// Format properties as a JSON object (for the JSON-RPC transport).
-pub fn properties_to_json(props: &BTreeMap<String, String>) -> serde_json::Value {
-    let map: serde_json::Map<String, serde_json::Value> = props
-        .iter()
-        .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
-        .collect();
+pub fn properties_to_json(props: &PropertyMap) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    for (k, v) in props.iter() {
+        map.insert(k.clone(), serde_json::Value::String(v.clone()));
+    }
     serde_json::Value::Object(map)
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
-fn insert(props: &mut BTreeMap<String, String>, key: &str, value: &str) {
-    props.insert(key.to_owned(), value.to_owned());
+fn insert(props: &mut PropertyMap, key: &str, value: &str) {
+    props.insert(key.to_string(), value.to_string());
 }
 
 fn format_rlimit_value(val: &crate::units::unit_parsing::RLimitValue) -> String {
@@ -920,42 +958,38 @@ fn format_rlimit_value(val: &crate::units::unit_parsing::RLimitValue) -> String 
     }
 }
 
-fn insert_bool(props: &mut BTreeMap<String, String>, key: &str, value: bool) {
+fn insert_bool(props: &mut PropertyMap, key: &str, value: bool) {
     props.insert(
-        key.to_owned(),
-        if value {
-            "yes".to_owned()
-        } else {
-            "no".to_owned()
-        },
+        key.to_string(),
+        if value { "yes" } else { "no" }.to_string(),
     );
 }
 
-fn insert_dep_list(props: &mut BTreeMap<String, String>, key: &str, ids: &[crate::units::UnitId]) {
+fn insert_dep_list(props: &mut PropertyMap, key: &str, ids: &[crate::units::UnitId]) {
     let value: String = ids
         .iter()
         .map(|id| id.name.as_str())
         .collect::<Vec<_>>()
         .join(" ");
-    props.insert(key.to_owned(), value);
+    props.insert(key.to_string(), value);
 }
 
-fn insert_string_list(props: &mut BTreeMap<String, String>, key: &str, items: &[String]) {
-    props.insert(key.to_owned(), items.join(" "));
+fn insert_string_list(props: &mut PropertyMap, key: &str, items: &[String]) {
+    props.insert(key.to_string(), items.join(" "));
 }
 
-fn insert_timeout(props: &mut BTreeMap<String, String>, key: &str, timeout: &Option<Timeout>) {
+fn insert_timeout(props: &mut PropertyMap, key: &str, timeout: &Option<Timeout>) {
     let value = match timeout {
         Some(Timeout::Duration(d)) => format!("{}us", d.as_micros()),
-        Some(Timeout::Infinity) => "infinity".to_owned(),
-        None => "infinity".to_owned(),
+        Some(Timeout::Infinity) => "infinity".to_string(),
+        None => "infinity".to_string(),
     };
-    props.insert(key.to_owned(), value);
+    props.insert(key.to_string(), value);
 }
 
-fn insert_commandlines(props: &mut BTreeMap<String, String>, key: &str, cmds: &[Commandline]) {
+fn insert_commandlines(props: &mut PropertyMap, key: &str, cmds: &[Commandline]) {
     if cmds.is_empty() {
-        props.insert(key.to_owned(), String::new());
+        props.insert(key.to_string(), String::new());
         return;
     }
     // systemctl show formats multi-command ExecStart as
@@ -983,13 +1017,13 @@ fn insert_commandlines(props: &mut BTreeMap<String, String>, key: &str, cmds: &[
             s
         })
         .collect();
-    props.insert(key.to_owned(), parts.join(" ; "));
+    props.insert(key.to_string(), parts.join(" ; "));
 }
 
 /// Format exec commandlines for ExecXYZEx properties with flags instead of ignore_errors.
-fn insert_commandlines_ex(props: &mut BTreeMap<String, String>, key: &str, cmds: &[Commandline]) {
+fn insert_commandlines_ex(props: &mut PropertyMap, key: &str, cmds: &[Commandline]) {
     if cmds.is_empty() {
-        props.insert(key.to_owned(), String::new());
+        props.insert(key.to_string(), String::new());
         return;
     }
     let parts: Vec<String> = cmds
@@ -1026,19 +1060,19 @@ fn insert_commandlines_ex(props: &mut BTreeMap<String, String>, key: &str, cmds:
             s
         })
         .collect();
-    props.insert(key.to_owned(), parts.join(" ; "));
+    props.insert(key.to_string(), parts.join(" ; "));
 }
 
-fn insert_optional(props: &mut BTreeMap<String, String>, key: &str, value: &Option<String>) {
+fn insert_optional(props: &mut PropertyMap, key: &str, value: &Option<String>) {
     match value {
-        Some(v) => props.insert(key.to_owned(), v.clone()),
-        None => props.insert(key.to_owned(), String::new()),
+        Some(v) => props.insert(key.to_string(), v.clone()),
+        None => props.insert(key.to_string(), String::new()),
     };
 }
 
 // ── Section inserters ────────────────────────────────────────────────────
 
-fn insert_unit_config(props: &mut BTreeMap<String, String>, conf: &UnitConfig) {
+fn insert_unit_config(props: &mut PropertyMap, conf: &UnitConfig) {
     insert(props, "Description", &conf.description);
     insert_string_list(props, "Documentation", &conf.documentation);
 
@@ -1126,7 +1160,7 @@ fn insert_unit_config(props: &mut BTreeMap<String, String>, conf: &UnitConfig) {
     }
 }
 
-fn insert_status(props: &mut BTreeMap<String, String>, status: &UnitStatus) {
+fn insert_status(props: &mut PropertyMap, status: &UnitStatus) {
     let (active_state, sub_state) = match status {
         UnitStatus::NeverStarted => ("inactive", "dead"),
         UnitStatus::Starting => ("activating", "start"),
@@ -1151,7 +1185,7 @@ fn insert_status(props: &mut BTreeMap<String, String>, status: &UnitStatus) {
     insert(props, "SubState", sub_state);
 }
 
-fn insert_timestamps(props: &mut BTreeMap<String, String>, unit: &Unit) {
+fn insert_timestamps(props: &mut PropertyMap, unit: &Unit) {
     let ts = unit.common.timestamps.read_poisoned();
     let fmt = |v: Option<u64>| match v {
         Some(usec) => format_usec_timestamp(usec),
@@ -1193,7 +1227,7 @@ fn insert_timestamps(props: &mut BTreeMap<String, String>, unit: &Unit) {
     );
 }
 
-fn insert_service_config(props: &mut BTreeMap<String, String>, conf: &ServiceConfig) {
+fn insert_service_config(props: &mut PropertyMap, conf: &ServiceConfig) {
     // Restart policy
     insert(props, "Restart", &format_restart(&conf.restart));
     match &conf.restart_sec {
@@ -1281,7 +1315,7 @@ fn insert_service_config(props: &mut BTreeMap<String, String>, conf: &ServiceCon
     }
 }
 
-fn insert_exec_config(props: &mut BTreeMap<String, String>, conf: &ExecConfig) {
+fn insert_exec_config(props: &mut PropertyMap, conf: &ExecConfig) {
     insert_optional(props, "User", &conf.user);
     insert_optional(props, "Group", &conf.group);
 
@@ -1481,7 +1515,7 @@ fn insert_exec_config(props: &mut BTreeMap<String, String>, conf: &ExecConfig) {
     // These are on ServiceConfig, not ExecConfig, so handled in insert_service_config.
 }
 
-fn insert_socket_config(props: &mut BTreeMap<String, String>, conf: &SocketConfig) {
+fn insert_socket_config(props: &mut PropertyMap, conf: &SocketConfig) {
     // List listen addresses
     let mut listen_items = Vec::new();
     for sock in &conf.sockets {
@@ -1604,7 +1638,7 @@ fn format_commandline(cmd: &crate::units::Commandline) -> String {
     s
 }
 
-fn insert_slice_config(props: &mut BTreeMap<String, String>, conf: &SliceConfig) {
+fn insert_slice_config(props: &mut PropertyMap, conf: &SliceConfig) {
     // Memory limits
     match &conf.memory_min {
         Some(crate::units::MemoryLimit::Bytes(n)) => insert(props, "MemoryMin", &n.to_string()),
@@ -1854,7 +1888,7 @@ fn insert_slice_config(props: &mut BTreeMap<String, String>, conf: &SliceConfig)
     );
 }
 
-fn insert_swap_config(props: &mut BTreeMap<String, String>, conf: &SwapConfig) {
+fn insert_swap_config(props: &mut PropertyMap, conf: &SwapConfig) {
     insert(props, "What", &conf.what);
     match conf.priority {
         Some(p) => insert(props, "Priority", &p.to_string()),
@@ -1867,7 +1901,7 @@ fn insert_swap_config(props: &mut BTreeMap<String, String>, conf: &SwapConfig) {
     }
 }
 
-fn insert_mount_config(props: &mut BTreeMap<String, String>, conf: &MountConfig) {
+fn insert_mount_config(props: &mut PropertyMap, conf: &MountConfig) {
     insert(props, "What", &conf.what);
     insert(props, "Where", &conf.where_);
     insert_optional(props, "Type", &conf.fs_type);
@@ -1986,7 +2020,7 @@ mod tests {
 
     #[test]
     fn test_format_properties_all() {
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         props.insert("ActiveState".to_owned(), "active".to_owned());
         props.insert("Description".to_owned(), "Test Unit".to_owned());
         props.insert("Id".to_owned(), "test.service".to_owned());
@@ -1999,7 +2033,7 @@ mod tests {
 
     #[test]
     fn test_format_properties_filtered() {
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         props.insert("ActiveState".to_owned(), "active".to_owned());
         props.insert("Description".to_owned(), "Test Unit".to_owned());
         props.insert("Id".to_owned(), "test.service".to_owned());
@@ -2013,7 +2047,7 @@ mod tests {
 
     #[test]
     fn test_format_properties_filter_case_insensitive() {
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         props.insert("ActiveState".to_owned(), "active".to_owned());
 
         let filter = vec!["activestate".to_owned()];
@@ -2023,7 +2057,7 @@ mod tests {
 
     #[test]
     fn test_format_properties_empty_filter() {
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         props.insert("Id".to_owned(), "test.service".to_owned());
 
         let filter: Vec<String> = vec![];
@@ -2071,7 +2105,7 @@ mod tests {
 
     #[test]
     fn test_insert_bool() {
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         insert_bool(&mut props, "TestYes", true);
         insert_bool(&mut props, "TestNo", false);
         assert_eq!(props.get("TestYes").unwrap(), "yes");
@@ -2080,7 +2114,7 @@ mod tests {
 
     #[test]
     fn test_insert_timeout_duration() {
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         insert_timeout(
             &mut props,
             "TestTimeout",
@@ -2091,14 +2125,14 @@ mod tests {
 
     #[test]
     fn test_insert_timeout_infinity() {
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         insert_timeout(&mut props, "TestTimeout", &Some(Timeout::Infinity));
         assert_eq!(props.get("TestTimeout").unwrap(), "infinity");
     }
 
     #[test]
     fn test_insert_timeout_none() {
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         insert_timeout(&mut props, "TestTimeout", &None);
         assert_eq!(props.get("TestTimeout").unwrap(), "infinity");
     }
@@ -2106,7 +2140,7 @@ mod tests {
     #[test]
     fn test_insert_dep_list() {
         use crate::units::{UnitId, UnitIdKind};
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         let deps = vec![
             UnitId {
                 kind: UnitIdKind::Target,
@@ -2126,14 +2160,14 @@ mod tests {
 
     #[test]
     fn test_insert_dep_list_empty() {
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         insert_dep_list(&mut props, "Before", &[]);
         assert_eq!(props.get("Before").unwrap(), "");
     }
 
     #[test]
     fn test_properties_to_json() {
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         props.insert("Id".to_owned(), "test.service".to_owned());
         props.insert("ActiveState".to_owned(), "active".to_owned());
 
@@ -2144,14 +2178,14 @@ mod tests {
 
     #[test]
     fn test_insert_commandlines_empty() {
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         insert_commandlines(&mut props, "ExecStart", &[]);
         assert_eq!(props.get("ExecStart").unwrap(), "");
     }
 
     #[test]
     fn test_insert_commandlines_single() {
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         let cmds = vec![Commandline {
             cmd: "/usr/bin/foo".to_owned(),
             args: vec!["--bar".to_owned(), "baz".to_owned()],
@@ -2165,30 +2199,31 @@ mod tests {
 
     #[test]
     fn test_insert_optional_some() {
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         insert_optional(&mut props, "PIDFile", &Some("/run/foo.pid".to_owned()));
         assert_eq!(props.get("PIDFile").unwrap(), "/run/foo.pid");
     }
 
     #[test]
     fn test_insert_optional_none() {
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         insert_optional(&mut props, "PIDFile", &None);
         assert_eq!(props.get("PIDFile").unwrap(), "");
     }
 
     #[test]
     fn test_format_properties_ordering() {
-        let mut props = BTreeMap::new();
+        // PropertyMap preserves insertion order (matching systemd vtable order)
+        let mut props = PropertyMap::new();
         props.insert("Zebra".to_owned(), "z".to_owned());
         props.insert("Alpha".to_owned(), "a".to_owned());
         props.insert("Middle".to_owned(), "m".to_owned());
 
         let output = format_properties(&props, None);
         let lines: Vec<&str> = output.trim().split('\n').collect();
-        assert_eq!(lines[0], "Alpha=a");
-        assert_eq!(lines[1], "Middle=m");
-        assert_eq!(lines[2], "Zebra=z");
+        assert_eq!(lines[0], "Zebra=z");
+        assert_eq!(lines[1], "Alpha=a");
+        assert_eq!(lines[2], "Middle=m");
     }
 
     // ── Slice config property tests ──────────────────────────────────
@@ -2250,7 +2285,7 @@ mod tests {
     #[test]
     fn test_slice_config_defaults() {
         let conf = default_slice_config();
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         insert_slice_config(&mut props, &conf);
 
         // Memory defaults
@@ -2308,7 +2343,7 @@ mod tests {
         conf.default_memory_min = Some(crate::units::MemoryLimit::Bytes(524288));
         conf.default_memory_low = Some(crate::units::MemoryLimit::Bytes(1048576));
 
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         insert_slice_config(&mut props, &conf);
 
         assert_eq!(props.get("MemoryMin").unwrap(), "1048576");
@@ -2328,7 +2363,7 @@ mod tests {
         conf.memory_high = Some(crate::units::MemoryLimit::Percent(70));
         conf.default_memory_low = Some(crate::units::MemoryLimit::Percent(25));
 
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         insert_slice_config(&mut props, &conf);
 
         assert_eq!(props.get("MemoryMax").unwrap(), "80%");
@@ -2342,7 +2377,7 @@ mod tests {
         conf.memory_min = Some(crate::units::MemoryLimit::Infinity);
         conf.default_memory_min = Some(crate::units::MemoryLimit::Infinity);
 
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         insert_slice_config(&mut props, &conf);
 
         assert_eq!(props.get("MemoryMin").unwrap(), "infinity");
@@ -2355,7 +2390,7 @@ mod tests {
         conf.cpu_weight = Some(500);
         conf.startup_cpu_weight = Some(100);
 
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         insert_slice_config(&mut props, &conf);
 
         assert_eq!(props.get("CPUWeight").unwrap(), "500");
@@ -2368,7 +2403,7 @@ mod tests {
         conf.cpu_quota = Some(200);
         conf.cpu_quota_period_sec = Some(Timeout::Duration(std::time::Duration::from_millis(100)));
 
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         insert_slice_config(&mut props, &conf);
 
         assert_eq!(props.get("CPUQuota").unwrap(), "200%");
@@ -2381,7 +2416,7 @@ mod tests {
         conf.io_weight = Some(500);
         conf.startup_io_weight = Some(100);
 
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         insert_slice_config(&mut props, &conf);
 
         assert_eq!(props.get("IOWeight").unwrap(), "500");
@@ -2414,7 +2449,7 @@ mod tests {
         conf.io_device_latency_target_sec =
             vec!["/dev/sda 25ms".to_owned(), "/dev/sdb 50ms".to_owned()];
 
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         insert_slice_config(&mut props, &conf);
 
         assert_eq!(props.get("IODeviceWeight").unwrap(), "/dev/sda 200");
@@ -2433,7 +2468,7 @@ mod tests {
         let mut conf = default_slice_config();
         conf.tasks_max = Some(crate::units::TasksMax::Value(4096));
 
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         insert_slice_config(&mut props, &conf);
 
         assert_eq!(props.get("TasksMax").unwrap(), "4096");
@@ -2444,7 +2479,7 @@ mod tests {
         let mut conf = default_slice_config();
         conf.tasks_max = Some(crate::units::TasksMax::Percent(50));
 
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         insert_slice_config(&mut props, &conf);
 
         assert_eq!(props.get("TasksMax").unwrap(), "50%");
@@ -2458,7 +2493,7 @@ mod tests {
         conf.io_accounting = Some(true);
         conf.tasks_accounting = Some(false);
 
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         insert_slice_config(&mut props, &conf);
 
         assert_eq!(props.get("CPUAccounting").unwrap(), "yes");
@@ -2472,7 +2507,7 @@ mod tests {
         let mut conf = default_slice_config();
         conf.delegate = crate::units::Delegate::Yes;
 
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         insert_slice_config(&mut props, &conf);
 
         assert_eq!(props.get("Delegate").unwrap(), "yes");
@@ -2485,7 +2520,7 @@ mod tests {
             crate::units::Delegate::Controllers(vec!["cpu".to_owned(), "memory".to_owned()]);
         conf.delegate_subgroup = Some("supervisor".to_owned());
 
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         insert_slice_config(&mut props, &conf);
 
         assert_eq!(props.get("Delegate").unwrap(), "cpu memory");
@@ -2498,7 +2533,7 @@ mod tests {
         conf.device_policy = crate::units::DevicePolicy::Strict;
         conf.device_allow = vec!["char-tty rw".to_owned(), "/dev/null rw".to_owned()];
 
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         insert_slice_config(&mut props, &conf);
 
         assert_eq!(props.get("DevicePolicy").unwrap(), "strict");
@@ -2516,7 +2551,7 @@ mod tests {
         conf.ip_ingress_filter_path = vec!["/sys/fs/bpf/ingress".to_owned()];
         conf.ip_egress_filter_path = vec!["/sys/fs/bpf/egress".to_owned()];
 
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         insert_slice_config(&mut props, &conf);
 
         assert_eq!(
@@ -2543,7 +2578,7 @@ mod tests {
         conf.restrict_network_interfaces = vec!["eth0".to_owned(), "lo".to_owned()];
         conf.nft_set = vec!["inet:filter:allowed_ips".to_owned()];
 
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         insert_slice_config(&mut props, &conf);
 
         assert_eq!(props.get("BPFProgram").unwrap(), "egress:/sys/fs/bpf/prog");
@@ -2561,7 +2596,7 @@ mod tests {
         conf.allowed_memory_nodes = Some("0".to_owned());
         conf.startup_allowed_memory_nodes = Some("0-1".to_owned());
 
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         insert_slice_config(&mut props, &conf);
 
         assert_eq!(props.get("AllowedCPUs").unwrap(), "0-3");
@@ -2575,7 +2610,7 @@ mod tests {
         let mut conf = default_slice_config();
         conf.disable_controllers = vec!["cpu".to_owned(), "io".to_owned()];
 
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         insert_slice_config(&mut props, &conf);
 
         assert_eq!(props.get("DisableControllers").unwrap(), "cpu io");
@@ -2589,7 +2624,7 @@ mod tests {
         conf.managed_oom_memory_pressure_limit = Some("50%".to_owned());
         conf.managed_oom_preference = Some("avoid".to_owned());
 
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         insert_slice_config(&mut props, &conf);
 
         assert_eq!(props.get("ManagedOOMSwap").unwrap(), "kill");
@@ -2605,7 +2640,7 @@ mod tests {
         conf.memory_pressure_threshold_sec =
             Some(Timeout::Duration(std::time::Duration::from_secs(2)));
 
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         insert_slice_config(&mut props, &conf);
 
         assert_eq!(props.get("MemoryPressureWatch").unwrap(), "on");
@@ -2620,7 +2655,7 @@ mod tests {
         let mut conf = default_slice_config();
         conf.memory_pressure_watch = crate::units::MemoryPressureWatch::Off;
 
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         insert_slice_config(&mut props, &conf);
 
         assert_eq!(props.get("MemoryPressureWatch").unwrap(), "off");
@@ -2631,7 +2666,7 @@ mod tests {
         let mut conf = default_slice_config();
         conf.memory_pressure_watch = crate::units::MemoryPressureWatch::Skip;
 
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         insert_slice_config(&mut props, &conf);
 
         assert_eq!(props.get("MemoryPressureWatch").unwrap(), "skip");
@@ -2642,7 +2677,7 @@ mod tests {
         let mut conf = default_slice_config();
         conf.device_policy = crate::units::DevicePolicy::Closed;
 
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         insert_slice_config(&mut props, &conf);
 
         assert_eq!(props.get("DevicePolicy").unwrap(), "closed");
@@ -2669,7 +2704,7 @@ mod tests {
         conf.disable_controllers = vec!["hugetlb".to_owned()];
         conf.socket_bind_allow = vec!["tcp:8080".to_owned()];
 
-        let mut props = BTreeMap::new();
+        let mut props = PropertyMap::new();
         insert_slice_config(&mut props, &conf);
 
         assert_eq!(props.get("MemoryMax").unwrap(), "4294967296");
