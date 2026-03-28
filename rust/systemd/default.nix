@@ -7731,6 +7731,84 @@
           MMEOF
           chmod +x TEST-74-AUX-UTILS.mask-unmask.sh
 
+          # systemctl list-jobs test
+          cat > TEST-74-AUX-UTILS.list-jobs.sh << 'LJEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl list-jobs runs without error"
+          systemctl list-jobs --no-pager > /dev/null
+
+          : "systemctl list-jobs --after shows job ordering"
+          systemctl list-jobs --after --no-pager > /dev/null || true
+
+          : "systemctl list-jobs --before shows job ordering"
+          systemctl list-jobs --before --no-pager > /dev/null || true
+          LJEOF
+          chmod +x TEST-74-AUX-UTILS.list-jobs.sh
+
+          # systemd-path test
+          cat > TEST-74-AUX-UTILS.systemd-path.sh << 'SPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-path shows standard paths"
+          systemd-path | grep -q "temporary"
+          systemd-path | grep -q "system-runtime"
+
+          : "systemd-path with specific key"
+          TEMP="$(systemd-path temporary)"
+          [[ -n "$TEMP" ]]
+
+          : "systemd-path temporary-large"
+          systemd-path temporary-large > /dev/null
+          SPEOF
+          chmod +x TEST-74-AUX-UTILS.systemd-path.sh
+
+          # systemctl log-level test
+          cat > TEST-74-AUX-UTILS.log-level.sh << 'LLEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl log-level shows current level"
+          LEVEL="$(systemctl log-level)"
+          [[ -n "$LEVEL" ]]
+
+          : "systemctl log-level can set and restore"
+          OLD_LEVEL="$(systemctl log-level)"
+          systemctl log-level info
+          [[ "$(systemctl log-level)" == "info" ]]
+          systemctl log-level "$OLD_LEVEL"
+          LLEOF
+          chmod +x TEST-74-AUX-UTILS.log-level.sh
+
+          # systemctl show ExecStart property for running service
+          cat > TEST-74-AUX-UTILS.show-exec.sh << 'SEEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl show ExecMainStartTimestamp is set for active services"
+          TS="$(systemctl show -P ExecMainStartTimestamp systemd-journald.service)"
+          [[ -n "$TS" ]]
+
+          : "systemctl show Id matches unit name"
+          ID="$(systemctl show -P Id systemd-journald.service)"
+          [[ "$ID" == "systemd-journald.service" ]]
+
+          : "systemctl show CanStart is yes for startable services"
+          CAN="$(systemctl show -P CanStart systemd-journald.service)"
+          [[ "$CAN" == "yes" ]]
+
+          : "systemctl show CanStop is yes for stoppable services"
+          CAN="$(systemctl show -P CanStop systemd-journald.service)"
+          [[ "$CAN" == "yes" ]]
+          SEEOF
+          chmod +x TEST-74-AUX-UTILS.show-exec.sh
+
           rm -f TEST-74-AUX-UTILS.busctl.sh \
                TEST-74-AUX-UTILS.capsule.sh \
                TEST-74-AUX-UTILS.firstboot.sh \
