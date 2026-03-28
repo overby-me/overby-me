@@ -7513,8 +7513,7 @@
                          TEST-23-UNIT-FILE.whoami.sh \
                          TEST-23-UNIT-FILE.success-failure.sh \
                          TEST-23-UNIT-FILE.exec-command-ex.sh \
-                         TEST-23-UNIT-FILE.utmp.sh \
-                         TEST-23-UNIT-FILE.ExecReload.sh
+                         TEST-23-UNIT-FILE.utmp.sh
 
                     # Fix property order in oneshot-restart subtest: systemctl show -p
                     # returns properties in filter-flag order, not systemd's internal
