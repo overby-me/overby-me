@@ -1580,10 +1580,23 @@ impl Shell {
             self.run_debug_trap();
         }
 
+        // Apply function-level redirections (from f() { ... } >>file)
+        let func_redirs = self.func_redirections.get(name).cloned();
+        let func_saved_fds = if let Some(ref redirs) = func_redirs {
+            self.setup_redirections(redirs).ok()
+        } else {
+            None
+        };
+
         let mut status = self.run_compound_command(body);
         // If returning was set (by builtin_return or a trap handler), use last_status
         if self.returning {
             status = self.last_status;
+        }
+
+        // Restore function-level redirections
+        if let Some(fds) = func_saved_fds {
+            self.restore_redirections(fds);
         }
 
         // Restore ERR and DEBUG traps and LINENO
