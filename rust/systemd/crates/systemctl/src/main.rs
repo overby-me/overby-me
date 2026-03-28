@@ -95,6 +95,12 @@ const LONG_FLAGS_WITH_VALUE: &[&str] = &[
 ];
 
 fn main() {
+    // Ignore SIGPIPE so piping systemctl output to grep/head/etc. doesn't
+    // cause a panic when the reader closes the pipe early.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_IGN);
+    }
+
     let mut args: Vec<_> = std::env::args().collect();
     let exec_name = args.remove(0);
 
