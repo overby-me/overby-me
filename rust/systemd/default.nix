@@ -6275,6 +6275,72 @@
           RDEPEOF
                     chmod +x TEST-23-UNIT-FILE.requires-dep.sh
 
+                    # Test ProtectSystem= in unit files
+                    cat > TEST-23-UNIT-FILE.protect-system.sh << 'PSEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "ProtectSystem=strict prevents writes to system dirs"
+          UNIT="prot-sys-$RANDOM"
+          systemd-run --wait --unit="$UNIT" \
+              -p ProtectSystem=strict \
+              -p ReadWritePaths=/tmp \
+              bash -c 'touch /tmp/prot-test-ok && (! touch /usr/prot-test-fail 2>/dev/null)'
+          [[ -f /tmp/prot-test-ok ]]
+          rm -f /tmp/prot-test-ok
+          PSEOF
+                    chmod +x TEST-23-UNIT-FILE.protect-system.sh
+
+                    # Test NoNewPrivileges=
+                    cat > TEST-23-UNIT-FILE.no-new-privs.sh << 'NNPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "NoNewPrivileges=yes prevents privilege escalation"
+          UNIT="nnp-test-$RANDOM"
+          systemd-run --wait --unit="$UNIT" \
+              -p NoNewPrivileges=yes \
+              bash -c 'cat /proc/self/status | grep -q "NoNewPrivs:[[:space:]]*1"'
+          NNPEOF
+                    chmod +x TEST-23-UNIT-FILE.no-new-privs.sh
+
+                    # Test ProtectHome=
+                    cat > TEST-23-UNIT-FILE.protect-home.sh << 'PHEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "ProtectHome=yes hides home directories"
+          UNIT="prot-home-$RANDOM"
+          # Create a file in /root (or wherever) first
+          touch /root/.prot-home-test
+          systemd-run --wait --unit="$UNIT" \
+              -p ProtectHome=yes \
+              bash -c '(! test -f /root/.prot-home-test)'
+          rm -f /root/.prot-home-test
+          PHEOF
+                    chmod +x TEST-23-UNIT-FILE.protect-home.sh
+
+                    # Test PrivateTmp=
+                    cat > TEST-23-UNIT-FILE.private-tmp-check.sh << 'PTCEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "PrivateTmp=yes gives isolated /tmp"
+          touch /tmp/outside-marker-$RANDOM
+          UNIT="ptmp-test-$RANDOM"
+          systemd-run --wait --unit="$UNIT" \
+              -p PrivateTmp=yes \
+              bash -c 'ls /tmp/ | wc -l > /run/ptmp-result'
+          COUNT="$(cat /run/ptmp-result)"
+          [[ "$COUNT" -eq 0 ]]
+          rm -f /run/ptmp-result /tmp/outside-marker-*
+          PTCEOF
+                    chmod +x TEST-23-UNIT-FILE.private-tmp-check.sh
+
                     rm -f TEST-23-UNIT-FILE.ExtraFileDescriptors.sh \
                          TEST-23-UNIT-FILE.JoinsNamespaceOf.sh \
                          TEST-23-UNIT-FILE.openfile.sh \
