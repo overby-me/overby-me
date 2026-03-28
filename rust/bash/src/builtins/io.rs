@@ -40,34 +40,47 @@ pub(super) fn builtin_echo(shell: &mut Shell, args: &[String]) -> i32 {
         text
     };
 
-    use std::io::Write;
-    let stdout = std::io::stdout();
-    let mut out = stdout.lock();
     // Convert to bytes: chars in U+0080..U+00FF range are written as single
     // bytes (raw byte output like bash), not as multi-byte UTF-8
-    let bytes = string_to_raw_bytes(&output);
-    let result = if newline {
-        out.write_all(&bytes)
-            .and_then(|_| out.write_all(b"\n"))
-            .and_then(|_| out.flush())
-    } else {
-        out.write_all(&bytes).and_then(|_| out.flush())
-    };
-    drop(out);
-    match result {
-        Ok(()) => 0,
-        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {
-            // In pipeline children, broken pipe is handled by SIGPIPE (SIG_DFL).
-            // In lastpipe (current shell), report the error like bash does.
-            if !shell.in_pipeline_child {
-                eprintln!("{}: echo: write error: Broken pipe", shell.error_prefix());
+    let mut bytes = string_to_raw_bytes(&output);
+    if newline {
+        bytes.push(b'\n');
+    }
+    // Use direct fd write to properly detect errors (Rust's BufWriter
+    // may not propagate EBADF from write to read-only fds)
+    #[cfg(unix)]
+    {
+        // Flush Rust stdout first to avoid buffered data being out of order
+        std::io::Write::flush(&mut std::io::stdout()).ok();
+        match nix::unistd::write(std::io::stdout(), &bytes) {
+            Ok(_) => 0,
+            Err(nix::Error::EPIPE) => {
+                if !shell.in_pipeline_child {
+                    eprintln!("{}: echo: write error: Broken pipe", shell.error_prefix());
+                }
+                1
             }
-            1
+            Err(e) => {
+                let msg = Shell::io_error_message(&std::io::Error::from_raw_os_error(
+                    e as i32,
+                ));
+                eprintln!("{}: echo: write error: {}", shell.error_prefix(), msg);
+                1
+            }
         }
-        Err(e) => {
-            let msg = Shell::io_error_message(&e);
-            eprintln!("{}: echo: write error: {}", shell.error_prefix(), msg);
-            1
+    }
+    #[cfg(not(unix))]
+    {
+        use std::io::Write;
+        let stdout = std::io::stdout();
+        let mut out = stdout.lock();
+        match out.write_all(&bytes).and_then(|_| out.flush()) {
+            Ok(()) => 0,
+            Err(e) => {
+                let msg = Shell::io_error_message(&e);
+                eprintln!("{}: echo: write error: {}", shell.error_prefix(), msg);
+                1
+            }
         }
     }
 }
