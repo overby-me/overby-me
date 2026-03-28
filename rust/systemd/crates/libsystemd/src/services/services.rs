@@ -180,6 +180,15 @@ pub struct Service {
     pub exec_main_handoff_timestamp: Option<u64>,
     /// Timestamp (usec since epoch) when the main process exited.
     pub exec_main_exit_timestamp: Option<u64>,
+    /// EXTEND_TIMEOUT_USEC= from sd_notify — when set, the service requests
+    /// that its current timeout (start, stop, or runtime) be extended.
+    /// Each EXTEND_TIMEOUT_USEC message resets the timeout window to the
+    /// specified number of microseconds from the time the message was received.
+    /// Cleared when the phase transition completes.
+    pub extend_timeout_usec: Option<u64>,
+    /// Timestamp when the last EXTEND_TIMEOUT_USEC was received.
+    /// Used to compute the new deadline as `extend_timeout_timestamp + extend_timeout_usec`.
+    pub extend_timeout_timestamp: Option<std::time::Instant>,
 }
 
 /// Environment variables passed to OnSuccess=/OnFailure= handler services.
@@ -332,6 +341,8 @@ impl Service {
         self.watchdog_last_ping = None;
         self.watchdog_usec_override = None;
         self.main_exit_status = None;
+        self.extend_timeout_usec = None;
+        self.extend_timeout_timestamp = None;
 
         super::prepare_service::prepare_service(
             self,

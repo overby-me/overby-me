@@ -106,11 +106,22 @@ fn check_watchdog_timeouts(run_info: &ArcMutRuntimeInfo) {
             let srvc = &state.srvc;
 
             // --- RuntimeMaxSec enforcement ---
+            // If the service has sent EXTEND_TIMEOUT_USEC, use the extended
+            // deadline (extend_timeout_timestamp + extend_timeout_usec) instead
+            // of the original RuntimeMaxSec deadline.
             if let Some(started_at) = srvc.runtime_started_at
                 && let Some(max_dur) = effective_runtime_max(&srvc_specific.conf.runtime_max_sec)
             {
+                let timed_out = if let (Some(ext_usec), Some(ext_ts)) =
+                    (srvc.extend_timeout_usec, srvc.extend_timeout_timestamp)
+                {
+                    let ext_dur = std::time::Duration::from_micros(ext_usec);
+                    now.duration_since(ext_ts) >= ext_dur
+                } else {
+                    now.duration_since(started_at) >= max_dur
+                };
                 let elapsed = now.duration_since(started_at);
-                if elapsed >= max_dur {
+                if timed_out {
                     let effective_pid = srvc.main_pid.or(srvc.pid);
                     runtime_max_timed_out.push(RuntimeMaxTimeout {
                         unit_name: unit.id.name.clone(),

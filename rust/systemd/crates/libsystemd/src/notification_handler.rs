@@ -783,6 +783,23 @@ pub fn handle_notification_message(msg: &str, srvc: &mut Service, name: &str) {
                 }
             }
         }
+        "EXTEND_TIMEOUT_USEC" => {
+            if split.len() > 1 {
+                match split[1].trim().parse::<u64>() {
+                    Ok(usec) => {
+                        srvc.extend_timeout_usec = Some(usec);
+                        srvc.extend_timeout_timestamp = Some(std::time::Instant::now());
+                        trace!("Service {name}: EXTEND_TIMEOUT_USEC={usec} — timeout extended");
+                    }
+                    Err(e) => {
+                        trace!(
+                            "Service {name}: ignoring unparsable EXTEND_TIMEOUT_USEC={}: {e}",
+                            split[1]
+                        );
+                    }
+                }
+            }
+        }
         _ => {
             warn!("Unknown notification from service {name}: {msg}");
         }

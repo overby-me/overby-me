@@ -75,8 +75,18 @@ pub fn wait_for_service(
                 }
 
                 if let Some(duration_timeout) = duration_timeout {
-                    let duration_elapsed = start_time.elapsed();
-                    if duration_elapsed > duration_timeout {
+                    // Check EXTEND_TIMEOUT_USEC: if the service has sent an
+                    // extension, measure timeout from the extension timestamp
+                    // using the extension duration instead of the original.
+                    let timed_out = if let (Some(ext_usec), Some(ext_ts)) =
+                        (srvc.extend_timeout_usec, srvc.extend_timeout_timestamp)
+                    {
+                        let ext_dur = std::time::Duration::from_micros(ext_usec);
+                        ext_ts.elapsed() > ext_dur
+                    } else {
+                        start_time.elapsed() > duration_timeout
+                    };
+                    if timed_out {
                         trace!("[FORK_PARENT] Service {name} notification timed out");
                         return Err(RunCmdError::Timeout(
                             conf.exec
@@ -86,7 +96,17 @@ pub fn wait_for_service(
                             format!("{duration_timeout:?}"),
                         ));
                     }
-                    let duration_till_timeout = duration_timeout - duration_elapsed;
+                    let duration_elapsed = if srvc.extend_timeout_timestamp.is_some() {
+                        srvc.extend_timeout_timestamp.unwrap().elapsed()
+                    } else {
+                        start_time.elapsed()
+                    };
+                    let effective_timeout = if let Some(ext_usec) = srvc.extend_timeout_usec {
+                        std::time::Duration::from_micros(ext_usec)
+                    } else {
+                        duration_timeout
+                    };
+                    let duration_till_timeout = effective_timeout.saturating_sub(duration_elapsed);
                     // Cap the recv timeout to 1 second so we frequently re-check
                     // the pid table for early process exits. Without this cap,
                     // a service that crashes immediately after fork still blocks
