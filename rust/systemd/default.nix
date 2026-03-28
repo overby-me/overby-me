@@ -387,6 +387,8 @@
               bash -xec "test ! -w /home; test ! -w /root; test ! -w /run/user; test ! -e $MARK"
           systemd-run --wait --pipe -p ProtectHome=read-only \
               bash -xec "test ! -w /home; test ! -w /root; test ! -w /run/user; test -e $MARK"
+          systemd-run --wait --pipe -p ProtectHome=tmpfs \
+              bash -xec "test ! -w /home; test ! -w /root; test ! -w /run/user; test ! -e $MARK"
           systemd-run --wait --pipe -p ProtectHome=no \
               bash -xec "test -w /home; test -w /root; test -w /run/user; test -e $MARK"
           rm -f "$MARK"

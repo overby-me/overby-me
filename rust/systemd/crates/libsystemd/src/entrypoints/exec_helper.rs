@@ -2125,9 +2125,9 @@ fn setup_mount_namespace(config: &ExecHelperConfig) {
             remount_read_only("/run/user", config);
         }
         "tmpfs" => {
-            mount_tmpfs("/home", config);
-            mount_tmpfs("/root", config);
-            mount_tmpfs("/run/user", config);
+            mount_tmpfs_readonly("/home", config);
+            mount_tmpfs_readonly("/root", config);
+            mount_tmpfs_readonly("/run/user", config);
         }
         _ => {} // "no" or unrecognized
     }
@@ -2577,6 +2577,33 @@ fn bind_mount_readwrite(path: &str, _config: &ExecHelperConfig) {
     if ret != 0 {
         log::warn!(
             "Failed to remount {} read-write: {} (non-fatal)",
+            path,
+            std::io::Error::last_os_error()
+        );
+    }
+}
+
+/// Mount an empty read-only tmpfs over a path (used by ProtectHome=tmpfs).
+fn mount_tmpfs_readonly(path: &str, _config: &ExecHelperConfig) {
+    let c_path = match std::ffi::CString::new(path) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    if !Path::new(path).exists() {
+        let _ = std::fs::create_dir_all(path);
+    }
+    let ret = unsafe {
+        libc::mount(
+            c"tmpfs".as_ptr(),
+            c_path.as_ptr(),
+            c"tmpfs".as_ptr(),
+            libc::MS_NOSUID | libc::MS_NODEV | libc::MS_STRICTATIME | libc::MS_RDONLY,
+            c"mode=0755,size=0".as_ptr().cast(),
+        )
+    };
+    if ret != 0 {
+        log::warn!(
+            "Failed to mount read-only tmpfs on {}: {}",
             path,
             std::io::Error::last_os_error()
         );
