@@ -1861,8 +1861,10 @@ fn glob_expand(field: &str) -> Vec<String> {
             }
         } else {
             let dotglob = DOTGLOB_ENABLED.with(|d| *d.borrow());
+            // If pattern starts with '.', always allow dotfile matching
+            let pattern_starts_dot = pattern.starts_with('.');
             let glob_opts = glob::MatchOptions {
-                require_literal_leading_dot: !dotglob,
+                require_literal_leading_dot: !dotglob && !pattern_starts_dot,
                 ..Default::default()
             };
             match glob::glob_with(&pattern, glob_opts) {
