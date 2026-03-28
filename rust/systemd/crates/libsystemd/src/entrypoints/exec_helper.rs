@@ -423,6 +423,11 @@ pub struct ExecHelperConfig {
     #[serde(default)]
     pub private_mounts: bool,
 
+    /// PrivateIPC= — if true, a new IPC namespace is created, isolating
+    /// System V IPC objects and POSIX message queues. See systemd.exec(5).
+    #[serde(default)]
+    pub private_ipc: bool,
+
     /// PrivatePIDs= — if true, a new PID namespace is created and /proc is
     /// remounted so the service process becomes PID 1 in the new namespace.
     /// See systemd.exec(5).
@@ -1531,6 +1536,17 @@ pub fn run_exec_helper() {
         } else {
             // Bring up the loopback interface in the new namespace
             bring_up_loopback();
+        }
+    }
+
+    // ── PrivateIPC= — IPC namespace ────────────────────────────────────
+    if config.private_ipc && !config.privileged_prefix {
+        let ret = unsafe { libc::unshare(libc::CLONE_NEWIPC) };
+        if ret != 0 {
+            log::warn!(
+                "Failed to create IPC namespace for PrivateIPC=: {}",
+                std::io::Error::last_os_error()
+            );
         }
     }
 

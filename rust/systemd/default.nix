@@ -882,6 +882,11 @@
           : "LogLevelMax via transient property"
           systemd-run --wait --pipe -p LogLevelMax=warning true
 
+          : "PrivateIPC=yes creates IPC namespace isolation"
+          HOST_IPC="$(readlink /proc/1/ns/ipc)"
+          SRVC_IPC="$(systemd-run --wait --pipe -p PrivateIPC=yes readlink /proc/self/ns/ipc)"
+          [[ "$HOST_IPC" != "$SRVC_IPC" ]]
+
           : "Error handling for clean-up codepaths"
           (! systemd-run --wait --pipe false)
           TESTEOF

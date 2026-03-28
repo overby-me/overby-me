@@ -477,6 +477,7 @@ fn start_service_with_filedescriptors(
         private_network: conf.exec_config.private_network,
         private_users: conf.exec_config.private_users,
         private_mounts: conf.exec_config.private_mounts,
+        private_ipc: conf.exec_config.private_ipc.unwrap_or(false),
         private_pids: conf.exec_config.private_pids.unwrap_or(false),
         protect_kernel_tunables: conf.exec_config.protect_kernel_tunables,
         protect_kernel_modules: conf.exec_config.protect_kernel_modules,
