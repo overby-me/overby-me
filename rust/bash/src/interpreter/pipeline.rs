@@ -168,11 +168,6 @@ impl Shell {
                         // Clear EXIT trap in subshell (pipeline children are subshells)
                         self.traps.remove("EXIT");
                         self.traps.remove("0");
-                        // Restore SIGPIPE to default in pipeline children so that
-                        // broken pipe silently kills the process (matching bash behavior)
-                        unsafe {
-                            libc::signal(libc::SIGPIPE, libc::SIG_DFL);
-                        }
                         self.in_pipeline_child = !self.shopt_lastpipe;
                         if let Some(fd) = prev_read_fd
                             && fd != 0
