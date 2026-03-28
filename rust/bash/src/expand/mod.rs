@@ -1989,11 +1989,33 @@ fn glob_expand(field: &str) -> Vec<String> {
                                 if !allows_dot {
                                     // For extglob with dot alternatives, extract each dot alt
                                     // and match against those specifically
+                                    // Use proper top-level splitting that respects nested parens
                                     let inner_start = pattern.find('(').map(|p| p + 1);
                                     let inner_end = pattern.rfind(')');
                                     if let (Some(start), Some(end)) = (inner_start, inner_end) {
                                         let inner = &pattern[start..end];
-                                        for alt in inner.split('|') {
+                                        // Split on | at top level only (not inside nested parens)
+                                        let mut alts = Vec::new();
+                                        let mut depth = 0i32;
+                                        let mut current = String::new();
+                                        for ch in inner.chars() {
+                                            match ch {
+                                                '(' => {
+                                                    depth += 1;
+                                                    current.push(ch);
+                                                }
+                                                ')' => {
+                                                    depth -= 1;
+                                                    current.push(ch);
+                                                }
+                                                '|' if depth == 0 => {
+                                                    alts.push(std::mem::take(&mut current));
+                                                }
+                                                _ => current.push(ch),
+                                            }
+                                        }
+                                        alts.push(current);
+                                        for alt in &alts {
                                             if alt.starts_with('.')
                                                 && crate::interpreter::commands::case_pattern_match(
                                                     name, alt,
