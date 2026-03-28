@@ -3019,6 +3019,18 @@ fn create_transient_unit(
                             ));
                     }
                 }
+                "WatchdogSec" => {
+                    let trimmed = value.trim_end_matches('s');
+                    if let Ok(secs) = trimmed.parse::<u64>() {
+                        service_conf.watchdog_sec = if secs == 0 {
+                            None
+                        } else {
+                            Some(crate::units::unit_parsing::Timeout::Duration(
+                                std::time::Duration::from_secs(secs),
+                            ))
+                        };
+                    }
+                }
                 "ExecStart" | "ExecStartEx" | "ExecStartPre" | "ExecStartPreEx"
                 | "ExecStartPost" | "ExecStartPostEx" | "ExecCondition" | "ExecConditionEx"
                 | "ExecReload" | "ExecReloadEx" | "ExecStop" | "ExecStopEx" | "ExecStopPost"

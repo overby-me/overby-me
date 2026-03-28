@@ -752,6 +752,21 @@
           systemctl stop kill-signal-test.service 2>/dev/null || true
           rm -f /tmp/kill-sigusr1-received
 
+          : "WatchdogSec= tests — notify service killed when it stops pinging"
+          systemd-run --unit=watchdog-test -p Type=notify -p WatchdogSec=2 \
+              bash -c 'systemd-notify --ready; sleep 60'
+          sleep 5
+          # Service should have been killed by watchdog after 2s without WATCHDOG=1 ping
+          (! systemctl is-active watchdog-test.service)
+          systemctl reset-failed watchdog-test.service 2>/dev/null || true
+
+          : "RemainAfterExit= tests"
+          systemd-run -p Type=oneshot -p RemainAfterExit=yes --unit=remain-test true
+          sleep 1
+          systemctl is-active remain-test.service
+          systemctl stop remain-test.service
+          (! systemctl is-active remain-test.service)
+
           : "Error handling for clean-up codepaths"
           (! systemd-run --wait --pipe false)
           TESTEOF
