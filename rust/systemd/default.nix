@@ -9519,6 +9519,93 @@
           RLEOF
           chmod +x TEST-74-AUX-UTILS.remain-lifecycle.sh
 
+          # systemctl show ActiveEnterTimestamp
+          cat > TEST-74-AUX-UTILS.enter-timestamp.sh << 'ETEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "ActiveEnterTimestamp is set for active service"
+          TS="$(systemctl show -P ActiveEnterTimestamp systemd-journald.service)"
+          [[ -n "$TS" ]]
+
+          : "InactiveExitTimestamp is set for active service"
+          TS="$(systemctl show -P InactiveExitTimestamp systemd-journald.service)"
+          [[ -n "$TS" ]]
+          ETEOF
+          chmod +x TEST-74-AUX-UTILS.enter-timestamp.sh
+
+          # systemctl show NeedDaemonReload
+          cat > TEST-74-AUX-UTILS.need-reload.sh << 'NREOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "NeedDaemonReload is no after fresh load"
+          NR="$(systemctl show -P NeedDaemonReload systemd-journald.service)"
+          [[ "$NR" == "no" ]]
+          NREOF
+          chmod +x TEST-74-AUX-UTILS.need-reload.sh
+
+          # systemctl show CanStart/CanStop/CanReload
+          cat > TEST-74-AUX-UTILS.can-operations.sh << 'COEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "CanStart is yes for regular service"
+          CS="$(systemctl show -P CanStart systemd-journald.service)"
+          [[ "$CS" == "yes" ]]
+
+          : "CanStop is yes for regular service"
+          CS="$(systemctl show -P CanStop systemd-journald.service)"
+          [[ "$CS" == "yes" ]]
+          COEOF
+          chmod +x TEST-74-AUX-UTILS.can-operations.sh
+
+          # systemctl cat shows drop-in content
+          cat > TEST-74-AUX-UTILS.cat-dropin-content.sh << 'CDCEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "Create unit with drop-in and verify cat shows both"
+          UNIT="cat-drop-$RANDOM"
+          cat > "/run/systemd/system/$UNIT.service" << UEOF
+          [Unit]
+          Description=Cat dropin test
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          UEOF
+          mkdir -p "/run/systemd/system/$UNIT.service.d"
+          cat > "/run/systemd/system/$UNIT.service.d/override.conf" << UEOF
+          [Service]
+          Environment=CATTEST=yes
+          UEOF
+          systemctl daemon-reload
+          OUT="$(systemctl cat "$UNIT.service")"
+          echo "$OUT" | grep -q "Cat dropin test"
+          echo "$OUT" | grep -q "CATTEST=yes"
+          rm -rf "/run/systemd/system/$UNIT.service" "/run/systemd/system/$UNIT.service.d"
+          systemctl daemon-reload
+          CDCEOF
+          chmod +x TEST-74-AUX-UTILS.cat-dropin-content.sh
+
+          # systemctl show StatusErrno
+          cat > TEST-74-AUX-UTILS.status-errno.sh << 'SEEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "StatusErrno is 0 for successful service"
+          UNIT="errno-ok-$RANDOM"
+          systemd-run --wait --unit="$UNIT" true
+          SE="$(systemctl show -P StatusErrno "$UNIT.service")"
+          [[ "$SE" == "0" ]]
+          SEEOF
+          chmod +x TEST-74-AUX-UTILS.status-errno.sh
+
           rm -f TEST-74-AUX-UTILS.busctl.sh \
                TEST-74-AUX-UTILS.capsule.sh \
                TEST-74-AUX-UTILS.firstboot.sh \
