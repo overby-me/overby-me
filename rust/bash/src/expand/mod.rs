@@ -1768,19 +1768,26 @@ fn glob_expand(field: &str) -> Vec<String> {
         let needs_custom_match = {
             let pb = pattern.as_bytes();
             let mut found = false;
-            // Check for balanced extglob patterns
+            // Check for balanced extglob patterns (parens AND brackets must be balanced)
             for i in 0..pb.len().saturating_sub(1) {
                 if pb[i + 1] == b'('
                     && matches!(pb[i], b'+' | b'@' | b'?' | b'!' | b'*')
                 {
                     let mut depth = 1;
                     let mut j = i + 2;
+                    let mut bracket_depth = 0i32;
                     while j < pb.len() && depth > 0 {
-                        if pb[j] == b'(' { depth += 1; }
-                        if pb[j] == b')' { depth -= 1; }
+                        match pb[j] {
+                            b'(' => depth += 1,
+                            b')' if bracket_depth == 0 => depth -= 1,
+                            b'[' => bracket_depth += 1,
+                            b']' if bracket_depth > 0 => bracket_depth -= 1,
+                            _ => {}
+                        }
                         j += 1;
                     }
-                    if depth == 0 {
+                    // Only valid if both parens and brackets are balanced
+                    if depth == 0 && bracket_depth == 0 {
                         found = true;
                         break;
                     }
@@ -1863,6 +1870,16 @@ fn glob_expand(field: &str) -> Vec<String> {
                     let mut results: Vec<String> = paths
                         .filter_map(|p| p.ok())
                         .map(|p| p.to_string_lossy().to_string())
+                        // Strip ./ prefix from glob results
+                        .map(|s| {
+                            if s.starts_with("./") && s.len() > 2 {
+                                s[2..].to_string()
+                            } else {
+                                s
+                            }
+                        })
+                        // Exclude . and .. from glob results (bash never includes them)
+                        .filter(|s| s != "." && s != ".." && s != "./" && s != "../")
                         .collect();
                     if results.is_empty() {
                         vec![remove_quotes(field)]
