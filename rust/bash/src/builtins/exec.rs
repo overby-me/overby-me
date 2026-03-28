@@ -82,7 +82,12 @@ pub(super) fn builtin_eval(shell: &mut Shell, args: &[String]) -> i32 {
                     .first()
                     .map(|s| s.as_str())
                     .unwrap_or("bash");
-                let eval_line = parser.current_line();
+                // Use cmd_end_line + 1 for eval error position
+                // (bash reports eval errors at the post-parse position)
+                let eval_line = shell
+                    .cmd_end_line
+                    .map(|end| end + 2)
+                    .unwrap_or_else(|| parser.current_line());
                 eprintln!(
                     "{}: eval: line {}: syntax error: unexpected end of file from `{}' command on line {}",
                     name, eval_line, cmd, cmd_line
