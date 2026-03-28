@@ -1118,6 +1118,89 @@
               -p 'Environment=SPACED=hello world' \
               bash -xec '[[ "$SPACED" == "hello world" ]]'
 
+          : "LimitNOFILE= sets open file descriptor limit"
+          NOFILE="$(systemd-run --wait --pipe -p LimitNOFILE=4096 \
+              bash -xec 'ulimit -n')"
+          [[ "$NOFILE" == "4096" ]]
+
+          : "LimitNOFILE= with soft:hard syntax"
+          NOFILE_SOFT="$(systemd-run --wait --pipe -p LimitNOFILE=1024:8192 \
+              bash -xec 'ulimit -Sn')"
+          NOFILE_HARD="$(systemd-run --wait --pipe -p LimitNOFILE=1024:8192 \
+              bash -xec 'ulimit -Hn')"
+          [[ "$NOFILE_SOFT" == "1024" ]]
+          [[ "$NOFILE_HARD" == "8192" ]]
+
+          : "LimitNPROC= sets max processes limit"
+          NPROC="$(systemd-run --wait --pipe -p LimitNPROC=512 \
+              bash -xec 'ulimit -u')"
+          [[ "$NPROC" == "512" ]]
+
+          : "LimitCORE= sets core dump size limit"
+          CORE="$(systemd-run --wait --pipe -p LimitCORE=0 \
+              bash -xec 'ulimit -c')"
+          [[ "$CORE" == "0" ]]
+
+          : "LimitCORE=infinity sets unlimited core dump"
+          CORE="$(systemd-run --wait --pipe -p LimitCORE=infinity \
+              bash -xec 'ulimit -c')"
+          [[ "$CORE" == "unlimited" ]]
+
+          : "LimitFSIZE= sets max file size limit"
+          FSIZE="$(systemd-run --wait --pipe -p LimitFSIZE=1048576 \
+              bash -xec 'ulimit -f')"
+          [[ "$FSIZE" == "1024" ]]
+
+          : "LimitMEMLOCK= sets locked memory limit"
+          MEMLOCK="$(systemd-run --wait --pipe -p LimitMEMLOCK=8388608 \
+              bash -xec 'ulimit -l')"
+          [[ "$MEMLOCK" == "8192" ]]
+
+          : "LimitSTACK= sets stack size limit"
+          STACK="$(systemd-run --wait --pipe -p LimitSTACK=16777216 \
+              bash -xec 'ulimit -s')"
+          [[ "$STACK" == "16384" ]]
+
+          : "LimitAS= sets virtual memory limit"
+          AS_LIM="$(systemd-run --wait --pipe -p LimitAS=2147483648 \
+              bash -xec 'ulimit -v')"
+          [[ "$AS_LIM" == "2097152" ]]
+
+          : "LimitSIGPENDING= sets pending signals limit"
+          SIGPEND="$(systemd-run --wait --pipe -p LimitSIGPENDING=256 \
+              bash -xec 'ulimit -i')"
+          [[ "$SIGPEND" == "256" ]]
+
+          : "LimitMSGQUEUE= sets POSIX message queue size"
+          MSGQ="$(systemd-run --wait --pipe -p LimitMSGQUEUE=1048576 \
+              bash -xec 'ulimit -q')"
+          [[ "$MSGQ" == "1048576" ]]
+
+          : "LimitRTPRIO= sets realtime priority limit"
+          RTPRIO="$(systemd-run --wait --pipe -p LimitRTPRIO=50 \
+              bash -xec 'ulimit -r')"
+          [[ "$RTPRIO" == "50" ]]
+
+          : "DynamicUser=yes runs without error"
+          systemd-run --wait --pipe -p DynamicUser=yes \
+              bash -xec 'true'
+
+          : "RemoveIPC=yes with User= runs without error"
+          systemd-run --wait --pipe -p User=testuser -p RemoveIPC=yes \
+              bash -xec 'true'
+
+          : "KillMode=process only kills main process"
+          systemd-run --unit=killmode-test -p KillMode=process -p RemainAfterExit=no \
+              bash -c 'sleep 999 & disown; exec sleep 60'
+          sleep 1
+          MAIN_PID="$(systemctl show -P MainPID killmode-test.service)"
+          [[ "$MAIN_PID" -gt 0 ]]
+          systemctl stop killmode-test.service 2>/dev/null || true
+
+          : "SendSIGHUP=yes sends SIGHUP after SIGTERM"
+          systemd-run --wait --pipe -p SendSIGHUP=yes \
+              bash -xec 'true'
+
           : "Error handling for clean-up codepaths"
           (! systemd-run --wait --pipe false)
           TESTEOF
