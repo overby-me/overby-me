@@ -1263,6 +1263,34 @@
           DREOF
           chmod +x TEST-04-JOURNAL.directory.sh
 
+          # journalctl --output with cat shows messages only
+          cat > TEST-04-JOURNAL.cat-output.sh << 'COEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl -o cat -b shows plain messages"
+          OUT="$(journalctl --no-pager -o cat -b -n 5)"
+          [[ -n "$OUT" ]]
+          # Cat output should not contain JSON braces
+          (! echo "$OUT" | grep -q "^{")
+          COEOF
+          chmod +x TEST-04-JOURNAL.cat-output.sh
+
+          # journalctl with multiple -o formats don't crash
+          cat > TEST-04-JOURNAL.all-formats.sh << 'AFEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "All supported output formats produce output"
+          for fmt in short json cat export json-pretty short-iso short-precise short-monotonic; do
+              OUT="$(journalctl --no-pager -o "$fmt" -n 1 2>&1)" || true
+              [[ -n "$OUT" ]]
+          done
+          AFEOF
+          chmod +x TEST-04-JOURNAL.all-formats.sh
+
           rm -f TEST-04-JOURNAL.bsod.sh \
                TEST-04-JOURNAL.cat.sh \
                TEST-04-JOURNAL.corrupted-journals.sh \
@@ -8626,6 +8654,21 @@
           systemd-cgtop --iterations=1 --batch > /dev/null || true
           CCEOF
           chmod +x TEST-19-CGROUP.cgls-cgtop.sh
+
+          cat > TEST-19-CGROUP.managed-oom.sh << 'MOEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "ManagedOOMSwap property accepted"
+          UNIT="cg-oom-$RANDOM"
+          systemd-run --wait --unit="$UNIT" -p ManagedOOMSwap=auto true || true
+
+          : "ManagedOOMMemoryPressure property accepted"
+          UNIT2="cg-oom2-$RANDOM"
+          systemd-run --wait --unit="$UNIT2" -p ManagedOOMMemoryPressure=auto true || true
+          MOEOF
+          chmod +x TEST-19-CGROUP.managed-oom.sh
         '';
       }
       {
