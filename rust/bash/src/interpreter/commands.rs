@@ -1008,9 +1008,6 @@ impl Shell {
             self.xtrace_write(&format!("+ {}", quoted.join(" ")));
         }
 
-        // Alias expansion now happens at the lexer level (during parsing),
-        // not at runtime. See Lexer::try_alias_expand().
-
         let command_name = &expanded_words[0];
         let args = &expanded_words[1..];
 
