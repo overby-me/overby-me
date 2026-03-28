@@ -1446,18 +1446,25 @@ pub(super) fn builtin_mapfile(shell: &mut Shell, args: &[String]) -> i32 {
         let _ = stdin.lock().read_to_end(&mut input_data);
     }
 
-    // Split by delimiter
+    // Split by delimiter byte
+    // Use raw byte splitting to handle non-UTF-8 delimiters (like $'\xff')
     let mut start = 0;
     for pos in 0..input_data.len() {
         if input_data[pos] == delim {
-            let line = String::from_utf8_lossy(&input_data[start..=pos]).to_string();
+            // Include delimiter in the line (will be stripped by -t if needed)
+            let segment = &input_data[start..pos];
+            // Convert bytes to string, treating each byte as a Latin-1 character
+            // to preserve non-UTF-8 bytes (like bash does)
+            let mut line: String = segment.iter().map(|&b| b as char).collect();
+            line.push(delim as char);
             lines.push(line);
             start = pos + 1;
         }
     }
     // Remaining data (no trailing delimiter)
     if start < input_data.len() {
-        let line = String::from_utf8_lossy(&input_data[start..]).to_string();
+        let segment = &input_data[start..];
+        let line: String = segment.iter().map(|&b| b as char).collect();
         lines.push(line);
     }
 

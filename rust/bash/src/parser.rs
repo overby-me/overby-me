@@ -1366,7 +1366,12 @@ impl Parser {
                                         }
                                     }
                                 }
-                                _ => {}
+                                other => {
+                                    // Include raw text of variable expansions ($i, ${i}, etc.)
+                                    name_text.push_str(&crate::ast::word_to_string(&vec![
+                                        other.clone(),
+                                    ]));
+                                }
                             }
                         }
                         if found_eq {
