@@ -2264,12 +2264,28 @@
                       --path-property=PathChanged=/root/bar \
                       true
           systemctl cat "$UNIT.service"
+          systemctl cat "$UNIT.path"
+          systemctl is-active "$UNIT.path"
           test -f "/run/systemd/transient/$UNIT.path"
           grep -q "^PathExists=/tmp$" "/run/systemd/transient/$UNIT.path"
           grep -q "^PathExists=/tmp/foo$" "/run/systemd/transient/$UNIT.path"
           grep -q "^PathChanged=/root/bar$" "/run/systemd/transient/$UNIT.path"
           grep -qE "^ExecStart=.*true.*$" "/run/systemd/transient/$UNIT.service"
-          systemctl stop "$UNIT.service" || :
+          systemctl stop "$UNIT.path" "$UNIT.service" || :
+
+          : "Transient path unit triggers service on file creation"
+          UNIT="path-func-$RANDOM"
+          rm -f "/tmp/path-trigger-$UNIT" "/tmp/path-result-$UNIT"
+          systemd-run --unit="$UNIT" \
+                      --path-property=PathExists="/tmp/path-trigger-$UNIT" \
+                      --remain-after-exit \
+                      touch "/tmp/path-result-$UNIT"
+          systemctl is-active "$UNIT.path"
+          touch "/tmp/path-trigger-$UNIT"
+          timeout 15 bash -c "until [[ -f /tmp/path-result-$UNIT ]]; do sleep 0.5; done"
+          [[ -f "/tmp/path-result-$UNIT" ]]
+          systemctl stop "$UNIT.path" "$UNIT.service" 2>/dev/null || true
+          rm -f "/tmp/path-trigger-$UNIT" "/tmp/path-result-$UNIT"
 
           : "Transient socket unit"
           UNIT="socket-0-$RANDOM"
