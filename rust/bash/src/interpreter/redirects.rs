@@ -1,13 +1,13 @@
 use super::*;
 
 impl Shell {
-    fn dup_error_message(src_fd: i32, e: &nix::Error) -> String {
+    fn dup_error_message(raw_target: &str, e: &nix::Error) -> String {
         let msg = match *e {
             nix::Error::EBADF => "Bad file descriptor",
             nix::Error::EINVAL => "invalid value",
             _ => "Bad file descriptor",
         };
-        format!("{}: {}", src_fd, msg)
+        format!("{}: {}", raw_target, msg)
     }
 
     #[cfg(unix)]
@@ -21,6 +21,8 @@ impl Shell {
         let is_var_fd = |redir: &Redirection| matches!(&redir.fd, Some(RedirFd::Var(_)));
 
         for redir in redirections {
+            // Get raw target text (before expansion) for error messages
+            let raw_target = crate::ast::word_to_string(&redir.target);
             // Expand redirect target without glob expansion
             let target_str = self.expand_word_single(&redir.target);
 
@@ -205,7 +207,7 @@ impl Shell {
                                 saved.push((fd, saved_fd));
                             }
                             nix::unistd::dup2(src_fd, fd)
-                                .map_err(|e| Self::dup_error_message(src_fd, &e))?;
+                                .map_err(|e| Self::dup_error_message(&raw_target, &e))?;
                             self.coproc_checkfd(src_fd);
                             nix::unistd::close(src_fd).ok();
                         }
@@ -220,7 +222,7 @@ impl Shell {
                             saved.push((fd, saved_fd));
                         }
                         nix::unistd::dup2(src_fd, fd)
-                            .map_err(|e| Self::dup_error_message(src_fd, &e))?;
+                            .map_err(|e| Self::dup_error_message(&raw_target, &e))?;
                     } else if redir.fd.is_none() {
                         // >&word where word is not a number and no explicit fd —
                         // redirect both stdout and stderr to the file
@@ -265,7 +267,7 @@ impl Shell {
                                 saved.push((fd, saved_fd));
                             }
                             nix::unistd::dup2(src_fd, fd)
-                                .map_err(|e| Self::dup_error_message(src_fd, &e))?;
+                                .map_err(|e| Self::dup_error_message(&raw_target, &e))?;
                             self.coproc_checkfd(src_fd);
                             nix::unistd::close(src_fd).ok();
                         }
@@ -280,7 +282,7 @@ impl Shell {
                             saved.push((fd, saved_fd));
                         }
                         nix::unistd::dup2(src_fd, fd)
-                            .map_err(|e| Self::dup_error_message(src_fd, &e))?;
+                            .map_err(|e| Self::dup_error_message(&raw_target, &e))?;
                     }
                 }
                 RedirectKind::HereDoc(_, _) | RedirectKind::HereString => {

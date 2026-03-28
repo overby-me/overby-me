@@ -700,12 +700,17 @@ fn format_pipeline_indent(pipeline: &Pipeline, indent: usize) -> String {
             s.push_str("time ");
         }
     }
-    let cmds: Vec<String> = pipeline
-        .commands
-        .iter()
-        .map(|c| format_command_indent(c, indent))
-        .collect();
-    s.push_str(&cmds.join(" | "));
+    for (i, cmd) in pipeline.commands.iter().enumerate() {
+        if i > 0 {
+            // Check if the pipe connection has |& (pipe stderr)
+            if i - 1 < pipeline.pipe_stderr.len() && pipeline.pipe_stderr[i - 1] {
+                s.push_str(" 2>&1 | ");
+            } else {
+                s.push_str(" | ");
+            }
+        }
+        s.push_str(&format_command_indent(cmd, indent));
+    }
     s
 }
 
