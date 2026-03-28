@@ -977,7 +977,7 @@ impl Shell {
         // Check for function
         let status = if let Some(func_body) = self.functions.get(command_name).cloned() {
             // Apply prefix assignments temporarily for function calls
-            let prefix_saves: Vec<(String, Option<String>)> = cmd
+            let prefix_saves: Vec<(String, Option<String>, Option<String>)> = cmd
                 .assignments
                 .iter()
                 .map(|a| {
@@ -985,35 +985,48 @@ impl Shell {
                         AssignValue::Scalar(w) => self.expand_word_single(w),
                         _ => String::new(),
                     };
-                    let old = self.vars.get(&a.name).cloned();
-                    if a.append {
+                    let old_var = self.vars.get(&a.name).cloned();
+                    let old_export = self.exports.get(&a.name).cloned();
+                    let final_val = if a.append {
                         if self.integer_vars.contains(&a.name) {
-                            let existing = self.eval_arith_expr(old.as_deref().unwrap_or("0"));
+                            let existing = self.eval_arith_expr(old_var.as_deref().unwrap_or("0"));
                             let addend = self.eval_arith_expr(&v);
-                            self.vars
-                                .insert(a.name.clone(), (existing + addend).to_string());
+                            (existing + addend).to_string()
                         } else {
-                            let existing = old.as_deref().unwrap_or("");
-                            self.vars
-                                .insert(a.name.clone(), format!("{}{}", existing, v));
+                            let existing = old_var.as_deref().unwrap_or("");
+                            format!("{}{}", existing, v)
                         }
                     } else {
-                        self.vars.insert(a.name.clone(), v);
-                    }
-                    (a.name.clone(), old)
+                        v
+                    };
+                    self.vars.insert(a.name.clone(), final_val.clone());
+                    // Export prefix assignments so printenv/child processes see them
+                    self.exports.insert(a.name.clone(), final_val.clone());
+                    unsafe { std::env::set_var(&a.name, &final_val) };
+                    (a.name.clone(), old_var, old_export)
                 })
                 .collect();
 
             let result = self.run_function(&func_body, command_name, args);
 
-            // Restore prefix assignments
-            for (k, old) in prefix_saves {
-                match old {
+            // Restore prefix assignments (vars + exports)
+            for (k, old_var, old_export) in prefix_saves {
+                match old_var {
                     Some(v) => {
-                        self.vars.insert(k, v);
+                        self.vars.insert(k.clone(), v);
                     }
                     None => {
                         self.vars.remove(&k);
+                    }
+                }
+                match old_export {
+                    Some(v) => {
+                        self.exports.insert(k.clone(), v.clone());
+                        unsafe { std::env::set_var(&k, &v) };
+                    }
+                    None => {
+                        self.exports.remove(&k);
+                        unsafe { std::env::remove_var(&k) };
                     }
                 }
             }
