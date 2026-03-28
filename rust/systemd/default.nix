@@ -4722,6 +4722,30 @@
           systemctl stop "$PUNIT.path" "$PUNIT.service" 2>/dev/null || true
           rm -f "/tmp/mod-trigger-$PUNIT" "/tmp/mod-result-$PUNIT"
 
+          : "PathExists= unit file with dedicated service"
+          PUNIT="path-unit-file-$RANDOM"
+          rm -f "/tmp/path-uf-trigger-$PUNIT" "/tmp/path-uf-result-$PUNIT"
+          cat > "/run/systemd/system/$PUNIT.path" << EOF
+          [Path]
+          PathExists=/tmp/path-uf-trigger-$PUNIT
+          EOF
+          cat > "/run/systemd/system/$PUNIT.service" << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=touch /tmp/path-uf-result-$PUNIT
+          RemainAfterExit=yes
+          EOF
+          systemctl daemon-reload
+          systemctl start "$PUNIT.path"
+          systemctl is-active "$PUNIT.path"
+          touch "/tmp/path-uf-trigger-$PUNIT"
+          timeout 15 bash -c "until [[ -f /tmp/path-uf-result-$PUNIT ]]; do sleep 0.5; done"
+          [[ -f "/tmp/path-uf-result-$PUNIT" ]]
+          systemctl stop "$PUNIT.path" "$PUNIT.service" 2>/dev/null || true
+          rm -f "/tmp/path-uf-trigger-$PUNIT" "/tmp/path-uf-result-$PUNIT"
+          rm -f "/run/systemd/system/$PUNIT.path" "/run/systemd/system/$PUNIT.service"
+          systemctl daemon-reload
+
           touch /testok
           PATHEOF
         '';
@@ -5204,6 +5228,69 @@
           (! systemd-notify --ready) || true
           NTEOF
           chmod +x TEST-74-AUX-UTILS.notify.sh
+
+          # Custom systemd-analyze standalone tests (no D-Bus needed)
+          cat > TEST-74-AUX-UTILS.analyze-standalone.sh << 'ANEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "systemd-analyze calendar parses calendar specs"
+          systemd-analyze calendar "daily"
+          systemd-analyze calendar "*-*-* 00:00:00"
+          systemd-analyze calendar "Mon *-*-* 12:00:00"
+
+          : "systemd-analyze calendar --iterations shows next N occurrences"
+          systemd-analyze calendar --iterations=3 "hourly"
+
+          : "systemd-analyze timespan parses time spans"
+          systemd-analyze timespan "1h 30min"
+          systemd-analyze timespan "2days"
+          systemd-analyze timespan "500ms"
+
+          : "systemd-analyze timestamp parses timestamps"
+          systemd-analyze timestamp "now"
+          systemd-analyze timestamp "today"
+          systemd-analyze timestamp "yesterday"
+
+          : "systemd-analyze unit-paths shows search paths"
+          systemd-analyze unit-paths
+
+          : "Invalid inputs return errors"
+          (! systemd-analyze calendar "not-a-valid-spec-at-all")
+          (! systemd-analyze timespan "not-a-timespan")
+          ANEOF
+          chmod +x TEST-74-AUX-UTILS.analyze-standalone.sh
+
+          # Custom systemd-cat test
+          cat > TEST-74-AUX-UTILS.cat.sh << 'CATEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "systemd-cat --help shows usage"
+          systemd-cat --help
+
+          : "systemd-cat --version shows version info"
+          systemd-cat --version
+
+          : "systemd-cat pipes message to journal"
+          TAG="cat-test-$$-$RANDOM"
+          echo "hello from cat test" | systemd-cat -t "$TAG"
+          journalctl --sync
+          # Use a retry loop since journal write may take time
+          timeout 10 bash -c "until journalctl --no-pager -t '$TAG' | grep -q 'hello from cat test'; do sleep 1; done"
+
+          : "systemd-cat -p sets priority"
+          echo "warning test" | systemd-cat -t "$TAG" -p warning
+          journalctl --sync
+          sleep 1
+          CATEOF
+          chmod +x TEST-74-AUX-UTILS.cat.sh
 
           rm -f TEST-74-AUX-UTILS.busctl.sh \
                TEST-74-AUX-UTILS.capsule.sh \
