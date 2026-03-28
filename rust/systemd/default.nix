@@ -1824,9 +1824,10 @@
 
           at_exit() {
               set +e
-              systemctl stop binds-to-test-{a,b}.service stop-prop-test-{1,2}.service part-of-test-{x,y}.service 2>/dev/null
+              systemctl stop binds-to-test-{a,b}.service stop-prop-test-{1,2}.service conflict-test-{1,2}.service part-of-test-{x,y}.service 2>/dev/null
               rm -f /run/systemd/system/binds-to-test-{a,b}.service
               rm -f /run/systemd/system/stop-prop-test-{1,2}.service
+              rm -f /run/systemd/system/conflict-test-{1,2}.service
               rm -f /run/systemd/system/part-of-test-{x,y}.service
               systemctl daemon-reload
           }
@@ -1880,6 +1881,31 @@
           systemctl stop stop-prop-test-2.service
           timeout 10 bash -c 'until ! systemctl is-active stop-prop-test-1.service 2>/dev/null; do sleep 0.5; done'
           (! systemctl is-active stop-prop-test-1.service)
+
+          : "Conflicts= stops conflicting unit when starting"
+          cat > /run/systemd/system/conflict-test-1.service << EOF
+          [Unit]
+          Conflicts=conflict-test-2.service
+          [Service]
+          ExecStart=sleep infinity
+          EOF
+
+          cat > /run/systemd/system/conflict-test-2.service << EOF
+          [Service]
+          ExecStart=sleep infinity
+          EOF
+
+          systemctl daemon-reload
+          systemctl start conflict-test-2.service
+          systemctl is-active conflict-test-2.service
+
+          # Starting 1 should stop 2 (Conflicts semantics)
+          systemctl start conflict-test-1.service
+          systemctl is-active conflict-test-1.service
+          timeout 10 bash -c 'until ! systemctl is-active conflict-test-2.service 2>/dev/null; do sleep 0.5; done'
+          (! systemctl is-active conflict-test-2.service)
+          systemctl stop conflict-test-1.service
+          rm -f /run/systemd/system/conflict-test-{1,2}.service
 
           : "PartOf= stops dependent when parent unit stops"
           cat > /run/systemd/system/part-of-test-y.service << EOF
