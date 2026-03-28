@@ -4193,6 +4193,160 @@
           CONDEOF
                     chmod +x TEST-23-UNIT-FILE.conditions.sh
 
+                    # Custom StandardOutput=file: test
+                    cat > TEST-23-UNIT-FILE.standard-output.sh << 'STDOUT_EOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              rm -f /run/systemd/system/stdout-test-*.service
+              rm -f /tmp/stdout-test-{out,err}
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "StandardOutput=file: writes to file"
+          cat > /run/systemd/system/stdout-test-file.service << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=bash -c 'echo hello-file'
+          StandardOutput=file:/tmp/stdout-test-out
+          StandardError=file:/tmp/stdout-test-err
+          EOF
+          systemctl daemon-reload
+          systemctl start stdout-test-file.service
+          [[ "$(cat /tmp/stdout-test-out)" == "hello-file" ]]
+
+          : "StandardOutput=append: appends to existing file"
+          cat > /run/systemd/system/stdout-test-append.service << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=bash -c 'echo second-line'
+          StandardOutput=append:/tmp/stdout-test-out
+          EOF
+          systemctl daemon-reload
+          systemctl start stdout-test-append.service
+          grep -q "hello-file" /tmp/stdout-test-out
+          grep -q "second-line" /tmp/stdout-test-out
+
+          : "StandardOutput=truncate: overwrites file"
+          cat > /run/systemd/system/stdout-test-trunc.service << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=bash -c 'echo only-this'
+          StandardOutput=truncate:/tmp/stdout-test-out
+          EOF
+          systemctl daemon-reload
+          systemctl start stdout-test-trunc.service
+          [[ "$(cat /tmp/stdout-test-out)" == "only-this" ]]
+          STDOUT_EOF
+                    chmod +x TEST-23-UNIT-FILE.standard-output.sh
+
+                    # Custom Environment/EnvironmentFile test
+                    cat > TEST-23-UNIT-FILE.environment.sh << 'ENV_EOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              rm -f /run/systemd/system/env-test-*.service
+              rm -f /tmp/env-test-out /tmp/env-file-test
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "Environment= passes variables to service"
+          cat > /run/systemd/system/env-test-basic.service << EOF
+          [Service]
+          Type=oneshot
+          Environment=MY_VAR=hello MY_OTHER=world
+          ExecStart=bash -c 'echo "\$MY_VAR \$MY_OTHER" > /tmp/env-test-out'
+          EOF
+          systemctl daemon-reload
+          systemctl start env-test-basic.service
+          [[ "$(cat /tmp/env-test-out)" == "hello world" ]]
+
+          : "EnvironmentFile= loads variables from file"
+          printf 'FROM_FILE=loaded\nANOTHER=value\n' > /tmp/env-file-test
+          cat > /run/systemd/system/env-test-file.service << EOF
+          [Service]
+          Type=oneshot
+          EnvironmentFile=/tmp/env-file-test
+          ExecStart=bash -c 'echo "\$FROM_FILE \$ANOTHER" > /tmp/env-test-out'
+          EOF
+          systemctl daemon-reload
+          systemctl start env-test-file.service
+          [[ "$(cat /tmp/env-test-out)" == "loaded value" ]]
+
+          : "Environment= overrides EnvironmentFile= for same key"
+          cat > /run/systemd/system/env-test-override.service << EOF
+          [Service]
+          Type=oneshot
+          EnvironmentFile=/tmp/env-file-test
+          Environment=FROM_FILE=override
+          ExecStart=bash -c 'echo "\$FROM_FILE" > /tmp/env-test-out'
+          EOF
+          systemctl daemon-reload
+          systemctl start env-test-override.service
+          [[ "$(cat /tmp/env-test-out)" == "override" ]]
+          ENV_EOF
+                    chmod +x TEST-23-UNIT-FILE.environment.sh
+
+                    # Custom drop-in override test
+                    cat > TEST-23-UNIT-FILE.drop-in.sh << 'DROPIN_EOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              systemctl stop dropin-test.service 2>/dev/null
+              rm -f /run/systemd/system/dropin-test.service
+              rm -rf /run/systemd/system/dropin-test.service.d
+              rm -f /tmp/dropin-test-out
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "Drop-in override.conf replaces property"
+          cat > /run/systemd/system/dropin-test.service << EOF
+          [Service]
+          Type=oneshot
+          Environment=MY_VAR=original
+          ExecStart=bash -c 'echo \$MY_VAR > /tmp/dropin-test-out'
+          EOF
+          systemctl daemon-reload
+          systemctl start dropin-test.service
+          [[ "$(cat /tmp/dropin-test-out)" == "original" ]]
+
+          mkdir -p /run/systemd/system/dropin-test.service.d
+          cat > /run/systemd/system/dropin-test.service.d/override.conf << EOF
+          [Service]
+          Environment=MY_VAR=overridden
+          EOF
+          systemctl daemon-reload
+          systemctl start dropin-test.service
+          [[ "$(cat /tmp/dropin-test-out)" == "overridden" ]]
+
+          : "Drop-in can add Description"
+          cat > /run/systemd/system/dropin-test.service.d/desc.conf << EOF
+          [Unit]
+          Description=Drop-in Description Test
+          EOF
+          systemctl daemon-reload
+          [[ "$(systemctl show -P Description dropin-test.service)" == "Drop-in Description Test" ]]
+          DROPIN_EOF
+                    chmod +x TEST-23-UNIT-FILE.drop-in.sh
+
                     rm -f TEST-23-UNIT-FILE.ExtraFileDescriptors.sh \
                          TEST-23-UNIT-FILE.JoinsNamespaceOf.sh \
                          TEST-23-UNIT-FILE.openfile.sh \
