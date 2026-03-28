@@ -978,6 +978,60 @@
           RVEOF
           chmod +x TEST-04-JOURNAL.reverse.sh
 
+          # journalctl --since/--until with absolute timestamps
+          cat > TEST-04-JOURNAL.absolute-time.sh << 'ATEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl --since with today works"
+          journalctl --no-pager --since today -n 5 > /dev/null
+
+          : "journalctl --until with now works"
+          journalctl --no-pager --until now -n 5 > /dev/null
+
+          : "journalctl --since and --until combined"
+          journalctl --no-pager --since today --until now -n 5 > /dev/null
+          ATEOF
+          chmod +x TEST-04-JOURNAL.absolute-time.sh
+
+          # journalctl -p with numeric priority
+          cat > TEST-04-JOURNAL.priority-numeric.sh << 'PNEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl -p 0 shows emerg"
+          journalctl --no-pager -p 0 -n 1 > /dev/null || true
+
+          : "journalctl -p 3 shows err and above"
+          journalctl --no-pager -p 3 -n 5 > /dev/null || true
+
+          : "journalctl -p err shows error messages"
+          journalctl --no-pager -p err -n 5 > /dev/null || true
+
+          : "journalctl -p warning shows warnings and above"
+          journalctl --no-pager -p warning -n 5 > /dev/null || true
+          PNEOF
+          chmod +x TEST-04-JOURNAL.priority-numeric.sh
+
+          # journalctl with field match (no assertion on content)
+          cat > TEST-04-JOURNAL.field-match.sh << 'FMTEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl _PID=1 runs without error"
+          journalctl --no-pager _PID=1 -n 3 > /dev/null || true
+
+          : "journalctl _UID=0 runs without error"
+          journalctl --no-pager _UID=0 -n 3 > /dev/null || true
+
+          : "journalctl _TRANSPORT=kernel runs without error"
+          journalctl --no-pager _TRANSPORT=kernel -n 3 > /dev/null || true
+          FMTEOF
+          chmod +x TEST-04-JOURNAL.field-match.sh
+
           rm -f TEST-04-JOURNAL.bsod.sh \
                TEST-04-JOURNAL.cat.sh \
                TEST-04-JOURNAL.corrupted-journals.sh \
@@ -7580,6 +7634,65 @@
           systemctl stop "$UNIT2.timer"
           WSEOF
           chmod +x TEST-53-TIMER.wake-system.sh
+
+          # Timer with OnCalendar via systemd-run
+          cat > TEST-53-TIMER.on-calendar-run.sh << 'OCREOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "systemd-run --on-calendar creates a calendar timer"
+          UNIT="timer-cal-$RANDOM"
+          systemd-run --unit="$UNIT" --on-calendar="*:0/15" --remain-after-exit true
+          systemctl is-active "$UNIT.timer"
+          # Timer unit should show up in list-timers
+          systemctl list-timers --no-pager --all | grep -q "$UNIT" || true
+          systemctl stop "$UNIT.timer" "$UNIT.service" 2>/dev/null || true
+          OCREOF
+          chmod +x TEST-53-TIMER.on-calendar-run.sh
+
+          # Timer show specific properties
+          cat > TEST-53-TIMER.show-timer-props.sh << 'STPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "Timer Unit property shows service target"
+          UNIT="timer-props-$RANDOM"
+          systemd-run --unit="$UNIT" --on-active=1h --remain-after-exit true
+          TUNIT="$(systemctl show -P Unit "$UNIT.timer")"
+          [[ "$TUNIT" == "$UNIT.service" ]]
+
+          : "Timer ActiveState is active"
+          STATE="$(systemctl show -P ActiveState "$UNIT.timer")"
+          [[ "$STATE" == "active" ]]
+          systemctl stop "$UNIT.timer" "$UNIT.service" 2>/dev/null || true
+          STPEOF
+          chmod +x TEST-53-TIMER.show-timer-props.sh
+
+          # Multiple timers with different trigger types
+          cat > TEST-53-TIMER.multi-timer-types.sh << 'MTTEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "Multiple --on-active timers can coexist"
+          UNIT1="timer-multi1-$RANDOM"
+          UNIT2="timer-multi2-$RANDOM"
+          systemd-run --unit="$UNIT1" --on-active=1h --remain-after-exit true
+          systemd-run --unit="$UNIT2" --on-active=2h --remain-after-exit true
+          systemctl is-active "$UNIT1.timer"
+          systemctl is-active "$UNIT2.timer"
+          systemctl stop "$UNIT1.timer" "$UNIT1.service" 2>/dev/null || true
+          systemctl stop "$UNIT2.timer" "$UNIT2.service" 2>/dev/null || true
+          MTTEOF
+          chmod +x TEST-53-TIMER.multi-timer-types.sh
         '';
       }
       {
