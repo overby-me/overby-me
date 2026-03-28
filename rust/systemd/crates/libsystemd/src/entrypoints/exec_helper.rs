@@ -430,6 +430,13 @@ pub struct ExecHelperConfig {
     #[serde(default)]
     pub private_mounts: bool,
 
+    /// JoinsNamespaceOf= — PID of a running service whose mount namespace
+    /// this service should join via setns(2) instead of creating its own.
+    /// When set, setup_mount_namespace() is skipped entirely because the
+    /// target's namespace already has the required isolation applied.
+    #[serde(default)]
+    pub join_namespace_pid: Option<u32>,
+
     /// MountFlags= — mount propagation flags for the mount namespace.
     /// "shared" = MS_SHARED, "slave" = MS_SLAVE (default), "private" = MS_PRIVATE.
     /// See systemd.exec(5).
@@ -1571,15 +1578,48 @@ pub fn run_exec_helper() {
             || config.root_directory.is_some());
 
     if needs_mount_ns {
-        log::trace!(
-            "entering mount namespace (protect_system={}, private_dev={}, private_tmp={}, protect_kernel_tunables={}, protect_kernel_logs={})",
-            config.protect_system,
-            config.private_devices,
-            config.private_tmp,
-            config.protect_kernel_tunables,
-            config.protect_kernel_logs
-        );
-        setup_mount_namespace(&config);
+        if let Some(ns_pid) = config.join_namespace_pid {
+            // JoinsNamespaceOf=: join the running service's mount namespace
+            // instead of creating a new one. The target already has all
+            // isolation (PrivateTmp, ProtectSystem, etc.) applied.
+            log::trace!(
+                "joining mount namespace of PID {} (JoinsNamespaceOf)",
+                ns_pid
+            );
+            let ns_path = format!("/proc/{}/ns/mnt", ns_pid);
+            match std::fs::File::open(&ns_path) {
+                Ok(ns_file) => {
+                    use std::os::unix::io::AsRawFd;
+                    let ret = unsafe { libc::setns(ns_file.as_raw_fd(), libc::CLONE_NEWNS) };
+                    if ret != 0 {
+                        log::warn!(
+                            "Failed to join mount namespace of PID {}: {}",
+                            ns_pid,
+                            std::io::Error::last_os_error()
+                        );
+                        // Fall back to creating a new namespace
+                        setup_mount_namespace(&config);
+                    } else {
+                        log::trace!("successfully joined mount namespace of PID {}", ns_pid);
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Failed to open mount namespace of PID {}: {}", ns_pid, e);
+                    // Fall back to creating a new namespace
+                    setup_mount_namespace(&config);
+                }
+            }
+        } else {
+            log::trace!(
+                "entering mount namespace (protect_system={}, private_dev={}, private_tmp={}, protect_kernel_tunables={}, protect_kernel_logs={})",
+                config.protect_system,
+                config.private_devices,
+                config.private_tmp,
+                config.protect_kernel_tunables,
+                config.protect_kernel_logs
+            );
+            setup_mount_namespace(&config);
+        }
         log::trace!("mount namespace setup complete");
     } else {
         log::trace!("no mount namespace needed");

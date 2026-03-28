@@ -208,6 +208,7 @@ pub fn unit_from_parsed_service(conf: ParsedServiceConfig) -> Result<Unit, Strin
                     exec_main_exit_timestamp: None,
                     extend_timeout_usec: None,
                     extend_timeout_timestamp: None,
+                    join_namespace_pid: None,
                 },
             }),
         }),
@@ -844,6 +845,7 @@ fn make_common_from_parsed(
             default_instance: install.default_instance,
             loaded_at: std::time::SystemTime::now(),
             loaded_dropin_files: Vec::new(),
+            joins_namespace_of: unit.joins_namespace_of.clone(),
         },
         dependencies: Dependencies {
             wants,

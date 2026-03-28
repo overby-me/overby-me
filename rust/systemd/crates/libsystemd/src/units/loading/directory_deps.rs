@@ -1706,6 +1706,7 @@ pub fn generate_fstab_mount_units(unit_table: &mut HashMap<UnitId, Unit>) {
                         default_instance: None,
                         loaded_at: std::time::SystemTime::now(),
                         loaded_dropin_files: Vec::new(),
+                        joins_namespace_of: Vec::new(),
                     },
                     dependencies: Dependencies {
                         wants: Vec::new(),
@@ -1869,6 +1870,7 @@ pub fn generate_fstab_mount_units(unit_table: &mut HashMap<UnitId, Unit>) {
                     default_instance: None,
                     loaded_at: std::time::SystemTime::now(),
                     loaded_dropin_files: Vec::new(),
+                    joins_namespace_of: Vec::new(),
                 },
                 dependencies: Dependencies {
                     wants: Vec::new(),
@@ -2489,6 +2491,7 @@ mod tests {
                     start_limit_action: crate::units::UnitAction::None,
                     loaded_at: std::time::SystemTime::now(),
                     loaded_dropin_files: Vec::new(),
+                    joins_namespace_of: Vec::new(),
                 },
                 dependencies: Dependencies {
                     wants: vec![],

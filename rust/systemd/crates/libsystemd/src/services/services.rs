@@ -5,7 +5,7 @@ use crate::lock_ext::{MutexExt, RwLockExt};
 use crate::runtime_info::{PidEntry, RuntimeInfo};
 use crate::units::{
     ActivationSource, Commandline, CommandlinePrefix, KillMode, NotifyKind, ServiceConfig,
-    ServiceType, Timeout, UnitId, UnitStatus,
+    ServiceType, Specific, Timeout, UnitId, UnitStatus,
 };
 
 /// Check if a unit is masked (symlink to /dev/null) on disk.
@@ -189,6 +189,9 @@ pub struct Service {
     /// Timestamp when the last EXTEND_TIMEOUT_USEC was received.
     /// Used to compute the new deadline as `extend_timeout_timestamp + extend_timeout_usec`.
     pub extend_timeout_timestamp: Option<std::time::Instant>,
+    /// PID of a running service whose mount namespace this service should join
+    /// via setns(2), resolved from JoinsNamespaceOf= at start time.
+    pub join_namespace_pid: Option<u32>,
 }
 
 /// Environment variables passed to OnSuccess=/OnFailure= handler services.
@@ -733,6 +736,25 @@ impl Service {
             cmd.env("MONITOR_INVOCATION_ID", "0");
         }
 
+        // JoinsNamespaceOf=: join the target service's mount namespace so
+        // that preliminary ExecStart= commands in oneshot services see the
+        // same filesystem view (e.g. PrivateTmp) as the target.
+        if let Some(ns_pid) = self.join_namespace_pid {
+            use std::os::unix::process::CommandExt;
+            unsafe {
+                cmd.pre_exec(move || {
+                    let ns_path = format!("/proc/{}/ns/mnt", ns_pid);
+                    let ns_file = std::fs::File::open(&ns_path)?;
+                    use std::os::unix::io::AsRawFd;
+                    let ret = libc::setns(ns_file.as_raw_fd(), libc::CLONE_NEWNS);
+                    if ret != 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    Ok(())
+                });
+            }
+        }
+
         trace!("Run {cmdline:?} for service: {name}");
         let spawn_result = {
             let mut pid_table_locked = run_info.pid_table.lock_poisoned();
@@ -1091,4 +1113,142 @@ fn wait_for_helper_child(
         }
         std::thread::sleep(sleep_dur);
     }
+}
+
+/// Resolve JoinsNamespaceOf= to the PID of a running service whose mount
+/// namespace should be joined.
+///
+/// The algorithm mirrors systemd's `unit_get_exec_runtime()`:
+/// 1. **Forward lookup**: for each target in `joins_namespace_of`, check if
+///    that target service is running and has a PID.
+/// 2. **Reverse lookup**: scan all services that list *this* unit in their
+///    `JoinsNamespaceOf=` — if any are running, join their namespace.
+/// 3. **Transitive**: for each target in `joins_namespace_of`, check if any
+///    *other* running service also references the same target.
+pub fn resolve_joins_namespace_of(
+    this_name: &str,
+    joins_namespace_of: &[String],
+    run_info: &RuntimeInfo,
+) -> Option<u32> {
+    if joins_namespace_of.is_empty() {
+        // Even with an empty list, check the reverse direction: other services
+        // may reference *this* unit in their JoinsNamespaceOf=.
+        for unit in run_info.unit_table.values() {
+            if let Specific::Service(ref svc_spec) = unit.specific {
+                if unit.id.name == this_name {
+                    continue;
+                }
+                if unit
+                    .common
+                    .unit
+                    .joins_namespace_of
+                    .iter()
+                    .any(|t| t == this_name)
+                {
+                    let state = svc_spec.state.read_poisoned();
+                    let pid = state
+                        .srvc
+                        .main_pid
+                        .or(state.srvc.pid)
+                        .map(|p| p.as_raw() as u32);
+                    if let Some(p) = pid {
+                        trace!(
+                            "JoinsNamespaceOf: {} joining namespace of {} (reverse, PID {})",
+                            this_name, unit.id.name, p
+                        );
+                        return Some(p);
+                    }
+                }
+            }
+        }
+        return None;
+    }
+
+    // Forward lookup: check targets directly
+    for target_name in joins_namespace_of {
+        for unit in run_info.unit_table.values() {
+            if unit.id.name == *target_name
+                && let Specific::Service(ref svc_spec) = unit.specific
+            {
+                let state = svc_spec.state.read_poisoned();
+                let pid = state
+                    .srvc
+                    .main_pid
+                    .or(state.srvc.pid)
+                    .map(|p| p.as_raw() as u32);
+                if let Some(p) = pid {
+                    trace!(
+                        "JoinsNamespaceOf: {} joining namespace of {} (forward, PID {})",
+                        this_name, target_name, p
+                    );
+                    return Some(p);
+                }
+            }
+        }
+    }
+
+    // Reverse lookup: check services that reference this unit
+    for unit in run_info.unit_table.values() {
+        if let Specific::Service(ref svc_spec) = unit.specific {
+            if unit.id.name == this_name {
+                continue;
+            }
+            if unit
+                .common
+                .unit
+                .joins_namespace_of
+                .iter()
+                .any(|t| t == this_name)
+            {
+                let state = svc_spec.state.read_poisoned();
+                let pid = state
+                    .srvc
+                    .main_pid
+                    .or(state.srvc.pid)
+                    .map(|p| p.as_raw() as u32);
+                if let Some(p) = pid {
+                    trace!(
+                        "JoinsNamespaceOf: {} joining namespace of {} (reverse, PID {})",
+                        this_name, unit.id.name, p
+                    );
+                    return Some(p);
+                }
+            }
+        }
+    }
+
+    // Transitive: for each target in joins_namespace_of, check if any other
+    // running service also references the same target
+    for target_name in joins_namespace_of {
+        for unit in run_info.unit_table.values() {
+            if let Specific::Service(ref svc_spec) = unit.specific {
+                if unit.id.name == this_name {
+                    continue;
+                }
+                if unit
+                    .common
+                    .unit
+                    .joins_namespace_of
+                    .iter()
+                    .any(|t| t == target_name)
+                {
+                    let state = svc_spec.state.read_poisoned();
+                    let pid = state
+                        .srvc
+                        .main_pid
+                        .or(state.srvc.pid)
+                        .map(|p| p.as_raw() as u32);
+                    if let Some(p) = pid {
+                        trace!(
+                            "JoinsNamespaceOf: {} joining namespace of {} (transitive via {}, PID {})",
+                            this_name, unit.id.name, target_name, p
+                        );
+                        return Some(p);
+                    }
+                }
+            }
+        }
+    }
+
+    None
 }

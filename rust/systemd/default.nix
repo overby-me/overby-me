@@ -5060,9 +5060,6 @@
           # Remove subtests that require systemd-analyze (not implemented)
           rm -f TEST-23-UNIT-FILE.verify-unit-files.sh
 
-          # Remove JoinsNamespaceOf subtest (namespace joining causes
-          # "Resource temporarily unavailable" errors)
-          rm -f TEST-23-UNIT-FILE.JoinsNamespaceOf.sh
 
           # Remove percentj-wantedby subtest (Wants= for transient services
           # fails to start wanted unit from test data)

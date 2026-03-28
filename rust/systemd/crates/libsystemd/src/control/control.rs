@@ -3659,6 +3659,7 @@ fn create_transient_unit(
                 start_limit_action: crate::units::UnitAction::None,
                 loaded_at: std::time::SystemTime::now(),
                 loaded_dropin_files: Vec::new(),
+                joins_namespace_of: Vec::new(),
             },
             dependencies: Dependencies {
                 wants: dep_wants.iter().map(|n| unit_id_from_name(n)).collect(),
@@ -3721,6 +3722,7 @@ fn create_transient_unit(
                     exec_main_exit_timestamp: None,
                     extend_timeout_usec: None,
                     extend_timeout_timestamp: None,
+                    join_namespace_pid: None,
                 },
             }),
         }),
@@ -3884,6 +3886,7 @@ fn create_transient_unit(
                     start_limit_action: crate::units::UnitAction::None,
                     loaded_at: std::time::SystemTime::now(),
                     loaded_dropin_files: Vec::new(),
+                    joins_namespace_of: Vec::new(),
                 },
                 dependencies: Dependencies {
                     wants: vec![],
@@ -4028,6 +4031,7 @@ fn create_transient_unit(
                     start_limit_action: crate::units::UnitAction::None,
                     loaded_at: std::time::SystemTime::now(),
                     loaded_dropin_files: Vec::new(),
+                    joins_namespace_of: Vec::new(),
                 },
                 dependencies: Dependencies {
                     wants: vec![],
@@ -7554,6 +7558,7 @@ mod tests {
                     start_limit_action: crate::units::UnitAction::None,
                     loaded_at: std::time::SystemTime::now(),
                     loaded_dropin_files: Vec::new(),
+                    joins_namespace_of: Vec::new(),
                 },
                 dependencies: Dependencies {
                     wants: vec![],

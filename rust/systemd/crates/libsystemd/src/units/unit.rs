@@ -1296,6 +1296,12 @@ impl Unit {
             }
             LockedState::Service(mut state, conf) => {
                 let state = &mut *state;
+                // Resolve JoinsNamespaceOf= before starting the service
+                state.srvc.join_namespace_pid = crate::services::resolve_joins_namespace_of(
+                    &self.id.name,
+                    &self.common.unit.joins_namespace_of,
+                    run_info,
+                );
                 state.activate(&self.id, conf, &self.common.status, run_info, source)
             }
             LockedState::Mount(_, conf) => activate_mount(&self.id, conf, &self.common.status),
@@ -1510,6 +1516,11 @@ impl Unit {
                 }
                 LockedState::Service(mut state, conf) => {
                     let state = &mut *state;
+                    state.srvc.join_namespace_pid = crate::services::resolve_joins_namespace_of(
+                        &self.id.name,
+                        &self.common.unit.joins_namespace_of,
+                        run_info,
+                    );
                     state.reactivate(&self.id, conf, &self.common.status, run_info, source)
                 }
                 LockedState::Mount(_, conf) => {
@@ -2182,6 +2193,11 @@ pub struct UnitConfig {
     /// Paths to drop-in `.conf` files that were applied when this unit was loaded.
     /// Used by `NeedDaemonReload` to detect added or removed drop-in files.
     pub loaded_dropin_files: Vec<PathBuf>,
+
+    /// Units that share the same mount namespace as this unit.
+    /// Matches systemd's `JoinsNamespaceOf=` setting.
+    /// Resolved at start time to find a running service's PID to join via setns(2).
+    pub joins_namespace_of: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
