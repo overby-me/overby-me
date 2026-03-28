@@ -974,8 +974,28 @@ impl Shell {
             }
         };
 
-        // Check for function
-        let status = if let Some(func_body) = self.functions.get(command_name).cloned() {
+        // Check for function (but in POSIX mode, special builtins take precedence)
+        let is_posix_special_builtin = self.opt_posix
+            && matches!(
+                command_name.as_str(),
+                "break"
+                    | "."
+                    | "source"
+                    | "continue"
+                    | "eval"
+                    | "exec"
+                    | "exit"
+                    | "export"
+                    | "readonly"
+                    | "return"
+                    | "set"
+                    | "shift"
+                    | "trap"
+                    | "unset"
+            );
+        let status = if !is_posix_special_builtin
+            && let Some(func_body) = self.functions.get(command_name).cloned()
+        {
             // Apply prefix assignments temporarily for function calls
             let prefix_saves: Vec<(String, Option<String>, Option<String>)> = cmd
                 .assignments

@@ -370,6 +370,28 @@ pub(super) fn builtin_type(shell: &mut Shell, args: &[String]) -> i32 {
                 println!("alias");
             } else if is_keyword {
                 println!("keyword");
+            } else if shell.opt_posix
+                && matches!(
+                    name,
+                    "break"
+                        | "."
+                        | "source"
+                        | "continue"
+                        | "eval"
+                        | "exec"
+                        | "exit"
+                        | "export"
+                        | "readonly"
+                        | "return"
+                        | "set"
+                        | "shift"
+                        | "trap"
+                        | "unset"
+                        | ":"
+                )
+                && builtin_map.contains_key(name)
+            {
+                println!("builtin");
             } else if shell.functions.contains_key(name) {
                 println!("function");
             } else if builtin_map.contains_key(name) {
@@ -396,6 +418,28 @@ pub(super) fn builtin_type(shell: &mut Shell, args: &[String]) -> i32 {
                 println!("{} is aliased to `{}'", name, alias_val);
             } else if is_keyword {
                 println!("{} is a shell keyword", name);
+            } else if shell.opt_posix
+                && matches!(
+                    name,
+                    "break"
+                        | "."
+                        | "source"
+                        | "continue"
+                        | "eval"
+                        | "exec"
+                        | "exit"
+                        | "export"
+                        | "readonly"
+                        | "return"
+                        | "set"
+                        | "shift"
+                        | "trap"
+                        | "unset"
+                        | ":"
+                )
+                && builtin_map.contains_key(name)
+            {
+                println!("{} is a special shell builtin", name);
             } else if let Some(body) = shell.functions.get(name) {
                 println!("{} is a function", name);
                 let needs_keyword = shell.func_has_keyword.contains(name)
