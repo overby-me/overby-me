@@ -1296,8 +1296,12 @@ impl Shell {
         };
 
         // For `exec` with no command args, don't restore redirections
-        // (they should persist in the current shell)
-        let is_exec_no_cmd = command_name == "exec" && args.is_empty();
+        // (they should persist in the current shell).
+        // Also handle `command exec` and `builtin exec` which delegate to exec.
+        let is_exec_no_cmd = (command_name == "exec" && args.is_empty())
+            || ((command_name == "command" || command_name == "builtin")
+                && args.first().map(|s| s.as_str()) == Some("exec")
+                && args.len() <= 1);
         if !is_exec_no_cmd {
             self.restore_redirections(saved_fds);
         }
@@ -1786,6 +1790,10 @@ impl Shell {
         #[cfg(unix)]
         {
             use std::ffi::CString;
+
+            // Flush stdout before forking to prevent buffered builtin output
+            // from appearing after the external command's output
+            std::io::Write::flush(&mut std::io::stdout()).ok();
 
             let path = builtins::find_executable(name);
 
