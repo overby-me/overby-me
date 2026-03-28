@@ -5162,6 +5162,84 @@
           MEEOF
                     chmod +x TEST-23-UNIT-FILE.multi-exec.sh
 
+                    # Target unit with Wants= pulls in services
+                    cat > TEST-23-UNIT-FILE.target-wants.sh << 'TWEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          at_exit() {
+              set +e
+              systemctl stop target-wants-test.target tw-svc-1.service tw-svc-2.service 2>/dev/null
+              rm -f /run/systemd/system/target-wants-test.target
+              rm -f /run/systemd/system/tw-svc-1.service /run/systemd/system/tw-svc-2.service
+              rm -f /tmp/tw-result-*
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "Target with Wants= starts wanted services"
+          cat > /run/systemd/system/tw-svc-1.service << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=touch /tmp/tw-result-1
+          RemainAfterExit=yes
+          EOF
+          cat > /run/systemd/system/tw-svc-2.service << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=touch /tmp/tw-result-2
+          RemainAfterExit=yes
+          EOF
+          cat > /run/systemd/system/target-wants-test.target << EOF
+          [Unit]
+          Wants=tw-svc-1.service tw-svc-2.service
+          After=tw-svc-1.service tw-svc-2.service
+          EOF
+          systemctl daemon-reload
+
+          rm -f /tmp/tw-result-1 /tmp/tw-result-2
+          systemctl start target-wants-test.target
+          [[ -f /tmp/tw-result-1 ]]
+          [[ -f /tmp/tw-result-2 ]]
+          [[ "$(systemctl show -P ActiveState target-wants-test.target)" == "active" ]]
+
+          : "Stopping target does not stop wanted services (Wants, not Requires)"
+          systemctl stop target-wants-test.target
+          [[ "$(systemctl show -P ActiveState tw-svc-1.service)" == "active" ]]
+          [[ "$(systemctl show -P ActiveState tw-svc-2.service)" == "active" ]]
+          TWEOF
+                    chmod +x TEST-23-UNIT-FILE.target-wants.sh
+
+                    # Service with User= directive
+                    cat > TEST-23-UNIT-FILE.user-service.sh << 'USEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          at_exit() {
+              set +e
+              systemctl stop user-svc-test.service 2>/dev/null
+              rm -f /run/systemd/system/user-svc-test.service
+              rm -f /tmp/user-svc-result
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "User= runs service as specified user"
+          cat > /run/systemd/system/user-svc-test.service << EOF
+          [Service]
+          Type=oneshot
+          User=nobody
+          ExecStart=bash -c 'id -un > /tmp/user-svc-result'
+          EOF
+          systemctl daemon-reload
+
+          systemctl start user-svc-test.service
+          [[ "$(cat /tmp/user-svc-result)" == "nobody" ]]
+          USEOF
+                    chmod +x TEST-23-UNIT-FILE.user-service.sh
+
                     rm -f TEST-23-UNIT-FILE.ExtraFileDescriptors.sh \
                          TEST-23-UNIT-FILE.JoinsNamespaceOf.sh \
                          TEST-23-UNIT-FILE.openfile.sh \
@@ -6170,6 +6248,47 @@
           [[ "$(systemctl show -P Description show-b.service)" == "Show Test B" ]]
           SMEOF
           chmod +x TEST-74-AUX-UTILS.show-multi.sh
+
+          # systemctl is-active/is-enabled/is-failed tests
+          cat > TEST-74-AUX-UTILS.is-queries.sh << 'IQEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          at_exit() {
+              set +e
+              systemctl stop is-query-test.service 2>/dev/null
+              rm -f /run/systemd/system/is-query-test.service
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "systemctl is-active returns active for running service"
+          cat > /run/systemd/system/is-query-test.service << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          RemainAfterExit=yes
+          EOF
+          systemctl daemon-reload
+          systemctl start is-query-test.service
+          systemctl is-active is-query-test.service
+
+          : "systemctl is-active returns inactive for stopped service"
+          systemctl stop is-query-test.service
+          (! systemctl is-active is-query-test.service)
+
+          : "systemctl is-active returns unknown for nonexistent unit"
+          (! systemctl is-active nonexistent-unit-12345.service)
+
+          : "systemctl is-enabled returns disabled for unit without install"
+          STATUS=$(systemctl is-enabled is-query-test.service 2>&1 || true)
+          echo "is-enabled status: $STATUS"
+
+          : "systemctl is-failed returns false for non-failed unit"
+          (! systemctl is-failed is-query-test.service)
+          IQEOF
+          chmod +x TEST-74-AUX-UTILS.is-queries.sh
 
           # Custom systemd-analyze standalone tests (no D-Bus needed)
           cat > TEST-74-AUX-UTILS.analyze-standalone.sh << 'ANEOF'
