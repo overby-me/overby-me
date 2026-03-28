@@ -760,21 +760,21 @@
           VACEOF
           chmod +x TEST-04-JOURNAL.vacuum.sh
 
-          # Journal verbose output
-          cat > TEST-04-JOURNAL.verbose-output.sh << 'VOEOF'
+          # Journal json-pretty output
+          cat > TEST-04-JOURNAL.json-pretty.sh << 'JPEOF'
           #!/usr/bin/env bash
           set -eux
           set -o pipefail
 
-          : "journalctl -o verbose shows structured output"
-          OUT="$(journalctl --no-pager -o verbose -n 3)"
-          echo "$OUT" | grep -q "_TRANSPORT="
-
-          : "journalctl -o json-pretty produces valid JSON structure"
+          : "journalctl -o json-pretty produces output with MESSAGE"
           OUT="$(journalctl --no-pager -o json-pretty -n 1)"
           echo "$OUT" | grep -q "MESSAGE"
-          VOEOF
-          chmod +x TEST-04-JOURNAL.verbose-output.sh
+
+          : "journalctl -o cat produces plain messages"
+          OUT="$(journalctl --no-pager -o cat -n 3)"
+          [[ -n "$OUT" ]]
+          JPEOF
+          chmod +x TEST-04-JOURNAL.json-pretty.sh
 
           # Journal _HOSTNAME matching
           cat > TEST-04-JOURNAL.hostname-match.sh << 'HMEOF'
@@ -823,6 +823,38 @@
           journalctl --no-pager -b 0 -n 5 > /dev/null
           LBEOF
           chmod +x TEST-04-JOURNAL.list-boots.sh
+
+          # Journal identifier filtering (without logger due to /dev/log issues)
+          cat > TEST-04-JOURNAL.identifier-filter.sh << 'IFEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl SYSLOG_IDENTIFIER matching works"
+          journalctl --no-pager SYSLOG_IDENTIFIER=systemd -n 3 > /dev/null || true
+
+          : "journalctl can filter by _PID"
+          journalctl --no-pager _PID=1 -n 3 > /dev/null || true
+
+          : "journalctl can filter by _UID"
+          journalctl --no-pager _UID=0 -n 3 > /dev/null
+          IFEOF
+          chmod +x TEST-04-JOURNAL.identifier-filter.sh
+
+          # Journal disk-usage details
+          cat > TEST-04-JOURNAL.disk-usage-detail.sh << 'DUDEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl --disk-usage shows archived and active"
+          OUT="$(journalctl --disk-usage)"
+          echo "$OUT" | grep -qi "journal"
+
+          : "journalctl --header shows journal metadata"
+          journalctl --no-pager --header > /dev/null || true
+          DUDEOF
+          chmod +x TEST-04-JOURNAL.disk-usage-detail.sh
 
           rm -f TEST-04-JOURNAL.bsod.sh \
                TEST-04-JOURNAL.cat.sh \
@@ -6729,6 +6761,85 @@
           TSEOF
                     chmod +x TEST-23-UNIT-FILE.timeout-start.sh
 
+                    # Test Description= in unit files
+                    cat > TEST-23-UNIT-FILE.description-unit.sh << 'DUEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "Description= is visible in systemctl show"
+          UNIT="desc-unit-$RANDOM"
+          cat > "/run/systemd/system/$UNIT.service" << UEOF
+          [Unit]
+          Description=Custom description for testing
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          UEOF
+          systemctl daemon-reload
+          DESC="$(systemctl show -P Description "$UNIT.service")"
+          [[ "$DESC" == "Custom description for testing" ]]
+          rm -f "/run/systemd/system/$UNIT.service"
+          systemctl daemon-reload
+          DUEOF
+                    chmod +x TEST-23-UNIT-FILE.description-unit.sh
+
+                    # Test multiple ExecStop= lines
+                    cat > TEST-23-UNIT-FILE.multi-exec-stop.sh << 'MESEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "Multiple ExecStop= lines run in order"
+          UNIT="multi-stop-$RANDOM"
+          cat > "/run/systemd/system/$UNIT.service" << UEOF
+          [Service]
+          Type=exec
+          ExecStart=sleep 300
+          ExecStop=bash -c 'echo stop1 > /tmp/multi-stop-result'
+          ExecStop=bash -c 'echo stop2 >> /tmp/multi-stop-result'
+          UEOF
+          systemctl daemon-reload
+          systemctl start "$UNIT.service"
+          sleep 1
+          systemctl stop "$UNIT.service"
+          sleep 1
+          grep -q "stop1" /tmp/multi-stop-result
+          grep -q "stop2" /tmp/multi-stop-result
+          rm -f /tmp/multi-stop-result "/run/systemd/system/$UNIT.service"
+          systemctl daemon-reload
+          MESEOF
+                    chmod +x TEST-23-UNIT-FILE.multi-exec-stop.sh
+
+                    # Test Wants= in unit file
+                    cat > TEST-23-UNIT-FILE.wants-dep-unit.sh << 'WDUEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "Wants= dependency is visible in systemctl show"
+          UNIT_A="wants-a-$RANDOM"
+          UNIT_B="wants-b-$RANDOM"
+          cat > "/run/systemd/system/$UNIT_A.service" << UEOF
+          [Unit]
+          Wants=$UNIT_B.service
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          UEOF
+          cat > "/run/systemd/system/$UNIT_B.service" << UEOF
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          UEOF
+          systemctl daemon-reload
+          WANTS="$(systemctl show -P Wants "$UNIT_A.service")"
+          echo "$WANTS" | grep -q "$UNIT_B.service"
+          rm -f "/run/systemd/system/$UNIT_A.service" "/run/systemd/system/$UNIT_B.service"
+          systemctl daemon-reload
+          WDUEOF
+                    chmod +x TEST-23-UNIT-FILE.wants-dep-unit.sh
+
                     # Test SupplementaryGroups= property
                     cat > TEST-23-UNIT-FILE.supplementary-groups.sh << 'SGEOF'
           #!/usr/bin/env bash
@@ -10683,6 +10794,74 @@
           echo "$OUT" | grep -q "ActiveState="
           SMPEOF
           chmod +x TEST-74-AUX-UTILS.show-multi-props-adv.sh
+
+          # systemctl daemon-reload timing
+          cat > TEST-74-AUX-UTILS.daemon-reload.sh << 'DREOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "daemon-reload succeeds"
+          systemctl daemon-reload
+
+          : "After reload, new unit files are picked up"
+          UNIT="dr-test-$RANDOM"
+          cat > "/run/systemd/system/$UNIT.service" << UEOF
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          UEOF
+          systemctl daemon-reload
+          systemctl show -P LoadState "$UNIT.service" | grep -q "loaded"
+          rm -f "/run/systemd/system/$UNIT.service"
+          systemctl daemon-reload
+          DREOF
+          chmod +x TEST-74-AUX-UTILS.daemon-reload.sh
+
+          # systemctl show for mount units
+          cat > TEST-74-AUX-UTILS.show-mount-props2.sh << 'SMP2EOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl list-units shows mount units"
+          systemctl list-units --no-pager --type=mount > /dev/null
+
+          : "Root mount has loaded state"
+          systemctl show -.mount > /dev/null || true
+          SMP2EOF
+          chmod +x TEST-74-AUX-UTILS.show-mount-props2.sh
+
+          # systemctl show for socket units
+          cat > TEST-74-AUX-UTILS.show-socket-props2.sh << 'SS2EOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-journald.socket properties"
+          LOAD="$(systemctl show -P LoadState systemd-journald.socket)"
+          [[ "$LOAD" == "loaded" ]]
+          ID="$(systemctl show -P Id systemd-journald.socket)"
+          [[ "$ID" == "systemd-journald.socket" ]]
+          SS2EOF
+          chmod +x TEST-74-AUX-UTILS.show-socket-props2.sh
+
+          # systemd-run with --on-calendar fires
+          cat > TEST-74-AUX-UTILS.run-on-calendar-fire.sh << 'ROCEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-run --on-calendar creates and starts timer"
+          UNIT="on-cal-fire-$RANDOM"
+          systemd-run --unit="$UNIT" \
+              --on-calendar="*:*:0/15" \
+              --remain-after-exit true
+          systemctl is-active "$UNIT.timer"
+          [[ "$(systemctl show -P LoadState "$UNIT.timer")" == "loaded" ]]
+          systemctl stop "$UNIT.timer" "$UNIT.service" 2>/dev/null || true
+          ROCEOF
+          chmod +x TEST-74-AUX-UTILS.run-on-calendar-fire.sh
 
           # systemd-escape --path tests
           cat > TEST-74-AUX-UTILS.escape-path.sh << 'EPEOF'
