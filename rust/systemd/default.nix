@@ -4415,6 +4415,102 @@
           DROPIN_EOF
                     chmod +x TEST-23-UNIT-FILE.drop-in.sh
 
+                    # Custom systemctl show properties test
+                    cat > TEST-23-UNIT-FILE.show-properties.sh << 'SPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              systemctl stop show-prop-test.service 2>/dev/null
+              rm -f /run/systemd/system/show-prop-test.service
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "systemctl show -P returns individual property values"
+          cat > /run/systemd/system/show-prop-test.service << EOF
+          [Unit]
+          Description=Show property test service
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          RemainAfterExit=yes
+          Environment=SHOW_VAR=hello
+          EOF
+          systemctl daemon-reload
+
+          # Check properties before start
+          [[ "$(systemctl show -P Description show-prop-test.service)" == "Show property test service" ]]
+          [[ "$(systemctl show -P ActiveState show-prop-test.service)" == "inactive" ]]
+          [[ "$(systemctl show -P LoadState show-prop-test.service)" == "loaded" ]]
+          [[ "$(systemctl show -P Type show-prop-test.service)" == "oneshot" ]]
+
+          # Start and check active state
+          systemctl start show-prop-test.service
+          [[ "$(systemctl show -P ActiveState show-prop-test.service)" == "active" ]]
+          # rust-systemd reports SubState=running for RemainAfterExit oneshot
+          [[ "$(systemctl show -P SubState show-prop-test.service)" == "running" ]]
+
+          # Stop and verify inactive
+          systemctl stop show-prop-test.service
+          sleep 0.5
+          [[ "$(systemctl show -P ActiveState show-prop-test.service)" == "inactive" ]]
+          SPEOF
+                    chmod +x TEST-23-UNIT-FILE.show-properties.sh
+
+                    # Custom slice and service grouping test
+                    cat > TEST-23-UNIT-FILE.slice-grouping.sh << 'SGEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              systemctl stop slice-svc-1.service slice-svc-2.service 2>/dev/null
+              rm -f /run/systemd/system/slice-svc-{1,2}.service
+              rm -f /run/systemd/system/test-slice.slice
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "Services can be grouped in a custom slice"
+          cat > /run/systemd/system/test-slice.slice << EOF
+          [Slice]
+          Description=Test slice for grouping
+          EOF
+
+          cat > /run/systemd/system/slice-svc-1.service << EOF
+          [Service]
+          Slice=test-slice.slice
+          ExecStart=sleep infinity
+          EOF
+
+          cat > /run/systemd/system/slice-svc-2.service << EOF
+          [Service]
+          Slice=test-slice.slice
+          ExecStart=sleep infinity
+          EOF
+
+          systemctl daemon-reload
+          systemctl start slice-svc-1.service slice-svc-2.service
+          systemctl is-active slice-svc-1.service
+          systemctl is-active slice-svc-2.service
+
+          # Verify services report correct slice
+          [[ "$(systemctl show -P Slice slice-svc-1.service)" == "test-slice.slice" ]]
+          [[ "$(systemctl show -P Slice slice-svc-2.service)" == "test-slice.slice" ]]
+
+          # Stop services
+          systemctl stop slice-svc-1.service slice-svc-2.service
+          SGEOF
+                    chmod +x TEST-23-UNIT-FILE.slice-grouping.sh
+
                     # Custom start-stop-no-reload test (based on upstream, simplified)
                     cat > TEST-23-UNIT-FILE.start-stop-no-reload.sh << 'SSNREOF'
           #!/usr/bin/env bash
