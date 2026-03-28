@@ -5457,6 +5457,53 @@
           NTEOF
           chmod +x TEST-74-AUX-UTILS.notify.sh
 
+          # Custom systemctl list-dependencies test
+          cat > TEST-74-AUX-UTILS.list-dependencies.sh << 'LDEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "systemctl list-dependencies shows dependency tree"
+          systemctl list-dependencies multi-user.target --no-pager | head -20
+
+          : "systemctl list-dependencies --reverse shows reverse deps"
+          systemctl list-dependencies --reverse sysinit.target --no-pager | head -20
+
+          : "systemctl list-dependencies for nonexistent unit fails"
+          (! systemctl list-dependencies nonexistent-unit-xyz.service --no-pager)
+          LDEOF
+          chmod +x TEST-74-AUX-UTILS.list-dependencies.sh
+
+          # Custom systemctl list-units and list-unit-files tests
+          cat > TEST-74-AUX-UTILS.list-units.sh << 'LUEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "systemctl list-units shows loaded units"
+          systemctl list-units --no-pager | head -20
+
+          : "systemctl list-units --type=service shows output"
+          systemctl list-units --type=service --no-pager | head -10
+
+          : "systemctl list-unit-files shows unit file states"
+          systemctl list-unit-files --no-pager | head -20
+
+          : "systemctl list-unit-files --type=timer shows timer files"
+          systemctl list-unit-files --type=timer --no-pager | head -10
+
+          : "systemctl list-timers shows active timers"
+          systemctl list-timers --no-pager
+
+          : "systemctl list-sockets shows active sockets"
+          systemctl list-sockets --no-pager
+          LUEOF
+          chmod +x TEST-74-AUX-UTILS.list-units.sh
+
           # Custom systemctl cat test
           cat > TEST-74-AUX-UTILS.systemctl-cat.sh << 'SCEOF'
           #!/usr/bin/env bash
