@@ -500,6 +500,34 @@
           DUEOF
           chmod +x TEST-04-JOURNAL.disk-usage.sh
 
+          # Journal time-based filtering test
+          cat > TEST-04-JOURNAL.time-filtering.sh << 'TFEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl --since filters by time"
+          BEFORE=$(date "+%Y-%m-%d %H:%M:%S")
+          logger "time-filter-test-$RANDOM"
+          journalctl --sync
+          sleep 1
+          journalctl --no-pager --since="$BEFORE" -n 20 | grep -q "time-filter-test"
+
+          : "journalctl --until filters by time"
+          AFTER=$(date "+%Y-%m-%d %H:%M:%S")
+          journalctl --no-pager --until="$AFTER" -n 5 > /dev/null
+
+          : "journalctl --since and --until combined"
+          journalctl --no-pager --since="$BEFORE" --until="$AFTER" | grep -q "time-filter-test"
+
+          : "journalctl -o verbose shows extra fields"
+          journalctl --no-pager -n 3 -o verbose > /dev/null
+
+          : "journalctl -o export produces machine-readable output"
+          journalctl --no-pager -n 1 -o export | grep -q "__CURSOR="
+          TFEOF
+          chmod +x TEST-04-JOURNAL.time-filtering.sh
+
           rm -f TEST-04-JOURNAL.bsod.sh \
                TEST-04-JOURNAL.cat.sh \
                TEST-04-JOURNAL.corrupted-journals.sh \
@@ -555,6 +583,48 @@
           rm -f /tmp/rlimit-nproc-result
           TLEOF
           chmod +x TEST-05-RLIMITS.transient-limits.sh
+
+          # Custom test: rlimits in unit files
+          cat > TEST-05-RLIMITS.unit-file-limits.sh << 'UFEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          at_exit() {
+              set +e
+              systemctl stop rlimit-unit-test.service 2>/dev/null
+              rm -f /run/systemd/system/rlimit-unit-test.service
+              rm -f /tmp/rlimit-unit-result
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "LimitNOFILE in unit file sets file descriptor limit"
+          cat > /run/systemd/system/rlimit-unit-test.service << EOF
+          [Service]
+          Type=oneshot
+          LimitNOFILE=4321
+          ExecStart=bash -c 'ulimit -n > /tmp/rlimit-unit-result'
+          EOF
+          systemctl daemon-reload
+
+          systemctl start rlimit-unit-test.service
+          [[ "$(cat /tmp/rlimit-unit-result)" == "4321" ]]
+
+          : "LimitCORE=infinity in unit file sets unlimited core"
+          rm -f /tmp/rlimit-unit-result
+          cat > /run/systemd/system/rlimit-unit-test.service << EOF
+          [Service]
+          Type=oneshot
+          LimitCORE=infinity
+          ExecStart=bash -c 'ulimit -c > /tmp/rlimit-unit-result'
+          EOF
+          systemctl daemon-reload
+
+          systemctl start rlimit-unit-test.service
+          [[ "$(cat /tmp/rlimit-unit-result)" == "unlimited" ]]
+          UFEOF
+          chmod +x TEST-05-RLIMITS.unit-file-limits.sh
         '';
       }
       {
@@ -5220,9 +5290,9 @@
           systemctl stop "$UNIT.timer" "$UNIT.service" 2>/dev/null || true
           rm -f "/tmp/timer-cal-fired-$UNIT"
 
-          : "Timer unit file with OnBootSec="
+          : "Timer unit file with OnActiveSec="
           UNIT="timer-boot-$RANDOM"
-          printf '[Timer]\nOnBootSec=1s\n[Install]\nWantedBy=timers.target\n' \
+          printf '[Timer]\nOnActiveSec=1s\n[Install]\nWantedBy=timers.target\n' \
               > "/run/systemd/system/$UNIT.timer"
           printf '[Service]\nType=oneshot\nExecStart=touch /tmp/timer-boot-fired-%s\n' \
               "$UNIT" > "/run/systemd/system/$UNIT.service"
@@ -5328,6 +5398,35 @@
           done
           TLEOF
           chmod +x TEST-53-TIMER.timer-lifecycle.sh
+
+          # Timer properties and status test
+          cat > TEST-53-TIMER.timer-properties.sh << 'TPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "Transient timer shows correct properties"
+          UNIT="timer-prop-$RANDOM"
+          systemd-run --unit="$UNIT" --on-active=300s --remain-after-exit true
+          # Timer should show as active
+          [[ "$(systemctl show -P ActiveState "$UNIT.timer")" == "active" ]]
+          systemctl stop "$UNIT.timer" "$UNIT.service" 2>/dev/null || true
+
+          : "systemctl list-timers shows transient timers"
+          UNIT2="timer-list-$RANDOM"
+          systemd-run --unit="$UNIT2" --on-active=60s --remain-after-exit true
+          systemctl list-timers --no-pager > /dev/null
+          systemctl stop "$UNIT2.timer" "$UNIT2.service" 2>/dev/null || true
+
+          : "Timer with --on-boot creates correct property"
+          UNIT3="timer-boot-$RANDOM"
+          systemd-run --unit="$UNIT3" --on-boot=1h --remain-after-exit true
+          grep -q "^OnBootSec=" "/run/systemd/transient/$UNIT3.timer"
+          systemctl stop "$UNIT3.timer" "$UNIT3.service" 2>/dev/null || true
+          TPEOF
+          chmod +x TEST-53-TIMER.timer-properties.sh
         '';
       }
       {
