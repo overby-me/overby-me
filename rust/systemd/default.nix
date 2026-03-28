@@ -913,6 +913,61 @@
           [[ "$EXPECTED_NS" != "$SRVC_NS" ]]
           ip netns del test-ns-path || true
 
+          : "Personality= sets execution domain"
+          systemd-run --wait --pipe -p Personality=x86-64 \
+              bash -xec '[[ "$(uname -m)" == x86_64 ]]'
+          systemd-run --wait --pipe -p Personality=x86 \
+              bash -xec '[[ "$(uname -m)" == i686 ]]'
+
+          : "Personality= with LockPersonality= combination"
+          systemd-run --wait --pipe -p Personality=x86 -p LockPersonality=yes -p NoNewPrivileges=yes \
+              bash -xec '[[ "$(uname -m)" == i686 ]]'
+
+          : "ProtectHostname=yes isolates hostname changes"
+          ORIG_HOSTNAME="$(hostname)"
+          systemd-run --wait --pipe -p ProtectHostname=yes \
+              bash -xec 'hostname test-ph-change; [[ "$(hostname)" == "test-ph-change" ]]'
+          [[ "$(hostname)" == "$ORIG_HOSTNAME" ]]
+
+          : "PrivateMounts=yes creates isolated mount namespace"
+          systemd-run --wait --pipe -p PrivateMounts=yes \
+              bash -xec 'mount -t tmpfs none /tmp 2>/dev/null && touch /tmp/private-mount-test'
+          [[ ! -e /tmp/private-mount-test ]]
+
+          : "ProtectKernelTunables=yes with PrivateMounts=yes combination"
+          systemd-run --wait --pipe -p ProtectKernelTunables=yes -p PrivateMounts=yes \
+              bash -xec '(! sysctl -w kernel.domainname=test 2>/dev/null)'
+
+          : "ProtectKernelLogs=yes with ProtectKernelModules=yes combination"
+          systemd-run --wait --pipe -p ProtectKernelLogs=yes -p ProtectKernelModules=yes \
+              bash -xec '[[ "$(stat -c %t:%T /dev/kmsg)" == "$(stat -c %t:%T /dev/null)" ]];
+                         (! ls /usr/lib/modules 2>/dev/null)'
+
+          : "ProtectSystem=strict with ProtectHome=yes combination"
+          systemd-run --wait --pipe -p ProtectSystem=strict -p ProtectHome=yes \
+              bash -xec 'test ! -w /; test ! -w /etc; test ! -w /var;
+                         test ! -e /root/.bashrc 2>/dev/null || test ! -w /root'
+
+          : "PrivateNetwork=yes with PrivateUsers=yes combination"
+          systemd-run --wait --pipe -p PrivateNetwork=yes -p PrivateUsers=yes \
+              bash -xec '(! ip link show eth0 2>/dev/null); ip link show lo;
+                         [[ "$(cat /proc/self/uid_map | awk "{print \$1}")" == "0" ]]'
+
+          : "Multiple InaccessiblePaths= entries"
+          mkdir -p /tmp/inac-test-1 /tmp/inac-test-2
+          echo "data1" > /tmp/inac-test-1/file
+          echo "data2" > /tmp/inac-test-2/file
+          systemd-run --wait --pipe \
+              -p InaccessiblePaths="/tmp/inac-test-1" \
+              -p InaccessiblePaths="/tmp/inac-test-2" \
+              bash -xec '(! cat /tmp/inac-test-1/file 2>/dev/null);
+                         (! cat /tmp/inac-test-2/file 2>/dev/null)'
+          rm -rf /tmp/inac-test-1 /tmp/inac-test-2
+
+          : "TemporaryFileSystem= with options (ro)"
+          systemd-run --wait --pipe -p TemporaryFileSystem="/tmp/tmpfs-ro-test:ro" \
+              bash -xec '[[ -d /tmp/tmpfs-ro-test ]]; (! touch /tmp/tmpfs-ro-test/file 2>/dev/null)'
+
           : "Error handling for clean-up codepaths"
           (! systemd-run --wait --pipe false)
           TESTEOF

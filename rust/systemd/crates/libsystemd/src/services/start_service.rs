@@ -494,6 +494,7 @@ fn start_service_with_filedescriptors(
         protect_control_groups: conf.exec_config.protect_control_groups,
         protect_clock: conf.exec_config.protect_clock,
         protect_hostname: conf.exec_config.protect_hostname,
+        personality: conf.exec_config.personality.clone(),
         lock_personality: conf.exec_config.lock_personality,
         memory_deny_write_execute: conf.exec_config.memory_deny_write_execute,
         restrict_realtime: conf.exec_config.restrict_realtime,

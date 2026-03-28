@@ -3440,44 +3440,36 @@ fn create_transient_unit(
                     };
                 }
                 "TTYPath" => {
-                    service_conf.exec_config.tty_path =
-                        Some(std::path::PathBuf::from(value));
+                    service_conf.exec_config.tty_path = Some(std::path::PathBuf::from(value));
                 }
                 "TTYReset" => {
-                    service_conf.exec_config.tty_reset =
-                        matches!(value, "yes" | "true" | "1");
+                    service_conf.exec_config.tty_reset = matches!(value, "yes" | "true" | "1");
                 }
                 "TTYVHangup" => {
-                    service_conf.exec_config.tty_vhangup =
-                        matches!(value, "yes" | "true" | "1");
+                    service_conf.exec_config.tty_vhangup = matches!(value, "yes" | "true" | "1");
                 }
                 "TTYVTDisallocate" => {
                     service_conf.exec_config.tty_vt_disallocate =
                         matches!(value, "yes" | "true" | "1");
                 }
                 "RemoveIPC" => {
-                    service_conf.exec_config.remove_ipc =
-                        matches!(value, "yes" | "true" | "1");
+                    service_conf.exec_config.remove_ipc = matches!(value, "yes" | "true" | "1");
                 }
                 "PrivateIPC" => {
                     service_conf.exec_config.private_ipc =
                         Some(matches!(value, "yes" | "true" | "1"));
                 }
                 "NetworkNamespacePath" => {
-                    service_conf.exec_config.network_namespace_path =
-                        Some(value.to_string());
+                    service_conf.exec_config.network_namespace_path = Some(value.to_string());
                 }
                 "IPCNamespacePath" => {
-                    service_conf.exec_config.ipc_namespace_path =
-                        Some(value.to_string());
+                    service_conf.exec_config.ipc_namespace_path = Some(value.to_string());
                 }
                 "LogLevelMax" => {
-                    service_conf.exec_config.log_level_max =
-                        Some(value.to_string());
+                    service_conf.exec_config.log_level_max = Some(value.to_string());
                 }
                 "LogRateLimitIntervalSec" => {
-                    service_conf.exec_config.log_rate_limit_interval_sec =
-                        Some(value.to_string());
+                    service_conf.exec_config.log_rate_limit_interval_sec = Some(value.to_string());
                 }
                 "LogRateLimitBurst" => {
                     if let Ok(n) = value.parse::<u32>() {
@@ -3485,12 +3477,10 @@ fn create_transient_unit(
                     }
                 }
                 "SyslogFacility" => {
-                    service_conf.exec_config.syslog_facility =
-                        Some(value.to_string());
+                    service_conf.exec_config.syslog_facility = Some(value.to_string());
                 }
                 "SyslogLevel" => {
-                    service_conf.exec_config.syslog_level =
-                        Some(value.to_string());
+                    service_conf.exec_config.syslog_level = Some(value.to_string());
                 }
                 "SyslogLevelPrefix" => {
                     service_conf.exec_config.syslog_level_prefix =
@@ -3501,10 +3491,7 @@ fn create_transient_unit(
                         service_conf.exec_config.secure_bits.clear();
                     } else {
                         for b in value.split_whitespace() {
-                            service_conf
-                                .exec_config
-                                .secure_bits
-                                .push(b.to_string());
+                            service_conf.exec_config.secure_bits.push(b.to_string());
                         }
                     }
                 }
@@ -3513,10 +3500,7 @@ fn create_transient_unit(
                         service_conf.exec_config.no_exec_paths.clear();
                     } else {
                         for p in value.split_whitespace() {
-                            service_conf
-                                .exec_config
-                                .no_exec_paths
-                                .push(p.to_string());
+                            service_conf.exec_config.no_exec_paths.push(p.to_string());
                         }
                     }
                 }
@@ -3525,49 +3509,34 @@ fn create_transient_unit(
                         service_conf.exec_config.exec_paths.clear();
                     } else {
                         for p in value.split_whitespace() {
-                            service_conf
-                                .exec_config
-                                .exec_paths
-                                .push(p.to_string());
+                            service_conf.exec_config.exec_paths.push(p.to_string());
                         }
                     }
                 }
                 "TimerSlackNSec" => {
-                    service_conf.exec_config.timer_slack_nsec =
-                        Some(value.to_string());
+                    service_conf.exec_config.timer_slack_nsec = Some(value.to_string());
                 }
                 "IOSchedulingClass" => {
                     service_conf.exec_config.io_scheduling_class = match value {
-                        "none" | "0" => {
-                            crate::units::unit_parsing::IOSchedulingClass::None
-                        }
-                        "realtime" | "1" => {
-                            crate::units::unit_parsing::IOSchedulingClass::Realtime
-                        }
+                        "none" | "0" => crate::units::unit_parsing::IOSchedulingClass::None,
+                        "realtime" | "1" => crate::units::unit_parsing::IOSchedulingClass::Realtime,
                         "best-effort" | "2" => {
                             crate::units::unit_parsing::IOSchedulingClass::BestEffort
                         }
-                        "idle" | "3" => {
-                            crate::units::unit_parsing::IOSchedulingClass::Idle
-                        }
-                        _ => {
-                            crate::units::unit_parsing::IOSchedulingClass::BestEffort
-                        }
+                        "idle" | "3" => crate::units::unit_parsing::IOSchedulingClass::Idle,
+                        _ => crate::units::unit_parsing::IOSchedulingClass::BestEffort,
                     };
                 }
                 "IOSchedulingPriority" => {
                     if let Ok(n) = value.parse::<u8>() {
-                        service_conf.exec_config.io_scheduling_priority =
-                            Some(n);
+                        service_conf.exec_config.io_scheduling_priority = Some(n);
                     }
                 }
                 "CoredumpFilter" => {
-                    service_conf.exec_config.coredump_filter =
-                        Some(value.to_string());
+                    service_conf.exec_config.coredump_filter = Some(value.to_string());
                 }
                 "Personality" => {
-                    service_conf.exec_config.personality =
-                        Some(value.to_string());
+                    service_conf.exec_config.personality = Some(value.to_string());
                 }
                 "SetLoginEnvironment" => {
                     service_conf.exec_config.set_login_environment =

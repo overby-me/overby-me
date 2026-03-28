@@ -453,7 +453,6 @@ pub struct ExecHelperConfig {
     #[serde(default)]
     pub cpu_affinity: Vec<String>,
 
-
     /// PrivatePIDs= — if true, a new PID namespace is created and /proc is
     /// remounted so the service process becomes PID 1 in the new namespace.
     /// See systemd.exec(5).
@@ -489,6 +488,11 @@ pub struct ExecHelperConfig {
     /// hostname/domainname changes are denied. See systemd.exec(5).
     #[serde(default)]
     pub protect_hostname: bool,
+
+    /// Personality= — set the execution domain (personality).
+    /// See systemd.exec(5).
+    #[serde(default)]
+    pub personality: Option<String>,
 
     /// LockPersonality= — if true, the execution domain is locked.
     /// See systemd.exec(5).
@@ -1566,45 +1570,45 @@ pub fn run_exec_helper() {
     }
 
     // ── NetworkNamespacePath= — join existing network namespace ────────
-    if let Some(ref ns_path) = config.network_namespace_path {
-        if !config.privileged_prefix {
-            match std::fs::File::open(ns_path) {
-                Ok(f) => {
-                    use std::os::unix::io::AsRawFd;
-                    let ret = unsafe { libc::setns(f.as_raw_fd(), libc::CLONE_NEWNET) };
-                    if ret != 0 {
-                        log::warn!(
-                            "Failed to join network namespace {}: {}",
-                            ns_path,
-                            std::io::Error::last_os_error()
-                        );
-                    }
+    if let Some(ref ns_path) = config.network_namespace_path
+        && !config.privileged_prefix
+    {
+        match std::fs::File::open(ns_path) {
+            Ok(f) => {
+                use std::os::unix::io::AsRawFd;
+                let ret = unsafe { libc::setns(f.as_raw_fd(), libc::CLONE_NEWNET) };
+                if ret != 0 {
+                    log::warn!(
+                        "Failed to join network namespace {}: {}",
+                        ns_path,
+                        std::io::Error::last_os_error()
+                    );
                 }
-                Err(e) => {
-                    log::warn!("Failed to open NetworkNamespacePath={}: {}", ns_path, e);
-                }
+            }
+            Err(e) => {
+                log::warn!("Failed to open NetworkNamespacePath={}: {}", ns_path, e);
             }
         }
     }
 
     // ── IPCNamespacePath= — join existing IPC namespace ────────────────
-    if let Some(ref ns_path) = config.ipc_namespace_path {
-        if !config.privileged_prefix {
-            match std::fs::File::open(ns_path) {
-                Ok(f) => {
-                    use std::os::unix::io::AsRawFd;
-                    let ret = unsafe { libc::setns(f.as_raw_fd(), libc::CLONE_NEWIPC) };
-                    if ret != 0 {
-                        log::warn!(
-                            "Failed to join IPC namespace {}: {}",
-                            ns_path,
-                            std::io::Error::last_os_error()
-                        );
-                    }
+    if let Some(ref ns_path) = config.ipc_namespace_path
+        && !config.privileged_prefix
+    {
+        match std::fs::File::open(ns_path) {
+            Ok(f) => {
+                use std::os::unix::io::AsRawFd;
+                let ret = unsafe { libc::setns(f.as_raw_fd(), libc::CLONE_NEWIPC) };
+                if ret != 0 {
+                    log::warn!(
+                        "Failed to join IPC namespace {}: {}",
+                        ns_path,
+                        std::io::Error::last_os_error()
+                    );
                 }
-                Err(e) => {
-                    log::warn!("Failed to open IPCNamespacePath={}: {}", ns_path, e);
-                }
+            }
+            Err(e) => {
+                log::warn!("Failed to open IPCNamespacePath={}: {}", ns_path, e);
             }
         }
     }
@@ -1813,13 +1817,8 @@ pub fn run_exec_helper() {
                     unsafe { libc::CPU_SET(cpu, &mut set) };
                 }
             }
-            let ret = unsafe {
-                libc::sched_setaffinity(
-                    0,
-                    std::mem::size_of::<libc::cpu_set_t>(),
-                    &set,
-                )
-            };
+            let ret =
+                unsafe { libc::sched_setaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &set) };
             if ret != 0 {
                 log::warn!(
                     "Failed to set CPUAffinity: {}",
@@ -2083,17 +2082,54 @@ pub fn run_exec_helper() {
         write_utmp_record(&config);
     }
 
+    // ── Personality= — set the execution domain ──────────────────────
+    if let Some(ref personality_str) = config.personality
+        && !config.privileged_prefix
+    {
+        // Map personality string to libc constant.
+        // On x86-64, both "x86-64" and "x86" map to PER_LINUX variants;
+        // systemd supports many architectures but we handle the common ones.
+        let per = match personality_str.as_str() {
+            "x86-64" | "x86_64" => Some(0x0000u64), // PER_LINUX
+            "x86" => Some(0x0008u64),               // PER_LINUX32
+            "s390x" => Some(0x0000u64),             // PER_LINUX
+            "s390" => Some(0x0008u64),              // PER_LINUX32
+            "ppc64" => Some(0x0000u64),             // PER_LINUX
+            "ppc64le" => Some(0x0000u64),           // PER_LINUX
+            "ppc" => Some(0x0008u64),               // PER_LINUX32
+            "arm64" | "aarch64" => Some(0x0000u64), // PER_LINUX
+            "arm" => Some(0x0008u64),               // PER_LINUX32
+            _ => {
+                log::warn!("Unknown Personality={}, ignoring", personality_str);
+                None
+            }
+        };
+        if let Some(domain) = per {
+            let ret = unsafe { libc::personality(domain as libc::c_ulong) };
+            if ret == -1 {
+                log::warn!(
+                    "Failed to set Personality={}: {}",
+                    personality_str,
+                    std::io::Error::last_os_error()
+                );
+            }
+        }
+    }
+
     // ── LockPersonality= — lock the execution domain ──────────────────
     if config.lock_personality && !config.privileged_prefix {
-        // Set personality to PER_LINUX (0x0000) to ensure we're in the
-        // default execution domain, then enforcement is via NoNewPrivileges
-        // preventing personality() changes after exec.
-        let ret = unsafe { libc::personality(0x0000) };
-        if ret == -1 {
-            log::warn!(
-                "Failed to set personality for LockPersonality=: {}",
-                std::io::Error::last_os_error()
-            );
+        // When Personality= is not explicitly set, reset to PER_LINUX (0x0000)
+        // to ensure we're in the default execution domain. When Personality=
+        // is set, the domain was already configured above — just let
+        // NoNewPrivileges prevent personality() changes after exec.
+        if config.personality.is_none() {
+            let ret = unsafe { libc::personality(0x0000) };
+            if ret == -1 {
+                log::warn!(
+                    "Failed to set personality for LockPersonality=: {}",
+                    std::io::Error::last_os_error()
+                );
+            }
         }
     }
 
