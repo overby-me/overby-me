@@ -312,7 +312,18 @@ impl Parser {
                 }
                 false
             }
-            _ => false,
+            _ => {
+                // Check for missing command separator: if the next token could start
+                // a new command (brace group, keyword, word) without a terminator,
+                // it's a syntax error
+                if self.is_keyword("{") || self.is_keyword("(") {
+                    return Err(format!(
+                        "syntax error near unexpected token `{}'",
+                        if self.is_keyword("{") { "{" } else { "(" }
+                    ));
+                }
+                false
+            }
         };
 
         // Resolve any deferred heredoc bodies (for pipeline heredocs like cmd <<EOF | cmd2)
