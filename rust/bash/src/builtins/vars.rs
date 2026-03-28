@@ -43,14 +43,13 @@ pub(super) fn builtin_export(shell: &mut Shell, args: &[String]) -> i32 {
                 continue;
             }
             if let Some(body) = shell.functions.get(name.as_str()) {
-                let body_str = format_func_body(body, 0);
-                let redir_str = if let Some(redirs) = shell.func_redirections.get(name.as_str()) {
-                    let parts: Vec<String> = redirs.iter().map(format_redirection).collect();
-                    format!(" {}", parts.join(" "))
-                } else {
-                    String::new()
-                };
-                let env_val = format!("() {}{}", body_str, redir_str);
+                let redirs = shell
+                    .func_redirections
+                    .get(name.as_str())
+                    .map(|v| v.as_slice())
+                    .unwrap_or(&[]);
+                let body_str = format_func_body_with_redirs(body, 0, redirs);
+                let env_val = format!("() {}", body_str);
                 let env_key = format!("BASH_FUNC_{}%%", name);
                 unsafe { std::env::set_var(&env_key, &env_val) };
             } else {
@@ -311,22 +310,20 @@ pub(super) fn builtin_readonly(shell: &mut Shell, args: &[String]) -> i32 {
     }
 
     let print_all = names.is_empty();
-    if print_all && (args.is_empty() || print_mode) {
+    if print_all && (args.is_empty() || print_mode || func_mode) {
         if func_mode {
             // Print readonly functions with their bodies
             let mut fnames: Vec<&String> = shell.readonly_funcs.iter().collect();
             fnames.sort();
             for name in fnames {
                 if let Some(body) = shell.functions.get(name.as_str()) {
-                    let body_str = format_func_body(body, 0);
-                    let redir_str = if let Some(redirs) = shell.func_redirections.get(name.as_str())
-                    {
-                        let parts: Vec<String> = redirs.iter().map(format_redirection).collect();
-                        format!(" {}", parts.join(" "))
-                    } else {
-                        String::new()
-                    };
-                    println!("{} () \n{}{}", name, body_str, redir_str);
+                    let redirs = shell
+                        .func_redirections
+                        .get(name.as_str())
+                        .map(|v| v.as_slice())
+                        .unwrap_or(&[]);
+                    let body_str = format_func_body_with_redirs(body, 0, redirs);
+                    println!("{} () \n{}", name, body_str);
                 }
                 println!("declare -fr {}", name);
             }
@@ -688,14 +685,13 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             let needs_keyword = shell.func_has_keyword.contains(name)
                 && !name.chars().all(|c| c.is_alphanumeric() || c == '_');
             let prefix = if needs_keyword { "function " } else { "" };
-            let body_str = format_func_body(body, 0);
-            let redir_str = if let Some(redirs) = shell.func_redirections.get(name) {
-                let parts: Vec<String> = redirs.iter().map(format_redirection).collect();
-                format!(" {}", parts.join(" "))
-            } else {
-                String::new()
-            };
-            println!("{}{} () \n{}{}", prefix, name, body_str, redir_str);
+            let redirs = shell
+                .func_redirections
+                .get(name)
+                .map(|v| v.as_slice())
+                .unwrap_or(&[]);
+            let body_str = format_func_body_with_redirs(body, 0, redirs);
+            println!("{}{} () \n{}", prefix, name, body_str);
         };
         if names.is_empty() {
             let mut fnames: Vec<&String> = shell.functions.keys().collect();
@@ -740,12 +736,8 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 if flag_readonly && !is_ro {
                     continue;
                 }
-                if flag_print {
-                    let flags = if is_ro { "-fr" } else { "-f" };
-                    println!("declare {} {}", flags, name);
-                } else {
-                    println!("{}", name);
-                }
+                let flags = if is_ro { "-fr" } else { "-f" };
+                println!("declare {} {}", flags, name);
             }
         } else {
             for name in &names {

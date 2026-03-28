@@ -323,13 +323,15 @@ pub(super) fn builtin_type(shell: &mut Shell, args: &[String]) -> i32 {
     let mut status = 0;
     let mut flag_t = false;
     let mut flag_p = false;
+    let mut flag_a = false;
     let mut names = Vec::new();
 
     for arg in args {
         match arg.as_str() {
             "-t" => flag_t = true,
             "-p" | "-P" => flag_p = true,
-            "-a" | "-f" => {}
+            "-a" => flag_a = true,
+            "-f" => {}
             a if a.starts_with('-') && a.len() > 1 => {
                 eprintln!("{}: type: {}: invalid option", shell.error_prefix(), a);
                 eprintln!("type: usage: type [-afptP] name [name ...]");
@@ -411,14 +413,46 @@ pub(super) fn builtin_type(shell: &mut Shell, args: &[String]) -> i32 {
                 status = 1;
             }
         } else {
-            // Default behavior
+            let mut found = false;
+            // Helper to print function info
+            let print_func_info = |name: &str, shell: &Shell| {
+                if let Some(body) = shell.functions.get(name) {
+                    println!("{} is a function", name);
+                    let needs_keyword = shell.func_has_keyword.contains(name)
+                        && !name.chars().all(|c| c.is_alphanumeric() || c == '_');
+                    let prefix = if needs_keyword { "function " } else { "" };
+                    let redirs = shell
+                        .func_redirections
+                        .get(name)
+                        .map(|v| v.as_slice())
+                        .unwrap_or(&[]);
+                    let body_str = format_func_body_with_redirs(body, 0, redirs);
+                    println!("{}{} () \n{}", prefix, name, body_str);
+                    true
+                } else {
+                    false
+                }
+            };
+            // Alias
             if shell.shopt_expand_aliases
                 && let Some(alias_val) = shell.aliases.get(name)
             {
                 println!("{} is aliased to `{}'", name, alias_val);
-            } else if is_keyword {
+                found = true;
+                if !flag_a {
+                    continue;
+                }
+            }
+            // Keyword
+            if is_keyword {
                 println!("{} is a shell keyword", name);
-            } else if shell.opt_posix
+                found = true;
+                if !flag_a {
+                    continue;
+                }
+            }
+            // In POSIX mode, special builtins before functions
+            if shell.opt_posix
                 && matches!(
                     name,
                     "break"
@@ -440,24 +474,56 @@ pub(super) fn builtin_type(shell: &mut Shell, args: &[String]) -> i32 {
                 && builtin_map.contains_key(name)
             {
                 println!("{} is a special shell builtin", name);
-            } else if let Some(body) = shell.functions.get(name) {
-                println!("{} is a function", name);
-                let needs_keyword = shell.func_has_keyword.contains(name)
-                    && !name.chars().all(|c| c.is_alphanumeric() || c == '_');
-                let prefix = if needs_keyword { "function " } else { "" };
-                let body_str = format_func_body(body, 0);
-                let redir_str = if let Some(redirs) = shell.func_redirections.get(name) {
-                    let parts: Vec<String> = redirs.iter().map(format_redirection).collect();
-                    format!(" {}", parts.join(" "))
-                } else {
-                    String::new()
-                };
-                println!("{}{} () \n{}{}", prefix, name, body_str, redir_str);
-            } else if builtin_map.contains_key(name) {
-                println!("{} is a shell builtin", name);
-            } else if let Some(path) = find_in_path_opt(name) {
+                found = true;
+                if !flag_a {
+                    continue;
+                }
+            }
+            // Function
+            if print_func_info(name, shell) {
+                found = true;
+                if !flag_a {
+                    continue;
+                }
+            }
+            // Builtin (skip if already shown as special builtin)
+            if builtin_map.contains_key(name) {
+                let already_shown_as_special = shell.opt_posix
+                    && matches!(
+                        name,
+                        "break"
+                            | "."
+                            | "source"
+                            | "continue"
+                            | "eval"
+                            | "exec"
+                            | "exit"
+                            | "export"
+                            | "readonly"
+                            | "return"
+                            | "set"
+                            | "shift"
+                            | "trap"
+                            | "unset"
+                            | ":"
+                    );
+                if !already_shown_as_special {
+                    println!("{} is a shell builtin", name);
+                    found = true;
+                    if !flag_a {
+                        continue;
+                    }
+                }
+            }
+            // File
+            if let Some(path) = find_in_path_opt(name) {
                 println!("{} is {}", name, path);
-            } else {
+                found = true;
+                if !flag_a {
+                    continue;
+                }
+            }
+            if !found {
                 eprintln!("{}: type: {}: not found", shell.error_prefix(), name);
                 status = 1;
             }
@@ -593,15 +659,13 @@ pub(super) fn builtin_command(shell: &mut Shell, args: &[String]) -> i32 {
                     } else {
                         ""
                     };
-                    let body = format_func_body(func_body, 0);
-                    let redir_str = if let Some(redirs) = shell.func_redirections.get(name.as_str())
-                    {
-                        let parts: Vec<String> = redirs.iter().map(format_redirection).collect();
-                        format!(" {}", parts.join(" "))
-                    } else {
-                        String::new()
-                    };
-                    println!("{}{} () \n{}{}", prefix, name, body, redir_str);
+                    let redirs = shell
+                        .func_redirections
+                        .get(name.as_str())
+                        .map(|v| v.as_slice())
+                        .unwrap_or(&[]);
+                    let body = format_func_body_with_redirs(func_body, 0, redirs);
+                    println!("{}{} () \n{}", prefix, name, body);
                 } else if builtin_map.contains_key(name.as_str()) {
                     println!("{} is a shell builtin", name);
                 } else if let Some(path) = find_in_path_opt(name) {

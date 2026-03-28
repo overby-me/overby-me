@@ -734,14 +734,8 @@ fn format_command_indent(cmd: &Command, indent: usize) -> String {
                 ""
             };
             // Bash always wraps function bodies in { ... } even if originally ( ... )
-            let body_str = format_func_body(body, indent);
-            let redir_str = if redirections.is_empty() {
-                String::new()
-            } else {
-                let parts: Vec<String> = redirections.iter().map(format_redirection).collect();
-                format!(" {}", parts.join(" "))
-            };
-            format!("{}{} () \n{}{}", prefix, name, body_str, redir_str)
+            let body_str = format_func_body_with_redirs(body, indent, redirections);
+            format!("{}{} () \n{}", prefix, name, body_str)
         }
         Command::Coproc(name, inner) => {
             let inner_str = format_command_indent(inner, indent);
@@ -826,15 +820,33 @@ fn format_cond_expr(expr: &CondExpr) -> String {
 }
 
 /// Format a function body — bash always wraps in { ... } even for subshell bodies
-pub fn format_func_body(body: &CompoundCommand, indent: usize) -> String {
+pub fn format_func_body_with_redirs(
+    body: &CompoundCommand,
+    indent: usize,
+    redirections: &[Redirection],
+) -> String {
+    let redir_str = if redirections.is_empty() {
+        String::new()
+    } else {
+        let parts: Vec<String> = redirections.iter().map(format_redirection).collect();
+        format!(" {}", parts.join(" "))
+    };
+    let iprefix = "    ".repeat(indent);
     match body {
-        CompoundCommand::BraceGroup(_) => format_compound_command_indent(body, indent),
-        // Non-brace body (e.g., subshell): wrap in { ... }
+        CompoundCommand::BraceGroup(_) => {
+            // Add iprefix to opening brace (format_compound_command_indent
+            // no longer adds it to allow inline BraceGroup to avoid double-indent)
+            let s = format_compound_command_indent(body, indent);
+            format!("{}{}{}", iprefix, s, redir_str)
+        }
+        // Non-brace body (e.g., subshell): wrap in { ... }, redirections go inside
         other => {
-            let iprefix = "    ".repeat(indent);
             let inner_prefix = "    ".repeat(indent + 1);
             let inner = format_compound_command_indent(other, 0);
-            format!("{}{{ \n{}{}\n{}}}", iprefix, inner_prefix, inner, iprefix)
+            format!(
+                "{}{{ \n{}{}{}\n{}}}",
+                iprefix, inner_prefix, inner, redir_str, iprefix
+            )
         }
     }
 }
@@ -844,11 +856,10 @@ fn format_compound_command_indent(cmd: &CompoundCommand, indent: usize) -> Strin
     match cmd {
         CompoundCommand::BraceGroup(program) => {
             if program.is_empty() {
-                format!("{}{{ \n{}}}", iprefix, iprefix)
+                format!("{{ \n{}}}", iprefix)
             } else {
                 format!(
-                    "{}{{ \n{}\n{}}}",
-                    iprefix,
+                    "{{ \n{}\n{}}}",
                     format_program_impl(program, indent + 1, false),
                     iprefix
                 )

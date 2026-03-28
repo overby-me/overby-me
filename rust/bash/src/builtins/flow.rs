@@ -2,10 +2,13 @@ use super::*;
 
 pub(super) fn builtin_break(shell: &mut Shell, args: &[String]) -> i32 {
     if shell.loop_depth == 0 {
-        eprintln!(
-            "{}: break: only meaningful in a `for', `while', or `until' loop",
-            shell.error_prefix()
-        );
+        // In POSIX mode, break outside a loop is silently ignored
+        if !shell.opt_posix {
+            eprintln!(
+                "{}: break: only meaningful in a `for', `while', or `until' loop",
+                shell.error_prefix()
+            );
+        }
         return 0;
     }
     let n: i32 = args.first().and_then(|s| s.parse().ok()).unwrap_or(1);
@@ -25,10 +28,12 @@ pub(super) fn builtin_break(shell: &mut Shell, args: &[String]) -> i32 {
 
 pub(super) fn builtin_continue(shell: &mut Shell, args: &[String]) -> i32 {
     if shell.loop_depth == 0 {
-        eprintln!(
-            "{}: continue: only meaningful in a `for', `while', or `until' loop",
-            shell.error_prefix()
-        );
+        if !shell.opt_posix {
+            eprintln!(
+                "{}: continue: only meaningful in a `for', `while', or `until' loop",
+                shell.error_prefix()
+            );
+        }
         return 0;
     }
     let n: i32 = args.first().and_then(|s| s.parse().ok()).unwrap_or(1);

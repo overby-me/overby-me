@@ -35,10 +35,28 @@ impl Shell {
                     )
                 {
                     eprintln!("{}: `{}': is a special builtin", self.error_prefix(), name);
-                    return 2;
+                    // Fatal error in POSIX mode — exit the shell/subshell
+                    std::process::exit(2);
                 }
-                // In POSIX mode, invalid identifiers are warnings, not fatal
-                // (bash 5.3 allows defining them)
+                // Validate function name: reject names with variable expansions ($)
+                // or other invalid chars
+                let name_invalid = if *has_function_keyword {
+                    // With 'function' keyword: reject names containing $ or backtick
+                    // (these indicate variable expansion in the name)
+                    name.contains('$') || name.contains('`')
+                } else {
+                    // Without 'function' keyword (name()): reject names with spaces
+                    // or process substitution chars
+                    name.contains(' ') || name.starts_with('<') || name.starts_with('>')
+                };
+                if name_invalid {
+                    eprintln!(
+                        "{}: `{}': not a valid identifier",
+                        self.error_prefix(),
+                        name
+                    );
+                    return 1;
+                }
                 if self.readonly_funcs.contains(name) {
                     eprintln!("{}: {}: readonly function", self.error_prefix(), name);
                     1
@@ -997,7 +1015,8 @@ impl Shell {
             && let Some(func_body) = self.functions.get(command_name).cloned()
         {
             // Apply prefix assignments temporarily for function calls
-            let prefix_saves: Vec<(String, Option<String>, Option<String>)> = cmd
+            // Save: (name, set_value, old_var, old_export)
+            let prefix_saves: Vec<(String, String, Option<String>, Option<String>)> = cmd
                 .assignments
                 .iter()
                 .map(|a| {
@@ -1023,30 +1042,39 @@ impl Shell {
                     // Export prefix assignments so printenv/child processes see them
                     self.exports.insert(a.name.clone(), final_val.clone());
                     unsafe { std::env::set_var(&a.name, &final_val) };
-                    (a.name.clone(), old_var, old_export)
+                    (a.name.clone(), final_val, old_var, old_export)
                 })
                 .collect();
 
             let result = self.run_function(&func_body, command_name, args);
 
             // Restore prefix assignments (vars + exports)
-            for (k, old_var, old_export) in prefix_saves {
+            for (k, set_val, old_var, old_export) in &prefix_saves {
+                // In POSIX mode, if the variable was modified inside the function
+                // (e.g., by special builtin prefix assignments that persist),
+                // don't restore it
+                if self.opt_posix {
+                    let current = self.vars.get(k).cloned();
+                    if current.as_deref() != Some(set_val.as_str()) {
+                        continue; // variable was changed inside function, keep the change
+                    }
+                }
                 match old_var {
                     Some(v) => {
-                        self.vars.insert(k.clone(), v);
+                        self.vars.insert(k.clone(), v.clone());
                     }
                     None => {
-                        self.vars.remove(&k);
+                        self.vars.remove(k);
                     }
                 }
                 match old_export {
                     Some(v) => {
                         self.exports.insert(k.clone(), v.clone());
-                        unsafe { std::env::set_var(&k, &v) };
+                        unsafe { std::env::set_var(k, v) };
                     }
                     None => {
-                        self.exports.remove(&k);
-                        unsafe { std::env::remove_var(&k) };
+                        self.exports.remove(k);
+                        unsafe { std::env::remove_var(k) };
                     }
                 }
             }

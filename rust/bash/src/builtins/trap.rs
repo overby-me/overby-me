@@ -402,6 +402,8 @@ pub(super) fn builtin_wait(shell: &mut Shell, args: &[String]) -> i32 {
                     Err(_) => break,
                 }
             }
+            // wait with no arguments returns 0 per POSIX
+            return 0;
         } else {
             // Wait for specific PIDs
             for arg in args {
