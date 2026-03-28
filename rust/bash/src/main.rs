@@ -233,26 +233,9 @@ fn run() -> i32 {
     {
         match std::fs::read_to_string(&file) {
             Ok(content) => {
-                // Open script on fd 0 so exec 0< can redirect subsequent reading
-                #[cfg(unix)]
-                {
-                    use std::os::unix::io::IntoRawFd;
-                    if let Ok(f) = std::fs::File::open(&file) {
-                        let raw = f.into_raw_fd();
-                        let script_dup =
-                            nix::fcntl::fcntl(raw, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(100)).ok();
-                        nix::unistd::dup2(raw, 0).ok();
-                        nix::unistd::close(raw).ok();
-                        nix::unistd::lseek(0, content.len() as i64, nix::unistd::Whence::SeekSet)
-                            .ok();
-                        shell.script_fd = script_dup;
-                    }
-                }
+                // For file-argument scripts, do NOT set script_fd — exec 0< should
+                // only affect stdin for commands, not switch the script source
                 let status = shell.run_string(&content);
-                #[cfg(unix)]
-                if let Some(fd) = shell.script_fd.take() {
-                    nix::unistd::close(fd).ok();
-                }
                 shell.run_exit_trap();
                 return status;
             }
@@ -282,7 +265,19 @@ fn run() -> i32 {
         // Read all of stdin and execute
         let mut input = String::new();
         io::stdin().read_to_string(&mut input).ok();
+        // Save a dup of fd 0 for exec 0< detection (so the shell can detect
+        // when exec redirects stdin to a different file)
+        #[cfg(unix)]
+        {
+            if let Ok(dup_fd) = nix::fcntl::fcntl(0, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(100)) {
+                shell.script_fd = Some(dup_fd);
+            }
+        }
         let status = shell.run_string(&input);
+        #[cfg(unix)]
+        if let Some(fd) = shell.script_fd.take() {
+            nix::unistd::close(fd).ok();
+        }
         shell.run_exit_trap();
         status
     }
