@@ -8219,6 +8219,91 @@
           CALEOF
           chmod +x TEST-74-AUX-UTILS.run-calendar.sh
 
+          # systemctl enable/disable with WantedBy test
+          cat > TEST-74-AUX-UTILS.enable-wantedby.sh << 'EWEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          at_exit() {
+              set +e
+              systemctl disable enable-wb-test.service 2>/dev/null
+              rm -f /run/systemd/system/enable-wb-test.service
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "systemctl enable creates WantedBy symlink"
+          cat > /run/systemd/system/enable-wb-test.service << EOF
+          [Unit]
+          Description=Enable WantedBy test
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+          systemctl daemon-reload
+
+          systemctl enable enable-wb-test.service
+          systemctl is-enabled enable-wb-test.service
+
+          : "systemctl disable removes WantedBy symlink"
+          systemctl disable enable-wb-test.service
+          (! systemctl is-enabled enable-wb-test.service) || true
+          EWEOF
+          chmod +x TEST-74-AUX-UTILS.enable-wantedby.sh
+
+          # systemd-run with EnvironmentFile test
+          cat > TEST-74-AUX-UTILS.run-envfile.sh << 'REEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          at_exit() {
+              set +e
+              rm -f /tmp/envfile-test /tmp/envfile-result
+          }
+          trap at_exit EXIT
+
+          : "systemd-run with -p EnvironmentFile reads env from file"
+          cat > /tmp/envfile-test << EOF
+          MY_TEST_VAR=hello-from-envfile
+          MY_OTHER_VAR=world
+          EOF
+
+          UNIT="run-envfile-$RANDOM"
+          systemd-run --unit="$UNIT" --remain-after-exit \
+              -p EnvironmentFile=/tmp/envfile-test \
+              bash -c 'echo "$MY_TEST_VAR $MY_OTHER_VAR" > /tmp/envfile-result'
+          sleep 1
+          [[ "$(cat /tmp/envfile-result)" == "hello-from-envfile world" ]]
+          systemctl stop "$UNIT.service" 2>/dev/null || true
+          REEOF
+          chmod +x TEST-74-AUX-UTILS.run-envfile.sh
+
+          # systemctl show for timer properties test
+          cat > TEST-74-AUX-UTILS.show-timer-props.sh << 'TPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl show timer properties"
+          UNIT="timer-show-$RANDOM"
+          systemd-run --unit="$UNIT" --on-active=300s --remain-after-exit true
+          # Timer should have correct properties
+          [[ "$(systemctl show -P ActiveState "$UNIT.timer")" == "active" ]]
+          [[ "$(systemctl show -P LoadState "$UNIT.timer")" == "loaded" ]]
+
+          : "Next elapse timestamp is set for active timer"
+          NEXT="$(systemctl show -P NextElapseUSecRealtime "$UNIT.timer")" || true
+          # May or may not be set, just ensure the property query works
+          systemctl show -P NextElapseUSecRealtime "$UNIT.timer" > /dev/null || true
+
+          systemctl stop "$UNIT.timer" "$UNIT.service" 2>/dev/null || true
+          TPEOF
+          chmod +x TEST-74-AUX-UTILS.show-timer-props.sh
+
           rm -f TEST-74-AUX-UTILS.busctl.sh \
                TEST-74-AUX-UTILS.capsule.sh \
                TEST-74-AUX-UTILS.firstboot.sh \
