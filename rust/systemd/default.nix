@@ -2831,6 +2831,152 @@
           SPEOF
           chmod +x TEST-07-PID1.systemctl-show-props.sh
 
+          # Custom ProtectSystem=/ProtectHome= test
+          cat > TEST-07-PID1.protect-system.sh << 'PSEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              rm -f /run/systemd/system/protect-test.service
+              rm -f /tmp/protect-test-out
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          # Helper: retry a command up to 5 times with 1s delay (works around EAGAIN)
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep 1; done; "$@"; }
+
+          : "ProtectSystem=strict makes filesystem read-only"
+          cat > /run/systemd/system/protect-test.service << EOF
+          [Service]
+          Type=oneshot
+          ProtectSystem=strict
+          ReadWritePaths=/tmp
+          ExecStart=bash -c '(touch /usr/test-file 2>/dev/null && echo WRITABLE || echo READONLY) > /tmp/protect-test-out'
+          EOF
+          retry systemctl daemon-reload
+          retry systemctl start protect-test.service
+          [[ "$(cat /tmp/protect-test-out)" == "READONLY" ]]
+
+          : "ProtectHome=yes makes /home inaccessible"
+          cat > /run/systemd/system/protect-test.service << EOF
+          [Service]
+          Type=oneshot
+          ProtectHome=yes
+          ReadWritePaths=/tmp
+          ExecStart=bash -c '(ls /home/testuser 2>/dev/null && echo ACCESSIBLE || echo PROTECTED) > /tmp/protect-test-out'
+          EOF
+          retry systemctl daemon-reload
+          retry systemctl start protect-test.service
+          [[ "$(cat /tmp/protect-test-out)" == "PROTECTED" ]]
+          PSEOF
+          chmod +x TEST-07-PID1.protect-system.sh
+
+          # Custom ReadOnlyPaths=/ReadWritePaths= test
+          cat > TEST-07-PID1.read-only-paths.sh << 'ROPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              rm -f /run/systemd/system/rop-test.service
+              rm -f /tmp/rop-test-out
+              rm -rf /tmp/rop-test-dir
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          # Helper: retry a command up to 5 times with 1s delay (works around EAGAIN)
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep 1; done; "$@"; }
+
+          : "ReadOnlyPaths= makes paths read-only"
+          mkdir -p /tmp/rop-test-dir
+          cat > /run/systemd/system/rop-test.service << EOF
+          [Service]
+          Type=oneshot
+          ReadOnlyPaths=/tmp/rop-test-dir
+          ReadWritePaths=/tmp/rop-test-out
+          ExecStart=bash -c '(touch /tmp/rop-test-dir/test 2>/dev/null && echo WRITABLE || echo READONLY) > /tmp/rop-test-out'
+          EOF
+          retry systemctl daemon-reload
+          retry systemctl start rop-test.service
+          [[ "$(cat /tmp/rop-test-out)" == "READONLY" ]]
+          ROPEOF
+          chmod +x TEST-07-PID1.read-only-paths.sh
+
+          # Custom PrivateTmp= test
+          cat > TEST-07-PID1.private-tmp.sh << 'PTEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              rm -f /run/systemd/system/ptmp-test.service
+              rm -f /run/ptmp-test-out /tmp/ptmp-marker
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          # Helper: retry a command up to 5 times with 1s delay (works around EAGAIN)
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep 1; done; "$@"; }
+
+          : "PrivateTmp=yes gives service its own /tmp"
+          touch /tmp/ptmp-marker
+          cat > /run/systemd/system/ptmp-test.service << EOF
+          [Service]
+          Type=oneshot
+          PrivateTmp=yes
+          ExecStart=bash -c '(ls /tmp/ptmp-marker 2>/dev/null && echo SHARED || echo PRIVATE) > /run/ptmp-test-out'
+          EOF
+          retry systemctl daemon-reload
+          retry systemctl start ptmp-test.service
+          [[ "$(cat /run/ptmp-test-out)" == "PRIVATE" ]]
+          rm -f /tmp/ptmp-marker /run/ptmp-test-out
+          PTEOF
+          chmod +x TEST-07-PID1.private-tmp.sh
+
+          # Custom NoNewPrivileges= test
+          cat > TEST-07-PID1.no-new-privileges.sh << 'NNPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              rm -f /run/systemd/system/nnp-test.service
+              rm -f /tmp/nnp-test-out
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          # Helper: retry a command up to 5 times with 1s delay (works around EAGAIN)
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep 1; done; "$@"; }
+
+          : "NoNewPrivileges=yes sets the no_new_privs flag"
+          cat > /run/systemd/system/nnp-test.service << EOF
+          [Service]
+          Type=oneshot
+          NoNewPrivileges=yes
+          ExecStart=bash -c 'cat /proc/self/status | grep NoNewPrivs > /tmp/nnp-test-out'
+          EOF
+          retry systemctl daemon-reload
+          retry systemctl start nnp-test.service
+          grep -q "NoNewPrivs:[[:space:]]*1" /tmp/nnp-test-out
+          NNPEOF
+          chmod +x TEST-07-PID1.no-new-privileges.sh
+
           # Custom KillMode= test
           cat > TEST-07-PID1.kill-mode.sh << 'KMEOF'
           #!/usr/bin/env bash
