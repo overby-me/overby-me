@@ -22,6 +22,8 @@ thread_local! {
     static ARITH_ERROR: RefCell<bool> = const { RefCell::new(false) };
     /// PID of the last process substitution child (for $!)
     static LAST_PROCSUB_PID: RefCell<Option<i32>> = const { RefCell::new(None) };
+    /// Whether dotglob shopt is enabled (for glob expansion)
+    static DOTGLOB_ENABLED: RefCell<bool> = const { RefCell::new(false) };
     /// Callback for running process substitution commands inline (instead of exec'ing
     /// a new shell). Set by the interpreter before word expansion.
     static PROCSUB_RUNNER: RefCell<Option<*mut dyn FnMut(&str) -> i32>> = const { RefCell::new(None) };
@@ -62,6 +64,10 @@ fn run_procsub_inline(cmd: &str) -> Option<i32> {
 
 pub fn set_script_name(name: &str) {
     SCRIPT_NAME.with(|f| *f.borrow_mut() = name.to_string());
+}
+
+pub fn set_dotglob(enabled: bool) {
+    DOTGLOB_ENABLED.with(|d| *d.borrow_mut() = enabled);
 }
 
 pub fn get_script_name() -> String {
@@ -1800,19 +1806,20 @@ fn glob_expand(field: &str) -> Vec<String> {
                         .filter_map(|e| e.ok())
                         .map(|e| e.file_name().to_string_lossy().to_string())
                         .filter(|name| {
-                            // Skip dotfiles unless pattern explicitly matches dots
+                            // Skip dotfiles unless dotglob is set or pattern explicitly matches dots
                             if name.starts_with('.') {
-                                // Check if the pattern explicitly starts with or contains dot alternatives
-                                let allows_dot = pattern.starts_with('.')
-                                    || pattern.starts_with("@(.")
-                                    || pattern.starts_with("+(.")
-                                    || pattern.starts_with("*(.")
-                                    || pattern.starts_with("?(.")
-                                    || pattern.starts_with("@(*")
-                                    || pattern.starts_with("+(* ")
-                                    || pattern.contains("|.");
-                                if !allows_dot {
-                                    return false;
+                                let dotglob = DOTGLOB_ENABLED.with(|d| *d.borrow());
+                                if !dotglob {
+                                    let allows_dot = pattern.starts_with('.')
+                                        || pattern.starts_with("@(.")
+                                        || pattern.starts_with("+(.")
+                                        || pattern.starts_with("*(.")
+                                        || pattern.starts_with("?(.")
+                                        || pattern.starts_with("@(*")
+                                        || pattern.contains("|.");
+                                    if !allows_dot {
+                                        return false;
+                                    }
                                 }
                             }
                             crate::interpreter::commands::case_pattern_match(name, &pattern)
@@ -1846,7 +1853,12 @@ fn glob_expand(field: &str) -> Vec<String> {
                 }
             }
         } else {
-            match glob::glob(&pattern) {
+            let dotglob = DOTGLOB_ENABLED.with(|d| *d.borrow());
+            let glob_opts = glob::MatchOptions {
+                require_literal_leading_dot: !dotglob,
+                ..Default::default()
+            };
+            match glob::glob_with(&pattern, glob_opts) {
                 Ok(paths) => {
                     let mut results: Vec<String> = paths
                         .filter_map(|p| p.ok())

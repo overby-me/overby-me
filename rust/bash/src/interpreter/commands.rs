@@ -280,6 +280,13 @@ impl Shell {
         crate::expand::EXPAND_ERROR_PREFIX.with(|p| {
             *p.borrow_mut() = self.error_prefix();
         });
+        // Set dotglob state for glob expansion
+        crate::expand::set_dotglob(
+            self.shopt_options
+                .get("dotglob")
+                .copied()
+                .unwrap_or(false),
+        );
         // Register inline runner for process substitutions using raw pointer
         // Safety: the pointer is valid for the duration of this function call
         let self_ptr = self as *mut Shell;
@@ -369,6 +376,12 @@ impl Shell {
     pub fn expand_word_single(&mut self, word: &Word) -> String {
         self.apply_assign_defaults(word);
         let word = self.eval_arith_in_word(word);
+        crate::expand::set_dotglob(
+            self.shopt_options
+                .get("dotglob")
+                .copied()
+                .unwrap_or(false),
+        );
         let mut vars = self.vars.clone();
         self.inject_transform_attrs(&word, &mut vars);
         let arrays = self.arrays.clone();
