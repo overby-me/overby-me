@@ -83,6 +83,16 @@ impl StdIo {
     }
 }
 
+impl Drop for StdIo {
+    fn drop(&mut self) {
+        if let Self::Piped(r, w) = self {
+            let _ = nix::unistd::close(*r);
+            let _ = nix::unistd::close(*w);
+        }
+        // File and Null variants hold std::fs::File which closes on drop
+    }
+}
+
 #[derive(Debug)]
 pub struct Service {
     pub pid: Option<nix::unistd::Pid>,
@@ -600,10 +610,17 @@ impl Service {
             self.kill_all_remaining_processes(conf, name);
             self.pid = None;
             self.process_group = None;
+            if let Some(path) = self.notifications_path.take() {
+                let _ = std::fs::remove_file(&path);
+            }
+            self.notifications = None;
+            self.stdout = None;
+            self.stderr = None;
             return Ok(());
         }
 
-        self.stop(conf, id.clone(), name, run_info)
+        let result = self
+            .stop(conf, id.clone(), name, run_info)
             .map_err(|stop_err| {
                 trace!(
                     "Stop process failed with: {stop_err:?} for service: {name}. Running poststop commands"
@@ -621,7 +638,19 @@ impl Service {
                 );
                 self.run_poststop(conf, id.clone(), name, run_info)
                     .map_err(ServiceErrorReason::PoststopFailed)
-            })
+            });
+
+        // Close file descriptors held by the service (notification socket,
+        // stdout/stderr pipes) to prevent FD exhaustion when many transient
+        // services are started and stopped.
+        if let Some(path) = self.notifications_path.take() {
+            let _ = std::fs::remove_file(&path);
+        }
+        self.notifications = None;
+        self.stdout = None;
+        self.stderr = None;
+
+        result
     }
 
     #[must_use]

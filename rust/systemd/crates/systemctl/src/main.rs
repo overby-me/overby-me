@@ -101,6 +101,17 @@ fn main() {
         libc::signal(libc::SIGPIPE, libc::SIG_IGN);
     }
 
+    // Rust's println!() panics on broken pipe even with SIGPIPE ignored.
+    // Install a custom panic hook that exits cleanly for BrokenPipe errors.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let msg = info.to_string();
+        if msg.contains("Broken pipe") {
+            std::process::exit(0);
+        }
+        default_hook(info);
+    }));
+
     let mut args: Vec<_> = std::env::args().collect();
     let exec_name = args.remove(0);
 

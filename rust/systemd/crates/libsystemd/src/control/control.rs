@@ -6705,58 +6705,22 @@ pub fn execute_command(
                                 crate::units::ServiceType::Notify
                                 | crate::units::ServiceType::NotifyReload,
                             ) => {
-                                // Drop the run_info lock before polling.
-                                drop(ri);
-                                // Poll until the service sends READY=1 or stops.
-                                loop {
-                                    let ri = run_info.read_poisoned();
-                                    let Some(unit) = ri.unit_table.get(&id) else {
-                                        break;
-                                    };
-                                    let status = unit.common.status.read_poisoned();
-                                    match &*status {
-                                        UnitStatus::Stopped(_, errors) if !errors.is_empty() => {
-                                            return Err(format!(
-                                                "Unit {} failed to start",
-                                                id.name
-                                            ));
-                                        }
-                                        UnitStatus::Stopped(
-                                            crate::units::StatusStopped::StoppedUnexpected,
-                                            _,
-                                        ) => {
-                                            return Err(format!(
-                                                "Unit {} failed to start",
-                                                id.name
-                                            ));
-                                        }
-                                        UnitStatus::Restarting => {
-                                            return Err(format!(
-                                                "Unit {} failed to start",
-                                                id.name
-                                            ));
-                                        }
-                                        UnitStatus::Stopped(_, _) => {
-                                            // Clean stop before READY — treat as failure
-                                            return Err(format!(
-                                                "Unit {} failed to start",
-                                                id.name
-                                            ));
-                                        }
-                                        UnitStatus::Started(_) => {
-                                            // Check if READY=1 has been signaled
-                                            if let Specific::Service(svc) = &unit.specific {
-                                                let state = svc.state.read_poisoned();
-                                                if state.srvc.signaled_ready {
-                                                    break; // success
-                                                }
-                                            }
-                                        }
-                                        _ => {}
+                                // activate_needed_units() already waited for
+                                // READY=1 via wait_for_service(), so the service
+                                // is ready at this point. Just verify it hasn't
+                                // stopped since then.
+                                let status = unit.common.status.read_poisoned();
+                                match &*status {
+                                    UnitStatus::Stopped(_, errors) if !errors.is_empty() => {
+                                        return Err(format!("Unit {} failed to start", id.name));
                                     }
-                                    drop(status);
-                                    drop(ri);
-                                    std::thread::sleep(std::time::Duration::from_millis(50));
+                                    UnitStatus::Stopped(
+                                        crate::units::StatusStopped::StoppedUnexpected,
+                                        _,
+                                    ) => {
+                                        return Err(format!("Unit {} failed to start", id.name));
+                                    }
+                                    _ => {}
                                 }
                             }
                             _ => {}

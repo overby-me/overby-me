@@ -162,6 +162,7 @@ pub fn wait_for_service(
                 }
                 crate::notification_handler::handle_notifications_from_buffer(srvc, name);
                 if srvc.signaled_ready {
+                    srvc.signaled_ready = false;
                     trace!("[FORK_PARENT] Service {name} sent READY=1 notification — proceeding!");
                     break;
                 }
