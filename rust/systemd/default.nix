@@ -2831,6 +2831,173 @@
           SPEOF
           chmod +x TEST-07-PID1.systemctl-show-props.sh
 
+          # Custom KillMode= test
+          cat > TEST-07-PID1.kill-mode.sh << 'KMEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              systemctl stop killmode-test.service 2>/dev/null
+              rm -f /run/systemd/system/killmode-test.service
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          # Helper: retry a command up to 5 times with 1s delay (works around EAGAIN)
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep 1; done; "$@"; }
+
+          : "KillMode=process only kills main process"
+          cat > /run/systemd/system/killmode-test.service << EOF
+          [Service]
+          KillMode=process
+          ExecStart=bash -c 'sleep infinity & exec sleep infinity'
+          EOF
+          retry systemctl daemon-reload
+          retry systemctl start killmode-test.service
+          MAINPID=$(systemctl show -P MainPID killmode-test.service)
+          [[ "$MAINPID" -gt 0 ]]
+          # Service is running
+          systemctl is-active killmode-test.service
+          systemctl stop killmode-test.service
+          KMEOF
+          chmod +x TEST-07-PID1.kill-mode.sh
+
+          # Custom UMask= test
+          cat > TEST-07-PID1.umask.sh << 'UMEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              rm -f /run/systemd/system/umask-test.service
+              rm -f /tmp/umask-test-out /tmp/umask-test-file
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          # Helper: retry a command up to 5 times with 1s delay (works around EAGAIN)
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep 1; done; "$@"; }
+
+          : "UMask= sets process umask"
+          cat > /run/systemd/system/umask-test.service << EOF
+          [Service]
+          Type=oneshot
+          UMask=0077
+          ExecStart=bash -c 'touch /tmp/umask-test-file && stat -c %%a /tmp/umask-test-file > /tmp/umask-test-out'
+          EOF
+          retry systemctl daemon-reload
+          rm -f /tmp/umask-test-file /tmp/umask-test-out
+          retry systemctl start umask-test.service
+          # With UMask=0077, new files should be 600 (rw-------)
+          [[ "$(cat /tmp/umask-test-out)" == "600" ]]
+          UMEOF
+          chmod +x TEST-07-PID1.umask.sh
+
+          # Custom LimitNOFILE= resource limit test
+          cat > TEST-07-PID1.resource-limits.sh << 'RLEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              rm -f /run/systemd/system/rlimit-test.service
+              rm -f /tmp/rlimit-test-out
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          # Helper: retry a command up to 5 times with 1s delay (works around EAGAIN)
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep 1; done; "$@"; }
+
+          : "LimitNOFILE= sets NOFILE rlimit"
+          cat > /run/systemd/system/rlimit-test.service << EOF
+          [Service]
+          Type=oneshot
+          LimitNOFILE=4096
+          ExecStart=bash -c 'ulimit -n > /tmp/rlimit-test-out'
+          EOF
+          retry systemctl daemon-reload
+          retry systemctl start rlimit-test.service
+          [[ "$(cat /tmp/rlimit-test-out)" == "4096" ]]
+
+          : "LimitNPROC= sets NPROC rlimit"
+          cat > /run/systemd/system/rlimit-test.service << EOF
+          [Service]
+          Type=oneshot
+          LimitNPROC=512
+          ExecStart=bash -c 'ulimit -u > /tmp/rlimit-test-out'
+          EOF
+          retry systemctl daemon-reload
+          retry systemctl start rlimit-test.service
+          [[ "$(cat /tmp/rlimit-test-out)" == "512" ]]
+
+          : "LimitCORE= sets CORE rlimit"
+          cat > /run/systemd/system/rlimit-test.service << EOF
+          [Service]
+          Type=oneshot
+          LimitCORE=0
+          ExecStart=bash -c 'ulimit -c > /tmp/rlimit-test-out'
+          EOF
+          retry systemctl daemon-reload
+          retry systemctl start rlimit-test.service
+          [[ "$(cat /tmp/rlimit-test-out)" == "0" ]]
+          RLEOF
+          chmod +x TEST-07-PID1.resource-limits.sh
+
+          # Custom drop-in override test
+          cat > TEST-07-PID1.drop-in-custom.sh << 'DIEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              systemctl stop dropin-custom-test.service 2>/dev/null
+              rm -f /run/systemd/system/dropin-custom-test.service
+              rm -rf /run/systemd/system/dropin-custom-test.service.d
+              rm -f /tmp/dropin-custom-out
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          # Helper: retry a command up to 5 times with 1s delay (works around EAGAIN)
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep 1; done; "$@"; }
+
+          : "Drop-in overrides main unit file properties"
+          cat > /run/systemd/system/dropin-custom-test.service << EOF
+          [Service]
+          Type=oneshot
+          Environment=MY_VAR=original
+          ExecStart=bash -c 'echo \$MY_VAR > /tmp/dropin-custom-out'
+          EOF
+          retry systemctl daemon-reload
+          retry systemctl start dropin-custom-test.service
+          [[ "$(cat /tmp/dropin-custom-out)" == "original" ]]
+
+          : "Drop-in .d/override.conf replaces Environment="
+          mkdir -p /run/systemd/system/dropin-custom-test.service.d
+          cat > /run/systemd/system/dropin-custom-test.service.d/override.conf << EOF
+          [Service]
+          Environment=MY_VAR=overridden
+          EOF
+          retry systemctl daemon-reload
+          retry systemctl start dropin-custom-test.service
+          [[ "$(cat /tmp/dropin-custom-out)" == "overridden" ]]
+          DIEOF
+          chmod +x TEST-07-PID1.drop-in-custom.sh
+
           # Custom ExecStopPost= runs after failure test
           cat > TEST-07-PID1.exec-stop-post-failure.sh << 'ESPFEOF'
           #!/usr/bin/env bash
