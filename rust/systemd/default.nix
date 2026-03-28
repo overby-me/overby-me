@@ -5015,6 +5015,83 @@
           EHEOF
                     chmod +x TEST-23-UNIT-FILE.exec-hooks.sh
 
+                    # WorkingDirectory= and ExecStop= test
+                    cat > TEST-23-UNIT-FILE.workdir-execstop.sh << 'WDEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          at_exit() {
+              set +e
+              systemctl stop wd-test.service stop-test.service 2>/dev/null
+              rm -f /run/systemd/system/wd-test.service /run/systemd/system/stop-test.service
+              rm -f /tmp/wd-test-result /tmp/stop-test-marker
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "WorkingDirectory= sets cwd for service"
+          cat > /run/systemd/system/wd-test.service << EOF
+          [Service]
+          Type=oneshot
+          WorkingDirectory=/tmp
+          ExecStart=bash -c 'pwd > /tmp/wd-test-result'
+          EOF
+          systemctl daemon-reload
+
+          systemctl start wd-test.service
+          [[ "$(cat /tmp/wd-test-result)" == "/tmp" ]]
+
+          : "ExecStop= runs when service is stopped"
+          cat > /run/systemd/system/stop-test.service << EOF
+          [Service]
+          ExecStart=sleep infinity
+          ExecStop=touch /tmp/stop-test-marker
+          EOF
+          systemctl daemon-reload
+
+          rm -f /tmp/stop-test-marker
+          systemctl start stop-test.service
+          [[ "$(systemctl show -P ActiveState stop-test.service)" == "active" ]]
+          systemctl stop stop-test.service
+          [[ -f /tmp/stop-test-marker ]]
+          WDEOF
+                    chmod +x TEST-23-UNIT-FILE.workdir-execstop.sh
+
+                    # Multiple ExecStart= in oneshot test
+                    cat > TEST-23-UNIT-FILE.multi-exec.sh << 'MEEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          at_exit() {
+              set +e
+              systemctl stop multi-exec-test.service 2>/dev/null
+              rm -f /run/systemd/system/multi-exec-test.service
+              rm -f /tmp/multi-exec-result
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "Multiple ExecStart= lines in oneshot all execute in order"
+          rm -f /tmp/multi-exec-result
+          cat > /run/systemd/system/multi-exec-test.service << EOF
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          ExecStart=bash -c 'echo first >> /tmp/multi-exec-result'
+          ExecStart=bash -c 'echo second >> /tmp/multi-exec-result'
+          ExecStart=bash -c 'echo third >> /tmp/multi-exec-result'
+          EOF
+          systemctl daemon-reload
+
+          systemctl start multi-exec-test.service
+          [[ "$(sed -n '1p' /tmp/multi-exec-result)" == "first" ]]
+          [[ "$(sed -n '2p' /tmp/multi-exec-result)" == "second" ]]
+          [[ "$(sed -n '3p' /tmp/multi-exec-result)" == "third" ]]
+          MEEOF
+                    chmod +x TEST-23-UNIT-FILE.multi-exec.sh
+
                     rm -f TEST-23-UNIT-FILE.ExtraFileDescriptors.sh \
                          TEST-23-UNIT-FILE.JoinsNamespaceOf.sh \
                          TEST-23-UNIT-FILE.openfile.sh \
@@ -5904,6 +5981,96 @@
           (! systemctl cat nonexistent-unit-12345.service)
           SCEOF
           chmod +x TEST-74-AUX-UTILS.systemctl-cat.sh
+
+          # systemctl daemon-reload and unit file updates test
+          cat > TEST-74-AUX-UTILS.daemon-reload.sh << 'DREOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          at_exit() {
+              set +e
+              systemctl stop reload-test.service 2>/dev/null
+              rm -f /run/systemd/system/reload-test.service
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "daemon-reload picks up new unit files"
+          cat > /run/systemd/system/reload-test.service << EOF
+          [Unit]
+          Description=Reload Test Original
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          EOF
+          systemctl daemon-reload
+
+          [[ "$(systemctl show -P Description reload-test.service)" == "Reload Test Original" ]]
+
+          : "daemon-reload picks up modified unit files"
+          cat > /run/systemd/system/reload-test.service << EOF
+          [Unit]
+          Description=Reload Test Modified
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          EOF
+          systemctl daemon-reload
+
+          [[ "$(systemctl show -P Description reload-test.service)" == "Reload Test Modified" ]]
+
+          : "daemon-reload picks up removed unit files"
+          rm -f /run/systemd/system/reload-test.service
+          systemctl daemon-reload
+          [[ "$(systemctl show -P LoadState reload-test.service)" == "not-found" ]]
+          DREOF
+          chmod +x TEST-74-AUX-UTILS.daemon-reload.sh
+
+          # systemctl show with multiple units test
+          cat > TEST-74-AUX-UTILS.show-multi.sh << 'SMEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          at_exit() {
+              set +e
+              systemctl stop show-a.service show-b.service 2>/dev/null
+              rm -f /run/systemd/system/show-a.service /run/systemd/system/show-b.service
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "systemctl show -P works for multiple properties"
+          cat > /run/systemd/system/show-a.service << EOF
+          [Unit]
+          Description=Show Test A
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          RemainAfterExit=yes
+          EOF
+          systemctl daemon-reload
+          systemctl start show-a.service
+
+          [[ "$(systemctl show -P Description show-a.service)" == "Show Test A" ]]
+          [[ "$(systemctl show -P Type show-a.service)" == "oneshot" ]]
+          [[ "$(systemctl show -P ActiveState show-a.service)" == "active" ]]
+          [[ "$(systemctl show -P LoadState show-a.service)" == "loaded" ]]
+
+          : "systemctl show for inactive unit shows correct state"
+          cat > /run/systemd/system/show-b.service << EOF
+          [Unit]
+          Description=Show Test B
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          EOF
+          systemctl daemon-reload
+          [[ "$(systemctl show -P ActiveState show-b.service)" == "inactive" ]]
+          [[ "$(systemctl show -P Description show-b.service)" == "Show Test B" ]]
+          SMEOF
+          chmod +x TEST-74-AUX-UTILS.show-multi.sh
 
           # Custom systemd-analyze standalone tests (no D-Bus needed)
           cat > TEST-74-AUX-UTILS.analyze-standalone.sh << 'ANEOF'
