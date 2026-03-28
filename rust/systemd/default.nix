@@ -471,6 +471,35 @@
           FMEOF
           chmod +x TEST-04-JOURNAL.field-matching.sh
 
+          # Journal disk-usage and boot queries test
+          cat > TEST-04-JOURNAL.disk-usage.sh << 'DUEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl --disk-usage reports journal size"
+          journalctl --disk-usage | grep -qE '[0-9]'
+
+          : "journalctl --list-boots shows current boot"
+          journalctl --list-boots | grep -qE '^\s*-?[0-9]+'
+
+          : "journalctl -b shows current boot logs"
+          journalctl -b --no-pager -n 5
+
+          : "journalctl --header shows journal metadata"
+          journalctl --header | grep -qiE 'file|boot|state'
+
+          : "journalctl --no-pager -n limits output"
+          LINES=$(journalctl --no-pager -n 5 | wc -l)
+          [[ "$LINES" -le 10 ]]
+
+          : "journalctl -p filters by priority"
+          journalctl --no-pager -n 10 -p err > /dev/null
+          journalctl --no-pager -n 10 -p warning > /dev/null
+          journalctl --no-pager -n 10 -p info > /dev/null
+          DUEOF
+          chmod +x TEST-04-JOURNAL.disk-usage.sh
+
           rm -f TEST-04-JOURNAL.bsod.sh \
                TEST-04-JOURNAL.cat.sh \
                TEST-04-JOURNAL.corrupted-journals.sh \
@@ -4892,6 +4921,99 @@
           [[ -f /tmp/cond-test-result ]]
           CDEOF
                     chmod +x TEST-23-UNIT-FILE.conditions.sh
+
+                    # Environment= and EnvironmentFile= test
+                    cat > TEST-23-UNIT-FILE.environment-vars.sh << 'EVEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          at_exit() {
+              set +e
+              systemctl stop env-test.service env-file-test.service 2>/dev/null
+              rm -f /run/systemd/system/env-test.service /run/systemd/system/env-file-test.service
+              rm -f /tmp/env-var-result /tmp/env-file-result /tmp/test-env-file
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "Environment= passes variables to service"
+          cat > /run/systemd/system/env-test.service << EOF
+          [Service]
+          Type=oneshot
+          Environment=MY_VAR=hello MY_OTHER_VAR=world
+          ExecStart=bash -c 'echo "\$MY_VAR \$MY_OTHER_VAR" > /tmp/env-var-result'
+          EOF
+          systemctl daemon-reload
+
+          systemctl start env-test.service
+          [[ "$(cat /tmp/env-var-result)" == "hello world" ]]
+
+          : "EnvironmentFile= loads variables from file"
+          cat > /tmp/test-env-file << EOF
+          FILE_VAR=from-file
+          FILE_OTHER=also-from-file
+          EOF
+          cat > /run/systemd/system/env-file-test.service << EOF
+          [Service]
+          Type=oneshot
+          EnvironmentFile=/tmp/test-env-file
+          ExecStart=bash -c 'echo "\$FILE_VAR \$FILE_OTHER" > /tmp/env-file-result'
+          EOF
+          systemctl daemon-reload
+
+          systemctl start env-file-test.service
+          [[ "$(cat /tmp/env-file-result)" == "from-file also-from-file" ]]
+          EVEOF
+                    chmod +x TEST-23-UNIT-FILE.environment-vars.sh
+
+                    # ExecStartPre/ExecStartPost test
+                    cat > TEST-23-UNIT-FILE.exec-hooks.sh << 'EHEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          at_exit() {
+              set +e
+              systemctl stop exec-hooks-test.service 2>/dev/null
+              rm -f /run/systemd/system/exec-hooks-test.service
+              rm -f /tmp/exec-hooks-result
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "ExecStartPre runs before ExecStart, ExecStartPost runs after"
+          rm -f /tmp/exec-hooks-result
+          cat > /run/systemd/system/exec-hooks-test.service << EOF
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          ExecStartPre=bash -c 'echo pre >> /tmp/exec-hooks-result'
+          ExecStart=bash -c 'echo main >> /tmp/exec-hooks-result'
+          ExecStartPost=bash -c 'echo post >> /tmp/exec-hooks-result'
+          EOF
+          systemctl daemon-reload
+
+          systemctl start exec-hooks-test.service
+          [[ "$(sed -n '1p' /tmp/exec-hooks-result)" == "pre" ]]
+          [[ "$(sed -n '2p' /tmp/exec-hooks-result)" == "main" ]]
+          [[ "$(sed -n '3p' /tmp/exec-hooks-result)" == "post" ]]
+
+          : "ExecStartPre failure prevents ExecStart"
+          rm -f /tmp/exec-hooks-result
+          systemctl stop exec-hooks-test.service 2>/dev/null || true
+          cat > /run/systemd/system/exec-hooks-test.service << EOF
+          [Service]
+          Type=oneshot
+          ExecStartPre=false
+          ExecStart=touch /tmp/exec-hooks-result
+          EOF
+          systemctl daemon-reload
+
+          systemctl start exec-hooks-test.service || true
+          [[ ! -f /tmp/exec-hooks-result ]]
+          EHEOF
+                    chmod +x TEST-23-UNIT-FILE.exec-hooks.sh
 
                     rm -f TEST-23-UNIT-FILE.ExtraFileDescriptors.sh \
                          TEST-23-UNIT-FILE.JoinsNamespaceOf.sh \
