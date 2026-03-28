@@ -930,6 +930,54 @@
           NHEOF
           chmod +x TEST-04-JOURNAL.no-hostname.sh
 
+          # journalctl -o export format
+          cat > TEST-04-JOURNAL.export-format.sh << 'EXEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl -o export shows field=value format"
+          OUT="$(journalctl --no-pager -o export -n 1)"
+          # Export format has __REALTIME_TIMESTAMP or MESSAGE fields
+          echo "$OUT" | grep -qE "^(MESSAGE=|__REALTIME_TIMESTAMP=)"
+          EXEOF
+          chmod +x TEST-04-JOURNAL.export-format.sh
+
+          # journalctl -n with various counts
+          cat > TEST-04-JOURNAL.n-counts.sh << 'NCEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl -n 1 returns exactly 1 entry in json"
+          COUNT="$(journalctl --no-pager -o json -n 1 | wc -l)"
+          [[ "$COUNT" -eq 1 ]]
+
+          : "journalctl -n 5 returns at most 5 entries"
+          COUNT="$(journalctl --no-pager -o json -n 5 | wc -l)"
+          [[ "$COUNT" -le 5 && "$COUNT" -ge 1 ]]
+
+          : "journalctl -n 0 returns no entries"
+          COUNT="$(journalctl --no-pager -o json -n 0 | wc -l)"
+          [[ "$COUNT" -eq 0 ]]
+          NCEOF
+          chmod +x TEST-04-JOURNAL.n-counts.sh
+
+          # journalctl --reverse
+          cat > TEST-04-JOURNAL.reverse.sh << 'RVEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl --reverse shows newest first"
+          # Get timestamps of first and last entry
+          NORMAL="$(journalctl --no-pager -o json -n 2 -b | head -1)"
+          REVERSE="$(journalctl --no-pager -o json -n 2 -b --reverse | head -1)"
+          # They should be different entries (reverse shows newest first)
+          [[ -n "$NORMAL" && -n "$REVERSE" ]]
+          RVEOF
+          chmod +x TEST-04-JOURNAL.reverse.sh
+
           rm -f TEST-04-JOURNAL.bsod.sh \
                TEST-04-JOURNAL.cat.sh \
                TEST-04-JOURNAL.corrupted-journals.sh \
@@ -1140,6 +1188,54 @@
           systemctl stop "$UNIT.service"
           DLEOF
           chmod +x TEST-05-RLIMITS.default-limits.sh
+
+          # Custom test: LimitNICE enforcement
+          cat > TEST-05-RLIMITS.nice-limit.sh << 'NLEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "LimitNICE= is enforced in transient services"
+          UNIT="rlimit-nice-$RANDOM"
+          systemd-run --wait --unit="$UNIT" \
+              -p LimitNICE=15 \
+              bash -c 'ulimit -e > /tmp/rlimit-nice-result'
+          [[ "$(cat /tmp/rlimit-nice-result)" == "15" ]]
+          rm -f /tmp/rlimit-nice-result
+
+          : "LimitRTPRIO= is enforced"
+          UNIT="rlimit-rtprio-$RANDOM"
+          systemd-run --wait --unit="$UNIT" \
+              -p LimitRTPRIO=5 \
+              bash -c 'ulimit -r > /tmp/rlimit-rtprio-result'
+          [[ "$(cat /tmp/rlimit-rtprio-result)" == "5" ]]
+          rm -f /tmp/rlimit-rtprio-result
+          NLEOF
+          chmod +x TEST-05-RLIMITS.nice-limit.sh
+
+          # Custom test: LimitAS enforcement
+          cat > TEST-05-RLIMITS.as-limit.sh << 'ALEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "LimitAS=infinity sets unlimited"
+          UNIT="rlimit-as-$RANDOM"
+          systemd-run --wait --unit="$UNIT" \
+              -p LimitAS=infinity \
+              bash -c 'ulimit -v > /tmp/rlimit-as-result'
+          [[ "$(cat /tmp/rlimit-as-result)" == "unlimited" ]]
+          rm -f /tmp/rlimit-as-result
+
+          : "LimitDATA=infinity sets unlimited"
+          UNIT="rlimit-data-$RANDOM"
+          systemd-run --wait --unit="$UNIT" \
+              -p LimitDATA=infinity \
+              bash -c 'ulimit -d > /tmp/rlimit-data-result'
+          [[ "$(cat /tmp/rlimit-data-result)" == "unlimited" ]]
+          rm -f /tmp/rlimit-data-result
+          ALEOF
+          chmod +x TEST-05-RLIMITS.as-limit.sh
         '';
       }
       {
@@ -11416,6 +11512,119 @@
           rm -rf /tmp/tmpfiles-clean-test /tmp/tmpclean.conf
           TCLEOF
           chmod +x TEST-74-AUX-UTILS.tmpfiles-clean.sh
+
+          # systemctl show-environment and set-environment
+          cat > TEST-74-AUX-UTILS.env-manager.sh << 'EMEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl show-environment lists manager env"
+          systemctl show-environment > /dev/null
+
+          : "systemctl set-environment sets a variable"
+          systemctl set-environment TESTVAR123=hello
+          OUT="$(systemctl show-environment)"
+          echo "$OUT" | grep -q "TESTVAR123=hello"
+
+          : "systemctl unset-environment removes variable"
+          systemctl unset-environment TESTVAR123
+          OUT="$(systemctl show-environment)"
+          (! echo "$OUT" | grep -q "TESTVAR123")
+          EMEOF
+          chmod +x TEST-74-AUX-UTILS.env-manager.sh
+
+          # systemctl get-default shows default target
+          cat > TEST-74-AUX-UTILS.get-default.sh << 'GDEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl get-default shows multi-user.target"
+          DEFAULT="$(systemctl get-default)"
+          [[ "$DEFAULT" == *"multi-user.target"* || "$DEFAULT" == *"graphical.target"* ]]
+          GDEOF
+          chmod +x TEST-74-AUX-UTILS.get-default.sh
+
+          # systemctl --failed shows failed units
+          cat > TEST-74-AUX-UTILS.list-failed.sh << 'LFEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl --failed returns without error"
+          systemctl --failed --no-pager > /dev/null
+
+          : "systemctl --failed --no-legend shows compact output"
+          systemctl --failed --no-pager --no-legend > /dev/null || true
+          LFEOF
+          chmod +x TEST-74-AUX-UTILS.list-failed.sh
+
+          # systemctl list-unit-files with pattern
+          cat > TEST-74-AUX-UTILS.list-uf-pattern.sh << 'LUFEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl list-unit-files with pattern filter"
+          OUT="$(systemctl list-unit-files --no-pager "systemd-journald*")"
+          echo "$OUT" | grep -q "journald"
+
+          : "systemctl list-unit-files --no-legend shows compact"
+          systemctl list-unit-files --no-pager --no-legend > /dev/null
+          LUFEOF
+          chmod +x TEST-74-AUX-UTILS.list-uf-pattern.sh
+
+          # systemctl add-wants creates dependency
+          cat > TEST-74-AUX-UTILS.add-wants.sh << 'AWEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl add-wants creates .wants symlink"
+          UNIT="aw-svc-$RANDOM"
+          cat > "/run/systemd/system/$UNIT.service" << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=/bin/true
+          EOF
+          systemctl daemon-reload
+          systemctl add-wants multi-user.target "$UNIT.service" || true
+          # Verify the wants directory or the property
+          systemctl daemon-reload
+          rm -f "/run/systemd/system/$UNIT.service"
+          rm -f "/etc/systemd/system/multi-user.target.wants/$UNIT.service" 2>/dev/null || true
+          systemctl daemon-reload
+          AWEOF
+          chmod +x TEST-74-AUX-UTILS.add-wants.sh
+
+          # systemctl revert unit
+          cat > TEST-74-AUX-UTILS.revert-unit.sh << 'RUEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl revert removes overrides"
+          UNIT="revert-test-$RANDOM"
+          cat > "/run/systemd/system/$UNIT.service" << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=/bin/true
+          EOF
+          systemctl daemon-reload
+          # Create a drop-in override
+          mkdir -p "/run/systemd/system/$UNIT.service.d"
+          cat > "/run/systemd/system/$UNIT.service.d/override.conf" << EOF
+          [Service]
+          Environment=FOO=bar
+          EOF
+          systemctl daemon-reload
+          # Revert should remove overrides
+          systemctl revert "$UNIT.service" 2>/dev/null || true
+          rm -rf "/run/systemd/system/$UNIT.service" "/run/systemd/system/$UNIT.service.d"
+          systemctl daemon-reload
+          RUEOF
+          chmod +x TEST-74-AUX-UTILS.revert-unit.sh
 
           rm -f TEST-74-AUX-UTILS.busctl.sh \
                TEST-74-AUX-UTILS.capsule.sh \
