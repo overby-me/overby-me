@@ -1077,6 +1077,47 @@
               bash -xec 'mount -t tmpfs none /tmp 2>/dev/null; touch /tmp/private-test'
           [[ ! -e /tmp/private-test ]]
 
+          : "ProtectProc=invisible hides other processes from non-root user"
+          systemd-run --wait --pipe -p PrivateMounts=yes -p ProtectProc=invisible -p User=testuser \
+              bash -xec '(! ls /proc/1/cmdline 2>/dev/null) || [[ ! -r /proc/1/cmdline ]]'
+
+          : "ProtectProc=noaccess denies access to other PIDs for non-root user"
+          systemd-run --wait --pipe -p PrivateMounts=yes -p ProtectProc=noaccess -p User=testuser \
+              bash -xec '(! cat /proc/1/cmdline 2>/dev/null)'
+
+          : "IgnoreSIGPIPE=no leaves SIGPIPE default (kills process)"
+          (! systemd-run --wait --pipe -p IgnoreSIGPIPE=no \
+              bash -c 'kill -PIPE $$')
+
+          : "IgnoreSIGPIPE=yes (default) ignores SIGPIPE"
+          systemd-run --wait --pipe -p IgnoreSIGPIPE=yes \
+              bash -xec 'true'
+
+          : "CPUSchedulingResetOnFork=yes with FIFO scheduling"
+          systemd-run --wait --pipe \
+              -p CPUSchedulingPolicy=fifo -p CPUSchedulingPriority=1 \
+              -p CPUSchedulingResetOnFork=yes \
+              bash -xec 'true'
+
+          : "StandardOutput=truncate: truncates file before writing"
+          echo "old-content" > /tmp/truncate-test
+          systemd-run --wait --pipe -p StandardOutput=truncate:/tmp/truncate-test \
+              bash -xec 'echo new-content'
+          grep -q new-content /tmp/truncate-test
+          (! grep -q old-content /tmp/truncate-test)
+          rm -f /tmp/truncate-test
+
+          : "Multiple Environment= entries accumulate"
+          systemd-run --wait --pipe \
+              -p Environment=FOO=first \
+              -p Environment=BAR=second \
+              bash -xec '[[ "$FOO" == first && "$BAR" == second ]]'
+
+          : "Environment= with spaces in values"
+          systemd-run --wait --pipe \
+              -p 'Environment=SPACED=hello world' \
+              bash -xec '[[ "$SPACED" == "hello world" ]]'
+
           : "Error handling for clean-up codepaths"
           (! systemd-run --wait --pipe false)
           TESTEOF
