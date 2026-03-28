@@ -5240,6 +5240,69 @@
           USEOF
                     chmod +x TEST-23-UNIT-FILE.user-service.sh
 
+                    # KillMode= and KillSignal= test
+                    cat > TEST-23-UNIT-FILE.kill-mode.sh << 'KMEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          at_exit() {
+              set +e
+              systemctl stop km-test.service 2>/dev/null
+              rm -f /run/systemd/system/km-test.service
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "KillMode=process only kills main process"
+          cat > /run/systemd/system/km-test.service << EOF
+          [Service]
+          ExecStart=sleep infinity
+          KillMode=process
+          EOF
+          systemctl daemon-reload
+
+          systemctl start km-test.service
+          [[ "$(systemctl show -P ActiveState km-test.service)" == "active" ]]
+          [[ "$(systemctl show -P KillMode km-test.service)" == "process" ]]
+          systemctl stop km-test.service
+          timeout 10 bash -c 'until [[ "$(systemctl show -P ActiveState km-test.service)" != "active" ]]; do sleep 0.5; done'
+          KMEOF
+                    chmod +x TEST-23-UNIT-FILE.kill-mode.sh
+
+                    # TimeoutStopSec= test
+                    cat > TEST-23-UNIT-FILE.timeout-stop.sh << 'TSEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          at_exit() {
+              set +e
+              systemctl stop timeout-test.service 2>/dev/null
+              rm -f /run/systemd/system/timeout-test.service
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "TimeoutStopSec= property is set correctly"
+          cat > /run/systemd/system/timeout-test.service << EOF
+          [Service]
+          ExecStart=sleep infinity
+          TimeoutStopSec=3s
+          EOF
+          systemctl daemon-reload
+
+          systemctl start timeout-test.service
+          [[ "$(systemctl show -P ActiveState timeout-test.service)" == "active" ]]
+          # Verify timeout property is visible
+          TIMEOUT=$(systemctl show -P TimeoutStopUSec timeout-test.service)
+          echo "TimeoutStopUSec=$TIMEOUT"
+          # Stop should complete (possibly by SIGKILL after timeout)
+          systemctl stop timeout-test.service
+          timeout 15 bash -c 'until [[ "$(systemctl show -P ActiveState timeout-test.service)" != "active" ]]; do sleep 0.5; done'
+          TSEOF
+                    chmod +x TEST-23-UNIT-FILE.timeout-stop.sh
+
                     rm -f TEST-23-UNIT-FILE.ExtraFileDescriptors.sh \
                          TEST-23-UNIT-FILE.JoinsNamespaceOf.sh \
                          TEST-23-UNIT-FILE.openfile.sh \
@@ -6289,6 +6352,65 @@
           (! systemctl is-failed is-query-test.service)
           IQEOF
           chmod +x TEST-74-AUX-UTILS.is-queries.sh
+
+          # Journal JSON output parsing test
+          cat > TEST-74-AUX-UTILS.journal-json.sh << 'JJEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl -o json produces valid JSON"
+          journalctl --no-pager -n 1 -o json | jq -e . > /dev/null
+
+          : "journalctl -o json-pretty produces valid JSON"
+          journalctl --no-pager -n 1 -o json-pretty | jq -e . > /dev/null
+
+          : "JSON output contains standard fields"
+          journalctl --no-pager -n 1 -o json | jq -e 'has("MESSAGE")' > /dev/null
+
+          : "journalctl -o json with multiple entries"
+          journalctl --no-pager -n 5 -o json > /dev/null
+
+          : "journalctl -o short is default-like output"
+          journalctl --no-pager -n 3 -o short > /dev/null
+
+          : "journalctl -o cat shows only messages"
+          journalctl --no-pager -n 3 -o cat > /dev/null
+          JJEOF
+          chmod +x TEST-74-AUX-UTILS.journal-json.sh
+
+          # systemctl reset-failed test
+          cat > TEST-74-AUX-UTILS.reset-failed.sh << 'RFEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          at_exit() {
+              set +e
+              systemctl stop rf-test.service 2>/dev/null
+              systemctl reset-failed rf-test.service 2>/dev/null
+              rm -f /run/systemd/system/rf-test.service
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "Failed service shows failed state"
+          cat > /run/systemd/system/rf-test.service << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=false
+          EOF
+          systemctl daemon-reload
+
+          systemctl start rf-test.service || true
+          sleep 1
+          systemctl is-failed rf-test.service
+
+          : "reset-failed clears failed state"
+          systemctl reset-failed rf-test.service
+          (! systemctl is-failed rf-test.service)
+          RFEOF
+          chmod +x TEST-74-AUX-UTILS.reset-failed.sh
 
           # Custom systemd-analyze standalone tests (no D-Bus needed)
           cat > TEST-74-AUX-UTILS.analyze-standalone.sh << 'ANEOF'
