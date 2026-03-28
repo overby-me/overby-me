@@ -1822,9 +1822,7 @@ fn glob_expand(field: &str) -> Vec<String> {
                     let skipdots = GLOBSKIPDOTS_ENABLED.with(|d| *d.borrow());
                     // Add . and .. when globskipdots is off and pattern explicitly matches
                     // dot-only patterns (not negation or mixed patterns)
-                    let extra: Vec<String> = if !skipdots
-                        && !pattern.starts_with("!(")
-                    {
+                    let extra: Vec<String> = if !skipdots && !pattern.starts_with("!(") {
                         let starts_dot_star = pattern.starts_with(".*")
                             || pattern.starts_with("@(.*")
                             || pattern.contains("|.*");
@@ -1853,27 +1851,38 @@ fn glob_expand(field: &str) -> Vec<String> {
                                 .map(|e| e.file_name().to_string_lossy().to_string()),
                         )
                         .filter(|name| {
-                            // Negation patterns !(...)  never match . and ..
-                            if (name == "." || name == "..") && pattern.starts_with("!(") {
-                                return false;
+                            // Negation patterns !(...)  never match dotfiles (without dotglob)
+                            if pattern.starts_with("!(") {
+                                if name == "." || name == ".." {
+                                    return false;
+                                }
+                                if name.starts_with('.') && !dotglob {
+                                    return false;
+                                }
                             }
                             // Skip dotfiles unless dotglob is set or pattern explicitly matches dots
-                            if name.starts_with('.') {
-                                if !dotglob {
-                                    // Check if pattern can match a leading dot
-                                    let allows_dot = pattern.starts_with('.')
-                                        || pattern.starts_with("@(.")
-                                        || pattern.starts_with("+(.")
-                                        || pattern.starts_with("*(.")
-                                        || pattern.starts_with("?(.")
-                                        || pattern.starts_with("@(*")
-                                        || pattern.contains("|.")
-                                        // *(...).X and ?(...).X can match .X with zero matches
-                                        || (pattern.starts_with("*(") || pattern.starts_with("?("))
-                                            && pattern.contains(").");
-                                    if !allows_dot {
-                                        return false;
+                            if name.starts_with('.') && !dotglob {
+                                let allows_dot = pattern.starts_with('.')
+                                    || (pattern.starts_with("*(") || pattern.starts_with("?("))
+                                        && pattern.contains(").");
+                                if !allows_dot {
+                                    // For extglob with dot alternatives, extract each dot alt
+                                    // and match against those specifically
+                                    let inner_start = pattern.find('(').map(|p| p + 1);
+                                    let inner_end = pattern.rfind(')');
+                                    if let (Some(start), Some(end)) = (inner_start, inner_end) {
+                                        let inner = &pattern[start..end];
+                                        for alt in inner.split('|') {
+                                            if alt.starts_with('.') {
+                                                if crate::interpreter::commands::case_pattern_match(
+                                                    name, alt,
+                                                ) {
+                                                    return true;
+                                                }
+                                            }
+                                        }
                                     }
+                                    return false;
                                 }
                             }
                             crate::interpreter::commands::case_pattern_match(name, &pattern)
