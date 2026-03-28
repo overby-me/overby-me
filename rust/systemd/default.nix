@@ -2609,6 +2609,21 @@
           UNIT="scope-named-$RANDOM"
           systemd-run --scope --unit="$UNIT" true
 
+          : "systemctl list-units and list-unit-files"
+          systemctl list-units | grep -q "multi-user.target"
+          systemctl list-units --type=service | grep -q "\.service"
+          systemctl list-unit-files | grep -q "\.service"
+          systemctl list-unit-files --type=service | grep -q "\.service"
+
+          : "systemctl show basic properties"
+          UNIT="show-test-$RANDOM"
+          systemd-run --unit="$UNIT" --remain-after-exit --service-type=oneshot true
+          systemctl is-active "$UNIT.service"
+          [[ "$(systemctl show -P ActiveState "$UNIT.service")" == "active" ]]
+          [[ "$(systemctl show -P Type "$UNIT.service")" == "oneshot" ]]
+          [[ "$(systemctl show -P RemainAfterExit "$UNIT.service")" == "yes" ]]
+          systemctl stop "$UNIT.service"
+
           : "Transient --on-active timer fires after delay"
           UNIT="on-active-$RANDOM"
           rm -f "/tmp/on-active-result-$UNIT"
