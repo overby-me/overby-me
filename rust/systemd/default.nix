@@ -2730,6 +2730,107 @@
           WTEOF
           chmod +x TEST-07-PID1.wantedby-target.sh
 
+          # Custom systemctl status output test
+          cat > TEST-07-PID1.systemctl-show.sh << 'SSEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              systemctl stop show-test.service 2>/dev/null
+              rm -f /run/systemd/system/show-test.service
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          # Helper: retry a command up to 5 times with 1s delay (works around EAGAIN)
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep 1; done; "$@"; }
+
+          : "systemctl show -P returns property values"
+          cat > /run/systemd/system/show-test.service << EOF
+          [Unit]
+          Description=Show test service
+          [Service]
+          ExecStart=sleep infinity
+          EOF
+          retry systemctl daemon-reload
+          [[ "$(systemctl show -P Description show-test.service)" == "Show test service" ]]
+
+          : "systemctl show -P ActiveState before/after start"
+          [[ "$(systemctl show -P ActiveState show-test.service)" == "inactive" ]]
+          retry systemctl start show-test.service
+          [[ "$(systemctl show -P ActiveState show-test.service)" == "active" ]]
+          systemctl stop show-test.service
+          [[ "$(systemctl show -P ActiveState show-test.service)" == "inactive" ]]
+          SSEOF
+          chmod +x TEST-07-PID1.systemctl-show.sh
+
+          # Custom systemctl list-units test
+          cat > TEST-07-PID1.list-units.sh << 'LUEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "systemctl list-units shows active units"
+          systemctl list-units --no-pager | grep -q "multi-user.target"
+
+          : "systemctl list-units --type filters by type"
+          systemctl list-units --no-pager --type=service | grep -q "\.service"
+          systemctl list-units --no-pager --type=target | grep -q "\.target"
+          systemctl list-units --no-pager --type=socket | grep -q "\.socket"
+
+          : "systemctl list-unit-files lists installed units"
+          systemctl list-unit-files --no-pager | grep -q "\.service"
+          LUEOF
+          chmod +x TEST-07-PID1.list-units.sh
+
+          # Custom systemctl show multiple properties test
+          cat > TEST-07-PID1.systemctl-show-props.sh << 'SPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          # Helper: retry a command up to 5 times with 1s delay (works around EAGAIN)
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep 1; done; "$@"; }
+
+          at_exit() {
+              set +e
+              systemctl stop show-props-test.service 2>/dev/null
+              rm -f /run/systemd/system/show-props-test.service
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "systemctl show with multiple -p flags"
+          cat > /run/systemd/system/show-props-test.service << EOF
+          [Unit]
+          Description=Show props test
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          RemainAfterExit=yes
+          EOF
+          retry systemctl daemon-reload
+          retry systemctl start show-props-test.service
+          systemctl is-active show-props-test.service
+          # Show multiple properties
+          OUT="$(systemctl show -P ActiveState -P SubState -P Type show-props-test.service)"
+          echo "$OUT" | grep -q "active"
+          echo "$OUT" | grep -q "oneshot"
+          # Show with -p (key=value format)
+          systemctl show -p ActiveState -p Type show-props-test.service | grep -q "ActiveState=active"
+          systemctl show -p ActiveState -p Type show-props-test.service | grep -q "Type=oneshot"
+          systemctl stop show-props-test.service
+          SPEOF
+          chmod +x TEST-07-PID1.systemctl-show-props.sh
+
           rm -f TEST-07-PID1.attach_processes.sh \
                TEST-07-PID1.concurrency.sh \
                TEST-07-PID1.DeferReactivation.sh \
