@@ -2223,6 +2223,131 @@
           TSEOF
           chmod +x TEST-07-PID1.timeout-stop.sh
 
+          # Custom ExecReload= test
+          cat > TEST-07-PID1.exec-reload.sh << 'EREOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              systemctl stop reload-test.service 2>/dev/null
+              rm -f /run/systemd/system/reload-test.service
+              rm -f /tmp/reload-marker
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          # Helper: retry a command up to 5 times with 1s delay (works around EAGAIN)
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep 1; done; "$@"; }
+
+          : "ExecReload= runs on systemctl reload"
+          cat > /run/systemd/system/reload-test.service << EOF
+          [Service]
+          ExecStart=sleep infinity
+          ExecReload=touch /tmp/reload-marker
+          EOF
+          retry systemctl daemon-reload
+          retry systemctl start reload-test.service
+          systemctl is-active reload-test.service
+          [[ ! -f /tmp/reload-marker ]]
+          systemctl reload reload-test.service
+          sleep 0.5
+          [[ -f /tmp/reload-marker ]]
+          systemctl stop reload-test.service
+          EREOF
+          chmod +x TEST-07-PID1.exec-reload.sh
+
+          # Custom OnFailure= trigger test
+          cat > TEST-07-PID1.on-failure.sh << 'OFEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              rm -f /run/systemd/system/onfail-trigger.service
+              rm -f /run/systemd/system/onfail-handler.service
+              rm -f /tmp/onfail-handler-ran
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          # Helper: retry a command up to 5 times with 1s delay (works around EAGAIN)
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep 1; done; "$@"; }
+
+          : "OnFailure= triggers handler when service fails"
+          cat > /run/systemd/system/onfail-handler.service << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=touch /tmp/onfail-handler-ran
+          RemainAfterExit=yes
+          EOF
+          cat > /run/systemd/system/onfail-trigger.service << EOF
+          [Unit]
+          OnFailure=onfail-handler.service
+          [Service]
+          Type=oneshot
+          ExecStart=false
+          EOF
+          retry systemctl daemon-reload
+          rm -f /tmp/onfail-handler-ran
+          systemctl start onfail-trigger.service || true
+          # Wait for OnFailure handler to run
+          timeout 15 bash -c 'until [[ -f /tmp/onfail-handler-ran ]]; do sleep 0.5; done'
+          [[ -f /tmp/onfail-handler-ran ]]
+
+          : "OnFailure= does NOT trigger on success"
+          cat > /run/systemd/system/onfail-trigger.service << EOF
+          [Unit]
+          OnFailure=onfail-handler.service
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          EOF
+          systemctl daemon-reload
+          rm -f /tmp/onfail-handler-ran
+          systemctl start onfail-trigger.service
+          sleep 2
+          [[ ! -f /tmp/onfail-handler-ran ]]
+          OFEOF
+          chmod +x TEST-07-PID1.on-failure.sh
+
+          # Custom systemctl set-environment test
+          cat > TEST-07-PID1.set-environment.sh << 'SEEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          # Helper: retry a command up to 5 times with 1s delay (works around EAGAIN)
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep 1; done; "$@"; }
+
+          : "systemctl set-environment adds variables"
+          retry systemctl set-environment TESTVAR_A=hello TESTVAR_B=world
+          systemctl show-environment | grep -q "TESTVAR_A=hello"
+          systemctl show-environment | grep -q "TESTVAR_B=world"
+
+          : "systemctl unset-environment removes variables"
+          systemctl unset-environment TESTVAR_A TESTVAR_B
+          (! systemctl show-environment | grep -q "TESTVAR_A")
+          (! systemctl show-environment | grep -q "TESTVAR_B")
+
+          : "set-environment and unset-environment with multiple calls"
+          retry systemctl set-environment FOO=bar
+          systemctl show-environment | grep -q "FOO=bar"
+          retry systemctl set-environment FOO=baz
+          systemctl show-environment | grep -q "FOO=baz"
+          (! systemctl show-environment | grep -q "FOO=bar")
+          systemctl unset-environment FOO
+          SEEOF
+          chmod +x TEST-07-PID1.set-environment.sh
+
           rm -f TEST-07-PID1.attach_processes.sh \
                TEST-07-PID1.concurrency.sh \
                TEST-07-PID1.DeferReactivation.sh \
@@ -2516,7 +2641,7 @@
           at_exit() {
               set +e
               rm -f /run/systemd/system/cond-test-*.service
-              rm -f /tmp/cond-test-marker /tmp/cond-test-file /tmp/cond-test-symlink /tmp/cond-test-notlink
+              rm -f /tmp/cond-test-marker /tmp/cond-test-file /tmp/cond-test-symlink /tmp/cond-test-notlink /tmp/cond-test-assert-*
               rm -rf /tmp/cond-test-dir
               systemctl daemon-reload
           }
@@ -2667,6 +2792,33 @@
           systemctl start cond-test-notlink.service
           (! systemctl is-active cond-test-notlink.service)
           rm -f /tmp/cond-test-notlink
+
+          : "AssertPathExists= succeeds when path exists"
+          cat > /run/systemd/system/cond-test-assert-ok.service << EOF
+          [Unit]
+          AssertPathExists=/etc/hostname
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          RemainAfterExit=yes
+          EOF
+          systemctl daemon-reload
+          systemctl start cond-test-assert-ok.service
+          systemctl is-active cond-test-assert-ok.service
+          systemctl stop cond-test-assert-ok.service
+
+          : "AssertPathExists= fails unit start when path does not exist"
+          cat > /run/systemd/system/cond-test-assert-fail.service << EOF
+          [Unit]
+          AssertPathExists=/nonexistent/path/that/should/not/exist
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          RemainAfterExit=yes
+          EOF
+          systemctl daemon-reload
+          # Assert failure should cause start to fail (unlike Condition which skips silently)
+          (! systemctl start cond-test-assert-fail.service)
           CONDEOF
                     chmod +x TEST-23-UNIT-FILE.conditions.sh
 
