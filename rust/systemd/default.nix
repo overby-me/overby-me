@@ -694,6 +694,64 @@
           [[ -e /tmp/exec-post-marker ]]
           rm -f /tmp/exec-post-marker
 
+          : "WorkingDirectory= tests"
+          systemd-run --wait --pipe -p WorkingDirectory=/tmp \
+              bash -xec '[[ "$PWD" == /tmp ]]'
+
+          : "WorkingDirectory= with User="
+          systemd-run --wait --pipe -p WorkingDirectory=/tmp -p User=testuser \
+              bash -xec '[[ "$PWD" == /tmp && "$(id -nu)" == testuser ]]'
+
+          : "StandardOutput=file: tests"
+          rm -f /tmp/stdout-test-out
+          systemd-run --wait --pipe -p StandardOutput=file:/tmp/stdout-test-out \
+              bash -xec 'echo hello-stdout'
+          [[ "$(cat /tmp/stdout-test-out)" == *hello-stdout* ]]
+          rm -f /tmp/stdout-test-out
+
+          : "StandardError=file: tests"
+          rm -f /tmp/stderr-test-out
+          systemd-run --wait --pipe -p StandardError=file:/tmp/stderr-test-out \
+              bash -xec 'echo hello-stderr >&2'
+          [[ "$(cat /tmp/stderr-test-out)" == *hello-stderr* ]]
+          rm -f /tmp/stderr-test-out
+
+          : "StandardOutput=append: tests"
+          echo "line1" > /tmp/append-test-out
+          systemd-run --wait --pipe -p StandardOutput=append:/tmp/append-test-out \
+              bash -xec 'echo line2'
+          grep -q line1 /tmp/append-test-out
+          grep -q line2 /tmp/append-test-out
+          rm -f /tmp/append-test-out
+
+          : "SetCredential= tests"
+          systemd-run --wait --pipe -p SetCredential=mycred:hello-cred \
+              bash -xec '[[ -n "$CREDENTIALS_DIRECTORY" ]];
+                         [[ -f "$CREDENTIALS_DIRECTORY/mycred" ]];
+                         [[ "$(cat "$CREDENTIALS_DIRECTORY/mycred")" == hello-cred ]]'
+
+          : "Multiple SetCredential= entries"
+          systemd-run --wait --pipe \
+              -p SetCredential=cred1:value1 \
+              -p SetCredential=cred2:value2 \
+              bash -xec '[[ "$(cat "$CREDENTIALS_DIRECTORY/cred1")" == value1 ]];
+                         [[ "$(cat "$CREDENTIALS_DIRECTORY/cred2")" == value2 ]]'
+
+          : "SetCredential= with User="
+          systemd-run --wait --pipe -p SetCredential=usercred:secret -p User=testuser \
+              bash -xec '[[ "$(cat "$CREDENTIALS_DIRECTORY/usercred")" == secret ]];
+                         [[ "$(id -nu)" == testuser ]]'
+
+          : "KillSignal= tests"
+          systemd-run -p KillSignal=SIGUSR1 --unit=kill-signal-test --remain-after-exit \
+              bash -xec 'trap "touch /tmp/kill-sigusr1-received; exit 0" USR1; while true; do sleep 0.1; done' &
+          sleep 1
+          systemctl kill --signal=SIGUSR1 kill-signal-test.service
+          sleep 1
+          [[ -e /tmp/kill-sigusr1-received ]]
+          systemctl stop kill-signal-test.service 2>/dev/null || true
+          rm -f /tmp/kill-sigusr1-received
+
           : "Error handling for clean-up codepaths"
           (! systemd-run --wait --pipe false)
           TESTEOF
