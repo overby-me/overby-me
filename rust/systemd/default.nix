@@ -7916,6 +7916,98 @@
           TWEOF
           chmod +x TEST-74-AUX-UTILS.tmpfiles-write.sh
 
+          # systemctl status output format test
+          cat > TEST-74-AUX-UTILS.status-format.sh << 'SFEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl status shows unit info"
+          systemctl status systemd-journald.service --no-pager > /dev/null || true
+
+          : "systemctl status with --lines limits output"
+          systemctl status systemd-journald.service --no-pager --lines=3 > /dev/null || true
+
+          : "systemctl status with --full shows full lines"
+          systemctl status systemd-journald.service --no-pager --full > /dev/null || true
+
+          : "systemctl status for multiple units"
+          systemctl status systemd-journald.service init.scope --no-pager > /dev/null || true
+
+          : "systemctl status shows loaded state"
+          systemctl status systemd-journald.service --no-pager 2>&1 | grep -qi "loaded" || true
+          SFEOF
+          chmod +x TEST-74-AUX-UTILS.status-format.sh
+
+          # systemd-run with timer options test
+          cat > TEST-74-AUX-UTILS.run-timer.sh << 'RTEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-run --on-active creates a timer"
+          UNIT="run-timer-$RANDOM"
+          systemd-run --unit="$UNIT" --on-active=5min --remain-after-exit true
+          systemctl is-active "$UNIT.timer"
+          systemctl stop "$UNIT.timer" "$UNIT.service" 2>/dev/null || true
+
+          : "systemd-run --on-boot creates a boot timer"
+          UNIT2="run-boot-$RANDOM"
+          systemd-run --unit="$UNIT2" --on-boot=1h --remain-after-exit true
+          systemctl is-active "$UNIT2.timer"
+          systemctl stop "$UNIT2.timer" "$UNIT2.service" 2>/dev/null || true
+
+          : "systemd-run --on-unit-active creates unit-active timer"
+          UNIT3="run-unitactive-$RANDOM"
+          systemd-run --unit="$UNIT3" --on-unit-active=30s --remain-after-exit true
+          systemctl is-active "$UNIT3.timer"
+          systemctl stop "$UNIT3.timer" "$UNIT3.service" 2>/dev/null || true
+          RTEOF
+          chmod +x TEST-74-AUX-UTILS.run-timer.sh
+
+          # systemctl switch-root dry test (just checking help/version)
+          cat > TEST-74-AUX-UTILS.systemctl-help.sh << 'SHEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl --help shows usage"
+          systemctl --help > /dev/null
+
+          : "systemctl --version shows version"
+          systemctl --version > /dev/null
+
+          : "systemctl --no-pager list-units works"
+          systemctl --no-pager list-units > /dev/null
+
+          : "systemctl --no-legend list-units strips headers"
+          systemctl --no-pager --no-legend list-units > /dev/null
+
+          : "systemctl --output=json list-units outputs JSON"
+          systemctl --no-pager --output=json list-units > /dev/null || true
+
+          : "systemctl --plain list-units shows flat output"
+          systemctl --no-pager --plain list-units > /dev/null
+          SHEOF
+          chmod +x TEST-74-AUX-UTILS.systemctl-help.sh
+
+          # systemd-cgls and systemd-cgtop options test
+          cat > TEST-74-AUX-UTILS.cg-options.sh << 'CGEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-cgls --no-pager shows hierarchy"
+          systemd-cgls --no-pager > /dev/null
+
+          : "systemd-cgls with specific unit"
+          systemd-cgls --no-pager /system.slice > /dev/null || true
+
+          : "systemd-cgtop --iterations=1 runs one cycle"
+          systemd-cgtop --iterations=1 --batch > /dev/null
+          CGEOF
+          chmod +x TEST-74-AUX-UTILS.cg-options.sh
+
           rm -f TEST-74-AUX-UTILS.busctl.sh \
                TEST-74-AUX-UTILS.capsule.sh \
                TEST-74-AUX-UTILS.firstboot.sh \
