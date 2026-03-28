@@ -1291,6 +1291,34 @@
           AFEOF
           chmod +x TEST-04-JOURNAL.all-formats.sh
 
+          # journalctl with SYSLOG_IDENTIFIER match
+          cat > TEST-04-JOURNAL.syslog-id.sh << 'SIDEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl SYSLOG_IDENTIFIER= field match"
+          journalctl --no-pager SYSLOG_IDENTIFIER=systemd -n 3 > /dev/null || true
+
+          : "journalctl _COMM= field match"
+          journalctl --no-pager _COMM=systemd -n 3 > /dev/null || true
+          SIDEOF
+          chmod +x TEST-04-JOURNAL.syslog-id.sh
+
+          # journalctl --since/--until with date math
+          cat > TEST-04-JOURNAL.date-range.sh << 'DREOF2'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl date range from epoch to now"
+          journalctl --no-pager --since "1970-01-01" --until "now" -n 5 > /dev/null || true
+
+          : "journalctl --since today --until today+1d style"
+          journalctl --no-pager --since today -n 5 > /dev/null
+          DREOF2
+          chmod +x TEST-04-JOURNAL.date-range.sh
+
           rm -f TEST-04-JOURNAL.bsod.sh \
                TEST-04-JOURNAL.cat.sh \
                TEST-04-JOURNAL.corrupted-journals.sh \
@@ -8141,6 +8169,70 @@
           systemctl stop "$UNIT.timer" "$UNIT.service" 2>/dev/null || true
           IAAEOF
           chmod +x TEST-53-TIMER.is-active-after.sh
+
+          # Timer enable/disable with unit file
+          cat > TEST-53-TIMER.timer-enable.sh << 'TEEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "Timer unit can be enabled and disabled"
+          UNIT="timer-en-$RANDOM"
+          cat > "/run/systemd/system/$UNIT.timer" << EOF
+          [Timer]
+          OnCalendar=daily
+          [Install]
+          WantedBy=timers.target
+          EOF
+          cat > "/run/systemd/system/$UNIT.service" << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=/bin/true
+          EOF
+          systemctl daemon-reload
+
+          systemctl enable "$UNIT.timer" || true
+          systemctl start "$UNIT.timer"
+          systemctl is-active "$UNIT.timer"
+          systemctl disable "$UNIT.timer" || true
+          systemctl stop "$UNIT.timer" 2>/dev/null || true
+
+          rm -f "/run/systemd/system/$UNIT.timer" "/run/systemd/system/$UNIT.service"
+          systemctl daemon-reload
+          TEEOF
+          chmod +x TEST-53-TIMER.timer-enable.sh
+
+          # Timer with multiple OnCalendar lines
+          cat > TEST-53-TIMER.multi-calendar.sh << 'MCEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "Timer with multiple OnCalendar lines"
+          UNIT="timer-mcal-$RANDOM"
+          cat > "/run/systemd/system/$UNIT.timer" << EOF
+          [Timer]
+          OnCalendar=*:0/5
+          OnCalendar=*:0/15
+          EOF
+          cat > "/run/systemd/system/$UNIT.service" << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=/bin/true
+          EOF
+          systemctl daemon-reload
+          systemctl start "$UNIT.timer"
+          systemctl is-active "$UNIT.timer"
+          systemctl stop "$UNIT.timer"
+
+          rm -f "/run/systemd/system/$UNIT.timer" "/run/systemd/system/$UNIT.service"
+          systemctl daemon-reload
+          MCEOF
+          chmod +x TEST-53-TIMER.multi-calendar.sh
         '';
       }
       {
