@@ -1,5 +1,32 @@
 use super::*;
 
+/// Create a pipe, ensuring neither end reuses fd 0, 1, or 2.
+/// When stdin/stdout/stderr are closed, pipe() can return low fds
+/// that conflict with standard streams, causing pipeline deadlocks.
+#[cfg(unix)]
+fn safe_pipe() -> nix::Result<(std::os::unix::io::RawFd, std::os::unix::io::RawFd)> {
+    use std::os::unix::io::IntoRawFd;
+    let (r, w) = nix::unistd::pipe()?;
+    let mut r_fd = r.into_raw_fd();
+    let mut w_fd = w.into_raw_fd();
+    // Move any fd that landed on 0, 1, or 2 to a higher number
+    if r_fd < 3 {
+        let new = nix::fcntl::fcntl(r_fd, nix::fcntl::FcntlArg::F_DUPFD(10)).unwrap_or(r_fd);
+        if new != r_fd {
+            nix::unistd::close(r_fd).ok();
+            r_fd = new;
+        }
+    }
+    if w_fd < 3 {
+        let new = nix::fcntl::fcntl(w_fd, nix::fcntl::FcntlArg::F_DUPFD(10)).unwrap_or(w_fd);
+        if new != w_fd {
+            nix::unistd::close(w_fd).ok();
+            w_fd = new;
+        }
+    }
+    Ok((r_fd, w_fd))
+}
+
 impl Shell {
     pub(super) fn run_pipeline(&mut self, pipeline: &Pipeline) -> i32 {
         let start_time = if pipeline.timed {
@@ -54,7 +81,7 @@ impl Shell {
 
         #[cfg(unix)]
         {
-            use std::os::unix::io::{IntoRawFd, RawFd};
+            use std::os::unix::io::RawFd;
 
             let mut prev_read_fd: Option<RawFd> = None;
             let mut children: Vec<nix::unistd::Pid> = Vec::new();
@@ -63,8 +90,8 @@ impl Shell {
                 let is_last = i == pipeline.commands.len() - 1;
 
                 let (read_fd, write_fd): (Option<RawFd>, Option<RawFd>) = if !is_last {
-                    let (r, w) = nix::unistd::pipe().expect("pipe failed");
-                    (Some(r.into_raw_fd()), Some(w.into_raw_fd()))
+                    let (r, w) = safe_pipe().expect("pipe failed");
+                    (Some(r), Some(w))
                 } else {
                     (None, None)
                 };
@@ -248,24 +275,20 @@ impl Shell {
     pub fn capture_output(&mut self, cmd_str: &str) -> String {
         #[cfg(unix)]
         {
-            use std::os::unix::io::AsRawFd;
-
             // Flush stdout before forking to prevent buffered data from being
             // inherited by the child and written to the capture pipe.
             std::io::Write::flush(&mut std::io::stdout()).ok();
 
-            let (pipe_r, pipe_w) = match nix::unistd::pipe() {
+            let (pipe_r_raw, pipe_w_raw) = match safe_pipe() {
                 Ok(p) => p,
                 Err(_) => return String::new(),
             };
-            let pipe_r_raw = pipe_r.as_raw_fd();
-            let pipe_w_raw = pipe_w.as_raw_fd();
 
             match unsafe { nix::unistd::fork() } {
                 Ok(nix::unistd::ForkResult::Child) => {
-                    drop(pipe_r);
+                    nix::unistd::close(pipe_r_raw).ok();
                     nix::unistd::dup2(pipe_w_raw, 1).ok();
-                    drop(pipe_w);
+                    nix::unistd::close(pipe_w_raw).ok();
                     // Command substitution does not inherit errexit or ERR trap
                     // (unless inherit_errexit/errtrace shopt is set or POSIX mode is on)
                     if !self.shopt_inherit_errexit && !self.opt_posix {
@@ -290,7 +313,7 @@ impl Shell {
                     std::process::exit(status);
                 }
                 Ok(nix::unistd::ForkResult::Parent { child }) => {
-                    drop(pipe_w);
+                    nix::unistd::close(pipe_w_raw).ok();
                     let mut output = Vec::new();
                     let mut buf = [0u8; 4096];
                     loop {
@@ -300,7 +323,7 @@ impl Shell {
                             Err(_) => break,
                         }
                     }
-                    drop(pipe_r);
+                    nix::unistd::close(pipe_r_raw).ok();
                     if let Ok(nix::sys::wait::WaitStatus::Exited(_, code)) =
                         nix::sys::wait::waitpid(child, None)
                     {
