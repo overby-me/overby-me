@@ -1422,6 +1422,59 @@
           [[ "$(systemctl show -P Type "$UNIT.service")" == "oneshot" ]]
           [[ "$(systemctl show -P RemainAfterExit "$UNIT.service")" == "yes" ]]
           systemctl stop "$UNIT.service"
+
+          : "Description= via --description flag"
+          UNIT="desc-test-$RANDOM"
+          systemd-run --unit="$UNIT" --description="My test description" \
+              -p RemainAfterExit=yes -p Type=oneshot true
+          sleep 1
+          [[ "$(systemctl show -P Description "$UNIT.service")" == "My test description" ]]
+          systemctl stop "$UNIT.service"
+
+          : "Type=exec waits for exec before reporting active"
+          systemd-run --wait --pipe -p Type=exec true
+
+          : "Environment= accumulation via multiple -p flags"
+          systemd-run --wait --pipe \
+              -p Environment=FOO=one \
+              -p Environment=BAR=two \
+              bash -xec '[[ "$FOO" == "one" && "$BAR" == "two" ]]'
+
+          : "Environment= last value wins for same variable"
+          systemd-run --wait --pipe \
+              -p Environment=FOO=first \
+              -p Environment=FOO=second \
+              bash -xec '[[ "$FOO" == "second" ]]'
+
+          : "TimeoutStopSec= affects stop behavior"
+          UNIT="timeout-stop-$RANDOM"
+          systemd-run --unit="$UNIT" -p TimeoutStopSec=2 sleep 300
+          sleep 1
+          systemctl is-active "$UNIT.service"
+          systemctl stop "$UNIT.service"
+          # After stop, it should not be active
+          (! systemctl is-active "$UNIT.service")
+
+          : "ExecStartPre= with - prefix ignores failure"
+          systemd-run --wait --pipe \
+              -p ExecStartPre='-false' \
+              bash -xec 'echo "main command ran despite ExecStartPre failure"'
+
+          : "ExecStartPre= without - prefix causes failure on error"
+          (! systemd-run --wait --pipe \
+              -p ExecStartPre='false' \
+              bash -xec 'echo "this should not run"')
+
+          : "RuntimeDirectory is cleaned on stop"
+          UNIT="clean-test-$RANDOM"
+          systemd-run --unit="$UNIT" -p Type=oneshot \
+              -p RemainAfterExit=yes \
+              -p RuntimeDirectory="$UNIT" \
+              true
+          sleep 1
+          [[ -d "/run/$UNIT" ]]
+          systemctl stop "$UNIT.service"
+          [[ ! -e "/run/$UNIT" ]]
           TESTEOF
           chmod +x TEST-07-PID1.exec-context.sh
           # Rewrite private-pids test: keep only testcase_basic.
