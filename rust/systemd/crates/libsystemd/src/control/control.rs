@@ -3401,6 +3401,44 @@ fn create_transient_unit(
                             .push((std::path::PathBuf::from(trimmed), false));
                     }
                 }
+                "StandardInput" => {
+                    service_conf.exec_config.stdin_option = match value {
+                        "null" => crate::units::StandardInput::Null,
+                        "tty" => crate::units::StandardInput::Tty,
+                        "tty-force" => crate::units::StandardInput::TtyForce,
+                        "tty-fail" => crate::units::StandardInput::TtyFail,
+                        _ => crate::units::StandardInput::Null,
+                    };
+                }
+                "UtmpIdentifier" => {
+                    service_conf.exec_config.utmp_identifier = if value.is_empty() {
+                        None
+                    } else {
+                        Some(value.to_string())
+                    };
+                }
+                "UtmpMode" => {
+                    service_conf.exec_config.utmp_mode = match value {
+                        "init" => crate::units::UtmpMode::Init,
+                        "login" => crate::units::UtmpMode::Login,
+                        "user" => crate::units::UtmpMode::User,
+                        _ => crate::units::UtmpMode::Init,
+                    };
+                }
+                "ProtectProc" => {
+                    service_conf.exec_config.protect_proc = match value {
+                        "noaccess" => crate::units::unit_parsing::ProtectProc::Noaccess,
+                        "invisible" => crate::units::unit_parsing::ProtectProc::Invisible,
+                        "ptraceable" => crate::units::unit_parsing::ProtectProc::Ptraceable,
+                        _ => crate::units::unit_parsing::ProtectProc::Default,
+                    };
+                }
+                "ProcSubset" => {
+                    service_conf.exec_config.proc_subset = match value {
+                        "pid" => crate::units::unit_parsing::ProcSubset::Pid,
+                        _ => crate::units::unit_parsing::ProcSubset::All,
+                    };
+                }
                 _ => {
                     log::debug!("Ignoring unknown transient unit property: {key}={value}");
                 }

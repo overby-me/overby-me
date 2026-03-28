@@ -862,6 +862,13 @@
           [[ "$(systemctl show -P RemainAfterExit show-prop-test.service)" == yes ]]
           systemctl stop show-prop-test.service
 
+          : "UtmpIdentifier and UtmpMode via transient properties"
+          assert_eq "$(systemd-run -qP -p UtmpIdentifier=test -p UtmpMode=user whoami)" "$(whoami)"
+
+          : "StandardInput=null is default (stdin is /dev/null)"
+          systemd-run --wait --pipe -p StandardInput=null \
+              bash -xec '[[ ! -t 0 ]]'
+
           : "Error handling for clean-up codepaths"
           (! systemd-run --wait --pipe false)
           TESTEOF
@@ -1107,7 +1114,6 @@
                          TEST-23-UNIT-FILE.runtime-bind-paths.sh \
                          TEST-23-UNIT-FILE.statedir.sh \
                          TEST-23-UNIT-FILE.Upholds.sh \
-                         TEST-23-UNIT-FILE.utmp.sh \
                          TEST-23-UNIT-FILE.verify-unit-files.sh \
                          TEST-23-UNIT-FILE.whoami.sh
                     # success-failure subtest: enabled — requires synchronous start for
