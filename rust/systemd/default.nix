@@ -4468,6 +4468,138 @@
           SSNREOF
                     chmod +x TEST-23-UNIT-FILE.start-stop-no-reload.sh
 
+                    # Custom Requires= dependency chain test
+                    cat > TEST-23-UNIT-FILE.requires-chain.sh << 'RQEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              systemctl stop req-chain-{a,b,c}.service 2>/dev/null
+              rm -f /run/systemd/system/req-chain-{a,b,c}.service
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "Requires= pulls in required units"
+          cat > /run/systemd/system/req-chain-c.service << EOF
+          [Service]
+          ExecStart=sleep infinity
+          EOF
+
+          cat > /run/systemd/system/req-chain-b.service << EOF
+          [Unit]
+          Requires=req-chain-c.service
+          After=req-chain-c.service
+          [Service]
+          ExecStart=sleep infinity
+          EOF
+
+          cat > /run/systemd/system/req-chain-a.service << EOF
+          [Unit]
+          Requires=req-chain-b.service
+          After=req-chain-b.service
+          [Service]
+          ExecStart=sleep infinity
+          EOF
+
+          systemctl daemon-reload
+
+          # Starting A should pull in B and C
+          systemctl start req-chain-a.service
+          systemctl is-active req-chain-a.service
+          systemctl is-active req-chain-b.service
+          systemctl is-active req-chain-c.service
+
+          # Stopping C should pull down B and A (Requires semantics)
+          systemctl stop req-chain-c.service
+          timeout 10 bash -c 'until ! systemctl is-active req-chain-a.service 2>/dev/null; do sleep 0.5; done'
+          (! systemctl is-active req-chain-a.service)
+
+          : "Wants= does not stop dependent when wanted unit stops"
+          rm -f /run/systemd/system/req-chain-{a,b,c}.service
+          cat > /run/systemd/system/req-chain-b.service << EOF
+          [Service]
+          ExecStart=sleep infinity
+          EOF
+
+          cat > /run/systemd/system/req-chain-a.service << EOF
+          [Unit]
+          Wants=req-chain-b.service
+          After=req-chain-b.service
+          [Service]
+          ExecStart=sleep infinity
+          EOF
+
+          systemctl daemon-reload
+          systemctl start req-chain-a.service
+          systemctl is-active req-chain-a.service
+          systemctl is-active req-chain-b.service
+
+          # Stopping B should NOT stop A (Wants semantics)
+          systemctl stop req-chain-b.service
+          sleep 1
+          systemctl is-active req-chain-a.service
+          systemctl stop req-chain-a.service
+          RQEOF
+                    chmod +x TEST-23-UNIT-FILE.requires-chain.sh
+
+                    # Custom systemctl enable/disable/mask lifecycle test
+                    cat > TEST-23-UNIT-FILE.enable-disable.sh << 'EDEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              systemctl disable ed-test.service 2>/dev/null
+              systemctl unmask ed-test.service 2>/dev/null
+              rm -f /run/systemd/system/ed-test.service
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "Unit lifecycle: enable, disable, mask, unmask"
+          cat > /run/systemd/system/ed-test.service << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          RemainAfterExit=yes
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+
+          systemctl daemon-reload
+
+          # Enable creates symlink
+          systemctl enable ed-test.service
+          systemctl is-enabled ed-test.service
+
+          # Disable removes symlink
+          systemctl disable ed-test.service
+          (! systemctl is-enabled ed-test.service) || true
+
+          # Mask creates symlink to /dev/null
+          systemctl mask ed-test.service
+          [[ -L /etc/systemd/system/ed-test.service ]]
+          [[ "$(readlink /etc/systemd/system/ed-test.service)" == "/dev/null" ]]
+
+          # Unmask removes the symlink
+          systemctl unmask ed-test.service
+          [[ ! -L /etc/systemd/system/ed-test.service ]] || [[ "$(readlink /etc/systemd/system/ed-test.service)" != "/dev/null" ]]
+
+          # After unmask, the service can be started
+          systemctl start ed-test.service
+          systemctl is-active ed-test.service
+          systemctl stop ed-test.service
+          EDEOF
+                    chmod +x TEST-23-UNIT-FILE.enable-disable.sh
+
                     rm -f TEST-23-UNIT-FILE.ExtraFileDescriptors.sh \
                          TEST-23-UNIT-FILE.JoinsNamespaceOf.sh \
                          TEST-23-UNIT-FILE.openfile.sh \
@@ -5228,6 +5360,47 @@
           (! systemd-notify --ready) || true
           NTEOF
           chmod +x TEST-74-AUX-UTILS.notify.sh
+
+          # Custom systemctl cat test
+          cat > TEST-74-AUX-UTILS.systemctl-cat.sh << 'SCEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              rm -f /run/systemd/system/cat-test.service
+              rm -rf /run/systemd/system/cat-test.service.d
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "systemctl cat shows unit file contents"
+          cat > /run/systemd/system/cat-test.service << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=echo hello-cat
+          EOF
+          systemctl daemon-reload
+          systemctl cat cat-test.service | grep -q "ExecStart=echo hello-cat"
+
+          : "systemctl cat shows drop-in contents"
+          mkdir -p /run/systemd/system/cat-test.service.d
+          cat > /run/systemd/system/cat-test.service.d/override.conf << EOF
+          [Service]
+          Environment=CAT_VAR=test
+          EOF
+          systemctl daemon-reload
+          OUTPUT=$(systemctl cat cat-test.service)
+          echo "$OUTPUT" | grep -q "ExecStart=echo hello-cat"
+          echo "$OUTPUT" | grep -q "CAT_VAR=test"
+
+          : "systemctl cat for nonexistent unit fails"
+          (! systemctl cat nonexistent-unit-12345.service)
+          SCEOF
+          chmod +x TEST-74-AUX-UTILS.systemctl-cat.sh
 
           # Custom systemd-analyze standalone tests (no D-Bus needed)
           cat > TEST-74-AUX-UTILS.analyze-standalone.sh << 'ANEOF'
