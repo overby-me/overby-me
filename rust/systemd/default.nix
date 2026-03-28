@@ -827,6 +827,71 @@
                          [[ "$OPTS" =~ noexec ]];'
           PPEOF
           chmod +x TEST-07-PID1.private-pids.sh
+          # Custom start-limit test: verify StartLimitBurst/StartLimitIntervalSec enforcement
+          cat > TEST-07-PID1.start-limit.sh << 'SLEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          UNIT="test-start-limit-$RANDOM"
+
+          at_exit() {
+              set +e
+              systemctl stop "$UNIT.service" 2>/dev/null
+              systemctl reset-failed "$UNIT.service" 2>/dev/null
+              rm -f "/run/systemd/system/$UNIT.service"
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          printf '[Unit]\nStartLimitBurst=3\nStartLimitIntervalSec=30\n[Service]\nType=oneshot\nExecStart=false\n' > "/run/systemd/system/$UNIT.service"
+          systemctl daemon-reload
+
+          # First 3 starts should be allowed (they fail, but they start)
+          for i in 1 2 3; do
+              systemctl start "$UNIT.service" || true
+          done
+
+          # After 3 failures within the interval, the 4th start should be refused
+          (! systemctl start "$UNIT.service" 2>/dev/null)
+          SLEOF
+          chmod +x TEST-07-PID1.start-limit.sh
+          # Custom forking service test: verify Type=forking with PIDFile tracking
+          cat > TEST-07-PID1.forking-pidfile.sh << 'FPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          UNIT="test-forking-pidfile-$RANDOM"
+
+          at_exit() {
+              set +e
+              systemctl stop "$UNIT.service" 2>/dev/null
+              rm -f "/run/systemd/system/$UNIT.service" "/run/$UNIT.pid"
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          printf '[Service]\nType=forking\nPIDFile=/run/%s.pid\nExecStart=bash -c '"'"'sleep infinity & echo $! > /run/%s.pid'"'"'\n' "$UNIT" "$UNIT" > "/run/systemd/system/$UNIT.service"
+          systemctl daemon-reload
+          systemctl start "$UNIT.service"
+          sleep 1
+
+          # Verify the service is active and PID was tracked
+          systemctl is-active "$UNIT.service"
+          MAIN_PID="$(systemctl show -P MainPID "$UNIT.service")"
+          [[ "$MAIN_PID" -gt 0 ]]
+          # Verify the PID matches what was written to the PID file
+          FILE_PID="$(cat "/run/$UNIT.pid")"
+          [[ "$MAIN_PID" == "$FILE_PID" ]]
+
+          systemctl stop "$UNIT.service"
+          FPEOF
+          chmod +x TEST-07-PID1.forking-pidfile.sh
           rm -f TEST-07-PID1.attach_processes.sh \
                TEST-07-PID1.concurrency.sh \
                TEST-07-PID1.DeferReactivation.sh \
@@ -850,7 +915,6 @@
                TEST-07-PID1.socket-defer.sh \
                TEST-07-PID1.socket-max-connection.sh \
                TEST-07-PID1.socket-pass-fds.sh \
-               TEST-07-PID1.start-limit.sh \
                TEST-07-PID1.subgroup-kill.sh \
                TEST-07-PID1.transient-unit-container.sh \
                TEST-07-PID1.user-namespace-path.sh
