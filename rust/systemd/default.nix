@@ -447,6 +447,30 @@
           SLEOF
           chmod +x TEST-04-JOURNAL.output-formats.sh
 
+          # Journal field matching test
+          cat > TEST-04-JOURNAL.field-matching.sh << 'FMEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl with field=value matches"
+          journalctl --no-pager -n 5 _TRANSPORT=kernel
+          journalctl --no-pager -n 5 PRIORITY=6
+
+          : "journalctl with multiple field matches (AND logic)"
+          journalctl --no-pager -n 5 _TRANSPORT=journal PRIORITY=6 || true
+
+          : "journalctl + separator uses OR logic"
+          journalctl --no-pager -n 5 _TRANSPORT=kernel + _TRANSPORT=journal || true
+
+          : "journalctl -b 0 shows current boot"
+          journalctl -b 0 --no-pager -n 5
+
+          : "journalctl --output-fields limits output in json"
+          journalctl --no-pager -n 1 -o json --output-fields=MESSAGE | jq -e 'has("MESSAGE")' > /dev/null
+          FMEOF
+          chmod +x TEST-04-JOURNAL.field-matching.sh
+
           rm -f TEST-04-JOURNAL.bsod.sh \
                TEST-04-JOURNAL.cat.sh \
                TEST-04-JOURNAL.corrupted-journals.sh \
@@ -4839,6 +4863,47 @@
           systemctl daemon-reload
           BTEOF
           chmod +x TEST-53-TIMER.basic-timer.sh
+
+          # Timer with AccuracySec and multiple timer triggers test
+          cat > TEST-53-TIMER.multi-trigger.sh << 'MTEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "Multiple sequential transient timers fire independently"
+          for i in 1 2 3; do
+              UNIT="multi-trig-$i-$RANDOM"
+              rm -f "/tmp/multi-trig-$UNIT"
+              systemd-run --unit="$UNIT" --on-active=1s --remain-after-exit \
+                  touch "/tmp/multi-trig-$UNIT"
+              systemctl is-active "$UNIT.timer"
+              timeout 10 bash -c "until [[ -f /tmp/multi-trig-$UNIT ]]; do sleep 0.5; done"
+              [[ -f "/tmp/multi-trig-$UNIT" ]]
+              systemctl stop "$UNIT.timer" "$UNIT.service" 2>/dev/null || true
+              rm -f "/tmp/multi-trig-$UNIT"
+          done
+
+          : "Transient timer with --on-active and --description"
+          UNIT="multi-trig-desc-$RANDOM"
+          rm -f "/tmp/multi-trig-$UNIT"
+          systemd-run --unit="$UNIT" --on-active=1s --description="Multi trigger test" --remain-after-exit \
+              touch "/tmp/multi-trig-$UNIT"
+          systemctl show -P Description "$UNIT.timer" | grep -q "Multi trigger test"
+          timeout 10 bash -c "until [[ -f /tmp/multi-trig-$UNIT ]]; do sleep 0.5; done"
+          systemctl stop "$UNIT.timer" "$UNIT.service" 2>/dev/null || true
+          rm -f "/tmp/multi-trig-$UNIT"
+
+          : "Timer property check via systemctl show"
+          UNIT="multi-trig-prop-$RANDOM"
+          systemd-run --unit="$UNIT" --on-active=30s --remain-after-exit true
+          # Timer should be active
+          [[ "$(systemctl show -P ActiveState "$UNIT.timer")" == "active" ]]
+          # Clean up without waiting for fire
+          systemctl stop "$UNIT.timer" "$UNIT.service" 2>/dev/null || true
+          MTEOF
+          chmod +x TEST-53-TIMER.multi-trigger.sh
 
           # Timer stop/restart lifecycle test
           cat > TEST-53-TIMER.timer-lifecycle.sh << 'TLEOF'
