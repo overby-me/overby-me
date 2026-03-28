@@ -2931,6 +2931,18 @@ fn create_transient_unit(
                 "SendSIGHUP" => {
                     service_conf.send_sighup = matches!(value, "yes" | "true" | "1");
                 }
+                "SendSIGKILL" => {
+                    service_conf.send_sigkill = matches!(value, "yes" | "true" | "1");
+                }
+                "KillMode" => {
+                    service_conf.kill_mode = match value {
+                        "control-group" => crate::units::unit_parsing::KillMode::ControlGroup,
+                        "process" => crate::units::unit_parsing::KillMode::Process,
+                        "mixed" => crate::units::unit_parsing::KillMode::Mixed,
+                        "none" => crate::units::unit_parsing::KillMode::None,
+                        _ => crate::units::unit_parsing::KillMode::ControlGroup,
+                    };
+                }
                 "SuccessExitStatus" => {
                     for token in value.split_whitespace() {
                         if let Ok(code) = token.parse::<i32>() {
