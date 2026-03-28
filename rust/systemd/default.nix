@@ -6856,6 +6856,73 @@
           SGEOF
                     chmod +x TEST-23-UNIT-FILE.supplementary-groups.sh
 
+                    # Test Conflicts= in unit files
+                    cat > TEST-23-UNIT-FILE.conflicts-unit.sh << 'CUEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "Conflicts= shows up in systemctl show"
+          UNIT_A="conflict-a-$RANDOM"
+          UNIT_B="conflict-b-$RANDOM"
+          cat > "/run/systemd/system/$UNIT_A.service" << UEOF
+          [Unit]
+          Conflicts=$UNIT_B.service
+          [Service]
+          Type=exec
+          ExecStart=sleep 300
+          UEOF
+          cat > "/run/systemd/system/$UNIT_B.service" << UEOF
+          [Service]
+          Type=exec
+          ExecStart=sleep 300
+          UEOF
+          systemctl daemon-reload
+          CONFLICTS="$(systemctl show -P Conflicts "$UNIT_A.service")"
+          echo "$CONFLICTS" | grep -q "$UNIT_B.service"
+          rm -f "/run/systemd/system/$UNIT_A.service" "/run/systemd/system/$UNIT_B.service"
+          systemctl daemon-reload
+          CUEOF
+                    chmod +x TEST-23-UNIT-FILE.conflicts-unit.sh
+
+                    # Test ConditionPathExists= in unit files
+                    cat > TEST-23-UNIT-FILE.condition-path.sh << 'CPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "ConditionPathExists= prevents start when path missing"
+          UNIT="cond-path-$RANDOM"
+          cat > "/run/systemd/system/$UNIT.service" << UEOF
+          [Unit]
+          ConditionPathExists=/nonexistent-path-$RANDOM
+          [Service]
+          Type=oneshot
+          ExecStart=touch /tmp/cond-path-fired
+          UEOF
+          systemctl daemon-reload
+          systemctl start "$UNIT.service" || true
+          test ! -f /tmp/cond-path-fired
+          rm -f "/run/systemd/system/$UNIT.service"
+          systemctl daemon-reload
+
+          : "ConditionPathExists= allows start when path exists"
+          UNIT2="cond-path2-$RANDOM"
+          cat > "/run/systemd/system/$UNIT2.service" << UEOF
+          [Unit]
+          ConditionPathExists=/etc/hostname
+          [Service]
+          Type=oneshot
+          ExecStart=touch /tmp/cond-path-fired2
+          UEOF
+          systemctl daemon-reload
+          systemctl start "$UNIT2.service"
+          test -f /tmp/cond-path-fired2
+          rm -f /tmp/cond-path-fired2 "/run/systemd/system/$UNIT2.service"
+          systemctl daemon-reload
+          CPEOF
+                    chmod +x TEST-23-UNIT-FILE.condition-path.sh
+
                     # Test KillMode=process
                     cat > TEST-23-UNIT-FILE.kill-mode.sh << 'KMEOF'
           #!/usr/bin/env bash
@@ -10949,6 +11016,86 @@
           (! systemd-analyze calendar "not-a-valid-calendar" 2>/dev/null)
           ACMEOF
           chmod +x TEST-74-AUX-UTILS.analyze-calendar-more.sh
+
+          # systemd-run --service-type=exec
+          cat > TEST-74-AUX-UTILS.run-type-exec.sh << 'RTEEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-run --service-type=exec starts service"
+          UNIT="run-type-exec-$RANDOM"
+          systemd-run --unit="$UNIT" --service-type=exec sleep 300
+          sleep 1
+          [[ "$(systemctl show -P Type "$UNIT.service")" == "exec" ]]
+          systemctl stop "$UNIT.service"
+          RTEEOF
+          chmod +x TEST-74-AUX-UTILS.run-type-exec.sh
+
+          # systemctl show with --value flag
+          cat > TEST-74-AUX-UTILS.show-value-flag.sh << 'SVFEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl show --value shows raw value"
+          VAL="$(systemctl show --value -p LoadState systemd-journald.service)"
+          [[ "$VAL" == "loaded" ]]
+
+          : "systemctl show --value -p ActiveState works"
+          VAL="$(systemctl show --value -p ActiveState systemd-journald.service)"
+          [[ "$VAL" == "active" ]]
+          SVFEOF
+          chmod +x TEST-74-AUX-UTILS.show-value-flag.sh
+
+          # systemd-analyze calendar with iterations
+          cat > TEST-74-AUX-UTILS.analyze-cal-iter.sh << 'ACIEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-analyze calendar with --iterations"
+          OUT="$(systemd-analyze calendar --iterations=3 daily 2>&1)" || true
+          [[ -n "$OUT" ]]
+          ACIEOF
+          chmod +x TEST-74-AUX-UTILS.analyze-cal-iter.sh
+
+          # systemd-run with --remain-after-exit and properties
+          cat > TEST-74-AUX-UTILS.run-remain-props.sh << 'RRPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-run --remain-after-exit keeps service active"
+          UNIT="remain-prop-$RANDOM"
+          systemd-run --unit="$UNIT" --remain-after-exit \
+              -p Environment=TEST_REMAIN=yes \
+              true
+          sleep 1
+          systemctl is-active "$UNIT.service"
+          systemctl stop "$UNIT.service"
+          RRPEOF
+          chmod +x TEST-74-AUX-UTILS.run-remain-props.sh
+
+          # systemctl show Result property
+          cat > TEST-74-AUX-UTILS.show-result.sh << 'SREOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "Result=success for successfully completed service"
+          UNIT="result-test-$RANDOM"
+          systemd-run --wait --unit="$UNIT" true
+          RESULT="$(systemctl show -P Result "$UNIT.service")"
+          [[ "$RESULT" == "success" ]]
+
+          : "Result for failed service"
+          UNIT2="result-fail-$RANDOM"
+          (! systemd-run --wait --unit="$UNIT2" false)
+          RESULT="$(systemctl show -P Result "$UNIT2.service")"
+          [[ -n "$RESULT" ]]
+          SREOF
+          chmod +x TEST-74-AUX-UTILS.show-result.sh
 
           # systemd-tmpfiles --create basic test
           cat > TEST-74-AUX-UTILS.tmpfiles-create.sh << 'TCEOF'
