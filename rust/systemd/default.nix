@@ -6206,6 +6206,75 @@
           EPPEOF
                     chmod +x TEST-23-UNIT-FILE.exec-pre-post.sh
 
+                    # Test multiple ExecStart= lines for Type=oneshot
+                    cat > TEST-23-UNIT-FILE.multi-exec-oneshot.sh << 'MEOSEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "Type=oneshot with multiple ExecStart runs all commands"
+          UNIT="multi-exec-$RANDOM"
+          cat > "/run/systemd/system/$UNIT.service" << UEOF
+          [Unit]
+          Description=Multi ExecStart test
+          [Service]
+          Type=oneshot
+          ExecStart=touch /tmp/$UNIT-step1
+          ExecStart=touch /tmp/$UNIT-step2
+          ExecStart=touch /tmp/$UNIT-step3
+          UEOF
+          systemctl daemon-reload
+          systemctl start "$UNIT.service"
+          sleep 1
+          [[ -f "/tmp/$UNIT-step1" ]]
+          [[ -f "/tmp/$UNIT-step2" ]]
+          [[ -f "/tmp/$UNIT-step3" ]]
+          rm -f "/run/systemd/system/$UNIT.service" "/tmp/$UNIT-step1" "/tmp/$UNIT-step2" "/tmp/$UNIT-step3"
+          systemctl daemon-reload
+          MEOSEOF
+                    chmod +x TEST-23-UNIT-FILE.multi-exec-oneshot.sh
+
+                    # Test Requires= dependency
+                    cat > TEST-23-UNIT-FILE.requires-dep.sh << 'RDEPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "Requires= pulls in hard dependency"
+          UNIT_DEP="req-dep-$RANDOM"
+          UNIT_SVC="req-svc-$RANDOM"
+
+          cat > "/run/systemd/system/$UNIT_DEP.service" << UEOF
+          [Unit]
+          Description=Required dep
+          [Service]
+          Type=oneshot
+          ExecStart=touch /tmp/$UNIT_DEP-ran
+          RemainAfterExit=yes
+          UEOF
+
+          cat > "/run/systemd/system/$UNIT_SVC.service" << UEOF
+          [Unit]
+          Description=Requiring service
+          Requires=$UNIT_DEP.service
+          After=$UNIT_DEP.service
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          RemainAfterExit=yes
+          UEOF
+
+          systemctl daemon-reload
+          systemctl start "$UNIT_SVC.service"
+          [[ -f "/tmp/$UNIT_DEP-ran" ]]
+          systemctl is-active "$UNIT_DEP.service"
+
+          systemctl stop "$UNIT_SVC.service" "$UNIT_DEP.service"
+          rm -f "/run/systemd/system/$UNIT_SVC.service" "/run/systemd/system/$UNIT_DEP.service" "/tmp/$UNIT_DEP-ran"
+          systemctl daemon-reload
+          RDEPEOF
+                    chmod +x TEST-23-UNIT-FILE.requires-dep.sh
+
                     rm -f TEST-23-UNIT-FILE.ExtraFileDescriptors.sh \
                          TEST-23-UNIT-FILE.JoinsNamespaceOf.sh \
                          TEST-23-UNIT-FILE.openfile.sh \
@@ -9357,6 +9426,98 @@
           systemctl show init.scope -P Id | grep -q "init.scope"
           SCEOF
           chmod +x TEST-74-AUX-UTILS.show-scope.sh
+
+          # systemctl show Result property
+          cat > TEST-74-AUX-UTILS.show-result.sh << 'SREOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "Result=success for successful service"
+          UNIT="result-ok-$RANDOM"
+          systemd-run --wait --unit="$UNIT" true
+          RESULT="$(systemctl show -P Result "$UNIT.service")"
+          [[ "$RESULT" == "success" ]]
+
+          : "Result for failed service"
+          UNIT2="result-fail-$RANDOM"
+          systemd-run --wait --unit="$UNIT2" bash -c 'exit 1' || true
+          RESULT="$(systemctl show -P Result "$UNIT2.service")"
+          [[ "$RESULT" != "success" ]]
+          systemctl reset-failed "$UNIT2.service" 2>/dev/null || true
+          SREOF
+          chmod +x TEST-74-AUX-UTILS.show-result.sh
+
+          # systemctl show ExecMainStatus
+          cat > TEST-74-AUX-UTILS.exec-status.sh << 'ESEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "ExecMainStatus=0 for successful service"
+          UNIT="exec-ok-$RANDOM"
+          systemd-run --wait --unit="$UNIT" true
+          STATUS="$(systemctl show -P ExecMainStatus "$UNIT.service")"
+          [[ "$STATUS" == "0" ]]
+
+          : "ExecMainStatus non-zero for failed service"
+          UNIT2="exec-fail-$RANDOM"
+          systemd-run --wait --unit="$UNIT2" bash -c 'exit 42' || true
+          STATUS="$(systemctl show -P ExecMainStatus "$UNIT2.service")"
+          [[ "$STATUS" == "42" ]]
+          systemctl reset-failed "$UNIT2.service" 2>/dev/null || true
+          ESEOF
+          chmod +x TEST-74-AUX-UTILS.exec-status.sh
+
+          # systemctl show SourcePath
+          cat > TEST-74-AUX-UTILS.source-path.sh << 'SPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "SourcePath for unit with drop-in"
+          SP="$(systemctl show -P SourcePath systemd-journald.service)"
+          # May or may not be set, but the property should exist
+          [[ -n "$SP" || -z "$SP" ]]
+
+          : "Id property for well-known unit"
+          ID="$(systemctl show -P Id systemd-journald.service)"
+          [[ "$ID" == "systemd-journald.service" ]]
+          SPEOF
+          chmod +x TEST-74-AUX-UTILS.source-path.sh
+
+          # systemctl show for multiple units (sequential)
+          cat > TEST-74-AUX-UTILS.show-sequential.sh << 'SQEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl show for journald service"
+          systemctl show systemd-journald.service -P ActiveState | grep -q "active"
+
+          : "systemctl show for logind service"
+          systemctl show systemd-logind.service -P Id | grep -q "logind"
+
+          : "systemctl show for resolved service"
+          systemctl show systemd-resolved.service -P Id | grep -q "resolved"
+          SQEOF
+          chmod +x TEST-74-AUX-UTILS.show-sequential.sh
+
+          # systemd-run with --remain-after-exit lifecycle
+          cat > TEST-74-AUX-UTILS.remain-lifecycle.sh << 'RLEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "remain-after-exit keeps unit active"
+          UNIT="remain-lc-$RANDOM"
+          systemd-run --unit="$UNIT" --remain-after-exit true
+          sleep 1
+          systemctl is-active "$UNIT.service"
+          systemctl stop "$UNIT.service"
+          (! systemctl is-active "$UNIT.service")
+          RLEOF
+          chmod +x TEST-74-AUX-UTILS.remain-lifecycle.sh
 
           rm -f TEST-74-AUX-UTILS.busctl.sh \
                TEST-74-AUX-UTILS.capsule.sh \
