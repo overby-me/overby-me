@@ -821,6 +821,17 @@
           systemctl is-active notify-ready-test.service
           systemctl stop notify-ready-test.service
 
+          : "SupplementaryGroups= tests"
+          systemd-run --wait --pipe -p User=testuser -p SupplementaryGroups=audio \
+              bash -xec 'id -Gn | tr " " "\n" | grep -q audio'
+
+          : "Multiple SupplementaryGroups= entries"
+          systemd-run --wait --pipe -p User=testuser \
+              -p SupplementaryGroups=audio \
+              -p SupplementaryGroups=video \
+              bash -xec 'id -Gn | tr " " "\n" | grep -q audio;
+                         id -Gn | tr " " "\n" | grep -q video'
+
           : "Error handling for clean-up codepaths"
           (! systemd-run --wait --pipe false)
           TESTEOF

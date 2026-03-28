@@ -2716,6 +2716,18 @@ fn create_transient_unit(
                 "Group" => {
                     service_conf.exec_config.group = Some(value.to_string());
                 }
+                "SupplementaryGroups" => {
+                    if value.is_empty() {
+                        service_conf.exec_config.supplementary_groups.clear();
+                    } else {
+                        for g in value.split_whitespace() {
+                            service_conf
+                                .exec_config
+                                .supplementary_groups
+                                .push(g.to_string());
+                        }
+                    }
+                }
                 "WorkingDirectory" => {
                     service_conf.exec_config.working_directory =
                         Some(std::path::PathBuf::from(value));
@@ -2961,6 +2973,12 @@ fn create_transient_unit(
                             _ => {}
                         }
                     }
+                }
+                "SyslogIdentifier" => {
+                    service_conf.exec_config.syslog_identifier = Some(value.to_string());
+                }
+                "RootDirectory" => {
+                    service_conf.exec_config.root_directory = Some(value.to_string());
                 }
                 "OnSuccess" => {
                     for name in value.split_whitespace() {
