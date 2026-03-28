@@ -6341,6 +6341,39 @@
           PTCEOF
                     chmod +x TEST-23-UNIT-FILE.private-tmp-check.sh
 
+                    # Test ReadOnlyPaths/ReadWritePaths
+                    cat > TEST-23-UNIT-FILE.readonly-paths.sh << 'ROPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "ReadOnlyPaths makes path read-only"
+          mkdir -p /tmp/ro-test-dir
+          touch /tmp/ro-test-dir/file
+          UNIT="ro-paths-$RANDOM"
+          systemd-run --wait --unit="$UNIT" \
+              -p ReadOnlyPaths=/tmp/ro-test-dir \
+              bash -c '(! touch /tmp/ro-test-dir/new-file 2>/dev/null)'
+          rm -rf /tmp/ro-test-dir
+          ROPEOF
+                    chmod +x TEST-23-UNIT-FILE.readonly-paths.sh
+
+                    # Test LimitNOFILE= in unit file
+                    cat > TEST-23-UNIT-FILE.limit-nofile.sh << 'LNEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "LimitNOFILE= sets file descriptor limit"
+          UNIT="lim-nofile-$RANDOM"
+          systemd-run --wait --unit="$UNIT" \
+              -p LimitNOFILE=1234 \
+              bash -c 'ulimit -n > /tmp/nofile-result'
+          [[ "$(cat /tmp/nofile-result)" == "1234" ]]
+          rm -f /tmp/nofile-result
+          LNEOF
+                    chmod +x TEST-23-UNIT-FILE.limit-nofile.sh
+
                     rm -f TEST-23-UNIT-FILE.ExtraFileDescriptors.sh \
                          TEST-23-UNIT-FILE.JoinsNamespaceOf.sh \
                          TEST-23-UNIT-FILE.openfile.sh \
@@ -9815,6 +9848,60 @@
           echo "$NAMES" | grep -q "systemd-journald.service"
           NMEOF
           chmod +x TEST-74-AUX-UTILS.names-prop.sh
+
+          # systemctl show StateChangeTimestamp
+          cat > TEST-74-AUX-UTILS.state-change-ts.sh << 'SCTEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "StateChangeTimestamp is set for active service"
+          TS="$(systemctl show -P StateChangeTimestamp systemd-journald.service)"
+          [[ -n "$TS" ]]
+          SCTEOF
+          chmod +x TEST-74-AUX-UTILS.state-change-ts.sh
+
+          # systemd-run with --user-unit (error path)
+          cat > TEST-74-AUX-UTILS.run-errors.sh << 'REEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-run without command fails"
+          (! systemd-run --wait 2>/dev/null)
+
+          : "systemd-run with nonexistent command fails"
+          (! systemd-run --wait /nonexistent-binary-$RANDOM 2>/dev/null)
+          REEOF
+          chmod +x TEST-74-AUX-UTILS.run-errors.sh
+
+          # systemctl show for swap/automount types
+          cat > TEST-74-AUX-UTILS.unit-types.sh << 'UTEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl list-units shows various unit types"
+          systemctl list-units --no-pager --type=service > /dev/null
+          systemctl list-units --no-pager --type=socket > /dev/null
+          systemctl list-units --no-pager --type=target > /dev/null
+          systemctl list-units --no-pager --type=mount > /dev/null
+          systemctl list-units --no-pager --type=timer > /dev/null
+          systemctl list-units --no-pager --type=path > /dev/null
+          UTEOF
+          chmod +x TEST-74-AUX-UTILS.unit-types.sh
+
+          # systemd-analyze unit-paths
+          cat > TEST-74-AUX-UTILS.analyze-unit-paths.sh << 'AUPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-analyze unit-paths lists directories"
+          OUT="$(systemd-analyze unit-paths)"
+          echo "$OUT" | grep -q "systemd"
+          AUPEOF
+          chmod +x TEST-74-AUX-UTILS.analyze-unit-paths.sh
 
           rm -f TEST-74-AUX-UTILS.busctl.sh \
                TEST-74-AUX-UTILS.capsule.sh \
