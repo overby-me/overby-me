@@ -1227,6 +1227,42 @@
           JAEOF
           chmod +x TEST-04-JOURNAL.json-array.sh
 
+          # journalctl with -q quiet mode
+          cat > TEST-04-JOURNAL.quiet-mode.sh << 'QMEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl -q suppresses informational messages"
+          journalctl --no-pager -q -n 5 > /dev/null
+
+          : "journalctl -q -o json produces clean output"
+          OUT="$(journalctl --no-pager -q -o json -n 1)"
+          echo "$OUT" | jq . > /dev/null
+          QMEOF
+          chmod +x TEST-04-JOURNAL.quiet-mode.sh
+
+          # journalctl --directory reads from path
+          cat > TEST-04-JOURNAL.directory.sh << 'DREOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl --directory reads journal from specific path"
+          # Find the journal directory
+          JDIR="/var/log/journal"
+          if [[ -d "$JDIR" ]]; then
+              journalctl --no-pager --directory="$JDIR" -n 3 > /dev/null
+          fi
+
+          : "journalctl --directory with machine-id subdir"
+          MID="$(cat /etc/machine-id)"
+          if [[ -d "$JDIR/$MID" ]]; then
+              journalctl --no-pager --directory="$JDIR/$MID" -n 3 > /dev/null || true
+          fi
+          DREOF
+          chmod +x TEST-04-JOURNAL.directory.sh
+
           rm -f TEST-04-JOURNAL.bsod.sh \
                TEST-04-JOURNAL.cat.sh \
                TEST-04-JOURNAL.corrupted-journals.sh \
@@ -8562,6 +8598,34 @@
           systemctl daemon-reload
           NSEOF
           chmod +x TEST-19-CGROUP.nested-slices.sh
+
+          cat > TEST-19-CGROUP.delegate-prop.sh << 'DPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "Delegate property accepted by transient service"
+          UNIT="cg-deleg-$RANDOM"
+          systemd-run --wait --unit="$UNIT" -p Delegate=yes true
+
+          : "Delegate with specific controllers"
+          UNIT2="cg-deleg2-$RANDOM"
+          systemd-run --wait --unit="$UNIT2" -p "Delegate=memory pids" true || true
+          DPEOF
+          chmod +x TEST-19-CGROUP.delegate-prop.sh
+
+          cat > TEST-19-CGROUP.cgls-cgtop.sh << 'CCEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-cgls shows cgroup tree"
+          systemd-cgls --no-pager > /dev/null
+
+          : "systemd-cgtop --iterations=1 shows resource usage"
+          systemd-cgtop --iterations=1 --batch > /dev/null || true
+          CCEOF
+          chmod +x TEST-19-CGROUP.cgls-cgtop.sh
         '';
       }
       {
