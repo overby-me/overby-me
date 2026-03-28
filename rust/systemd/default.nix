@@ -9683,6 +9683,73 @@
           DPEOF
           chmod +x TEST-74-AUX-UTILS.dep-props.sh
 
+          # systemctl show SubState transitions
+          cat > TEST-74-AUX-UTILS.substate-check.sh << 'SBEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "SubState=running for active long-running service"
+          UNIT="sub-run-$RANDOM"
+          systemd-run --unit="$UNIT" sleep 300
+          sleep 1
+          SS="$(systemctl show -P SubState "$UNIT.service")"
+          [[ "$SS" == "running" ]]
+          systemctl stop "$UNIT.service"
+
+          : "SubState=dead for stopped service"
+          SS="$(systemctl show -P SubState "$UNIT.service")"
+          [[ "$SS" == "dead" || "$SS" == "failed" ]]
+          systemctl reset-failed "$UNIT.service" 2>/dev/null || true
+          SBEOF
+          chmod +x TEST-74-AUX-UTILS.substate-check.sh
+
+          # systemctl show ExecMainStartTimestamp
+          cat > TEST-74-AUX-UTILS.exec-timestamps.sh << 'XTSEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "ExecMainStartTimestamp is set after service runs"
+          UNIT="exec-ts-$RANDOM"
+          systemd-run --wait --unit="$UNIT" true
+          TS="$(systemctl show -P ExecMainStartTimestamp "$UNIT.service")"
+          [[ -n "$TS" ]]
+
+          : "ExecMainExitTimestamp is set after service completes"
+          TS="$(systemctl show -P ExecMainExitTimestamp "$UNIT.service")"
+          [[ -n "$TS" ]]
+          XTSEOF
+          chmod +x TEST-74-AUX-UTILS.exec-timestamps.sh
+
+          # systemctl show for ControlPID
+          cat > TEST-74-AUX-UTILS.control-pid.sh << 'CPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "ControlPID is 0 when no control process"
+          UNIT="ctl-pid-$RANDOM"
+          systemd-run --unit="$UNIT" sleep 300
+          sleep 1
+          CPID="$(systemctl show -P ControlPID "$UNIT.service")"
+          [[ "$CPID" == "0" ]]
+          systemctl stop "$UNIT.service"
+          CPEOF
+          chmod +x TEST-74-AUX-UTILS.control-pid.sh
+
+          # systemctl show Names property
+          cat > TEST-74-AUX-UTILS.names-prop.sh << 'NMEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "Names property contains the unit name"
+          NAMES="$(systemctl show -P Names systemd-journald.service)"
+          echo "$NAMES" | grep -q "systemd-journald.service"
+          NMEOF
+          chmod +x TEST-74-AUX-UTILS.names-prop.sh
+
           rm -f TEST-74-AUX-UTILS.busctl.sh \
                TEST-74-AUX-UTILS.capsule.sh \
                TEST-74-AUX-UTILS.firstboot.sh \
