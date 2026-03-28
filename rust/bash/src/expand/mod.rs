@@ -1147,13 +1147,23 @@ fn remove_quotes(s: &str) -> String {
 fn has_glob_chars(s: &str) -> bool {
     let mut prev_null = false;
     let mut prev_backslash = false;
-    for ch in s.chars() {
+    let chars: Vec<char> = s.chars().collect();
+    for (i, &ch) in chars.iter().enumerate() {
         if ch == '\x00' {
             prev_null = true;
             prev_backslash = false;
             continue;
         }
         if matches!(ch, '*' | '?' | '[') && !prev_null && !prev_backslash {
+            return true;
+        }
+        // Check for extglob patterns: +(, @(, ?(, !(, *(
+        if matches!(ch, '+' | '@' | '?' | '!' | '*')
+            && !prev_null
+            && !prev_backslash
+            && i + 1 < chars.len()
+            && chars[i + 1] == '('
+        {
             return true;
         }
         prev_backslash = ch == '\\' && !prev_null;
@@ -1747,20 +1757,71 @@ fn glob_expand(field: &str) -> Vec<String> {
                 pattern.push(ch);
             }
         }
-        match glob::glob(&pattern) {
-            Ok(paths) => {
-                let mut results: Vec<String> = paths
-                    .filter_map(|p| p.ok())
-                    .map(|p| p.to_string_lossy().to_string())
-                    .collect();
-                if results.is_empty() {
-                    vec![remove_quotes(field)]
+        // Check if pattern has extglob chars that the glob crate can't handle
+        let has_extglob = pattern.contains("+(")
+            || pattern.contains("@(")
+            || pattern.contains("?(")
+            || pattern.contains("!(");
+        if has_extglob {
+            // Use our case_pattern_match for extglob support
+            // For simple (non-path) patterns, match against current directory entries
+            if !pattern.contains('/') {
+                let dir = std::env::current_dir().unwrap_or_default();
+                if let Ok(entries) = std::fs::read_dir(&dir) {
+                    let mut results: Vec<String> = entries
+                        .filter_map(|e| e.ok())
+                        .map(|e| e.file_name().to_string_lossy().to_string())
+                        .filter(|name| {
+                            // Skip dotfiles unless pattern starts with .
+                            if name.starts_with('.') && !pattern.starts_with('.') {
+                                return false;
+                            }
+                            crate::interpreter::commands::case_pattern_match(name, &pattern)
+                        })
+                        .collect();
+                    if results.is_empty() {
+                        vec![remove_quotes(field)]
+                    } else {
+                        results.sort();
+                        results
+                    }
                 } else {
-                    results.sort();
-                    results
+                    vec![remove_quotes(field)]
+                }
+            } else {
+                // For path patterns, fall back to glob crate (extglob in paths not supported yet)
+                match glob::glob(&pattern) {
+                    Ok(paths) => {
+                        let mut results: Vec<String> = paths
+                            .filter_map(|p| p.ok())
+                            .map(|p| p.to_string_lossy().to_string())
+                            .collect();
+                        if results.is_empty() {
+                            vec![remove_quotes(field)]
+                        } else {
+                            results.sort();
+                            results
+                        }
+                    }
+                    Err(_) => vec![remove_quotes(field)],
                 }
             }
-            Err(_) => vec![remove_quotes(field)],
+        } else {
+            match glob::glob(&pattern) {
+                Ok(paths) => {
+                    let mut results: Vec<String> = paths
+                        .filter_map(|p| p.ok())
+                        .map(|p| p.to_string_lossy().to_string())
+                        .collect();
+                    if results.is_empty() {
+                        vec![remove_quotes(field)]
+                    } else {
+                        results.sort();
+                        results
+                    }
+                }
+                Err(_) => vec![remove_quotes(field)],
+            }
         }
     } else {
         vec![remove_quotes(field)]

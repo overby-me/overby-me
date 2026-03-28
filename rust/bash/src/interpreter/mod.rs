@@ -1,5 +1,5 @@
 mod arithmetic;
-mod commands;
+pub(crate) mod commands;
 mod pipeline;
 mod redirects;
 mod signals;

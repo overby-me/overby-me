@@ -3179,7 +3179,7 @@ impl Shell {
     }
 }
 
-fn case_pattern_match(text: &str, pattern: &str) -> bool {
+pub fn case_pattern_match(text: &str, pattern: &str) -> bool {
     if pattern == "*" {
         return true;
     }
