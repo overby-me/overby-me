@@ -894,9 +894,27 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
 
     // Check if read fd is valid before attempting to read
     #[cfg(unix)]
-    if nix::fcntl::fcntl(read_fd, nix::fcntl::FcntlArg::F_GETFD).is_err() {
-        // fd is closed/invalid — return 1 (failure)
-        return 1;
+    {
+        if nix::fcntl::fcntl(read_fd, nix::fcntl::FcntlArg::F_GETFD).is_err() {
+            // fd is closed/invalid — return 1 (failure)
+            return 1;
+        }
+        // Check if fd points to /dev/null (Rust opens /dev/null on fds 0-2 if closed)
+        // read -t 0 on /dev/null should return 1 (no data available)
+        if timeout_secs == Some(0.0) && read_fd <= 2 {
+            if let Ok(stat) = nix::sys::stat::fstat(read_fd) {
+                // /dev/null is a character device with major 1, minor 3
+                let major = nix::sys::stat::major(stat.st_rdev);
+                let minor = nix::sys::stat::minor(stat.st_rdev);
+                if nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode)
+                    .contains(nix::sys::stat::SFlag::S_IFCHR)
+                    && major == 1
+                    && minor == 3
+                {
+                    return 1;
+                }
+            }
+        }
     }
 
     // Handle timeout: check if data is available within the timeout period
