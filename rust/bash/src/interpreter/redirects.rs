@@ -103,6 +103,12 @@ impl Shell {
                         nix::unistd::dup2(raw_fd, fd).map_err(|e| e.to_string())?;
                         nix::unistd::close(raw_fd).ok();
                     }
+                    // Clear CLOEXEC flag so child processes inherit this fd
+                    nix::fcntl::fcntl(
+                        fd,
+                        nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::empty()),
+                    )
+                    .ok();
                 }
                 RedirectKind::Append => {
                     let fd = self.resolve_redir_fd(&redir.fd, 1);
@@ -123,6 +129,11 @@ impl Shell {
                         nix::unistd::dup2(raw_fd, fd).map_err(|e| e.to_string())?;
                         nix::unistd::close(raw_fd).ok();
                     }
+                    nix::fcntl::fcntl(
+                        fd,
+                        nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::empty()),
+                    )
+                    .ok();
                 }
                 RedirectKind::OutputAll | RedirectKind::AppendAll => {
                     // &> or &>> — redirect both stdout and stderr to file
