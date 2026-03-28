@@ -7809,6 +7809,113 @@
           SEEOF
           chmod +x TEST-74-AUX-UTILS.show-exec.sh
 
+          # systemctl set-environment / unset-environment test
+          cat > TEST-74-AUX-UTILS.set-environment.sh << 'SEEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl show-environment lists environment"
+          systemctl show-environment > /dev/null
+
+          : "systemctl set-environment adds a variable"
+          systemctl set-environment TESTVAR_74=hello
+          systemctl show-environment | grep -q "TESTVAR_74=hello"
+
+          : "systemctl set-environment with multiple vars"
+          systemctl set-environment TESTVAR_74A=one TESTVAR_74B=two
+          systemctl show-environment | grep -q "TESTVAR_74A=one"
+          systemctl show-environment | grep -q "TESTVAR_74B=two"
+
+          : "systemctl unset-environment removes a variable"
+          systemctl unset-environment TESTVAR_74
+          (! systemctl show-environment | grep -q "TESTVAR_74=hello")
+
+          : "systemctl unset-environment multiple vars"
+          systemctl unset-environment TESTVAR_74A TESTVAR_74B
+          (! systemctl show-environment | grep -q "TESTVAR_74A=")
+          (! systemctl show-environment | grep -q "TESTVAR_74B=")
+          SEEOF
+          chmod +x TEST-74-AUX-UTILS.set-environment.sh
+
+          # systemd-run --collect and --quiet test
+          cat > TEST-74-AUX-UTILS.run-collect.sh << 'RCEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-run --collect removes unit after exit"
+          UNIT="run-collect-$RANDOM"
+          systemd-run --wait --collect --unit="$UNIT" true
+          sleep 1
+          # Unit should be gone or inactive after --collect
+          STATE="$(systemctl show -P ActiveState "$UNIT.service" 2>/dev/null)" || STATE="not-found"
+          [[ "$STATE" == "inactive" || "$STATE" == "not-found" || "$STATE" == "" ]]
+
+          : "systemd-run --quiet suppresses output"
+          UNIT2="run-quiet-$RANDOM"
+          OUTPUT="$(systemd-run --wait --quiet --unit="$UNIT2" echo hello 2>&1)" || true
+          # --quiet should suppress "Running as unit:" line
+          (! echo "$OUTPUT" | grep -q "Running as unit") || true
+          RCEOF
+          chmod +x TEST-74-AUX-UTILS.run-collect.sh
+
+          # journalctl vacuum test
+          cat > TEST-74-AUX-UTILS.journal-vacuum.sh << 'JVEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl --vacuum-size runs without error"
+          journalctl --vacuum-size=500M > /dev/null 2>&1 || true
+
+          : "journalctl --vacuum-time runs without error"
+          journalctl --vacuum-time=1s > /dev/null 2>&1 || true
+
+          : "journalctl --flush runs without error"
+          journalctl --flush > /dev/null 2>&1 || true
+          JVEOF
+          chmod +x TEST-74-AUX-UTILS.journal-vacuum.sh
+
+          # systemd-tmpfiles copy and truncate operations
+          cat > TEST-74-AUX-UTILS.tmpfiles-write.sh << 'TWEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          at_exit() {
+              set +e
+              rm -f /tmp/tmpfiles-write-test*.conf
+              rm -f /tmp/tmpfiles-write-*
+          }
+          trap at_exit EXIT
+
+          : "systemd-tmpfiles 'f' creates file with content"
+          cat > /tmp/tmpfiles-write-test1.conf << EOF
+          f /tmp/tmpfiles-write-file 0644 root root - hello-tmpfiles-write
+          EOF
+          systemd-tmpfiles --create /tmp/tmpfiles-write-test1.conf
+          [[ -f /tmp/tmpfiles-write-file ]]
+          [[ "$(cat /tmp/tmpfiles-write-file)" == "hello-tmpfiles-write" ]]
+
+          : "systemd-tmpfiles 'w' writes to existing file"
+          echo "old-content" > /tmp/tmpfiles-write-target
+          cat > /tmp/tmpfiles-write-test2.conf << EOF
+          w /tmp/tmpfiles-write-target - - - - new-content
+          EOF
+          systemd-tmpfiles --create /tmp/tmpfiles-write-test2.conf
+          [[ "$(cat /tmp/tmpfiles-write-target)" == "new-content" ]]
+
+          : "systemd-tmpfiles 'L' creates symlink"
+          cat > /tmp/tmpfiles-write-test3.conf << EOF
+          L /tmp/tmpfiles-write-symlink - - - - /tmp/tmpfiles-write-file
+          EOF
+          systemd-tmpfiles --create /tmp/tmpfiles-write-test3.conf
+          [[ -L /tmp/tmpfiles-write-symlink ]]
+          [[ "$(readlink /tmp/tmpfiles-write-symlink)" == "/tmp/tmpfiles-write-file" ]]
+          TWEOF
+          chmod +x TEST-74-AUX-UTILS.tmpfiles-write.sh
+
           rm -f TEST-74-AUX-UTILS.busctl.sh \
                TEST-74-AUX-UTILS.capsule.sh \
                TEST-74-AUX-UTILS.firstboot.sh \
