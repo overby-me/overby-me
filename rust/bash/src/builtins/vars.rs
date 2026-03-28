@@ -313,10 +313,21 @@ pub(super) fn builtin_readonly(shell: &mut Shell, args: &[String]) -> i32 {
     let print_all = names.is_empty();
     if print_all && (args.is_empty() || print_mode) {
         if func_mode {
-            // Print readonly functions
+            // Print readonly functions with their bodies
             let mut fnames: Vec<&String> = shell.readonly_funcs.iter().collect();
             fnames.sort();
             for name in fnames {
+                if let Some(body) = shell.functions.get(name.as_str()) {
+                    let body_str = format_func_body(body, 0);
+                    let redir_str = if let Some(redirs) = shell.func_redirections.get(name.as_str())
+                    {
+                        let parts: Vec<String> = redirs.iter().map(format_redirection).collect();
+                        format!(" {}", parts.join(" "))
+                    } else {
+                        String::new()
+                    };
+                    println!("{} () \n{}{}", name, body_str, redir_str);
+                }
                 println!("declare -fr {}", name);
             }
         } else {

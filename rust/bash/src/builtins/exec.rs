@@ -564,6 +564,28 @@ pub(super) fn builtin_command(shell: &mut Shell, args: &[String]) -> i32 {
                     println!("{} is a shell keyword", name);
                 } else if let Some(value) = shell.aliases.get(name.as_str()) {
                     println!("{} is aliased to `{}'", name, value);
+                } else if shell.opt_posix
+                    && matches!(
+                        name.as_str(),
+                        "break"
+                            | "."
+                            | "source"
+                            | "continue"
+                            | "eval"
+                            | "exec"
+                            | "exit"
+                            | "export"
+                            | "readonly"
+                            | "return"
+                            | "set"
+                            | "shift"
+                            | "trap"
+                            | "unset"
+                            | ":"
+                    )
+                    && builtin_map.contains_key(name.as_str())
+                {
+                    println!("{} is a special shell builtin", name);
                 } else if let Some(func_body) = shell.functions.get(name.as_str()) {
                     println!("{} is a function", name);
                     let prefix = if shell.func_has_keyword.contains(name.as_str()) {
@@ -615,7 +637,27 @@ pub(super) fn builtin_command(shell: &mut Shell, args: &[String]) -> i32 {
                     | "]]"
                     | "coproc"
             );
-            if is_keyword || shell.functions.contains_key(name.as_str()) {
+            let is_posix_special = shell.opt_posix
+                && matches!(
+                    name.as_str(),
+                    "break"
+                        | "."
+                        | "source"
+                        | "continue"
+                        | "eval"
+                        | "exec"
+                        | "exit"
+                        | "export"
+                        | "readonly"
+                        | "return"
+                        | "set"
+                        | "shift"
+                        | "trap"
+                        | "unset"
+                        | ":"
+                )
+                && builtin_map.contains_key(name.as_str());
+            if is_keyword || is_posix_special || shell.functions.contains_key(name.as_str()) {
                 println!("{}", name);
             } else if shell.aliases.contains_key(name.as_str()) {
                 let val = &shell.aliases[name.as_str()];
