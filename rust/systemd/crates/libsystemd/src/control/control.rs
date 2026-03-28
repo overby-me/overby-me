@@ -3536,6 +3536,31 @@ fn create_transient_unit(
                     service_conf.exec_config.timer_slack_nsec =
                         Some(value.to_string());
                 }
+                "IOSchedulingClass" => {
+                    service_conf.exec_config.io_scheduling_class = match value {
+                        "none" | "0" => {
+                            crate::units::unit_parsing::IOSchedulingClass::None
+                        }
+                        "realtime" | "1" => {
+                            crate::units::unit_parsing::IOSchedulingClass::Realtime
+                        }
+                        "best-effort" | "2" => {
+                            crate::units::unit_parsing::IOSchedulingClass::BestEffort
+                        }
+                        "idle" | "3" => {
+                            crate::units::unit_parsing::IOSchedulingClass::Idle
+                        }
+                        _ => {
+                            crate::units::unit_parsing::IOSchedulingClass::BestEffort
+                        }
+                    };
+                }
+                "IOSchedulingPriority" => {
+                    if let Ok(n) = value.parse::<u8>() {
+                        service_conf.exec_config.io_scheduling_priority =
+                            Some(n);
+                    }
+                }
                 "CoredumpFilter" => {
                     service_conf.exec_config.coredump_filter =
                         Some(value.to_string());

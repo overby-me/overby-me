@@ -887,6 +887,10 @@
               bash -xec 'cat /proc/self/timerslack_ns')"
           [[ "$SLACK" == "1000000" ]]
 
+          : "IOSchedulingClass= and IOSchedulingPriority= via transient properties"
+          systemd-run --wait --pipe -p IOSchedulingClass=best-effort -p IOSchedulingPriority=5 true
+          systemd-run --wait --pipe -p IOSchedulingClass=idle true
+
           : "PrivateIPC=yes creates IPC namespace isolation"
           HOST_IPC="$(readlink /proc/1/ns/ipc)"
           SRVC_IPC="$(systemd-run --wait --pipe -p PrivateIPC=yes readlink /proc/self/ns/ipc)"
