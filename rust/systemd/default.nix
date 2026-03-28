@@ -4977,10 +4977,7 @@
       }
       {
         name = "15-DROPIN";
-        # Skip order_dropin_paths_set_property
-        # (systemctl set-property runtime dropins not supported).
         patchScript = ''
-          sed -i '/^testcase_order_dropin_paths_set_property/s/^testcase_/skipped_/' TEST-15-DROPIN.sh
         '';
       }
       {
