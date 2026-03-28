@@ -2014,13 +2014,36 @@ impl Shell {
         compound: &CompoundCommand,
         redirections: &[Redirection],
     ) -> i32 {
+        // For redirect errors in pre-parsed programs (subshells/functions),
+        // use end_line because cmd.line is the start, not the post-parse position.
+        // This is only needed when NOT running from run_string (which sets LINENO
+        // from the parser's current position before each command).
+        let saved_lineno = if !redirections.is_empty()
+            && let Some(end_line) = self.cmd_end_line
+            && self.in_preparsed_program
+        {
+            let old = self.vars.get("LINENO").cloned();
+            self.vars
+                .insert("LINENO".to_string(), end_line.to_string());
+            old
+        } else {
+            None
+        };
         let saved_fds = match self.setup_redirections(redirections) {
             Ok(fds) => fds,
             Err(e) => {
                 eprintln!("{}: {}", self.error_prefix(), e);
+                // Restore LINENO
+                if let Some(ln) = saved_lineno {
+                    self.vars.insert("LINENO".to_string(), ln);
+                }
                 return 1;
             }
         };
+        // Restore LINENO after redirect setup (it was only temporarily changed for error reporting)
+        if let Some(ln) = saved_lineno {
+            self.vars.insert("LINENO".to_string(), ln);
+        }
 
         let status = self.run_compound_command(compound);
 

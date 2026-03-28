@@ -267,6 +267,8 @@ pub struct Shell {
     pub errexit_suppressed: bool,
     pub sourcing: bool,
     pub source_file_error: bool,
+    pub cmd_end_line: Option<usize>,
+    pub in_preparsed_program: bool,
     /// The original script file name for error messages (doesn't change with BASH_ARGV0)
     pub script_name: String,
     pub dir_stack: Vec<String>,
@@ -434,6 +436,8 @@ impl Shell {
             errexit_suppressed: false,
             sourcing: false,
             source_file_error: false,
+            cmd_end_line: None,
+            in_preparsed_program: false,
             script_name: String::new(),
             dir_stack: Vec::new(),
             func_names: Vec::new(),
@@ -745,6 +749,8 @@ impl Shell {
         // This allows scripts to continue after parse errors (like bash)
         let mut status = 0;
         let mut last_pos = usize::MAX;
+        let saved_preparsed = self.in_preparsed_program;
+        self.in_preparsed_program = false; // run_string uses parser position for LINENO
         loop {
             parser.skip_newlines_and_semis();
             if parser.is_at_eof() {
@@ -900,6 +906,7 @@ impl Shell {
                                 status = self.run_string(&new_content);
                                 self.script_fd = saved_script_fd;
                             }
+                            self.in_preparsed_program = saved_preparsed;
                             return status;
                         }
                     }
@@ -1022,10 +1029,13 @@ impl Shell {
                 }
             }
         }
+        self.in_preparsed_program = saved_preparsed;
         status
     }
 
     pub fn run_program(&mut self, program: &Program) -> i32 {
+        let saved_preparsed = self.in_preparsed_program;
+        self.in_preparsed_program = true;
         let mut status = 0;
         for cmd in program {
             if self.returning || self.breaking > 0 || self.continuing > 0 {
@@ -1052,6 +1062,7 @@ impl Shell {
             }
             self.errexit_suppressed = false;
         }
+        self.in_preparsed_program = saved_preparsed;
         status
     }
 
@@ -1064,6 +1075,8 @@ impl Shell {
         if !self.in_debug_trap && self.in_trap_handler == 0 {
             self.vars.insert("LINENO".to_string(), cmd.line.to_string());
         }
+        // Store end_line for compound redirect error reporting
+        self.cmd_end_line = Some(cmd.end_line);
 
         if cmd.background {
             #[cfg(unix)]
