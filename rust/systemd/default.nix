@@ -1006,6 +1006,10 @@
                       --working-directory=/tmp \
                       bash -xec '[[ "$PWD" == /tmp ]]'
 
+          : "Transient service cgroup placement"
+          systemd-run --wait --pipe \
+                      bash -xec '[[ "$(</proc/self/cgroup)" =~ run-.+\.service$ ]]'
+
           : "Transient service with uid/gid"
           systemd-run --wait --pipe \
                       --uid=testuser \
