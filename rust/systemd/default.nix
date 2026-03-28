@@ -654,6 +654,34 @@
           PREOF
           chmod +x TEST-04-JOURNAL.priority-range.sh
 
+          # Journal export format and JSON fields test
+          cat > TEST-04-JOURNAL.export-json.sh << 'EJEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl -o export has standard fields"
+          ENTRY="$(journalctl -b --no-pager -n 1 -o export)"
+          echo "$ENTRY" | grep -q "^__CURSOR="
+          echo "$ENTRY" | grep -q "^__REALTIME_TIMESTAMP="
+          echo "$ENTRY" | grep -q "^__MONOTONIC_TIMESTAMP="
+          echo "$ENTRY" | grep -q "^_BOOT_ID="
+
+          : "journalctl -o json has standard fields"
+          journalctl -b --no-pager -n 1 -o json | jq -e '.__REALTIME_TIMESTAMP' > /dev/null
+          journalctl -b --no-pager -n 1 -o json | jq -e '._BOOT_ID' > /dev/null
+
+          : "journalctl -o json-seq uses record separator"
+          journalctl -b --no-pager -n 1 -o json-seq > /dev/null || true
+
+          : "journalctl -o short-monotonic shows monotonic timestamps"
+          journalctl -b --no-pager -n 3 -o short-monotonic > /dev/null
+
+          : "journalctl -o short-full shows full date and time"
+          journalctl -b --no-pager -n 3 -o short-full > /dev/null
+          EJEOF
+          chmod +x TEST-04-JOURNAL.export-json.sh
+
           rm -f TEST-04-JOURNAL.bsod.sh \
                TEST-04-JOURNAL.cat.sh \
                TEST-04-JOURNAL.corrupted-journals.sh \
@@ -751,6 +779,75 @@
           [[ "$(cat /tmp/rlimit-unit-result)" == "unlimited" ]]
           UFEOF
           chmod +x TEST-05-RLIMITS.unit-file-limits.sh
+
+          # Custom test: LimitAS, LimitFSIZE, LimitMEMLOCK via transient services
+          cat > TEST-05-RLIMITS.extra-limits.sh << 'ELEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "LimitFSIZE= is enforced in transient services"
+          UNIT="rlimit-fsize-$RANDOM"
+          systemd-run --unit="$UNIT" --remain-after-exit \
+              -p LimitFSIZE=1048576 \
+              bash -c 'ulimit -f > /tmp/rlimit-fsize-result'
+          sleep 1
+          [[ "$(cat /tmp/rlimit-fsize-result)" == "1024" ]]
+          systemctl stop "$UNIT.service" 2>/dev/null || true
+          rm -f /tmp/rlimit-fsize-result
+
+          : "LimitMEMLOCK= is enforced in transient services"
+          UNIT="rlimit-memlock-$RANDOM"
+          systemd-run --unit="$UNIT" --remain-after-exit \
+              -p LimitMEMLOCK=8388608 \
+              bash -c 'ulimit -l > /tmp/rlimit-memlock-result'
+          sleep 1
+          RESULT="$(cat /tmp/rlimit-memlock-result)"
+          [[ "$RESULT" == "8192" ]]
+          systemctl stop "$UNIT.service" 2>/dev/null || true
+          rm -f /tmp/rlimit-memlock-result
+
+          : "LimitSTACK= is enforced in transient services"
+          UNIT="rlimit-stack-$RANDOM"
+          systemd-run --unit="$UNIT" --remain-after-exit \
+              -p LimitSTACK=16777216 \
+              bash -c 'ulimit -s > /tmp/rlimit-stack-result'
+          sleep 1
+          [[ "$(cat /tmp/rlimit-stack-result)" == "16384" ]]
+          systemctl stop "$UNIT.service" 2>/dev/null || true
+          rm -f /tmp/rlimit-stack-result
+          ELEOF
+          chmod +x TEST-05-RLIMITS.extra-limits.sh
+
+          # Custom test: LimitNOFILE soft:hard syntax
+          cat > TEST-05-RLIMITS.soft-hard-limits.sh << 'SHEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "LimitNOFILE soft:hard syntax works"
+          UNIT="rlimit-softhard-$RANDOM"
+          systemd-run --unit="$UNIT" --remain-after-exit \
+              -p LimitNOFILE=1000:2000 \
+              bash -c 'ulimit -Sn > /tmp/rlimit-soft; ulimit -Hn > /tmp/rlimit-hard'
+          sleep 1
+          [[ "$(cat /tmp/rlimit-soft)" == "1000" ]]
+          [[ "$(cat /tmp/rlimit-hard)" == "2000" ]]
+          systemctl stop "$UNIT.service" 2>/dev/null || true
+          rm -f /tmp/rlimit-soft /tmp/rlimit-hard
+
+          : "LimitCORE=infinity:infinity sets both to unlimited"
+          UNIT="rlimit-unlim-$RANDOM"
+          systemd-run --unit="$UNIT" --remain-after-exit \
+              -p LimitCORE=infinity \
+              bash -c 'ulimit -Sc > /tmp/rlimit-core-s; ulimit -Hc > /tmp/rlimit-core-h'
+          sleep 1
+          [[ "$(cat /tmp/rlimit-core-s)" == "unlimited" ]]
+          [[ "$(cat /tmp/rlimit-core-h)" == "unlimited" ]]
+          systemctl stop "$UNIT.service" 2>/dev/null || true
+          rm -f /tmp/rlimit-core-s /tmp/rlimit-core-h
+          SHEOF
+          chmod +x TEST-05-RLIMITS.soft-hard-limits.sh
         '';
       }
       {
