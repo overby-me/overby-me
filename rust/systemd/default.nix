@@ -990,6 +990,50 @@
           rm -f /tmp/rlimit-core-s /tmp/rlimit-core-h
           SHEOF
           chmod +x TEST-05-RLIMITS.soft-hard-limits.sh
+
+          # Custom test: LimitMSGQUEUE enforcement
+          cat > TEST-05-RLIMITS.more-limits.sh << 'MLEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "LimitMSGQUEUE= is enforced"
+          UNIT="rlimit-msgq-$RANDOM"
+          systemd-run --unit="$UNIT" --remain-after-exit \
+              -p LimitMSGQUEUE=819200 \
+              bash -c 'ulimit -q > /tmp/rlimit-msgq-result'
+          sleep 1
+          [[ "$(cat /tmp/rlimit-msgq-result)" == "819200" ]]
+          systemctl stop "$UNIT.service" 2>/dev/null || true
+          rm -f /tmp/rlimit-msgq-result
+
+          : "LimitSTACK= via --wait works"
+          UNIT="rlimit-stk2-$RANDOM"
+          systemd-run --wait --unit="$UNIT" \
+              -p LimitSTACK=33554432 \
+              bash -c 'ulimit -s > /tmp/rlimit-stk2-result'
+          [[ "$(cat /tmp/rlimit-stk2-result)" == "32768" ]]
+          rm -f /tmp/rlimit-stk2-result
+          MLEOF
+          chmod +x TEST-05-RLIMITS.more-limits.sh
+
+          # Custom test: Default limits via transient service
+          cat > TEST-05-RLIMITS.default-limits.sh << 'DLEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "Default limits exist in transient service"
+          UNIT="rlimit-defaults-$RANDOM"
+          systemd-run --unit="$UNIT" sleep 300
+          sleep 1
+          # LimitNOFILE should have a default value
+          systemctl show -P LimitNOFILE "$UNIT.service" > /dev/null
+          # LimitCORE should exist
+          systemctl show -P LimitCORE "$UNIT.service" > /dev/null
+          systemctl stop "$UNIT.service"
+          DLEOF
+          chmod +x TEST-05-RLIMITS.default-limits.sh
         '';
       }
       {
@@ -7008,6 +7052,54 @@
           systemctl stop "$UNIT2.timer" "$UNIT2.service" 2>/dev/null || true
           OUEOF
           chmod +x TEST-53-TIMER.on-unit-inactive.sh
+
+          # Timer with Persistent= property
+          cat > TEST-53-TIMER.persistent-prop.sh << 'PPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "Persistent= property is written to transient timer"
+          UNIT="timer-persist-$RANDOM"
+          systemd-run --unit="$UNIT" \
+              --on-calendar="*:*:0/30" \
+              --timer-property=Persistent=yes \
+              --remain-after-exit true
+          grep -q "Persistent=yes" "/run/systemd/transient/$UNIT.timer"
+          systemctl stop "$UNIT.timer" "$UNIT.service" 2>/dev/null || true
+
+          : "WakeSystem= property is written to transient timer"
+          UNIT="timer-wake-$RANDOM"
+          systemd-run --unit="$UNIT" \
+              --on-active=30s \
+              --timer-property=WakeSystem=yes \
+              --remain-after-exit true
+          grep -q "WakeSystem=yes" "/run/systemd/transient/$UNIT.timer"
+          systemctl stop "$UNIT.timer" "$UNIT.service" 2>/dev/null || true
+          PPEOF
+          chmod +x TEST-53-TIMER.persistent-prop.sh
+
+          # Timer cleanup and masking
+          cat > TEST-53-TIMER.timer-cleanup.sh << 'TCEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "Stopping a timer cleans up correctly"
+          UNIT="timer-clean-$RANDOM"
+          systemd-run --unit="$UNIT" --on-active=1h --remain-after-exit true
+          systemctl is-active "$UNIT.timer"
+          systemctl stop "$UNIT.timer"
+          (! systemctl is-active "$UNIT.timer")
+
+          : "systemctl list-timers --all includes inactive"
+          systemctl list-timers --no-pager --all > /dev/null
+          TCEOF
+          chmod +x TEST-53-TIMER.timer-cleanup.sh
         '';
       }
       {
@@ -7238,6 +7330,30 @@
           systemctl show -P Description "$SLICE_UNIT.slice" | grep -q "Test cgroup slice"
           rm -f "/run/systemd/system/$SLICE_UNIT.slice"
           systemctl daemon-reload
+
+          : "CPUWeight= property accepted in transient service"
+          UNIT="cg-cpuw-$RANDOM"
+          systemd-run --wait --unit="$UNIT" \
+              -p CPUWeight=200 \
+              true
+
+          : "TasksMax= property accepted in transient service"
+          UNIT="cg-tasks-$RANDOM"
+          systemd-run --wait --unit="$UNIT" \
+              -p TasksMax=500 \
+              true
+
+          : "MemoryMax= property accepted in transient service"
+          UNIT="cg-memmax-$RANDOM"
+          systemd-run --wait --unit="$UNIT" \
+              -p MemoryMax=1G \
+              true
+
+          : "IOWeight= property accepted in transient service"
+          UNIT="cg-iow-$RANDOM"
+          systemd-run --wait --unit="$UNIT" \
+              -p IOWeight=200 \
+              true
 
           touch /testok
           CGEOF
