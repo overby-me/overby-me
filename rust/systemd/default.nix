@@ -896,6 +896,11 @@
               bash -xec 'cat /proc/self/coredump_filter')"
           [[ "$FILTER" == "00000033" ]]
 
+          : "CPUAffinity= pins process to specific CPUs"
+          MASK="$(systemd-run --wait --pipe -p CPUAffinity=0 \
+              bash -xec 'taskset -p $$ | sed "s/.*: //"')"
+          [[ "$MASK" == "1" ]]
+
           : "PrivateIPC=yes creates IPC namespace isolation"
           HOST_IPC="$(readlink /proc/1/ns/ipc)"
           SRVC_IPC="$(systemd-run --wait --pipe -p PrivateIPC=yes readlink /proc/self/ns/ipc)"

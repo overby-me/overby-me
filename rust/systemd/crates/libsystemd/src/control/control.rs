@@ -3573,6 +3573,16 @@ fn create_transient_unit(
                     service_conf.exec_config.set_login_environment =
                         Some(matches!(value, "yes" | "true" | "1"));
                 }
+                "CPUAffinity" => {
+                    if value.is_empty() {
+                        service_conf.exec_config.cpu_affinity.clear();
+                    } else {
+                        service_conf
+                            .exec_config
+                            .cpu_affinity
+                            .push(value.to_string());
+                    }
+                }
                 "MountAPIVFS" => {
                     service_conf.exec_config.mount_api_vfs =
                         Some(matches!(value, "yes" | "true" | "1"));

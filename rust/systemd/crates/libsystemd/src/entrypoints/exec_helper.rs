@@ -448,6 +448,11 @@ pub struct ExecHelperConfig {
     #[serde(default)]
     pub coredump_filter: Option<String>,
 
+    /// CPUAffinity= — list of CPU indices/ranges to pin the process to.
+    /// Applied via sched_setaffinity(). See systemd.exec(5).
+    #[serde(default)]
+    pub cpu_affinity: Vec<String>,
+
 
     /// PrivatePIDs= — if true, a new PID namespace is created and /proc is
     /// remounted so the service process becomes PID 1 in the new namespace.
@@ -1781,6 +1786,46 @@ pub fn run_exec_helper() {
                 nsec,
                 std::io::Error::last_os_error()
             );
+        }
+    }
+
+    // Apply CPUAffinity= setting via sched_setaffinity().
+    if !config.cpu_affinity.is_empty() {
+        let mut cpus: Vec<usize> = Vec::new();
+        for token in &config.cpu_affinity {
+            for part in token.split_whitespace() {
+                if let Some((start, end)) = part.split_once('-') {
+                    if let (Ok(s), Ok(e)) = (start.parse::<usize>(), end.parse::<usize>()) {
+                        for c in s..=e {
+                            cpus.push(c);
+                        }
+                    }
+                } else if let Ok(c) = part.parse::<usize>() {
+                    cpus.push(c);
+                }
+            }
+        }
+        if !cpus.is_empty() {
+            let mut set = unsafe { std::mem::zeroed::<libc::cpu_set_t>() };
+            unsafe { libc::CPU_ZERO(&mut set) };
+            for &cpu in &cpus {
+                if cpu < libc::CPU_SETSIZE as usize {
+                    unsafe { libc::CPU_SET(cpu, &mut set) };
+                }
+            }
+            let ret = unsafe {
+                libc::sched_setaffinity(
+                    0,
+                    std::mem::size_of::<libc::cpu_set_t>(),
+                    &set,
+                )
+            };
+            if ret != 0 {
+                log::warn!(
+                    "Failed to set CPUAffinity: {}",
+                    std::io::Error::last_os_error()
+                );
+            }
         }
     }
 
