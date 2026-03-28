@@ -67,7 +67,8 @@ impl Shell {
                 RedirectKind::Output | RedirectKind::Clobber => {
                     let fd = self.resolve_redir_fd(&redir.fd, 1);
                     if !is_var_fd(redir)
-                        && let Ok(saved_fd) = nix::unistd::dup(fd)
+                        && let Ok(saved_fd) =
+                            nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(10))
                     {
                         saved.push((fd, saved_fd));
                     }
@@ -106,7 +107,8 @@ impl Shell {
                 RedirectKind::Append => {
                     let fd = self.resolve_redir_fd(&redir.fd, 1);
                     if !is_var_fd(redir)
-                        && let Ok(saved_fd) = nix::unistd::dup(fd)
+                        && let Ok(saved_fd) =
+                            nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(10))
                     {
                         saved.push((fd, saved_fd));
                     }
@@ -151,7 +153,8 @@ impl Shell {
                 RedirectKind::Input => {
                     let fd = self.resolve_redir_fd(&redir.fd, 0);
                     if !is_var_fd(redir)
-                        && let Ok(saved_fd) = nix::unistd::dup(fd)
+                        && let Ok(saved_fd) =
+                            nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(10))
                     {
                         saved.push((fd, saved_fd));
                     }
@@ -175,7 +178,8 @@ impl Shell {
                     if target_str == "-" {
                         // Save fd before closing so it can be restored
                         if !is_var_fd(redir)
-                            && let Ok(saved_fd) = nix::unistd::dup(fd)
+                            && let Ok(saved_fd) =
+                                nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(10))
                         {
                             saved.push((fd, saved_fd));
                         }
@@ -184,7 +188,9 @@ impl Shell {
                     } else if let Some(src_str) = target_str.strip_suffix('-') {
                         // Move fd: dup src to fd, then close src
                         if let Ok(src_fd) = src_str.parse::<i32>() {
-                            if let Ok(saved_fd) = nix::unistd::dup(fd) {
+                            if let Ok(saved_fd) =
+                                nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(10))
+                            {
                                 saved.push((fd, saved_fd));
                             }
                             nix::unistd::dup2(src_fd, fd)
@@ -197,7 +203,9 @@ impl Shell {
                             self.restore_redirections(saved);
                             return Err(format!("{}: ambiguous redirect", target_str));
                         }
-                        if let Ok(saved_fd) = nix::unistd::dup(fd) {
+                        if let Ok(saved_fd) =
+                            nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(10))
+                        {
                             saved.push((fd, saved_fd));
                         }
                         nix::unistd::dup2(src_fd, fd)
@@ -227,7 +235,8 @@ impl Shell {
                     if target_str == "-" {
                         // Save fd before closing so it can be restored
                         if !is_var_fd(redir)
-                            && let Ok(saved_fd) = nix::unistd::dup(fd)
+                            && let Ok(saved_fd) =
+                                nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(10))
                         {
                             saved.push((fd, saved_fd));
                         }
@@ -239,7 +248,9 @@ impl Shell {
                                 self.restore_redirections(saved);
                                 return Err(format!("{}: ambiguous redirect", target_str));
                             }
-                            if let Ok(saved_fd) = nix::unistd::dup(fd) {
+                            if let Ok(saved_fd) =
+                                nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(10))
+                            {
                                 saved.push((fd, saved_fd));
                             }
                             nix::unistd::dup2(src_fd, fd)
@@ -252,7 +263,9 @@ impl Shell {
                             self.restore_redirections(saved);
                             return Err(format!("{}: ambiguous redirect", target_str));
                         }
-                        if let Ok(saved_fd) = nix::unistd::dup(fd) {
+                        if let Ok(saved_fd) =
+                            nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(10))
+                        {
                             saved.push((fd, saved_fd));
                         }
                         nix::unistd::dup2(src_fd, fd)
@@ -261,7 +274,9 @@ impl Shell {
                 }
                 RedirectKind::HereDoc(_, _) | RedirectKind::HereString => {
                     let fd = self.resolve_redir_fd(&redir.fd, 0);
-                    if let Ok(saved_fd) = nix::unistd::dup(fd) {
+                    if let Ok(saved_fd) =
+                        nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(10))
+                    {
                         saved.push((fd, saved_fd));
                     }
 
@@ -279,7 +294,9 @@ impl Shell {
                 }
                 RedirectKind::ReadWrite => {
                     let fd = self.resolve_redir_fd(&redir.fd, 0);
-                    if let Ok(saved_fd) = nix::unistd::dup(fd) {
+                    if let Ok(saved_fd) =
+                        nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(10))
+                    {
                         saved.push((fd, saved_fd));
                     }
 

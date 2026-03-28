@@ -1075,6 +1075,16 @@ impl Shell {
                         return 0;
                     }
                     Ok(nix::unistd::ForkResult::Child) => {
+                        // Close CLOEXEC fds to prevent pipe leaks from command
+                        // substitution contexts (saved redirect fds hold comsub
+                        // pipe write ends open)
+                        for fd in 3..1024 {
+                            if let Ok(flags) = nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_GETFD)
+                                && flags & libc::FD_CLOEXEC != 0
+                            {
+                                nix::unistd::close(fd).ok();
+                            }
+                        }
                         let status = self.run_and_or_list(&cmd.list);
                         std::process::exit(status);
                     }
