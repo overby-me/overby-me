@@ -8769,6 +8769,94 @@
           NEEOF
           chmod +x TEST-74-AUX-UTILS.notify-extended.sh
 
+          # systemd-id128 operations
+          cat > TEST-74-AUX-UTILS.id128-extended.sh << 'IDEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-id128 new generates valid UUID"
+          ID="$(systemd-id128 new)"
+          LEN=$(echo -n "$ID" | wc -c)
+          [[ "$LEN" -eq 32 ]]
+
+          : "systemd-id128 boot-id returns boot ID"
+          BOOT_ID="$(systemd-id128 boot-id)"
+          [[ -n "$BOOT_ID" ]]
+
+          : "systemd-id128 machine-id returns machine ID"
+          MACHINE_ID="$(systemd-id128 machine-id)"
+          [[ -n "$MACHINE_ID" ]]
+
+          : "systemd-id128 new generates unique IDs"
+          ID1="$(systemd-id128 new)"
+          ID2="$(systemd-id128 new)"
+          [[ "$ID1" != "$ID2" ]]
+          IDEOF
+          chmod +x TEST-74-AUX-UTILS.id128-extended.sh
+
+          # detect-virt basic check
+          cat > TEST-74-AUX-UTILS.detect-virt-basic.sh << 'DVEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-detect-virt returns virtualization type"
+          VIRT="$(systemd-detect-virt -v || true)"
+          [[ -n "$VIRT" ]]
+
+          : "systemd-detect-virt --container reports none"
+          (! systemd-detect-virt -c)
+          DVEOF
+          chmod +x TEST-74-AUX-UTILS.detect-virt-basic.sh
+
+          # machine-id-setup check
+          cat > TEST-74-AUX-UTILS.machine-id-check.sh << 'MIEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "machine-id file exists and is valid"
+          [[ -f /etc/machine-id ]]
+          MACHINE_ID="$(cat /etc/machine-id)"
+          LEN=$(echo -n "$MACHINE_ID" | wc -c)
+          [[ "$LEN" -eq 32 ]]
+
+          : "machine-id matches systemd-id128 output"
+          SYSTEMD_MACHINE_ID="$(systemd-id128 machine-id)"
+          [[ "$MACHINE_ID" == "$SYSTEMD_MACHINE_ID" ]]
+          MIEOF
+          chmod +x TEST-74-AUX-UTILS.machine-id-check.sh
+
+          # systemctl list-sockets
+          cat > TEST-74-AUX-UTILS.list-sockets.sh << 'LSEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl list-sockets runs without error"
+          systemctl list-sockets --no-pager > /dev/null
+
+          : "systemctl list-sockets --all shows sockets"
+          OUT="$(systemctl list-sockets --no-pager --all)"
+          echo "$OUT" | grep -q "socket"
+          LSEOF
+          chmod +x TEST-74-AUX-UTILS.list-sockets.sh
+
+          # systemctl show for slices
+          cat > TEST-74-AUX-UTILS.show-slices.sh << 'SSEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl show system.slice has properties"
+          systemctl show system.slice -P ActiveState | grep -q "active"
+
+          : "systemctl list-units --type=slice shows slices"
+          systemctl list-units --no-pager --type=slice > /dev/null
+          SSEOF
+          chmod +x TEST-74-AUX-UTILS.show-slices.sh
+
           rm -f TEST-74-AUX-UTILS.busctl.sh \
                TEST-74-AUX-UTILS.capsule.sh \
                TEST-74-AUX-UTILS.firstboot.sh \
