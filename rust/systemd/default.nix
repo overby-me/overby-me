@@ -7973,6 +7973,37 @@
           rm -f "/run/systemd/system/$PUNIT.path" "/run/systemd/system/$PUNIT.service"
           systemctl daemon-reload
 
+          : "Path unit LoadState and SubState"
+          PUNIT="path-state-$RANDOM"
+          rm -f "/tmp/path-state-$PUNIT"
+          systemd-run --unit="$PUNIT" --path-property=PathExists="/tmp/path-state-$PUNIT" --remain-after-exit true
+          LS="$(systemctl show -P LoadState "$PUNIT.path")"
+          [[ "$LS" == "loaded" ]]
+          AS="$(systemctl show -P ActiveState "$PUNIT.path")"
+          [[ "$AS" == "active" ]]
+          systemctl stop "$PUNIT.path" "$PUNIT.service" 2>/dev/null || true
+
+          : "Multiple PathExists= watches via unit file"
+          PUNIT="path-multi-$RANDOM"
+          rm -f "/tmp/path-multi-a-$PUNIT" "/tmp/path-multi-result-$PUNIT"
+          cat > "/run/systemd/system/$PUNIT.path" << EOF
+          [Path]
+          PathExists=/tmp/path-multi-a-$PUNIT
+          EOF
+          cat > "/run/systemd/system/$PUNIT.service" << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=touch /tmp/path-multi-result-$PUNIT
+          EOF
+          systemctl daemon-reload
+          systemctl start "$PUNIT.path"
+          touch "/tmp/path-multi-a-$PUNIT"
+          timeout 15 bash -c "until [[ -f /tmp/path-multi-result-$PUNIT ]]; do sleep 0.5; done"
+          systemctl stop "$PUNIT.path" "$PUNIT.service" 2>/dev/null || true
+          rm -f "/tmp/path-multi-a-$PUNIT" "/tmp/path-multi-result-$PUNIT"
+          rm -f "/run/systemd/system/$PUNIT.path" "/run/systemd/system/$PUNIT.service"
+          systemctl daemon-reload
+
           touch /testok
           PATHEOF
         '';
