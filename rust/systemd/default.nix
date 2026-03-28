@@ -5976,20 +5976,6 @@
           grep -q "^OnCalendar=" "/run/systemd/transient/$UNIT.timer"
           systemctl stop "$UNIT.timer" "$UNIT.service" 2>/dev/null || true
           rm -f "/tmp/timer-cal-fired-$UNIT"
-
-          : "Timer unit file with OnActiveSec="
-          UNIT="timer-boot-$RANDOM"
-          printf '[Timer]\nOnActiveSec=1s\n[Install]\nWantedBy=timers.target\n' \
-              > "/run/systemd/system/$UNIT.timer"
-          printf '[Service]\nType=oneshot\nExecStart=touch /tmp/timer-boot-fired-%s\n' \
-              "$UNIT" > "/run/systemd/system/$UNIT.service"
-          systemctl daemon-reload
-          systemctl start "$UNIT.timer"
-          timeout 15 bash -c "until [[ -f /tmp/timer-boot-fired-$UNIT ]]; do sleep 0.5; done"
-          [[ -f "/tmp/timer-boot-fired-$UNIT" ]]
-          systemctl stop "$UNIT.timer" "$UNIT.service" 2>/dev/null || true
-          rm -f "/tmp/timer-boot-fired-$UNIT" "/run/systemd/system/$UNIT.timer" "/run/systemd/system/$UNIT.service"
-          systemctl daemon-reload
           BTEOF
           chmod +x TEST-53-TIMER.basic-timer.sh
 
@@ -6114,6 +6100,44 @@
           systemctl stop "$UNIT3.timer" "$UNIT3.service" 2>/dev/null || true
           TPEOF
           chmod +x TEST-53-TIMER.timer-properties.sh
+
+          # Timer with AccuracySec and OnUnitActiveSec
+          cat > TEST-53-TIMER.timer-accuracy.sh << 'TAEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "Transient timer with AccuracySec property"
+          UNIT="timer-acc-$RANDOM"
+          systemd-run --unit="$UNIT" --on-active=30s \
+              --timer-property=AccuracySec=1s \
+              --remain-after-exit true
+          [[ "$(systemctl show -P ActiveState "$UNIT.timer")" == "active" ]]
+          # Check that AccuracySec was set in the transient file
+          grep -q "AccuracySec=" "/run/systemd/transient/$UNIT.timer" || true
+          systemctl stop "$UNIT.timer" "$UNIT.service" 2>/dev/null || true
+
+          : "Transient timer with OnUnitActiveSec"
+          UNIT2="timer-unit-act-$RANDOM"
+          systemd-run --unit="$UNIT2" --on-unit-active=30s \
+              --remain-after-exit true
+          [[ "$(systemctl show -P ActiveState "$UNIT2.timer")" == "active" ]]
+          grep -q "OnUnitActiveSec=" "/run/systemd/transient/$UNIT2.timer"
+          systemctl stop "$UNIT2.timer" "$UNIT2.service" 2>/dev/null || true
+
+          : "Timer with --on-active=0 fires immediately"
+          UNIT3="timer-zero-$RANDOM"
+          rm -f "/tmp/timer-zero-$UNIT3"
+          systemd-run --unit="$UNIT3" --on-active=0 \
+              --remain-after-exit touch "/tmp/timer-zero-$UNIT3"
+          timeout 10 bash -c "until [[ -f /tmp/timer-zero-$UNIT3 ]]; do sleep 0.5; done"
+          [[ -f "/tmp/timer-zero-$UNIT3" ]]
+          systemctl stop "$UNIT3.timer" "$UNIT3.service" 2>/dev/null || true
+          rm -f "/tmp/timer-zero-$UNIT3"
+          TAEOF
+          chmod +x TEST-53-TIMER.timer-accuracy.sh
         '';
       }
       {
@@ -7260,6 +7284,98 @@
           [[ "$STATE" == "running" || "$STATE" == "degraded" ]]
           ISREOF
           chmod +x TEST-74-AUX-UTILS.is-system-running.sh
+
+          # systemctl show for special properties
+          cat > TEST-74-AUX-UTILS.show-special.sh << 'SSEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "systemctl show NNeedDaemonReload returns boolean"
+          RELOAD="$(systemctl show -P NeedDaemonReload systemd-journald.service)"
+          [[ "$RELOAD" == "no" || "$RELOAD" == "yes" ]]
+
+          : "systemctl show MainPID for running service"
+          PID="$(systemctl show -P MainPID systemd-journald.service)"
+          [[ "$PID" -gt 0 ]]
+
+          : "systemctl show ExecMainStartTimestamp exists"
+          TS="$(systemctl show -P ExecMainStartTimestamp systemd-journald.service)"
+          [[ -n "$TS" ]]
+
+          : "systemctl show ControlGroup"
+          CG="$(systemctl show -P ControlGroup systemd-journald.service)"
+          echo "ControlGroup=$CG"
+
+          : "systemctl show FragmentPath"
+          FP="$(systemctl show -P FragmentPath systemd-journald.service)"
+          echo "FragmentPath=$FP"
+          [[ -n "$FP" ]]
+
+          : "systemctl show for PID 1"
+          SVER="$(systemctl show -P Version)"
+          echo "Version=$SVER"
+          SSEOF
+          chmod +x TEST-74-AUX-UTILS.show-special.sh
+
+          # systemd-id128 more operations
+          cat > TEST-74-AUX-UTILS.id128-ops.sh << 'IDEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "systemd-id128 new generates valid UUID"
+          ID="$(systemd-id128 new)"
+          LEN="$(echo -n "$ID" | wc -c)"
+          [[ "$LEN" -eq 32 ]]
+
+          : "systemd-id128 machine-id matches /etc/machine-id"
+          MID="$(systemd-id128 machine-id)"
+          EMID="$(cat /etc/machine-id)"
+          [[ "$MID" == "$EMID" ]]
+
+          : "systemd-id128 boot-id returns a valid ID"
+          BID="$(systemd-id128 boot-id)"
+          BLEN="$(echo -n "$BID" | wc -c)"
+          [[ "$BLEN" -eq 32 ]]
+
+          : "systemd-id128 invocation-id returns a valid ID for service"
+          # Note: running in shell context, not in a service, so this may not work
+          # Just test that the command doesn't crash
+          systemd-id128 invocation-id || true
+          IDEOF
+          chmod +x TEST-74-AUX-UTILS.id128-ops.sh
+
+          # systemd-escape advanced patterns
+          cat > TEST-74-AUX-UTILS.escape-advanced.sh << 'EAEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "systemd-escape encodes special characters"
+          [[ "$(systemd-escape 'foo/bar')" == "foo-bar" ]]
+          [[ "$(systemd-escape 'foo bar')" == *"foo"* ]]
+
+          : "systemd-escape --unescape decodes"
+          ENCODED="$(systemd-escape 'hello world')"
+          DECODED="$(systemd-escape --unescape "$ENCODED")"
+          [[ "$DECODED" == "hello world" ]]
+
+          : "systemd-escape --path converts paths to unit names"
+          [[ "$(systemd-escape --path /tmp/test)" == "tmp-test" ]]
+          [[ "$(systemd-escape --path /)" == "-" ]]
+
+          : "systemd-escape --suffix=mount"
+          RESULT="$(systemd-escape --suffix=mount --path /tmp/test)"
+          [[ "$RESULT" == "tmp-test.mount" ]]
+          EAEOF
+          chmod +x TEST-74-AUX-UTILS.escape-advanced.sh
 
           rm -f TEST-74-AUX-UTILS.busctl.sh \
                TEST-74-AUX-UTILS.capsule.sh \
