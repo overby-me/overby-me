@@ -476,11 +476,13 @@ impl Parser {
                     self.skip_newlines();
                     let body_start = self.current_line();
                     let body = self.parse_compound_command()?;
+                    let end_line = self.current_line().saturating_sub(1).max(body_start);
                     let redirections = self.parse_redirections()?;
                     return Ok(Command::FunctionDef {
                         name,
                         body: Box::new(body),
                         body_line: body_start,
+                        end_line,
                         has_function_keyword: false,
                         redirections,
                     });
@@ -512,11 +514,13 @@ impl Parser {
             self.skip_newlines();
             let body_start = self.current_line();
             let body = self.parse_compound_command()?;
+            let end_line = self.current_line().saturating_sub(1).max(body_start);
             let redirections = self.parse_redirections()?;
             return Ok(Command::FunctionDef {
                 name,
                 body: Box::new(body),
                 body_line: body_start,
+                end_line,
                 has_function_keyword: true,
                 redirections,
             });

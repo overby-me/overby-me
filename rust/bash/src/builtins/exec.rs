@@ -271,6 +271,7 @@ pub(super) fn builtin_source(shell: &mut Shell, args: &[String]) -> i32 {
         find_in_path(filename)
     };
 
+    shell.source_file_error = false;
     match std::fs::read_to_string(&path) {
         Ok(content) => {
             // Save and set positional parameters for the sourced script
@@ -307,6 +308,7 @@ pub(super) fn builtin_source(shell: &mut Shell, args: &[String]) -> i32 {
         Err(e) => {
             let msg = io_error_message(&e);
             eprintln!("{}: {}: {}", shell.error_prefix(), filename, msg);
+            shell.source_file_error = true;
             1
         }
     }

@@ -266,6 +266,7 @@ pub struct Shell {
     pub in_trap_handler: i32,
     pub errexit_suppressed: bool,
     pub sourcing: bool,
+    pub source_file_error: bool,
     /// The original script file name for error messages (doesn't change with BASH_ARGV0)
     pub script_name: String,
     pub dir_stack: Vec<String>,
@@ -432,6 +433,7 @@ impl Shell {
             in_trap_handler: 0,
             errexit_suppressed: false,
             sourcing: false,
+            source_file_error: false,
             script_name: String::new(),
             dir_stack: Vec::new(),
             func_names: Vec::new(),

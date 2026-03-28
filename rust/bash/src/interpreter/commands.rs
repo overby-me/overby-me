@@ -11,9 +11,12 @@ impl Shell {
                 name,
                 body,
                 body_line,
+                end_line,
                 has_function_keyword,
                 redirections,
             } => {
+                // Set LINENO to end of function definition (closing brace)
+                self.vars.insert("LINENO".to_string(), end_line.to_string());
                 // In POSIX mode, cannot define functions with names of special builtins
                 if self.opt_posix
                     && matches!(
@@ -1264,8 +1267,8 @@ impl Shell {
                     "trap" => false,
                     // exit: never fatal (it's already exiting)
                     "exit" => false,
-                    // . and source: fatal on error (file not found etc.)
-                    "." | "source" => true,
+                    // . and source: fatal only on file error (not found etc.)
+                    "." | "source" => self.source_file_error,
                     // All other special builtins: fatal
                     _ => true,
                 };

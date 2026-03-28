@@ -45,6 +45,7 @@ pub enum Command {
         name: String,
         body: Box<CompoundCommand>,
         body_line: usize,
+        end_line: usize,
         has_function_keyword: bool,
         redirections: Vec<Redirection>,
     },
