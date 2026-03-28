@@ -288,6 +288,12 @@ impl Shell {
                 .copied()
                 .unwrap_or(true),
         );
+        crate::expand::set_globignore(
+            self.vars
+                .get("GLOBIGNORE")
+                .map(|s| s.as_str())
+                .unwrap_or(""),
+        );
         // Register inline runner for process substitutions using raw pointer
         // Safety: the pointer is valid for the duration of this function call
         let self_ptr = self as *mut Shell;
@@ -383,6 +389,12 @@ impl Shell {
                 .get("globskipdots")
                 .copied()
                 .unwrap_or(true),
+        );
+        crate::expand::set_globignore(
+            self.vars
+                .get("GLOBIGNORE")
+                .map(|s| s.as_str())
+                .unwrap_or(""),
         );
         let mut vars = self.vars.clone();
         self.inject_transform_attrs(&word, &mut vars);

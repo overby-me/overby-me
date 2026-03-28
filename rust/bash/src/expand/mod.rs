@@ -26,6 +26,8 @@ thread_local! {
     static DOTGLOB_ENABLED: RefCell<bool> = const { RefCell::new(false) };
     /// Whether globskipdots shopt is enabled (skip . and .. in glob results)
     static GLOBSKIPDOTS_ENABLED: RefCell<bool> = const { RefCell::new(true) };
+    /// GLOBIGNORE patterns (colon-separated, empty = no ignore)
+    static GLOBIGNORE: RefCell<String> = const { RefCell::new(String::new()) };
     /// Callback for running process substitution commands inline (instead of exec'ing
     /// a new shell). Set by the interpreter before word expansion.
     #[allow(clippy::type_complexity)]
@@ -76,6 +78,10 @@ pub fn set_dotglob(enabled: bool) {
 
 pub fn set_globskipdots(enabled: bool) {
     GLOBSKIPDOTS_ENABLED.with(|d| *d.borrow_mut() = enabled);
+}
+
+pub fn set_globignore(value: &str) {
+    GLOBIGNORE.with(|g| *g.borrow_mut() = value.to_string());
 }
 
 #[allow(dead_code)]
@@ -1874,6 +1880,75 @@ fn globstar_expand(pattern: &str) -> Vec<String> {
         .collect()
 }
 
+/// Split GLOBIGNORE on colons, respecting bracket expressions [...]
+fn split_globignore(globignore: &str) -> Vec<String> {
+    let mut patterns = Vec::new();
+    let mut current = String::new();
+    let chars: Vec<char> = globignore.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        match chars[i] {
+            ':' => {
+                if !current.is_empty() {
+                    patterns.push(std::mem::take(&mut current));
+                }
+            }
+            '[' => {
+                // Inside bracket expression — skip until matching ]
+                current.push('[');
+                i += 1;
+                // Handle [! or [^ negation
+                if i < chars.len() && (chars[i] == '!' || chars[i] == '^') {
+                    current.push(chars[i]);
+                    i += 1;
+                }
+                // Handle ] as first char in bracket (literal])
+                if i < chars.len() && chars[i] == ']' {
+                    current.push(']');
+                    i += 1;
+                }
+                while i < chars.len() && chars[i] != ']' {
+                    current.push(chars[i]);
+                    i += 1;
+                }
+                if i < chars.len() {
+                    current.push(']');
+                }
+            }
+            c => current.push(c),
+        }
+        i += 1;
+    }
+    if !current.is_empty() {
+        patterns.push(current);
+    }
+    patterns
+}
+
+/// Filter glob results by GLOBIGNORE patterns
+fn apply_globignore(results: &mut Vec<String>) {
+    let globignore = GLOBIGNORE.with(|g| g.borrow().clone());
+    if globignore.is_empty() {
+        return;
+    }
+    let patterns = split_globignore(&globignore);
+    if patterns.is_empty() {
+        return;
+    }
+    results.retain(|name| {
+        // Don't filter . and ..
+        if name == "." || name == ".." {
+            return true;
+        }
+        for pat in &patterns {
+            if crate::interpreter::commands::case_pattern_match(name, pat) {
+                return false;
+            }
+        }
+        true
+    });
+}
+
 fn glob_expand(field: &str) -> Vec<String> {
     // Only glob if there are unescaped (unquoted) glob metacharacters
     if has_glob_chars(field) {
@@ -2031,6 +2106,7 @@ fn glob_expand(field: &str) -> Vec<String> {
                             crate::interpreter::commands::case_pattern_match(name, &pattern)
                         })
                         .collect();
+                    apply_globignore(&mut results);
                     if results.is_empty() {
                         vec![remove_quotes(field)]
                     } else {
@@ -2089,6 +2165,7 @@ fn glob_expand(field: &str) -> Vec<String> {
                             }
                         })
                         .collect();
+                    apply_globignore(&mut results);
                     if results.is_empty() {
                         vec![remove_quotes(field)]
                     } else {
