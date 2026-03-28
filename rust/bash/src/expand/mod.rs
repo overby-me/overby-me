@@ -948,9 +948,21 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
             {
                 use std::os::unix::io::AsRawFd;
                 let (pipe_r, pipe_w) = nix::unistd::pipe().expect("pipe failed");
-                let r_fd = pipe_r.as_raw_fd();
-                let w_fd = pipe_w.as_raw_fd();
-                // Prevent OwnedFd from closing the fds we need
+                let r_raw = pipe_r.as_raw_fd();
+                let w_raw = pipe_w.as_raw_fd();
+                // Move procsub pipe fds to high numbers (>=10) to avoid conflicts
+                // with user-requested fds like `exec 3< <(cmd)`
+                let r_fd = nix::fcntl::fcntl(r_raw, nix::fcntl::FcntlArg::F_DUPFD(10))
+                    .unwrap_or(r_raw);
+                let w_fd = nix::fcntl::fcntl(w_raw, nix::fcntl::FcntlArg::F_DUPFD(10))
+                    .unwrap_or(w_raw);
+                if r_fd != r_raw {
+                    nix::unistd::close(r_raw).ok();
+                }
+                if w_fd != w_raw {
+                    nix::unistd::close(w_raw).ok();
+                }
+                // Prevent OwnedFd from closing (they're already moved/closed above)
                 std::mem::forget(pipe_r);
                 std::mem::forget(pipe_w);
 
@@ -968,17 +980,7 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                                 nix::unistd::close(r_fd).ok();
                             }
                         }
-                        // Try to run inline using the registered shell runner
-                        // (preserves error prefix and signal handling)
-                        // Yield to let parent start processing
-                        unsafe { libc::sched_yield(); }
-                        // SIGPIPE stays as SIG_IGN so echo detects EPIPE and reports it
-                        if let Some(status) = run_procsub_inline(cmd) {
-                            std::io::Write::flush(&mut std::io::stdout()).ok();
-                            std::io::Write::flush(&mut std::io::stderr()).ok();
-                            std::process::exit(status);
-                        }
-                        // Fallback: exec a new shell
+                        // Exec a new shell for the process substitution command
                         unsafe {
                             libc::signal(libc::SIGPIPE, libc::SIG_DFL);
                         }
@@ -996,16 +998,27 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                         let fd = match kind {
                             ProcessSubKind::Input => {
                                 nix::unistd::close(w_fd).ok();
+                                // Clear CLOEXEC so child processes can access /proc/self/fd/N
+                                nix::fcntl::fcntl(
+                                    r_fd,
+                                    nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::empty()),
+                                )
+                                .ok();
                                 register_procsub_fd(r_fd);
                                 r_fd
                             }
                             ProcessSubKind::Output => {
                                 nix::unistd::close(r_fd).ok();
+                                nix::fcntl::fcntl(
+                                    w_fd,
+                                    nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::empty()),
+                                )
+                                .ok();
                                 register_procsub_fd(w_fd);
                                 w_fd
                             }
                         };
-                        out.push(Segment::Unquoted(format!("/proc/self/fd/{}", fd)));
+                        out.push(Segment::Unquoted(format!("/dev/fd/{}", fd)));
                     }
                     Err(e) => {
                         eprintln!("bash: process substitution: {}", e);

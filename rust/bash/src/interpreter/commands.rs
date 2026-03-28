@@ -284,7 +284,13 @@ impl Shell {
         // Safety: the pointer is valid for the duration of this function call
         let self_ptr = self as *mut Shell;
         let mut procsub_runner = move |cmd: &str| -> i32 {
-            unsafe { (*self_ptr).run_string(cmd) }
+            let shell = unsafe { &mut *self_ptr };
+            // Mark as pipeline child so EPIPE errors are suppressed in process sub children
+            let saved = shell.in_pipeline_child;
+            shell.in_pipeline_child = true;
+            let status = shell.run_string(cmd);
+            shell.in_pipeline_child = saved;
+            status
         };
         crate::expand::set_procsub_runner(&mut procsub_runner as *mut dyn FnMut(&str) -> i32);
         let mut cmd_sub = |cmd: &str| -> String { self.capture_output(cmd) };
@@ -378,7 +384,12 @@ impl Shell {
         });
         let self_ptr2 = self as *mut Shell;
         let mut procsub_runner = move |cmd: &str| -> i32 {
-            unsafe { (*self_ptr2).run_string(cmd) }
+            let shell = unsafe { &mut *self_ptr2 };
+            let saved = shell.in_pipeline_child;
+            shell.in_pipeline_child = true;
+            let status = shell.run_string(cmd);
+            shell.in_pipeline_child = saved;
+            status
         };
         crate::expand::set_procsub_runner(&mut procsub_runner as *mut dyn FnMut(&str) -> i32);
         let mut cmd_sub = |cmd: &str| -> String { self.capture_output(cmd) };
