@@ -1984,6 +1984,29 @@
           systemctl stop "$PUNIT.path" "$PUNIT.service" 2>/dev/null || true
           rm -f "/tmp/path-trigger-$PUNIT" "/tmp/path-result-$PUNIT"
 
+          : "Transient DirectoryNotEmpty= unit fires when directory gets content"
+          PUNIT="transient-dirne-$RANDOM"
+          mkdir -p "/tmp/dirne-$PUNIT"
+          rm -f "/tmp/dirne-$PUNIT"/*
+          systemd-run --unit="$PUNIT" --path-property=DirectoryNotEmpty="/tmp/dirne-$PUNIT" --remain-after-exit touch "/tmp/dirne-result-$PUNIT"
+          systemctl is-active "$PUNIT.path"
+          touch "/tmp/dirne-$PUNIT/file"
+          timeout 15 bash -c "until [[ -f /tmp/dirne-result-$PUNIT ]]; do sleep 0.5; done"
+          [[ -f "/tmp/dirne-result-$PUNIT" ]]
+          systemctl stop "$PUNIT.path" "$PUNIT.service" 2>/dev/null || true
+          rm -rf "/tmp/dirne-$PUNIT" "/tmp/dirne-result-$PUNIT"
+
+          : "Transient PathModified= unit fires when file is modified"
+          PUNIT="transient-mod-$RANDOM"
+          touch "/tmp/mod-trigger-$PUNIT"
+          systemd-run --unit="$PUNIT" --path-property=PathModified="/tmp/mod-trigger-$PUNIT" --remain-after-exit touch "/tmp/mod-result-$PUNIT"
+          systemctl is-active "$PUNIT.path"
+          echo "modified" >> "/tmp/mod-trigger-$PUNIT"
+          timeout 15 bash -c "until [[ -f /tmp/mod-result-$PUNIT ]]; do sleep 0.5; done"
+          [[ -f "/tmp/mod-result-$PUNIT" ]]
+          systemctl stop "$PUNIT.path" "$PUNIT.service" 2>/dev/null || true
+          rm -f "/tmp/mod-trigger-$PUNIT" "/tmp/mod-result-$PUNIT"
+
           touch /testok
           PATHEOF
         '';
