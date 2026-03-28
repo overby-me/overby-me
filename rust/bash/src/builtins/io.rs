@@ -885,6 +885,13 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
     // Determine which fd to read from
     let read_fd = fd.unwrap_or(0); // 0 = stdin
 
+    // Check if read fd is valid before attempting to read
+    #[cfg(unix)]
+    if nix::fcntl::fcntl(read_fd, nix::fcntl::FcntlArg::F_GETFD).is_err() {
+        // fd is closed/invalid — return 1 (failure)
+        return 1;
+    }
+
     // Handle timeout: check if data is available within the timeout period
     #[cfg(unix)]
     if let Some(secs) = timeout_secs {

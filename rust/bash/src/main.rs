@@ -253,18 +253,14 @@ fn run() -> i32 {
                 // `read -t 0` and `read` from stdin work correctly.
                 // Only do this if fd 0 is NOT explicitly redirected (pipe, regular file).
                 // If fd 0 is a tty or /dev/null, replace it with the script file.
+                // Open script file on fd 0 (matching bash behavior) only when
+                // fd 0 is a terminal (interactive inherited stdin).
+                // Don't replace when: redirected (pipe/file), or closed.
                 #[cfg(unix)]
                 {
                     use std::os::unix::io::IntoRawFd;
-                    let fd0_is_redirected = nix::sys::stat::fstat(0)
-                        .map(|s| {
-                            use nix::sys::stat::SFlag;
-                            let mode = SFlag::from_bits_truncate(s.st_mode);
-                            // Pipes and regular files are explicit redirects (don't replace)
-                            mode.contains(SFlag::S_IFIFO) || mode.contains(SFlag::S_IFREG)
-                        })
-                        .unwrap_or(false);
-                    if !fd0_is_redirected {
+                    let fd0_is_tty = nix::unistd::isatty(0).unwrap_or(false);
+                    if fd0_is_tty {
                         if let Ok(f) = std::fs::File::open(&file) {
                             let raw = f.into_raw_fd();
                             if raw != 0 {
