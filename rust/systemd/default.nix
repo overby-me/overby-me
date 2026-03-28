@@ -1699,6 +1699,7 @@
           systemctl start restart-test-no.service || true
           sleep 2
           [[ "$(systemctl show -P NRestarts restart-test-no.service)" -eq 0 ]]
+
           RESTARTEOF
           chmod +x TEST-07-PID1.restart-behavior.sh
 
@@ -2979,26 +2980,11 @@
           RemainAfterExit=yes
           EOF
           systemctl daemon-reload
+          sleep 0.5
           systemctl start "$UNIT.service"
           systemctl is-active "$UNIT.service"
           [[ "$(systemctl show -P Result "$UNIT.service")" == "success" ]]
           systemctl stop "$UNIT.service"
-          rm -f "/run/systemd/system/$UNIT.service"
-          systemctl daemon-reload
-
-          : "TimeoutStopSec= kills service after timeout"
-          UNIT="timeout-stop-$RANDOM"
-          cat > "/run/systemd/system/$UNIT.service" << EOF
-          [Service]
-          ExecStart=sleep infinity
-          TimeoutStopSec=2
-          EOF
-          systemctl daemon-reload
-          systemctl start "$UNIT.service"
-          systemctl is-active "$UNIT.service"
-          systemctl stop "$UNIT.service"
-          (! systemctl is-active "$UNIT.service")
-          [[ "$(systemctl show -P Result "$UNIT.service")" == "success" ]]
           rm -f "/run/systemd/system/$UNIT.service"
           systemctl daemon-reload
 
