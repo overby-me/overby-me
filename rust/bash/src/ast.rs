@@ -414,6 +414,21 @@ pub fn word_to_string(word: &Word) -> String {
                 s.push('$');
                 s.push_str(name);
             }
+            WordPart::CommandSub(cmd) => {
+                s.push_str("$(");
+                s.push_str(cmd);
+                s.push(')');
+            }
+            WordPart::BacktickSub(cmd) => {
+                s.push('`');
+                s.push_str(cmd);
+                s.push('`');
+            }
+            WordPart::Param(expr) => {
+                s.push_str("${");
+                s.push_str(&expr.name);
+                s.push('}');
+            }
             _ => {}
         }
     }

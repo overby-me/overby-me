@@ -188,6 +188,11 @@ impl Shell {
                 }
                 RedirectKind::DupOutput => {
                     let fd = self.resolve_redir_fd(&redir.fd, 1);
+                    // Empty target from expansion is ambiguous redirect
+                    if target_str.is_empty() {
+                        self.restore_redirections(saved);
+                        return Err(format!("{}: ambiguous redirect", raw_target));
+                    }
                     if target_str == "-" {
                         // Save fd before closing so it can be restored
                         if !is_var_fd(redir)
@@ -245,6 +250,10 @@ impl Shell {
                 }
                 RedirectKind::DupInput => {
                     let fd = self.resolve_redir_fd(&redir.fd, 0);
+                    if target_str.is_empty() {
+                        self.restore_redirections(saved);
+                        return Err(format!("{}: ambiguous redirect", raw_target));
+                    }
                     if target_str == "-" {
                         // Save fd before closing so it can be restored
                         if !is_var_fd(redir)
