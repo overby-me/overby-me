@@ -2348,6 +2348,163 @@
           SEEOF
           chmod +x TEST-07-PID1.set-environment.sh
 
+          # Custom User=/Group= in unit files test
+          cat > TEST-07-PID1.user-group.sh << 'UGEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              rm -f /run/systemd/system/user-group-test-*.service
+              rm -f /tmp/user-group-*
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          # Helper: retry a command up to 5 times with 1s delay (works around EAGAIN)
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep 1; done; "$@"; }
+
+          : "User= runs process as specified user"
+          cat > /run/systemd/system/user-group-test-user.service << EOF
+          [Service]
+          Type=oneshot
+          User=testuser
+          ExecStart=bash -c 'id -nu > /tmp/user-group-user'
+          EOF
+          retry systemctl daemon-reload
+          retry systemctl start user-group-test-user.service
+          [[ "$(cat /tmp/user-group-user)" == "testuser" ]]
+
+          : "Group= runs process with specified group"
+          cat > /run/systemd/system/user-group-test-group.service << EOF
+          [Service]
+          Type=oneshot
+          User=testuser
+          Group=daemon
+          ExecStart=bash -c 'id -ng > /tmp/user-group-group'
+          EOF
+          systemctl daemon-reload
+          systemctl start user-group-test-group.service
+          [[ "$(cat /tmp/user-group-group)" == "daemon" ]]
+
+          : "SupplementaryGroups= adds extra groups"
+          cat > /run/systemd/system/user-group-test-suppl.service << EOF
+          [Service]
+          Type=oneshot
+          User=testuser
+          SupplementaryGroups=daemon
+          ExecStart=bash -c 'id -Gn > /tmp/user-group-suppl'
+          EOF
+          systemctl daemon-reload
+          systemctl start user-group-test-suppl.service
+          grep -q "daemon" /tmp/user-group-suppl
+          UGEOF
+          chmod +x TEST-07-PID1.user-group.sh
+
+          # Custom multiple ExecStart for oneshot test
+          cat > TEST-07-PID1.multi-exec-start.sh << 'MESEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              rm -f /run/systemd/system/multi-exec-*.service
+              rm -f /tmp/multi-exec-*
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          # Helper: retry a command up to 5 times with 1s delay (works around EAGAIN)
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep 1; done; "$@"; }
+
+          : "Multiple ExecStart= in oneshot runs sequentially"
+          cat > /run/systemd/system/multi-exec-test.service << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=bash -c 'echo step1 >> /tmp/multi-exec-log'
+          ExecStart=bash -c 'echo step2 >> /tmp/multi-exec-log'
+          ExecStart=bash -c 'echo step3 >> /tmp/multi-exec-log'
+          RemainAfterExit=yes
+          EOF
+          rm -f /tmp/multi-exec-log
+          retry systemctl daemon-reload
+          retry systemctl start multi-exec-test.service
+          systemctl is-active multi-exec-test.service
+          [[ "$(cat /tmp/multi-exec-log)" == "step1
+          step2
+          step3" ]]
+          systemctl stop multi-exec-test.service
+
+          : "Multiple ExecStart= stops on first failure"
+          cat > /run/systemd/system/multi-exec-fail.service << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=bash -c 'echo ok >> /tmp/multi-exec-fail-log'
+          ExecStart=false
+          ExecStart=bash -c 'echo should-not-run >> /tmp/multi-exec-fail-log'
+          EOF
+          rm -f /tmp/multi-exec-fail-log
+          systemctl daemon-reload
+          systemctl start multi-exec-fail.service || true
+          (! systemctl is-active multi-exec-fail.service)
+          # Only first command should have run
+          [[ "$(cat /tmp/multi-exec-fail-log)" == "ok" ]]
+          MESEOF
+          chmod +x TEST-07-PID1.multi-exec-start.sh
+
+          # Custom systemctl is-enabled test
+          cat > TEST-07-PID1.is-enabled.sh << 'IEEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              systemctl disable is-enabled-test.service 2>/dev/null
+              systemctl unmask is-enabled-test.service 2>/dev/null
+              rm -f /run/systemd/system/is-enabled-test.service
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          # Helper: retry a command up to 5 times with 1s delay (works around EAGAIN)
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep 1; done; "$@"; }
+
+          : "systemctl is-enabled for disabled service"
+          cat > /run/systemd/system/is-enabled-test.service << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+          retry systemctl daemon-reload
+          # Should not be enabled yet
+          [[ "$(systemctl is-enabled is-enabled-test.service)" == "disabled" ]]
+
+          : "systemctl is-enabled after enable"
+          systemctl enable is-enabled-test.service
+          [[ "$(systemctl is-enabled is-enabled-test.service)" == "enabled" ]]
+
+          : "systemctl is-enabled after disable"
+          systemctl disable is-enabled-test.service
+          [[ "$(systemctl is-enabled is-enabled-test.service)" == "disabled" ]]
+
+          : "systemctl is-enabled for masked service"
+          systemctl mask is-enabled-test.service
+          [[ "$(systemctl is-enabled is-enabled-test.service)" == "masked" ]]
+          systemctl unmask is-enabled-test.service
+          IEEOF
+          chmod +x TEST-07-PID1.is-enabled.sh
+
           rm -f TEST-07-PID1.attach_processes.sh \
                TEST-07-PID1.concurrency.sh \
                TEST-07-PID1.DeferReactivation.sh \
