@@ -682,6 +682,30 @@
           EJEOF
           chmod +x TEST-04-JOURNAL.export-json.sh
 
+          # Journal lines and paging test
+          cat > TEST-04-JOURNAL.lines-paging.sh << 'LPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl -n limits to N entries"
+          COUNT=$(journalctl --no-pager -n 5 -o short | wc -l)
+          [[ "$COUNT" -le 10 ]]
+
+          : "journalctl -n 0 returns no entries"
+          COUNT=$(journalctl --no-pager -n 0 -o short | wc -l)
+          [[ "$COUNT" -eq 0 ]]
+
+          : "journalctl -n 1 returns exactly 1 entry"
+          COUNT=$(journalctl --no-pager -n 1 -o short | wc -l)
+          [[ "$COUNT" -eq 1 ]]
+
+          : "journalctl --reverse -n 3 returns 3 entries in reverse"
+          COUNT=$(journalctl --no-pager --reverse -n 3 -o short | wc -l)
+          [[ "$COUNT" -eq 3 ]]
+          LPEOF
+          chmod +x TEST-04-JOURNAL.lines-paging.sh
+
           rm -f TEST-04-JOURNAL.bsod.sh \
                TEST-04-JOURNAL.cat.sh \
                TEST-04-JOURNAL.corrupted-journals.sh \
@@ -8007,6 +8031,90 @@
           systemd-cgtop --iterations=1 --batch > /dev/null
           CGEOF
           chmod +x TEST-74-AUX-UTILS.cg-options.sh
+
+          # systemctl reload-or-restart test
+          cat > TEST-74-AUX-UTILS.reload-restart.sh << 'RREOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          at_exit() {
+              set +e
+              systemctl stop reload-restart-test.service 2>/dev/null
+              rm -f /run/systemd/system/reload-restart-test.service
+              rm -f /tmp/reload-restart-*
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "systemctl reload-or-restart works for running service"
+          cat > /run/systemd/system/reload-restart-test.service << EOF
+          [Unit]
+          Description=Reload restart test
+          [Service]
+          Type=simple
+          ExecStart=sleep infinity
+          ExecReload=touch /tmp/reload-restart-reloaded
+          EOF
+          systemctl daemon-reload
+          systemctl start reload-restart-test.service
+          [[ "$(systemctl show -P ActiveState reload-restart-test.service)" == "active" ]]
+
+          systemctl reload-or-restart reload-restart-test.service
+          # Service should still be active after reload-or-restart
+          sleep 1
+          [[ "$(systemctl show -P ActiveState reload-restart-test.service)" == "active" ]]
+
+          : "systemctl try-restart only restarts if running"
+          systemctl try-restart reload-restart-test.service
+          sleep 1
+          [[ "$(systemctl show -P ActiveState reload-restart-test.service)" == "active" ]]
+          RREOF
+          chmod +x TEST-74-AUX-UTILS.reload-restart.sh
+
+          # systemctl show for inactive/non-existent units
+          cat > TEST-74-AUX-UTILS.show-inactive.sh << 'SIEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl show for non-existent unit returns not-found"
+          LS="$(systemctl show -P LoadState nonexistent-unit-$RANDOM.service)"
+          [[ "$LS" == "not-found" ]]
+
+          : "systemctl is-active returns inactive for non-running"
+          (! systemctl is-active nonexistent-$RANDOM.service)
+
+          : "systemctl is-failed returns true for non-existent"
+          (! systemctl is-failed nonexistent-$RANDOM.service) || true
+
+          : "systemctl show works for target units"
+          [[ "$(systemctl show -P ActiveState multi-user.target)" == "active" ]]
+          [[ "$(systemctl show -P LoadState multi-user.target)" == "loaded" ]]
+          SIEOF
+          chmod +x TEST-74-AUX-UTILS.show-inactive.sh
+
+          # systemd-run with --shell-like options
+          cat > TEST-74-AUX-UTILS.run-options.sh << 'ROEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-run with --uid runs as specified user"
+          UNIT="run-uid-$RANDOM"
+          systemd-run --wait --unit="$UNIT" --uid=nobody id > /dev/null || true
+
+          : "systemd-run with --nice sets nice level"
+          UNIT2="run-nice-$RANDOM"
+          systemd-run --unit="$UNIT2" --remain-after-exit \
+              --nice=5 \
+              bash -c 'nice > /tmp/run-nice-result'
+          sleep 1
+          [[ "$(cat /tmp/run-nice-result)" == "5" ]]
+          systemctl stop "$UNIT2.service" 2>/dev/null || true
+          rm -f /tmp/run-nice-result
+          ROEOF
+          chmod +x TEST-74-AUX-UTILS.run-options.sh
 
           rm -f TEST-74-AUX-UTILS.busctl.sh \
                TEST-74-AUX-UTILS.capsule.sh \
