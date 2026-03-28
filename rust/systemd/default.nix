@@ -994,6 +994,54 @@
           systemd-run --wait --pipe -p "SecureBits=keep-caps noroot no-setuid-fixup" \
               bash -xec 'true'
 
+          : "StandardOutput=file: writes stdout to a file"
+          systemd-run --wait --pipe -p StandardOutput=file:/tmp/stdout-file-test \
+              bash -xec 'echo hello-stdout'
+          [[ "$(cat /tmp/stdout-file-test)" == "hello-stdout" ]]
+          rm -f /tmp/stdout-file-test
+
+          : "StandardError=file: writes stderr to a file"
+          systemd-run --wait --pipe -p StandardError=file:/tmp/stderr-file-test \
+              bash -c 'echo hello-stderr >&2'
+          grep -q hello-stderr /tmp/stderr-file-test
+          rm -f /tmp/stderr-file-test
+
+          : "StandardOutput=append: appends to existing file"
+          echo "line1" > /tmp/stdout-append-test
+          systemd-run --wait --pipe -p StandardOutput=append:/tmp/stdout-append-test \
+              bash -xec 'echo line2'
+          grep -q line1 /tmp/stdout-append-test
+          grep -q line2 /tmp/stdout-append-test
+          rm -f /tmp/stdout-append-test
+
+          : "StandardError=append: appends to existing file"
+          echo "err-line1" > /tmp/stderr-append-test
+          systemd-run --wait --pipe -p StandardError=append:/tmp/stderr-append-test \
+              bash -c 'echo err-line2 >&2'
+          grep -q err-line1 /tmp/stderr-append-test
+          grep -q err-line2 /tmp/stderr-append-test
+          rm -f /tmp/stderr-append-test
+
+          : "CPUSchedulingPolicy=rr with CPUSchedulingPriority= sets realtime scheduling"
+          systemd-run --wait --pipe -p CPUSchedulingPolicy=rr -p CPUSchedulingPriority=10 \
+              bash -xec 'chrt -p $$ | grep -q "SCHED_RR"'
+
+          : "CPUSchedulingPolicy=fifo sets FIFO scheduling"
+          systemd-run --wait --pipe -p CPUSchedulingPolicy=fifo -p CPUSchedulingPriority=1 \
+              bash -xec 'chrt -p $$ | grep -q "SCHED_FIFO"'
+
+          : "CPUSchedulingPolicy=batch sets batch scheduling"
+          systemd-run --wait --pipe -p CPUSchedulingPolicy=batch \
+              bash -xec 'chrt -p $$ | grep -q "SCHED_BATCH"'
+
+          : "IOSchedulingClass=best-effort with IOSchedulingPriority="
+          systemd-run --wait --pipe -p IOSchedulingClass=best-effort -p IOSchedulingPriority=3 \
+              bash -xec 'ionice -p $$ | grep -q "best-effort.*prio 3"'
+
+          : "IOSchedulingClass=idle sets idle I/O scheduling"
+          systemd-run --wait --pipe -p IOSchedulingClass=idle \
+              bash -xec 'ionice -p $$ | grep -q idle'
+
           : "Error handling for clean-up codepaths"
           (! systemd-run --wait --pipe false)
           TESTEOF
