@@ -1927,6 +1927,118 @@
           KMEOF
           chmod +x TEST-07-PID1.kill-mode.sh
 
+          # Custom systemctl restart test
+          cat > TEST-07-PID1.systemctl-restart.sh << 'SREOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              rm -f /run/systemd/system/restart-cmd-*.service
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          # Helper: retry a command up to 5 times with 1s delay (works around EAGAIN)
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep 1; done; "$@"; }
+
+          : "systemctl restart replaces main process"
+          cat > /run/systemd/system/restart-cmd-test.service << EOF
+          [Service]
+          ExecStart=sleep infinity
+          EOF
+          retry systemctl daemon-reload
+          retry systemctl start restart-cmd-test.service
+          ORIG_PID="$(systemctl show -P MainPID restart-cmd-test.service)"
+          [[ "$ORIG_PID" -gt 0 ]]
+          systemctl restart restart-cmd-test.service
+          systemctl is-active restart-cmd-test.service
+          NEW_PID="$(systemctl show -P MainPID restart-cmd-test.service)"
+          [[ "$NEW_PID" -gt 0 ]]
+          [[ "$ORIG_PID" -ne "$NEW_PID" ]]
+          systemctl stop restart-cmd-test.service
+          SREOF
+          chmod +x TEST-07-PID1.systemctl-restart.sh
+
+          # Custom SuccessExitStatus test
+          cat > TEST-07-PID1.success-exit-status.sh << 'SESEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              rm -f /run/systemd/system/success-exit-*.service
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          # Helper: retry a command up to 5 times with 1s delay (works around EAGAIN)
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep 1; done; "$@"; }
+
+          : "SuccessExitStatus= treats custom exit code as success"
+          cat > /run/systemd/system/success-exit-42.service << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=bash -c 'exit 42'
+          SuccessExitStatus=42
+          RemainAfterExit=yes
+          EOF
+          retry systemctl daemon-reload
+          retry systemctl start success-exit-42.service
+          systemctl is-active success-exit-42.service
+          [[ "$(systemctl show -P Result success-exit-42.service)" == "success" ]]
+          systemctl stop success-exit-42.service
+
+          : "Without SuccessExitStatus=, exit 42 is failure"
+          cat > /run/systemd/system/success-exit-fail.service << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=bash -c 'exit 42'
+          EOF
+          systemctl daemon-reload
+          systemctl start success-exit-fail.service || true
+          (! systemctl is-active success-exit-fail.service)
+          SESEOF
+          chmod +x TEST-07-PID1.success-exit-status.sh
+
+          # Custom TimeoutStopSec test
+          cat > TEST-07-PID1.timeout-stop.sh << 'TSEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              rm -f /run/systemd/system/timeout-stop-*.service
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          # Helper: retry a command up to 5 times with 1s delay (works around EAGAIN)
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep 1; done; "$@"; }
+
+          : "TimeoutStopSec= kills service after timeout"
+          cat > /run/systemd/system/timeout-stop-test.service << EOF
+          [Service]
+          ExecStart=sleep infinity
+          TimeoutStopSec=2
+          EOF
+          retry systemctl daemon-reload
+          retry systemctl start timeout-stop-test.service
+          systemctl is-active timeout-stop-test.service
+          systemctl stop timeout-stop-test.service
+          (! systemctl is-active timeout-stop-test.service)
+          TSEOF
+          chmod +x TEST-07-PID1.timeout-stop.sh
+
           rm -f TEST-07-PID1.attach_processes.sh \
                TEST-07-PID1.concurrency.sh \
                TEST-07-PID1.DeferReactivation.sh \
