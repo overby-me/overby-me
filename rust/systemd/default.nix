@@ -486,7 +486,48 @@
                TEST-04-JOURNAL.SYSTEMD_JOURNAL_COMPRESS.sh
         '';
       }
-      {name = "05-RLIMITS";}
+      {
+        name = "05-RLIMITS";
+        patchScript = ''
+          # Custom test: verify LimitNOFILE and LimitCORE via transient services
+          cat > TEST-05-RLIMITS.transient-limits.sh << 'TLEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "LimitNOFILE= is enforced in transient services"
+          UNIT="rlimit-nofile-$RANDOM"
+          systemd-run --unit="$UNIT" --remain-after-exit \
+              -p LimitNOFILE=1234 \
+              bash -c 'ulimit -n > /tmp/rlimit-nofile-result'
+          sleep 1
+          [[ "$(cat /tmp/rlimit-nofile-result)" == "1234" ]]
+          systemctl stop "$UNIT.service" 2>/dev/null || true
+          rm -f /tmp/rlimit-nofile-result
+
+          : "LimitCORE= is enforced in transient services"
+          UNIT="rlimit-core-$RANDOM"
+          systemd-run --unit="$UNIT" --remain-after-exit \
+              -p LimitCORE=0 \
+              bash -c 'ulimit -c > /tmp/rlimit-core-result'
+          sleep 1
+          [[ "$(cat /tmp/rlimit-core-result)" == "0" ]]
+          systemctl stop "$UNIT.service" 2>/dev/null || true
+          rm -f /tmp/rlimit-core-result
+
+          : "LimitNPROC= is enforced in transient services"
+          UNIT="rlimit-nproc-$RANDOM"
+          systemd-run --unit="$UNIT" --remain-after-exit \
+              -p LimitNPROC=5678 \
+              bash -c 'ulimit -u > /tmp/rlimit-nproc-result'
+          sleep 1
+          [[ "$(cat /tmp/rlimit-nproc-result)" == "5678" ]]
+          systemctl stop "$UNIT.service" 2>/dev/null || true
+          rm -f /tmp/rlimit-nproc-result
+          TLEOF
+          chmod +x TEST-05-RLIMITS.transient-limits.sh
+        '';
+      }
       {
         name = "07-PID1";
         # Patch main script to remove mountpoint check and exit, keep run_subtests.
@@ -4720,6 +4761,138 @@
           EDEOF
                     chmod +x TEST-23-UNIT-FILE.enable-disable.sh
 
+                    # Conflicts= dependency test
+                    cat > TEST-23-UNIT-FILE.conflicts.sh << 'CFEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          at_exit() {
+              set +e
+              systemctl stop conflict-a.service conflict-b.service 2>/dev/null
+              rm -f /run/systemd/system/conflict-a.service /run/systemd/system/conflict-b.service
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "Conflicts= stops the other unit when starting"
+          cat > /run/systemd/system/conflict-a.service << EOF
+          [Unit]
+          Conflicts=conflict-b.service
+          [Service]
+          ExecStart=sleep infinity
+          EOF
+          cat > /run/systemd/system/conflict-b.service << EOF
+          [Service]
+          ExecStart=sleep infinity
+          EOF
+          systemctl daemon-reload
+
+          # Start B first, then A which conflicts with B
+          systemctl start conflict-b.service
+          [[ "$(systemctl show -P ActiveState conflict-b.service)" == "active" ]]
+
+          systemctl start conflict-a.service
+          [[ "$(systemctl show -P ActiveState conflict-a.service)" == "active" ]]
+          # B should have been stopped due to Conflicts=
+          timeout 10 bash -c 'until [[ "$(systemctl show -P ActiveState conflict-b.service)" != "active" ]]; do sleep 0.5; done'
+          CFEOF
+                    chmod +x TEST-23-UNIT-FILE.conflicts.sh
+
+                    # After/Before ordering test
+                    cat > TEST-23-UNIT-FILE.ordering.sh << 'OREOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          at_exit() {
+              set +e
+              systemctl stop order-after.service order-before.service 2>/dev/null
+              rm -f /run/systemd/system/order-after.service /run/systemd/system/order-before.service
+              rm -f /tmp/order-result
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "After= ensures ordering between services"
+          cat > /run/systemd/system/order-before.service << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=bash -c 'echo before >> /tmp/order-result'
+          RemainAfterExit=yes
+          EOF
+          cat > /run/systemd/system/order-after.service << EOF
+          [Unit]
+          After=order-before.service
+          Requires=order-before.service
+          [Service]
+          Type=oneshot
+          ExecStart=bash -c 'echo after >> /tmp/order-result'
+          RemainAfterExit=yes
+          EOF
+          systemctl daemon-reload
+          rm -f /tmp/order-result
+
+          systemctl start order-after.service
+          [[ "$(systemctl show -P ActiveState order-after.service)" == "active" ]]
+          [[ "$(systemctl show -P ActiveState order-before.service)" == "active" ]]
+          # Verify both ran (ordering guaranteed by After=)
+          [[ "$(head -1 /tmp/order-result)" == "before" ]]
+          [[ "$(tail -1 /tmp/order-result)" == "after" ]]
+          OREOF
+                    chmod +x TEST-23-UNIT-FILE.ordering.sh
+
+                    # ConditionPathExists= test
+                    cat > TEST-23-UNIT-FILE.conditions.sh << 'CDEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          at_exit() {
+              set +e
+              systemctl stop cond-exists.service cond-not-exists.service 2>/dev/null
+              rm -f /run/systemd/system/cond-exists.service /run/systemd/system/cond-not-exists.service
+              rm -f /tmp/cond-test-marker /tmp/cond-test-result
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          : "ConditionPathExists= skips service when path missing"
+          rm -f /tmp/cond-test-marker /tmp/cond-test-result
+          cat > /run/systemd/system/cond-exists.service << EOF
+          [Unit]
+          ConditionPathExists=/tmp/cond-test-marker
+          [Service]
+          Type=oneshot
+          ExecStart=touch /tmp/cond-test-result
+          EOF
+          systemctl daemon-reload
+
+          # With marker missing, service should not run
+          systemctl start cond-exists.service || true
+          [[ ! -f /tmp/cond-test-result ]]
+
+          # With marker present, service should run
+          touch /tmp/cond-test-marker
+          systemctl start cond-exists.service
+          [[ -f /tmp/cond-test-result ]]
+
+          : "ConditionPathExists=! negation works"
+          rm -f /tmp/cond-test-result
+          cat > /run/systemd/system/cond-not-exists.service << EOF
+          [Unit]
+          ConditionPathExists=!/tmp/cond-test-nonexistent
+          [Service]
+          Type=oneshot
+          ExecStart=touch /tmp/cond-test-result
+          EOF
+          systemctl daemon-reload
+
+          systemctl start cond-not-exists.service
+          [[ -f /tmp/cond-test-result ]]
+          CDEOF
+                    chmod +x TEST-23-UNIT-FILE.conditions.sh
+
                     rm -f TEST-23-UNIT-FILE.ExtraFileDescriptors.sh \
                          TEST-23-UNIT-FILE.JoinsNamespaceOf.sh \
                          TEST-23-UNIT-FILE.openfile.sh \
@@ -5550,16 +5723,16 @@
           . "$(dirname "$0")"/util.sh
 
           : "systemctl list-units shows loaded units"
-          systemctl list-units --no-pager | head -20
+          systemctl list-units --no-pager > /dev/null
 
           : "systemctl list-units --type=service shows output"
-          systemctl list-units --type=service --no-pager | head -10
+          systemctl list-units --type=service --no-pager > /dev/null
 
           : "systemctl list-unit-files shows unit file states"
-          systemctl list-unit-files --no-pager | head -20
+          systemctl list-unit-files --no-pager > /dev/null
 
           : "systemctl list-unit-files --type=timer shows timer files"
-          systemctl list-unit-files --type=timer --no-pager | head -10
+          systemctl list-unit-files --type=timer --no-pager > /dev/null
 
           : "systemctl list-timers shows active timers"
           systemctl list-timers --no-pager
@@ -5721,6 +5894,45 @@
           sleep 1
           RAEOF
           chmod +x TEST-74-AUX-UTILS.run-advanced.sh
+
+          # systemctl environment management test
+          cat > TEST-74-AUX-UTILS.environment.sh << 'ENVEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl set-environment and show-environment"
+          systemctl set-environment TEST_ENV_VAR=hello
+          systemctl show-environment | grep -q "TEST_ENV_VAR=hello"
+
+          : "systemctl unset-environment removes the variable"
+          systemctl unset-environment TEST_ENV_VAR
+          (! systemctl show-environment | grep -q "TEST_ENV_VAR=hello")
+
+          : "Multiple variables can be set at once"
+          systemctl set-environment A=1 B=2 C=3
+          systemctl show-environment | grep -q "A=1"
+          systemctl show-environment | grep -q "B=2"
+          systemctl show-environment | grep -q "C=3"
+          systemctl unset-environment A B C
+          ENVEOF
+          chmod +x TEST-74-AUX-UTILS.environment.sh
+
+          # systemctl is-system-running test
+          cat > TEST-74-AUX-UTILS.is-system-running.sh << 'ISREOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl is-system-running returns running or degraded"
+          STATE="$(systemctl is-system-running || true)"
+          [[ "$STATE" == "running" || "$STATE" == "degraded" ]]
+
+          : "systemctl is-system-running --wait blocks until booted"
+          STATE="$(timeout 10 systemctl is-system-running --wait || true)"
+          [[ "$STATE" == "running" || "$STATE" == "degraded" ]]
+          ISREOF
+          chmod +x TEST-74-AUX-UTILS.is-system-running.sh
 
           rm -f TEST-74-AUX-UTILS.busctl.sh \
                TEST-74-AUX-UTILS.capsule.sh \
