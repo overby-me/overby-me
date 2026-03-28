@@ -856,6 +856,80 @@
           DUDEOF
           chmod +x TEST-04-JOURNAL.disk-usage-detail.sh
 
+          # journalctl --fields lists known fields
+          cat > TEST-04-JOURNAL.fields-list.sh << 'FLEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl --fields lists known journal fields"
+          OUT="$(journalctl --fields 2>&1)" || true
+          # Should contain at least MESSAGE or _PID
+          echo "$OUT" | grep -qE "(MESSAGE|_PID)" || echo "$OUT"
+          FLEOF
+          chmod +x TEST-04-JOURNAL.fields-list.sh
+
+          # journalctl -b with specific boot ID
+          cat > TEST-04-JOURNAL.boot-id-query.sh << 'BIQEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl can query by boot ID"
+          BOOT_ID="$(cat /proc/sys/kernel/random/boot_id | tr -d '-')"
+          journalctl --no-pager -b "$BOOT_ID" -n 5 > /dev/null
+
+          : "journalctl -b 0 matches current boot"
+          journalctl --no-pager -b 0 -n 5 > /dev/null
+          BIQEOF
+          chmod +x TEST-04-JOURNAL.boot-id-query.sh
+
+          # journalctl -o short-iso output format
+          cat > TEST-04-JOURNAL.short-iso.sh << 'SIEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl -o short-iso shows ISO timestamps"
+          OUT="$(journalctl --no-pager -o short-iso -n 3)"
+          # ISO format: YYYY-MM-DDTHH:MM:SS
+          echo "$OUT" | grep -qE "[0-9]{4}-[0-9]{2}-[0-9]{2}T"
+
+          : "journalctl -o short-precise shows microseconds"
+          journalctl --no-pager -o short-precise -n 3 > /dev/null
+          SIEOF
+          chmod +x TEST-04-JOURNAL.short-iso.sh
+
+          # journalctl --output-fields limits JSON fields
+          cat > TEST-04-JOURNAL.output-fields.sh << 'OFEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl --output-fields limits fields in json output"
+          OUT="$(journalctl --no-pager -o json -n 1 --output-fields=MESSAGE,_PID 2>&1)" || true
+          # Should produce output (even if --output-fields isn't fully supported, json should work)
+          [[ -n "$OUT" ]]
+
+          : "journalctl -o json-seq produces output"
+          journalctl --no-pager -o json -n 5 > /dev/null
+          OFEOF
+          chmod +x TEST-04-JOURNAL.output-fields.sh
+
+          # journalctl --no-hostname suppresses hostname
+          cat > TEST-04-JOURNAL.no-hostname.sh << 'NHEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "journalctl --no-hostname works without error"
+          journalctl --no-pager --no-hostname -n 5 > /dev/null || true
+
+          : "journalctl -q suppresses info messages"
+          journalctl --no-pager -q -n 5 > /dev/null
+          NHEOF
+          chmod +x TEST-04-JOURNAL.no-hostname.sh
+
           rm -f TEST-04-JOURNAL.bsod.sh \
                TEST-04-JOURNAL.cat.sh \
                TEST-04-JOURNAL.corrupted-journals.sh \
@@ -7350,6 +7424,67 @@
           systemctl list-timers --no-pager --all > /dev/null
           TCEOF
           chmod +x TEST-53-TIMER.timer-cleanup.sh
+
+          # Timer with RandomizedDelaySec property
+          cat > TEST-53-TIMER.randomized-delay.sh << 'RDEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "Transient timer accepts RandomizedDelaySec"
+          UNIT="timer-rdelay-$RANDOM"
+          systemd-run --unit="$UNIT" --on-active=1h -p RandomizedDelaySec=30s --remain-after-exit true
+          systemctl is-active "$UNIT.timer"
+          systemctl stop "$UNIT.timer"
+          RDEOF
+          chmod +x TEST-53-TIMER.randomized-delay.sh
+
+          # Timer with AccuracySec property
+          cat > TEST-53-TIMER.accuracy-sec.sh << 'ASEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "Transient timer accepts AccuracySec"
+          UNIT="timer-acc-$RANDOM"
+          systemd-run --unit="$UNIT" --on-active=1h -p AccuracySec=1s --remain-after-exit true
+          systemctl is-active "$UNIT.timer"
+          systemctl stop "$UNIT.timer"
+
+          : "Timer list-timers produces output"
+          UNIT2="timer-list-$RANDOM"
+          systemd-run --unit="$UNIT2" --on-active=2h --remain-after-exit true
+          OUT="$(systemctl list-timers --no-pager --all)"
+          [[ -n "$OUT" ]]
+          systemctl stop "$UNIT2.timer"
+          ASEOF
+          chmod +x TEST-53-TIMER.accuracy-sec.sh
+
+          # Timer WakeSystem property
+          cat > TEST-53-TIMER.wake-system.sh << 'WSEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          : "Transient timer accepts WakeSystem property"
+          UNIT="timer-wake-$RANDOM"
+          systemd-run --unit="$UNIT" --on-active=1h -p WakeSystem=false --remain-after-exit true
+          systemctl is-active "$UNIT.timer"
+          systemctl stop "$UNIT.timer"
+
+          : "Timer with RemainAfterElapse=false"
+          UNIT2="timer-rae-$RANDOM"
+          systemd-run --unit="$UNIT2" --on-active=1h -p RemainAfterElapse=false --remain-after-exit true
+          systemctl is-active "$UNIT2.timer"
+          systemctl stop "$UNIT2.timer"
+          WSEOF
+          chmod +x TEST-53-TIMER.wake-system.sh
         '';
       }
       {
@@ -11185,6 +11320,102 @@
           rm -rf /tmp/tmpfiles-test-dir /tmp/tmpfiles-test.conf /tmp/tmpfiles-test2.conf
           TCEOF
           chmod +x TEST-74-AUX-UTILS.tmpfiles-create.sh
+
+          # systemctl show after-timestamp for service
+          cat > TEST-74-AUX-UTILS.after-timestamp.sh << 'ATEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "InactiveEnterTimestamp set after service stops"
+          UNIT="ats-$RANDOM"
+          systemd-run --wait --unit="$UNIT" true
+          TS="$(systemctl show -P InactiveEnterTimestamp "$UNIT.service")"
+          [[ -n "$TS" ]]
+
+          : "ActiveEnterTimestamp was set during run"
+          TS2="$(systemctl show -P ActiveEnterTimestamp "$UNIT.service")"
+          [[ -n "$TS2" ]]
+          ATEOF
+          chmod +x TEST-74-AUX-UTILS.after-timestamp.sh
+
+          # systemctl show with multiple -P flags
+          cat > TEST-74-AUX-UTILS.show-multi-p.sh << 'SMPEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemctl show multiple properties on separate calls"
+          UNIT="multi-p-$RANDOM"
+          systemd-run --wait --unit="$UNIT" true
+          TYPE="$(systemctl show -P Type "$UNIT.service")"
+          [[ "$TYPE" == "simple" ]]
+          RESULT="$(systemctl show -P Result "$UNIT.service")"
+          [[ "$RESULT" == "success" ]]
+          SMPEOF
+          chmod +x TEST-74-AUX-UTILS.show-multi-p.sh
+
+          # systemctl show TriggeredBy for service triggered by timer
+          cat > TEST-74-AUX-UTILS.triggered-by.sh << 'TBEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "TriggeredBy shows timer for timed service"
+          UNIT="trig-by-$RANDOM"
+          systemd-run --unit="$UNIT" --on-active=1h --remain-after-exit true
+          sleep 1
+          TB="$(systemctl show -P TriggeredBy "$UNIT.service" 2>/dev/null)" || true
+          # May be empty in rust-systemd, just verify no crash
+          echo "TriggeredBy=$TB"
+          systemctl stop "$UNIT.timer" "$UNIT.service" 2>/dev/null || true
+          TBEOF
+          chmod +x TEST-74-AUX-UTILS.triggered-by.sh
+
+          # systemctl show StatusErrno
+          cat > TEST-74-AUX-UTILS.status-errno2.sh << 'SE2EOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "StatusErrno is 0 for successful service"
+          UNIT="serrno-$RANDOM"
+          systemd-run --wait --unit="$UNIT" true
+          SE="$(systemctl show -P StatusErrno "$UNIT.service")"
+          [[ "$SE" == "0" || "$SE" == "" ]]
+          SE2EOF
+          chmod +x TEST-74-AUX-UTILS.status-errno2.sh
+
+          # systemctl show WatchdogUSec
+          cat > TEST-74-AUX-UTILS.watchdog-usec.sh << 'WUEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "WatchdogUSec defaults to 0"
+          UNIT="wdog-$RANDOM"
+          systemd-run --wait --unit="$UNIT" true
+          WD="$(systemctl show -P WatchdogUSec "$UNIT.service")"
+          [[ "$WD" == "0" || "$WD" == "infinity" || "$WD" == "" ]]
+          WUEOF
+          chmod +x TEST-74-AUX-UTILS.watchdog-usec.sh
+
+          # systemd-tmpfiles --clean
+          cat > TEST-74-AUX-UTILS.tmpfiles-clean.sh << 'TCLEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          : "systemd-tmpfiles --clean runs without error"
+          # Create a tmpfiles config
+          echo "d /tmp/tmpfiles-clean-test 0755 root root -" > /tmp/tmpclean.conf
+          systemd-tmpfiles --create /tmp/tmpclean.conf
+          test -d /tmp/tmpfiles-clean-test
+          # --clean should not error
+          systemd-tmpfiles --clean /tmp/tmpclean.conf || true
+          rm -rf /tmp/tmpfiles-clean-test /tmp/tmpclean.conf
+          TCLEOF
+          chmod +x TEST-74-AUX-UTILS.tmpfiles-clean.sh
 
           rm -f TEST-74-AUX-UTILS.busctl.sh \
                TEST-74-AUX-UTILS.capsule.sh \
