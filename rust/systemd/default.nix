@@ -2638,6 +2638,98 @@
           RMEOF
           chmod +x TEST-07-PID1.requires-mounts-for.sh
 
+          # Custom systemctl kill test
+          cat > TEST-07-PID1.systemctl-kill.sh << 'SKEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              systemctl stop kill-test.service 2>/dev/null
+              rm -f /run/systemd/system/kill-test.service
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          # Helper: retry a command up to 5 times with 1s delay (works around EAGAIN)
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep 1; done; "$@"; }
+
+          : "systemctl kill sends signal to service"
+          cat > /run/systemd/system/kill-test.service << EOF
+          [Service]
+          ExecStart=sleep infinity
+          EOF
+          retry systemctl daemon-reload
+          retry systemctl start kill-test.service
+          systemctl is-active kill-test.service
+          PID="$(systemctl show -P MainPID kill-test.service)"
+          [[ "$PID" -gt 0 ]]
+
+          # Kill with SIGTERM (default)
+          systemctl kill kill-test.service
+          timeout 10 bash -c 'until ! systemctl is-active kill-test.service 2>/dev/null; do sleep 0.5; done'
+          (! systemctl is-active kill-test.service)
+
+          : "systemctl kill with custom signal"
+          retry systemctl start kill-test.service
+          systemctl is-active kill-test.service
+          systemctl kill --signal=SIGKILL kill-test.service
+          timeout 10 bash -c 'until ! systemctl is-active kill-test.service 2>/dev/null; do sleep 0.5; done'
+          (! systemctl is-active kill-test.service)
+          SKEOF
+          chmod +x TEST-07-PID1.systemctl-kill.sh
+
+          # Custom WantedBy= target pull-in test
+          cat > TEST-07-PID1.wantedby-target.sh << 'WTEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          . "$(dirname "$0")"/util.sh
+
+          at_exit() {
+              set +e
+              systemctl disable wantedby-test.service 2>/dev/null
+              systemctl stop wantedby-test.service custom-test.target 2>/dev/null
+              rm -f /run/systemd/system/wantedby-test.service
+              rm -f /run/systemd/system/custom-test.target
+              systemctl daemon-reload
+          }
+          trap at_exit EXIT
+
+          # Helper: retry a command up to 5 times with 1s delay (works around EAGAIN)
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep 1; done; "$@"; }
+
+          : "WantedBy= creates symlink on enable and target starts service"
+          cat > /run/systemd/system/custom-test.target << EOF
+          [Unit]
+          Description=Custom test target
+          EOF
+          cat > /run/systemd/system/wantedby-test.service << EOF
+          [Service]
+          Type=oneshot
+          ExecStart=true
+          RemainAfterExit=yes
+          [Install]
+          WantedBy=custom-test.target
+          EOF
+          retry systemctl daemon-reload
+          systemctl enable wantedby-test.service
+          # Verify symlink was created
+          [[ -L /etc/systemd/system/custom-test.target.wants/wantedby-test.service ]]
+          # Starting the target should pull in the service
+          systemctl start custom-test.target
+          systemctl is-active wantedby-test.service
+          systemctl stop custom-test.target wantedby-test.service
+          systemctl disable wantedby-test.service
+          # Verify symlink was removed
+          [[ ! -L /etc/systemd/system/custom-test.target.wants/wantedby-test.service ]]
+          WTEOF
+          chmod +x TEST-07-PID1.wantedby-target.sh
+
           rm -f TEST-07-PID1.attach_processes.sh \
                TEST-07-PID1.concurrency.sh \
                TEST-07-PID1.DeferReactivation.sh \
