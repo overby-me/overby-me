@@ -329,10 +329,12 @@ impl Parser {
         // Resolve any deferred heredoc bodies (for pipeline heredocs like cmd <<EOF | cmd2)
         self.resolve_heredoc_bodies(&mut list);
 
+        let end_line = self.current_line();
         Ok(CompleteCommand {
             list,
             background,
             line,
+            end_line,
         })
     }
 

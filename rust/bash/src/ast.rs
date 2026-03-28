@@ -9,6 +9,7 @@ pub struct CompleteCommand {
     pub list: AndOrList,
     pub background: bool,
     pub line: usize,
+    pub end_line: usize,
 }
 
 /// A chain of pipelines connected by && or ||.
