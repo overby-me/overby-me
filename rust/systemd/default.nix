@@ -1824,9 +1824,10 @@
 
           at_exit() {
               set +e
-              systemctl stop binds-to-test-{a,b}.service stop-prop-test-{1,2}.service 2>/dev/null
+              systemctl stop binds-to-test-{a,b}.service stop-prop-test-{1,2}.service part-of-test-{x,y}.service 2>/dev/null
               rm -f /run/systemd/system/binds-to-test-{a,b}.service
               rm -f /run/systemd/system/stop-prop-test-{1,2}.service
+              rm -f /run/systemd/system/part-of-test-{x,y}.service
               systemctl daemon-reload
           }
           trap at_exit EXIT
@@ -1879,6 +1880,31 @@
           systemctl stop stop-prop-test-2.service
           timeout 10 bash -c 'until ! systemctl is-active stop-prop-test-1.service 2>/dev/null; do sleep 0.5; done'
           (! systemctl is-active stop-prop-test-1.service)
+
+          : "PartOf= stops dependent when parent unit stops"
+          cat > /run/systemd/system/part-of-test-y.service << EOF
+          [Service]
+          ExecStart=sleep infinity
+          EOF
+
+          cat > /run/systemd/system/part-of-test-x.service << EOF
+          [Unit]
+          PartOf=part-of-test-y.service
+          After=part-of-test-y.service
+          [Service]
+          ExecStart=sleep infinity
+          EOF
+
+          systemctl daemon-reload
+          systemctl start part-of-test-y.service
+          systemctl start part-of-test-x.service
+          systemctl is-active part-of-test-x.service
+          systemctl is-active part-of-test-y.service
+
+          # Stopping y should pull down x (PartOf semantics)
+          systemctl stop part-of-test-y.service
+          timeout 10 bash -c 'until ! systemctl is-active part-of-test-x.service 2>/dev/null; do sleep 0.5; done'
+          (! systemctl is-active part-of-test-x.service)
           BTEOF
                     chmod +x TEST-23-UNIT-FILE.binds-to.sh
 
