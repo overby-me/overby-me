@@ -2335,6 +2335,28 @@
           grep -qE "^ExecStart=.*true.*$" "/run/systemd/transient/$UNIT.service"
           systemctl stop "$UNIT.service" || :
 
+          : "Transient scope basics"
+          systemd-run --scope true
+          systemd-run --scope bash -xec 'echo scope-works'
+
+          : "Transient scope inherits caller environment"
+          export SCOPE_TEST_VAR=hello_scope
+          systemd-run --scope bash -xec '[[ "$SCOPE_TEST_VAR" == hello_scope ]]'
+
+          : "Transient scope with RuntimeMaxSec override"
+          systemd-run --scope \
+                      --property=RuntimeMaxSec=10 \
+                      --property=RuntimeMaxSec=infinity \
+                      true
+
+          : "Transient scope with uid/gid"
+          systemd-run --scope --uid=testuser bash -xec '[[ "$(id -nu)" == testuser ]]'
+          systemd-run --scope --gid=testuser bash -xec '[[ "$(id -ng)" == testuser ]]'
+
+          : "Transient scope with named unit"
+          UNIT="scope-named-$RANDOM"
+          systemd-run --scope --unit="$UNIT" true
+
           : "Error handling"
           (! systemd-run)
           (! systemd-run "")
