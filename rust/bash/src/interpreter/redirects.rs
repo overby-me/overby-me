@@ -319,8 +319,16 @@ impl Shell {
                         .open(&target_str)
                         .map_err(|e| format!("{}: {}", target_str, Self::io_error_message(&e)))?;
                     let raw_fd = file.into_raw_fd();
-                    nix::unistd::dup2(raw_fd, fd).map_err(|e| e.to_string())?;
-                    nix::unistd::close(raw_fd).ok();
+                    if raw_fd != fd {
+                        nix::unistd::dup2(raw_fd, fd).map_err(|e| e.to_string())?;
+                        nix::unistd::close(raw_fd).ok();
+                    }
+                    // Clear CLOEXEC so child processes inherit this fd
+                    nix::fcntl::fcntl(
+                        fd,
+                        nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::empty()),
+                    )
+                    .ok();
                 }
                 RedirectKind::ProcessSubIn | RedirectKind::ProcessSubOut => {
                     // Process substitution handled during word expansion
