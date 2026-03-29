@@ -268,6 +268,18 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                     (width_str.parse().unwrap_or(0), flags.contains('-'))
                 };
                 let zero_pad = flags.contains('0');
+                // Skip length modifiers (l, ll, h, hh, L, z, j, t)
+                // — bash ignores these since all integers are native-width
+                if let Some(&c) = chars.peek()
+                    && matches!(c, 'l' | 'h' | 'L' | 'z' | 'j' | 't')
+                {
+                    chars.next();
+                    if let Some(&c2) = chars.peek()
+                        && ((c == 'l' && c2 == 'l') || (c == 'h' && c2 == 'h'))
+                    {
+                        chars.next();
+                    }
+                }
                 match chars.next() {
                     Some('(') => {
                         // %(fmt)T — strftime format
