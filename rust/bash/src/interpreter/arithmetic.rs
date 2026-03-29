@@ -97,6 +97,14 @@ impl Shell {
         let expanded_cs: String;
         let expr = if expr.contains('$') {
             expanded_cs = self.expand_comsubs_in_arith(expr);
+            // Update top expression with expanded version for error messages
+            if self.arith_depth == 1 {
+                if let Some(ref mut top) = self.arith_top_expr {
+                    if top.contains('$') {
+                        *top = expanded_cs.trim_start().to_string();
+                    }
+                }
+            }
             &expanded_cs
         } else {
             expr
