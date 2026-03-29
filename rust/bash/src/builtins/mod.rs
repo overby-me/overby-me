@@ -266,8 +266,8 @@ fn parse_printf_int(arg: &str) -> i64 {
             Ok(v) => v,
             Err(_) => {
                 // For overflow, clamp to INT64_MAX/MIN like bash
-                if arg.starts_with('-') {
-                    arg[1..].parse::<u64>().map(|_| i64::MIN).unwrap_or(0)
+                if let Some(abs) = arg.strip_prefix('-') {
+                    abs.parse::<u64>().map(|_| i64::MIN).unwrap_or(0)
                 } else {
                     arg.parse::<u64>().map(|_| i64::MAX).unwrap_or(0)
                 }
