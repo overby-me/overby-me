@@ -930,6 +930,10 @@ impl Shell {
         // Check for arithmetic errors during word expansion (e.g., echo $(( 1/0 )))
         if crate::expand::take_arith_error() {
             self.last_status = 1;
+            // In POSIX mode, expansion errors are fatal
+            if self.opt_posix {
+                std::process::exit(1);
+            }
             return 1;
         }
 
