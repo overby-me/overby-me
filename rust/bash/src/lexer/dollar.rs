@@ -778,8 +778,8 @@ fn parse_dollar_inner(
             }
             WordPart::DoubleQuoted(dq_parts)
         }
-        '\'' if !IN_HEREDOC.with(|f| f.get()) => {
-            // $'...' ANSI-C quoting (not in heredoc context)
+        '\'' => {
+            // $'...' ANSI-C quoting
             *i += 1; // skip '
             let mut s = String::new();
             while *i < chars.len() && chars[*i] != '\'' {
