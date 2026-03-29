@@ -785,41 +785,40 @@ fn format_program_impl(program: &Program, indent: usize, semi_last: bool) -> Str
             pending_bg = Some(line);
             continue;
         }
-        // Add semicolons after commands (bash style):
+        // Add semicolons after commands and blank lines after heredocs (bash style):
         {
             let is_last = idx == program.len() - 1;
             let add_semi = if is_last { semi_last } else { true };
-            if add_semi {
-                let trimmed = line.trim_end();
-                let is_keyword = trimmed.ends_with('{')
-                    || trimmed.ends_with("then")
-                    || trimmed.ends_with("do")
-                    || trimmed.ends_with("else");
-                // Don't add ; if the command ends with a heredoc body
-                // (the last line is the heredoc delimiter, e.g., "EOF")
-                let ends_with_heredoc = if let Some(last_line) = line.rsplit('\n').next() {
-                    let llt = last_line.trim();
-                    !llt.is_empty()
-                        && !llt.contains(' ')
-                        && !llt.contains('\t')
-                        && !llt.ends_with(';')
-                        && !llt.ends_with('}')
-                        && !llt.ends_with(')')
-                        && line.contains("<<")
-                } else {
-                    false
-                };
-                if !is_keyword
-                    && !trimmed.ends_with('&')
-                    && !trimmed.is_empty()
-                    && !ends_with_heredoc
-                {
-                    line.push(';');
-                }
-                // Add blank line after heredoc body (bash puts \n after delimiter)
-                if ends_with_heredoc {
-                    line.push('\n');
-                }
+            let trimmed = line.trim_end();
+            let is_keyword = trimmed.ends_with('{')
+                || trimmed.ends_with("then")
+                || trimmed.ends_with("do")
+                || trimmed.ends_with("else");
+            // Check if the command ends with a heredoc body
+            // (the last line is the heredoc delimiter, e.g., "EOF")
+            let ends_with_heredoc = if let Some(last_line) = line.rsplit('\n').next() {
+                let llt = last_line.trim();
+                !llt.is_empty()
+                    && !llt.contains(' ')
+                    && !llt.contains('\t')
+                    && !llt.ends_with(';')
+                    && !llt.ends_with('}')
+                    && !llt.ends_with(')')
+                    && line.contains("<<")
+            } else {
+                false
+            };
+            if add_semi
+                && !is_keyword
+                && !trimmed.ends_with('&')
+                && !trimmed.is_empty()
+                && !ends_with_heredoc
+            {
+                line.push(';');
+            }
+            // Add blank line after heredoc body (bash puts \n after delimiter)
+            if ends_with_heredoc {
+                line.push('\n');
             }
         }
         lines.push(line);
