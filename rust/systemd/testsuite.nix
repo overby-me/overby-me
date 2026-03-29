@@ -10,6 +10,7 @@
   name,
   patchScript ? "",
   extraPackages ? [],
+  testEnv ? {},
 }: let
   systemdSrc = pkgs.systemd.src;
 
@@ -275,10 +276,9 @@ in
       else:
           units_dir = "/etc/systemd-tests/units"
 
-      test_cmd = (
-          f"cd {units_dir} && "
-          "bash -x ./${testName}.sh 2>&1"
-      )
+      env_exports = "${builtins.concatStringsSep "; " (builtins.attrValues (builtins.mapAttrs (k: v: "export ${k}='${v}'") testEnv))}"
+      env_prefix = f"{env_exports}; " if env_exports else ""
+      test_cmd = f"cd {units_dir} && {env_prefix}bash -x ./${testName}.sh 2>&1"
 
       try:
           (rc, output) = machine.execute(test_cmd)

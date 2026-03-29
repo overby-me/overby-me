@@ -4,8 +4,8 @@ use crate::lock_ext::RwLockExt;
 use crate::runtime_info::{ArcMutRuntimeInfo, RuntimeInfo};
 use crate::signal_handler::ChildTermination;
 use crate::units::{
-    ExitType, ServiceRestart, ServiceType, Specific, SuccessExitStatus, Timeout, UnitAction,
-    UnitId, UnitOperationErrorReason, UnitStatus,
+    ExitType, RestartMode, ServiceRestart, ServiceType, Specific, SuccessExitStatus, Timeout,
+    UnitAction, UnitId, UnitOperationErrorReason, UnitStatus,
 };
 
 /// Compute a graduated restart delay that ramps from `base_sec` to
@@ -708,12 +708,14 @@ pub(crate) fn service_exit_handler(
 
     trace!("Check if we want to restart the unit");
     let name = &unit.id.name;
-    let (restart_unit, restart_sec) = {
+    let (restart_unit, restart_sec, restart_mode) = {
         if let Specific::Service(srvc) = &unit.specific {
             trace!(
                 "Service with id: {:?}, name: {} pid: {} exited with: {:?}",
                 srvc_id, unit.id.name, pid, code
             );
+
+            let restart_mode = srvc.conf.restart_mode;
 
             // Check whether the watchdog or RuntimeMaxSec enforcement
             // thread killed this service.
@@ -756,7 +758,7 @@ pub(crate) fn service_exit_handler(
                     "Service {}: exit status {:?} matches RestartPreventExitStatus=, skipping restart",
                     unit.id.name, code
                 );
-                (false, srvc.conf.restart_sec.clone())
+                (false, srvc.conf.restart_sec.clone(), restart_mode)
             } else {
                 // RestartForceExitStatus= overrides the Restart= policy: if the
                 // termination status matches any entry, force a restart.
@@ -792,10 +794,10 @@ pub(crate) fn service_exit_handler(
                     srvc.conf.restart_sec.clone()
                 };
 
-                (do_restart, restart_sec)
+                (do_restart, restart_sec, restart_mode)
             }
         } else {
-            (false, None)
+            (false, None, RestartMode::default())
         }
     };
 
@@ -849,14 +851,13 @@ pub(crate) fn service_exit_handler(
     }
 
     if restart_unit {
-        // Trigger OnSuccess=/OnFailure= even when restarting — systemd fires
-        // these on the state transition independent of restart.
-        // A clean signal (SIGHUP/SIGINT/SIGTERM/SIGPIPE) or explicit success
-        // triggers OnSuccess=; everything else triggers OnFailure=.
-        // NOTE: We trigger here while still holding the read lock because the
-        // restart logic below also needs it. The trigger spawns a thread that
-        // acquires its own locks asynchronously.
-        if let Some(unit) = run_info.unit_table.get(&srvc_id) {
+        // With RestartMode=direct, skip OnSuccess=/OnFailure= triggering and
+        // dependency propagation — the service restarts "directly" without
+        // going through the full deactivation path. With RestartMode=normal,
+        // fire these triggers as real systemd does.
+        if restart_mode == RestartMode::Normal
+            && let Some(unit) = run_info.unit_table.get(&srvc_id)
+        {
             let is_clean =
                 success_exit_status.is_success(&code) || success_exit_status.is_clean_signal(&code);
             if is_clean && !unit.common.unit.on_success.is_empty() {
@@ -869,6 +870,30 @@ pub(crate) fn service_exit_handler(
                 trigger_on_success_failure_units(&targets, name, "OnFailure", arc_run_info, mon);
             }
         }
+
+        // With RestartMode=normal, propagate the stop to bound/required_by
+        // units before restarting. This matches real systemd: the service goes
+        // through the full deactivation path, so BindsTo= deps are stopped.
+        // With RestartMode=direct, skip this — deps don't see the restart.
+        let stopped_deps = if restart_mode == RestartMode::Normal {
+            let mut deps = Vec::new();
+            if let Some(unit) = run_info.unit_table.get(&srvc_id) {
+                deps.extend(unit.common.dependencies.bound_by.clone());
+                deps.extend(unit.common.dependencies.required_by.clone());
+                deps.extend(unit.common.dependencies.part_of_by.clone());
+            }
+            for dep_id in &deps {
+                if let Err(e) = crate::units::deactivate_unit_recursive(dep_id, run_info) {
+                    trace!(
+                        "Failed to propagate stop to {} during RestartMode=normal restart of {name}: {e}",
+                        dep_id.name
+                    );
+                }
+            }
+            deps
+        } else {
+            Vec::new()
+        };
 
         // Mark the unit as Restarting so that SubState shows "auto-restart"
         // and `systemctl start` can shortcut the pending restart.
@@ -957,7 +982,49 @@ pub(crate) fn service_exit_handler(
             return Ok(None);
         }
         trace!("Restart service {name} after it died");
+        // Clear the old PID and process group so that srvc.start() does not
+        // reject the restart with AlreadyHasPID.  The old process is already
+        // dead (we are in its exit handler).
+        if let Some(unit) = run_info.unit_table.get(&srvc_id)
+            && let Specific::Service(srvc) = &unit.specific
+        {
+            let mut state = srvc.state.write_poisoned();
+            state.srvc.pid = None;
+            state.srvc.process_group = None;
+        }
         crate::units::reactivate_unit(srvc_id, run_info).map_err(|e| format!("{e}"))?;
+
+        // For RestartMode=normal, re-activate the deps that were stopped.
+        // This mirrors real systemd: BindsTo= deps restart when the bound
+        // unit comes back.
+        for dep_id in &stopped_deps {
+            if let Some(dep_unit) = run_info.unit_table.get(dep_id) {
+                let dep_status = dep_unit.common.status.read_poisoned().clone();
+                if matches!(
+                    dep_status,
+                    UnitStatus::Stopped(..) | UnitStatus::NeverStarted
+                ) {
+                    // Reset to NeverStarted so activate_unit doesn't skip the
+                    // unit (it returns early for StoppedUnexpected).
+                    {
+                        let mut status = dep_unit.common.status.write_poisoned();
+                        if status.is_stopped() {
+                            *status = UnitStatus::NeverStarted;
+                        }
+                    }
+                    if let Err(e) = crate::units::activate_unit(
+                        dep_id.clone(),
+                        run_info,
+                        crate::units::ActivationSource::Regular,
+                    ) {
+                        trace!(
+                            "Failed to re-activate {} after RestartMode=normal restart of {name}: {e}",
+                            dep_id.name
+                        );
+                    }
+                }
+            }
+        }
     } else {
         // Detect whether this exit is for a stale process that was replaced
         // by a restart.  If the service already has a different PID (the new

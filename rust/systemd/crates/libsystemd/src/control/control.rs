@@ -6696,16 +6696,39 @@ pub fn execute_command(
             refresh_directory_deps(&id.name, &run_info);
             // PropagatesStopTo= stop propagation: stop listed units before
             // reactivation so the restart's implicit stop propagates correctly.
-            {
+            // Also stop required_by/bound_by units so they get restarted after.
+            let stopped_reverse_deps: Vec<crate::units::UnitId> = {
                 let ri = run_info.read_poisoned();
+                let mut deps_to_stop = Vec::new();
                 if let Some(unit) = ri.unit_table.get(&id) {
                     for stop_id in &unit.common.dependencies.propagates_stop_to {
                         if let Err(e) = crate::units::deactivate_unit_recursive(stop_id, &ri) {
                             warn!("Failed to propagate stop to {}: {e}", stop_id.name);
                         }
                     }
+                    // Collect reverse deps (units that Require/BindsTo this unit)
+                    for dep_id in unit
+                        .common
+                        .dependencies
+                        .required_by
+                        .iter()
+                        .chain(unit.common.dependencies.bound_by.iter())
+                    {
+                        if let Some(dep) = ri.unit_table.get(dep_id) {
+                            let status = dep.common.status.read_poisoned();
+                            if status.is_started() {
+                                deps_to_stop.push(dep_id.clone());
+                            }
+                        }
+                    }
+                    for dep_id in &deps_to_stop {
+                        if let Err(e) = crate::units::deactivate_unit_recursive(dep_id, &ri) {
+                            warn!("Failed to stop reverse dep {}: {e}", dep_id.name);
+                        }
+                    }
                 }
-            }
+                deps_to_stop
+            };
             {
                 let ri = run_info.read_poisoned();
                 crate::units::reactivate_unit(id.clone(), &ri).map_err(|e| format!("{e}"))?;
@@ -6758,6 +6781,32 @@ pub fn execute_command(
                 let errs = crate::units::activate_needed_units(dep_id, run_info.clone());
                 for err in &errs {
                     warn!("Error re-starting dependency after restart: {err}");
+                }
+            }
+            // Re-activate reverse deps (required_by/bound_by) that were stopped
+            for dep_id in stopped_reverse_deps {
+                {
+                    let ri = run_info.read_poisoned();
+                    if let Some(dep) = ri.unit_table.get(&dep_id) {
+                        let mut status = dep.common.status.write_poisoned();
+                        if status.is_stopped() {
+                            *status = crate::units::UnitStatus::NeverStarted;
+                        }
+                    }
+                }
+                {
+                    let ri = run_info.read_poisoned();
+                    if let Some(dep) = ri.unit_table.get(&dep_id) {
+                        let status = dep.common.status.read_poisoned();
+                        if matches!(&*status, crate::units::UnitStatus::NeverStarted) {
+                            drop(status);
+                            let errs =
+                                crate::units::activate_needed_units(dep_id, run_info.clone());
+                            for err in &errs {
+                                warn!("Error re-activating reverse dep: {err}");
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -7142,7 +7191,12 @@ pub fn execute_command(
             }
 
             // Poll until all specified units reach a terminal state.
+            // Wait for each unit to have been started at least once (not
+            // NeverStarted) and then stopped. This avoids racing with the
+            // activation path where a unit might still be NeverStarted.
             let mut any_failed = false;
+            let mut seen_started: std::collections::HashSet<crate::units::UnitId> =
+                std::collections::HashSet::new();
             loop {
                 let mut all_done = true;
                 let ri = run_info.read_poisoned();
@@ -7150,14 +7204,23 @@ pub fn execute_command(
                     if let Some(unit) = ri.unit_table.get(id) {
                         let status = unit.common.status.read_poisoned();
                         match &*status {
+                            crate::units::UnitStatus::Started(_)
+                            | crate::units::UnitStatus::Starting => {
+                                seen_started.insert(id.clone());
+                                all_done = false;
+                            }
                             crate::units::UnitStatus::Stopped(_, errors) => {
+                                seen_started.insert(id.clone());
                                 if !errors.is_empty() {
                                     any_failed = true;
                                 }
                             }
-                            crate::units::UnitStatus::NeverStarted => {}
                             _ => {
-                                all_done = false;
+                                // NeverStarted or other transient state — only
+                                // consider done if we've seen it started before.
+                                if !seen_started.contains(id) {
+                                    all_done = false;
+                                }
                             }
                         }
                     }

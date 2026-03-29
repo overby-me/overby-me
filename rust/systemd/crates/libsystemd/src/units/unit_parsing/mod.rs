@@ -3821,13 +3821,14 @@ pub enum OOMPolicy {
 /// See `systemd.service(5)` `RestartMode=`.
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug, Default)]
 pub enum RestartMode {
-    /// The service is stopped, then started again (default). All
-    /// `ExecStop*=` / `ExecStartPre=` etc. run.
+    /// Restart without going through the full deactivation path.
+    /// OnFailure= units are not triggered and dependent units (BindsTo=,
+    /// required_by) are not stopped during the restart.
     #[default]
     Direct,
-    /// (Reserved for future use — not yet implemented by real systemd either
-    /// in all versions.) Behaves the same as `Direct` in this
-    /// implementation.
+    /// Go through the full deactivation path on restart. OnFailure= units
+    /// are triggered and dependent units (BindsTo=, required_by) are stopped
+    /// then re-activated after the service restarts.
     Normal,
 }
 
