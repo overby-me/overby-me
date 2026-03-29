@@ -623,6 +623,31 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                     Some('b') => {
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("");
                         let has_stop = arg.contains("\\c");
+                        // Check for \x with no hex digits in %b argument
+                        // Must skip \\x (escaped backslash + literal x)
+                        {
+                            let bytes = arg.as_bytes();
+                            let mut i = 0;
+                            while i < bytes.len().saturating_sub(1) {
+                                if bytes[i] == b'\\' {
+                                    if bytes[i + 1] == b'\\' {
+                                        i += 2; // skip escaped backslash
+                                        continue;
+                                    }
+                                    if bytes[i + 1] == b'x' {
+                                        let next = bytes.get(i + 2).copied().unwrap_or(0);
+                                        if !next.is_ascii_hexdigit() {
+                                            eprintln!("{}: printf: missing hex digit for \\x", shell.error_prefix());
+                                            had_error = true;
+                                            break;
+                                        }
+                                        i += 2;
+                                        continue;
+                                    }
+                                }
+                                i += 1;
+                            }
+                        }
                         let expanded = interpret_echo_escapes(arg);
                         // Apply precision (truncate) then width (pad)
                         let truncated = if let Some(p) = precision {
