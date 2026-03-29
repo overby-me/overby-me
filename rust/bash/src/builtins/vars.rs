@@ -1221,6 +1221,9 @@ pub(super) fn builtin_let(shell: &mut Shell, args: &[String]) -> i32 {
     }
     shell.arith_is_let = false;
 
-    // let returns 1 if the last expression evaluates to 0, 0 otherwise
-    if result == 0 { 1 } else { 0 }
+    // Drain arithmetic error flag — let handles errors via return status
+    let had_error = crate::expand::take_arith_error();
+
+    // let returns 1 if the last expression evaluates to 0 or had error, 0 otherwise
+    if had_error || result == 0 { 1 } else { 0 }
 }
