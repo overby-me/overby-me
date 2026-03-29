@@ -575,11 +575,31 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                     Some('b') => {
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("");
                         let expanded = interpret_echo_escapes(arg);
-                        // Use raw byte output for %b (supports NUL bytes and raw bytes)
-                        use std::io::Write;
-                        std::io::stdout()
-                            .write_all(&string_to_raw_bytes(&expanded))
-                            .ok();
+                        // Apply precision (truncate) then width (pad)
+                        let truncated = if let Some(p) = precision {
+                            let end = expanded
+                                .char_indices()
+                                .nth(p)
+                                .map(|(i, _)| i)
+                                .unwrap_or(expanded.len());
+                            &expanded[..end]
+                        } else {
+                            &expanded
+                        };
+                        let w = w.min(4096);
+                        if w > 0 {
+                            if left {
+                                print!("{:<w$}", truncated);
+                            } else {
+                                print!("{:>w$}", truncated);
+                            }
+                        } else {
+                            // Use raw byte output for %b (supports NUL bytes and raw bytes)
+                            use std::io::Write;
+                            std::io::stdout()
+                                .write_all(&string_to_raw_bytes(truncated))
+                                .ok();
+                        }
                         arg_idx += 1;
                     }
                     Some('q') => {
