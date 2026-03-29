@@ -405,25 +405,8 @@ fn format_word(word: &Word) -> String {
                         s.push('\\');
                         s.push(ch);
                     }
-                } else if t.chars().any(|c| c.is_ascii_control()) {
-                    // Use $'...' for control characters
-                    s.push_str("$'");
-                    for ch in t.chars() {
-                        match ch {
-                            '\n' => s.push_str("\\n"),
-                            '\t' => s.push_str("\\t"),
-                            '\r' => s.push_str("\\r"),
-                            '\'' => s.push_str("\\'"),
-                            '\\' => s.push_str("\\\\"),
-                            '\x07' => s.push_str("\\a"),
-                            c if c.is_ascii_control() => {
-                                s.push_str(&format!("\\{:03o}", c as u8));
-                            }
-                            c => s.push(c),
-                        }
-                    }
-                    s.push('\'');
                 } else {
+                    // Bash preserves raw bytes (including control chars) in single quotes
                     s.push('\'');
                     s.push_str(t);
                     s.push('\'');
@@ -471,30 +454,8 @@ fn format_word_part(part: &WordPart) -> String {
     match part {
         WordPart::Literal(t) => t.clone(),
         WordPart::SingleQuoted(t) => {
-            if t.chars().any(|c| c.is_ascii_control()) {
-                // Use $'...' format for strings with control characters
-                let mut s = String::from("$'");
-                for ch in t.chars() {
-                    match ch {
-                        '\n' => s.push_str("\\n"),
-                        '\t' => s.push_str("\\t"),
-                        '\r' => s.push_str("\\r"),
-                        '\'' => s.push_str("\\'"),
-                        '\\' => s.push_str("\\\\"),
-                        '\x07' => s.push_str("\\a"),
-                        '\x08' => s.push_str("\\b"),
-                        '\x1b' => s.push_str("\\E"),
-                        c if c.is_ascii_control() => {
-                            s.push_str(&format!("\\{:03o}", c as u8));
-                        }
-                        c => s.push(c),
-                    }
-                }
-                s.push('\'');
-                s
-            } else {
-                format!("'{}'", t)
-            }
+            // Bash preserves raw bytes (including control chars) in single-quoted strings
+            format!("'{}'", t)
         }
         WordPart::DoubleQuoted(parts) => {
             let mut s = String::from("\"");
