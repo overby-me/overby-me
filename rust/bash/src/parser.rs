@@ -874,17 +874,7 @@ impl Parser {
         self.skip_newlines();
 
         let mut items = Vec::new();
-        while self.current != Token::Eof
-            && !(self.is_keyword("esac") && {
-                // esac followed by | is a pattern alternative, not the terminator
-                let saved = self.lexer.save_position();
-                self.advance();
-                let next_is_pipe = self.current == Token::Pipe;
-                self.lexer.restore_position(saved);
-                self.current = Token::Word(vec![WordPart::Literal("esac".to_string())]);
-                !next_is_pipe
-            })
-        {
+        while !self.is_keyword("esac") && self.current != Token::Eof {
             // Optional leading (
             if self.current == Token::LParen {
                 self.advance();

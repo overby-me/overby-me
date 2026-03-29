@@ -549,25 +549,7 @@ fn parse_dollar_inner(
                                 let after_in = trimmed.ends_with(" in")
                                     || trimmed.ends_with("\tin")
                                     || trimmed.ends_with("\nin");
-                                // Check if followed by | (pattern alternative)
-                                let next_non_ws = {
-                                    let mut j = *i;
-                                    while j < chars.len() && matches!(chars[j], ' ' | '\t') {
-                                        j += 1;
-                                    }
-                                    if j < chars.len() {
-                                        Some(chars[j])
-                                    } else {
-                                        None
-                                    }
-                                };
-                                let followed_by_pipe = next_non_ws == Some('|');
-                                if !followed_by_pipe
-                                    && (in_case_action
-                                        || prev_ch == ';'
-                                        || prev_ch == '\n'
-                                        || after_in)
-                                {
+                                if in_case_action || prev_ch == ';' || prev_ch == '\n' || after_in {
                                     case_depth -= 1;
                                     case_paren_depth.pop();
                                     in_case_action = false;
