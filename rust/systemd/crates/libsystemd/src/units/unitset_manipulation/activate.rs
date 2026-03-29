@@ -344,9 +344,10 @@ pub fn activate_unit(
                 // Already running — nothing to do, don't re-dispatch before-chain
                 return Ok(StartResult::Started(vec![]));
             }
-            UnitStatus::Stopped(StatusStopped::StoppedFinal, _)
-                if !source.is_socket_activation() =>
-            {
+            UnitStatus::Stopped(
+                StatusStopped::StoppedFinal | StatusStopped::ConditionSkipped,
+                _,
+            ) if !source.is_socket_activation() => {
                 // Already finished (e.g. condition-skipped oneshot) — don't re-check
                 return Ok(StartResult::Started(vec![]));
             }

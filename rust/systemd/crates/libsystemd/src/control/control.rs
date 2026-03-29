@@ -3206,6 +3206,17 @@ fn create_transient_unit(
                         service_conf.final_kill_signal = Some(sig);
                     }
                 }
+                "ExitType" => match value.to_lowercase().as_str() {
+                    "main" | "" => {
+                        service_conf.exit_type = crate::units::ExitType::Main;
+                    }
+                    "cgroup" => {
+                        service_conf.exit_type = crate::units::ExitType::Cgroup;
+                    }
+                    _ => {
+                        warn!("Unknown ExitType value: {value}");
+                    }
+                },
                 "LimitNOFILE" => {
                     service_conf.limit_nofile =
                         crate::units::unit_parsing::parse_resource_limit(value);
@@ -4439,11 +4450,22 @@ pub fn execute_command(
                 };
                 let status = unit.common.status.read_poisoned();
                 match &*status {
-                    crate::units::UnitStatus::Stopped(_, errors) => {
-                        let (result, exit_code) = if errors.is_empty() {
-                            // Get the actual exit status from the service state.
-                            let exit_status =
-                                if let crate::units::Specific::Service(svc) = &unit.specific {
+                    crate::units::UnitStatus::Stopped(stop_reason, errors) => {
+                        let (result, exit_code) =
+                            if matches!(stop_reason, crate::units::StatusStopped::ConditionSkipped)
+                            {
+                                // ExecCondition= failed: service was skipped
+                                ("exec-condition", 1i32)
+                            } else if errors.is_empty() {
+                                // Clean stop: if StoppedFinal (explicit stop) always
+                                // return 0.  Otherwise use the process exit status.
+                                let exit_status = if matches!(
+                                    stop_reason,
+                                    crate::units::StatusStopped::StoppedFinal
+                                ) {
+                                    0
+                                } else if let crate::units::Specific::Service(svc) = &unit.specific
+                                {
                                     if let Ok(state) = svc.state.try_read() {
                                         state.srvc.main_exit_status.unwrap_or(0)
                                     } else {
@@ -4452,21 +4474,21 @@ pub fn execute_command(
                                 } else {
                                     0
                                 };
-                            ("success", exit_status)
-                        } else {
-                            // Failed — extract exit status from service state.
-                            let exit_status =
-                                if let crate::units::Specific::Service(svc) = &unit.specific {
-                                    if let Ok(state) = svc.state.try_read() {
-                                        state.srvc.main_exit_status.unwrap_or(1)
+                                ("success", exit_status)
+                            } else {
+                                // Failed — extract exit status from service state.
+                                let exit_status =
+                                    if let crate::units::Specific::Service(svc) = &unit.specific {
+                                        if let Ok(state) = svc.state.try_read() {
+                                            state.srvc.main_exit_status.unwrap_or(1)
+                                        } else {
+                                            1
+                                        }
                                     } else {
                                         1
-                                    }
-                                } else {
-                                    1
-                                };
-                            ("exit-code", exit_status)
-                        };
+                                    };
+                                ("exit-code", exit_status)
+                            };
                         let mut resp = serde_json::json!({
                             "started": unit_name,
                             "result": result,
@@ -5768,7 +5790,31 @@ pub fn execute_command(
             // Determine which PIDs to signal based on --kill-whom
             let pids_to_signal: Vec<i32> = match whom.as_str() {
                 "main" => main_pid.into_iter().collect(),
-                _ => main_pid.into_iter().collect(), // "all" falls back to main for now
+                _ => {
+                    // "all": send signal to all processes in the cgroup
+                    let mut pids = Vec::new();
+                    let ri = run_info.read_poisoned();
+                    if let Some(unit) = ri.unit_table.get(&id)
+                        && let Specific::Service(svc) = &unit.specific
+                    {
+                        let cgroup_path = &svc.conf.platform_specific.cgroup_path;
+                        let procs_file = cgroup_path.join("cgroup.procs");
+                        if let Ok(contents) = std::fs::read_to_string(&procs_file) {
+                            for line in contents.lines() {
+                                if let Ok(pid) = line.trim().parse::<i32>() {
+                                    pids.push(pid);
+                                }
+                            }
+                        }
+                    }
+                    drop(ri);
+                    // Fall back to main PID if cgroup enumeration found nothing
+                    if pids.is_empty() {
+                        main_pid.into_iter().collect()
+                    } else {
+                        pids
+                    }
+                }
             };
 
             if pids_to_signal.is_empty() {

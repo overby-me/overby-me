@@ -20,6 +20,7 @@ pub enum StatusStarted {
 pub enum StatusStopped {
     StoppedFinal,
     StoppedUnexpected,
+    ConditionSkipped,
 }
 
 impl std::fmt::Display for StatusStarted {
@@ -36,6 +37,7 @@ impl std::fmt::Display for StatusStopped {
         match self {
             Self::StoppedFinal => write!(f, "stopped"),
             Self::StoppedUnexpected => write!(f, "stopped unexpectedly"),
+            Self::ConditionSkipped => write!(f, "skipped (exec-condition)"),
         }
     }
 }

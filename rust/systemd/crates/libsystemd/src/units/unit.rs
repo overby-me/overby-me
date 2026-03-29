@@ -331,9 +331,9 @@ impl ServiceState {
             Ok(crate::services::StartResult::ConditionSkipped) => {
                 {
                     let mut status = status.write_poisoned();
-                    *status = UnitStatus::Stopped(StatusStopped::StoppedFinal, vec![]);
+                    *status = UnitStatus::Stopped(StatusStopped::ConditionSkipped, vec![]);
                 }
-                Ok(UnitStatus::Stopped(StatusStopped::StoppedFinal, vec![]))
+                Ok(UnitStatus::Stopped(StatusStopped::ConditionSkipped, vec![]))
             }
             Ok(crate::services::StartResult::WaitingForSocket) => {
                 {
@@ -516,7 +516,7 @@ impl ServiceState {
             Ok(crate::services::StartResult::ConditionSkipped) => {
                 {
                     let mut status = status.write_poisoned();
-                    *status = UnitStatus::Stopped(StatusStopped::StoppedFinal, vec![]);
+                    *status = UnitStatus::Stopped(StatusStopped::ConditionSkipped, vec![]);
                 }
                 Ok(())
             }
@@ -1089,7 +1089,10 @@ impl Unit {
                     status_locked.is_started()
                         || matches!(
                             &**status_locked,
-                            UnitStatus::Stopped(StatusStopped::StoppedFinal, _)
+                            UnitStatus::Stopped(
+                                StatusStopped::StoppedFinal | StatusStopped::ConditionSkipped,
+                                _
+                            )
                         )
                 } else if is_pull_dep {
                     **status_locked != UnitStatus::NeverStarted
@@ -1143,7 +1146,10 @@ impl Unit {
                     status_locked.is_started()
                         || matches!(
                             &**status_locked,
-                            UnitStatus::Stopped(StatusStopped::StoppedFinal, _)
+                            UnitStatus::Stopped(
+                                StatusStopped::StoppedFinal | StatusStopped::ConditionSkipped,
+                                _
+                            )
                         )
                 } else if is_pull_dep {
                     **status_locked != UnitStatus::NeverStarted

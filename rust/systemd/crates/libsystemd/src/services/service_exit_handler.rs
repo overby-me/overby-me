@@ -4,8 +4,8 @@ use crate::lock_ext::RwLockExt;
 use crate::runtime_info::{ArcMutRuntimeInfo, RuntimeInfo};
 use crate::signal_handler::ChildTermination;
 use crate::units::{
-    ServiceRestart, ServiceType, Specific, SuccessExitStatus, Timeout, UnitAction, UnitId,
-    UnitOperationErrorReason, UnitStatus,
+    ExitType, ServiceRestart, ServiceType, Specific, SuccessExitStatus, Timeout, UnitAction,
+    UnitId, UnitOperationErrorReason, UnitStatus,
 };
 
 /// Compute a graduated restart delay that ramps from `base_sec` to
@@ -44,6 +44,15 @@ fn compute_graduated_restart_delay(
     let delay = base_dur + std::time::Duration::from_millis(increment as u64);
 
     Some(Timeout::Duration(delay))
+}
+
+/// Check whether a cgroup directory still has live processes.
+#[cfg(target_os = "linux")]
+fn cgroup_has_processes(cgroup_path: &std::path::Path) -> bool {
+    let procs_file = cgroup_path.join("cgroup.procs");
+    std::fs::read_to_string(&procs_file)
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false)
 }
 
 /// Check whether a service has `RemainAfterExit=yes` configured.
@@ -359,6 +368,92 @@ pub(crate) fn service_exit_handler(
     }
 
     let success_exit_status = get_success_exit_status(unit);
+
+    // ExitType=cgroup: if the service is configured to only be considered dead
+    // when its cgroup is empty, check whether other processes remain. If so,
+    // keep the service active and poll until the cgroup drains.
+    // Skip this if the unit is already being stopped or is stopped (explicit
+    // `systemctl stop` — that command handles deactivation itself).
+    #[cfg(target_os = "linux")]
+    if let Specific::Service(srvc) = &unit.specific
+        && srvc.conf.exit_type == ExitType::Cgroup
+        && srvc.conf.srcv_type != ServiceType::OneShot
+    {
+        let status_locked = unit.common.status.read_poisoned();
+        let is_active = status_locked.is_started() || *status_locked == UnitStatus::Starting;
+        drop(status_locked);
+
+        let cgroup_path = &srvc.conf.platform_specific.cgroup_path;
+        if is_active && cgroup_has_processes(cgroup_path) {
+            let name = unit.id.name.clone();
+            trace!(
+                "Service {name}: main PID exited but ExitType=cgroup and cgroup still has processes, staying active"
+            );
+            // Clear the main PID since the process has exited, but keep
+            // the service in Started state.
+            {
+                let mut state = srvc.state.write_poisoned();
+                state.srvc.pid = None;
+            }
+
+            // Record the exit code from the main process for later use.
+            let main_code = code;
+            let main_success = success_exit_status.is_success(&code);
+
+            // Poll the cgroup until it's empty, then deactivate the service.
+            let cg = cgroup_path.clone();
+            let id = srvc_id.clone();
+            let ri = arc_run_info.clone();
+            std::thread::spawn(move || {
+                loop {
+                    std::thread::sleep(std::time::Duration::from_millis(250));
+                    if !cgroup_has_processes(&cg) {
+                        trace!("Service {name}: cgroup is now empty, completing exit");
+                        break;
+                    }
+                }
+                let guard = ri.read_poisoned();
+                // Deactivate the service now that the cgroup is empty.
+                loop {
+                    let res = crate::units::deactivate_unit_recursive(&id, &guard);
+                    let retry = if let Err(e) = &res {
+                        matches!(e.reason, UnitOperationErrorReason::DependencyError(_))
+                    } else {
+                        false
+                    };
+                    if !retry {
+                        if let Err(e) = res {
+                            error!("Failed to deactivate {name} after cgroup drain: {e}");
+                        }
+                        break;
+                    }
+                }
+
+                // If the main process exit was not clean, mark as failed.
+                if !main_success && let Some(unit) = guard.unit_table.get(&id) {
+                    let reason = match &main_code {
+                        ChildTermination::Exit(c) => UnitOperationErrorReason::GenericStartError(
+                            format!("process exited with status {c}"),
+                        ),
+                        ChildTermination::Signal(s) => UnitOperationErrorReason::GenericStartError(
+                            format!("process killed by signal {s}"),
+                        ),
+                    };
+                    let mut status = unit.common.status.write_poisoned();
+                    *status = UnitStatus::Stopped(
+                        crate::units::StatusStopped::StoppedUnexpected,
+                        vec![reason],
+                    );
+                }
+
+                // Clean up the cgroup directory.
+                if cg.exists() {
+                    let _ = std::fs::remove_dir(&cg);
+                }
+            });
+            return Ok(None);
+        }
+    }
 
     // Handle oneshot service exit: clean up remaining processes and decide
     // whether to keep the service active (RemainAfterExit=yes) or deactivate it.
