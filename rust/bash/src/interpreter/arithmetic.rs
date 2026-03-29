@@ -476,7 +476,7 @@ impl Shell {
                 self.arith_error_prefix(),
                 self.arith_cmd_prefix(),
                 top_expr,
-                rest
+                rest.trim_start()
             );
             crate::expand::set_arith_error();
             return 0;
