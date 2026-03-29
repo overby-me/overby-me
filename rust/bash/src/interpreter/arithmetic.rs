@@ -979,6 +979,23 @@ impl Shell {
             if expr == "RANDOM" {
                 return crate::expand::next_random() as i64;
             }
+            // Check for nounset (-u): unset variables in arithmetic are errors
+            if self.opt_nounset && !self.vars.contains_key(expr) && std::env::var(expr).is_err() {
+                let name = self
+                    .vars
+                    .get("_BASH_SOURCE_FILE")
+                    .or_else(|| self.positional.first())
+                    .map(|s| s.as_str())
+                    .unwrap_or("bash");
+                let lineno = self
+                    .vars
+                    .get("LINENO")
+                    .and_then(|s| s.parse::<i64>().ok())
+                    .unwrap_or(0);
+                eprintln!("{}: line {}: {}: unbound variable", name, lineno, expr);
+                crate::expand::set_arith_error();
+                return 0;
+            }
             let val = self.vars.get(expr).cloned().unwrap_or_default();
             if val.is_empty() {
                 return 0;
