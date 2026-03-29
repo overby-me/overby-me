@@ -473,10 +473,8 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                         let val = lookup_var(name, ctx);
                         if val.is_empty()
                             && ctx.opt_flags.contains('u')
-                            && !matches!(
-                                name.as_str(),
-                                "?" | "$" | "#" | "@" | "*" | "!" | "-" | "0"
-                            )
+                            && !matches!(name.as_str(), "?" | "$" | "#" | "@" | "*" | "-" | "0")
+                            && !(name == "!" && ctx.last_bg_pid != 0)
                             && name.parse::<usize>().is_err()
                             && !ctx.vars.contains_key(name.as_str())
                             && !ctx.arrays.contains_key(name.as_str())
@@ -764,7 +762,9 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
             let val = lookup_var(name, ctx);
             if val.is_empty()
                 && ctx.opt_flags.contains('u')
-                && !matches!(name.as_str(), "?" | "$" | "#" | "@" | "*" | "!" | "-" | "0")
+                && !matches!(name.as_str(), "?" | "$" | "#" | "@" | "*" | "-" | "0")
+                // $! is unbound when no background job has been started
+                && !(name == "!" && ctx.last_bg_pid != 0)
                 && name.parse::<usize>().is_err()
                 && !ctx.vars.contains_key(name.as_str())
                 && !ctx.arrays.contains_key(name.as_str())
