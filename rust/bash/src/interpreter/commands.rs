@@ -1044,7 +1044,9 @@ impl Shell {
                         self.restore_redirections(saved_fds);
                     }
                     Err(e) => {
-                        eprintln!("{}: {}", self.error_prefix(), e);
+                        if !e.is_empty() {
+                            eprintln!("{}: {}", self.error_prefix(), e);
+                        }
                         return 1;
                     }
                 }
@@ -1093,7 +1095,9 @@ impl Shell {
         let saved_fds = match self.setup_redirections(&cmd.redirections) {
             Ok(fds) => fds,
             Err(e) => {
-                eprintln!("{}: {}", self.error_prefix(), e);
+                if !e.is_empty() {
+                    eprintln!("{}: {}", self.error_prefix(), e);
+                }
                 return 1;
             }
         };
@@ -2116,7 +2120,9 @@ impl Shell {
         let saved_fds = match self.setup_redirections(redirections) {
             Ok(fds) => fds,
             Err(e) => {
-                eprintln!("{}: {}", self.error_prefix(), e);
+                if !e.is_empty() {
+                    eprintln!("{}: {}", self.error_prefix(), e);
+                }
                 // Restore LINENO
                 if let Some(ln) = saved_lineno {
                     self.vars.insert("LINENO".to_string(), ln);

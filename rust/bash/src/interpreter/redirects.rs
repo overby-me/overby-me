@@ -26,6 +26,17 @@ impl Shell {
             // Expand redirect target without glob expansion
             let target_str = self.expand_word_single(&redir.target);
 
+            // Check for expansion errors (bad substitution, etc.) during heredoc/here-string expansion
+            if matches!(
+                redir.kind,
+                RedirectKind::HereDoc(_, _) | RedirectKind::HereString
+            ) && crate::expand::take_arith_error()
+            {
+                self.last_status = 1;
+                self.restore_redirections(saved);
+                return Err(String::new());
+            }
+
             // Check for ambiguous redirect (expansion contains IFS chars from variable)
             if !matches!(
                 redir.kind,

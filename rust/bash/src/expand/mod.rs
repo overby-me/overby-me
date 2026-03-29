@@ -1201,6 +1201,7 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                 }
             });
             eprintln!("{}: {}: bad substitution", prefix, expr);
+            set_arith_error(); // Signal expansion error to abort command
             // Push empty to avoid breaking segment collection
             out.push(Segment::Unquoted(String::new()));
         }
