@@ -1964,30 +1964,29 @@ fn globstar_expand(pattern: &str) -> Vec<String> {
         normalized
     };
 
-    // Split pattern on first unquoted **
-    let (prefix_pat, suffix_pat) = {
+    // Determine base directory from the prefix before the first **
+    let first_star_pos = {
         let chars: Vec<char> = pattern.chars().collect();
-        let mut split_pos = 0;
+        let mut pos = 0;
         let mut i = 0;
+        let mut found = false;
         while i < chars.len().saturating_sub(1) {
             if chars[i] == '\x00' {
                 i += 2;
                 continue;
             }
             if chars[i] == '*' && chars[i + 1] == '*' {
-                split_pos = i;
+                pos = i;
+                found = true;
                 break;
             }
             i += 1;
         }
-        let prefix: String = chars[..split_pos].iter().collect();
-        let suffix: String = chars[split_pos + 2..].iter().collect();
-        (prefix, suffix)
+        if found { pos } else { 0 }
     };
 
-    // Determine base directory (from prefix before **)
+    let prefix_pat: String = pattern.chars().take(first_star_pos).collect();
     let base = prefix_pat.trim_end_matches('/');
-    let suffix = suffix_pat.trim_start_matches('/');
     let base_dir = if base.is_empty() {
         std::env::current_dir().unwrap_or_default()
     } else {
@@ -1998,131 +1997,86 @@ fn globstar_expand(pattern: &str) -> Vec<String> {
         return vec![pattern.to_string()];
     }
 
-    let mut results = Vec::new();
+    let dir_only = pattern.ends_with('/');
     let all_entries = walk_dir(&base_dir, base, dotglob);
 
-    if suffix.is_empty() && suffix_pat.is_empty() {
-        // Pattern is just "**" or "prefix/**"
-        // Include all entries (files and dirs, no trailing slashes)
-        if !base.is_empty() {
-            // For dir/**, include "dir/" first
-            results.push(format!("{}/", base));
-        }
-        for (path, _is_dir) in &all_entries {
-            results.push(path.clone());
-        }
-    } else if suffix.is_empty() && suffix_pat == "/" {
-        // Pattern is "**/" — match directories only
-        if !base.is_empty() {
-            results.push(format!("{}/", base));
-        }
-        for (path, is_dir) in &all_entries {
-            if *is_dir {
-                results.push(format!("{}/", path));
-            }
-        }
-    } else {
-        // Pattern is "**/suffix" or "prefix/**/suffix"
-        // ** matches zero or more directory levels
-        let dir_only = suffix_pat.ends_with('/');
-        let suffix_trimmed = suffix.trim_end_matches('/');
+    // Split pattern into segments by '/', filtering empty segments
+    let pat_segments: Vec<&str> = pattern.split('/').filter(|s| !s.is_empty()).collect();
 
-        // Collect all directory paths for matching
-        // Each entry is (relative_path, is_dir)
-        // We try matching the suffix against each possible tail of the path
-        for (path, is_dir) in &all_entries {
-            // Try matching the suffix against various tail segments of the path
-            let path_to_check = if base.is_empty() {
-                path.clone()
+    // Count the number of ways a path matches the pattern (bash produces
+    // duplicates for multi-** patterns)
+    fn count_matches(path_segs: &[&str], pat_segs: &[&str], pi: usize, si: usize) -> usize {
+        // Both exhausted = one match
+        if si >= pat_segs.len() {
+            return if pi >= path_segs.len() { 1 } else { 0 };
+        }
+        // Pattern segments remain but path exhausted
+        if pi >= path_segs.len() {
+            return if pat_segs[si..].iter().all(|s| *s == "**") {
+                1
             } else {
-                // Strip the base prefix to get the relative portion after **
-                path.strip_prefix(&format!("{}/", base))
-                    .unwrap_or(path)
-                    .to_string()
+                0
             };
-
-            // Try matching suffix against each possible tail
-            // e.g., for path "bar/foo/e" and suffix "foo/e", try:
-            //   "bar/foo/e", "foo/e", "e"
-            let mut tail = path_to_check.as_str();
-            loop {
-                let match_target = if dir_only && *is_dir {
-                    format!("{}/", tail)
-                } else {
-                    tail.to_string()
-                };
-                // Use glob pattern matching for the suffix
-                let suffix_to_match = if dir_only {
-                    format!("{}/", suffix_trimmed)
-                } else {
-                    suffix.to_string()
-                };
-                let glob_opts = glob::MatchOptions {
-                    require_literal_separator: true,
-                    ..Default::default()
-                };
-                if glob::Pattern::new(&suffix_to_match)
-                    .map(|p| p.matches_with(&match_target, glob_opts))
-                    .unwrap_or(false)
-                {
-                    if dir_only {
-                        results.push(format!("{}/", path));
-                    } else {
-                        results.push(path.clone());
-                    }
-                    break;
-                }
-                // Try shorter tail (remove first segment)
-                if let Some(pos) = tail.find('/') {
-                    tail = &tail[pos + 1..];
-                } else {
-                    break;
-                }
-            }
         }
+        if pat_segs[si] == "**" {
+            // ** matches zero or more path segments
+            let mut total = 0;
+            for skip in 0..=(path_segs.len() - pi) {
+                total += count_matches(path_segs, pat_segs, pi + skip, si + 1);
+            }
+            total
+        } else {
+            // Match single segment with glob pattern
+            let glob_opts = glob::MatchOptions {
+                require_literal_separator: true,
+                ..Default::default()
+            };
+            if let Ok(p) = glob::Pattern::new(pat_segs[si])
+                && p.matches_with(path_segs[pi], glob_opts)
+            {
+                return count_matches(path_segs, pat_segs, pi + 1, si + 1);
+            }
+            0
+        }
+    }
 
-        // Also check base-level entries (** matches zero segments)
-        if let Ok(rd) = std::fs::read_dir(&base_dir) {
-            let mut dir_entries: Vec<_> = rd.flatten().collect();
-            dir_entries.sort_by_key(|e| e.file_name());
-            for entry in dir_entries {
-                let name = entry.file_name().to_string_lossy().to_string();
-                if name.starts_with('.') && !dotglob {
-                    continue;
-                }
-                let is_dir_entry = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
-                let path = if base.is_empty() {
-                    name.clone()
+    let mut results = Vec::new();
+
+    // For patterns like "prefix/**", also include the base directory itself
+    let is_suffix_only_stars = {
+        let after_base = if base.is_empty() {
+            &pattern
+        } else {
+            pattern
+                .strip_prefix(base)
+                .and_then(|s| s.strip_prefix('/'))
+                .unwrap_or(&pattern)
+        };
+        after_base.chars().all(|c| c == '*' || c == '/')
+    };
+    if !base.is_empty() && is_suffix_only_stars {
+        results.push(format!("{}/", base));
+    }
+
+    for (path, is_dir) in &all_entries {
+        if dir_only && !is_dir {
+            continue;
+        }
+        let path_to_check = if dir_only {
+            format!("{}/", path)
+        } else {
+            path.clone()
+        };
+        let path_segs: Vec<&str> = path_to_check.split('/').filter(|s| !s.is_empty()).collect();
+        if count_matches(&path_segs, &pat_segments, 0, 0) > 0 {
+            // Count how many ways the pattern matches (bash produces duplicates
+            // for multi-** patterns where each ** can consume different segments)
+            let match_count = count_matches(&path_segs, &pat_segments, 0, 0);
+            for _ in 0..match_count {
+                if dir_only {
+                    results.push(format!("{}/", path));
                 } else {
-                    format!("{}/{}", base, name)
-                };
-                let suffix_to_match = if dir_only {
-                    format!("{}/", suffix_trimmed)
-                } else {
-                    suffix.to_string()
-                };
-                let name_to_match = if dir_only && is_dir_entry {
-                    format!("{}/", name)
-                } else {
-                    name.clone()
-                };
-                let glob_opts2 = glob::MatchOptions {
-                    require_literal_separator: true,
-                    ..Default::default()
-                };
-                if glob::Pattern::new(&suffix_to_match)
-                    .map(|p| p.matches_with(&name_to_match, glob_opts2))
-                    .unwrap_or(false)
-                    && (!dir_only || is_dir_entry)
-                {
-                    let final_path = if dir_only {
-                        format!("{}/", path)
-                    } else {
-                        path.clone()
-                    };
-                    if !results.contains(&final_path) {
-                        results.push(final_path);
-                    }
+                    results.push(path.clone());
                 }
             }
         }
