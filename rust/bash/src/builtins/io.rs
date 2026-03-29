@@ -684,8 +684,12 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                     }
                     Some('q') => {
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("");
+                        let use_locale_quote = flags.contains('#');
                         let mut quoted = if arg.is_empty() {
                             "''".to_string()
+                        } else if use_locale_quote {
+                            // %#q uses single-quote style (locale-aware)
+                            format!("'{}'", arg.replace('\'', "'\\''"))
                         } else {
                             shell_escape(arg)
                         };
