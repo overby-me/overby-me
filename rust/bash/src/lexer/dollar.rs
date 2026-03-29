@@ -103,6 +103,7 @@ fn parse_dollar_inner(
                 let mut cmd = String::new();
                 let mut case_depth = 0i32;
                 let mut case_paren_depth = Vec::<i32>::new(); // paren depth at each case
+                let mut case_action_stack = Vec::<bool>::new(); // saved in_case_action for outer cases
                 let mut in_case_action = false; // true after case pattern ), false after ;;
                 let mut compound_depth = 0i32; // tracks do/done, then/fi nesting
                 while *i < chars.len() && depth > 0 {
@@ -535,6 +536,8 @@ fn parse_dollar_inner(
                         if kw == "case" {
                             case_depth += 1;
                             case_paren_depth.push(depth);
+                            // Save current action state and reset for new case
+                            case_action_stack.push(in_case_action);
                             in_case_action = false;
                         } else if (kw == "esac" || word == "esac") && case_depth > 0 {
                             // Only treat esac as case terminator when:
@@ -552,7 +555,8 @@ fn parse_dollar_inner(
                                 if in_case_action || prev_ch == ';' || prev_ch == '\n' || after_in {
                                     case_depth -= 1;
                                     case_paren_depth.pop();
-                                    in_case_action = false;
+                                    // Restore outer case's action state
+                                    in_case_action = case_action_stack.pop().unwrap_or(false);
                                 }
                             }
                         }
