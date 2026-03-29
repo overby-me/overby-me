@@ -2532,9 +2532,22 @@ fn create_transient_unit(
         set_login_environment: None,
     };
 
+    let effective_slice = params
+        .slice
+        .clone()
+        .or_else(|| Some("system.slice".to_owned()));
+
     let platform_specific = PlatformSpecificServiceFields {
         #[cfg(target_os = "linux")]
-        cgroup_path: std::path::PathBuf::from(format!("/sys/fs/cgroup/rust-systemd/{unit_name}")),
+        cgroup_path: {
+            let root = std::path::PathBuf::from("/sys/fs/cgroup/rust-systemd");
+            if let Some(ref slice_name) = effective_slice {
+                crate::units::from_parsed_config::slice_cgroup_path(&root, slice_name)
+                    .join(unit_name)
+            } else {
+                root.join(unit_name)
+            }
+        },
     };
 
     let mut service_conf = ServiceConfig {
@@ -2561,7 +2574,7 @@ fn create_transient_unit(
         dbus_name: None,
         pid_file: None,
         sockets: vec![],
-        slice: params.slice.clone(),
+        slice: effective_slice,
         remain_after_exit: params.remain_after_exit,
         success_exit_status: SuccessExitStatus::default(),
         restart_force_exit_status: SuccessExitStatus::default(),

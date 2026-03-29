@@ -107,12 +107,22 @@ pub fn get_own_freezer(base_path: &std::path::Path) -> Result<std::path::PathBuf
 
     // prefer v2 path but fall back to v1 freezer
     let cgroup_path = if let Some(v2path) = v2path {
-        let v2_full_path = base_path.join("unified").join(v2path);
-        trace!("v2 cgroup: {v2_full_path:?}");
+        // On hybrid systems the v2 hierarchy is mounted at base_path/unified/
+        // and /proc/self/cgroup shows paths relative to that mount.
+        // On pure v2 systems the hierarchy is mounted at base_path/ directly,
+        // but move_to_own_cgroup creates a directory called "unified/" within
+        // it, so /proc/self/cgroup shows "unified/..." as part of the path.
+        // Try base_path/unified/<path> first (hybrid), then base_path/<path>
+        // (pure v2) to handle both layouts.
+        let hybrid_path = base_path.join("unified").join(&v2path);
+        let pure_v2_path = base_path.join(&v2path);
+        trace!("v2 hybrid cgroup: {hybrid_path:?}");
+        trace!("v2 pure cgroup: {pure_v2_path:?}");
 
-        // If v2 group exists but we cant freeze it we still need to use the v1 controller
-        if v2_full_path.join("cgroup.freeze").exists() {
-            v2_full_path
+        if hybrid_path.join("cgroup.freeze").exists() {
+            hybrid_path
+        } else if pure_v2_path.join("cgroup.freeze").exists() {
+            pure_v2_path
         } else {
             v1_full_path
         }

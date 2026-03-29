@@ -19,12 +19,37 @@ use std::convert::TryInto;
 use std::path::PathBuf;
 use std::sync::RwLock;
 
+/// Build the cgroup directory path for a slice name relative to a root.
+///
+/// Systemd slice names encode a hierarchy via dashes:
+/// - `"testslice.slice"` → `{root}/testslice.slice/`
+/// - `"a-b-c.slice"` → `{root}/a.slice/a-b.slice/a-b-c.slice/`
+/// - `"-.slice"` (root slice) → `{root}/`
+pub fn slice_cgroup_path(root: &std::path::Path, slice_name: &str) -> PathBuf {
+    if slice_name == "-.slice" {
+        return root.to_path_buf();
+    }
+    let base = slice_name.strip_suffix(".slice").unwrap_or(slice_name);
+    let parts: Vec<&str> = base.split('-').collect();
+    let mut path = root.to_path_buf();
+    for i in 0..parts.len() {
+        let component = parts[..=i].join("-");
+        path = path.join(format!("{component}.slice"));
+    }
+    path
+}
+
 #[cfg(feature = "cgroups")]
-fn make_cgroup_path(srvc_name: &str) -> Result<PathBuf, String> {
+fn make_cgroup_path(srvc_name: &str, slice: Option<&str>) -> Result<PathBuf, String> {
     let systemd_rs_cgroup =
         crate::platform::cgroups::get_own_freezer(&PathBuf::from("/sys/fs/cgroup"))
             .map_err(|e| format!("Couldnt get own cgroup: {}", e))?;
-    let service_cgroup = systemd_rs_cgroup.join(srvc_name);
+    let base = if let Some(slice_name) = slice {
+        slice_cgroup_path(&systemd_rs_cgroup, slice_name)
+    } else {
+        systemd_rs_cgroup
+    };
+    let service_cgroup = base.join(srvc_name);
     trace!(
         "Service {} will be moved into cgroup: {:?}",
         srvc_name, service_cgroup
@@ -33,7 +58,7 @@ fn make_cgroup_path(srvc_name: &str) -> Result<PathBuf, String> {
 }
 
 #[cfg(not(feature = "cgroups"))]
-fn make_cgroup_path(_srvc_name: &str) -> Result<PathBuf, String> {
+fn make_cgroup_path(_srvc_name: &str, _slice: Option<&str>) -> Result<PathBuf, String> {
     // doesnt matter, wont be used anyways
     Ok(PathBuf::from("/ree"))
 }
@@ -42,7 +67,7 @@ pub fn unit_from_parsed_service(conf: ParsedServiceConfig) -> Result<Unit, Strin
     // TODO make the cgroup path dynamic so multiple rust-systemd instances can exist
     let platform_specific = PlatformSpecificServiceFields {
         #[cfg(target_os = "linux")]
-        cgroup_path: make_cgroup_path(&conf.common.name)?,
+        cgroup_path: make_cgroup_path(&conf.common.name, conf.srvc.slice.as_deref())?,
     };
 
     let fragment_path = conf.common.fragment_path.clone();

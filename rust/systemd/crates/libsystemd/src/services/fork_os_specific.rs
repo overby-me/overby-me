@@ -326,3 +326,157 @@ pub fn post_fork_os_specific(conf: &PlatformSpecificServiceFields) -> Result<(),
     let _ = conf;
     Ok(())
 }
+
+/// Create the slice cgroup directory and apply its resource-control limits.
+///
+/// This must be called before the service's own cgroup is created so that
+/// the slice's cgroup hierarchy exists and has controllers enabled.
+#[cfg(feature = "cgroups")]
+pub fn setup_slice_cgroup(
+    slice_conf: &crate::units::SliceConfig,
+    service_cgroup_path: &std::path::Path,
+) {
+    // Walk up from the service cgroup to find the slice cgroup directory.
+    // The service cgroup is at {root}/{slice.slice}/{service_name}, so
+    // the slice directory is the parent.
+    let Some(slice_path) = service_cgroup_path.parent() else {
+        return;
+    };
+
+    // Create the slice cgroup directory
+    if let Err(e) = std::fs::create_dir_all(slice_path) {
+        trace!("Could not create slice cgroup {:?}: {}", slice_path, e);
+        return;
+    }
+
+    // Enable required controllers on the slice's parent
+    {
+        let mut needed_controllers: Vec<&str> = Vec::new();
+        if slice_conf.tasks_max.is_some() || slice_conf.tasks_accounting == Some(true) {
+            needed_controllers.push("pids");
+        }
+        if slice_conf.memory_min.is_some()
+            || slice_conf.memory_low.is_some()
+            || slice_conf.memory_high.is_some()
+            || slice_conf.memory_max.is_some()
+            || slice_conf.memory_swap_max.is_some()
+            || slice_conf.memory_accounting == Some(true)
+        {
+            needed_controllers.push("memory");
+        }
+        if slice_conf.cpu_weight.is_some()
+            || slice_conf.startup_cpu_weight.is_some()
+            || slice_conf.cpu_quota.is_some()
+            || slice_conf.cpu_accounting == Some(true)
+        {
+            needed_controllers.push("cpu");
+        }
+        if slice_conf.io_weight.is_some()
+            || slice_conf.startup_io_weight.is_some()
+            || !slice_conf.io_device_weight.is_empty()
+            || !slice_conf.io_read_bandwidth_max.is_empty()
+            || !slice_conf.io_write_bandwidth_max.is_empty()
+            || !slice_conf.io_read_iops_max.is_empty()
+            || !slice_conf.io_write_iops_max.is_empty()
+            || slice_conf.io_accounting == Some(true)
+        {
+            needed_controllers.push("io");
+        }
+        if !needed_controllers.is_empty() {
+            needed_controllers.dedup();
+            if let Err(e) =
+                cgroups::cgroup2::enable_controllers_on_parent(slice_path, &needed_controllers)
+            {
+                trace!(
+                    "Could not enable cgroup controllers {:?} for slice {:?}: {}",
+                    needed_controllers, slice_path, e
+                );
+            }
+        }
+    }
+
+    // Apply memory limits
+    if let Some(ref limit) = slice_conf.memory_min
+        && let Err(e) = cgroups::cgroup2::set_memory_min(slice_path, limit)
+    {
+        trace!("Could not set slice memory.min: {}", e);
+    }
+    if let Some(ref limit) = slice_conf.memory_low
+        && let Err(e) = cgroups::cgroup2::set_memory_low(slice_path, limit)
+    {
+        trace!("Could not set slice memory.low: {}", e);
+    }
+    if let Some(ref limit) = slice_conf.memory_high
+        && let Err(e) = cgroups::cgroup2::set_memory_high(slice_path, limit)
+    {
+        trace!("Could not set slice memory.high: {}", e);
+    }
+    if let Some(ref limit) = slice_conf.memory_max
+        && let Err(e) = cgroups::cgroup2::set_memory_max(slice_path, limit)
+    {
+        trace!("Could not set slice memory.max: {}", e);
+    }
+    if let Some(ref limit) = slice_conf.memory_swap_max
+        && let Err(e) = cgroups::cgroup2::set_memory_swap_max(slice_path, limit)
+    {
+        trace!("Could not set slice memory.swap.max: {}", e);
+    }
+
+    // Apply CPU limits
+    if let Some(weight) = slice_conf.cpu_weight
+        && let Err(e) = cgroups::cgroup2::set_cpu_weight(slice_path, weight)
+    {
+        trace!("Could not set slice cpu.weight: {}", e);
+    }
+    if let Some(quota) = slice_conf.cpu_quota
+        && let Err(e) = cgroups::cgroup2::set_cpu_quota(slice_path, quota)
+    {
+        trace!("Could not set slice cpu.max: {}", e);
+    }
+
+    // Apply I/O limits
+    if let Some(weight) = slice_conf.io_weight
+        && let Err(e) = cgroups::cgroup2::set_io_weight(slice_path, weight)
+    {
+        trace!("Could not set slice io.weight: {}", e);
+    }
+
+    // Apply TasksMax
+    if let Some(ref tasks_max) = slice_conf.tasks_max {
+        let value = match tasks_max {
+            TasksMax::Value(n) => n.to_string(),
+            TasksMax::Percent(pct) => {
+                let pid_max = std::fs::read_to_string("/proc/sys/kernel/pid_max")
+                    .unwrap_or_else(|_| "32768".to_owned());
+                let pid_max: u64 = pid_max.trim().parse().unwrap_or(32768);
+                let limit = (pid_max * pct / 100).max(1);
+                limit.to_string()
+            }
+            TasksMax::Infinity => "max".to_owned(),
+        };
+        let pids_max_path = slice_path.join("pids.max");
+        if let Err(e) = std::fs::write(&pids_max_path, &value) {
+            trace!("Could not write slice pids.max: {}", e);
+        }
+    }
+
+    // Also enable controllers within the slice's subtree_control so
+    // child cgroups (the service) can have limits applied.
+    {
+        // Always enable memory and pids for children — the service's own
+        // pre_fork_os_specific may need them.
+        let child_controllers: Vec<&str> = vec!["memory", "pids", "cpu", "io"];
+        let subtree_control = slice_path.join("cgroup.subtree_control");
+        let value = child_controllers
+            .iter()
+            .map(|c| format!("+{c}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        if let Err(e) = std::fs::write(&subtree_control, &value) {
+            trace!(
+                "Could not enable controllers in slice subtree_control {:?}: {}",
+                subtree_control, e
+            );
+        }
+    }
+}

@@ -5738,7 +5738,7 @@
           cat > "/run/systemd/system/$UNIT.service" << EOF
           [Service]
           Type=oneshot
-          ExecStart=/bin/true
+          ExecStart=/run/current-system/sw/bin/true
           EOF
           systemctl daemon-reload
 
@@ -5771,7 +5771,7 @@
           cat > "/run/systemd/system/$UNIT.service" << EOF
           [Service]
           Type=oneshot
-          ExecStart=/bin/true
+          ExecStart=/run/current-system/sw/bin/true
           EOF
           systemctl daemon-reload
           systemctl start "$UNIT.timer"
@@ -5891,8 +5891,16 @@
       {
         name = "19-CGROUP";
         patchScript = ''
-          # Replace all upstream subtests with custom safe cgroup tests
-          cat > TEST-19-CGROUP.sh << 'CGEOF'
+          # Use upstream main script (sources test-control.sh and calls run_subtests)
+          # but remove subtests that need unimplemented features
+          rm -f TEST-19-CGROUP.delegate.sh \
+               TEST-19-CGROUP.cleanup-slice.sh \
+               TEST-19-CGROUP.ExitType-cgroup.sh \
+               TEST-19-CGROUP.IPAddressAllow-Deny.sh \
+               TEST-19-CGROUP.keyed-properties.sh
+
+          # Basic cgroup operations (moved from inline main script)
+          cat > TEST-19-CGROUP.basic-cgroup-ops.sh << 'BCEOF'
           #!/usr/bin/env bash
           set -eux
           set -o pipefail
@@ -5914,12 +5922,6 @@
           systemd-run --wait --unit="$UNIT2" \
               -p CPUQuota=50% \
               true
-
-          : "systemd-cgls shows cgroup tree"
-          systemd-cgls --no-pager > /dev/null || true
-
-          : "systemd-cgtop runs without error"
-          systemd-cgtop --iterations=1 --no-pager > /dev/null || true
 
           : "Slice unit can be loaded"
           SLICE_UNIT="test-cg-slice-$RANDOM"
@@ -5955,17 +5957,8 @@
           systemd-run --wait --unit="$UNIT" \
               -p IOWeight=200 \
               true
-
-          touch /testok
-          CGEOF
-          chmod +x TEST-19-CGROUP.sh
-
-          rm -f TEST-19-CGROUP.delegate.sh \
-               TEST-19-CGROUP.cleanup-slice.sh \
-               TEST-19-CGROUP.abort-on-cgroup-creation-failure.sh \
-               TEST-19-CGROUP.ExitType-cgroup.sh \
-               TEST-19-CGROUP.IPAddressAllow-Deny.sh \
-               TEST-19-CGROUP.keyed-properties.sh
+          BCEOF
+          chmod +x TEST-19-CGROUP.basic-cgroup-ops.sh
 
           # Additional cgroup tests
           cat > TEST-19-CGROUP.slice-hierarchy.sh << 'SHEOF'
@@ -6099,7 +6092,7 @@
           cat > "/run/systemd/system/$UNIT.service" << EOF
           [Service]
           Type=oneshot
-          ExecStart=/bin/true
+          ExecStart=/run/current-system/sw/bin/true
           MemoryMax=512M
           TasksMax=100
           CPUWeight=50
@@ -6115,7 +6108,7 @@
           cat > "/run/systemd/system/$UNIT2.service" << EOF
           [Service]
           Type=oneshot
-          ExecStart=/bin/true
+          ExecStart=/run/current-system/sw/bin/true
           IOWeight=200
           MemoryHigh=1G
           EOF
@@ -9656,7 +9649,7 @@
           cat > "/run/systemd/system/$UNIT.service" << EOF
           [Service]
           Type=oneshot
-          ExecStart=/bin/true
+          ExecStart=/run/current-system/sw/bin/true
           EOF
           systemctl daemon-reload
           systemctl add-wants multi-user.target "$UNIT.service" || true
@@ -9679,7 +9672,7 @@
           cat > "/run/systemd/system/$UNIT.service" << EOF
           [Service]
           Type=oneshot
-          ExecStart=/bin/true
+          ExecStart=/run/current-system/sw/bin/true
           EOF
           systemctl daemon-reload
           # Create a drop-in override

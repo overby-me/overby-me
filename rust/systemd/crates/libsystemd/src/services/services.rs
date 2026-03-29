@@ -397,6 +397,24 @@ impl Service {
         super::prepare_service::reopen_stdio(self, conf)
             .map_err(ServiceErrorReason::PreparingFailed)?;
 
+        // Set up slice cgroup limits before the service cgroup is created.
+        // If the service is in a slice, we need the slice's cgroup directory
+        // to exist with proper resource limits before pre_fork_os_specific
+        // creates the service's child cgroup inside it.
+        #[cfg(feature = "cgroups")]
+        if let Some(ref slice_name) = conf.slice
+            && let Some(slice_unit) = run_info
+                .unit_table
+                .values()
+                .find(|u| u.id.name == *slice_name)
+            && let crate::units::Specific::Slice(ref slice_specific) = slice_unit.specific
+        {
+            super::fork_os_specific::setup_slice_cgroup(
+                &slice_specific.conf,
+                &conf.platform_specific.cgroup_path,
+            );
+        }
+
         if !conf.exec.is_empty() {
             // For multi-ExecStart oneshot services, run all but the last
             // command via run_cmd (helper process style) sequentially.

@@ -345,13 +345,27 @@ pub fn enable_controllers_on_parent(
     cgroup_path: &Path,
     controllers: &[&str],
 ) -> Result<(), CgroupError> {
-    if let Some(parent) = cgroup_path.parent() {
+    // In cgroups v2, controllers must be enabled at every level from the root
+    // down to the target cgroup.  Walk up the tree to collect all ancestor
+    // cgroup.subtree_control files, then enable controllers top-down so that
+    // each parent has the controller available before we enable it on its child.
+    let mut ancestors = Vec::new();
+    let mut current = cgroup_path.to_path_buf();
+    while let Some(parent) = current.parent() {
         let subtree_ctl = parent.join("cgroup.subtree_control");
         if subtree_ctl.exists() {
-            for ctl in controllers {
-                // Ignore errors — the controller may already be enabled or unavailable
-                let _ = fs::write(&subtree_ctl, format!("+{ctl}"));
-            }
+            ancestors.push(subtree_ctl);
+        } else {
+            // Left the cgroup filesystem
+            break;
+        }
+        current = parent.to_path_buf();
+    }
+    // Enable controllers top-down (root first)
+    ancestors.reverse();
+    for subtree_ctl in &ancestors {
+        for ctl in controllers {
+            let _ = fs::write(subtree_ctl, format!("+{ctl}"));
         }
     }
     Ok(())
