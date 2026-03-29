@@ -803,7 +803,8 @@ impl Shell {
                             b'*' => left.wrapping_mul(right),
                             b'/' => {
                                 if right == 0 {
-                                    let top_expr = self.arith_top_expr.as_deref().unwrap_or(expr);
+                                    let top_expr =
+                                        self.arith_top_expr.as_deref().unwrap_or(expr).trim();
                                     let error_token = expr[i + 1..].trim_start();
                                     eprintln!(
                                         "{}: {}{}: division by 0 (error token is \"{}\")",
