@@ -395,6 +395,7 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                         arg_idx += 1;
                     }
                     Some('d') | Some('i') => {
+                        let arg_provided = arg_idx < fmt_args.len();
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
                         let n: i64 = parse_printf_int(arg);
                         // Check for non-numeric or overflow
@@ -409,14 +410,15 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                                 arg
                             );
                             had_error = true;
-                        } else if !arg.is_empty()
+                        } else if arg_provided
                             && !arg.starts_with('\'')
                             && !arg.starts_with('"')
-                            && arg.parse::<i64>().is_err()
-                            && abs_arg.parse::<u64>().is_err()
-                            && !arg.starts_with("0x")
-                            && !arg.starts_with("0X")
-                            && !(arg.starts_with('0') && arg.len() > 1)
+                            && (arg.is_empty()
+                                || (arg.parse::<i64>().is_err()
+                                    && abs_arg.parse::<u64>().is_err()
+                                    && !arg.starts_with("0x")
+                                    && !arg.starts_with("0X")
+                                    && !(arg.starts_with('0') && arg.len() > 1)))
                         {
                             eprintln!("{}: printf: {}: invalid number", shell.error_prefix(), arg);
                             had_error = true;
