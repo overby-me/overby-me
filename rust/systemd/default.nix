@@ -5061,10 +5061,6 @@
           rm -f TEST-23-UNIT-FILE.verify-unit-files.sh
 
 
-          # Remove percentj-wantedby subtest (Wants= for transient services
-          # fails to start wanted unit from test data)
-          rm -f TEST-23-UNIT-FILE.percentj-wantedby.sh
-
           # Remove statedir subtest (requires --user service management)
           rm -f TEST-23-UNIT-FILE.statedir.sh
 

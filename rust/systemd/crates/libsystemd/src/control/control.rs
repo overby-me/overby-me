@@ -2,8 +2,8 @@ use crate::control::unit_properties;
 use crate::lock_ext::RwLockExt;
 use crate::runtime_info::{ArcMutRuntimeInfo, UnitTable};
 use crate::units::{
-    ActivationSource, Specific, Unit, UnitId, UnitIdKind, UnitStatus, find_symlink_aliases,
-    insert_new_units, load_all_units_no_prune, load_new_unit,
+    Specific, Unit, UnitId, UnitIdKind, UnitStatus, find_symlink_aliases, insert_new_units,
+    load_all_units_no_prune, load_new_unit,
 };
 
 use std::fmt::Write as _;
@@ -4253,16 +4253,24 @@ pub fn execute_command(
             let do_wait = params.wait;
             let do_pipe = params.pipe;
             let id = create_transient_unit(&params, &run_info)?;
-            // Now start the unit.
+            // Load dependency units (Wants=, Requires=, After=) from disk
+            // so the full dependency graph is available for activation.
+            load_dependency_units(&id, &run_info);
+            // Now start the unit and all its dependencies.
             {
-                let ri = run_info.read_poisoned();
-                crate::units::activate_unit(id.clone(), &ri, ActivationSource::Regular)
-                    .map_err(|e| format!("Failed to start transient unit {unit_name}: {e}"))?;
+                let errs = crate::units::activate_needed_units(id.clone(), run_info.clone());
+                if !errs.is_empty() {
+                    let mut errstr = format!("Failed to start transient unit {unit_name}:");
+                    for err in errs {
+                        let _ = write!(errstr, "\n{err:?}");
+                    }
+                    return Err(errstr);
+                }
             }
 
-            // After activate_unit returns, check if the unit actually
-            // started.  activate_unit swallows some errors (converting
-            // them to Ok) for dependency-graph walking purposes, but for
+            // After activation returns, check if the unit actually
+            // started.  activate_needed_units may not report all errors
+            // (e.g. individual unit failures during graph walk), so for
             // oneshot and Type=exec transient units we need to detect
             // failure so that `systemd-run` can exit non-zero.
             {
@@ -4282,8 +4290,8 @@ pub fn execute_command(
 
                 // For Type=exec, wait_for_service catches exec()
                 // failures (exit 203) synchronously and sets
-                // StoppedUnexpected, but activate_unit swallows the
-                // error.  Only check for start-path errors (which
+                // StoppedUnexpected, but the activation graph may
+                // swallow the error.  Only check for start-path errors (which
                 // contain ServiceStartError), NOT exit-handler errors
                 // from the program exiting normally after a successful
                 // exec().
