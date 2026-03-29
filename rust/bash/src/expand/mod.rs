@@ -780,7 +780,18 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                 eprintln!("{}: line {}: {}: unbound variable", sname, lineno, name);
                 set_arith_error();
             }
-            out.push(Segment::Unquoted(val));
+            // Unquoted $@ should still produce separate words (like "$@")
+            // even with null IFS — the splitting is inherent to $@
+            if name == "@" && ctx.positional.len() > 1 {
+                for (i, arg) in ctx.positional[1..].iter().enumerate() {
+                    if i > 0 {
+                        out.push(Segment::SplitHere);
+                    }
+                    out.push(Segment::Unquoted(arg.clone()));
+                }
+            } else {
+                out.push(Segment::Unquoted(val));
+            }
         }
         WordPart::Param(expr) => {
             // Handle unquoted ${@%pattern}, ${@#pattern}, ${@/pat/rep} etc.
