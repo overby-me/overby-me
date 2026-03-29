@@ -134,18 +134,11 @@ fn trigger_on_success_failure_units(
                     }
                 }
             }
-            let ri = arc_ri.read_poisoned();
-            match crate::units::activate_unit(
-                target_id,
-                &ri,
-                crate::units::ActivationSource::Regular,
-            ) {
-                Ok(_) => {
-                    info!(
-                        "{kind_owned} unit {target_name_owned} activated for {source_name_owned}"
-                    );
-                }
-                Err(e) => {
+            let errs = crate::units::activate_needed_units(target_id, arc_ri.clone());
+            if errs.is_empty() {
+                info!("{kind_owned} unit {target_name_owned} activated for {source_name_owned}");
+            } else {
+                for e in &errs {
                     warn!(
                         "Failed to activate {kind_owned} unit {target_name_owned} for {source_name_owned}: {e}"
                     );
@@ -1097,26 +1090,84 @@ pub(crate) fn service_exit_handler(
 
         // Collect OnSuccess=/OnFailure= trigger info.
         // Actual triggering happens after the read lock is dropped.
+        let mut pending_trigger = None;
         if let Some(unit) = run_info.unit_table.get(&srvc_id) {
             let effective_success = is_success
                 || was_replaced_or_stopping
                 || success_exit_status.is_clean_signal(&code);
             if effective_success && !unit.common.unit.on_success.is_empty() {
-                return Ok(Some(PendingTrigger {
+                pending_trigger = Some(PendingTrigger {
                     targets: unit.common.unit.on_success.clone(),
                     source_name: name.to_string(),
                     kind: "OnSuccess".to_string(),
                     monitor_env: build_monitor_env(name, &code, true),
-                }));
+                });
             } else if !effective_success && !unit.common.unit.on_failure.is_empty() {
-                return Ok(Some(PendingTrigger {
+                pending_trigger = Some(PendingTrigger {
                     targets: unit.common.unit.on_failure.clone(),
                     source_name: name.to_string(),
                     kind: "OnFailure".to_string(),
                     monitor_env: build_monitor_env(name, &code, false),
-                }));
+                });
             }
         }
+
+        // Upholds= enforcement: if this service is upheld by any active unit,
+        // restart it asynchronously. This implements systemd's Upholds= semantics:
+        // as long as the upholding unit is active, the upheld unit is kept running.
+        if !was_replaced_or_stopping
+            && let Some(unit) = run_info.unit_table.get(&srvc_id)
+        {
+            let upheld_by = unit.common.dependencies.upheld_by.clone();
+            if !upheld_by.is_empty() {
+                let any_active = upheld_by.iter().any(|upholding_id| {
+                    run_info
+                        .unit_table
+                        .get(upholding_id)
+                        .map(|u| u.common.status.read_poisoned().is_started())
+                        .unwrap_or(false)
+                });
+                if any_active {
+                    trace!("Service {name} is upheld by an active unit, scheduling restart");
+                    // Reset to NeverStarted so it can be re-activated.
+                    {
+                        let mut status = unit.common.status.write_poisoned();
+                        *status = UnitStatus::NeverStarted;
+                    }
+                    let srvc_id_clone = srvc_id.clone();
+                    let arc_ri = arc_run_info.clone();
+                    std::thread::spawn(move || {
+                        // Small delay to avoid tight restart loops
+                        std::thread::sleep(std::time::Duration::from_millis(500));
+                        {
+                            let ri = arc_ri.read_poisoned();
+                            // Re-check that the unit is still NeverStarted (not
+                            // started by someone else in the meantime).
+                            if let Some(unit) = ri.unit_table.get(&srvc_id_clone) {
+                                let st = unit.common.status.read_poisoned();
+                                if !matches!(&*st, UnitStatus::NeverStarted) {
+                                    return;
+                                }
+                            }
+                        }
+                        let errs =
+                            crate::units::activate_needed_units(srvc_id_clone.clone(), arc_ri);
+                        if errs.is_empty() {
+                            info!("Upholds= restarted {}", srvc_id_clone.name);
+                        } else {
+                            for e in &errs {
+                                warn!(
+                                    "Failed to restart upheld unit {}: {}",
+                                    srvc_id_clone.name, e
+                                );
+                            }
+                        }
+                    });
+                }
+            }
+        }
+
+        return Ok(pending_trigger);
     }
     Ok(None)
 }

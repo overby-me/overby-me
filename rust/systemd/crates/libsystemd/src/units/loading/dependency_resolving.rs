@@ -184,6 +184,10 @@ pub fn fill_dependencies(units: &mut HashMap<UnitId, Unit>) -> Result<(), String
     let mut after = Vec::new();
     let mut conflicts = Vec::new();
     let mut part_of_by: Vec<(UnitId, UnitId)> = Vec::new();
+    // Upholds=B on unit A: collect (upheld=B, upholding=A) pairs
+    let mut upheld_by: Vec<(UnitId, UnitId)> = Vec::new();
+    // BindsTo=B on unit A: collect (bound=B, binder=A) pairs
+    let mut bound_by: Vec<(UnitId, UnitId)> = Vec::new();
 
     for unit in (*units).values_mut() {
         trace!("Fill deps for unit: {:?}", unit.id);
@@ -216,6 +220,14 @@ pub fn fill_dependencies(units: &mut HashMap<UnitId, Unit>) -> Result<(), String
         // Collect (target, dependent) pairs so we can fill part_of_by on the target.
         for id in &conf.part_of {
             part_of_by.push((id.clone(), unit.id.clone()));
+        }
+        // Upholds=B on unit A: B gets upheld_by=A
+        for id in &conf.upholds {
+            upheld_by.push((id.clone(), unit.id.clone()));
+        }
+        // BindsTo=B on unit A: B gets bound_by=A
+        for id in &conf.binds_to {
+            bound_by.push((id.clone(), unit.id.clone()));
         }
     }
 
@@ -287,6 +299,24 @@ pub fn fill_dependencies(units: &mut HashMap<UnitId, Unit>) -> Result<(), String
         }
     }
 
+    // Upholds= : unit A has Upholds=B, so B gets upheld_by=A
+    for (upheld, upholding) in upheld_by {
+        if let Some(unit) = units.get_mut(&upheld) {
+            unit.common.dependencies.upheld_by.push(upholding);
+        } else {
+            trace!("Dependency {upholding:?} upholds {upheld:?}, but {upheld:?} not found");
+        }
+    }
+
+    // BindsTo= : unit A has BindsTo=B, so B gets bound_by=A
+    for (bound, binder) in bound_by {
+        if let Some(unit) = units.get_mut(&bound) {
+            unit.common.dependencies.bound_by.push(binder);
+        } else {
+            trace!("Dependency {binder:?} binds to {bound:?}, but {bound:?} not found");
+        }
+    }
+
     add_all_implicit_relations(units)?;
 
     // Remove activation dependency references to unit IDs that don't exist in the
@@ -307,6 +337,8 @@ pub fn fill_dependencies(units: &mut HashMap<UnitId, Unit>) -> Result<(), String
         deps.part_of_by.retain(|id| existing_ids.contains(id));
         deps.binds_to.retain(|id| existing_ids.contains(id));
         deps.bound_by.retain(|id| existing_ids.contains(id));
+        deps.upholds.retain(|id| existing_ids.contains(id));
+        deps.upheld_by.retain(|id| existing_ids.contains(id));
         // Keep refs_by_name un-pruned: it preserves the original dependency
         // references from the unit file so that on-demand loading (e.g.
         // `systemctl restart` of a target whose Wants= service didn't exist

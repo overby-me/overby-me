@@ -225,7 +225,8 @@ pub fn unstarted_deps(
             //   rescue.target; it only orders them IF both are activated.
             let required = unit.common.dependencies.requires.contains(elem)
                 || unit.common.dependencies.binds_to.contains(elem);
-            let pulled = unit.common.dependencies.wants.contains(elem);
+            let pulled = unit.common.dependencies.wants.contains(elem)
+                || unit.common.dependencies.upholds.contains(elem);
             let is_pull_dep = required || pulled;
 
             let Some(elem_unit) = run_info.unit_table.get(elem) else {

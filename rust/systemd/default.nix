@@ -5064,9 +5064,48 @@
           # Remove statedir subtest (requires --user service management)
           rm -f TEST-23-UNIT-FILE.statedir.sh
 
-          # Remove Upholds subtest (requires PID 1 signal propagation
-          # to test script for OnSuccess/OnFailure notification)
-          rm -f TEST-23-UNIT-FILE.Upholds.sh
+          # Upholds subtest: rewrite to poll instead of waiting for signals
+          # (signals don't work because the test doesn't run as a service in the VM).
+          # Also skip section 2 (UpheldBy= in Install, not yet implemented).
+          cat > TEST-23-UNIT-FILE.Upholds.sh << 'UPHEOF'
+          #!/usr/bin/env bash
+          set -eux
+          set -o pipefail
+
+          # Section 1: OnSuccess -> OnFailure -> Upholds chain
+          # success.service succeeds -> OnSuccess starts fail.service ->
+          # fail.service fails -> OnFailure starts uphold.service ->
+          # uphold.service has Upholds=short-lived.service, which keeps
+          # short-lived running. short-lived increments a counter; after 5 runs
+          # we know Upholds= is working.
+
+          rm -f /tmp/TEST-23-UNIT-FILE.counter
+          systemctl start TEST-23-UNIT-FILE-success.service
+
+          # Wait for short-lived to run at least 5 times (counter reaches 5+)
+          timeout 120 bash -c 'until [[ "$(cat /tmp/TEST-23-UNIT-FILE.counter 2>/dev/null)" -ge 5 ]]; do sleep .5; done'
+
+          systemctl stop TEST-23-UNIT-FILE-uphold.service
+
+          # Section 3: StopPropagatedFrom / PropagatesStopTo
+          # prop-stop-one.service has StopPropagatedFrom=prop-stop-two.service.
+          # When two finishes (sleep 1.5), one should also be stopped.
+
+          systemctl start TEST-23-UNIT-FILE-prop-stop-one.service
+
+          # Wait for prop-stop-two to finish (sleep 1.5s) and for prop-stop-one
+          # to be stopped via StopPropagatedFrom=.
+          timeout 60 bash -c 'until [[ "$(systemctl show -P ActiveState TEST-23-UNIT-FILE-prop-stop-one.service)" != "active" ]]; do sleep .5; done'
+
+          # Section 4: BindsTo
+          # binds-to.service has BindsTo=bound-by.service.
+          # When bound-by finishes (sleep 0.7), binds-to should also stop.
+
+          systemctl start TEST-23-UNIT-FILE-binds-to.service
+
+          timeout 60 bash -c 'until [[ "$(systemctl show -P ActiveState TEST-23-UNIT-FILE-binds-to.service)" != "active" ]]; do sleep .5; done'
+          UPHEOF
+          chmod +x TEST-23-UNIT-FILE.Upholds.sh
 
           # Remove whoami subtest (returns "backdoor.service" in NixOS
           # test VM because tests run via the backdoor shell)

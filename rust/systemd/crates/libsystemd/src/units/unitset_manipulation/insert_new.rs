@@ -446,6 +446,12 @@ pub fn insert_new_unit_lenient(mut unit: units::Unit, run_info: &mut RuntimeInfo
         if unit.common.dependencies.bound_by.contains(&existing.id) {
             existing.common.dependencies.binds_to.push(new_id.clone());
         }
+        if unit.common.dependencies.upholds.contains(&existing.id) {
+            existing.common.dependencies.upheld_by.push(new_id.clone());
+        }
+        if unit.common.dependencies.upheld_by.contains(&existing.id) {
+            existing.common.dependencies.upholds.push(new_id.clone());
+        }
 
         // Direction 2: existing → new (e.g., existing has Before=new_unit)
         if existing.common.dependencies.before.contains(&new_id) {
@@ -483,6 +489,12 @@ pub fn insert_new_unit_lenient(mut unit: units::Unit, run_info: &mut RuntimeInfo
         }
         if existing.common.dependencies.bound_by.contains(&new_id) {
             unit.common.dependencies.binds_to.push(existing.id.clone());
+        }
+        if existing.common.dependencies.upholds.contains(&new_id) {
+            unit.common.dependencies.upheld_by.push(existing.id.clone());
+        }
+        if existing.common.dependencies.upheld_by.contains(&new_id) {
+            unit.common.dependencies.upholds.push(existing.id.clone());
         }
 
         // Direction 2 (refs_by_name fallback): if the existing unit originally
@@ -540,6 +552,8 @@ pub fn insert_new_units(new_units: UnitTable, run_info: &mut RuntimeInfo) -> Res
                     unit.common.dependencies.conflicted_by.clone(),
                     unit.common.dependencies.binds_to.clone(),
                     unit.common.dependencies.bound_by.clone(),
+                    unit.common.dependencies.upholds.clone(),
+                    unit.common.dependencies.upheld_by.clone(),
                 )
             })
             .collect();
@@ -563,6 +577,8 @@ pub fn insert_new_units(new_units: UnitTable, run_info: &mut RuntimeInfo) -> Res
             dep_conflicted_by,
             dep_binds_to,
             dep_bound_by,
+            dep_upholds,
+            dep_upheld_by,
         ) in new_dep_info
         {
             for unit in unit_table.values_mut() {
@@ -598,6 +614,12 @@ pub fn insert_new_units(new_units: UnitTable, run_info: &mut RuntimeInfo) -> Res
                 }
                 if dep_bound_by.contains(&unit.id) {
                     unit.common.dependencies.binds_to.push(new_id.clone());
+                }
+                if dep_upholds.contains(&unit.id) {
+                    unit.common.dependencies.upheld_by.push(new_id.clone());
+                }
+                if dep_upheld_by.contains(&unit.id) {
+                    unit.common.dependencies.upholds.push(new_id.clone());
                 }
             }
         }

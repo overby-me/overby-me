@@ -1080,7 +1080,8 @@ impl Unit {
             .fold(Vec::new(), |mut acc, (id, status_locked)| {
                 let required = self.common.dependencies.requires.contains(id)
                     || self.common.dependencies.binds_to.contains(id);
-                let pulled = self.common.dependencies.wants.contains(id);
+                let pulled = self.common.dependencies.wants.contains(id)
+                    || self.common.dependencies.upholds.contains(id);
                 let is_pull_dep = required || pulled;
                 let ready = if required {
                     // StoppedFinal means the unit completed successfully
@@ -1140,7 +1141,8 @@ impl Unit {
             .fold(Vec::new(), |mut acc, (id, status_locked)| {
                 let required = self.common.dependencies.requires.contains(id)
                     || self.common.dependencies.binds_to.contains(id);
-                let pulled = self.common.dependencies.wants.contains(id);
+                let pulled = self.common.dependencies.wants.contains(id)
+                    || self.common.dependencies.upholds.contains(id);
                 let is_pull_dep = required || pulled;
                 let ready = if required {
                     status_locked.is_started()
@@ -2243,6 +2245,14 @@ pub struct Dependencies {
     /// Reverse of `binds_to`: units that declared `BindsTo=` pointing to this unit.
     /// When this unit stops, all `bound_by` units should also stop.
     pub bound_by: Vec<UnitId>,
+
+    /// Units this unit "upholds". As long as this unit is active, the listed
+    /// units will be restarted if they stop. Acts like `Wants=` for activation.
+    /// Matches systemd's `Upholds=` setting.
+    pub upholds: Vec<UnitId>,
+    /// Reverse of `upholds`: units that declared `Upholds=` pointing to this unit.
+    /// When this unit stops, any active unit in `upheld_by` will restart it.
+    pub upheld_by: Vec<UnitId>,
 }
 
 impl Dependencies {
@@ -2259,6 +2269,8 @@ impl Dependencies {
         self.part_of_by.sort();
         self.binds_to.sort();
         self.bound_by.sort();
+        self.upholds.sort();
+        self.upheld_by.sort();
         // dedup after sorting
         self.wants.dedup();
         self.requires.dedup();
@@ -2272,6 +2284,8 @@ impl Dependencies {
         self.part_of_by.dedup();
         self.binds_to.dedup();
         self.bound_by.dedup();
+        self.upholds.dedup();
+        self.upheld_by.dedup();
     }
 
     #[must_use]
@@ -2300,7 +2314,10 @@ impl Dependencies {
         self.after
             .iter()
             .filter(|id| {
-                self.wants.contains(id) || self.requires.contains(id) || self.binds_to.contains(id)
+                self.wants.contains(id)
+                    || self.requires.contains(id)
+                    || self.binds_to.contains(id)
+                    || self.upholds.contains(id)
             })
             .cloned()
             .collect()
@@ -2312,6 +2329,8 @@ impl Dependencies {
         ids.extend(self.requires.iter().cloned());
         // BindsTo= implies the same start dependency as Requires=
         ids.extend(self.binds_to.iter().cloned());
+        // Upholds= implies a Wants=-like start dependency
+        ids.extend(self.upholds.iter().cloned());
 
         ids.into_iter()
             .filter(|id| !self.after.contains(id))
@@ -2338,6 +2357,8 @@ impl Dependencies {
         Self::remove_from_vec(&mut self.part_of_by, id);
         Self::remove_from_vec(&mut self.binds_to, id);
         Self::remove_from_vec(&mut self.bound_by, id);
+        Self::remove_from_vec(&mut self.upholds, id);
+        Self::remove_from_vec(&mut self.upheld_by, id);
     }
 
     #[must_use]
