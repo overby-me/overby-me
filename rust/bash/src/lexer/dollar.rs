@@ -1329,8 +1329,25 @@ fn read_param_op(chars: &[char], i: &mut usize, _name: &str, in_dquote: bool) ->
                 }
                 _ => {
                     // ${var:offset} or ${var:offset:length}
+                    // Must handle nested ternary (?:) in arithmetic expressions
+                    // e.g., ${var:1 ? 4 : 2} — the : after 4 is ternary, not length separator
                     let mut offset = String::new();
-                    while *i < chars.len() && chars[*i] != ':' && chars[*i] != '}' {
+                    let mut ternary_depth = 0i32;
+                    let mut paren_depth = 0i32;
+                    while *i < chars.len() && chars[*i] != '}' {
+                        match chars[*i] {
+                            '(' => paren_depth += 1,
+                            ')' => paren_depth -= 1,
+                            '?' if paren_depth == 0 => ternary_depth += 1,
+                            ':' if paren_depth == 0 => {
+                                if ternary_depth > 0 {
+                                    ternary_depth -= 1;
+                                } else {
+                                    break; // This is the length separator
+                                }
+                            }
+                            _ => {}
+                        }
                         offset.push(chars[*i]);
                         *i += 1;
                     }

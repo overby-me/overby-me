@@ -300,7 +300,7 @@ pub(super) fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
 /// Parse an arithmetic expression for substring offset/length.
 /// If the string is a simple integer, parse it directly. If it's a variable name,
 /// resolve it. Otherwise, report an arithmetic error.
-fn parse_arith_offset(s: &str, param_name: &str, ctx: &ExpCtx) -> i64 {
+fn parse_arith_offset(s: &str, _param_name: &str, ctx: &ExpCtx) -> i64 {
     if s.is_empty() {
         return 0;
     }
@@ -320,21 +320,14 @@ fn parse_arith_offset(s: &str, param_name: &str, ctx: &ExpCtx) -> i64 {
             .unwrap_or(0);
         return val;
     }
-    // Report arithmetic syntax error
-    let prefix = EXPAND_ERROR_PREFIX.with(|p| {
-        let p = p.borrow();
-        if p.is_empty() {
-            "bash".to_string()
-        } else {
-            p.clone()
-        }
-    });
-    eprintln!(
-        "{}: {}: {}: arithmetic syntax error: operand expected (error token is \"{}\")",
-        prefix, param_name, s, s
-    );
-    crate::expand::set_arith_error();
-    0
+    // Use full arithmetic evaluation for complex expressions (ternary, operators, etc.)
+    crate::expand::arithmetic::eval_arith_full(
+        s,
+        ctx.vars,
+        &std::collections::HashMap::new(),
+        ctx.positional,
+        ctx.last_status,
+    )
 }
 
 /// Apply a parameter operation to a pre-resolved value (for array per-element operations)
