@@ -328,6 +328,14 @@ impl Shell {
         // Handle pre-increment/decrement: ++var, --var, ++arr[idx], --arr[idx]
         if let Some(stripped) = expr.strip_prefix("++") {
             let name = stripped.trim();
+            if name.is_empty() {
+                eprintln!(
+                    "{}: ((: ++ : arithmetic syntax error: operand expected (error token is \"+ \")",
+                    self.arith_error_prefix()
+                );
+                crate::expand::set_arith_error();
+                return 0;
+            }
             // Check for simple var or array element (name[...])
             // First char must be letter or _ (not digit — ++7 is not a pre-increment)
             let first_ok = name
@@ -376,6 +384,14 @@ impl Shell {
         }
         if let Some(stripped) = expr.strip_prefix("--") {
             let name = stripped.trim();
+            if name.is_empty() {
+                eprintln!(
+                    "{}: ((: -- : arithmetic syntax error: operand expected (error token is \"- \")",
+                    self.arith_error_prefix()
+                );
+                crate::expand::set_arith_error();
+                return 0;
+            }
             let first_ok = name
                 .chars()
                 .next()
