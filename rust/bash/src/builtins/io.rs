@@ -158,6 +158,7 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
     let format = &args[0];
     let fmt_args = &args[1..];
     let mut arg_idx = 0;
+    let mut had_error = false;
 
     // printf reuses format string until all arguments are consumed
     loop {
@@ -370,7 +371,15 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                         } else if arg.starts_with('\'') || arg.starts_with('"') {
                             arg.chars().nth(1).map(|c| c as i64).unwrap_or(0)
                         } else {
-                            arg.parse().unwrap_or(0)
+                            match arg.parse() {
+                                Ok(v) => v,
+                                Err(_) if !arg.is_empty() => {
+                                    eprintln!("{}: printf: {}: invalid number", shell.error_prefix(), arg);
+                                    had_error = true;
+                                    0
+                                }
+                                _ => 0,
+                            }
                         };
                         let show_sign = flags.contains('+');
                         let space_sign = flags.contains(' ');
@@ -620,8 +629,25 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                         arg_idx += 1;
                     }
                     Some('%') => print!("%"),
-                    Some(c) => print!("%{}{}{}", flags, width_str, c),
-                    None => print!("%"),
+                    Some(c) => {
+                        // Invalid format character
+                        eprintln!(
+                            "{}: printf: `{}': invalid format character",
+                            shell.error_prefix(),
+                            c
+                        );
+                        return 1;
+                    }
+                    None => {
+                        // Missing format character at end of string
+                        let fmt_spec = format!("%{}{}", flags, width_str);
+                        eprintln!(
+                            "{}: printf: `{}': missing format character",
+                            shell.error_prefix(),
+                            fmt_spec
+                        );
+                        return 1;
+                    }
                 }
             } else {
                 print!("{}", ch);
@@ -636,7 +662,7 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
     // (redirections may change fd 1 before the buffer is flushed)
     use std::io::Write;
     std::io::stdout().flush().ok();
-    0
+    if had_error { 1 } else { 0 }
 }
 
 /// Shell-escape a string for use with %q in printf.
