@@ -1128,7 +1128,9 @@ fn parse_brace_param(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart
         if *i < chars.len() {
             *i += 1;
         }
-        return WordPart::BadSubstitution(format!("${{{}}}", content));
+        // Strip $' → ' in the error message (bash resolves ANSI-C quoting in display)
+        let display_content = content.replace("$'", "'");
+        return WordPart::BadSubstitution(format!("${{{}}}", display_content));
     }
 
     // Check for @X transform operator before }
