@@ -332,8 +332,11 @@ impl Shell {
                 }
                 return val;
             }
-            // Assignment to non-variable (e.g., 7=4)
-            if !name.is_empty() && name.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+            // Assignment to non-variable (e.g., 7=4) — only if name is purely numeric/alphanumeric
+            if !name.is_empty()
+                && name.chars().next().is_some_and(|c| c.is_ascii_digit())
+                && name.chars().all(|c| c.is_alphanumeric() || c == '_')
+            {
                 eprintln!(
                     "{}: {}{}: attempted assignment to non-variable (error token is \"{}\")",
                     self.arith_error_prefix(),
