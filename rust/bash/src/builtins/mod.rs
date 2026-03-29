@@ -746,8 +746,11 @@ fn format_command_indent(cmd: &Command, indent: usize) -> String {
         }
         Command::Coproc(name, inner) => {
             let inner_str = format_command_indent(inner, indent);
+            // Only show explicit COPROC name for compound commands (subshells/braces)
+            let is_compound = matches!(inner.as_ref(), Command::Compound(..));
             match name.as_deref() {
-                Some("COPROC") | None => format!("coproc {}", inner_str),
+                None => format!("coproc {}", inner_str),
+                Some("COPROC") if !is_compound => format!("coproc {}", inner_str),
                 Some(n) => format!("coproc {} {}", n, inner_str),
             }
         }
@@ -795,7 +798,25 @@ fn format_program_impl(program: &Program, indent: usize, semi_last: bool) -> Str
                     || trimmed.ends_with("then")
                     || trimmed.ends_with("do")
                     || trimmed.ends_with("else");
-                if !is_keyword && !trimmed.ends_with('&') && !trimmed.is_empty() {
+                // Don't add ; if the command ends with a heredoc body
+                // (the last line is the heredoc delimiter, e.g., "EOF")
+                let ends_with_heredoc = if let Some(last_line) = line.rsplit('\n').next() {
+                    let llt = last_line.trim();
+                    !llt.is_empty()
+                        && !llt.contains(' ')
+                        && !llt.contains('\t')
+                        && !llt.ends_with(';')
+                        && !llt.ends_with('}')
+                        && !llt.ends_with(')')
+                        && line.contains("<<")
+                } else {
+                    false
+                };
+                if !is_keyword
+                    && !trimmed.ends_with('&')
+                    && !trimmed.is_empty()
+                    && !ends_with_heredoc
+                {
                     line.push(';');
                 }
             }
@@ -875,7 +896,20 @@ fn format_compound_command_indent(cmd: &CompoundCommand, indent: usize) -> Strin
         CompoundCommand::Subshell(program) => {
             let body = format_program(program, 0);
             let trimmed = body.trim();
-            if !trimmed.contains('\n') {
+            // Single command (possibly with heredoc) → ( cmd ... )
+            let is_single_cmd = program.len() == 1
+                && program[0].list.rest.is_empty()
+                && !program[0].background
+                && program[0].list.first.commands.len() == 1;
+            if is_single_cmd {
+                // Format as ( cmd\nheredoc\n ) for heredocs or ( cmd ) for simple
+                let cmd_str = trimmed.trim_end_matches(';');
+                if cmd_str.contains('\n') {
+                    format!("( {}\n )", cmd_str)
+                } else {
+                    format!("( {} )", cmd_str)
+                }
+            } else if !trimmed.contains('\n') {
                 format!("( {} )", trimmed.trim_end_matches(';'))
             } else {
                 // Check if body is a single compound command with a brace group
@@ -907,7 +941,7 @@ fn format_compound_command_indent(cmd: &CompoundCommand, indent: usize) -> Strin
                         .collect();
                     format!("( {{ \n{}\n{}}} ){redir_str}", inner_body, iprefix,)
                 } else {
-                    format!("( \n{}\n{})", format_program(program, indent + 1), iprefix)
+                    format!("( \n{}\n )", format_program(program, indent + 1))
                 }
             }
         }
