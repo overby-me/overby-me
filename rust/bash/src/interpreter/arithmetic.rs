@@ -258,6 +258,22 @@ impl Shell {
             && !expr[pos + 1..].starts_with('=')
         {
             let name = expr[..pos].trim();
+            // Check for ++/-- prefix/suffix on the LHS → attempted assignment to non-variable
+            if !name.is_empty()
+                && (name.starts_with("++") || name.starts_with("--")
+                    || name.ends_with("++") || name.ends_with("--"))
+            {
+                let top_expr = self.arith_top_expr.as_deref().unwrap_or(expr);
+                eprintln!(
+                    "{}: {}{}: attempted assignment to non-variable (error token is \"{}\")",
+                    self.arith_error_prefix(),
+                    self.arith_cmd_prefix(),
+                    top_expr,
+                    &expr[pos..]
+                );
+                crate::expand::set_arith_error();
+                return 0;
+            }
             if !name.is_empty()
                 && name.chars().next().is_some_and(|c| !c.is_ascii_digit())
                 && (name.chars().all(|c| c.is_alphanumeric() || c == '_') || name.contains('['))
