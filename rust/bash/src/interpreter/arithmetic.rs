@@ -1239,12 +1239,18 @@ impl Shell {
             };
             if !rest.is_empty() {
                 let top_expr = self.arith_top_expr.as_deref().unwrap_or(expr);
+                // Find the error token in the top expression (preserves trailing space)
+                let error_token = if let Some(pos) = top_expr.find(rest) {
+                    &top_expr[pos..]
+                } else {
+                    rest
+                };
                 eprintln!(
                     "{}: {}{}: arithmetic syntax error in expression (error token is \"{}\")",
                     self.arith_error_prefix(),
                     self.arith_cmd_prefix(),
                     top_expr,
-                    rest
+                    error_token
                 );
                 crate::expand::set_arith_error();
                 return 0;
