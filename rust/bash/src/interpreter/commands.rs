@@ -288,6 +288,7 @@ impl Shell {
                 .copied()
                 .unwrap_or(true),
         );
+        crate::expand::set_globstar(self.shopt_globstar);
         crate::expand::set_globignore(
             self.vars
                 .get("GLOBIGNORE")
@@ -390,6 +391,7 @@ impl Shell {
                 .copied()
                 .unwrap_or(true),
         );
+        crate::expand::set_globstar(self.shopt_globstar);
         crate::expand::set_globignore(
             self.vars
                 .get("GLOBIGNORE")

@@ -26,6 +26,8 @@ thread_local! {
     static DOTGLOB_ENABLED: RefCell<bool> = const { RefCell::new(false) };
     /// Whether globskipdots shopt is enabled (skip . and .. in glob results)
     static GLOBSKIPDOTS_ENABLED: RefCell<bool> = const { RefCell::new(true) };
+    /// Whether globstar shopt is enabled (** matches recursively)
+    static GLOBSTAR_ENABLED: RefCell<bool> = const { RefCell::new(false) };
     /// GLOBIGNORE patterns (colon-separated, empty = no ignore)
     static GLOBIGNORE: RefCell<String> = const { RefCell::new(String::new()) };
     /// Callback for running process substitution commands inline (instead of exec'ing
@@ -78,6 +80,10 @@ pub fn set_dotglob(enabled: bool) {
 
 pub fn set_globskipdots(enabled: bool) {
     GLOBSKIPDOTS_ENABLED.with(|d| *d.borrow_mut() = enabled);
+}
+
+pub fn set_globstar(enabled: bool) {
+    GLOBSTAR_ENABLED.with(|d| *d.borrow_mut() = enabled);
 }
 
 pub fn set_globignore(value: &str) {
@@ -1793,25 +1799,21 @@ fn split_brace_alternatives(s: &str) -> Vec<String> {
 }
 
 /// Expand a pattern containing ** (globstar) by recursively walking directories
-#[allow(dead_code)]
 fn globstar_expand(pattern: &str) -> Vec<String> {
     let dotglob = DOTGLOB_ENABLED.with(|d| *d.borrow());
-    let skipdots = GLOBSKIPDOTS_ENABLED.with(|d| *d.borrow());
 
-    // Split pattern around **
-    // Common patterns: **, **/*.o, dir/**, dir/**/*.o, **/name
-    let mut results = Vec::new();
-
-    // Collect all files recursively from the appropriate directory
-    fn walk_dir(dir: &std::path::Path, prefix: &str, dotglob: bool, skipdots: bool) -> Vec<String> {
+    /// Recursively walk a directory, returning all entries (files and dirs)
+    fn walk_dir(dir: &std::path::Path, prefix: &str, dotglob: bool) -> Vec<(String, bool)> {
         let mut entries = Vec::new();
         if let Ok(rd) = std::fs::read_dir(dir) {
-            for entry in rd.flatten() {
+            let mut dir_entries: Vec<_> = rd.flatten().collect();
+            dir_entries.sort_by_key(|e| e.file_name());
+            for entry in dir_entries {
                 let name = entry.file_name().to_string_lossy().to_string();
-                if name.starts_with('.') && !dotglob {
+                if name == "." || name == ".." {
                     continue;
                 }
-                if (name == "." || name == "..") && skipdots {
+                if name.starts_with('.') && !dotglob {
                     continue;
                 }
                 let path = if prefix.is_empty() {
@@ -1819,65 +1821,211 @@ fn globstar_expand(pattern: &str) -> Vec<String> {
                 } else {
                     format!("{}/{}", prefix, name)
                 };
-                entries.push(path.clone());
-                if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                    // Add directory with trailing /
-                    entries.push(format!("{}/", path));
-                    // Recurse into subdirectory
-                    entries.extend(walk_dir(&entry.path(), &path, dotglob, skipdots));
+                let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                entries.push((path.clone(), is_dir));
+                if is_dir {
+                    entries.extend(walk_dir(&entry.path(), &path, dotglob));
                 }
             }
         }
         entries
     }
 
-    // Determine the base directory and the suffix pattern after **
-    let parts: Vec<&str> = pattern.splitn(2, "**").collect();
-    let base = parts[0].trim_end_matches('/');
-    let suffix = if parts.len() > 1 {
-        parts[1].trim_start_matches('/')
-    } else {
-        ""
+    // Find unquoted ** in the pattern (skip \*\* which is quoted)
+    let has_real_globstar = {
+        let chars: Vec<char> = pattern.chars().collect();
+        let mut found = false;
+        let mut i = 0;
+        while i < chars.len().saturating_sub(1) {
+            if chars[i] == '\x00' {
+                i += 2; // skip quoted char
+                continue;
+            }
+            if chars[i] == '*' && chars[i + 1] == '*' {
+                found = true;
+                break;
+            }
+            i += 1;
+        }
+        found
     };
 
+    if !has_real_globstar {
+        return vec![pattern.to_string()];
+    }
+
+    // Split pattern on first unquoted **
+    let (prefix_pat, suffix_pat) = {
+        let chars: Vec<char> = pattern.chars().collect();
+        let mut split_pos = 0;
+        let mut i = 0;
+        while i < chars.len().saturating_sub(1) {
+            if chars[i] == '\x00' {
+                i += 2;
+                continue;
+            }
+            if chars[i] == '*' && chars[i + 1] == '*' {
+                split_pos = i;
+                break;
+            }
+            i += 1;
+        }
+        let prefix: String = chars[..split_pos].iter().collect();
+        let suffix: String = chars[split_pos + 2..].iter().collect();
+        (prefix, suffix)
+    };
+
+    // Determine base directory (from prefix before **)
+    let base = prefix_pat.trim_end_matches('/');
+    let suffix = suffix_pat.trim_start_matches('/');
     let base_dir = if base.is_empty() {
         std::env::current_dir().unwrap_or_default()
     } else {
         std::path::PathBuf::from(base)
     };
 
-    let all_entries = walk_dir(&base_dir, base, dotglob, skipdots);
+    if !base_dir.exists() {
+        return vec![pattern.to_string()];
+    }
 
-    if suffix.is_empty() {
-        // ** alone or dir/**: include the base dir/ entry if base is not empty
-        if !base.is_empty() && base_dir.is_dir() {
+    let all_entries = walk_dir(&base_dir, base, dotglob);
+
+    let mut results = Vec::new();
+
+    if suffix.is_empty() && suffix_pat.is_empty() {
+        // Pattern is just "**" or "prefix/**"
+        // Include all entries (files and dirs, no trailing slashes)
+        if !base.is_empty() {
+            // For dir/**, include "dir/" first
             results.push(format!("{}/", base));
         }
-        results.extend(all_entries);
+        for (path, _is_dir) in &all_entries {
+            results.push(path.clone());
+        }
+    } else if suffix.is_empty() && suffix_pat == "/" {
+        // Pattern is "**/" — match directories only
+        if !base.is_empty() {
+            results.push(format!("{}/", base));
+        }
+        for (path, is_dir) in &all_entries {
+            if *is_dir {
+                results.push(format!("{}/", path));
+            }
+        }
     } else {
-        // **/suffix: filter entries matching the suffix pattern
-        for entry in &all_entries {
-            let name = entry.rsplit('/').next().unwrap_or(entry);
-            if crate::interpreter::commands::case_pattern_match(name, suffix) {
-                results.push(entry.clone());
+        // Pattern is "**/suffix" or "prefix/**/suffix"
+        // ** matches zero or more directory levels
+        let dir_only = suffix_pat.ends_with('/');
+        let suffix_trimmed = suffix.trim_end_matches('/');
+
+        // Collect all directory paths for matching
+        // Each entry is (relative_path, is_dir)
+        // We try matching the suffix against each possible tail of the path
+        for (path, is_dir) in &all_entries {
+            // Try matching the suffix against various tail segments of the path
+            let path_to_check = if base.is_empty() {
+                path.clone()
+            } else {
+                // Strip the base prefix to get the relative portion after **
+                path.strip_prefix(&format!("{}/", base))
+                    .unwrap_or(path)
+                    .to_string()
+            };
+
+            // Try matching suffix against each possible tail
+            // e.g., for path "bar/foo/e" and suffix "foo/e", try:
+            //   "bar/foo/e", "foo/e", "e"
+            let mut tail = path_to_check.as_str();
+            loop {
+                let match_target = if dir_only && *is_dir {
+                    format!("{}/", tail)
+                } else {
+                    tail.to_string()
+                };
+                // Use glob pattern matching for the suffix
+                let suffix_to_match = if dir_only {
+                    format!("{}/", suffix_trimmed)
+                } else {
+                    suffix.to_string()
+                };
+                let glob_opts = glob::MatchOptions {
+                    require_literal_separator: true,
+                    ..Default::default()
+                };
+                if glob::Pattern::new(&suffix_to_match)
+                    .map(|p| p.matches_with(&match_target, glob_opts))
+                    .unwrap_or(false)
+                {
+                    if dir_only {
+                        results.push(format!("{}/", path));
+                    } else {
+                        results.push(path.clone());
+                    }
+                    break;
+                }
+                // Try shorter tail (remove first segment)
+                if let Some(pos) = tail.find('/') {
+                    tail = &tail[pos + 1..];
+                } else {
+                    break;
+                }
+            }
+        }
+
+        // Also check base-level entries (** matches zero segments)
+        if let Ok(rd) = std::fs::read_dir(&base_dir) {
+            let mut dir_entries: Vec<_> = rd.flatten().collect();
+            dir_entries.sort_by_key(|e| e.file_name());
+            for entry in dir_entries {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.starts_with('.') && !dotglob {
+                    continue;
+                }
+                let is_dir_entry = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                let path = if base.is_empty() {
+                    name.clone()
+                } else {
+                    format!("{}/{}", base, name)
+                };
+                let suffix_to_match = if dir_only {
+                    format!("{}/", suffix_trimmed)
+                } else {
+                    suffix.to_string()
+                };
+                let name_to_match = if dir_only && is_dir_entry {
+                    format!("{}/", name)
+                } else {
+                    name.clone()
+                };
+                let glob_opts2 = glob::MatchOptions {
+                    require_literal_separator: true,
+                    ..Default::default()
+                };
+                if glob::Pattern::new(&suffix_to_match)
+                    .map(|p| p.matches_with(&name_to_match, glob_opts2))
+                    .unwrap_or(false)
+                    && (!dir_only || is_dir_entry)
+                {
+                    let final_path = if dir_only {
+                        format!("{}/", path)
+                    } else {
+                        path.clone()
+                    };
+                    if !results.contains(&final_path) {
+                        results.push(final_path);
+                    }
+                }
             }
         }
     }
 
-    // Keep directory entries with trailing slash for dir/** patterns,
-    // but remove trailing slashes from subdirectory entries
-    results
-        .into_iter()
-        .filter(|s| {
-            // Keep entries like "dir/" (explicit base), filter out sub/
-            if s.ends_with('/') {
-                // Keep the base dir/ entry
-                s.trim_end_matches('/') == base
-            } else {
-                true
-            }
-        })
-        .collect()
+    apply_globignore(&mut results);
+    if results.is_empty() {
+        vec![remove_quotes(pattern)]
+    } else {
+        results.sort();
+        results
+    }
 }
 
 /// Split GLOBIGNORE on colons, respecting bracket expressions [...]
@@ -1970,6 +2118,12 @@ fn glob_expand(field: &str) -> Vec<String> {
                 pattern.push(ch);
             }
         }
+        // Check for globstar (**) — must be enabled and pattern contains **
+        let globstar = GLOBSTAR_ENABLED.with(|g| *g.borrow());
+        if globstar && pattern.contains("**") {
+            return globstar_expand(&pattern);
+        }
+
         // Check if pattern has extglob chars that the glob crate can't handle
         // Check if pattern needs our custom matcher (extglob or POSIX char classes)
         let needs_custom_match = {
