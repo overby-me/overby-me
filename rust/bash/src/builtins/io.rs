@@ -128,18 +128,37 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
             );
             return 2;
         }
-        // Build the printf command without -v and capture output
+        // Capture printf output to variable instead of stdout
+        // Use pipe to capture raw output (preserving trailing newlines)
         let inner_args: Vec<String> = args[2..].to_vec();
-        let output = shell.capture_output(&format!(
-            "printf {}",
-            inner_args
-                .iter()
-                .map(|a| format!("'{}'", a.replace('\'', "'\\''")))
-                .collect::<Vec<_>>()
-                .join(" ")
-        ));
-        shell.set_var(&var_name, output);
-        return 0;
+        let (read_fd, write_fd) = {
+            use std::os::fd::IntoRawFd;
+            let (r, w) = nix::unistd::pipe().unwrap();
+            (r.into_raw_fd(), w.into_raw_fd())
+        };
+        let saved_stdout = nix::fcntl::fcntl(1, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(10)).unwrap();
+        nix::unistd::dup2(write_fd, 1).ok();
+        // Run printf with remaining args
+        let result = builtin_printf(shell, &inner_args);
+        use std::io::Write;
+        std::io::stdout().flush().ok();
+        // Restore stdout and close pipe write end
+        nix::unistd::dup2(saved_stdout, 1).ok();
+        nix::unistd::close(saved_stdout).ok();
+        nix::unistd::close(write_fd).ok();
+        // Read captured output
+        let mut output = Vec::new();
+        let mut buf = [0u8; 4096];
+        loop {
+            match nix::unistd::read(read_fd, &mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => output.extend_from_slice(&buf[..n]),
+            }
+        }
+        nix::unistd::close(read_fd).ok();
+        let output_str = String::from_utf8_lossy(&output).to_string();
+        shell.set_var(&var_name, output_str);
+        return result;
     }
     // Skip -- (end of options marker)
     let args = if !args.is_empty() && args[0] == "--" {
