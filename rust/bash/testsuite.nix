@@ -11,7 +11,7 @@
   name,
 }:
 pkgs.runCommand "rust-bash-test-${name}" {
-  nativeBuildInputs = [pkgs.rust-bash-dev pkgs.bash pkgs.gcc pkgs.coreutils pkgs.diffutils pkgs.gnused pkgs.gnugrep pkgs.gawk pkgs.findutils];
+  nativeBuildInputs = [pkgs.rust-bash-dev pkgs.bash pkgs.gcc pkgs.coreutils pkgs.diffutils pkgs.gnused pkgs.gnugrep pkgs.gawk pkgs.findutils pkgs.glibcLocales];
   bashSrc = pkgs.bash.src;
 } ''
   # Extract the test suite and helper sources
@@ -29,6 +29,9 @@ pkgs.runCommand "rust-bash-test-${name}" {
   # Put helpers on PATH
   export PATH="$OLDPWD:$PATH"
   export TMPDIR="$(mktemp -d)"
+
+  # Make locales available for tests that need them (e.g. printf2.sub)
+  export LOCALE_ARCHIVE="${pkgs.glibcLocales}/lib/locale/locale-archive"
 
   echo "Running bash test: ${name}"
 

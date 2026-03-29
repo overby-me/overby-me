@@ -178,6 +178,7 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
     let fmt_args = &args[1..];
     let mut arg_idx = 0;
     let mut had_error = false;
+    let mut bytes_written: usize = 0;
 
     // printf reuses format string until all arguments are consumed
     loop {
@@ -186,14 +187,38 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
         while let Some(ch) = chars.next() {
             if ch == '\\' {
                 match chars.next() {
-                    Some('n') => println!(),
-                    Some('t') => print!("\t"),
-                    Some('r') => print!("\r"),
-                    Some('\\') => print!("\\"),
-                    Some('a') => print!("\x07"),
-                    Some('b') => print!("\x08"),
-                    Some('f') => print!("\x0c"),
-                    Some('v') => print!("\x0b"),
+                    Some('n') => {
+                        println!();
+                        bytes_written += 1;
+                    }
+                    Some('t') => {
+                        print!("\t");
+                        bytes_written += 1;
+                    }
+                    Some('r') => {
+                        print!("\r");
+                        bytes_written += 1;
+                    }
+                    Some('\\') => {
+                        print!("\\");
+                        bytes_written += 1;
+                    }
+                    Some('a') => {
+                        print!("\x07");
+                        bytes_written += 1;
+                    }
+                    Some('b') => {
+                        print!("\x08");
+                        bytes_written += 1;
+                    }
+                    Some('f') => {
+                        print!("\x0c");
+                        bytes_written += 1;
+                    }
+                    Some('v') => {
+                        print!("\x0b");
+                        bytes_written += 1;
+                    }
                     Some(c @ '0'..='7') => {
                         let mut val = c as u8 - b'0';
                         for _ in 0..2 {
@@ -208,9 +233,20 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                         // Write raw byte (including NUL)
                         use std::io::Write;
                         std::io::stdout().write_all(&[val]).ok();
+                        bytes_written += 1;
                     }
-                    Some('\'') => print!("'"),
-                    Some('"') => print!("\""),
+                    Some('\'') => {
+                        print!("'");
+                        bytes_written += 1;
+                    }
+                    Some('"') => {
+                        print!("\"");
+                        bytes_written += 1;
+                    }
+                    Some('?') => {
+                        print!("?");
+                        bytes_written += 1;
+                    }
                     Some('x') => {
                         // \xNN hex escape
                         let mut val = 0u8;
@@ -234,9 +270,13 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                         } else {
                             use std::io::Write;
                             std::io::stdout().write_all(&[val]).ok();
+                            bytes_written += 1;
                         }
                     }
-                    Some(c) => print!("\\{}", c),
+                    Some(c) => {
+                        print!("\\{}", c);
+                        bytes_written += 2;
+                    }
                     None => print!("\\"),
                 }
             } else if ch == '%' {
@@ -275,13 +315,23 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                         // Precision from argument
                         chars.next();
                         let p_arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
-                        let p_val = p_arg.parse::<i64>().unwrap_or(0);
-                        if p_val > i32::MAX as i64 {
-                            eprintln!("{}: printf: Value too large for defined data type", shell.error_prefix());
+                        let p_parsed = p_arg.parse::<i64>();
+                        let p_overflow = p_parsed
+                            .as_ref()
+                            .map(|v| *v > i32::MAX as i64)
+                            .unwrap_or_else(|_| {
+                                // parse failed — check if it's a large number
+                                p_arg.chars().all(|c| c.is_ascii_digit()) && !p_arg.is_empty()
+                            });
+                        if p_overflow {
+                            eprintln!(
+                                "{}: printf: Value too large for defined data type",
+                                shell.error_prefix()
+                            );
                             had_error = true;
-                            precision = Some(0);
+                            precision = Some(usize::MAX / 2); // large but not 0 — strings still print
                         } else {
-                            precision = Some(p_val.max(0) as usize);
+                            precision = Some(p_parsed.unwrap_or(0).max(0) as usize);
                         }
                         arg_idx += 1;
                     } else {
@@ -294,7 +344,24 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                                 break;
                             }
                         }
-                        precision = Some(prec_str.parse().unwrap_or(0));
+                        let pp = prec_str.parse::<i64>();
+                        let pp_overflow =
+                            pp.as_ref()
+                                .map(|v| *v > i32::MAX as i64)
+                                .unwrap_or_else(|_| {
+                                    !prec_str.is_empty()
+                                        && prec_str.chars().all(|c| c.is_ascii_digit())
+                                });
+                        if pp_overflow {
+                            eprintln!(
+                                "{}: printf: Value too large for defined data type",
+                                shell.error_prefix()
+                            );
+                            had_error = true;
+                            precision = Some(usize::MAX / 2);
+                        } else {
+                            precision = Some(pp.unwrap_or(0).max(0) as usize);
+                        }
                     }
                 }
                 // Handle negative width (means left-align)
@@ -308,7 +375,10 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                             .unwrap_or(true)
                 };
                 if width_overflow {
-                    eprintln!("{}: printf: Value too large for defined data type", shell.error_prefix());
+                    eprintln!(
+                        "{}: printf: Value too large for defined data type",
+                        shell.error_prefix()
+                    );
                     had_error = true;
                 }
                 let (w, left) = if width_overflow {
@@ -334,29 +404,61 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                 }
                 match chars.next() {
                     Some('(') => {
-                        // %(fmt)T — strftime format
+                        // %(fmt)T — strftime format; track nested parens
                         let mut fmt = String::new();
+                        let mut depth = 1i32;
                         while let Some(&c) = chars.peek() {
-                            if c == ')' {
-                                chars.next();
-                                break;
+                            chars.next();
+                            if c == '(' {
+                                depth += 1;
+                                fmt.push(c);
+                            } else if c == ')' {
+                                depth -= 1;
+                                if depth == 0 {
+                                    break;
+                                }
+                                fmt.push(c);
+                            } else {
+                                fmt.push(c);
                             }
-                            fmt.push(c);
-                            chars.next();
                         }
-                        // Consume the T
-                        if chars.peek() == Some(&'T') {
+                        // Check terminator — must be 'T'
+                        let term = chars.peek().copied();
+                        if term == Some('T') {
                             chars.next();
+                        } else {
+                            // Non-T terminator: warn and print literal
+                            let term_ch = term.unwrap_or('\0');
+                            if term_ch != '\0' {
+                                use std::io::Write;
+                                std::io::stdout().flush().ok();
+                                eprintln!(
+                                    "{}: printf: warning: `{}': invalid time format specification",
+                                    shell.error_prefix(),
+                                    term_ch
+                                );
+                                chars.next();
+                            }
+                            print!(
+                                "%({}){}",
+                                fmt,
+                                if term_ch != '\0' {
+                                    term_ch.to_string()
+                                } else {
+                                    String::new()
+                                }
+                            );
+                            bytes_written += 3 + fmt.len() + if term_ch != '\0' { 1 } else { 0 };
+                            arg_idx += 1;
+                            continue; // skip strftime
+                        }
+                        // Default empty format to %X (locale time)
+                        if fmt.is_empty() {
+                            fmt = "%X".to_string();
                         }
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("-1");
-                        let timestamp: i64 = if arg == "-1" {
-                            // -1 means current time
-                            std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_secs() as i64
-                        } else if arg == "-2" {
-                            // -2 means shell startup time
+                        let timestamp: i64 = if arg == "-1" || arg == "-2" {
+                            // -1 = current time, -2 = shell startup time
                             std::time::SystemTime::now()
                                 .duration_since(std::time::UNIX_EPOCH)
                                 .unwrap_or_default()
@@ -375,7 +477,7 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                                 tm
                             };
                             let c_fmt = std::ffi::CString::new(fmt.as_str()).unwrap_or_default();
-                            let mut buf = [0u8; 512];
+                            let mut buf = [0u8; 4096];
                             let len = unsafe {
                                 libc::strftime(
                                     buf.as_mut_ptr() as *mut libc::c_char,
@@ -384,13 +486,23 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                                     &tm,
                                 )
                             };
-                            if len > 0 {
-                                print!("{}", String::from_utf8_lossy(&buf[..len]));
+                            let result = String::from_utf8_lossy(&buf[..len]).to_string();
+                            // Apply width
+                            if w > 0 {
+                                if left {
+                                    print!("{:<w$}", result);
+                                } else {
+                                    print!("{:>w$}", result);
+                                }
+                                bytes_written += w.max(result.len());
+                            } else {
+                                print!("{}", result);
+                                bytes_written += result.len();
                             }
                         }
                         arg_idx += 1;
                     }
-                    Some('s') => {
+                    Some('s') | Some('S') => {
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("");
                         // Apply precision (truncate string, byte-safe)
                         let truncated = if let Some(p) = precision {
@@ -604,31 +716,36 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                                 fix_scientific_notation(&s, true)
                             }
                             'g' | 'G' => {
-                                // %g uses shorter of %e and %f, stripping trailing zeros
+                                // C %g: use %e if exponent < -4 or >= precision, else %f
+                                // Strip trailing zeros from result
                                 let p = if p == 0 { 1 } else { p };
-                                let f_str = format!("{:.prec$}", n, prec = p.saturating_sub(1));
-                                let e_str = if fmt_ch == 'G' {
-                                    fix_scientific_notation(
-                                        &format!("{:.prec$E}", n, prec = p.saturating_sub(1)),
-                                        true,
-                                    )
+                                let upper = fmt_ch == 'G';
+                                // Determine exponent
+                                let exponent = if n == 0.0 {
+                                    0i32
                                 } else {
-                                    fix_scientific_notation(
-                                        &format!("{:.prec$e}", n, prec = p.saturating_sub(1)),
-                                        false,
-                                    )
+                                    n.abs().log10().floor() as i32
                                 };
-                                if e_str.len() < f_str.len() {
-                                    e_str
-                                } else {
-                                    // Strip trailing zeros after decimal point
-                                    if f_str.contains('.') {
-                                        let trimmed = f_str.trim_end_matches('0');
-                                        let trimmed = trimmed.trim_end_matches('.');
-                                        trimmed.to_string()
+                                let use_scientific = exponent < -4 || exponent >= p as i32;
+                                let raw = if use_scientific {
+                                    let e_prec = p.saturating_sub(1);
+                                    let s = if upper {
+                                        format!("{:.prec$E}", n, prec = e_prec)
                                     } else {
-                                        f_str
-                                    }
+                                        format!("{:.prec$e}", n, prec = e_prec)
+                                    };
+                                    fix_scientific_notation(&s, upper)
+                                } else {
+                                    // For %f style, precision = significant digits - digits before decimal - 1
+                                    let f_prec = (p as i32 - exponent - 1).max(0) as usize;
+                                    format!("{:.prec$}", n, prec = f_prec)
+                                };
+                                // Strip trailing zeros (unless # flag)
+                                if !flags.contains('#') && raw.contains('.') {
+                                    let trimmed = raw.trim_end_matches('0');
+                                    trimmed.trim_end_matches('.').to_string()
+                                } else {
+                                    raw
                                 }
                             }
                             _ => format!("{:.p$}", n), // f, F
@@ -671,10 +788,21 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                         }
                         arg_idx += 1;
                     }
-                    Some('c') => {
+                    Some('c') | Some('C') => {
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("");
-                        if let Some(ch) = arg.chars().next() {
-                            print!("{}", ch);
+                        let ch_str = arg
+                            .chars()
+                            .next()
+                            .map(|c| c.to_string())
+                            .unwrap_or_default();
+                        if w > 0 {
+                            if left {
+                                print!("{:<w$}", ch_str);
+                            } else {
+                                print!("{:>w$}", ch_str);
+                            }
+                        } else {
+                            print!("{}", ch_str);
                         }
                         arg_idx += 1;
                     }
@@ -695,7 +823,10 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                                     if bytes[i + 1] == b'x' {
                                         let next = bytes.get(i + 2).copied().unwrap_or(0);
                                         if !next.is_ascii_hexdigit() {
-                                            eprintln!("{}: printf: missing hex digit for \\x", shell.error_prefix());
+                                            eprintln!(
+                                                "{}: printf: missing hex digit for \\x",
+                                                shell.error_prefix()
+                                            );
                                             had_error = true;
                                             break;
                                         }
@@ -798,8 +929,9 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                             && var_name.chars().all(|c| c.is_alphanumeric() || c == '_')
                             && var_name.chars().next().is_some_and(|c| !c.is_ascii_digit())
                         {
-                            // We don't track exact chars written, use 0 as approximation
-                            shell.set_var(var_name, "0".to_string());
+                            use std::io::Write;
+                            std::io::stdout().flush().ok();
+                            shell.set_var(var_name, bytes_written.to_string());
                         } else if !var_name.is_empty() {
                             eprintln!(
                                 "{}: printf: `{}': not a valid identifier",
@@ -811,13 +943,16 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                     }
                     Some('%') => print!("%"),
                     Some(c) => {
-                        // Invalid format character
+                        // Invalid format character — flush stdout first so output order is correct
+                        use std::io::Write;
+                        std::io::stdout().flush().ok();
                         eprintln!(
                             "{}: printf: `{}': invalid format character",
                             shell.error_prefix(),
                             c
                         );
-                        return 1;
+                        had_error = true;
+                        break;
                     }
                     None => {
                         // Missing format character at end of string
@@ -827,11 +962,13 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                             shell.error_prefix(),
                             fmt_spec
                         );
-                        return 1;
+                        had_error = true;
+                        break;
                     }
                 }
             } else {
                 print!("{}", ch);
+                bytes_written += ch.len_utf8();
             }
         }
         // If no format args were consumed in this pass, or all args consumed, stop

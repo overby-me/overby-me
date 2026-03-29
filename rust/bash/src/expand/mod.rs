@@ -2352,7 +2352,11 @@ fn glob_expand(field: &str) -> Vec<String> {
                     apply_globignore(&mut results);
                     let nullglob = NULLGLOB_ENABLED.with(|d| *d.borrow());
                     if results.is_empty() {
-                        if nullglob { vec![] } else { vec![remove_quotes(field)] }
+                        if nullglob {
+                            vec![]
+                        } else {
+                            vec![remove_quotes(field)]
+                        }
                     } else {
                         results.sort();
                         results
@@ -2370,7 +2374,11 @@ fn glob_expand(field: &str) -> Vec<String> {
                             .collect();
                         let nullglob = NULLGLOB_ENABLED.with(|d| *d.borrow());
                         if results.is_empty() {
-                            if nullglob { vec![] } else { vec![remove_quotes(field)] }
+                            if nullglob {
+                                vec![]
+                            } else {
+                                vec![remove_quotes(field)]
+                            }
                         } else {
                             results.sort();
                             results
@@ -2413,7 +2421,11 @@ fn glob_expand(field: &str) -> Vec<String> {
                     apply_globignore(&mut results);
                     let nullglob = NULLGLOB_ENABLED.with(|d| *d.borrow());
                     if results.is_empty() {
-                        if nullglob { vec![] } else { vec![remove_quotes(field)] }
+                        if nullglob {
+                            vec![]
+                        } else {
+                            vec![remove_quotes(field)]
+                        }
                     } else {
                         results.sort();
                         results
