@@ -1149,6 +1149,19 @@ impl Shell {
             if close <= bracket + 1 {
                 return 0;
             }
+            // Check for extra text after arr[idx] (e.g., b[c]d → "d" is extra)
+            let after_bracket = &expr[close + 1..].trim();
+            if !after_bracket.is_empty() {
+                let top_expr = self.arith_top_expr.as_deref().unwrap_or(expr);
+                eprintln!(
+                    "{}: {}: arithmetic syntax error in expression (error token is \"{}\")",
+                    self.arith_error_prefix(),
+                    top_expr,
+                    after_bracket
+                );
+                crate::expand::set_arith_error();
+                return 0;
+            }
             let name = &expr[..bracket];
             let idx_str = &expr[bracket + 1..close];
             let resolved = self.resolve_nameref(name);
@@ -1176,12 +1189,46 @@ impl Shell {
         }
 
         // Fall back to reporting error
+        // Check if this looks like "valid_expr extra_stuff" — syntax error in expression
+        let trimmed = expr.trim();
+        let first_word_end = trimmed.find(|c: char| c.is_whitespace() || c == '[').unwrap_or(trimmed.len());
+        let first_word = &trimmed[..first_word_end];
+        let has_extra = first_word_end < trimmed.len()
+            && (first_word.chars().all(|c| c.is_alphanumeric() || c == '_')
+                || first_word.contains('['));
+        if has_extra {
+            // Find the extra text after the valid part
+            let rest = trimmed[first_word_end..].trim_start();
+            // Check for array subscript: skip past ]
+            let rest = if first_word.contains('[') {
+                if let Some(close) = trimmed[first_word_end..].find(']') {
+                    trimmed[first_word_end + close + 1..].trim_start()
+                } else {
+                    rest
+                }
+            } else {
+                rest
+            };
+            if !rest.is_empty() {
+                let top_expr = self.arith_top_expr.as_deref().unwrap_or(expr);
+                eprintln!(
+                    "{}: {}{}: arithmetic syntax error in expression (error token is \"{}\")",
+                    self.arith_error_prefix(),
+                    self.arith_cmd_prefix(),
+                    top_expr,
+                    rest
+                );
+                crate::expand::set_arith_error();
+                return 0;
+            }
+        }
+        let top_expr = self.arith_top_expr.as_deref().unwrap_or(expr);
         eprintln!(
             "{}: {}{}: arithmetic syntax error: operand expected (error token is \"{}\")",
             self.arith_error_prefix(),
             self.arith_cmd_prefix(),
-            expr,
-            expr
+            top_expr,
+            top_expr
         );
         crate::expand::set_arith_error();
         0
