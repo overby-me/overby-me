@@ -104,9 +104,9 @@ fn parse_dollar_inner(
                 let mut compound_depth = 0i32; // tracks do/done, then/fi nesting
                 while *i < chars.len() && depth > 0 {
                     match chars[*i] {
-                        '\'' if !in_dquote || brace_depth > 0 => {
-                            // Single-quoted string — track in non-dquote comsub
-                            // OR when inside ${...} (where single quotes are always active)
+                        '\'' => {
+                            // Single-quoted string — always active inside $() comsub
+                            // (command substitution starts a new parsing context)
                             cmd.push(chars[*i]);
                             *i += 1;
                             while *i < chars.len() && chars[*i] != '\'' {
