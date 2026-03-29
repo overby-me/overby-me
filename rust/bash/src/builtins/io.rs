@@ -1354,7 +1354,9 @@ pub(super) fn builtin_mapfile(shell: &mut Shell, args: &[String]) -> i32 {
                     delim = if args[i].is_empty() {
                         0 // NUL delimiter
                     } else {
-                        args[i].as_bytes()[0]
+                        // Use the first character's raw byte value (not UTF-8 byte)
+                        // so that $'\xff' gives delimiter 0xff, not 0xc3
+                        args[i].chars().next().map(|c| c as u8).unwrap_or(0)
                     };
                 }
             }
