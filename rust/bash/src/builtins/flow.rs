@@ -52,10 +52,17 @@ pub(super) fn builtin_continue(shell: &mut Shell, args: &[String]) -> i32 {
 }
 
 pub(super) fn builtin_exit(shell: &mut Shell, args: &[String]) -> i32 {
-    let code: i32 = args
-        .first()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(shell.last_status);
+    let code: i32 = if let Some(arg) = args.first() {
+        match arg.parse::<i64>() {
+            Ok(n) => (n & 0xFF) as i32,
+            Err(_) => {
+                eprintln!("{}: exit: {}: numeric argument required", shell.error_prefix(), arg);
+                2
+            }
+        }
+    } else {
+        shell.last_status
+    };
     shell.last_status = code;
     shell.run_exit_trap();
     std::io::Write::flush(&mut std::io::stdout()).ok();
