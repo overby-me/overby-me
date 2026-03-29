@@ -454,39 +454,37 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                         } else {
                             ""
                         };
-                        let effective_width = if let Some(p) = precision { p.max(w) } else { w };
-                        let use_zero_pad = zero_pad || precision.is_some();
+                        let effective_width = w;
+                        // For integers, precision specifies minimum digits (zero-padded)
+                        // When precision is specified, the 0 flag is ignored for width padding
+                        let use_zero_pad = zero_pad && precision.is_none();
+                        // Format number with precision (minimum digits)
+                        let abs_n = n.unsigned_abs();
+                        let prefix = if n < 0 { "-" } else { sign_prefix };
+                        let digits = if let Some(p) = precision {
+                            format!("{:0>width$}", abs_n, width = p)
+                        } else {
+                            abs_n.to_string()
+                        };
+                        let formatted = format!("{}{}", prefix, digits);
                         if effective_width > 0 {
                             if left {
-                                let formatted = if n < 0 {
-                                    format!("{}", n)
-                                } else {
-                                    format!("{}{}", sign_prefix, n)
-                                };
                                 let ew = effective_width.min(4096);
                                 print!("{:<ew$}", formatted);
                             } else if use_zero_pad {
-                                // For zero-padding, sign/prefix comes first, then zeros, then digits
-                                let prefix = if n < 0 { "-" } else { sign_prefix };
-                                let abs_n = n.unsigned_abs();
-                                let num_width =
-                                    effective_width.saturating_sub(prefix.len()).min(4096);
-                                print!("{}{:0>num_width$}", prefix, abs_n);
-                            } else {
-                                let formatted = if n < 0 {
-                                    format!("{}", n)
+                                // Zero-pad: sign first, then zeros
+                                let total_len = formatted.len();
+                                if total_len < effective_width {
+                                    let pad = effective_width - total_len;
+                                    print!("{}{}{}", prefix, "0".repeat(pad), digits);
                                 } else {
-                                    format!("{}{}", sign_prefix, n)
-                                };
+                                    print!("{}", formatted);
+                                }
+                            } else {
                                 let ew = effective_width.min(4096);
                                 print!("{:>ew$}", formatted);
                             }
                         } else {
-                            let formatted = if n < 0 {
-                                format!("{}", n)
-                            } else {
-                                format!("{}{}", sign_prefix, n)
-                            };
                             print!("{}", formatted);
                         }
                         arg_idx += 1;
@@ -494,21 +492,32 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                     Some(hex_ch @ ('x' | 'X')) => {
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
                         let n: i64 = parse_printf_int(arg);
-                        let formatted = if hex_ch == 'x' {
-                            if flags.contains('#') {
-                                format!("{:#x}", n)
-                            } else {
-                                format!("{:x}", n)
-                            }
-                        } else if flags.contains('#') {
-                            format!("0X{:X}", n)
+                        // Apply precision (minimum digits) for hex
+                        let raw_hex = if hex_ch == 'x' {
+                            format!("{:x}", n)
                         } else {
                             format!("{:X}", n)
                         };
+                        let digits = if let Some(p) = precision {
+                            format!("{:0>width$}", raw_hex, width = p)
+                        } else {
+                            raw_hex
+                        };
+                        let formatted = if flags.contains('#') && n != 0 {
+                            if hex_ch == 'x' {
+                                format!("0x{}", digits)
+                            } else {
+                                format!("0X{}", digits)
+                            }
+                        } else {
+                            digits
+                        };
+                        // Precision overrides 0 flag for integers
+                        let use_zero = zero_pad && precision.is_none();
                         if w > 0 {
                             if left {
                                 print!("{:<w$}", formatted);
-                            } else if zero_pad {
+                            } else if use_zero {
                                 print!("{:0>w$}", formatted);
                             } else {
                                 print!("{:>w$}", formatted);
