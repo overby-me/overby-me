@@ -124,7 +124,7 @@ fn load_all_units_inner(
         trace!(
             "Dir dep: {} {} {}",
             dep.parent_unit,
-            if dep.is_requires { "Requires" } else { "Wants" },
+            dep.dep_kind.label(),
             dep.child_unit
         );
     }
@@ -428,9 +428,9 @@ fn parse_all_units(
         if entry_path.is_dir() {
             let dir_name = entry.file_name().to_string_lossy().to_string();
 
-            // Handle .wants/ and .requires/ directories
-            if let Some((parent_unit, is_requires)) = parse_dep_dir_name(&dir_name) {
-                collect_dep_dir_entries(&entry_path, &parent_unit, is_requires, priority, dir_deps);
+            // Handle .wants/, .requires/, and .upholds/ directories
+            if let Some((parent_unit, dep_kind)) = parse_dep_dir_name(&dir_name) {
+                collect_dep_dir_entries(&entry_path, &parent_unit, dep_kind, priority, dir_deps);
                 continue;
             }
 

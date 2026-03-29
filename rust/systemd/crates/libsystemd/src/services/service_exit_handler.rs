@@ -1135,31 +1135,7 @@ pub(crate) fn service_exit_handler(
                     let srvc_id_clone = srvc_id.clone();
                     let arc_ri = arc_run_info.clone();
                     std::thread::spawn(move || {
-                        // Small delay to avoid tight restart loops
-                        std::thread::sleep(std::time::Duration::from_millis(500));
-                        {
-                            let ri = arc_ri.read_poisoned();
-                            // Re-check that the unit is still NeverStarted (not
-                            // started by someone else in the meantime).
-                            if let Some(unit) = ri.unit_table.get(&srvc_id_clone) {
-                                let st = unit.common.status.read_poisoned();
-                                if !matches!(&*st, UnitStatus::NeverStarted) {
-                                    return;
-                                }
-                            }
-                        }
-                        let errs =
-                            crate::units::activate_needed_units(srvc_id_clone.clone(), arc_ri);
-                        if errs.is_empty() {
-                            info!("Upholds= restarted {}", srvc_id_clone.name);
-                        } else {
-                            for e in &errs {
-                                warn!(
-                                    "Failed to restart upheld unit {}: {}",
-                                    srvc_id_clone.name, e
-                                );
-                            }
-                        }
+                        crate::units::upholds_retry_loop(srvc_id_clone, arc_ri);
                     });
                 }
             }

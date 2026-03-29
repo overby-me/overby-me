@@ -1,4 +1,4 @@
-//! Support for systemd directory-based dependencies (.wants/, .requires/),
+//! Support for systemd directory-based dependencies (.wants/, .requires/, .upholds/),
 //! drop-in override directories (.d/), template unit instantiation with
 //! specifier resolution, and a minimal getty generator.
 
@@ -16,15 +16,34 @@ use crate::units::{
 };
 use std::sync::RwLock;
 
-/// Represents a dependency relationship discovered from a `.wants/` or `.requires/` directory.
+/// The kind of directory-based dependency (.wants/, .requires/, .upholds/).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DepDirKind {
+    Wants,
+    Requires,
+    Upholds,
+}
+
+impl DepDirKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Wants => "Wants",
+            Self::Requires => "Requires",
+            Self::Upholds => "Upholds",
+        }
+    }
+}
+
+/// Represents a dependency relationship discovered from a `.wants/`, `.requires/`,
+/// or `.upholds/` directory.
 #[derive(Debug, Clone)]
 pub struct DirectoryDependency {
     /// The unit that has the dependency (e.g., "multi-user.target")
     pub parent_unit: String,
-    /// The unit that is wanted/required (e.g., "getty.target")
+    /// The unit that is wanted/required/upheld (e.g., "getty.target")
     pub child_unit: String,
-    /// Whether this is a Wants (false) or Requires (true) dependency
-    pub is_requires: bool,
+    /// The kind of dependency (Wants, Requires, or Upholds).
+    pub dep_kind: DepDirKind,
     /// Priority of the search path this was found in (lower = higher priority).
     /// E.g., /etc = 0, /run = 1, /usr/lib = 3.
     pub priority: usize,
@@ -32,16 +51,17 @@ pub struct DirectoryDependency {
     pub is_mask: bool,
 }
 
-/// Check if a directory name represents a `.wants` or `.requires` dependency directory.
-/// Returns Some((parent_unit_name, is_requires)) if it does.
-#[allow(clippy::manual_map)]
-pub fn parse_dep_dir_name(dir_name: &str) -> Option<(String, bool)> {
+/// Check if a directory name represents a `.wants`, `.requires`, or `.upholds`
+/// dependency directory. Returns Some((parent_unit_name, dep_kind)) if it does.
+pub fn parse_dep_dir_name(dir_name: &str) -> Option<(String, DepDirKind)> {
     if let Some(parent) = dir_name.strip_suffix(".wants") {
-        Some((parent.to_owned(), false))
+        Some((parent.to_owned(), DepDirKind::Wants))
     } else if let Some(parent) = dir_name.strip_suffix(".requires") {
-        Some((parent.to_owned(), true))
+        Some((parent.to_owned(), DepDirKind::Requires))
     } else {
-        None
+        dir_name
+            .strip_suffix(".upholds")
+            .map(|parent| (parent.to_owned(), DepDirKind::Upholds))
     }
 }
 
@@ -799,12 +819,12 @@ pub fn insert_parsed_unit(
     }
 }
 
-/// Collect entries from a `.wants/` or `.requires/` directory and record
-/// the dependency relationships.
+/// Collect entries from a `.wants/`, `.requires/`, or `.upholds/` directory
+/// and record the dependency relationships.
 pub fn collect_dep_dir_entries(
     dir_path: &Path,
     parent_unit: &str,
-    is_requires: bool,
+    dep_kind: DepDirKind,
     priority: usize,
     dir_deps: &mut Vec<DirectoryDependency>,
 ) {
@@ -832,7 +852,7 @@ pub fn collect_dep_dir_entries(
             trace!(
                 "Directory dependency: {} {} {}{} (priority={})",
                 parent_unit,
-                if is_requires { "Requires" } else { "Wants" },
+                dep_kind.label(),
                 child_name,
                 if is_mask { " [MASKED]" } else { "" },
                 priority
@@ -840,7 +860,7 @@ pub fn collect_dep_dir_entries(
             dir_deps.push(DirectoryDependency {
                 parent_unit: parent_unit.to_owned(),
                 child_unit: child_name,
-                is_requires,
+                dep_kind,
                 priority,
                 is_mask,
             });
@@ -849,8 +869,9 @@ pub fn collect_dep_dir_entries(
 }
 
 /// Collect directory-based dependencies for a specific unit from all unit dirs.
-/// Scans `{unit_name}.wants/` and `{unit_name}.requires/` in each search path,
-/// applies priority-based `/dev/null` masking, and returns the effective deps.
+/// Scans `{unit_name}.wants/`, `{unit_name}.requires/`, and `{unit_name}.upholds/`
+/// in each search path, applies priority-based `/dev/null` masking, and returns
+/// the effective deps.
 pub fn collect_dir_deps_for_unit(
     unit_dirs: &[std::path::PathBuf],
     unit_name: &str,
@@ -859,11 +880,33 @@ pub fn collect_dir_deps_for_unit(
     for (priority, dir) in unit_dirs.iter().enumerate() {
         let wants_dir = dir.join(format!("{unit_name}.wants"));
         if wants_dir.is_dir() {
-            collect_dep_dir_entries(&wants_dir, unit_name, false, priority, &mut dir_deps);
+            collect_dep_dir_entries(
+                &wants_dir,
+                unit_name,
+                DepDirKind::Wants,
+                priority,
+                &mut dir_deps,
+            );
         }
         let requires_dir = dir.join(format!("{unit_name}.requires"));
         if requires_dir.is_dir() {
-            collect_dep_dir_entries(&requires_dir, unit_name, true, priority, &mut dir_deps);
+            collect_dep_dir_entries(
+                &requires_dir,
+                unit_name,
+                DepDirKind::Requires,
+                priority,
+                &mut dir_deps,
+            );
+        }
+        let upholds_dir = dir.join(format!("{unit_name}.upholds"));
+        if upholds_dir.is_dir() {
+            collect_dep_dir_entries(
+                &upholds_dir,
+                unit_name,
+                DepDirKind::Upholds,
+                priority,
+                &mut dir_deps,
+            );
         }
     }
     resolve_masked_dir_deps(&dir_deps)
@@ -1130,15 +1173,15 @@ pub fn apply_dropins(
 }
 
 /// Apply directory-based dependencies to the unit table.
-/// For each .wants/ and .requires/ relationship discovered, add the appropriate
-/// dependency to the parent unit. Respects priority-based masking: if the
-/// highest-priority entry for a (parent, child, dep_type) triple is a
-/// `/dev/null` symlink, the dependency is suppressed.
+/// For each .wants/, .requires/, and .upholds/ relationship discovered, add
+/// the appropriate dependency to the parent unit. Respects priority-based
+/// masking: if the highest-priority entry for a (parent, child, dep_type)
+/// triple is a `/dev/null` symlink, the dependency is suppressed.
 pub fn apply_directory_dependencies(
     unit_table: &mut HashMap<UnitId, Unit>,
     dir_deps: &[DirectoryDependency],
 ) {
-    // Resolve masking: for each (parent, child, is_requires) triple, find the
+    // Resolve masking: for each (parent, child, dep_kind) triple, find the
     // highest-priority (lowest priority value) entry. If it's a mask, skip it.
     let effective_deps = resolve_masked_dir_deps(dir_deps);
 
@@ -1167,21 +1210,13 @@ pub fn apply_directory_dependencies(
 
         if child_exists {
             if let Some(parent) = unit_table.get_mut(&parent_id) {
-                if dep.is_requires {
-                    if !parent.common.dependencies.requires.contains(&child_id) {
-                        trace!(
-                            "Adding directory Requires dependency: {} -> {}",
-                            dep.parent_unit, dep.child_unit
-                        );
-                        parent.common.dependencies.requires.push(child_id.clone());
-                    }
-                } else if !parent.common.dependencies.wants.contains(&child_id) {
-                    trace!(
-                        "Adding directory Wants dependency: {} -> {}",
-                        dep.parent_unit, dep.child_unit
-                    );
-                    parent.common.dependencies.wants.push(child_id.clone());
-                }
+                apply_dep_to_unit(
+                    parent,
+                    &child_id,
+                    dep.dep_kind,
+                    &dep.parent_unit,
+                    &dep.child_unit,
+                );
                 if !parent.common.unit.refs_by_name.contains(&child_id) {
                     parent.common.unit.refs_by_name.push(child_id);
                 }
@@ -1195,19 +1230,49 @@ pub fn apply_directory_dependencies(
     }
 }
 
+/// Add a directory dependency of the given kind to the parent unit.
+fn apply_dep_to_unit(
+    parent: &mut Unit,
+    child_id: &UnitId,
+    dep_kind: DepDirKind,
+    parent_name: &str,
+    child_name: &str,
+) {
+    match dep_kind {
+        DepDirKind::Requires => {
+            if !parent.common.dependencies.requires.contains(child_id) {
+                trace!("Adding directory Requires dependency: {parent_name} -> {child_name}");
+                parent.common.dependencies.requires.push(child_id.clone());
+            }
+        }
+        DepDirKind::Wants => {
+            if !parent.common.dependencies.wants.contains(child_id) {
+                trace!("Adding directory Wants dependency: {parent_name} -> {child_name}");
+                parent.common.dependencies.wants.push(child_id.clone());
+            }
+        }
+        DepDirKind::Upholds => {
+            if !parent.common.dependencies.upholds.contains(child_id) {
+                trace!("Adding directory Upholds dependency: {parent_name} -> {child_name}");
+                parent.common.dependencies.upholds.push(child_id.clone());
+            }
+        }
+    }
+}
+
 /// Resolve priority-based masking for directory dependencies.
-/// For each unique (parent, child, is_requires) triple, the highest-priority
+/// For each unique (parent, child, dep_kind) triple, the highest-priority
 /// entry (lowest priority number) wins. If that entry is a mask (`/dev/null`
 /// symlink), the dependency is suppressed entirely.
 pub fn resolve_masked_dir_deps(dir_deps: &[DirectoryDependency]) -> Vec<DirectoryDependency> {
-    // Key: (parent_unit, child_unit, is_requires) -> best (lowest priority) entry
-    let mut best: HashMap<(String, String, bool), &DirectoryDependency> = HashMap::new();
+    // Key: (parent_unit, child_unit, dep_kind) -> best (lowest priority) entry
+    let mut best: HashMap<(String, String, DepDirKind), &DirectoryDependency> = HashMap::new();
 
     for dep in dir_deps {
         let key = (
             dep.parent_unit.clone(),
             dep.child_unit.clone(),
-            dep.is_requires,
+            dep.dep_kind,
         );
         match best.get(&key) {
             Some(existing) if existing.priority <= dep.priority => {
@@ -1225,7 +1290,7 @@ pub fn resolve_masked_dir_deps(dir_deps: &[DirectoryDependency]) -> Vec<Director
                 trace!(
                     "Masking directory dependency: {} {} {} (priority={})",
                     dep.parent_unit,
-                    if dep.is_requires { "Requires" } else { "Wants" },
+                    dep.dep_kind.label(),
                     dep.child_unit,
                     dep.priority
                 );
@@ -1489,13 +1554,13 @@ pub fn instantiate_template_units(
         }
 
         if let Some(parent) = unit_table.get_mut(&parent_id) {
-            if dep.is_requires {
-                if !parent.common.dependencies.requires.contains(&child_id) {
-                    parent.common.dependencies.requires.push(child_id.clone());
-                }
-            } else if !parent.common.dependencies.wants.contains(&child_id) {
-                parent.common.dependencies.wants.push(child_id.clone());
-            }
+            apply_dep_to_unit(
+                parent,
+                &child_id,
+                dep.dep_kind,
+                &dep.parent_unit,
+                &dep.child_unit,
+            );
             if !parent.common.unit.refs_by_name.contains(&child_id) {
                 parent.common.unit.refs_by_name.push(child_id);
             }
@@ -2232,11 +2297,15 @@ mod tests {
     fn test_parse_dep_dir_name() {
         assert_eq!(
             parse_dep_dir_name("multi-user.target.wants"),
-            Some(("multi-user.target".to_owned(), false))
+            Some(("multi-user.target".to_owned(), DepDirKind::Wants))
         );
         assert_eq!(
             parse_dep_dir_name("sysinit.target.requires"),
-            Some(("sysinit.target".to_owned(), true))
+            Some(("sysinit.target".to_owned(), DepDirKind::Requires))
+        );
+        assert_eq!(
+            parse_dep_dir_name("my-uphold.service.upholds"),
+            Some(("my-uphold.service".to_owned(), DepDirKind::Upholds))
         );
         assert_eq!(parse_dep_dir_name("some-directory"), None);
     }

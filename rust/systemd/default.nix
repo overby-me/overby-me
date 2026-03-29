@@ -5095,7 +5095,6 @@
 
           # Upholds subtest: rewrite to poll instead of waiting for signals
           # (signals don't work because the test doesn't run as a service in the VM).
-          # Also skip section 2 (UpheldBy= in Install, not yet implemented).
           cat > TEST-23-UNIT-FILE.Upholds.sh << 'UPHEOF'
           #!/usr/bin/env bash
           set -eux
@@ -5115,6 +5114,26 @@
           timeout 120 bash -c 'until [[ "$(cat /tmp/TEST-23-UNIT-FILE.counter 2>/dev/null)" -ge 5 ]]; do sleep .5; done'
 
           systemctl stop TEST-23-UNIT-FILE-uphold.service
+
+          # Section 2: UpheldBy= in [Install]
+          # Enable creates .upholds symlink, then starting retry-uphold should
+          # also uphold upheldby-install via the .upholds directory.
+          systemctl enable TEST-23-UNIT-FILE-upheldby-install.service
+          systemctl daemon-reload
+
+          rm -f /tmp/TEST-23-UNIT-FILE-retry-fail
+          systemctl start TEST-23-UNIT-FILE-retry-uphold.service
+          systemctl is-active TEST-23-UNIT-FILE-upheldby-install.service
+
+          timeout 60 bash -c 'until systemctl is-failed TEST-23-UNIT-FILE-retry-fail.service; do sleep .5; done'
+
+          (! systemctl is-active TEST-23-UNIT-FILE-retry-upheld.service)
+
+          touch /tmp/TEST-23-UNIT-FILE-retry-fail
+
+          timeout 60 bash -c 'until systemctl is-active TEST-23-UNIT-FILE-retry-upheld.service; do sleep .5; done'
+
+          systemctl stop TEST-23-UNIT-FILE-retry-uphold.service TEST-23-UNIT-FILE-retry-fail.service TEST-23-UNIT-FILE-retry-upheld.service
 
           # Section 3: StopPropagatedFrom / PropagatesStopTo
           # prop-stop-one.service has StopPropagatedFrom=prop-stop-two.service.

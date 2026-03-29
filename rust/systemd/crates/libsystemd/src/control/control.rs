@@ -1519,7 +1519,7 @@ fn refresh_directory_deps(unit_name: &str, run_info: &ArcMutRuntimeInfo) {
         ri.config.unit_dirs.clone()
     };
 
-    for (suffix, is_requires) in &[("wants", false), ("requires", true)] {
+    for suffix in &["wants", "requires", "upholds"] {
         for dir in &unit_dirs {
             let dep_dir = dir.join(format!("{unit_name}.{suffix}"));
             if !dep_dir.is_dir() {
@@ -1559,15 +1559,28 @@ fn refresh_directory_deps(unit_name: &str, run_info: &ArcMutRuntimeInfo) {
                 if let (Some(parent_id), Some(child_id)) = (parent_id, child_id)
                     && let Some(parent) = ri.unit_table.get_mut(&parent_id)
                 {
-                    if *is_requires {
-                        if !parent.common.dependencies.requires.contains(&child_id) {
-                            parent.common.dependencies.requires.push(child_id.clone());
+                    match *suffix {
+                        "requires" => {
+                            if !parent.common.dependencies.requires.contains(&child_id) {
+                                parent.common.dependencies.requires.push(child_id.clone());
+                            }
                         }
-                    } else if !parent.common.dependencies.wants.contains(&child_id) {
-                        parent.common.dependencies.wants.push(child_id.clone());
+                        "upholds" => {
+                            if !parent.common.dependencies.upholds.contains(&child_id) {
+                                parent.common.dependencies.upholds.push(child_id.clone());
+                            }
+                        }
+                        _ => {
+                            // "wants"
+                            if !parent.common.dependencies.wants.contains(&child_id) {
+                                parent.common.dependencies.wants.push(child_id.clone());
+                            }
+                        }
                     }
                     // Also add After ordering so the dep is waited on
-                    if !parent.common.dependencies.after.contains(&child_id) {
+                    // (not needed for upholds, but doesn't hurt)
+                    if *suffix != "upholds" && !parent.common.dependencies.after.contains(&child_id)
+                    {
                         parent.common.dependencies.after.push(child_id);
                     }
                 }
@@ -1658,16 +1671,19 @@ fn unit_file_state(
         return "masked";
     }
 
-    // Check if the unit has an [Install] section by looking for WantedBy=/RequiredBy=
+    // Check if the unit has an [Install] section by looking for WantedBy=/RequiredBy=/UpheldBy=
     // in the loaded unit table, or by reading the file itself.
     let has_install = if let Some(unit) = unit_table.values().find(|u| u.id.name == name) {
         !unit.common.dependencies.wanted_by.is_empty()
             || !unit.common.dependencies.required_by.is_empty()
+            || !unit.common.dependencies.upheld_by.is_empty()
     } else {
         // Not loaded — peek at the file for [Install]
         if let Ok(content) = std::fs::read_to_string(path) {
             content.contains("[Install]")
-                && (content.contains("WantedBy=") || content.contains("RequiredBy="))
+                && (content.contains("WantedBy=")
+                    || content.contains("RequiredBy=")
+                    || content.contains("UpheldBy="))
         } else {
             false
         }
@@ -1677,13 +1693,16 @@ fn unit_file_state(
         // No [Install] section → static (cannot be enabled/disabled)
         "static"
     } else {
-        // Check if enablement symlinks exist in .wants/.requires directories.
+        // Check if enablement symlinks exist in .wants/.requires/.upholds directories.
         for dir in unit_dirs {
             if let Ok(entries) = std::fs::read_dir(dir) {
                 for entry in entries.flatten() {
                     let entry_name = entry.file_name();
                     let entry_str = entry_name.to_string_lossy();
-                    if entry_str.ends_with(".wants") || entry_str.ends_with(".requires") {
+                    if entry_str.ends_with(".wants")
+                        || entry_str.ends_with(".requires")
+                        || entry_str.ends_with(".upholds")
+                    {
                         let symlink = entry.path().join(name);
                         if symlink.exists() || symlink.symlink_metadata().is_ok() {
                             return "enabled";
@@ -4593,6 +4612,7 @@ pub fn execute_command(
                 let mut in_install = false;
                 let mut wanted_by = Vec::new();
                 let mut required_by = Vec::new();
+                let mut upheld_by = Vec::new();
                 for line in content.lines() {
                     let trimmed = line.trim();
                     if trimmed == "[Install]" {
@@ -4614,6 +4634,11 @@ pub fn execute_command(
                     if let Some(val) = trimmed.strip_prefix("RequiredBy=") {
                         for target in val.split_whitespace() {
                             required_by.push(target.to_string());
+                        }
+                    }
+                    if let Some(val) = trimmed.strip_prefix("UpheldBy=") {
+                        for target in val.split_whitespace() {
+                            upheld_by.push(target.to_string());
                         }
                     }
                 }
@@ -4647,6 +4672,10 @@ pub fn execute_command(
                     .into_iter()
                     .map(|s| expand_specifiers(&s))
                     .collect();
+                let upheld_by: Vec<String> = upheld_by
+                    .into_iter()
+                    .map(|s| expand_specifiers(&s))
+                    .collect();
                 // Create .wants symlinks
                 for target in &wanted_by {
                     let wants_dir = base_dir.join(format!("{target}.wants"));
@@ -4663,6 +4692,16 @@ pub fn execute_command(
                     std::fs::create_dir_all(&req_dir)
                         .map_err(|e| format!("Failed to create {}: {e}", req_dir.display()))?;
                     let link = req_dir.join(&full_name);
+                    let _ = std::fs::remove_file(&link);
+                    std::os::unix::fs::symlink(&unit_path, &link)
+                        .map_err(|e| format!("Failed to create symlink {}: {e}", link.display()))?;
+                }
+                // Create .upholds symlinks
+                for target in &upheld_by {
+                    let upholds_dir = base_dir.join(format!("{target}.upholds"));
+                    std::fs::create_dir_all(&upholds_dir)
+                        .map_err(|e| format!("Failed to create {}: {e}", upholds_dir.display()))?;
+                    let link = upholds_dir.join(&full_name);
                     let _ = std::fs::remove_file(&link);
                     std::os::unix::fs::symlink(&unit_path, &link)
                         .map_err(|e| format!("Failed to create symlink {}: {e}", link.display()))?;
@@ -4737,7 +4776,10 @@ pub fn execute_command(
                     for entry in entries.flatten() {
                         let entry_name = entry.file_name();
                         let entry_str = entry_name.to_string_lossy();
-                        if entry_str.ends_with(".wants") || entry_str.ends_with(".requires") {
+                        if entry_str.ends_with(".wants")
+                            || entry_str.ends_with(".requires")
+                            || entry_str.ends_with(".upholds")
+                        {
                             if is_template {
                                 // Remove all instance symlinks matching the template
                                 if let Ok(links) = std::fs::read_dir(entry.path()) {
@@ -4893,6 +4935,16 @@ pub fn execute_command(
                                         let _ = std::os::unix::fs::symlink(&unit_path, &link);
                                     }
                                 }
+                                if let Some(val) = trimmed.strip_prefix("UpheldBy=") {
+                                    for target in val.split_whitespace() {
+                                        let upholds_dir =
+                                            base_dir.join(format!("{target}.upholds"));
+                                        let _ = std::fs::create_dir_all(&upholds_dir);
+                                        let link = upholds_dir.join(&full_name);
+                                        let _ = std::fs::remove_file(&link);
+                                        let _ = std::os::unix::fs::symlink(&unit_path, &link);
+                                    }
+                                }
                             }
                         }
                     }
@@ -4902,7 +4954,9 @@ pub fn execute_command(
                             for entry in entries.flatten() {
                                 let entry_name = entry.file_name();
                                 let entry_str = entry_name.to_string_lossy();
-                                if entry_str.ends_with(".wants") || entry_str.ends_with(".requires")
+                                if entry_str.ends_with(".wants")
+                                    || entry_str.ends_with(".requires")
+                                    || entry_str.ends_with(".upholds")
                                 {
                                     let link = entry.path().join(&full_name);
                                     if link.symlink_metadata().is_ok() {
@@ -6410,7 +6464,7 @@ pub fn execute_command(
                     scan_name,
                 );
                 for dep in &effective_deps {
-                    let prop_key = if dep.is_requires { "Requires" } else { "Wants" };
+                    let prop_key = dep.dep_kind.label();
                     // Resolve symlink aliases to canonical unit names
                     let child_name = {
                         let mut resolved = dep.child_unit.clone();

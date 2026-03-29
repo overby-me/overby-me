@@ -791,6 +791,51 @@ pub fn activate_needed_units(
     tpool.join();
     info!("activate_needed_units: activation complete, all jobs dispatched");
 
+    // Post-activation: check for upheld units that failed to start.
+    // If a unit is upheld by an active unit but failed to activate
+    // (e.g. due to a dependency failure), spawn a retry loop.
+    {
+        let ri = run_info.read_poisoned();
+        for (uid, unit) in ri.unit_table.iter() {
+            if unit.common.dependencies.upheld_by.is_empty() {
+                continue;
+            }
+            let status = unit.common.status.read_poisoned();
+            if status.is_started() {
+                continue; // already running
+            }
+            let any_active = unit
+                .common
+                .dependencies
+                .upheld_by
+                .iter()
+                .any(|upholding_id| {
+                    ri.unit_table
+                        .get(upholding_id)
+                        .map(|u| u.common.status.read_poisoned().is_started())
+                        .unwrap_or(false)
+                });
+            if any_active {
+                trace!(
+                    "Upheld unit {} not started after activation, scheduling retry",
+                    uid.name
+                );
+                drop(status);
+                {
+                    let mut st = unit.common.status.write_poisoned();
+                    if !st.is_started() {
+                        *st = UnitStatus::NeverStarted;
+                    }
+                }
+                let uid_clone = uid.clone();
+                let arc_ri = run_info.clone();
+                std::thread::spawn(move || {
+                    upholds_retry_loop(uid_clone, arc_ri);
+                });
+            }
+        }
+    }
+
     trace!("activate_needed_units: all activation complete");
     // TODO can we handle errors in a more meaningful way?
     let errs = (*errors.lock_poisoned()).clone();
@@ -1025,4 +1070,105 @@ fn trigger_on_failure_units(failed_id: &UnitId, run_info: &ArcMutRuntimeInfo) {
             }
         });
     }
+}
+
+/// Retry loop for upheld units. Keeps trying to restart an upheld unit
+/// as long as any of its upholding units remain active. Uses exponential
+/// backoff (500ms → 1s → 2s → ... capped at 30s) to avoid busy loops
+/// when a dependency keeps failing.
+pub fn upholds_retry_loop(unit_id: UnitId, arc_ri: ArcMutRuntimeInfo) {
+    let mut delay = std::time::Duration::from_millis(500);
+    let max_delay = std::time::Duration::from_secs(30);
+    let max_retries = 120; // ~30 minutes with max delay
+
+    for attempt in 0..max_retries {
+        std::thread::sleep(delay);
+
+        // Check if the unit is still upheld by an active unit
+        let (should_retry, is_never_started) = {
+            let ri = arc_ri.read_poisoned();
+            let Some(unit) = ri.unit_table.get(&unit_id) else {
+                return; // unit removed
+            };
+            let status = unit.common.status.read_poisoned();
+            let is_started = status.is_started();
+            if is_started {
+                return; // already running, no need to retry
+            }
+            let any_upholding_active = unit.common.dependencies.upheld_by.iter().any(|uid| {
+                ri.unit_table
+                    .get(uid)
+                    .map(|u| u.common.status.read_poisoned().is_started())
+                    .unwrap_or(false)
+            });
+            if !any_upholding_active {
+                return; // no upholding unit is active anymore
+            }
+            let is_ns = matches!(&*status, UnitStatus::NeverStarted);
+            (true, is_ns)
+        };
+
+        if !should_retry {
+            return;
+        }
+
+        // Reset to NeverStarted if needed so activate_unit picks it up
+        if !is_never_started {
+            let ri = arc_ri.read_poisoned();
+            if let Some(unit) = ri.unit_table.get(&unit_id) {
+                let mut status = unit.common.status.write_poisoned();
+                if !status.is_started() {
+                    *status = UnitStatus::NeverStarted;
+                }
+            }
+        }
+
+        // Also reset stopped dependencies so they can be retried
+        {
+            let ri = arc_ri.read_poisoned();
+            if let Some(unit) = ri.unit_table.get(&unit_id) {
+                let dep_ids: Vec<UnitId> = unit
+                    .common
+                    .dependencies
+                    .requires
+                    .iter()
+                    .chain(unit.common.dependencies.wants.iter())
+                    .cloned()
+                    .collect();
+                for dep_id in &dep_ids {
+                    if let Some(dep) = ri.unit_table.get(dep_id) {
+                        let mut st = dep.common.status.write_poisoned();
+                        if st.is_stopped() {
+                            *st = UnitStatus::NeverStarted;
+                        }
+                    }
+                }
+            }
+        }
+
+        let errs = activate_needed_units(unit_id.clone(), arc_ri.clone());
+        if errs.is_empty() {
+            info!(
+                "Upholds= restarted {} (attempt {})",
+                unit_id.name,
+                attempt + 1
+            );
+            return;
+        }
+        for e in &errs {
+            trace!(
+                "Upholds= retry {} for {} failed: {}",
+                attempt + 1,
+                unit_id.name,
+                e
+            );
+        }
+
+        // Exponential backoff
+        delay = std::cmp::min(delay * 2, max_delay);
+    }
+    warn!(
+        "Upholds= gave up restarting {} after {} retries",
+        unit_id.name, max_retries
+    );
 }
