@@ -127,7 +127,7 @@ impl Shell {
                     eprintln!(
                         "{}: {}: arithmetic syntax error: operand expected (error token is \"{}\")",
                         self.arith_error_prefix(),
-                        top_expr.trim(),
+                        top_expr,
                         error_token
                     );
                     crate::expand::set_arith_error();
@@ -453,18 +453,14 @@ impl Shell {
                 let else_part = &rest[c_pos + 1..];
                 // Check for empty then/else parts
                 if then_part.trim().is_empty() || else_part.trim().is_empty() {
-                    let top_expr = self.arith_top_expr.as_deref().unwrap_or(expr).trim();
-                    let error_token = if then_part.trim().is_empty() {
-                        &rest[c_pos..] // from ':' onwards
-                    } else {
-                        &rest[c_pos..] // from ':' onwards (empty else)
-                    };
+                    let top_expr = self.arith_top_expr.as_deref().unwrap_or(expr);
+                    let error_token = &rest[c_pos..]; // from ':' onwards
                     eprintln!(
                         "{}: {}{}: expression expected (error token is \"{}\")",
                         self.arith_error_prefix(),
                         self.arith_cmd_prefix(),
                         top_expr,
-                        error_token.trim()
+                        error_token
                     );
                     crate::expand::set_arith_error();
                     return 0;
@@ -476,13 +472,13 @@ impl Shell {
                 };
             }
             // Missing ':' in ternary — error
-            let top_expr = self.arith_top_expr.as_deref().unwrap_or(expr).trim();
+            let top_expr = self.arith_top_expr.as_deref().unwrap_or(expr);
             eprintln!(
                 "{}: {}{}: `:' expected for conditional expression (error token is \"{}\")",
                 self.arith_error_prefix(),
                 self.arith_cmd_prefix(),
                 top_expr,
-                rest.trim()
+                rest
             );
             crate::expand::set_arith_error();
             return 0;
@@ -840,7 +836,7 @@ impl Shell {
                             b'/' => {
                                 if right == 0 {
                                     let top_expr =
-                                        self.arith_top_expr.as_deref().unwrap_or(expr).trim();
+                                        self.arith_top_expr.as_deref().unwrap_or(expr);
                                     let error_token = expr[i + 1..].trim_start();
                                     eprintln!(
                                         "{}: {}{}: division by 0 (error token is \"{}\")",
