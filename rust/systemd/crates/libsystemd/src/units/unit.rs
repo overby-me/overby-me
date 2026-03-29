@@ -2253,6 +2253,11 @@ pub struct Dependencies {
     /// Reverse of `upholds`: units that declared `Upholds=` pointing to this unit.
     /// When this unit stops, any active unit in `upheld_by` will restart it.
     pub upheld_by: Vec<UnitId>,
+
+    /// Units to propagate stop requests to.
+    /// When this unit is stopped, the listed units are also stopped.
+    /// Matches systemd's `PropagatesStopTo=` setting.
+    pub propagates_stop_to: Vec<UnitId>,
 }
 
 impl Dependencies {
@@ -2271,6 +2276,7 @@ impl Dependencies {
         self.bound_by.sort();
         self.upholds.sort();
         self.upheld_by.sort();
+        self.propagates_stop_to.sort();
         // dedup after sorting
         self.wants.dedup();
         self.requires.dedup();
@@ -2286,6 +2292,7 @@ impl Dependencies {
         self.bound_by.dedup();
         self.upholds.dedup();
         self.upheld_by.dedup();
+        self.propagates_stop_to.dedup();
     }
 
     #[must_use]
@@ -2359,6 +2366,7 @@ impl Dependencies {
         Self::remove_from_vec(&mut self.bound_by, id);
         Self::remove_from_vec(&mut self.upholds, id);
         Self::remove_from_vec(&mut self.upheld_by, id);
+        Self::remove_from_vec(&mut self.propagates_stop_to, id);
     }
 
     #[must_use]

@@ -339,6 +339,8 @@ pub fn fill_dependencies(units: &mut HashMap<UnitId, Unit>) -> Result<(), String
         deps.bound_by.retain(|id| existing_ids.contains(id));
         deps.upholds.retain(|id| existing_ids.contains(id));
         deps.upheld_by.retain(|id| existing_ids.contains(id));
+        deps.propagates_stop_to
+            .retain(|id| existing_ids.contains(id));
         // Keep refs_by_name un-pruned: it preserves the original dependency
         // references from the unit file so that on-demand loading (e.g.
         // `systemctl restart` of a target whose Wants= service didn't exist

@@ -3709,6 +3709,7 @@ fn create_transient_unit(
                 bound_by: vec![],
                 upholds: vec![],
                 upheld_by: vec![],
+                propagates_stop_to: vec![],
             },
             status: RwLock::new(UnitStatus::NeverStarted),
             timestamps: RwLock::new(UnitTimestamps::default()),
@@ -3938,6 +3939,7 @@ fn create_transient_unit(
                     bound_by: vec![],
                     upholds: vec![],
                     upheld_by: vec![],
+                    propagates_stop_to: vec![],
                 },
                 status: RwLock::new(UnitStatus::Started(crate::units::StatusStarted::Running)),
                 timestamps: RwLock::new(UnitTimestamps::default()),
@@ -4085,6 +4087,7 @@ fn create_transient_unit(
                     bound_by: vec![],
                     upholds: vec![],
                     upheld_by: vec![],
+                    propagates_stop_to: vec![],
                 },
                 status: RwLock::new(UnitStatus::Started(crate::units::StatusStarted::Running)),
                 timestamps: RwLock::new(UnitTimestamps::default()),
@@ -6637,11 +6640,46 @@ pub fn execute_command(
             // .wants/.requires directories, matching Start behaviour.
             load_dependency_units(&id, &run_info);
             refresh_directory_deps(&id.name, &run_info);
-            // Collect NeverStarted Wants/Requires deps before reactivation.
-            // These are deps that were just loaded from disk and need to be
-            // started after the restart (e.g. services created on disk after
-            // the target was initially loaded).
-            let new_dep_ids: Vec<crate::units::UnitId> = {
+            // PropagatesStopTo= stop propagation: stop listed units before
+            // reactivation so the restart's implicit stop propagates correctly.
+            {
+                let ri = run_info.read_poisoned();
+                if let Some(unit) = ri.unit_table.get(&id) {
+                    for stop_id in &unit.common.dependencies.propagates_stop_to {
+                        if let Err(e) = crate::units::deactivate_unit_recursive(stop_id, &ri) {
+                            warn!("Failed to propagate stop to {}: {e}", stop_id.name);
+                        }
+                    }
+                }
+            }
+            {
+                let ri = run_info.read_poisoned();
+                crate::units::reactivate_unit(id.clone(), &ri).map_err(|e| format!("{e}"))?;
+            }
+            // Re-start Wants/Requires deps that are Stopped.
+            // Reset their status to NeverStarted so the normal activation
+            // path picks them up (activate_unit skips StoppedFinal units).
+            {
+                let ri = run_info.read_poisoned();
+                if let Some(unit) = ri.unit_table.get(&id) {
+                    for dep_id in unit
+                        .common
+                        .dependencies
+                        .wants
+                        .iter()
+                        .chain(unit.common.dependencies.requires.iter())
+                    {
+                        if let Some(dep) = ri.unit_table.get(dep_id) {
+                            let mut status = dep.common.status.write_poisoned();
+                            if status.is_stopped() {
+                                *status = crate::units::UnitStatus::NeverStarted;
+                            }
+                        }
+                    }
+                }
+            }
+            // Now activate all deps that need starting.
+            let dep_ids: Vec<crate::units::UnitId> = {
                 let ri = run_info.read_poisoned();
                 let mut ids = Vec::new();
                 if let Some(unit) = ri.unit_table.get(&id) {
@@ -6662,52 +6700,109 @@ pub fn execute_command(
                 }
                 ids
             };
-            {
-                let ri = run_info.read_poisoned();
-                crate::units::reactivate_unit(id, &ri).map_err(|e| format!("{e}"))?;
-            }
-            // Start any newly-discovered NeverStarted deps.
-            for dep_id in new_dep_ids {
+            for dep_id in dep_ids {
                 let errs = crate::units::activate_needed_units(dep_id, run_info.clone());
                 for err in &errs {
-                    warn!("Error starting dependency after restart: {err}");
+                    warn!("Error re-starting dependency after restart: {err}");
                 }
             }
         }
         Command::TryRestart(unit_name) => {
             // try-restart: restart the unit only if it is currently active.
             // If the unit is not active, do nothing (success).
-            let ri = run_info.read_poisoned();
-            let units = find_units_with_name(&unit_name, &ri.unit_table);
-            if units.is_empty() {
-                // Unit not found — nothing to restart, not an error for try-restart.
-                return Ok(serde_json::json!(null));
-            }
-            if units.len() > 1 {
-                let names: Vec<_> = units.iter().map(|unit| unit.id.name.clone()).collect();
-                return Err(format!(
-                    "More than one unit found with name: {unit_name}: {names:?}"
-                ));
-            }
-
-            let id = units[0].id.clone();
-            // Check if the unit is currently active.
-            let is_active = ri
-                .unit_table
-                .get(&id)
-                .map(|unit| {
-                    let status_locked = unit.common.status.read_poisoned();
-                    matches!(
-                        *status_locked,
-                        crate::units::UnitStatus::Started(_) | crate::units::UnitStatus::Starting
-                    )
-                })
-                .unwrap_or(false);
+            let (id, is_active) = {
+                let ri = run_info.read_poisoned();
+                let units = find_units_with_name(&unit_name, &ri.unit_table);
+                if units.is_empty() {
+                    return Ok(serde_json::json!(null));
+                }
+                if units.len() > 1 {
+                    let names: Vec<_> = units.iter().map(|unit| unit.id.name.clone()).collect();
+                    return Err(format!(
+                        "More than one unit found with name: {unit_name}: {names:?}"
+                    ));
+                }
+                let id = units[0].id.clone();
+                let active = ri
+                    .unit_table
+                    .get(&id)
+                    .map(|unit| {
+                        let status_locked = unit.common.status.read_poisoned();
+                        matches!(
+                            *status_locked,
+                            crate::units::UnitStatus::Started(_)
+                                | crate::units::UnitStatus::Starting
+                        )
+                    })
+                    .unwrap_or(false);
+                (id, active)
+            };
 
             if is_active {
-                crate::units::reactivate_unit(id, &ri).map_err(|e| format!("{e}"))?;
+                // PropagatesStopTo= stop propagation during restart
+                {
+                    let ri = run_info.read_poisoned();
+                    if let Some(unit) = ri.unit_table.get(&id) {
+                        for stop_id in &unit.common.dependencies.propagates_stop_to {
+                            if let Err(e) = crate::units::deactivate_unit_recursive(stop_id, &ri) {
+                                warn!("Failed to propagate stop to {}: {e}", stop_id.name);
+                            }
+                        }
+                    }
+                }
+                {
+                    let ri = run_info.read_poisoned();
+                    crate::units::reactivate_unit(id.clone(), &ri).map_err(|e| format!("{e}"))?;
+                }
+                // Re-start stopped deps (same as Restart handler):
+                // reset Stopped → NeverStarted so activate_unit picks them up.
+                {
+                    let ri = run_info.read_poisoned();
+                    if let Some(unit) = ri.unit_table.get(&id) {
+                        for dep_id in unit
+                            .common
+                            .dependencies
+                            .wants
+                            .iter()
+                            .chain(unit.common.dependencies.requires.iter())
+                        {
+                            if let Some(dep) = ri.unit_table.get(dep_id) {
+                                let mut status = dep.common.status.write_poisoned();
+                                if status.is_stopped() {
+                                    *status = crate::units::UnitStatus::NeverStarted;
+                                }
+                            }
+                        }
+                    }
+                }
+                let dep_ids: Vec<crate::units::UnitId> = {
+                    let ri = run_info.read_poisoned();
+                    let mut ids = Vec::new();
+                    if let Some(unit) = ri.unit_table.get(&id) {
+                        for dep_id in unit
+                            .common
+                            .dependencies
+                            .wants
+                            .iter()
+                            .chain(unit.common.dependencies.requires.iter())
+                        {
+                            if let Some(dep) = ri.unit_table.get(dep_id) {
+                                let status = dep.common.status.read_poisoned();
+                                if matches!(&*status, crate::units::UnitStatus::NeverStarted) {
+                                    ids.push(dep_id.clone());
+                                }
+                            }
+                        }
+                    }
+                    ids
+                };
+                for dep_id in dep_ids {
+                    let errs = crate::units::activate_needed_units(dep_id, run_info.clone());
+                    for err in &errs {
+                        warn!("Error re-starting dependency after restart: {err}");
+                    }
+                }
             }
-            // If not active, silently succeed.
         }
         Command::ReloadOrRestart(unit_name) => {
             // reload-or-restart: try to reload, fall back to restart.
@@ -7189,8 +7284,69 @@ pub fn execute_command(
             let id = find_or_load_unit(&unit_name, &run_info)?;
             let run_info_clone = run_info.clone();
             std::thread::spawn(move || {
-                if let Err(e) = crate::units::reactivate_unit(id, &run_info_clone.read_poisoned()) {
-                    log::error!("Background restart error for {unit_name}: {e}");
+                // PropagatesStopTo= stop propagation during restart
+                {
+                    let ri = run_info_clone.read_poisoned();
+                    if let Some(unit) = ri.unit_table.get(&id) {
+                        for stop_id in &unit.common.dependencies.propagates_stop_to {
+                            if let Err(e) = crate::units::deactivate_unit_recursive(stop_id, &ri) {
+                                log::error!("Failed to propagate stop to {}: {e}", stop_id.name);
+                            }
+                        }
+                    }
+                }
+                {
+                    let ri = run_info_clone.read_poisoned();
+                    if let Err(e) = crate::units::reactivate_unit(id.clone(), &ri) {
+                        log::error!("Background restart error for {unit_name}: {e}");
+                    }
+                }
+                // Re-start stopped deps: reset Stopped → NeverStarted
+                {
+                    let ri = run_info_clone.read_poisoned();
+                    if let Some(unit) = ri.unit_table.get(&id) {
+                        for dep_id in unit
+                            .common
+                            .dependencies
+                            .wants
+                            .iter()
+                            .chain(unit.common.dependencies.requires.iter())
+                        {
+                            if let Some(dep) = ri.unit_table.get(dep_id) {
+                                let mut status = dep.common.status.write_poisoned();
+                                if status.is_stopped() {
+                                    *status = crate::units::UnitStatus::NeverStarted;
+                                }
+                            }
+                        }
+                    }
+                }
+                let dep_ids: Vec<crate::units::UnitId> = {
+                    let ri = run_info_clone.read_poisoned();
+                    let mut ids = Vec::new();
+                    if let Some(unit) = ri.unit_table.get(&id) {
+                        for dep_id in unit
+                            .common
+                            .dependencies
+                            .wants
+                            .iter()
+                            .chain(unit.common.dependencies.requires.iter())
+                        {
+                            if let Some(dep) = ri.unit_table.get(dep_id) {
+                                let status = dep.common.status.read_poisoned();
+                                if matches!(&*status, crate::units::UnitStatus::NeverStarted) {
+                                    ids.push(dep_id.clone());
+                                }
+                            }
+                        }
+                    }
+                    ids
+                };
+                for dep_id in dep_ids {
+                    let errs = crate::units::activate_needed_units(dep_id, run_info_clone.clone());
+                    for err in &errs {
+                        log::error!("Error re-starting dependency after restart: {err}");
+                    }
                 }
             });
         }
@@ -7768,6 +7924,7 @@ mod tests {
                     bound_by: vec![],
                     upholds: vec![],
                     upheld_by: vec![],
+                    propagates_stop_to: vec![],
                 },
                 status: RwLock::new(UnitStatus::NeverStarted),
                 timestamps: RwLock::new(UnitTimestamps::default()),

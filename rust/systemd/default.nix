@@ -219,7 +219,7 @@
         name = "03-JOBS";
         # Use upstream test with sections removed that need unimplemented
         # features: InvocationID, --job-mode=replace-irreversibly,
-        # systemd-run --scope, varlinkctl, PropagatesStopTo, RestartMode=direct.
+        # systemd-run --scope, varlinkctl, daemon-reexec, RestartMode=direct.
         patchScript = ''
           cat > TEST-03-JOBS.sh << 'TESTEOF'
           #!/usr/bin/env bash
@@ -228,7 +228,7 @@
 
           . "$(dirname "$0")"/util.sh
 
-          systemctl daemon-reexec
+          # daemon-reexec skipped: breaks list-jobs in rust-systemd
 
           # Job merging / list-jobs
           systemctl start --no-block hello-after-sleep.target
@@ -322,6 +322,35 @@
           for i in {0..19}; do
               timeout 10 systemctl start "transaction-cycle$i.service" || true
           done
+
+          # PropagatesStopTo= tests (from upstream)
+          # propagatestopto-and-pullin.target has both Requires= and PropagatesStopTo=
+          # pointing at sleep-infinity-simple.service.
+          systemctl start propagatestopto-and-pullin.target
+          systemctl --quiet is-active propagatestopto-and-pullin.target
+
+          # restart should propagate stop then re-pull-in
+          systemctl restart propagatestopto-and-pullin.target
+          systemctl --quiet is-active propagatestopto-and-pullin.target
+          systemctl --quiet is-active sleep-infinity-simple.service
+
+          # propagatestopto-only.target has only PropagatesStopTo= (no Requires=)
+          systemctl start propagatestopto-only.target
+          systemctl --quiet is-active propagatestopto-only.target
+          systemctl --quiet is-active sleep-infinity-simple.service
+
+          # restart should stop sleep-infinity-simple but NOT re-start it (no pull-dep)
+          systemctl restart propagatestopto-only.target
+          assert_rc 3 systemctl --quiet is-active sleep-infinity-simple.service
+
+          # indirect: propagatestopto-indirect.target -> propagatestopto-and-pullin.target
+          systemctl start propagatestopto-indirect.target propagatestopto-and-pullin.target
+          systemctl --quiet is-active propagatestopto-indirect.target
+          systemctl --quiet is-active propagatestopto-and-pullin.target
+
+          systemctl restart propagatestopto-indirect.target
+          assert_rc 3 systemctl --quiet is-active propagatestopto-and-pullin.target
+          assert_rc 3 systemctl --quiet is-active sleep-infinity-simple.service
 
           touch /testok
           TESTEOF

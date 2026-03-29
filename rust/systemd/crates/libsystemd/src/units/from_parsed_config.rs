@@ -824,6 +824,7 @@ fn make_common_from_parsed(
     let requires = collect_supported_unit_ids(unit.requires);
     let binds_to = collect_supported_unit_ids(unit.binds_to);
     let upholds = collect_supported_unit_ids(unit.upholds);
+    let propagates_stop_to = collect_supported_unit_ids(unit.propagates_stop_to);
     let part_of = collect_supported_unit_ids(unit.part_of);
     let conflicts = collect_supported_unit_ids(unit.conflicts);
     let wanted_by = collect_supported_unit_ids(install.wanted_by);
@@ -839,6 +840,7 @@ fn make_common_from_parsed(
     refs_by_name.extend(part_of.iter().cloned());
     refs_by_name.extend(binds_to.iter().cloned());
     refs_by_name.extend(upholds.iter().cloned());
+    refs_by_name.extend(propagates_stop_to.iter().cloned());
     refs_by_name.extend(conflicts.iter().cloned());
     refs_by_name.extend(before.iter().cloned());
     refs_by_name.extend(after.iter().cloned());
@@ -889,6 +891,7 @@ fn make_common_from_parsed(
             bound_by: Vec::new(),
             upholds,
             upheld_by: Vec::new(),
+            propagates_stop_to,
         },
         timestamps: RwLock::new(UnitTimestamps::default()),
         n_restarts: std::sync::atomic::AtomicU64::new(0),

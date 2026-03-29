@@ -1115,9 +1115,7 @@ pub(crate) fn service_exit_handler(
         // Upholds= enforcement: if this service is upheld by any active unit,
         // restart it asynchronously. This implements systemd's Upholds= semantics:
         // as long as the upholding unit is active, the upheld unit is kept running.
-        if !was_replaced_or_stopping
-            && let Some(unit) = run_info.unit_table.get(&srvc_id)
-        {
+        if !was_replaced_or_stopping && let Some(unit) = run_info.unit_table.get(&srvc_id) {
             let upheld_by = unit.common.dependencies.upheld_by.clone();
             if !upheld_by.is_empty() {
                 let any_active = upheld_by.iter().any(|upholding_id| {

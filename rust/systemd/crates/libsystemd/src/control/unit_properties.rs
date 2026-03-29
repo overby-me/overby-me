@@ -181,6 +181,11 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
     insert_dep_list(&mut props, "BoundBy", &unit.common.dependencies.bound_by);
     insert_dep_list(&mut props, "Upholds", &unit.common.dependencies.upholds);
     insert_dep_list(&mut props, "UpheldBy", &unit.common.dependencies.upheld_by);
+    insert_dep_list(
+        &mut props,
+        "PropagatesStopTo",
+        &unit.common.dependencies.propagates_stop_to,
+    );
 
     // ── Status ────────────────────────────────────────────────────────
     // Drop the unit-status READ lock before reading type-specific state

@@ -208,6 +208,7 @@ pub fn resolve_symlink_aliases(
                 u.common.dependencies.bound_by.clone(),
                 u.common.dependencies.upholds.clone(),
                 u.common.dependencies.upheld_by.clone(),
+                u.common.dependencies.propagates_stop_to.clone(),
                 u.common.unit.refs_by_name.clone(),
             )
         });
@@ -227,6 +228,7 @@ pub fn resolve_symlink_aliases(
             a_bound_by,
             a_upholds,
             a_upheld_by,
+            a_propagates_stop_to,
             a_refs,
         )) = alias_deps
             && let Some(real_unit) = unit_table.get_mut(real_id)
@@ -293,6 +295,11 @@ pub fn resolve_symlink_aliases(
             merge_dep_vec(
                 &mut real_unit.common.dependencies.upheld_by,
                 &a_upheld_by,
+                real_id,
+            );
+            merge_dep_vec(
+                &mut real_unit.common.dependencies.propagates_stop_to,
+                &a_propagates_stop_to,
                 real_id,
             );
             merge_dep_vec(&mut real_unit.common.unit.refs_by_name, &a_refs, real_id);
@@ -434,6 +441,7 @@ pub fn resolve_symlink_aliases(
                             u.common.dependencies.bound_by.clone(),
                             u.common.dependencies.upholds.clone(),
                             u.common.dependencies.upheld_by.clone(),
+                            u.common.dependencies.propagates_stop_to.clone(),
                             u.common.unit.refs_by_name.clone(),
                         )
                     });
@@ -453,6 +461,7 @@ pub fn resolve_symlink_aliases(
                         a_bound_by,
                         a_upholds,
                         a_upheld_by,
+                        a_propagates_stop_to,
                         a_refs,
                     )) = alias_deps
                         && let Some(real_unit) = unit_table.get_mut(&real_instance_id)
@@ -525,6 +534,11 @@ pub fn resolve_symlink_aliases(
                         merge_dep_vec(
                             &mut real_unit.common.dependencies.upheld_by,
                             &a_upheld_by,
+                            &real_instance_id,
+                        );
+                        merge_dep_vec(
+                            &mut real_unit.common.dependencies.propagates_stop_to,
+                            &a_propagates_stop_to,
                             &real_instance_id,
                         );
                         merge_dep_vec(
@@ -605,6 +619,7 @@ pub fn resolve_symlink_aliases(
             rewrite_id_vec(&mut unit.common.dependencies.part_of_by, &redirect);
             rewrite_id_vec(&mut unit.common.dependencies.binds_to, &redirect);
             rewrite_id_vec(&mut unit.common.dependencies.bound_by, &redirect);
+            rewrite_id_vec(&mut unit.common.dependencies.propagates_stop_to, &redirect);
             rewrite_id_vec(&mut unit.common.unit.refs_by_name, &redirect);
 
             // Also rewrite socket<->service cross-references
@@ -1751,6 +1766,7 @@ pub fn generate_fstab_mount_units(unit_table: &mut HashMap<UnitId, Unit>) {
                         bound_by: Vec::new(),
                         upholds: Vec::new(),
                         upheld_by: Vec::new(),
+                        propagates_stop_to: Vec::new(),
                     },
                     timestamps: RwLock::new(UnitTimestamps::default()),
                     n_restarts: std::sync::atomic::AtomicU64::new(0),
@@ -1917,6 +1933,7 @@ pub fn generate_fstab_mount_units(unit_table: &mut HashMap<UnitId, Unit>) {
                     bound_by: Vec::new(),
                     upholds: Vec::new(),
                     upheld_by: Vec::new(),
+                    propagates_stop_to: Vec::new(),
                 },
                 timestamps: RwLock::new(UnitTimestamps::default()),
                 n_restarts: std::sync::atomic::AtomicU64::new(0),
@@ -2540,6 +2557,7 @@ mod tests {
                     bound_by: vec![],
                     upholds: vec![],
                     upheld_by: vec![],
+                    propagates_stop_to: vec![],
                 },
                 status: RwLock::new(UnitStatus::NeverStarted),
                 timestamps: RwLock::new(UnitTimestamps::default()),
