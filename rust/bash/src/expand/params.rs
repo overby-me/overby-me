@@ -598,8 +598,10 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
         )
         && !matches!(
             expr.name.as_str(),
-            "?" | "$" | "#" | "@" | "*" | "!" | "-" | "0"
+            "?" | "$" | "#" | "@" | "*" | "-" | "0"
         )
+        // $! is only exempt from nounset if a background job has been started
+        && !(expr.name == "!" && ctx.last_bg_pid != 0)
         && expr.name.parse::<usize>().is_err()
         && !ctx.vars.contains_key(&expr.name)
         && !ctx.arrays.contains_key(&expr.name)
