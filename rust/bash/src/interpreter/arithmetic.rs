@@ -325,31 +325,88 @@ impl Shell {
             }
         }
 
-        // Handle pre-increment/decrement: ++var, --var
+        // Handle pre-increment/decrement: ++var, --var, ++arr[idx], --arr[idx]
         if let Some(stripped) = expr.strip_prefix("++") {
             let name = stripped.trim();
-            if !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_') {
-                let val: i64 = self
-                    .vars
-                    .get(name)
-                    .and_then(|v| v.parse().ok())
-                    .unwrap_or(0);
-                let new_val = val + 1;
-                self.set_var(name, new_val.to_string());
-                return new_val;
+            // Check for simple var or array element (name[...])
+            let is_var = if let Some(bracket) = name.find('[') {
+                let base = &name[..bracket];
+                !base.is_empty()
+                    && base.chars().all(|c| c.is_alphanumeric() || c == '_')
+                    && name.ends_with(']')
+            } else {
+                !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_')
+            };
+            if is_var {
+                if name.contains('[') {
+                    let bracket = name.find('[').unwrap();
+                    let base = &name[..bracket];
+                    let idx_expr = &name[bracket + 1..name.len() - 1];
+                    let idx = self.eval_arith_expr(idx_expr) as usize;
+                    let val: i64 = self
+                        .arrays
+                        .get(base)
+                        .and_then(|a| a.get(idx))
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(0);
+                    let new_val = val + 1;
+                    let arr = self.arrays.entry(base.to_string()).or_default();
+                    while arr.len() <= idx {
+                        arr.push(String::new());
+                    }
+                    arr[idx] = new_val.to_string();
+                    return new_val;
+                } else {
+                    let val: i64 = self
+                        .vars
+                        .get(name)
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(0);
+                    let new_val = val + 1;
+                    self.set_var(name, new_val.to_string());
+                    return new_val;
+                }
             }
         }
         if let Some(stripped) = expr.strip_prefix("--") {
             let name = stripped.trim();
-            if !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_') {
-                let val: i64 = self
-                    .vars
-                    .get(name)
-                    .and_then(|v| v.parse().ok())
-                    .unwrap_or(0);
-                let new_val = val - 1;
-                self.set_var(name, new_val.to_string());
-                return new_val;
+            let is_var = if let Some(bracket) = name.find('[') {
+                let base = &name[..bracket];
+                !base.is_empty()
+                    && base.chars().all(|c| c.is_alphanumeric() || c == '_')
+                    && name.ends_with(']')
+            } else {
+                !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_')
+            };
+            if is_var {
+                if name.contains('[') {
+                    let bracket = name.find('[').unwrap();
+                    let base = &name[..bracket];
+                    let idx_expr = &name[bracket + 1..name.len() - 1];
+                    let idx = self.eval_arith_expr(idx_expr) as usize;
+                    let val: i64 = self
+                        .arrays
+                        .get(base)
+                        .and_then(|a| a.get(idx))
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(0);
+                    let new_val = val - 1;
+                    let arr = self.arrays.entry(base.to_string()).or_default();
+                    while arr.len() <= idx {
+                        arr.push(String::new());
+                    }
+                    arr[idx] = new_val.to_string();
+                    return new_val;
+                } else {
+                    let val: i64 = self
+                        .vars
+                        .get(name)
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(0);
+                    let new_val = val - 1;
+                    self.set_var(name, new_val.to_string());
+                    return new_val;
+                }
             }
         }
 
@@ -847,6 +904,10 @@ impl Shell {
             .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
             && expr.chars().all(|c| c.is_alphanumeric() || c == '_')
         {
+            // Special dynamic variables
+            if expr == "RANDOM" {
+                return crate::expand::next_random() as i64;
+            }
             let val = self.vars.get(expr).cloned().unwrap_or_default();
             if val.is_empty() {
                 return 0;
