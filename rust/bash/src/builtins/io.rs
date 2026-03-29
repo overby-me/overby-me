@@ -207,7 +207,10 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                             }
                         }
                         if count == 0 {
-                            eprintln!("{}: printf: missing hex digit for \\x", shell.error_prefix());
+                            eprintln!(
+                                "{}: printf: missing hex digit for \\x",
+                                shell.error_prefix()
+                            );
                             had_error = true;
                         } else {
                             use std::io::Write;
@@ -351,7 +354,11 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                         // Apply precision (truncate string, byte-safe)
                         let truncated = if let Some(p) = precision {
                             // Find the byte offset for the p-th char boundary
-                            let end = arg.char_indices().nth(p).map(|(i, _)| i).unwrap_or(arg.len());
+                            let end = arg
+                                .char_indices()
+                                .nth(p)
+                                .map(|(i, _)| i)
+                                .unwrap_or(arg.len());
                             &arg[..end]
                         } else {
                             arg
@@ -381,7 +388,11 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                             match arg.parse() {
                                 Ok(v) => v,
                                 Err(_) if !arg.is_empty() => {
-                                    eprintln!("{}: printf: {}: invalid number", shell.error_prefix(), arg);
+                                    eprintln!(
+                                        "{}: printf: {}: invalid number",
+                                        shell.error_prefix(),
+                                        arg
+                                    );
                                     had_error = true;
                                     0
                                 }
@@ -412,7 +423,8 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                                 // For zero-padding, sign/prefix comes first, then zeros, then digits
                                 let prefix = if n < 0 { "-" } else { sign_prefix };
                                 let abs_n = n.unsigned_abs();
-                                let num_width = effective_width.saturating_sub(prefix.len()).min(4096);
+                                let num_width =
+                                    effective_width.saturating_sub(prefix.len()).min(4096);
                                 print!("{}{:0>num_width$}", prefix, abs_n);
                             } else {
                                 let formatted = if n < 0 {

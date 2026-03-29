@@ -65,7 +65,11 @@ impl Shell {
             if paren_depth > 0 {
                 let top_expr = self.arith_top_expr.as_deref().unwrap_or(expr);
                 // Find the last token for the error
-                let error_token = expr.trim().rsplit(|c: char| c.is_whitespace() || c == '(').next().unwrap_or(expr.trim());
+                let error_token = expr
+                    .trim()
+                    .rsplit(|c: char| c.is_whitespace() || c == '(')
+                    .next()
+                    .unwrap_or(expr.trim());
                 eprintln!(
                     "{}: {}{}: missing `)' (error token is \"{}\")",
                     self.arith_error_prefix(),
@@ -98,12 +102,11 @@ impl Shell {
         let expr = if expr.contains('$') {
             expanded_cs = self.expand_comsubs_in_arith(expr);
             // Update top expression with expanded version for error messages
-            if self.arith_depth == 1 {
-                if let Some(ref mut top) = self.arith_top_expr {
-                    if top.contains('$') {
-                        *top = expanded_cs.trim_start().to_string();
-                    }
-                }
+            if self.arith_depth == 1
+                && let Some(ref mut top) = self.arith_top_expr
+                && top.contains('$')
+            {
+                *top = expanded_cs.trim_start().replace("\\$", "$");
             }
             &expanded_cs
         } else {
@@ -115,12 +118,11 @@ impl Shell {
         let expr = if expr.contains('"') {
             unquoted = expr.replace('"', "");
             // Update top expression to match stripped version for error messages
-            if self.arith_depth == 1 {
-                if let Some(ref mut top) = self.arith_top_expr {
-                    if top.contains('"') {
-                        *top = top.replace('"', "");
-                    }
-                }
+            if self.arith_depth == 1
+                && let Some(ref mut top) = self.arith_top_expr
+                && top.contains('"')
+            {
+                *top = top.replace('"', "");
             }
             &unquoted
         } else {
@@ -280,8 +282,10 @@ impl Shell {
             let name = expr[..pos].trim();
             // Check for ++/-- prefix/suffix on the LHS → attempted assignment to non-variable
             if !name.is_empty()
-                && (name.starts_with("++") || name.starts_with("--")
-                    || name.ends_with("++") || name.ends_with("--"))
+                && (name.starts_with("++")
+                    || name.starts_with("--")
+                    || name.ends_with("++")
+                    || name.ends_with("--"))
             {
                 let top_expr = self.arith_top_expr.as_deref().unwrap_or(expr);
                 eprintln!(
@@ -1230,7 +1234,9 @@ impl Shell {
         // Fall back to reporting error
         // Check if this looks like "valid_expr extra_stuff" — syntax error in expression
         let trimmed = expr.trim();
-        let first_word_end = trimmed.find(|c: char| c.is_whitespace() || c == '[').unwrap_or(trimmed.len());
+        let first_word_end = trimmed
+            .find(|c: char| c.is_whitespace() || c == '[')
+            .unwrap_or(trimmed.len());
         let first_word = &trimmed[..first_word_end];
         let has_extra = first_word_end < trimmed.len()
             && (first_word.chars().all(|c| c.is_alphanumeric() || c == '_')

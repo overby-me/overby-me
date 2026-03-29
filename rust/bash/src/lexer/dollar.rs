@@ -1359,8 +1359,12 @@ fn read_param_op(chars: &[char], i: &mut usize, _name: &str, in_dquote: bool) ->
                         let mut l = String::new();
                         let mut brace_depth2 = 0i32;
                         while *i < chars.len() && !(chars[*i] == '}' && brace_depth2 == 0) {
-                            if chars[*i] == '{' { brace_depth2 += 1; }
-                            if chars[*i] == '}' { brace_depth2 -= 1; }
+                            if chars[*i] == '{' {
+                                brace_depth2 += 1;
+                            }
+                            if chars[*i] == '}' {
+                                brace_depth2 -= 1;
+                            }
                             l.push(chars[*i]);
                             *i += 1;
                         }

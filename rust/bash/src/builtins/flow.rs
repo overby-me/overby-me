@@ -56,7 +56,11 @@ pub(super) fn builtin_exit(shell: &mut Shell, args: &[String]) -> i32 {
         match arg.parse::<i64>() {
             Ok(n) => (n & 0xFF) as i32,
             Err(_) => {
-                eprintln!("{}: exit: {}: numeric argument required", shell.error_prefix(), arg);
+                eprintln!(
+                    "{}: exit: {}: numeric argument required",
+                    shell.error_prefix(),
+                    arg
+                );
                 2
             }
         }
