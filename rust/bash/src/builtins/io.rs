@@ -522,7 +522,15 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                         } else if arg.starts_with('\'') || arg.starts_with('"') {
                             arg.chars().nth(1).map(|c| c as i64 as f64).unwrap_or(0.0)
                         } else {
-                            arg.parse().unwrap_or(0.0)
+                            match arg.parse() {
+                                Ok(v) => v,
+                                Err(_) if !arg.is_empty() => {
+                                    eprintln!("{}: printf: {}: invalid number", shell.error_prefix(), arg);
+                                    had_error = true;
+                                    0.0
+                                }
+                                _ => 0.0,
+                            }
                         };
                         let p = precision.unwrap_or(6);
                         let formatted = match fmt_ch {
