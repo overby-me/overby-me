@@ -1445,6 +1445,23 @@ impl Shell {
                 let val = self.positional.get(idx).cloned().unwrap_or_default();
                 result.push_str(&val);
                 i += 2;
+            } else if chars[i] == '$'
+                && i + 1 < chars.len()
+                && (chars[i + 1].is_ascii_alphabetic() || chars[i + 1] == '_')
+            {
+                // Simple variable: $var — expand using word expansion
+                let start = i;
+                i += 1;
+                let mut name = String::new();
+                while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') {
+                    name.push(chars[i]);
+                    i += 1;
+                }
+                // Use full word expansion for dynamic variables like $RANDOM
+                let param_text: String = chars[start..i].iter().collect();
+                let expanded =
+                    self.expand_word_single(&crate::lexer::parse_word_string(&param_text));
+                result.push_str(&expanded);
             } else {
                 result.push(chars[i]);
                 i += 1;
