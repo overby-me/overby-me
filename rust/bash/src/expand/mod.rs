@@ -1922,9 +1922,19 @@ fn globstar_expand(pattern: &str) -> Vec<String> {
                 } else {
                     format!("{}/{}", prefix, name)
                 };
-                let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                let file_type = entry.file_type().ok();
+                let is_symlink = file_type.as_ref().map(|t| t.is_symlink()).unwrap_or(false);
+                // Follow symlinks to determine if the target is a directory
+                let is_dir = if is_symlink {
+                    std::fs::metadata(entry.path())
+                        .map(|m| m.is_dir())
+                        .unwrap_or(false)
+                } else {
+                    file_type.map(|t| t.is_dir()).unwrap_or(false)
+                };
                 entries.push((path.clone(), is_dir));
-                if is_dir {
+                // Recurse into real directories but NOT symlinked directories
+                if is_dir && !is_symlink {
                     entries.extend(walk_dir(&entry.path(), &path, dotglob));
                 }
             }
@@ -1957,6 +1967,7 @@ fn globstar_expand(pattern: &str) -> Vec<String> {
 
     // Normalize: collapse consecutive ** segments
     // **/** → **, **/**/** → **, **/a/**/** → **/a/**
+    let original_pattern = pattern.to_string();
     let pattern = {
         let mut normalized = pattern.to_string();
         while normalized.contains("**/**") {
@@ -1964,6 +1975,7 @@ fn globstar_expand(pattern: &str) -> Vec<String> {
         }
         normalized
     };
+    let was_collapsed = original_pattern != pattern;
 
     // Determine base directory from the prefix before the first **
     let first_star_pos = {
@@ -2056,7 +2068,14 @@ fn globstar_expand(pattern: &str) -> Vec<String> {
         after_base.chars().all(|c| c == '*' || c == '/')
     };
     if !base.is_empty() && is_suffix_only_stars {
-        results.push(format!("{}/", base));
+        // a/** → include "a/" (trailing slash)
+        // a/**/** → include "a" (no slash, because multi-** collapsed means
+        // ** matching zero segments gives just the directory name)
+        if was_collapsed {
+            results.push(base.to_string());
+        } else {
+            results.push(format!("{}/", base));
+        }
     }
 
     for (path, is_dir) in &all_entries {
