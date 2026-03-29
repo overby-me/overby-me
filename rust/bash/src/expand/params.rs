@@ -300,7 +300,7 @@ pub(super) fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
 /// Parse an arithmetic expression for substring offset/length.
 /// If the string is a simple integer, parse it directly. If it's a variable name,
 /// resolve it. Otherwise, report an arithmetic error.
-fn parse_arith_offset(s: &str, _param_name: &str, ctx: &ExpCtx) -> i64 {
+fn parse_arith_offset(s: &str, param_name: &str, ctx: &ExpCtx) -> i64 {
     if s.is_empty() {
         return 0;
     }
@@ -319,6 +319,27 @@ fn parse_arith_offset(s: &str, _param_name: &str, ctx: &ExpCtx) -> i64 {
             .and_then(|v| v.parse::<i64>().ok())
             .unwrap_or(0);
         return val;
+    }
+    // Check if expression starts with a valid arithmetic token (digit, variable, unary op, paren)
+    let first_char = s.trim().as_bytes().first().copied().unwrap_or(0);
+    if !first_char.is_ascii_alphanumeric()
+        && !matches!(first_char, b'_' | b'-' | b'+' | b'!' | b'~' | b'(' | b'$')
+    {
+        // Not a valid arithmetic expression — report error
+        let prefix = EXPAND_ERROR_PREFIX.with(|p| {
+            let p = p.borrow();
+            if p.is_empty() {
+                "bash".to_string()
+            } else {
+                p.clone()
+            }
+        });
+        eprintln!(
+            "{}: {}: {}: arithmetic syntax error: operand expected (error token is \"{}\")",
+            prefix, param_name, s, s
+        );
+        crate::expand::set_arith_error();
+        return 0;
     }
     // Use full arithmetic evaluation for complex expressions (ternary, operators, etc.)
     crate::expand::arithmetic::eval_arith_full(
