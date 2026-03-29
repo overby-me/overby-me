@@ -1202,6 +1202,18 @@ pub(super) fn builtin_let(shell: &mut Shell, args: &[String]) -> i32 {
         return 1;
     }
 
+    // Skip leading -- (option terminator)
+    let args = if args.first().map(|s| s.as_str()) == Some("--") {
+        &args[1..]
+    } else {
+        args
+    };
+
+    if args.is_empty() {
+        eprintln!("{}: let: expression expected", shell.error_prefix());
+        return 1;
+    }
+
     let mut result = 0i64;
     shell.arith_is_let = true;
     for expr in args {
