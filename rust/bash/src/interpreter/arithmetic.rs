@@ -1251,7 +1251,7 @@ impl Shell {
         0
     }
 
-    /// Expand command substitutions $(...) within an arithmetic expression string.
+    /// Expand command substitutions $(...) and $var within an arithmetic expression string.
     fn expand_comsubs_in_arith(&mut self, expr: &str) -> String {
         let mut result = String::new();
         let chars: Vec<char> = expr.chars().collect();
