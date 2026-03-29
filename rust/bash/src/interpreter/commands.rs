@@ -3356,59 +3356,100 @@ fn pattern_match_impl(text: &[char], ti: usize, pattern: &[char], pi: usize) -> 
                 let rest_pi = close + 1;
                 let alts = split_extglob_alts(&inner);
 
-                match op {
-                    '@' => {
-                        // Exactly one match of the alternatives
-                        for alt in &alts {
-                            let mut combined = alt.clone();
-                            combined.extend_from_slice(&pattern[rest_pi..]);
-                            if pattern_match_impl(text, ti, &combined, 0) {
-                                return true;
+                // Check for incomplete bracket expressions in alternatives
+                // If any alternative has '[' without matching ']', the entire
+                // extglob is malformed and should be treated as literal
+                let has_incomplete_bracket = alts.iter().any(|alt| {
+                    let mut i = 0;
+                    while i < alt.len() {
+                        if alt[i] == '[' {
+                            let start = i + 1;
+                            // Skip ! or ^ at start
+                            let mut j = start;
+                            if j < alt.len() && (alt[j] == '!' || alt[j] == '^') {
+                                j += 1;
                             }
-                        }
-                        return false;
-                    }
-                    '?' => {
-                        // Zero or one match
-                        // Try with zero matches (skip the extglob)
-                        if pattern_match_impl(text, ti, pattern, rest_pi) {
-                            return true;
-                        }
-                        // Try with one match
-                        for alt in &alts {
-                            let mut combined = alt.clone();
-                            combined.extend_from_slice(&pattern[rest_pi..]);
-                            if pattern_match_impl(text, ti, &combined, 0) {
-                                return true;
+                            // Skip ] at first position (literal)
+                            if j < alt.len() && alt[j] == ']' {
+                                j += 1;
                             }
-                        }
-                        return false;
-                    }
-                    '*' => {
-                        return extglob_star_match(text, ti, &alts, pattern, rest_pi);
-                    }
-                    '+' => {
-                        return extglob_plus_match(text, ti, &alts, pattern, rest_pi);
-                    }
-                    '!' => {
-                        // Anything that doesn't match any of the alternatives
-                        // Try all possible lengths of text
-                        for end in ti..=text.len() {
-                            let mut any_match = false;
-                            for alt in &alts {
-                                if pattern_match_impl(&text[ti..end], 0, alt, 0) {
-                                    any_match = true;
+                            let mut found_close = false;
+                            while j < alt.len() {
+                                if alt[j] == ']' {
+                                    found_close = true;
                                     break;
                                 }
+                                j += 1;
                             }
-                            if !any_match && pattern_match_impl(text, end, pattern, rest_pi) {
+                            if !found_close {
                                 return true;
                             }
+                            i = j + 1;
+                        } else {
+                            i += 1;
                         }
-                        return false;
                     }
-                    _ => unreachable!(),
-                }
+                    false
+                });
+
+                if has_incomplete_bracket {
+                    // Malformed extglob — fall through to literal matching
+                    // (the `*(` is not treated as extglob syntax)
+                } else {
+                    match op {
+                        '@' => {
+                            // Exactly one match of the alternatives
+                            for alt in &alts {
+                                let mut combined = alt.clone();
+                                combined.extend_from_slice(&pattern[rest_pi..]);
+                                if pattern_match_impl(text, ti, &combined, 0) {
+                                    return true;
+                                }
+                            }
+                            return false;
+                        }
+                        '?' => {
+                            // Zero or one match
+                            // Try with zero matches (skip the extglob)
+                            if pattern_match_impl(text, ti, pattern, rest_pi) {
+                                return true;
+                            }
+                            // Try with one match
+                            for alt in &alts {
+                                let mut combined = alt.clone();
+                                combined.extend_from_slice(&pattern[rest_pi..]);
+                                if pattern_match_impl(text, ti, &combined, 0) {
+                                    return true;
+                                }
+                            }
+                            return false;
+                        }
+                        '*' => {
+                            return extglob_star_match(text, ti, &alts, pattern, rest_pi);
+                        }
+                        '+' => {
+                            return extglob_plus_match(text, ti, &alts, pattern, rest_pi);
+                        }
+                        '!' => {
+                            // Anything that doesn't match any of the alternatives
+                            // Try all possible lengths of text
+                            for end in ti..=text.len() {
+                                let mut any_match = false;
+                                for alt in &alts {
+                                    if pattern_match_impl(&text[ti..end], 0, alt, 0) {
+                                        any_match = true;
+                                        break;
+                                    }
+                                }
+                                if !any_match && pattern_match_impl(text, end, pattern, rest_pi) {
+                                    return true;
+                                }
+                            }
+                            return false;
+                        }
+                        _ => unreachable!(),
+                    }
+                } // end else (not has_incomplete_bracket)
             }
         }
 
