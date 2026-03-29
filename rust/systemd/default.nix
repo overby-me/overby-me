@@ -5179,16 +5179,7 @@
           sed -i '/^# Test systemctl edit --global/,/^rm -f.*GLOBAL_MASKED_UNIT/d' TEST-26-SYSTEMCTL.sh
         '';
       }
-      {
-        name = "30-ONCLOCKCHANGE";
-        # Skip until --on-timezone-change and --on-clock-change timer triggers
-        # are implemented in PID 1 (currently fires command immediately).
-        patchScript = ''
-          echo '#!/bin/bash' > TEST-30-ONCLOCKCHANGE.sh
-          echo 'echo "Skipped: timer-on-change triggers not yet implemented"' >> TEST-30-ONCLOCKCHANGE.sh
-          echo 'touch /testok' >> TEST-30-ONCLOCKCHANGE.sh
-        '';
-      }
+      {name = "30-ONCLOCKCHANGE";}
       {name = "32-OOMPOLICY";}
       {
         name = "34-DYNAMICUSERMIGRATE";

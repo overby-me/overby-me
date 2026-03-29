@@ -17,8 +17,73 @@ use crate::lock_ext::RwLockExt;
 use crate::runtime_info::ArcMutRuntimeInfo;
 use crate::units::{ActivationSource, Specific, StatusStarted, TimerConfig, UnitId, UnitStatus};
 
-/// How often the scheduler thread wakes up to check timers.
-const TIMER_CHECK_INTERVAL: Duration = Duration::from_secs(15);
+/// Threshold in seconds for detecting a wall-clock jump.
+/// If wall-clock advances by more or less than monotonic time by this amount,
+/// we consider it a clock change event (OnClockChange=).
+const CLOCK_JUMP_THRESHOLD_SECS: i64 = 2;
+
+/// State for detecting clock and timezone changes between scheduler ticks.
+struct ChangeDetector {
+    /// Last known mtime of /etc/localtime (for timezone change detection).
+    last_localtime_mtime: Option<std::time::SystemTime>,
+    /// Last wall-clock reading (for clock jump detection).
+    last_wallclock: Option<SystemTime>,
+    /// Last monotonic reading corresponding to last_wallclock.
+    last_monotonic: Option<Instant>,
+}
+
+impl ChangeDetector {
+    fn new() -> Self {
+        let localtime_mtime = std::fs::metadata("/etc/localtime")
+            .and_then(|m| m.modified())
+            .ok();
+        Self {
+            last_localtime_mtime: localtime_mtime,
+            last_wallclock: Some(SystemTime::now()),
+            last_monotonic: Some(Instant::now()),
+        }
+    }
+
+    /// Check if the timezone has changed since the last call.
+    /// Detects changes by comparing the mtime of /etc/localtime.
+    fn timezone_changed(&mut self) -> bool {
+        let current_mtime = std::fs::metadata("/etc/localtime")
+            .and_then(|m| m.modified())
+            .ok();
+        let changed = match (&self.last_localtime_mtime, &current_mtime) {
+            (Some(old), Some(new)) => old != new,
+            (None, Some(_)) => true,
+            (Some(_), None) => true,
+            (None, None) => false,
+        };
+        if changed {
+            self.last_localtime_mtime = current_mtime;
+        }
+        changed
+    }
+
+    /// Check if the system clock has jumped since the last call.
+    /// Detects jumps by comparing wall-clock delta vs monotonic delta.
+    fn clock_changed(&mut self) -> bool {
+        let now_wall = SystemTime::now();
+        let now_mono = Instant::now();
+
+        let changed = if let (Some(prev_wall), Some(prev_mono)) =
+            (self.last_wallclock, self.last_monotonic)
+        {
+            let mono_delta = now_mono.duration_since(prev_mono);
+            let wall_delta = now_wall.duration_since(prev_wall).unwrap_or(Duration::ZERO);
+            let diff = (wall_delta.as_secs() as i64) - (mono_delta.as_secs() as i64);
+            diff.abs() > CLOCK_JUMP_THRESHOLD_SECS
+        } else {
+            false
+        };
+
+        self.last_wallclock = Some(now_wall);
+        self.last_monotonic = Some(now_mono);
+        changed
+    }
+}
 
 /// Boot instant — captured once when the scheduler starts.
 /// Used for OnBootSec= / OnStartupSec= calculations.
@@ -46,9 +111,31 @@ pub fn start_timer_scheduler_thread(run_info: ArcMutRuntimeInfo) {
             let mut last_fired: std::collections::HashMap<String, Instant> =
                 std::collections::HashMap::new();
 
+            let mut change_detector = ChangeDetector::new();
+
             loop {
-                check_and_fire_timers(&run_info, boot_instant, &mut last_fired);
-                std::thread::sleep(TIMER_CHECK_INTERVAL);
+                // Detect clock/timezone changes before checking timers
+                let tz_changed = change_detector.timezone_changed();
+                let clock_changed = change_detector.clock_changed();
+
+                if tz_changed {
+                    info!("Timezone change detected");
+                }
+                if clock_changed {
+                    info!("Clock change detected");
+                }
+
+                check_and_fire_timers(
+                    &run_info,
+                    boot_instant,
+                    &mut last_fired,
+                    tz_changed,
+                    clock_changed,
+                );
+                // Use a shorter interval (1s) to detect clock/timezone changes
+                // promptly. The original 15s interval is too slow for tests that
+                // wait for OnClockChange/OnTimezoneChange timers to fire.
+                std::thread::sleep(Duration::from_secs(1));
             }
         })
         .expect("Failed to spawn timer-scheduler thread");
@@ -59,6 +146,8 @@ fn check_and_fire_timers(
     run_info: &ArcMutRuntimeInfo,
     boot_instant: Instant,
     last_fired: &mut std::collections::HashMap<String, Instant>,
+    timezone_changed: bool,
+    clock_changed: bool,
 ) {
     let now = Instant::now();
     let elapsed_since_boot = now.duration_since(boot_instant);
@@ -81,7 +170,15 @@ fn check_and_fire_timers(
                 let timer_name = &unit.id.name;
                 let target_unit = &conf.unit;
 
-                if should_fire_timer(conf, timer_name, elapsed_since_boot, now, last_fired) {
+                if should_fire_timer(
+                    conf,
+                    timer_name,
+                    elapsed_since_boot,
+                    now,
+                    last_fired,
+                    timezone_changed,
+                    clock_changed,
+                ) {
                     timers_to_fire.push((unit.id.clone(), target_unit.clone()));
                 }
             }
@@ -135,6 +232,8 @@ fn should_fire_timer(
     elapsed_since_boot: Duration,
     now: Instant,
     last_fired: &std::collections::HashMap<String, Instant>,
+    timezone_changed: bool,
+    clock_changed: bool,
 ) -> bool {
     let last = last_fired.get(timer_name).copied();
 
@@ -205,6 +304,24 @@ fn should_fire_timer(
                 }
             }
         }
+    }
+
+    // OnClockChange= — fire when the system clock jumps
+    if conf.on_clock_change && clock_changed {
+        trace!(
+            "Timer {}: OnClockChange triggered (clock jump detected)",
+            timer_name
+        );
+        return true;
+    }
+
+    // OnTimezoneChange= — fire when the system timezone changes
+    if conf.on_timezone_change && timezone_changed {
+        trace!(
+            "Timer {}: OnTimezoneChange triggered (timezone change detected)",
+            timer_name
+        );
+        return true;
     }
 
     // OnCalendar= — calendar event expressions
@@ -493,6 +610,8 @@ mod tests {
             Duration::from_secs(300),
             Instant::now(),
             &last_fired,
+            false,
+            false,
         );
         assert!(!result);
     }
@@ -524,6 +643,8 @@ mod tests {
             Duration::from_secs(600),
             Instant::now(),
             &last_fired,
+            false,
+            false,
         );
         assert!(result);
     }
@@ -556,6 +677,8 @@ mod tests {
             Duration::from_secs(600),
             Instant::now(),
             &last_fired,
+            false,
+            false,
         );
         assert!(!result);
     }
@@ -592,6 +715,8 @@ mod tests {
             Duration::from_secs(300),
             now,
             &last_fired,
+            false,
+            false,
         );
         assert!(result);
     }
@@ -628,6 +753,8 @@ mod tests {
             Duration::from_secs(300),
             now,
             &last_fired,
+            false,
+            false,
         );
         assert!(!result);
     }
@@ -664,6 +791,8 @@ mod tests {
             Duration::from_secs(10000),
             now,
             &last_fired,
+            false,
+            false,
         );
         assert!(result);
     }
@@ -703,6 +832,8 @@ mod tests {
             Duration::from_secs(10000),
             now,
             &last_fired,
+            false,
+            false,
         );
         assert!(!result);
     }
@@ -734,6 +865,8 @@ mod tests {
             Duration::from_secs(999999),
             Instant::now(),
             &last_fired,
+            false,
+            false,
         );
         assert!(!result);
     }
@@ -766,6 +899,8 @@ mod tests {
             Duration::from_secs(60),
             Instant::now(),
             &last_fired,
+            false,
+            false,
         );
         assert!(result);
     }
