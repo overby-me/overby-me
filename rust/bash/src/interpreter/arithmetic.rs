@@ -114,16 +114,21 @@ impl Shell {
                     && !trimmed.ends_with("++")
                     && !trimmed.ends_with("--")
                 {
-                    let op_char = last as char;
                     let top_expr = self
                         .arith_top_expr
-                        .clone()
-                        .unwrap_or_else(|| trimmed.to_string());
+                        .as_deref()
+                        .unwrap_or(trimmed);
+                    // Find the trailing operator in the top expression (includes any trailing space)
+                    let error_token = if let Some(pos) = top_expr.rfind(last as char) {
+                        &top_expr[pos..]
+                    } else {
+                        &expr[expr.len() - 1..]
+                    };
                     eprintln!(
                         "{}: {}: arithmetic syntax error: operand expected (error token is \"{}\")",
                         self.arith_error_prefix(),
-                        top_expr,
-                        op_char
+                        top_expr.trim(),
+                        error_token
                     );
                     crate::expand::set_arith_error();
                     return 0;
@@ -444,12 +449,43 @@ impl Shell {
             let rest = &expr[q_pos + 1..];
             // Find the matching ':' at top level in the rest
             if let Some(c_pos) = Self::find_top_level_arith_op(rest, ":") {
+                let then_part = &rest[..c_pos];
+                let else_part = &rest[c_pos + 1..];
+                // Check for empty then/else parts
+                if then_part.trim().is_empty() || else_part.trim().is_empty() {
+                    let top_expr = self.arith_top_expr.as_deref().unwrap_or(expr).trim();
+                    let error_token = if then_part.trim().is_empty() {
+                        &rest[c_pos..] // from ':' onwards
+                    } else {
+                        &rest[c_pos..] // from ':' onwards (empty else)
+                    };
+                    eprintln!(
+                        "{}: {}{}: expression expected (error token is \"{}\")",
+                        self.arith_error_prefix(),
+                        self.arith_cmd_prefix(),
+                        top_expr,
+                        error_token.trim()
+                    );
+                    crate::expand::set_arith_error();
+                    return 0;
+                }
                 return if cond != 0 {
-                    self.eval_arith_expr_impl(&rest[..c_pos])
+                    self.eval_arith_expr_impl(then_part)
                 } else {
-                    self.eval_arith_expr_impl(&rest[c_pos + 1..])
+                    self.eval_arith_expr_impl(else_part)
                 };
             }
+            // Missing ':' in ternary — error
+            let top_expr = self.arith_top_expr.as_deref().unwrap_or(expr).trim();
+            eprintln!(
+                "{}: {}{}: `:' expected for conditional expression (error token is \"{}\")",
+                self.arith_error_prefix(),
+                self.arith_cmd_prefix(),
+                top_expr,
+                rest.trim()
+            );
+            crate::expand::set_arith_error();
+            return 0;
         }
 
         // Handle || at top level (preserves assignments in subexprs)
