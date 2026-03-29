@@ -1094,6 +1094,16 @@ impl Shell {
             }
         };
 
+        // Close procsub fds created during redirect expansion (e.g., heredoc
+        // bodies with ${var#<(cmd)}). These aren't referenced in expanded_words.
+        #[cfg(unix)]
+        {
+            let redir_fds = crate::expand::take_procsub_fds_not_in(&expanded_words);
+            for fd in redir_fds {
+                nix::unistd::close(fd).ok();
+            }
+        }
+
         // Check for function (but in POSIX mode, special builtins take precedence)
         let is_posix_special_builtin = self.opt_posix
             && matches!(
