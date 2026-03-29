@@ -1854,6 +1854,16 @@ fn globstar_expand(pattern: &str) -> Vec<String> {
         return vec![pattern.to_string()];
     }
 
+    // Normalize: collapse consecutive ** segments
+    // **/** → **, **/**/** → **, **/a/**/** → **/a/**
+    let pattern = {
+        let mut normalized = pattern.to_string();
+        while normalized.contains("**/**") {
+            normalized = normalized.replace("**/**", "**");
+        }
+        normalized
+    };
+
     // Split pattern on first unquoted **
     let (prefix_pat, suffix_pat) = {
         let chars: Vec<char> = pattern.chars().collect();
@@ -1888,9 +1898,8 @@ fn globstar_expand(pattern: &str) -> Vec<String> {
         return vec![pattern.to_string()];
     }
 
-    let all_entries = walk_dir(&base_dir, base, dotglob);
-
     let mut results = Vec::new();
+    let all_entries = walk_dir(&base_dir, base, dotglob);
 
     if suffix.is_empty() && suffix_pat.is_empty() {
         // Pattern is just "**" or "prefix/**"
@@ -2021,7 +2030,7 @@ fn globstar_expand(pattern: &str) -> Vec<String> {
 
     apply_globignore(&mut results);
     if results.is_empty() {
-        vec![remove_quotes(pattern)]
+        vec![remove_quotes(&pattern)]
     } else {
         results.sort();
         results
