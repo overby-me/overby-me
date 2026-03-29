@@ -53,7 +53,7 @@ impl Shell {
 
         // Check recursion depth limit (bash uses 1024, but each level uses
         // significant stack space so we use a lower limit)
-        if self.arith_depth > 512 {
+        if self.arith_depth > 64 {
             let var_name = expr.trim();
             eprintln!(
                 "{}: {}: expression recursion level exceeded (error token is \"{}\")",
@@ -182,6 +182,20 @@ impl Shell {
                     && (name.chars().all(|c| c.is_alphanumeric() || c == '_') || name.contains('['))
                 {
                     let rhs = self.eval_arith_expr_impl(&expr[pos + op.len()..]);
+                    // Check for division by zero in /= and %=
+                    if (op == "/=" || op == "%=") && rhs == 0 {
+                        let top_expr = self.arith_top_expr.as_deref().unwrap_or(expr);
+                        let error_token = expr[pos + op.len()..].trim_start();
+                        eprintln!(
+                            "{}: {}{}: division by 0 (error token is \"{}\")",
+                            self.arith_error_prefix(),
+                            self.arith_cmd_prefix(),
+                            top_expr,
+                            error_token
+                        );
+                        crate::expand::set_arith_error();
+                        return 0;
+                    }
                     // Handle array element: name[subscript]
                     if let Some(bracket) = name.find('[') {
                         let base = &name[..bracket];
