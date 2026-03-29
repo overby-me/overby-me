@@ -32,7 +32,8 @@ impl Shell {
         let is_top_level = self.arith_top_expr.is_none();
         if is_top_level {
             // Trim leading whitespace but preserve trailing (bash includes trailing space)
-            self.arith_top_expr = Some(expr.trim_start().to_string());
+            // Also strip backslash-dollar (\$) → $ for error display
+            self.arith_top_expr = Some(expr.trim_start().replace("\\$", "$"));
         }
         let result = self.eval_arith_expr_impl(expr);
         if is_top_level {
@@ -1448,8 +1449,9 @@ impl Shell {
             } else if chars[i] == '$'
                 && i + 1 < chars.len()
                 && (chars[i + 1].is_ascii_alphabetic() || chars[i + 1] == '_')
+                && !(i > 0 && chars[i - 1] == '\\')
             {
-                // Simple variable: $var — expand using word expansion
+                // Simple variable: $var — expand using word expansion (skip if preceded by \)
                 let start = i;
                 i += 1;
                 let mut name = String::new();
