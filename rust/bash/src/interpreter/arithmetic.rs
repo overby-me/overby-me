@@ -149,8 +149,7 @@ impl Shell {
         }
 
         // Check for trailing operators (e.g., "4+" → syntax error)
-        // Only check top-level expressions (arith_depth == 1 means we're at the outermost call)
-        if self.arith_depth == 1 {
+        {
             let trimmed = expr.trim();
             if !trimmed.is_empty() {
                 let last = trimmed.as_bytes()[trimmed.len() - 1];
@@ -158,17 +157,21 @@ impl Shell {
                     && !trimmed.ends_with("++")
                     && !trimmed.ends_with("--")
                 {
-                    let top_expr = self.arith_top_expr.as_deref().unwrap_or(trimmed);
-                    // Find the trailing operator in the top expression (includes any trailing space)
-                    let error_token = if let Some(pos) = top_expr.rfind(last as char) {
-                        &top_expr[pos..]
+                    let display_expr = if self.arith_depth == 1 {
+                        self.arith_top_expr.as_deref().unwrap_or(trimmed)
+                    } else {
+                        expr // preserve original spacing for recursive evals
+                    };
+                    // Find the trailing operator in the display expression
+                    let error_token = if let Some(pos) = display_expr.rfind(last as char) {
+                        &display_expr[pos..]
                     } else {
                         &expr[expr.len() - 1..]
                     };
                     eprintln!(
                         "{}: {}: arithmetic syntax error: operand expected (error token is \"{}\")",
                         self.arith_error_prefix(),
-                        top_expr,
+                        display_expr,
                         error_token
                     );
                     crate::expand::set_arith_error();
