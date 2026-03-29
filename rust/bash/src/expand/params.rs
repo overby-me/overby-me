@@ -153,7 +153,7 @@ pub(super) fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
             count.to_string()
         }
         "0" => ctx.positional.first().cloned().unwrap_or_default(),
-        "@" | "*" => {
+        "*" => {
             if ctx.positional.len() > 1 {
                 // $* joins with first char of IFS (space if IFS unset, empty if IFS="")
                 let ifs = ctx.vars.get("IFS");
@@ -163,6 +163,15 @@ pub(super) fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
                     Some(s) => s.chars().next().unwrap_or(' ').to_string(),
                 };
                 ctx.positional[1..].join(&sep)
+            } else {
+                String::new()
+            }
+        }
+        "@" => {
+            // $@ always joins with space in lookup context
+            // (actual field splitting into separate args is handled by callers)
+            if ctx.positional.len() > 1 {
+                ctx.positional[1..].join(" ")
             } else {
                 String::new()
             }
