@@ -512,7 +512,18 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                     }
                     Some(fmt_ch @ ('f' | 'F' | 'e' | 'E' | 'g' | 'G')) => {
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
-                        let n: f64 = arg.parse().unwrap_or(0.0);
+                        let n: f64 = if arg.starts_with("0x") || arg.starts_with("0X") {
+                            i64::from_str_radix(&arg[2..], 16).unwrap_or(0) as f64
+                        } else if arg.starts_with("0") && arg.len() > 1
+                            && arg.chars().skip(1).all(|c| c.is_ascii_digit())
+                            && !arg.contains('.')
+                        {
+                            i64::from_str_radix(&arg[1..], 8).unwrap_or(0) as f64
+                        } else if arg.starts_with('\'') || arg.starts_with('"') {
+                            arg.chars().nth(1).map(|c| c as i64 as f64).unwrap_or(0.0)
+                        } else {
+                            arg.parse().unwrap_or(0.0)
+                        };
                         let p = precision.unwrap_or(6);
                         let formatted = match fmt_ch {
                             'e' => {
