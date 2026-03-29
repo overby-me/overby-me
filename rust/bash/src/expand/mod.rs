@@ -784,10 +784,10 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                 eprintln!("{}: line {}: {}: unbound variable", sname, lineno, name);
                 set_arith_error();
             }
-            // Unquoted $@ and $* produce separate words (like "$@")
-            // even with null IFS — the splitting is inherent to $@/$*
-            // (only "$*" joins with IFS first char)
-            if (name == "@" || name == "*") && ctx.positional.len() > 1 {
+            // Unquoted $@ produces separate words even with null IFS
+            // (the splitting is inherent to $@, not dependent on IFS)
+            // $* is handled differently — it uses IFS for both joining and splitting
+            if name == "@" && ctx.positional.len() > 1 {
                 for (i, arg) in ctx.positional[1..].iter().enumerate() {
                     if i > 0 {
                         out.push(Segment::SplitHere);
