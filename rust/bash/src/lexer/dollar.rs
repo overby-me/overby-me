@@ -1107,6 +1107,28 @@ fn parse_brace_param(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart
 
     let name = read_param_name_with_subscript(chars, i);
 
+    // ${' is bad substitution (quoted variable names not allowed)
+    if name.is_empty() && *i < chars.len() && chars[*i] == '\'' {
+        // Scan to closing } and return as bad substitution
+        let start = *i;
+        let mut depth = 1;
+        while *i < chars.len() && depth > 0 {
+            if chars[*i] == '{' {
+                depth += 1;
+            } else if chars[*i] == '}' {
+                depth -= 1;
+            }
+            if depth > 0 {
+                *i += 1;
+            }
+        }
+        let content: String = chars[start..*i].iter().collect();
+        if *i < chars.len() {
+            *i += 1;
+        }
+        return WordPart::BadSubstitution(format!("${{{}}}", content));
+    }
+
     // Check for @X transform operator before }
     if *i + 1 < chars.len() && chars[*i] == '@' && chars[*i + 1] != '}' {
         let transform_char = chars[*i + 1];
@@ -1190,7 +1212,31 @@ fn read_param_name_with_subscript(chars: &[char], i: &mut usize) -> String {
 
 fn read_param_name(chars: &[char], i: &mut usize) -> String {
     let mut name = String::new();
-    if *i < chars.len()
+    // $'...' ANSI-C quoting as variable name: ${$'name'...}
+    if *i + 1 < chars.len() && chars[*i] == '$' && chars[*i + 1] == '\'' {
+        *i += 2; // skip $'
+        while *i < chars.len() && chars[*i] != '\'' {
+            if chars[*i] == '\\' && *i + 1 < chars.len() {
+                *i += 1;
+                match chars[*i] {
+                    'n' => name.push('\n'),
+                    't' => name.push('\t'),
+                    '\\' => name.push('\\'),
+                    '\'' => name.push('\''),
+                    c => {
+                        name.push('\\');
+                        name.push(c);
+                    }
+                }
+            } else {
+                name.push(chars[*i]);
+            }
+            *i += 1;
+        }
+        if *i < chars.len() {
+            *i += 1; // skip closing '
+        }
+    } else if *i < chars.len()
         && (chars[*i] == '@'
             || chars[*i] == '*'
             || chars[*i] == '#'

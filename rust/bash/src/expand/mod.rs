@@ -765,7 +765,11 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                 && !matches!(name.as_str(), "?" | "$" | "#" | "@" | "*" | "-" | "0")
                 // $! is unbound when no background job has been started
                 && !(name == "!" && ctx.last_bg_pid != 0)
-                && name.parse::<usize>().is_err()
+                && (name.parse::<usize>().is_err()
+                    || name
+                        .parse::<usize>()
+                        .map(|n| n >= ctx.positional.len())
+                        .unwrap_or(false))
                 && !ctx.vars.contains_key(name.as_str())
                 && !ctx.arrays.contains_key(name.as_str())
                 && std::env::var(name.as_str()).is_err()
@@ -780,9 +784,10 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                 eprintln!("{}: line {}: {}: unbound variable", sname, lineno, name);
                 set_arith_error();
             }
-            // Unquoted $@ should still produce separate words (like "$@")
-            // even with null IFS — the splitting is inherent to $@
-            if name == "@" && ctx.positional.len() > 1 {
+            // Unquoted $@ and $* produce separate words (like "$@")
+            // even with null IFS — the splitting is inherent to $@/$*
+            // (only "$*" joins with IFS first char)
+            if (name == "@" || name == "*") && ctx.positional.len() > 1 {
                 for (i, arg) in ctx.positional[1..].iter().enumerate() {
                     if i > 0 {
                         out.push(Segment::SplitHere);
