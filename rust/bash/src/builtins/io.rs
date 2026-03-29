@@ -340,12 +340,15 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                     }
                     Some('s') => {
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("");
-                        // Apply precision (truncate string)
+                        // Apply precision (truncate string, byte-safe)
                         let truncated = if let Some(p) = precision {
-                            &arg[..arg.len().min(p)]
+                            // Find the byte offset for the p-th char boundary
+                            let end = arg.char_indices().nth(p).map(|(i, _)| i).unwrap_or(arg.len());
+                            &arg[..end]
                         } else {
                             arg
                         };
+                        let w = w.min(4096);
                         if w > 0 {
                             if left {
                                 print!("{:<w$}", truncated);
@@ -387,12 +390,13 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                                 } else {
                                     format!("{}{}", sign_prefix, n)
                                 };
-                                print!("{:<effective_width$}", formatted);
+                                let ew = effective_width.min(4096);
+                                print!("{:<ew$}", formatted);
                             } else if use_zero_pad {
                                 // For zero-padding, sign/prefix comes first, then zeros, then digits
                                 let prefix = if n < 0 { "-" } else { sign_prefix };
                                 let abs_n = n.unsigned_abs();
-                                let num_width = effective_width.saturating_sub(prefix.len());
+                                let num_width = effective_width.saturating_sub(prefix.len()).min(4096);
                                 print!("{}{:0>num_width$}", prefix, abs_n);
                             } else {
                                 let formatted = if n < 0 {
@@ -400,7 +404,8 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                                 } else {
                                     format!("{}{}", sign_prefix, n)
                                 };
-                                print!("{:>effective_width$}", formatted);
+                                let ew = effective_width.min(4096);
+                                print!("{:>ew$}", formatted);
                             }
                         } else {
                             let formatted = if n < 0 {
