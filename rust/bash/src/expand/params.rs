@@ -100,14 +100,7 @@ pub(super) fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
     match name {
         "?" => ctx.last_status.to_string(),
         "$" => ctx.top_level_pid.to_string(),
-        "RANDOM" => {
-            // Simple pseudo-random using time and pid
-            let t = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos();
-            ((t ^ (std::process::id() as u128 * 2654435761)) % 32768).to_string()
-        }
+        "RANDOM" => crate::expand::next_random().to_string(),
         "BASHPID" => std::process::id().to_string(),
         "SRANDOM" => {
             // Secure random 32-bit number

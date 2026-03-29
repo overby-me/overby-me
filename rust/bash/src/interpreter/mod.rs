@@ -620,6 +620,7 @@ impl Shell {
             && let Ok(seed) = value.parse::<u32>()
         {
             self.random_seed = seed;
+            crate::expand::seed_random(seed);
         }
         // Resetting OPTIND also resets the getopts internal offset
         if resolved == "OPTIND" {

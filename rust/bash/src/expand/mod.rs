@@ -20,6 +20,10 @@ thread_local! {
     static SCRIPT_NAME: RefCell<String> = const { RefCell::new(String::new()) };
     /// Flag set when arithmetic evaluation encounters an error.
     static ARITH_ERROR: RefCell<bool> = const { RefCell::new(false) };
+    /// RANDOM PRNG state (bash-compatible linear congruential generator)
+    static RANDOM_STATE: RefCell<u32> = const { RefCell::new(0) };
+    static RANDOM_SEEDED: RefCell<bool> = const { RefCell::new(false) };
+    static RANDOM_LAST: RefCell<u32> = const { RefCell::new(0) };
     /// PID of the last process substitution child (for $!)
     static LAST_PROCSUB_PID: RefCell<Option<i32>> = const { RefCell::new(None) };
     /// Whether dotglob shopt is enabled (for glob expansion)
@@ -84,6 +88,53 @@ pub fn set_globskipdots(enabled: bool) {
 
 pub fn set_globstar(enabled: bool) {
     GLOBSTAR_ENABLED.with(|d| *d.borrow_mut() = enabled);
+}
+
+/// Seed the RANDOM PRNG (called when RANDOM=N is assigned)
+pub fn seed_random(seed: u32) {
+    RANDOM_STATE.with(|s| *s.borrow_mut() = seed);
+    RANDOM_SEEDED.with(|s| *s.borrow_mut() = true);
+    // Also reset last_random_value for the duplicate-avoidance loop
+    RANDOM_LAST.with(|l| *l.borrow_mut() = seed);
+}
+
+/// Get next RANDOM value (bash-compatible Park-Miller PRNG with XOR mixing).
+pub fn next_random() -> u16 {
+    RANDOM_STATE.with(|s| {
+        let mut state = s.borrow_mut();
+        if !RANDOM_SEEDED.with(|f| *f.borrow()) {
+            let t = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos() as u32;
+            *state = t ^ (std::process::id() * 2654435761);
+            RANDOM_SEEDED.with(|f| *f.borrow_mut() = true);
+            RANDOM_LAST.with(|l| *l.borrow_mut() = *state);
+        }
+        // brand() loop with duplicate avoidance
+        let last = RANDOM_LAST.with(|l| *l.borrow());
+        loop {
+            if *state == 0 {
+                *state = 123459876;
+            }
+            // Park-Miller PRNG
+            let h = *state / 127773;
+            let l = *state % 127773;
+            let result = (16807i64 * l as i64) - (2836i64 * h as i64);
+            *state = if result < 0 {
+                (result + 0x7fffffff) as u32
+            } else {
+                result as u32
+            };
+            // XOR mixing: t = (r >> 16) ^ (r & 0xffff)
+            let r = *state;
+            let t = (r >> 16) ^ (r & 0xffff);
+            if t != last {
+                RANDOM_LAST.with(|l| *l.borrow_mut() = t);
+                return (t & 32767) as u16;
+            }
+        }
+    })
 }
 
 pub fn set_globignore(value: &str) {
