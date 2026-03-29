@@ -993,8 +993,8 @@ impl Shell {
                     .and_then(|s| s.parse::<i64>().ok())
                     .unwrap_or(0);
                 eprintln!("{}: line {}: {}: unbound variable", name, lineno, expr);
-                crate::expand::set_arith_error();
-                return 0;
+                // nounset errors cause the shell/subshell to exit
+                std::process::exit(1);
             }
             let val = self.vars.get(expr).cloned().unwrap_or_default();
             if val.is_empty() {
@@ -1144,8 +1144,7 @@ impl Shell {
                     .and_then(|s| s.parse::<i64>().ok())
                     .unwrap_or(0);
                 eprintln!("{}: line {}: {}: unbound variable", name, lineno, resolved);
-                crate::expand::set_arith_error();
-                return 0;
+                std::process::exit(1);
             }
             return 0;
         }
