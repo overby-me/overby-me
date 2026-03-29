@@ -509,13 +509,18 @@ fn parse_dollar_inner(
                     }
                     // Handle # comments — # after newline, ;, &, | or at start
                     // of the comsub starts a comment that runs to end of line
+                    // But NOT after escaped chars like \; (the ; is literal, not separator)
                     if chars[*i] == '#' {
                         let prev = if cmd.is_empty() {
                             '\n'
                         } else {
                             cmd.chars().last().unwrap_or('\n')
                         };
-                        if matches!(prev, '\n' | ';' | '&' | '|' | '(' | ' ' | '\t') {
+                        // Check if prev char was escaped (preceded by \)
+                        let prev_escaped = cmd.len() >= 2 && cmd.as_bytes()[cmd.len() - 2] == b'\\';
+                        if !prev_escaped
+                            && matches!(prev, '\n' | ';' | '&' | '|' | '(' | ' ' | '\t')
+                        {
                             // Skip to end of line — don't push comment content to cmd
                             // (comments may contain ) which would corrupt paren tracking)
                             while *i < chars.len() && chars[*i] != '\n' {
