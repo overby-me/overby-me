@@ -1334,12 +1334,15 @@ fn read_param_op(chars: &[char], i: &mut usize, _name: &str, in_dquote: bool) ->
                     let mut offset = String::new();
                     let mut ternary_depth = 0i32;
                     let mut paren_depth = 0i32;
-                    while *i < chars.len() && chars[*i] != '}' {
+                    let mut brace_depth = 0i32;
+                    while *i < chars.len() && !(chars[*i] == '}' && brace_depth == 0) {
                         match chars[*i] {
+                            '{' => brace_depth += 1,
+                            '}' => brace_depth -= 1,
                             '(' => paren_depth += 1,
                             ')' => paren_depth -= 1,
-                            '?' if paren_depth == 0 => ternary_depth += 1,
-                            ':' if paren_depth == 0 => {
+                            '?' if paren_depth == 0 && brace_depth == 0 => ternary_depth += 1,
+                            ':' if paren_depth == 0 && brace_depth == 0 => {
                                 if ternary_depth > 0 {
                                     ternary_depth -= 1;
                                 } else {
@@ -1354,7 +1357,10 @@ fn read_param_op(chars: &[char], i: &mut usize, _name: &str, in_dquote: bool) ->
                     let length = if *i < chars.len() && chars[*i] == ':' {
                         *i += 1;
                         let mut l = String::new();
-                        while *i < chars.len() && chars[*i] != '}' {
+                        let mut brace_depth2 = 0i32;
+                        while *i < chars.len() && !(chars[*i] == '}' && brace_depth2 == 0) {
+                            if chars[*i] == '{' { brace_depth2 += 1; }
+                            if chars[*i] == '}' { brace_depth2 -= 1; }
                             l.push(chars[*i]);
                             *i += 1;
                         }
