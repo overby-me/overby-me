@@ -102,6 +102,7 @@ fn parse_dollar_inner(
                 let mut brace_depth = 0i32; // track ${...} nesting
                 let mut cmd = String::new();
                 let mut case_depth = 0i32;
+                let mut case_paren_depth = Vec::<i32>::new(); // paren depth at each case
                 let mut in_case_action = false; // true after case pattern ), false after ;;
                 let mut compound_depth = 0i32; // tracks do/done, then/fi nesting
                 while *i < chars.len() && depth > 0 {
@@ -533,23 +534,45 @@ fn parse_dollar_inner(
                         let kw = effective.as_deref().unwrap_or(word.as_str());
                         if kw == "case" {
                             case_depth += 1;
+                            case_paren_depth.push(depth);
                             in_case_action = false;
                         } else if (kw == "esac" || word == "esac") && case_depth > 0 {
                             // Only treat esac as case terminator when:
-                            // - in action context (after pattern ))
-                            // - right after ;; (new pattern position)
-                            // - right after 'in' keyword (empty case)
-                            // NOT when preceded by | (it's a pattern alternative)
-                            let trimmed = cmd.trim_end();
-                            let prev_ch = trimmed.chars().last().unwrap_or('\n');
-                            let after_in = trimmed.ends_with(" in")
-                                || trimmed.ends_with("\tin")
-                                || trimmed.ends_with("\nin");
-                            if in_case_action || prev_ch == ';' || prev_ch == '\n' || after_in {
-                                case_depth -= 1;
-                                in_case_action = false;
+                            // - at the same paren depth as the case was opened
+                            // - in action context or at pattern start (not after |)
+                            let case_open_depth = case_paren_depth.last().copied().unwrap_or(depth);
+                            if depth != case_open_depth {
+                                // Inside a subshell — esac is just a command, not terminator
+                            } else {
+                                let trimmed = cmd.trim_end();
+                                let prev_ch = trimmed.chars().last().unwrap_or('\n');
+                                let after_in = trimmed.ends_with(" in")
+                                    || trimmed.ends_with("\tin")
+                                    || trimmed.ends_with("\nin");
+                                // Check if followed by | (pattern alternative)
+                                let next_non_ws = {
+                                    let mut j = *i;
+                                    while j < chars.len() && matches!(chars[j], ' ' | '\t') {
+                                        j += 1;
+                                    }
+                                    if j < chars.len() {
+                                        Some(chars[j])
+                                    } else {
+                                        None
+                                    }
+                                };
+                                let followed_by_pipe = next_non_ws == Some('|');
+                                if !followed_by_pipe
+                                    && (in_case_action
+                                        || prev_ch == ';'
+                                        || prev_ch == '\n'
+                                        || after_in)
+                                {
+                                    case_depth -= 1;
+                                    case_paren_depth.pop();
+                                    in_case_action = false;
+                                }
                             }
-                            // After | (pattern alternative), esac is just a pattern word
                         }
                         // Track compound commands (do/done, then/fi) to prevent ) from
                         // closing the comsub when inside an incomplete compound
