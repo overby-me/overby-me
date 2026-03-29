@@ -16,6 +16,8 @@ thread_local! {
     static IN_HEREDOC: Cell<bool> = const { Cell::new(false) };
     /// Set when parsing pattern words (#, %, /) — enables single-quote quoting in dquote
     static PATTERN_WORD: Cell<bool> = const { Cell::new(false) };
+    /// POSIX mode flag for dollar expansion (disables ${!name} indirect)
+    pub(super) static POSIX_MODE_DOLLAR: Cell<bool> = const { Cell::new(false) };
     /// Aliases available for comsub keyword expansion
     static COMSUB_ALIASES: std::cell::RefCell<HashMap<String, String>> = std::cell::RefCell::new(HashMap::new());
     /// Heredoc EOF warnings from comsub scanner (line, start_line, delimiter)

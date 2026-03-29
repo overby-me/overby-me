@@ -417,6 +417,7 @@ impl Lexer {
                                     self.advance();
                                     let input_clone = self.input.clone();
                                     let old_pos = self.pos;
+                                    POSIX_MODE_DOLLAR.with(|p| p.set(self.posix_mode));
                                     let part = parse_dollar_with_warnings(
                                         &input_clone,
                                         &mut self.pos,
@@ -520,6 +521,7 @@ impl Lexer {
                                     self.advance();
                                     let input_clone = self.input.clone();
                                     let old_pos = self.pos;
+                                    POSIX_MODE_DOLLAR.with(|p| p.set(self.posix_mode));
                                     let part = parse_dollar_with_warnings(
                                         &input_clone,
                                         &mut self.pos,
@@ -765,6 +767,7 @@ impl Lexer {
                     } else {
                         let input_clone = self.input.clone();
                         let old_pos = self.pos;
+                        POSIX_MODE_DOLLAR.with(|p| p.set(self.posix_mode));
                         let part = parse_dollar_with_warnings(
                             &input_clone,
                             &mut self.pos,

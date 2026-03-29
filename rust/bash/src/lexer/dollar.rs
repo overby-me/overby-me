@@ -965,7 +965,9 @@ fn parse_dollar_inner(
 
 fn parse_brace_param(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart {
     // ${!name} — indirect expansion / name prefix / array indices
-    if *i < chars.len() && chars[*i] == '!' {
+    // In POSIX mode, ${!...} is always $! with operator (no indirect expansion)
+    let posix = POSIX_MODE_DOLLAR.with(|p| p.get());
+    if *i < chars.len() && chars[*i] == '!' && !posix {
         // Check if '!' should be the variable name (not indirect prefix)
         // ${!} = $!, ${!-word} = $! with default, ${!:-word} = $! with colon-default
         // vs ${!name} = indirect, ${!name-word} = indirect with op
