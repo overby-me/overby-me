@@ -260,7 +260,10 @@ fn parse_dollar_inner(
                             if case_depth > 0 && !in_case_action {
                                 // ) in case pattern context — ends pattern, enter action
                                 in_case_action = true;
-                            } else if compound_depth <= 0 {
+                            } else if compound_depth > 0 && depth <= 1 {
+                                // Inside do/done or then/fi at comsub depth —
+                                // don't let ) close the comsub
+                            } else {
                                 depth -= 1;
                                 if depth == 0 {
                                     *i += 1;
