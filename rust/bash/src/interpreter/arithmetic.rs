@@ -51,6 +51,32 @@ impl Shell {
     fn eval_arith_expr_inner(&mut self, expr: &str) -> i64 {
         let expr = expr.trim_start();
 
+        // Check for unmatched parentheses at top level
+        if self.arith_depth == 1 {
+            let mut paren_depth = 0i32;
+            for ch in expr.chars() {
+                match ch {
+                    '(' => paren_depth += 1,
+                    ')' => paren_depth -= 1,
+                    _ => {}
+                }
+            }
+            if paren_depth > 0 {
+                let top_expr = self.arith_top_expr.as_deref().unwrap_or(expr);
+                // Find the last token for the error
+                let error_token = expr.trim().rsplit(|c: char| c.is_whitespace() || c == '(').next().unwrap_or(expr.trim());
+                eprintln!(
+                    "{}: {}{}: missing `)' (error token is \"{}\")",
+                    self.arith_error_prefix(),
+                    self.arith_cmd_prefix(),
+                    top_expr,
+                    error_token.trim_end_matches(')')
+                );
+                crate::expand::set_arith_error();
+                return 0;
+            }
+        }
+
         // Check recursion depth limit (bash uses 1024, but each level uses
         // significant stack space so we use a lower limit)
         if self.arith_depth > 64 {
