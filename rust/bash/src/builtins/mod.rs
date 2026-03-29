@@ -935,12 +935,16 @@ fn format_compound_command_indent(cmd: &CompoundCommand, indent: usize) -> Strin
         CompoundCommand::Subshell(program) => {
             let body = format_program(program, 0);
             let trimmed = body.trim();
-            // Single command (possibly with heredoc) → ( cmd ... )
-            let is_single_cmd = program.len() == 1
+            // Single simple command (possibly with heredoc) → ( cmd ... )
+            let is_single_simple_cmd = program.len() == 1
                 && program[0].list.rest.is_empty()
                 && !program[0].background
-                && program[0].list.first.commands.len() == 1;
-            if is_single_cmd {
+                && program[0].list.first.commands.len() == 1
+                && matches!(
+                    &program[0].list.first.commands[0],
+                    crate::ast::Command::Simple(_)
+                );
+            if is_single_simple_cmd {
                 // Format as ( cmd\nheredoc\n ) for heredocs or ( cmd ) for simple
                 let cmd_str = trimmed.trim_end_matches(';');
                 if cmd_str.contains('\n') {
