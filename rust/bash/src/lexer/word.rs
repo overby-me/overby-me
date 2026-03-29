@@ -187,6 +187,48 @@ pub(super) fn read_param_word_impl(
                 literal.push(chars[*i]);
                 *i += 1;
             }
+            '<' | '>' if *i + 1 < chars.len() && chars[*i + 1] == '(' => {
+                if !literal.is_empty() {
+                    parts.push(WordPart::Literal(std::mem::take(&mut literal)));
+                }
+                let kind = if chars[*i] == '<' {
+                    ProcessSubKind::Input
+                } else {
+                    ProcessSubKind::Output
+                };
+                *i += 2;
+                let mut ps_depth = 1i32;
+                let mut cmd = String::new();
+                while *i < chars.len() && ps_depth > 0 {
+                    match chars[*i] {
+                        '(' => ps_depth += 1,
+                        ')' => {
+                            ps_depth -= 1;
+                            if ps_depth == 0 {
+                                *i += 1;
+                                break;
+                            }
+                        }
+                        '\'' => {
+                            cmd.push('\'');
+                            *i += 1;
+                            while *i < chars.len() && chars[*i] != '\'' {
+                                cmd.push(chars[*i]);
+                                *i += 1;
+                            }
+                            if *i < chars.len() {
+                                cmd.push('\'');
+                            }
+                        }
+                        _ => {}
+                    }
+                    if ps_depth > 0 {
+                        cmd.push(chars[*i]);
+                    }
+                    *i += 1;
+                }
+                parts.push(WordPart::ProcessSub(kind, cmd));
+            }
             ch => {
                 literal.push(ch);
                 *i += 1;

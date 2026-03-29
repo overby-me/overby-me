@@ -146,6 +146,26 @@ pub fn take_procsub_fds() -> Vec<i32> {
     PROCSUB_FDS.with(|fds| std::mem::take(&mut *fds.borrow_mut()))
 }
 
+/// Take procsub fds whose `/dev/fd/N` path does NOT appear in any of the given words.
+/// Fds that DO appear are kept for later cleanup.
+pub fn take_procsub_fds_not_in(words: &[String]) -> Vec<i32> {
+    PROCSUB_FDS.with(|fds| {
+        let mut all = fds.borrow_mut();
+        let mut unused = Vec::new();
+        let mut kept = Vec::new();
+        for fd in all.drain(..) {
+            let path = format!("/dev/fd/{}", fd);
+            if words.iter().any(|w| w.contains(&path)) {
+                kept.push(fd);
+            } else {
+                unused.push(fd);
+            }
+        }
+        *all = kept;
+        unused
+    })
+}
+
 /// Register a process substitution fd for later cleanup.
 pub fn register_procsub_fd_pub(fd: i32) {
     register_procsub_fd(fd);
@@ -1035,7 +1055,14 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                                 nix::unistd::close(r_fd).ok();
                             }
                         }
-                        // Exec a new shell for the process substitution command
+                        // Run command inline if procsub runner is available
+                        // (preserves LINENO and script name for error messages)
+                        if let Some(status) = run_procsub_inline(cmd) {
+                            std::io::Write::flush(&mut std::io::stdout()).ok();
+                            std::io::Write::flush(&mut std::io::stderr()).ok();
+                            std::process::exit(status);
+                        }
+                        // Fallback: exec a new shell
                         unsafe {
                             libc::signal(libc::SIGPIPE, libc::SIG_DFL);
                         }
@@ -1046,7 +1073,11 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                         let bash = CString::new("/proc/self/exe").unwrap();
                         let c_flag = CString::new("-c").unwrap();
                         let c_cmd = CString::new(cmd.as_str()).unwrap();
-                        nix::unistd::execvp(&bash, &[&bash, &c_flag, &c_cmd]).ok();
+                        let script_name =
+                            ctx.positional.first().map(|s| s.as_str()).unwrap_or("bash");
+                        let c_name = CString::new(script_name)
+                            .unwrap_or_else(|_| CString::new("bash").unwrap());
+                        nix::unistd::execvp(&bash, &[&bash, &c_flag, &c_cmd, &c_name]).ok();
                         std::process::exit(127);
                     }
                     Ok(nix::unistd::ForkResult::Parent { child, .. }) => {

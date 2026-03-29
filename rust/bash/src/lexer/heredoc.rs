@@ -225,6 +225,50 @@ fn parse_double_quoted_content(s: &str) -> Word {
                 }
                 parts.push(WordPart::BacktickSub(cmd));
             }
+            '<' | '>' if i + 1 < chars.len() && chars[i + 1] == '(' => {
+                if !literal.is_empty() {
+                    parts.push(WordPart::Literal(std::mem::take(&mut literal)));
+                }
+                let kind = if chars[i] == '<' {
+                    crate::ast::ProcessSubKind::Input
+                } else {
+                    crate::ast::ProcessSubKind::Output
+                };
+                i += 2;
+                let mut depth = 1i32;
+                let mut cmd = String::new();
+                while i < chars.len() && depth > 0 {
+                    match chars[i] {
+                        '(' => depth += 1,
+                        ')' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                break;
+                            }
+                        }
+                        '\'' => {
+                            cmd.push('\'');
+                            i += 1;
+                            while i < chars.len() && chars[i] != '\'' {
+                                cmd.push(chars[i]);
+                                i += 1;
+                            }
+                            if i < chars.len() {
+                                cmd.push('\'');
+                            }
+                        }
+                        _ => {}
+                    }
+                    if depth > 0 {
+                        cmd.push(chars[i]);
+                    }
+                    i += 1;
+                }
+                if i < chars.len() {
+                    i += 1;
+                }
+                parts.push(WordPart::ProcessSub(kind, cmd));
+            }
             ch => {
                 literal.push(ch);
                 i += 1;
