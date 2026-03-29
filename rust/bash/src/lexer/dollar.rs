@@ -86,8 +86,9 @@ fn parse_dollar_inner(
                         *i += 1;
                     }
                 }
-                if has_semicolon_at_top {
-                    // Content has ';' at top paren level — reparse as $( (cmd); (cmd) )
+                if has_semicolon_at_top || depth > 0 {
+                    // Content has ';' at top paren level, or no matching ))
+                    // found — reparse as $( (cmd) ) command substitution
                     *i = saved_i; // Back to the second '('
                 // Fall through to command substitution below
                 } else {
@@ -101,6 +102,7 @@ fn parse_dollar_inner(
                 let mut brace_depth = 0i32; // track ${...} nesting
                 let mut cmd = String::new();
                 let mut case_depth = 0i32;
+                let mut in_case_action = false; // true after case pattern ), false after ;;
                 let mut compound_depth = 0i32; // tracks do/done, then/fi nesting
                 while *i < chars.len() && depth > 0 {
                     match chars[*i] {
@@ -246,20 +248,25 @@ fn parse_dollar_inner(
                             continue;
                         }
                         '(' => {
-                            // Don't count ( inside case blocks as it's a pattern delimiter
-                            if case_depth <= 0 {
+                            // Check if preceded by $ (nested command sub or arith)
+                            let preceded_by_dollar = cmd.ends_with('$') || cmd.ends_with("$(");
+                            if case_depth > 0 && !in_case_action && !preceded_by_dollar {
+                                // ( in case pattern context — pattern delimiter, skip
+                            } else {
                                 depth += 1;
                             }
                         }
                         ')' => {
-                            if case_depth <= 0 && compound_depth <= 0 {
+                            if case_depth > 0 && !in_case_action {
+                                // ) in case pattern context — ends pattern, enter action
+                                in_case_action = true;
+                            } else if compound_depth <= 0 {
                                 depth -= 1;
                                 if depth == 0 {
                                     *i += 1;
                                     break;
                                 }
                             }
-                            // Inside a case block, ) is a pattern delimiter — skip
                         }
                         '}' if brace_depth > 0 => {
                             // Inside a ${...} block — this } closes that block
@@ -291,8 +298,13 @@ fn parse_dollar_inner(
                             }
                             continue;
                         }
+                        // Backslash-newline: line continuation (remove both)
+                        '\\' if *i + 1 < chars.len() && chars[*i + 1] == '\n' => {
+                            *i += 2; // skip \ and newline
+                            continue;
+                        }
                         // Backslash: escape next char (prevents ) from closing comsub)
-                        '\\' if *i + 1 < chars.len() && chars[*i + 1] != '\n' => {
+                        '\\' if *i + 1 < chars.len() => {
                             cmd.push(chars[*i]);
                             *i += 1;
                             cmd.push(chars[*i]);
@@ -474,6 +486,36 @@ fn parse_dollar_inner(
                         }
                         _ => {}
                     }
+                    // Detect ;; to reset case action context
+                    if chars[*i] == ';'
+                        && *i + 1 < chars.len()
+                        && chars[*i + 1] == ';'
+                        && case_depth > 0
+                    {
+                        in_case_action = false;
+                        cmd.push(';');
+                        *i += 1;
+                        cmd.push(';');
+                        *i += 1;
+                        continue;
+                    }
+                    // Handle # comments — # after newline, ;, &, | or at start
+                    // of the comsub starts a comment that runs to end of line
+                    if chars[*i] == '#' {
+                        let prev = if cmd.is_empty() {
+                            '\n'
+                        } else {
+                            cmd.chars().last().unwrap_or('\n')
+                        };
+                        if matches!(prev, '\n' | ';' | '&' | '|' | '(' | ' ' | '\t') {
+                            // Skip to end of line
+                            while *i < chars.len() && chars[*i] != '\n' {
+                                cmd.push(chars[*i]);
+                                *i += 1;
+                            }
+                            continue;
+                        }
+                    }
                     // Track case/esac keywords
                     if chars[*i].is_alphabetic() {
                         let _start = *i;
@@ -489,8 +531,10 @@ fn parse_dollar_inner(
                         let kw = effective.as_deref().unwrap_or(word.as_str());
                         if kw == "case" {
                             case_depth += 1;
+                            in_case_action = false;
                         } else if kw == "esac" || word == "esac" {
                             case_depth -= 1;
+                            in_case_action = false;
                         }
                         // Track compound commands (do/done, then/fi) to prevent ) from
                         // closing the comsub when inside an incomplete compound
