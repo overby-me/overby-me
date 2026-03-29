@@ -262,7 +262,17 @@ fn parse_printf_int(arg: &str) -> i64 {
     } else if arg.starts_with('\'') || arg.starts_with('"') {
         arg.chars().nth(1).map(|c| c as i64).unwrap_or(0)
     } else {
-        arg.parse().unwrap_or(0)
+        match arg.parse::<i64>() {
+            Ok(v) => v,
+            Err(_) => {
+                // For overflow, clamp to INT64_MAX/MIN like bash
+                if arg.starts_with('-') {
+                    arg[1..].parse::<u64>().map(|_| i64::MIN).unwrap_or(0)
+                } else {
+                    arg.parse::<u64>().map(|_| i64::MAX).unwrap_or(0)
+                }
+            }
+        }
     }
 }
 

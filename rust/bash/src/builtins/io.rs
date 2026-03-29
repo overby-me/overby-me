@@ -396,28 +396,25 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                     }
                     Some('d') | Some('i') => {
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
-                        let n: i64 = if arg.starts_with("0x") || arg.starts_with("0X") {
-                            i64::from_str_radix(&arg[2..], 16).unwrap_or(0)
-                        } else if arg.starts_with("0") && arg.len() > 1 && !arg.contains(['8', '9'])
+                        let n: i64 = parse_printf_int(arg);
+                        // Check for non-numeric (but not overflow — overflow is clamped silently)
+                        let abs_arg = arg.strip_prefix('-').unwrap_or(arg);
+                        if !arg.is_empty()
+                            && !arg.starts_with('\'')
+                            && !arg.starts_with('"')
+                            && arg.parse::<i64>().is_err()
+                            && abs_arg.parse::<u64>().is_err()
+                            && !arg.starts_with("0x")
+                            && !arg.starts_with("0X")
+                            && !(arg.starts_with('0') && arg.len() > 1)
                         {
-                            i64::from_str_radix(&arg[1..], 8).unwrap_or(0)
-                        } else if arg.starts_with('\'') || arg.starts_with('"') {
-                            arg.chars().nth(1).map(|c| c as i64).unwrap_or(0)
-                        } else {
-                            match arg.parse() {
-                                Ok(v) => v,
-                                Err(_) if !arg.is_empty() => {
-                                    eprintln!(
-                                        "{}: printf: {}: invalid number",
-                                        shell.error_prefix(),
-                                        arg
-                                    );
-                                    had_error = true;
-                                    0
-                                }
-                                _ => 0,
-                            }
-                        };
+                            eprintln!(
+                                "{}: printf: {}: invalid number",
+                                shell.error_prefix(),
+                                arg
+                            );
+                            had_error = true;
+                        }
                         let show_sign = flags.contains('+');
                         let space_sign = flags.contains(' ');
                         let sign_prefix = if n >= 0 && show_sign {
