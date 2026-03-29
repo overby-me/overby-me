@@ -584,25 +584,6 @@ fn format_param_expr(name: &str, op: &ParamOp) -> String {
     }
 }
 
-thread_local! {
-    static HEREDOC_COUNTER: std::cell::RefCell<usize> = const { std::cell::RefCell::new(0) };
-}
-
-fn next_heredoc_delim() -> String {
-    HEREDOC_COUNTER.with(|c| {
-        let n = *c.borrow();
-        *c.borrow_mut() = n + 1;
-        if n == 0 {
-            "EOF".to_string()
-        } else {
-            format!("EOF{}", n)
-        }
-    })
-}
-
-fn reset_heredoc_counter() {
-    HEREDOC_COUNTER.with(|c| *c.borrow_mut() = 0);
-}
 
 fn format_redirection(redir: &Redirection) -> String {
     let mut s = String::new();
@@ -654,18 +635,17 @@ fn format_redirection(redir: &Redirection) -> String {
         RedirectKind::DupInput => s.push_str("<&"),
         RedirectKind::DupOutput => s.push_str(">&"),
         RedirectKind::ReadWrite => s.push_str("<> "),
-        RedirectKind::HereDoc(strip, ref _delim) => {
+        RedirectKind::HereDoc(strip, ref delim) => {
             if strip {
                 s.push_str("<<-");
             } else {
                 s.push_str("<<");
             }
-            let new_delim = next_heredoc_delim();
-            s.push_str(&new_delim);
+            s.push_str(delim);
             s.push('\n');
             s.push_str(&format_word(&redir.target));
             s.push('\n');
-            s.push_str(&new_delim);
+            s.push_str(delim);
             return s;
         }
         RedirectKind::HereString => s.push_str("<<< "),
@@ -703,10 +683,28 @@ fn format_simple_command(cmd: &SimpleCommand) -> String {
     for w in &cmd.words {
         parts.push(format_word(w));
     }
+    // Put non-heredoc redirects and heredoc headers on the command line,
+    // then append heredoc bodies after
+    let mut heredoc_bodies = Vec::new();
     for r in &cmd.redirections {
-        parts.push(format_redirection(r));
+        let formatted = format_redirection(r);
+        if matches!(r.kind, RedirectKind::HereDoc(..)) {
+            // Split heredoc: <<DELIM on command line, body\nDELIM after
+            if let Some(first_nl) = formatted.find('\n') {
+                parts.push(formatted[..first_nl].to_string());
+                heredoc_bodies.push(formatted[first_nl..].to_string());
+            } else {
+                parts.push(formatted);
+            }
+        } else {
+            parts.push(formatted);
+        }
     }
-    parts.join(" ")
+    let mut result = parts.join(" ");
+    for body in heredoc_bodies {
+        result.push_str(&body);
+    }
+    result
 }
 
 fn format_pipeline_indent(pipeline: &Pipeline, indent: usize) -> String {
@@ -857,6 +855,10 @@ fn format_program_impl(program: &Program, indent: usize, semi_last: bool) -> Str
                 {
                     line.push(';');
                 }
+                // Add blank line after heredoc body (bash puts \n after delimiter)
+                if ends_with_heredoc {
+                    line.push('\n');
+                }
             }
         }
         lines.push(line);
@@ -891,7 +893,6 @@ pub fn format_func_body_with_redirs(
     indent: usize,
     redirections: &[Redirection],
 ) -> String {
-    reset_heredoc_counter();
     let redir_str = if redirections.is_empty() {
         String::new()
     } else {

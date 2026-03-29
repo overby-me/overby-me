@@ -69,6 +69,7 @@ pub struct LexerSaveState {
     pos: usize,
     pending_heredocs: Vec<HereDocPending>,
     heredoc_bodies_len: usize,
+    heredoc_delimiters_len: usize,
     heredoc_eof_warnings_len: usize,
     line: usize,
     // Note: alias expansion state (expand_alias_next, expanding_aliases,
@@ -166,6 +167,7 @@ impl Lexer {
             pos: self.pos,
             pending_heredocs: self.pending_heredocs.clone(),
             heredoc_bodies_len: self.heredoc_bodies.len(),
+            heredoc_delimiters_len: self.heredoc_delimiters.len(),
             heredoc_eof_warnings_len: self.heredoc_eof_warnings.len(),
             line: self.line,
         }
@@ -175,6 +177,7 @@ impl Lexer {
         self.pos = saved.pos;
         self.pending_heredocs = saved.pending_heredocs;
         self.heredoc_bodies.truncate(saved.heredoc_bodies_len);
+        self.heredoc_delimiters.truncate(saved.heredoc_delimiters_len);
         self.heredoc_eof_warnings
             .truncate(saved.heredoc_eof_warnings_len);
         self.line = saved.line;
