@@ -148,6 +148,7 @@ pub fn take_procsub_fds() -> Vec<i32> {
 
 /// Take procsub fds whose `/dev/fd/N` path does NOT appear in any of the given words.
 /// Fds that DO appear are kept for later cleanup.
+#[allow(dead_code)]
 pub fn take_procsub_fds_not_in(words: &[String]) -> Vec<i32> {
     PROCSUB_FDS.with(|fds| {
         let mut all = fds.borrow_mut();

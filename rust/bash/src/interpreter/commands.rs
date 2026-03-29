@@ -1032,16 +1032,6 @@ impl Shell {
             expanded_words = new_words;
         }
 
-        // Close procsub fds not referenced in command arguments.
-        // These were used only in parameter expansion patterns (e.g., ${var#<(cmd)}).
-        #[cfg(unix)]
-        {
-            let unused_fds = crate::expand::take_procsub_fds_not_in(&expanded_words);
-            for fd in unused_fds {
-                nix::unistd::close(fd).ok();
-            }
-        }
-
         if expanded_words.is_empty() {
             // No command words — apply redirections for null commands (e.g., `> file`)
             if !cmd.redirections.is_empty() {
@@ -1059,13 +1049,6 @@ impl Shell {
             // command substitution (if any), not 0.
             // If no command substitution ran, last_status is unchanged from
             // before the assignment — return 0 for simple assignments.
-            #[cfg(unix)]
-            {
-                let fds = crate::expand::take_procsub_fds();
-                for fd in fds {
-                    nix::unistd::close(fd).ok();
-                }
-            }
             return if self.last_status != saved_last_status {
                 self.last_status
             } else {
@@ -1110,15 +1093,6 @@ impl Shell {
                 return 1;
             }
         };
-
-        // Close procsub fds created during redirect expansion (heredoc bodies).
-        #[cfg(unix)]
-        {
-            let redir_fds = crate::expand::take_procsub_fds_not_in(&expanded_words);
-            for fd in redir_fds {
-                nix::unistd::close(fd).ok();
-            }
-        }
 
         // Check for function (but in POSIX mode, special builtins take precedence)
         let is_posix_special_builtin = self.opt_posix
@@ -2059,13 +2033,6 @@ impl Shell {
                     }
                 }
                 Ok(nix::unistd::ForkResult::Parent { child }) => {
-                    // Close procsub fds — child inherited them via fork
-                    {
-                        let fds = crate::expand::take_procsub_fds();
-                        for fd in fds {
-                            nix::unistd::close(fd).ok();
-                        }
-                    }
                     // Wait for child, but check for pending signals on EINTR
                     self.in_foreground_wait = true;
                     let result = loop {
