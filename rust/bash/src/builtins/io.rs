@@ -622,6 +622,7 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                     }
                     Some('b') => {
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("");
+                        let has_stop = arg.contains("\\c");
                         let expanded = interpret_echo_escapes(arg);
                         // Apply precision (truncate) then width (pad)
                         let truncated = if let Some(p) = precision {
@@ -649,6 +650,12 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                                 .ok();
                         }
                         arg_idx += 1;
+                        // \c in %b stops all further printf output
+                        if has_stop {
+                            use std::io::Write;
+                            std::io::stdout().flush().ok();
+                            return if had_error { 1 } else { 0 };
+                        }
                     }
                     Some('q') => {
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("");
