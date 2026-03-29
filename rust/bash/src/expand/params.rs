@@ -155,7 +155,14 @@ pub(super) fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
         "0" => ctx.positional.first().cloned().unwrap_or_default(),
         "@" | "*" => {
             if ctx.positional.len() > 1 {
-                ctx.positional[1..].join(" ")
+                // $* joins with first char of IFS (space if IFS unset, empty if IFS="")
+                let ifs = ctx.vars.get("IFS");
+                let sep = match ifs {
+                    None => " ".to_string(),
+                    Some(s) if s.is_empty() => String::new(),
+                    Some(s) => s.chars().next().unwrap_or(' ').to_string(),
+                };
+                ctx.positional[1..].join(&sep)
             } else {
                 String::new()
             }
