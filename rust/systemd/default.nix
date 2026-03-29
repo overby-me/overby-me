@@ -245,19 +245,11 @@
             d
           }' TEST-03-JOBS.sh
 
-          # Remove varlinkctl section (needs varlink server in PID 1)
-          sed -i '/^IDS_FILE=/,/^done$/d' TEST-03-JOBS.sh
-
           # Remove systemd-run --scope test (needs RuntimeMaxSec for scopes)
           sed -i '/^# Test time-limited scopes/,/^\[\[.*RESULT.*-ne/d' TEST-03-JOBS.sh
 
           # Fix upstream typo: propagatesstopto → propagatestopto
           sed -i 's/propagatesstopto-indirect/propagatestopto-indirect/g' TEST-03-JOBS.sh
-
-          # Remove daemon-reexec test (reexec state serialization is incomplete —
-          # units written to /run/ after reexec don't load on-demand properly)
-          sed -i '/^systemctl daemon-reexec$/d' TEST-03-JOBS.sh
-          sed -i '/^# Simple test for that daemon-reexec/,/^$/d' TEST-03-JOBS.sh
 
         '';
       }

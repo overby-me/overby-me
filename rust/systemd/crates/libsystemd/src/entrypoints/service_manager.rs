@@ -86,6 +86,21 @@ pub fn run_service_manager() {
 
     let run_info = prepare_runtimeinfo(&conf, cli_args.dry_run);
 
+    // After daemon-reexec (execve), the process inherits the signal mask from
+    // the previous instance.  signal_hook blocks SIGCHLD/etc in all threads so
+    // only the iterator thread receives them.  After execve the single
+    // remaining thread still has those signals blocked, so all threads spawned
+    // from it inherit the mask and SIGCHLD is never delivered.  Reset the
+    // signal mask to empty before registering handlers.
+    {
+        let empty = nix::sys::signal::SigSet::empty();
+        let _ = nix::sys::signal::sigprocmask(
+            nix::sys::signal::SigmaskHow::SIG_SETMASK,
+            Some(&empty),
+            None,
+        );
+    }
+
     // Build the set of signals to listen for: standard signals + SIGRTMIN+N
     // real-time signals used for target switching, shutdown, reexec, etc.
     let mut sig_list = vec![
@@ -110,7 +125,8 @@ pub fn run_service_manager() {
     // If this is a daemon-reexec, restore PID tracking for running services.
     // This must happen after the signal handler is running (so SIGCHLD is
     // caught) but before we start activating new units.
-    if signal_handler::check_and_restore_reexec_state(&run_info) {
+    let is_reexec = signal_handler::check_and_restore_reexec_state(&run_info);
+    if is_reexec {
         info!("Resumed after daemon-reexec");
     }
 
@@ -154,7 +170,16 @@ pub fn run_service_manager() {
     };
 
     // parallel startup of all services
-    units::activate_needed_units(target_id, run_info);
+    if is_reexec {
+        // After daemon-reexec, unit statuses were already restored from the
+        // reexec state file by check_and_restore_reexec_state (PIDs for
+        // running services + status for all units that existed before reexec).
+        // Skip full activation — it would block threads waiting for READY=1
+        // from notify services that already sent it to the old instance.
+        info!("daemon-reexec: skipped full activation, statuses restored from state file");
+    } else {
+        units::activate_needed_units(target_id, run_info);
+    }
 
     handle.join().unwrap();
 }

@@ -401,6 +401,25 @@ fn serialize_reexec_state(
         }
     }
 
+    // Write unit statuses so the new instance can mark them correctly
+    // (without blindly marking every loaded unit as Started).
+    let status_path = path.with_extension("status");
+    let mut status_file = std::fs::File::create(&status_path)
+        .map_err(|e| format!("create {}: {e}", status_path.display()))?;
+    for unit in ri.unit_table.values() {
+        let status = unit.common.status.read_poisoned();
+        let status_str = match &*status {
+            crate::units::UnitStatus::NeverStarted => "NeverStarted",
+            crate::units::UnitStatus::Starting => "Started",
+            crate::units::UnitStatus::Started(_) => "Started",
+            crate::units::UnitStatus::Stopping => "Stopped",
+            crate::units::UnitStatus::Stopped(_, _) => "Stopped",
+            crate::units::UnitStatus::Restarting => "Started",
+        };
+        writeln!(status_file, "{}\t{}", unit.id.name, status_str)
+            .map_err(|e| format!("write status: {e}"))?;
+    }
+
     // Write a separate freezer state file for all units with non-default freezer state.
     let freezer_path = path.with_extension("freezer");
     let mut freezer_file = std::fs::File::create(&freezer_path)
@@ -497,6 +516,55 @@ pub fn check_and_restore_reexec_state(run_info: &ArcMutRuntimeInfo) -> bool {
         }
     }
 
+    // Restore unit statuses from the status file.  Only units that existed
+    // before the reexec get their status restored — newly-discovered units
+    // (e.g. written to /run/systemd/system/ between the reexec and the
+    // re-scan) keep their NeverStarted default.
+    let status_path = state_path.with_extension("status");
+    let mut status_restored = 0u32;
+    if let Ok(status_content) = std::fs::read_to_string(&status_path) {
+        for line in status_content.lines() {
+            let parts: Vec<&str> = line.split('\t').collect();
+            if parts.len() < 2 {
+                continue;
+            }
+            let unit_name = parts[0];
+            let target_status = parts[1];
+            if let Some(unit) = ri.unit_table.values().find(|u| u.id.name == unit_name) {
+                let current = unit.common.status.read_poisoned();
+                // Only restore if the unit wasn't already handled by PID
+                // restoration above (which sets Started(Running) for
+                // services with live PIDs).
+                let dominated_by_pid_restore = matches!(
+                    &*current,
+                    crate::units::UnitStatus::Started(crate::units::StatusStarted::Running)
+                );
+                drop(current);
+                if !dominated_by_pid_restore {
+                    match target_status {
+                        "Started" => {
+                            *unit.common.status.write_poisoned() =
+                                crate::units::UnitStatus::Started(
+                                    crate::units::StatusStarted::Running,
+                                );
+                            status_restored += 1;
+                        }
+                        "Stopped" => {
+                            *unit.common.status.write_poisoned() =
+                                crate::units::UnitStatus::Stopped(
+                                    crate::units::StatusStopped::StoppedFinal,
+                                    Vec::new(),
+                                );
+                            status_restored += 1;
+                        }
+                        _ => {} // NeverStarted — leave as-is
+                    }
+                }
+            }
+        }
+        let _ = std::fs::remove_file(&status_path);
+    }
+
     // Restore freezer state from the separate freezer state file.
     let freezer_path = state_path.with_extension("freezer");
     if let Ok(freezer_content) = std::fs::read_to_string(&freezer_path) {
@@ -525,7 +593,7 @@ pub fn check_and_restore_reexec_state(run_info: &ArcMutRuntimeInfo) -> bool {
     // Clean up the state file.
     let _ = std::fs::remove_file(state_path);
 
-    info!("Reexec: restored {restored} running service(s)");
+    info!("Reexec: restored {restored} running service(s), {status_restored} unit statuses");
     true
 }
 
