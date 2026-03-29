@@ -1024,6 +1024,10 @@ impl Shell {
                         }
                     }
                     status = 2;
+                    if e.contains("syntax error") {
+                        // Syntax errors in non-interactive shells cause exit
+                        return 2;
+                    }
                     // Skip to the next newline to try to recover
                     parser.skip_to_next_command();
                 }

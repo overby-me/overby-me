@@ -263,8 +263,12 @@ fn parse_dollar_inner(
                                 // ) in case pattern context — ends pattern, enter action
                                 in_case_action = true;
                             } else if compound_depth > 0 && depth <= 1 {
-                                // Inside do/done or then/fi at comsub depth —
-                                // don't let ) close the comsub
+                                // Incomplete compound command (e.g. if/then without fi)
+                                // at comsub depth — stop scanning and close the comsub
+                                // with what we have, so the ) is left for the outer parser
+                                // to report as a syntax error
+                                depth = 0;
+                                break;
                             } else {
                                 depth -= 1;
                                 if depth == 0 {
