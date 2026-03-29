@@ -1130,6 +1130,23 @@ impl Shell {
             if let Some(arr) = self.arrays.get(&resolved) {
                 return arr.get(idx).and_then(|v| v.parse().ok()).unwrap_or(0);
             }
+            // Check nounset for unset array
+            if self.opt_nounset && !self.vars.contains_key(&resolved) {
+                let name = self
+                    .vars
+                    .get("_BASH_SOURCE_FILE")
+                    .or_else(|| self.positional.first())
+                    .map(|s| s.as_str())
+                    .unwrap_or("bash");
+                let lineno = self
+                    .vars
+                    .get("LINENO")
+                    .and_then(|s| s.parse::<i64>().ok())
+                    .unwrap_or(0);
+                eprintln!("{}: line {}: {}: unbound variable", name, lineno, resolved);
+                crate::expand::set_arith_error();
+                return 0;
+            }
             return 0;
         }
 
