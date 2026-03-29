@@ -519,7 +519,10 @@ pub(super) fn apply_param_op(
 
 pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
     // Handle indirect expansion with operators: ${!name+word}, ${!name-word}, etc.
-    if expr.name.starts_with('!') && !matches!(expr.op, ParamOp::None | ParamOp::Indirect) {
+    if expr.name.starts_with('!')
+        && expr.name.len() > 1
+        && !matches!(expr.op, ParamOp::None | ParamOp::Indirect)
+    {
         let real_name = &expr.name[1..];
         // First resolve the indirect: get the value of real_name, use as variable name
         let target = lookup_var(real_name, ctx);
