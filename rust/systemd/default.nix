@@ -5007,59 +5007,7 @@
         patchScript = ''
         '';
       }
-      {
-        name = "16-EXTEND-TIMEOUT";
-        # Replace with a trimmed version that only tests RuntimeMaxSec
-        # enforcement via systemd-run. EXTEND_TIMEOUT_USEC protocol,
-        # scope units, and daemon-reload override tests are skipped.
-        patchScript = ''
-          cat > TEST-16-EXTEND-TIMEOUT.sh << 'TESTEOF'
-          #!/usr/bin/env bash
-          set -eux
-          set -o pipefail
-
-          wait_for_timeout()
-          {
-              local unit="$1"
-              local time="$2"
-
-              while [[ $time -gt 0 ]]; do
-                  if [[ "$(systemctl show --property=Result "$unit")" == "Result=timeout" ]]; then
-                      return 0
-                  fi
-
-                  sleep 1
-                  time=$((time - 1))
-              done
-
-              echo "Timed out waiting for $unit to reach Result=timeout"
-              systemctl show "$unit"
-              return 1
-          }
-
-          runtime_max_sec=5
-
-          : "RuntimeMaxSec on service unit"
-          systemd-run \
-              --property=RuntimeMaxSec=''${runtime_max_sec}s \
-              -u runtime-max-sec-test-1.service \
-              sh -c "while true; do sleep 1; done"
-          wait_for_timeout runtime-max-sec-test-1.service $((runtime_max_sec + 10))
-
-          : "RuntimeMaxSec on scope unit"
-          systemd-run \
-              --property=RuntimeMaxSec=''${runtime_max_sec}s \
-              --scope \
-              -u runtime-max-sec-test-2.scope \
-              sh -c "while true; do sleep 1; done" &
-          wait_for_timeout runtime-max-sec-test-2.scope $((runtime_max_sec + 10))
-
-          echo "RuntimeMaxSec enforcement tests passed"
-          touch /testok
-          TESTEOF
-          chmod +x TEST-16-EXTEND-TIMEOUT.sh
-        '';
-      }
+      {name = "16-EXTEND-TIMEOUT";}
       {
         name = "18-FAILUREACTION";
         # Use upstream test with reboot/exit phases removed — the NixOS test
