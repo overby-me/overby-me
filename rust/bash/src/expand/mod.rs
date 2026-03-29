@@ -107,7 +107,7 @@ pub fn next_random() -> u16 {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_nanos() as u32;
-            *state = t ^ (std::process::id() * 2654435761);
+            *state = t ^ std::process::id().wrapping_mul(2654435761);
             RANDOM_SEEDED.with(|f| *f.borrow_mut() = true);
             RANDOM_LAST.with(|l| *l.borrow_mut() = *state);
         }
