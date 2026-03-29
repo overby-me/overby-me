@@ -294,9 +294,8 @@ fn parse_dollar_inner(
                             || (cmd.ends_with(";;")
                                 || (cmd.ends_with(';') && !cmd.ends_with("\\;"))) =>
                         {
-                            // Comment after newline, ;;, or unescaped ; (not after space — could be escaped word)
+                            // Comment — skip to end of line (don't push to cmd)
                             while *i < chars.len() && chars[*i] != '\n' {
-                                cmd.push(chars[*i]);
                                 *i += 1;
                             }
                             continue;
@@ -511,9 +510,9 @@ fn parse_dollar_inner(
                             cmd.chars().last().unwrap_or('\n')
                         };
                         if matches!(prev, '\n' | ';' | '&' | '|' | '(' | ' ' | '\t') {
-                            // Skip to end of line
+                            // Skip to end of line — don't push comment content to cmd
+                            // (comments may contain ) which would corrupt paren tracking)
                             while *i < chars.len() && chars[*i] != '\n' {
-                                cmd.push(chars[*i]);
                                 *i += 1;
                             }
                             continue;
@@ -535,9 +534,22 @@ fn parse_dollar_inner(
                         if kw == "case" {
                             case_depth += 1;
                             in_case_action = false;
-                        } else if kw == "esac" || word == "esac" {
-                            case_depth -= 1;
-                            in_case_action = false;
+                        } else if (kw == "esac" || word == "esac") && case_depth > 0 {
+                            // Only treat esac as case terminator when:
+                            // - in action context (after pattern ))
+                            // - right after ;; (new pattern position)
+                            // - right after 'in' keyword (empty case)
+                            // NOT when preceded by | (it's a pattern alternative)
+                            let trimmed = cmd.trim_end();
+                            let prev_ch = trimmed.chars().last().unwrap_or('\n');
+                            let after_in = trimmed.ends_with(" in")
+                                || trimmed.ends_with("\tin")
+                                || trimmed.ends_with("\nin");
+                            if in_case_action || prev_ch == ';' || prev_ch == '\n' || after_in {
+                                case_depth -= 1;
+                                in_case_action = false;
+                            }
+                            // After | (pattern alternative), esac is just a pattern word
                         }
                         // Track compound commands (do/done, then/fi) to prevent ) from
                         // closing the comsub when inside an incomplete compound
