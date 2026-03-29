@@ -323,6 +323,27 @@ pub fn wait_for_service(
                         format!("{duration_timeout:?}"),
                     ));
                 }
+                // Poll the notification socket for MAINPID/other
+                // notifications while waiting for the parent to exit.
+                if srvc.notifications.is_some() {
+                    let stream = srvc.notifications.as_ref().unwrap();
+                    stream
+                        .set_read_timeout(Some(std::time::Duration::from_millis(10)))
+                        .ok();
+                    let mut notify_buf = [0u8; 512];
+                    let recv_result = stream.recv(&mut notify_buf[..]);
+                    stream.set_read_timeout(None).ok();
+                    if let Ok(bytes) = recv_result
+                        && bytes > 0
+                    {
+                        let received = core::str::from_utf8(&notify_buf[..bytes]).unwrap_or("");
+                        srvc.notifications_buffer.push_str(received);
+                        if !received.ends_with('\n') {
+                            srvc.notifications_buffer.push('\n');
+                        }
+                        crate::notification_handler::handle_notifications_from_buffer(srvc, name);
+                    }
+                }
                 {
                     let mut pid_table_locked = pid_table.lock_poisoned();
                     match pid_table_locked.get(&pid) {
@@ -379,6 +400,28 @@ pub fn wait_for_service(
                                     );
                                     srvc.pid = None;
                                 }
+                            } else if let Some(daemon_pid) = srvc.main_pid {
+                                // MAINPID was set via sd_notify — track this
+                                // PID as the daemon process.
+                                trace!(
+                                    "[FORK_PARENT] Using MAINPID {daemon_pid} from notification for {name}"
+                                );
+                                srvc.pid = Some(daemon_pid);
+                                let now = crate::units::UnitTimestamps::now_usec();
+                                srvc.exec_main_start_timestamp = Some(now);
+                                srvc.exec_main_handoff_timestamp = Some(now);
+                                pid_table_locked.insert(
+                                    daemon_pid,
+                                    PidEntry::Service(
+                                        run_info
+                                            .unit_table
+                                            .iter()
+                                            .find(|(_, u)| u.id.name == name)
+                                            .map(|(_, u)| u.id.clone())
+                                            .unwrap(),
+                                        conf.srcv_type,
+                                    ),
+                                );
                             } else {
                                 trace!(
                                     "[FORK_PARENT] No PIDFile for forking service {name}, \

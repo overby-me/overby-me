@@ -5078,8 +5078,7 @@
           # type-exec subtest: remove busctl section (issue #20933, needs D-Bus)
           perl -i -0pe 's/# For issue #20933.*//s' TEST-23-UNIT-FILE.type-exec.sh
 
-          # ExecStopPost subtest: remove forking/dbus service type tests (need busctl)
-          perl -i -0pe 's/cat >\/tmp\/forking1\.sh.*?test -f \/run\/forking2\n\n//s' TEST-23-UNIT-FILE.ExecStopPost.sh
+          # ExecStopPost subtest: remove dbus service type tests (need busctl)
           perl -i -0pe 's/systemd-run --unit=dbus1\.service.*?touch \/run\/dbus3. true\)\n\n//s' TEST-23-UNIT-FILE.ExecStopPost.sh
         '';
       }
