@@ -658,6 +658,15 @@ impl Service {
                     .map_err(ServiceErrorReason::PoststopFailed)
             });
 
+        // Kill any remaining processes in the cgroup after ExecStop +
+        // ExecStopPost have run, matching real systemd's behavior.
+        self.kill_all_remaining_processes(conf, name);
+
+        // Clear PID/process_group so the service can be re-started
+        // (e.g. by a path unit re-triggering after deactivation).
+        self.pid = None;
+        self.process_group = None;
+
         // Close file descriptors held by the service (notification socket,
         // stdout/stderr pipes) to prevent FD exhaustion when many transient
         // services are started and stopped.

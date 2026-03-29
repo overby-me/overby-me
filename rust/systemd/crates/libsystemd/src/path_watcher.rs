@@ -374,6 +374,49 @@ impl PathSnapshot {
 }
 
 // ---------------------------------------------------------------------------
+// Shared baseline snapshots (written by activation code, consumed by watcher)
+// ---------------------------------------------------------------------------
+
+use std::sync::{LazyLock, Mutex};
+
+/// Baselines recorded at path-unit activation time on the main thread.
+/// The watcher thread drains these into its local `last_state` each iteration.
+static ACTIVATION_BASELINES: LazyLock<Mutex<HashMap<String, PathSnapshot>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Record baseline snapshots for a path unit's PathChanged/PathModified
+/// conditions.  Called synchronously during path-unit activation so the
+/// filesystem state is captured *before* `systemctl start` returns.
+pub fn record_activation_baselines(unit_name: &str, conf: &crate::units::PathConfig) {
+    use crate::units::PathCondition;
+    let mut map = ACTIVATION_BASELINES.lock().unwrap();
+    for condition in &conf.conditions {
+        match condition {
+            PathCondition::PathChanged(path) => {
+                let key = format!("{unit_name}:changed:{path}");
+                map.insert(key, PathSnapshot::capture(path));
+            }
+            PathCondition::PathModified(path) => {
+                let key = format!("{unit_name}:modified:{path}");
+                map.insert(key, PathSnapshot::capture(path));
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Drain activation baselines into the watcher's local state.
+/// Activation baselines overwrite existing entries because they represent
+/// a fresh snapshot taken at unit-start time (the unit may have been
+/// restarted, so old state is stale).
+fn drain_activation_baselines(last_state: &mut HashMap<String, PathSnapshot>) {
+    let mut map = ACTIVATION_BASELINES.lock().unwrap();
+    for (key, snapshot) in map.drain() {
+        last_state.insert(key, snapshot);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Public entry point
 // ---------------------------------------------------------------------------
 
@@ -421,6 +464,12 @@ pub fn start_path_watcher_thread(run_info: ArcMutRuntimeInfo) {
                 let now = Instant::now();
                 let mut units_to_check: HashMap<String, bool> = HashMap::new();
 
+                // Merge baselines that were recorded on the main thread when
+                // path units were activated.  This is the primary mechanism for
+                // avoiding the race where a file changes between `systemctl
+                // start <path>` returning and the watcher noticing the unit.
+                drain_activation_baselines(&mut last_state);
+
                 // Re-check units that fired on the previous cycle.
                 for name in recheck_units.drain() {
                     units_to_check.insert(name, true);
@@ -428,7 +477,10 @@ pub fn start_path_watcher_thread(run_info: ArcMutRuntimeInfo) {
 
                 // --- Phase 1: Ensure inotify watches are up to date ---
                 if let Some(ref mut ino) = inotify_state {
-                    sync_inotify_watches(ino, &run_info, &mut watched_units);
+                    let newly_watched = sync_inotify_watches(ino, &run_info, &mut watched_units);
+                    for name in newly_watched {
+                        units_to_check.insert(name, true);
+                    }
                 }
 
                 // --- Phase 2: Drain inotify events ---
@@ -507,19 +559,26 @@ fn wait_for_inotify_events(fd: std::os::fd::RawFd, timeout_ms: i32) {
 }
 
 /// Synchronize inotify watches with the currently active path units.
+/// Returns the names of newly-watched units so the caller can schedule
+/// an immediate condition check for them.
 fn sync_inotify_watches(
     ino: &mut PathInotify,
     run_info: &ArcMutRuntimeInfo,
     watched_units: &mut HashMap<String, bool>,
-) {
+) -> Vec<String> {
     let ri = run_info.read_poisoned();
     let mut current_units: HashMap<String, bool> = HashMap::new();
+    let mut newly_watched: Vec<String> = Vec::new();
 
     for unit in ri.unit_table.values() {
         if let Specific::Path(path_specific) = &unit.specific {
             let status = unit.common.status.read_poisoned().clone();
             if matches!(status, UnitStatus::Started(StatusStarted::Running)) {
-                current_units.insert(unit.id.name.clone(), true);
+                let name = unit.id.name.clone();
+                if !watched_units.contains_key(&name) {
+                    newly_watched.push(name.clone());
+                }
+                current_units.insert(name, true);
                 ino.ensure_watches(&unit.id.name, &path_specific.conf);
             }
         }
@@ -538,6 +597,7 @@ fn sync_inotify_watches(
     }
 
     *watched_units = current_units;
+    newly_watched
 }
 
 // ---------------------------------------------------------------------------
@@ -880,7 +940,7 @@ fn fire_path_target(
                     match crate::units::activate_unit(
                         id,
                         &run_info.read_poisoned(),
-                        ActivationSource::Regular,
+                        ActivationSource::TriggerActivation,
                     ) {
                         Ok(_) => {
                             info!("Path triggered: started {}", target_unit_name);
@@ -911,7 +971,7 @@ fn fire_path_target(
                 match crate::units::activate_unit(
                     id,
                     &run_info.read_poisoned(),
-                    ActivationSource::Regular,
+                    ActivationSource::TriggerActivation,
                 ) {
                     Ok(_) => info!("Path triggered: started {} (on-demand)", target_unit_name),
                     Err(e) => warn!(

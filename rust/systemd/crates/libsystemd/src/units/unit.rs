@@ -1369,6 +1369,12 @@ impl Unit {
                         }
                     }
                 }
+                // Record baseline snapshots for PathChanged/PathModified
+                // conditions synchronously, before returning from activation.
+                // The path watcher thread will pick these up and use them as
+                // the reference point for detecting changes.
+                crate::path_watcher::record_activation_baselines(&self.id.name, conf);
+
                 let mut status = self.common.status.write_poisoned();
                 if status.is_started() {
                     return Ok(status.clone());

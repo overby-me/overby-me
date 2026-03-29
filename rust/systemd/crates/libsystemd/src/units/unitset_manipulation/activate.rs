@@ -301,12 +301,23 @@ pub enum StartResult {
 pub enum ActivationSource {
     Regular,
     SocketActivation,
+    /// Activation triggered by a path or timer unit.  Like socket activation,
+    /// this bypasses the StoppedFinal/StoppedUnexpected early-return guards so
+    /// that a service can be re-started after it exits.
+    TriggerActivation,
 }
 
 impl ActivationSource {
     #[must_use]
     pub const fn is_socket_activation(&self) -> bool {
         matches!(self, Self::SocketActivation)
+    }
+
+    /// Returns true for activation sources that should bypass the
+    /// Stopped early-return guards (socket, path, timer triggers).
+    #[must_use]
+    pub const fn bypasses_stopped_guard(&self) -> bool {
+        matches!(self, Self::SocketActivation | Self::TriggerActivation)
     }
 }
 
@@ -348,12 +359,12 @@ pub fn activate_unit(
             UnitStatus::Stopped(
                 StatusStopped::StoppedFinal | StatusStopped::ConditionSkipped,
                 _,
-            ) if !source.is_socket_activation() => {
+            ) if !source.bypasses_stopped_guard() => {
                 // Already finished (e.g. condition-skipped oneshot) — don't re-check
                 return Ok(StartResult::Started(vec![]));
             }
             UnitStatus::Stopped(StatusStopped::StoppedUnexpected, _)
-                if !source.is_socket_activation() =>
+                if !source.bypasses_stopped_guard() =>
             {
                 // Already failed — don't retry during initial activation
                 return Ok(StartResult::Started(vec![]));

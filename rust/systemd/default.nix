@@ -4447,15 +4447,12 @@
       }
       {
         name = "63-PATH";
-        # Patch out busctl calls (ActivationDetails D-Bus property not implemented),
-        # the issue-24577 section (pending job assertions — jobs don't appear in
-        # list-jobs because rust-systemd resolves dependencies inline), and the
-        # pr-30768 race-condition test (path re-triggering during service
-        # deactivation not yet implemented).
+        # Patch out busctl calls (ActivationDetails D-Bus property not implemented)
+        # and the issue-24577 section (pending job assertions — jobs don't appear
+        # in list-jobs because rust-systemd resolves dependencies inline).
         patchScript = ''
           sed -i '/^test "$(busctl/d' TEST-63-PATH.sh
           sed -i '/^# tests for issue.*24577/,/^# Test for race condition/{ /^# Test for race condition/!d }' TEST-63-PATH.sh
-          sed -i '/^# Test for race condition/,/^touch \/testok/{/^touch \/testok/!d}' TEST-63-PATH.sh
         '';
       }
       {
@@ -4472,8 +4469,10 @@
       {name = "68-PROPAGATE-EXIT-STATUS";}
       {
         name = "71-HOSTNAME";
+        # Skip nss-myhostname testcase: the module is present but doesn't
+        # resolve *.localhost subdomains (foo.localhost) in this VM config.
+        # This is a C-library systemd feature, not a rust-systemd concern.
         patchScript = ''
-          # Skip nss-myhostname testcase (NSS module not available in rust-systemd)
           sed -i '/^testcase_nss-myhostname/s/^testcase_/skipped_/' TEST-71-HOSTNAME.sh
         '';
       }

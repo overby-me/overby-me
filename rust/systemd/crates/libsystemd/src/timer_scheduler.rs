@@ -428,7 +428,7 @@ fn fire_timer_target(run_info: &ArcMutRuntimeInfo, target_unit_name: &str, timer
                         "Timer target {} is already running, attempting restart",
                         target_unit_name
                     );
-                    match unit.reactivate(&ri, ActivationSource::Regular) {
+                    match unit.reactivate(&ri, ActivationSource::TriggerActivation) {
                         Ok(()) => {
                             info!("Timer fired: restarted {}", target_unit_name);
                         }
@@ -444,7 +444,7 @@ fn fire_timer_target(run_info: &ArcMutRuntimeInfo, target_unit_name: &str, timer
                     match crate::units::activate_unit(
                         id,
                         &run_info.read_poisoned(),
-                        ActivationSource::Regular,
+                        ActivationSource::TriggerActivation,
                     ) {
                         Ok(_) => {
                             info!("Timer fired: started {}", target_unit_name);
@@ -477,7 +477,7 @@ fn fire_timer_target(run_info: &ArcMutRuntimeInfo, target_unit_name: &str, timer
                 match crate::units::activate_unit(
                     id,
                     &run_info.read_poisoned(),
-                    ActivationSource::Regular,
+                    ActivationSource::TriggerActivation,
                 ) {
                     Ok(_) => info!("Timer fired: started {} (on-demand)", target_unit_name),
                     Err(e) => warn!(
