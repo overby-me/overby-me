@@ -5002,11 +5002,7 @@
         '';
         extraPackages = pkgs: [pkgs.e2fsprogs pkgs.socat]; # chattr for socket-on-failure, socat for issue-30412
       }
-      {
-        name = "15-DROPIN";
-        patchScript = ''
-        '';
-      }
+      {name = "15-DROPIN";}
       {name = "16-EXTEND-TIMEOUT";}
       {
         name = "18-FAILUREACTION";
