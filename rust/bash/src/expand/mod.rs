@@ -32,6 +32,8 @@ thread_local! {
     static GLOBSKIPDOTS_ENABLED: RefCell<bool> = const { RefCell::new(true) };
     /// Whether globstar shopt is enabled (** matches recursively)
     static GLOBSTAR_ENABLED: RefCell<bool> = const { RefCell::new(false) };
+    /// Whether nullglob shopt is enabled (unmatched globs expand to nothing)
+    static NULLGLOB_ENABLED: RefCell<bool> = const { RefCell::new(false) };
     /// GLOBIGNORE patterns (colon-separated, empty = no ignore)
     static GLOBIGNORE: RefCell<String> = const { RefCell::new(String::new()) };
     /// Callback for running process substitution commands inline (instead of exec'ing
@@ -88,6 +90,10 @@ pub fn set_globskipdots(enabled: bool) {
 
 pub fn set_globstar(enabled: bool) {
     GLOBSTAR_ENABLED.with(|d| *d.borrow_mut() = enabled);
+}
+
+pub fn set_nullglob(enabled: bool) {
+    NULLGLOB_ENABLED.with(|d| *d.borrow_mut() = enabled);
 }
 
 /// Seed the RANDOM PRNG (called when RANDOM=N is assigned)
@@ -2344,8 +2350,9 @@ fn glob_expand(field: &str) -> Vec<String> {
                         })
                         .collect();
                     apply_globignore(&mut results);
+                    let nullglob = NULLGLOB_ENABLED.with(|d| *d.borrow());
                     if results.is_empty() {
-                        vec![remove_quotes(field)]
+                        if nullglob { vec![] } else { vec![remove_quotes(field)] }
                     } else {
                         results.sort();
                         results
@@ -2361,8 +2368,9 @@ fn glob_expand(field: &str) -> Vec<String> {
                             .filter_map(|p| p.ok())
                             .map(|p| p.to_string_lossy().to_string())
                             .collect();
+                        let nullglob = NULLGLOB_ENABLED.with(|d| *d.borrow());
                         if results.is_empty() {
-                            vec![remove_quotes(field)]
+                            if nullglob { vec![] } else { vec![remove_quotes(field)] }
                         } else {
                             results.sort();
                             results
@@ -2403,8 +2411,9 @@ fn glob_expand(field: &str) -> Vec<String> {
                         })
                         .collect();
                     apply_globignore(&mut results);
+                    let nullglob = NULLGLOB_ENABLED.with(|d| *d.borrow());
                     if results.is_empty() {
-                        vec![remove_quotes(field)]
+                        if nullglob { vec![] } else { vec![remove_quotes(field)] }
                     } else {
                         results.sort();
                         results
