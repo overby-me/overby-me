@@ -613,10 +613,48 @@ pub(crate) fn service_exit_handler(
                         crate::units::StatusStopped::StoppedUnexpected,
                         vec![reason],
                     );
+                    drop(status);
+                    // Propagate failure to required_by deps (e.g.
+                    // targets with Requires= on this service).
+                    for dep_id in &unit.common.dependencies.required_by {
+                        if let Some(dep) = run_info.unit_table.get(dep_id)
+                            && dep.common.status.read_poisoned().is_started()
+                        {
+                            let mut dep_st = dep.common.status.write_poisoned();
+                            *dep_st = crate::units::UnitStatus::Stopped(
+                                crate::units::StatusStopped::StoppedFinal,
+                                vec![],
+                            );
+                        }
+                    }
                     return Ok(None);
                 }
 
                 info!("Restarting oneshot service {name}");
+
+                // With RestartMode=normal, propagate the stop to deps before
+                // restarting, matching real systemd's full deactivation path.
+                // With RestartMode=direct, skip dep propagation.
+                if srvc.conf.restart_mode == RestartMode::Normal
+                    && let Some(unit) = run_info.unit_table.get(&srvc_id)
+                {
+                    for dep_id in unit
+                        .common
+                        .dependencies
+                        .bound_by
+                        .iter()
+                        .chain(unit.common.dependencies.required_by.iter())
+                        .chain(unit.common.dependencies.part_of_by.iter())
+                    {
+                        if let Err(e) = crate::units::deactivate_unit_recursive(dep_id, run_info) {
+                            trace!(
+                                "Failed to propagate stop to {} during RestartMode=normal oneshot restart of {name}: {e}",
+                                dep_id.name
+                            );
+                        }
+                    }
+                }
+
                 // Spawn the restart on a separate thread so that this exit
                 // handler can return and release the RuntimeInfo read lock.
                 // Oneshot reactivation blocks in wait_for_service until the
@@ -637,11 +675,27 @@ pub(crate) fn service_exit_handler(
                 return Ok(None);
             }
 
-            crate::units::deactivate_unit_recursive(&srvc_id, run_info)
-                .map_err(|e| format!("{e}"))?;
+            let is_success = success_exit_status.is_success(&code);
+            if is_success {
+                // Clean oneshot exit: do NOT deactivate.  In real
+                // systemd, Requires= is a start-time dependency — the
+                // service's start job completed, so reverse deps
+                // (targets) stay active.  Calling deactivate_unit_recursive
+                // here would try to stop them (and fail because the
+                // target's own deps are still running, which just logs
+                // an error), but the attempt also prevents THIS service
+                // from being marked Stopped in time for concurrent
+                // activation of later units that depend on it.  By
+                // leaving the service in its Started state we match
+                // real systemd's effective behavior.
+            } else {
+                // Failed exit: full recursive deactivation including
+                // required_by to propagate the failure.
+                crate::units::deactivate_unit_recursive(&srvc_id, run_info)
+                    .map_err(|e| format!("{e}"))?;
+            }
 
             // Mark as failed if the exit was not clean.
-            let is_success = success_exit_status.is_success(&code);
             if !is_success && let Some(unit) = run_info.unit_table.get(&srvc_id) {
                 let mut status = unit.common.status.write_poisoned();
                 let reason = match &code {
@@ -875,14 +929,22 @@ pub(crate) fn service_exit_handler(
         // units before restarting. This matches real systemd: the service goes
         // through the full deactivation path, so BindsTo= deps are stopped.
         // With RestartMode=direct, skip this — deps don't see the restart.
+        //
+        // We track which deps to RE-ACTIVATE after restart separately:
+        // only bound_by gets re-activated (BindsTo= semantics). required_by
+        // and part_of_by deps are NOT re-activated because their start jobs
+        // already completed/failed — re-activating them would differ from
+        // real systemd where the job queue doesn't re-enqueue them.
         let stopped_deps = if restart_mode == RestartMode::Normal {
-            let mut deps = Vec::new();
+            let mut all_deps = Vec::new();
+            let mut reactivate_deps = Vec::new();
             if let Some(unit) = run_info.unit_table.get(&srvc_id) {
-                deps.extend(unit.common.dependencies.bound_by.clone());
-                deps.extend(unit.common.dependencies.required_by.clone());
-                deps.extend(unit.common.dependencies.part_of_by.clone());
+                reactivate_deps.extend(unit.common.dependencies.bound_by.clone());
+                all_deps.extend(unit.common.dependencies.bound_by.clone());
+                all_deps.extend(unit.common.dependencies.required_by.clone());
+                all_deps.extend(unit.common.dependencies.part_of_by.clone());
             }
-            for dep_id in &deps {
+            for dep_id in &all_deps {
                 if let Err(e) = crate::units::deactivate_unit_recursive(dep_id, run_info) {
                     trace!(
                         "Failed to propagate stop to {} during RestartMode=normal restart of {name}: {e}",
@@ -890,7 +952,7 @@ pub(crate) fn service_exit_handler(
                     );
                 }
             }
-            deps
+            reactivate_deps
         } else {
             Vec::new()
         };
@@ -994,9 +1056,9 @@ pub(crate) fn service_exit_handler(
         }
         crate::units::reactivate_unit(srvc_id, run_info).map_err(|e| format!("{e}"))?;
 
-        // For RestartMode=normal, re-activate the deps that were stopped.
-        // This mirrors real systemd: BindsTo= deps restart when the bound
-        // unit comes back.
+        // For RestartMode=normal, re-activate only the BindsTo= deps that
+        // were stopped. required_by/part_of_by deps are NOT re-activated
+        // because their original start jobs already completed/failed.
         for dep_id in &stopped_deps {
             if let Some(dep_unit) = run_info.unit_table.get(dep_id) {
                 let dep_status = dep_unit.common.status.read_poisoned().clone();

@@ -7033,20 +7033,35 @@ pub fn execute_command(
             }
         },
         Command::Start(unit_names) => {
-            for unit_name in &unit_names {
+            // Extract --job-mode= from the unit names list (passed as a pseudo-param)
+            let mut job_mode: Option<String> = None;
+            let mut actual_names: Vec<String> = Vec::new();
+            for name in &unit_names {
+                if let Some(jm) = name.strip_prefix("--job-mode=") {
+                    job_mode = Some(jm.to_string());
+                } else {
+                    actual_names.push(name.clone());
+                }
+            }
+            let ignore_deps = job_mode.as_deref() == Some("ignore-dependencies")
+                || job_mode.as_deref() == Some("ignore-requirements");
+
+            for unit_name in &actual_names {
                 let id = find_or_load_unit(unit_name, &run_info)?;
-                // Load all dependency units from disk so the full graph is available.
-                load_dependency_units(&id, &run_info);
-                // Refresh on-disk .wants/.requires so dynamically created
-                // symlinks are picked up without requiring daemon-reload.
-                refresh_directory_deps(&id.name, &run_info);
+                if !ignore_deps {
+                    // Load all dependency units from disk so the full graph is available.
+                    load_dependency_units(&id, &run_info);
+                    // Refresh on-disk .wants/.requires so dynamically created
+                    // symlinks are picked up without requiring daemon-reload.
+                    refresh_directory_deps(&id.name, &run_info);
+                }
                 // Reset the unit (and its Wants deps) from Stopped → NeverStarted
                 // so activate_needed_units will actually start them. Without this,
                 // units that were previously stopped are skipped.
                 {
                     let ri = run_info.read_poisoned();
                     let mut ids_to_reset = vec![id.clone()];
-                    if let Some(unit) = ri.unit_table.get(&id) {
+                    if !ignore_deps && let Some(unit) = ri.unit_table.get(&id) {
                         for dep_id in unit
                             .common
                             .dependencies
@@ -7070,76 +7085,225 @@ pub fn execute_command(
                         }
                     }
                 }
-                let errs = crate::units::activate_needed_units(id.clone(), run_info.clone());
-                if !errs.is_empty() {
-                    let mut errstr = String::from("Errors while starting the unit:");
-                    for err in errs {
-                        let _ = write!(errstr, "\n{err:?}");
+                let errs = if ignore_deps {
+                    // Activate only this unit, not its dependencies
+                    match crate::units::activate_unit(
+                        id.clone(),
+                        &run_info.read_poisoned(),
+                        crate::units::ActivationSource::Regular,
+                    ) {
+                        Ok(_) => vec![],
+                        Err(e) => vec![e],
                     }
-                    return Err(errstr);
+                } else {
+                    crate::units::activate_needed_units(id.clone(), run_info.clone())
+                };
+                let mut activation_failed = !errs.is_empty();
+                if activation_failed {
+                    // Check if any units are in Restarting state (auto-restart
+                    // pending). If so, wait for the restart to complete and
+                    // retry activation only if at least one service recovered.
+                    let has_restarting_deps = {
+                        let ri = run_info.read_poisoned();
+                        ri.unit_table.values().any(|unit| {
+                            let status = unit.common.status.read_poisoned();
+                            matches!(&*status, UnitStatus::Restarting)
+                        })
+                    };
+                    if has_restarting_deps {
+                        // Wait up to 30s for restarting services to finish
+                        let deadline =
+                            std::time::Instant::now() + std::time::Duration::from_secs(30);
+                        loop {
+                            std::thread::sleep(std::time::Duration::from_millis(100));
+                            let still_restarting = {
+                                let ri = run_info.read_poisoned();
+                                ri.unit_table.values().any(|unit| {
+                                    let status = unit.common.status.read_poisoned();
+                                    matches!(&*status, UnitStatus::Restarting)
+                                })
+                            };
+                            if !still_restarting || std::time::Instant::now() > deadline {
+                                break;
+                            }
+                        }
+                        // Only retry if:
+                        // 1. The target unit is NOT stopped (i.e. deps weren't
+                        //    deactivated during RestartMode=normal restart)
+                        // 2. At least one required dep recovered (Started)
+                        let target_still_alive = {
+                            let ri = run_info.read_poisoned();
+                            ri.unit_table
+                                .get(&id)
+                                .map(|u| !u.common.status.read_poisoned().is_stopped())
+                                .unwrap_or(false)
+                        };
+                        let any_recovered = target_still_alive && {
+                            let ri = run_info.read_poisoned();
+                            if let Some(unit) = ri.unit_table.get(&id) {
+                                unit.common
+                                    .dependencies
+                                    .requires
+                                    .iter()
+                                    .chain(unit.common.dependencies.wants.iter())
+                                    .any(|dep_id| {
+                                        ri.unit_table
+                                            .get(dep_id)
+                                            .map(|u| u.common.status.read_poisoned().is_started())
+                                            .unwrap_or(false)
+                                    })
+                            } else {
+                                false
+                            }
+                        };
+                        if any_recovered {
+                            // Retry activation — restarted services are now started
+                            {
+                                let ri = run_info.read_poisoned();
+                                if let Some(unit) = ri.unit_table.get(&id) {
+                                    let status = unit.common.status.read_poisoned();
+                                    if status.is_stopped() {
+                                        drop(status);
+                                        let mut st = unit.common.status.write_poisoned();
+                                        *st = UnitStatus::NeverStarted;
+                                    }
+                                }
+                            }
+                            let errs2 =
+                                crate::units::activate_needed_units(id.clone(), run_info.clone());
+                            if errs2.is_empty() {
+                                activation_failed = false;
+                            }
+                        }
+                    }
+                    // Give the exit handler a moment to process restarts
+                    // so our post-activation dep check is accurate.
+                    if activation_failed {
+                        std::thread::sleep(std::time::Duration::from_millis(200));
+                    }
                 }
                 // Check the target unit's final status after activation.
-                //
-                // For oneshot services: activation is synchronous, so check
-                // immediately for failure / restart.
-                //
-                // For Type=notify services: block until READY=1 is received
-                // or the service stops, matching real systemd behavior where
-                // `systemctl start` waits for readiness notification.
-                {
+                // Extract info from locked state, then release before waiting.
+                enum PostCheck {
+                    Target {
+                        req_dep_ids: Vec<crate::units::UnitId>,
+                    },
+                    OneShot,
+                    Notify,
+                    Other,
+                    NotFound,
+                }
+                let post_check = {
                     let ri = run_info.read_poisoned();
                     if let Some(unit) = ri.unit_table.get(&id) {
-                        let srvc_type = if let Specific::Service(srvc) = &unit.specific {
-                            Some(srvc.conf.srcv_type)
-                        } else {
-                            None
-                        };
-                        match srvc_type {
-                            // Non-service units (sockets, targets, etc.):
-                            // check if the unit ended up in a failed state.
-                            None => {
+                        match &unit.specific {
+                            Specific::Service(srvc) => match srvc.conf.srcv_type {
+                                crate::units::ServiceType::OneShot => {
+                                    let status = unit.common.status.read_poisoned();
+                                    match &*status {
+                                        UnitStatus::Stopped(_, errors) if !errors.is_empty() => {
+                                            return Err(format!(
+                                                "Unit {} failed to start",
+                                                id.name
+                                            ));
+                                        }
+                                        UnitStatus::Restarting => {
+                                            return Err(format!(
+                                                "Unit {} failed to start",
+                                                id.name
+                                            ));
+                                        }
+                                        _ => {}
+                                    }
+                                    PostCheck::OneShot
+                                }
+                                crate::units::ServiceType::Notify
+                                | crate::units::ServiceType::NotifyReload => {
+                                    let status = unit.common.status.read_poisoned();
+                                    match &*status {
+                                        UnitStatus::Stopped(_, errors) if !errors.is_empty() => {
+                                            return Err(format!(
+                                                "Unit {} failed to start",
+                                                id.name
+                                            ));
+                                        }
+                                        UnitStatus::Stopped(
+                                            crate::units::StatusStopped::StoppedUnexpected,
+                                            _,
+                                        ) => {
+                                            return Err(format!(
+                                                "Unit {} failed to start",
+                                                id.name
+                                            ));
+                                        }
+                                        _ => {}
+                                    }
+                                    PostCheck::Notify
+                                }
+                                _ => PostCheck::Other,
+                            },
+                            _ => {
+                                // Non-service (target, socket, etc.)
                                 let status = unit.common.status.read_poisoned();
                                 if let UnitStatus::Stopped(_, errors) = &*status
                                     && !errors.is_empty()
                                 {
                                     return Err(format!("Unit {} failed to start", id.name));
                                 }
+                                drop(status);
+                                let req_dep_ids = unit.common.dependencies.requires.to_vec();
+                                PostCheck::Target { req_dep_ids }
                             }
-                            Some(crate::units::ServiceType::OneShot) => {
-                                let status = unit.common.status.read_poisoned();
-                                match &*status {
-                                    UnitStatus::Stopped(_, errors) if !errors.is_empty() => {
-                                        return Err(format!("Unit {} failed to start", id.name));
-                                    }
-                                    UnitStatus::Restarting => {
-                                        return Err(format!("Unit {} failed to start", id.name));
-                                    }
-                                    _ => {}
-                                }
-                            }
-                            Some(
-                                crate::units::ServiceType::Notify
-                                | crate::units::ServiceType::NotifyReload,
-                            ) => {
-                                // activate_needed_units() already waited for
-                                // READY=1 via wait_for_service(), so the service
-                                // is ready at this point. Just verify it hasn't
-                                // stopped since then.
-                                let status = unit.common.status.read_poisoned();
-                                match &*status {
-                                    UnitStatus::Stopped(_, errors) if !errors.is_empty() => {
-                                        return Err(format!("Unit {} failed to start", id.name));
-                                    }
-                                    UnitStatus::Stopped(
-                                        crate::units::StatusStopped::StoppedUnexpected,
-                                        _,
-                                    ) => {
-                                        return Err(format!("Unit {} failed to start", id.name));
-                                    }
-                                    _ => {}
-                                }
-                            }
-                            _ => {}
+                        }
+                    } else {
+                        PostCheck::NotFound
+                    }
+                };
+                // For targets: wait for required deps to finish any
+                // active restart cycle. When a dep hits its rate limit,
+                // the exit handler propagates the failure to required_by
+                // units (deactivating this target). We just need to
+                // wait for the cycle to complete before checking.
+                if let PostCheck::Target { req_dep_ids } = post_check
+                    && !req_dep_ids.is_empty()
+                {
+                    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+                    loop {
+                        let any_transitioning = {
+                            let ri = run_info.read_poisoned();
+                            req_dep_ids.iter().any(|dep_id| {
+                                ri.unit_table
+                                    .get(dep_id)
+                                    .map(|dep| {
+                                        let st = dep.common.status.read_poisoned();
+                                        matches!(
+                                            &*st,
+                                            UnitStatus::Restarting
+                                                | UnitStatus::Starting
+                                                | UnitStatus::Stopping
+                                        )
+                                    })
+                                    .unwrap_or(false)
+                            })
+                        };
+                        if !any_transitioning {
+                            break;
+                        }
+                        if std::time::Instant::now() > deadline {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(50));
+                    }
+                    // Check if the target was deactivated by an
+                    // exit handler (e.g. rate limit propagation).
+                    let ri = run_info.read_poisoned();
+                    if let Some(unit) = ri.unit_table.get(&id) {
+                        let st = unit.common.status.read_poisoned();
+                        if st.is_stopped() {
+                            return Err(format!(
+                                "Unit {} failed: a required dependency failed",
+                                id.name
+                            ));
                         }
                     }
                 }

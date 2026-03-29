@@ -168,6 +168,7 @@ fn main() {
     let mut kill_whom: Option<String> = None;
     let mut kill_value: Option<i32> = None;
     let mut kill_signal_str: Option<String> = None;
+    let mut job_mode: Option<String> = None;
 
     let mut i = 0;
     let mut end_of_options = false;
@@ -389,6 +390,20 @@ fn main() {
         }
         if let Some(rest) = arg.strip_prefix("--state=") {
             state_filter = Some(rest.to_string());
+            i += 1;
+            continue;
+        }
+
+        // Capture --job-mode value
+        if arg == "--job-mode" {
+            if i + 1 < args.len() {
+                job_mode = Some(args[i + 1].clone());
+            }
+            i += 2;
+            continue;
+        }
+        if let Some(rest) = arg.strip_prefix("--job-mode=") {
+            job_mode = Some(rest.to_string());
             i += 1;
             continue;
         }
@@ -958,7 +973,7 @@ fn main() {
     }
 
     let method = command.clone();
-    let params = if method == "list-units" {
+    let mut params = if method == "list-units" {
         // list-units [type] — optional type or state filter
         // Build a JSON object with optional type and state filters.
         let mut obj = serde_json::Map::new();
@@ -1244,6 +1259,16 @@ fn main() {
     } else {
         method.to_string()
     };
+    // Append --job-mode to params so the server can use it
+    if let Some(ref jm) = job_mode {
+        let jm_param = Value::String(format!("--job-mode={jm}"));
+        match params {
+            Some(Value::Array(ref mut arr)) => arr.push(jm_param),
+            Some(ref v) => params = Some(Value::Array(vec![v.clone(), jm_param])),
+            None => params = Some(Value::Array(vec![jm_param])),
+        }
+    }
+
     let method_name = method.clone();
     let call = Call {
         method,
