@@ -375,7 +375,8 @@ impl ExpCtx<'_> {
     fn is_param_set(&self, name: &str) -> bool {
         // Special variables are always "set" (except $@ and $* with no args)
         match name {
-            "#" | "?" | "-" | "$" | "!" | "0" => return true,
+            "#" | "?" | "-" | "$" | "0" => return true,
+            "!" => return self.last_bg_pid != 0,
             "@" | "*" => return self.positional.len() > 1,
             _ => {}
         }
