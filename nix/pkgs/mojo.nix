@@ -32,7 +32,7 @@
 in
   stdenv.mkDerivation rec {
     pname = "mojo";
-    version = "26.1.0";
+    version = "26.2.0";
 
     srcs =
       [
@@ -40,19 +40,19 @@ in
           url = "https://conda.modular.com/max/${condaPlatform}/mojo-compiler-0.${version}-release.conda";
           sha256 =
             if isDarwin
-            then "sha256-M1MjopxjKtr3WVg2apM1IILy5qi+5DNTJp6G7vqGos8="
-            else "sha256-qtbPnlWCStoRR6yu6LN8aO8Zc7IIpKQYL3rIW8IOaQw=";
+            then "sha256-6Cy3zhp1aHaiM9Nk1Tl63KWtfiD/9SBMHH6Trv5FSbU="
+            else "sha256-5T8w1ypl5rCmd0XmmI+XjY9uzBRTFCBjHJcZ65x7nCs=";
         })
         (fetchurl {
           url = "https://conda.modular.com/max/${condaPlatform}/mojo-0.${version}-release.conda";
           sha256 =
             if isDarwin
-            then "sha256-uiBaW7T6/Eer7l24f9WN7gkbEE0gZRNj89webKYOHSE="
-            else "sha256-6UXo+/8P3SBk6hk7JvtLqVq3gjZ8/SosRSI1AGZDRJQ=";
+            then "sha256-41uNNFZLMBicWphZkEZrQoP54diXuvI/6d28vJKDRZw="
+            else "sha256-TXBHRmwT2SscjrGcbSA6hQOvvSsa1j61KJqPS79NKUU=";
         })
         (fetchurl {
           url = "https://repo.prefix.dev/max/noarch/mblack-${version}-release.conda";
-          sha256 = "sha256-bM7FL+c1T0S+k6QaEi0iFOzbAw5jYq/o54duqzVHLmI=";
+          sha256 = "sha256-PC/OuJzvyomdzXyPJqYgKsrLKgc+TLLvNlUUpGXQHc0=";
         })
       ]
       # Using nixpkgs ncurses, mojo fails with error:
