@@ -951,6 +951,55 @@ pub(crate) fn service_exit_handler(
             info!("Service {name} failed with {:?}, marked as failed", code);
         }
 
+        // Clean up the cgroup directory now that the service has stopped.
+        // This matches real systemd's behavior of removing empty cgroup dirs.
+        #[cfg(target_os = "linux")]
+        if let Some(unit) = run_info.unit_table.get(&srvc_id)
+            && let Specific::Service(svc) = &unit.specific
+        {
+            let cgroup_path = &svc.conf.platform_specific.cgroup_path;
+            if cgroup_path.exists() {
+                // Only remove if the cgroup is empty (no more processes).
+                let procs_file = cgroup_path.join("cgroup.procs");
+                let is_empty = std::fs::read_to_string(&procs_file)
+                    .map(|s| s.trim().is_empty())
+                    .unwrap_or(true);
+                if is_empty {
+                    if let Err(e) = std::fs::remove_dir(cgroup_path) {
+                        trace!(
+                            "Could not remove cgroup dir {}: {}",
+                            cgroup_path.display(),
+                            e
+                        );
+                    } else {
+                        trace!(
+                            "Cleaned up cgroup dir {} for {}",
+                            cgroup_path.display(),
+                            srvc_id.name
+                        );
+                        // Try to remove the parent slice cgroup dir if empty.
+                        if let Some(parent) = cgroup_path.parent() {
+                            let parent_procs = parent.join("cgroup.procs");
+                            let parent_empty = std::fs::read_to_string(&parent_procs)
+                                .map(|s| s.trim().is_empty())
+                                .unwrap_or(false);
+                            if parent_empty {
+                                // Check no child dirs remain
+                                let has_children = std::fs::read_dir(parent)
+                                    .map(|entries| {
+                                        entries.filter_map(|e| e.ok()).any(|e| e.path().is_dir())
+                                    })
+                                    .unwrap_or(false);
+                                if !has_children {
+                                    let _ = std::fs::remove_dir(parent);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Collect OnSuccess=/OnFailure= trigger info.
         // Actual triggering happens after the read lock is dropped.
         if let Some(unit) = run_info.unit_table.get(&srvc_id) {
