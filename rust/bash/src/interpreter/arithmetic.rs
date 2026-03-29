@@ -329,14 +329,20 @@ impl Shell {
         if let Some(stripped) = expr.strip_prefix("++") {
             let name = stripped.trim();
             // Check for simple var or array element (name[...])
-            let is_var = if let Some(bracket) = name.find('[') {
-                let base = &name[..bracket];
-                !base.is_empty()
-                    && base.chars().all(|c| c.is_alphanumeric() || c == '_')
-                    && name.ends_with(']')
-            } else {
-                !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_')
-            };
+            // First char must be letter or _ (not digit — ++7 is not a pre-increment)
+            let first_ok = name
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_alphabetic() || c == '_');
+            let is_var = first_ok
+                && if let Some(bracket) = name.find('[') {
+                    let base = &name[..bracket];
+                    !base.is_empty()
+                        && base.chars().all(|c| c.is_alphanumeric() || c == '_')
+                        && name.ends_with(']')
+                } else {
+                    name.chars().all(|c| c.is_alphanumeric() || c == '_')
+                };
             if is_var {
                 if name.contains('[') {
                     let bracket = name.find('[').unwrap();
@@ -370,14 +376,19 @@ impl Shell {
         }
         if let Some(stripped) = expr.strip_prefix("--") {
             let name = stripped.trim();
-            let is_var = if let Some(bracket) = name.find('[') {
-                let base = &name[..bracket];
-                !base.is_empty()
-                    && base.chars().all(|c| c.is_alphanumeric() || c == '_')
-                    && name.ends_with(']')
-            } else {
-                !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_')
-            };
+            let first_ok = name
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_alphabetic() || c == '_');
+            let is_var = first_ok
+                && if let Some(bracket) = name.find('[') {
+                    let base = &name[..bracket];
+                    !base.is_empty()
+                        && base.chars().all(|c| c.is_alphanumeric() || c == '_')
+                        && name.ends_with(']')
+                } else {
+                    !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_')
+                };
             if is_var {
                 if name.contains('[') {
                     let bracket = name.find('[').unwrap();
