@@ -210,6 +210,13 @@ pub struct ExecHelperConfig {
     #[serde(default)]
     pub clean_environment: bool,
 
+    /// When true, the command has the '|' prefix: run the command via the
+    /// user's login shell. The original command and arguments are passed
+    /// as `shell -el -c "cmd args..."`. The shell is looked up from the
+    /// effective user's passwd entry (after User= is applied).
+    #[serde(default)]
+    pub login_shell: bool,
+
     pub env: Vec<(String, String)>,
 
     pub group: libc::gid_t,
@@ -748,6 +755,20 @@ fn prepare_exec_args(
     }
 
     (cmd, args)
+}
+
+/// Look up the login shell for the given UID from /etc/passwd.
+/// Falls back to "/bin/sh" if the lookup fails or the shell field is empty.
+fn get_login_shell(uid: libc::uid_t) -> String {
+    let pwd = unsafe { libc::getpwuid(uid) };
+    if !pwd.is_null() {
+        let shell = unsafe { std::ffi::CStr::from_ptr((*pwd).pw_shell) };
+        let shell = shell.to_string_lossy().into_owned();
+        if !shell.is_empty() {
+            return shell;
+        }
+    }
+    "/bin/sh".to_owned()
 }
 
 /// Open a terminal device, retrying on EIO.
@@ -2178,7 +2199,47 @@ pub fn run_exec_helper() {
 
     log::trace!("privilege drop + caps complete, preparing exec args...");
 
-    let (cmd, args) = prepare_exec_args(&config.cmd, &config.args, config.use_first_arg_as_argv0);
+    // ── '|' prefix: login shell wrapping ─────────────────────────────
+    // When the '|' prefix is used, the original command is wrapped into:
+    //   <login-shell> -el -c "<cmd> <args...>"
+    // The shell is looked up from the effective user's passwd entry.
+    let (effective_cmd, effective_args);
+    if config.login_shell {
+        let shell = get_login_shell(config.user);
+        let shell_name = Path::new(&shell)
+            .file_name()
+            .unwrap_or(std::ffi::OsStr::new("sh"))
+            .to_string_lossy()
+            .into_owned();
+
+        // Build the original command string for -c
+        let mut cmd_str = config.cmd.to_string_lossy().into_owned();
+        for arg in &config.args {
+            cmd_str.push(' ');
+            cmd_str.push_str(arg);
+        }
+
+        effective_cmd = PathBuf::from(&shell);
+        effective_args = vec![
+            format!("-{shell_name}"), // argv[0] = "-bash" (login shell indicator)
+            "-c".to_owned(),
+            cmd_str,
+        ];
+        log::trace!(
+            "login shell wrapping: {} -el -c {:?}",
+            shell,
+            &effective_args[2]
+        );
+    } else {
+        effective_cmd = config.cmd.clone();
+        effective_args = config.args.clone();
+    }
+
+    let (cmd, args) = prepare_exec_args(
+        &effective_cmd,
+        &effective_args,
+        config.login_shell || config.use_first_arg_as_argv0,
+    );
 
     // change working directory if configured
     if let Some(ref dir) = config.working_directory {

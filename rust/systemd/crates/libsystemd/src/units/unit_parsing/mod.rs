@@ -3894,6 +3894,8 @@ pub enum CommandlinePrefix {
     Plus,
     Exclamation,
     DoubleExclamation,
+    /// `|` prefix: run the command via the user's login shell (`shell -el -c "cmd args..."`)
+    Pipe,
 }
 
 #[derive(Clone, Eq, PartialEq, Debug)]
@@ -3918,6 +3920,7 @@ impl std::fmt::Display for Commandline {
                 CommandlinePrefix::Colon => write!(f, ":")?,
                 CommandlinePrefix::Exclamation => write!(f, "!")?,
                 CommandlinePrefix::DoubleExclamation => write!(f, "!!")?,
+                CommandlinePrefix::Pipe => write!(f, "|")?,
             }
         }
         write!(f, "{}", self.cmd)?;

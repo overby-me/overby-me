@@ -348,6 +348,10 @@ pub(crate) fn parse_cmdline(raw_line: &str) -> Result<Commandline, ParsingErrorR
                 cmd = cmd[1..].to_owned();
                 CommandlinePrefix::Colon
             }
+            "|" => {
+                cmd = cmd[1..].to_owned();
+                CommandlinePrefix::Pipe
+            }
             "!" => {
                 if cmd.len() > 1 && &cmd[1..2] == "!" {
                     cmd = cmd[2..].to_owned();

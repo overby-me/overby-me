@@ -1053,6 +1053,7 @@ fn insert_commandlines_ex(props: &mut PropertyMap, key: &str, cmds: &[Commandlin
                     CommandlinePrefix::Exclamation => flags.push("no-setuid"),
                     CommandlinePrefix::DoubleExclamation => flags.push("sandbox"),
                     CommandlinePrefix::AtSign => flags.push("no-argv0"),
+                    CommandlinePrefix::Pipe => flags.push("login-shell"),
                 }
             }
             let flags_str = if flags.is_empty() {
@@ -1643,6 +1644,7 @@ fn format_commandline(cmd: &crate::units::Commandline) -> String {
             crate::units::CommandlinePrefix::Colon => s.push(':'),
             crate::units::CommandlinePrefix::Exclamation => s.push('!'),
             crate::units::CommandlinePrefix::DoubleExclamation => s.push_str("!!"),
+            crate::units::CommandlinePrefix::Pipe => s.push('|'),
         }
     }
     s.push_str(&cmd.cmd);
