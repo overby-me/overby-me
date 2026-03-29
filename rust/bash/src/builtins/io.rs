@@ -443,7 +443,7 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                                 format!("{:x}", n)
                             }
                         } else if flags.contains('#') {
-                            format!("{:#X}", n)
+                            format!("0X{:X}", n)
                         } else {
                             format!("{:X}", n)
                         };
