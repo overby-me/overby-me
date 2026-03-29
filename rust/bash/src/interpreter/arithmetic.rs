@@ -115,10 +115,7 @@ impl Shell {
                     && !trimmed.ends_with("++")
                     && !trimmed.ends_with("--")
                 {
-                    let top_expr = self
-                        .arith_top_expr
-                        .as_deref()
-                        .unwrap_or(trimmed);
+                    let top_expr = self.arith_top_expr.as_deref().unwrap_or(trimmed);
                     // Find the trailing operator in the top expression (includes any trailing space)
                     let error_token = if let Some(pos) = top_expr.rfind(last as char) {
                         &top_expr[pos..]
@@ -836,8 +833,7 @@ impl Shell {
                             b'*' => left.wrapping_mul(right),
                             b'/' => {
                                 if right == 0 {
-                                    let top_expr =
-                                        self.arith_top_expr.as_deref().unwrap_or(expr);
+                                    let top_expr = self.arith_top_expr.as_deref().unwrap_or(expr);
                                     let error_token = expr[i + 1..].trim_start();
                                     eprintln!(
                                         "{}: {}{}: division by 0 (error token is \"{}\")",
@@ -990,10 +986,16 @@ impl Shell {
             let value_str = expr[hash_pos + 1..].trim();
             if let Ok(base) = base_str.parse::<u32>() {
                 if !(2..=64).contains(&base) {
+                    let msg = if base < 2 {
+                        "invalid number"
+                    } else {
+                        "invalid arithmetic base"
+                    };
                     eprintln!(
-                        "{}: {}: invalid arithmetic base (error token is \"{}\")",
+                        "{}: {}: {} (error token is \"{}\")",
                         self.arith_error_prefix(),
                         expr,
+                        msg,
                         expr
                     );
                     crate::expand::set_arith_error();
@@ -1002,6 +1004,17 @@ impl Shell {
                 if value_str.is_empty() {
                     eprintln!(
                         "{}: {}: invalid integer constant (error token is \"{}\")",
+                        self.arith_error_prefix(),
+                        expr,
+                        expr
+                    );
+                    crate::expand::set_arith_error();
+                    return 0;
+                }
+                // Check for invalid chars like extra # in value
+                if value_str.contains('#') {
+                    eprintln!(
+                        "{}: {}: invalid number (error token is \"{}\")",
                         self.arith_error_prefix(),
                         expr,
                         expr

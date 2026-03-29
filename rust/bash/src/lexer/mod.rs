@@ -177,7 +177,8 @@ impl Lexer {
         self.pos = saved.pos;
         self.pending_heredocs = saved.pending_heredocs;
         self.heredoc_bodies.truncate(saved.heredoc_bodies_len);
-        self.heredoc_delimiters.truncate(saved.heredoc_delimiters_len);
+        self.heredoc_delimiters
+            .truncate(saved.heredoc_delimiters_len);
         self.heredoc_eof_warnings
             .truncate(saved.heredoc_eof_warnings_len);
         self.line = saved.line;

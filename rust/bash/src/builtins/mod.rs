@@ -545,7 +545,6 @@ fn format_param_expr(name: &str, op: &ParamOp) -> String {
     }
 }
 
-
 fn format_redirection(redir: &Redirection) -> String {
     let mut s = String::new();
     // For dup redirects with no explicit fd, print the default
