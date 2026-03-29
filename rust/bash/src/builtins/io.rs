@@ -195,17 +195,24 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                     Some('x') => {
                         // \xNN hex escape
                         let mut val = 0u8;
+                        let mut count = 0;
                         for _ in 0..2 {
                             match chars.peek() {
                                 Some(d) if d.is_ascii_hexdigit() => {
                                     val = val * 16 + d.to_digit(16).unwrap() as u8;
                                     chars.next();
+                                    count += 1;
                                 }
                                 _ => break,
                             }
                         }
-                        use std::io::Write;
-                        std::io::stdout().write_all(&[val]).ok();
+                        if count == 0 {
+                            eprintln!("{}: printf: missing hex digit for \\x", shell.error_prefix());
+                            had_error = true;
+                        } else {
+                            use std::io::Write;
+                            std::io::stdout().write_all(&[val]).ok();
+                        }
                     }
                     Some(c) => print!("\\{}", c),
                     None => print!("\\"),
