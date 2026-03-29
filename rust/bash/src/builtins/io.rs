@@ -275,7 +275,14 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                         // Precision from argument
                         chars.next();
                         let p_arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
-                        precision = Some(p_arg.parse().unwrap_or(0));
+                        let p_val = p_arg.parse::<i64>().unwrap_or(0);
+                        if p_val > i32::MAX as i64 {
+                            eprintln!("{}: printf: Value too large for defined data type", shell.error_prefix());
+                            had_error = true;
+                            precision = Some(0);
+                        } else {
+                            precision = Some(p_val.max(0) as usize);
+                        }
                         arg_idx += 1;
                     } else {
                         let mut prec_str = String::new();
@@ -291,7 +298,22 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                     }
                 }
                 // Handle negative width (means left-align)
-                let (w, left) = if let Some(stripped) = width_str.strip_prefix('-') {
+                // Detect overflow: if width string is non-empty but parse fails, it's overflow
+                let width_overflow = !width_str.is_empty() && {
+                    let abs = width_str.strip_prefix('-').unwrap_or(&width_str);
+                    !abs.is_empty()
+                        && abs
+                            .parse::<i64>()
+                            .map(|v| v > i32::MAX as i64)
+                            .unwrap_or(true)
+                };
+                if width_overflow {
+                    eprintln!("{}: printf: Value too large for defined data type", shell.error_prefix());
+                    had_error = true;
+                }
+                let (w, left) = if width_overflow {
+                    (0, flags.contains('-'))
+                } else if let Some(stripped) = width_str.strip_prefix('-') {
                     let abs_w: usize = stripped.parse().unwrap_or(0);
                     (abs_w, true)
                 } else {
@@ -602,14 +624,41 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                             }
                             _ => format!("{:.p$}", n), // f, F
                         };
+                        // Apply sign prefix
+                        let sign_prefix = if n >= 0.0 && flags.contains('+') {
+                            "+"
+                        } else if n >= 0.0 && flags.contains(' ') {
+                            " "
+                        } else {
+                            ""
+                        };
+                        let display = if !sign_prefix.is_empty() && !formatted.starts_with('-') {
+                            format!("{}{}", sign_prefix, formatted)
+                        } else {
+                            formatted
+                        };
                         if w > 0 {
                             if left {
-                                print!("{:<w$}", formatted);
+                                print!("{:<w$}", display);
+                            } else if zero_pad && !left {
+                                // Zero-pad: put sign first, then zeros, then number
+                                let total_len = display.len();
+                                if total_len < w {
+                                    let pad_count = w - total_len;
+                                    if display.starts_with('-') || display.starts_with('+') {
+                                        let (sign, rest) = display.split_at(1);
+                                        print!("{}{}{}", sign, "0".repeat(pad_count), rest);
+                                    } else {
+                                        print!("{}{}", "0".repeat(pad_count), display);
+                                    }
+                                } else {
+                                    print!("{}", display);
+                                }
                             } else {
-                                print!("{:>w$}", formatted);
+                                print!("{:>w$}", display);
                             }
                         } else {
-                            print!("{}", formatted);
+                            print!("{}", display);
                         }
                         arg_idx += 1;
                     }
