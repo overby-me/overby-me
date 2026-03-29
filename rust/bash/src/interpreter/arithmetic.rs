@@ -31,7 +31,8 @@ impl Shell {
     pub fn eval_arith_expr(&mut self, expr: &str) -> i64 {
         let is_top_level = self.arith_top_expr.is_none();
         if is_top_level {
-            self.arith_top_expr = Some(expr.to_string());
+            // Trim leading whitespace but preserve trailing (bash includes trailing space)
+            self.arith_top_expr = Some(expr.trim_start().to_string());
         }
         let result = self.eval_arith_expr_impl(expr);
         if is_top_level {
