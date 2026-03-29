@@ -584,6 +584,26 @@ fn format_param_expr(name: &str, op: &ParamOp) -> String {
     }
 }
 
+thread_local! {
+    static HEREDOC_COUNTER: std::cell::RefCell<usize> = const { std::cell::RefCell::new(0) };
+}
+
+fn next_heredoc_delim() -> String {
+    HEREDOC_COUNTER.with(|c| {
+        let n = *c.borrow();
+        *c.borrow_mut() = n + 1;
+        if n == 0 {
+            "EOF".to_string()
+        } else {
+            format!("EOF{}", n)
+        }
+    })
+}
+
+fn reset_heredoc_counter() {
+    HEREDOC_COUNTER.with(|c| *c.borrow_mut() = 0);
+}
+
 fn format_redirection(redir: &Redirection) -> String {
     let mut s = String::new();
     // For dup redirects with no explicit fd, print the default
@@ -634,20 +654,19 @@ fn format_redirection(redir: &Redirection) -> String {
         RedirectKind::DupInput => s.push_str("<&"),
         RedirectKind::DupOutput => s.push_str(">&"),
         RedirectKind::ReadWrite => s.push_str("<> "),
-        RedirectKind::HereDoc(strip, ref delim) => {
+        RedirectKind::HereDoc(strip, ref _delim) => {
             if strip {
                 s.push_str("<<-");
             } else {
                 s.push_str("<<");
             }
-            if !delim.is_empty() {
-                s.push_str(delim);
-                s.push('\n');
-                s.push_str(&format_word(&redir.target));
-                s.push('\n');
-                s.push_str(delim);
-                return s;
-            }
+            let new_delim = next_heredoc_delim();
+            s.push_str(&new_delim);
+            s.push('\n');
+            s.push_str(&format_word(&redir.target));
+            s.push('\n');
+            s.push_str(&new_delim);
+            return s;
         }
         RedirectKind::HereString => s.push_str("<<< "),
         RedirectKind::OutputAll => s.push_str("&> "),
@@ -721,9 +740,28 @@ fn format_command_indent(cmd: &Command, indent: usize) -> String {
         Command::Simple(sc) => format_simple_command(sc),
         Command::Compound(cc, redirections) => {
             let mut s = format_compound_command_indent(cc, indent);
+            // Put non-heredoc redirects on the command line first,
+            // then append heredoc bodies
+            let mut heredoc_parts = Vec::new();
             for r in redirections {
-                s.push(' ');
-                s.push_str(&format_redirection(r));
+                if matches!(r.kind, RedirectKind::HereDoc(..)) {
+                    heredoc_parts.push(format_redirection(r));
+                } else {
+                    s.push(' ');
+                    s.push_str(&format_redirection(r));
+                }
+            }
+            for h in heredoc_parts {
+                // Heredoc format: <<DELIM\nbody\nDELIM
+                // Split at first \n to put <<DELIM on command line
+                if let Some(first_nl) = h.find('\n') {
+                    s.push(' ');
+                    s.push_str(&h[..first_nl]);
+                    s.push_str(&h[first_nl..]);
+                } else {
+                    s.push(' ');
+                    s.push_str(&h);
+                }
             }
             s
         }
@@ -853,6 +891,7 @@ pub fn format_func_body_with_redirs(
     indent: usize,
     redirections: &[Redirection],
 ) -> String {
+    reset_heredoc_counter();
     let redir_str = if redirections.is_empty() {
         String::new()
     } else {
