@@ -106,6 +106,14 @@ impl Shell {
         let unquoted: String;
         let expr = if expr.contains('"') {
             unquoted = expr.replace('"', "");
+            // Update top expression to match stripped version for error messages
+            if self.arith_depth == 1 {
+                if let Some(ref mut top) = self.arith_top_expr {
+                    if top.contains('"') {
+                        *top = top.replace('"', "");
+                    }
+                }
+            }
             &unquoted
         } else {
             expr
