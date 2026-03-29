@@ -963,8 +963,8 @@ impl Shell {
                 eprintln!(
                     "{}: {}: exponent less than 0 (error token is \"{}\")",
                     self.arith_error_prefix(),
-                    expr.trim(),
-                    &expr[pos + 2..].trim()
+                    self.arith_top_expr.as_deref().unwrap_or(expr),
+                    expr[pos + 2..].trim_start_matches('-')
                 );
                 crate::expand::set_arith_error();
                 return 0;
