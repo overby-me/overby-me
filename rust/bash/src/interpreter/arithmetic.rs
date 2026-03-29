@@ -1031,6 +1031,13 @@ impl Shell {
         if let Ok(n) = expr.parse::<i64>() {
             return n;
         }
+        // Handle overflow: large decimal numbers wrap (like C unsigned → signed)
+        if expr.chars().all(|c| c.is_ascii_digit())
+            && !expr.is_empty()
+            && let Ok(n) = expr.parse::<u64>()
+        {
+            return n as i64; // wrapping cast
+        }
 
         // Array element: arr[idx]
         if let Some(bracket) = expr.find('[') {
