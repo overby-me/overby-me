@@ -374,7 +374,7 @@ pub fn daemon_reexec(run_info: &ArcMutRuntimeInfo) {
 
 /// Serialize the current running-service state to a file.
 ///
-/// Format: one line per running service, `unit_name\tpid\n`.
+/// Format: one line per running service, `unit_name\tpid\tServiceType\n`.
 /// This allows the re-exec'd instance to adopt running processes.
 fn serialize_reexec_state(
     run_info: &ArcMutRuntimeInfo,
@@ -398,6 +398,18 @@ fn serialize_reexec_state(
         if let PidEntry::Service(unit_id, srvc_type) = entry {
             writeln!(file, "{}\t{}\t{:?}", unit_id.name, pid.as_raw(), srvc_type)
                 .map_err(|e| format!("write: {e}"))?;
+        }
+    }
+
+    // Write a separate freezer state file for all units with non-default freezer state.
+    let freezer_path = path.with_extension("freezer");
+    let mut freezer_file = std::fs::File::create(&freezer_path)
+        .map_err(|e| format!("create {}: {e}", freezer_path.display()))?;
+    for unit in ri.unit_table.values() {
+        let state = crate::control::unit_properties::get_freezer_state_pub(unit);
+        if !matches!(state, crate::units::FreezerState::Running) {
+            writeln!(freezer_file, "{}\t{}", unit.id.name, state.as_str())
+                .map_err(|e| format!("write freezer: {e}"))?;
         }
     }
 
@@ -464,11 +476,50 @@ pub fn check_and_restore_reexec_state(run_info: &ArcMutRuntimeInfo) -> bool {
             if let crate::units::Specific::Service(srvc) = &unit.specific {
                 pid_table.insert(pid, PidEntry::Service(unit.id.clone(), srvc.conf.srcv_type));
                 restored += 1;
+
+                // Mark the unit as active since its process is still running.
+                *unit.common.status.write_poisoned() =
+                    crate::units::UnitStatus::Started(crate::units::StatusStarted::Running);
+
+                // Restore the main PID so the service can be managed.
+                {
+                    let mut state = srvc.state.write_poisoned();
+                    state.srvc.pid = Some(pid);
+                    if state.srvc.main_pid.is_none() {
+                        state.srvc.main_pid = Some(pid);
+                    }
+                }
+
                 info!("Reexec: restored PID tracking for {unit_name} (PID {pid_raw})");
             }
         } else {
             trace!("Reexec: unit {unit_name} not found in table, skipping PID {pid_raw}");
         }
+    }
+
+    // Restore freezer state from the separate freezer state file.
+    let freezer_path = state_path.with_extension("freezer");
+    if let Ok(freezer_content) = std::fs::read_to_string(&freezer_path) {
+        for line in freezer_content.lines() {
+            let parts: Vec<&str> = line.split('\t').collect();
+            if parts.len() < 2 {
+                continue;
+            }
+            let unit_name = parts[0];
+            let freezer_state = match parts[1] {
+                "frozen" => crate::units::FreezerState::Frozen,
+                "frozen-by-parent" => crate::units::FreezerState::FrozenByParent,
+                _ => continue,
+            };
+            if let Some(unit) = ri.unit_table.values().find(|u| u.id.name == unit_name) {
+                crate::control::unit_properties::set_freezer_state(unit, freezer_state);
+                info!(
+                    "Reexec: restored freezer state '{}' for {unit_name}",
+                    parts[1]
+                );
+            }
+        }
+        let _ = std::fs::remove_file(&freezer_path);
     }
 
     // Clean up the state file.

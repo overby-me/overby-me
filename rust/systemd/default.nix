@@ -5117,16 +5117,10 @@
       }
       {
         name = "38-FREEZER";
-        # Keep only testcase_systemctl (with cgroup check removed) and
-        # testcase_systemctl_show. The other testcases use busctl D-Bus calls.
+        # Enable all testcases except testcase_dbus_api (requires busctl).
         patchScript = ''
-          # Skip testcases that use busctl
+          # Skip testcases that use busctl D-Bus calls
           sed -i 's/^testcase_dbus_api/skipped_dbus_api/' TEST-38-FREEZER.sh
-          sed -i 's/^testcase_recursive/skipped_recursive/' TEST-38-FREEZER.sh
-          sed -i 's/^testcase_preserve_state/skipped_preserve_state/' TEST-38-FREEZER.sh
-          sed -i 's/^testcase_watchdog/skipped_watchdog/' TEST-38-FREEZER.sh
-          # Override check_cgroup_state to a no-op (our cgroup paths differ)
-          sed -i '/^check_cgroup_state/,/^}/c\check_cgroup_state() { :; }' TEST-38-FREEZER.sh
         '';
       }
       {

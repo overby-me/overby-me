@@ -116,6 +116,11 @@ fn get_freezer_state(unit: &Unit) -> FreezerState {
     }
 }
 
+/// Public accessor for get_freezer_state.
+pub fn get_freezer_state_pub(unit: &Unit) -> FreezerState {
+    get_freezer_state(unit)
+}
+
 /// Set the FreezerState on a unit's common state.
 pub fn set_freezer_state(unit: &Unit, state: FreezerState) {
     match &unit.specific {
@@ -232,13 +237,16 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
     match &unit.specific {
         Specific::Service(svc) => {
             insert(&mut props, "Type", &format_service_type(svc.conf.srcv_type));
-            // ControlGroup — cgroup path for this service
+            // ControlGroup — cgroup path relative to cgroup root (like real systemd)
             #[cfg(target_os = "linux")]
-            insert(
-                &mut props,
-                "ControlGroup",
-                &svc.conf.platform_specific.cgroup_path.display().to_string(),
-            );
+            {
+                let full_path = svc.conf.platform_specific.cgroup_path.display().to_string();
+                let relative = full_path
+                    .strip_prefix("/sys/fs/cgroup")
+                    .unwrap_or(&full_path);
+                let relative = if relative.is_empty() { "/" } else { relative };
+                insert(&mut props, "ControlGroup", relative);
+            }
             insert_service_config(&mut props, &svc.conf);
             insert_exec_config(&mut props, &svc.conf.exec_config);
 

@@ -40,51 +40,104 @@ fn use_v2(cgroup_path: &std::path::Path) -> bool {
 
 const OWN_CGROUP_NAME: &str = "systemd_rs_self";
 
+/// The cgroup name used for PID 1 (like systemd's init.scope).
+const INIT_SCOPE_NAME: &str = "init.scope";
+
+/// Detect the cgroup v2 root mount point.
+/// On pure v2 systems this is `base_path` directly (e.g. `/sys/fs/cgroup/`).
+/// On hybrid systems the v2 tree is at `base_path/unified/`.
+fn detect_v2_root(base_path: &std::path::Path) -> Option<std::path::PathBuf> {
+    // Pure v2: base_path itself has cgroup.procs
+    if base_path.join("cgroup.procs").exists() {
+        return Some(base_path.to_path_buf());
+    }
+    // Hybrid: base_path/unified/ is the v2 mount
+    let unified = base_path.join("unified");
+    if unified.join("cgroup.procs").exists() {
+        return Some(unified);
+    }
+    None
+}
+
 /// moves rust-systemd into own cgroup if v2 is used
 ///
-/// This is necessary because cgroupv2 discourages processes in cgroups that are not leafes
+/// This is necessary because cgroupv2 discourages processes in cgroups that are not leafes.
+/// PID 1 is placed in `init.scope` under the cgroup root, matching real systemd's layout.
 pub fn move_to_own_cgroup(base_path: &std::path::Path) -> Result<(), CgroupError> {
     trace!("Move rust-systemd to own manager cgroup");
-    let proc_content = std::fs::read_to_string("/proc/self/cgroup").unwrap();
-    let proc_content_lines = proc_content.split('\n').collect::<Vec<_>>();
-    let v2path = get_own_cgroup_v2(&proc_content_lines);
-    trace!("V2 path: {v2path:?}");
-    if let Some(v2path) = v2path {
-        let base_path = base_path.join("unified");
-        let absolute_v2path = base_path.join(v2path);
-        let systemd_rs_subgroup =
-            absolute_v2path.join(format!("systemd_rs_{}", nix::unistd::getpid()));
-        let manager_cgroup = systemd_rs_subgroup.join(OWN_CGROUP_NAME);
-        trace!("Manager path: {manager_cgroup:?}");
-        if !manager_cgroup.exists() {
-            std::fs::create_dir_all(&manager_cgroup)
-                .map_err(|e| CgroupError::IOErr(e, format!("{manager_cgroup:?}")))?;
+    if let Some(v2_root) = detect_v2_root(base_path) {
+        let init_scope = v2_root.join(INIT_SCOPE_NAME);
+        trace!("Manager path (init.scope): {init_scope:?}");
+        if !init_scope.exists() {
+            std::fs::create_dir_all(&init_scope)
+                .map_err(|e| CgroupError::IOErr(e, format!("{init_scope:?}")))?;
         }
-        move_self_to_cgroup(&manager_cgroup)?;
+        move_self_to_cgroup(&init_scope)?;
+    } else {
+        // Fallback for legacy cgroup v1 systems
+        let proc_content = std::fs::read_to_string("/proc/self/cgroup").unwrap();
+        let proc_content_lines = proc_content.split('\n').collect::<Vec<_>>();
+        let v2path = get_own_cgroup_v2(&proc_content_lines);
+        if let Some(v2path) = v2path {
+            let absolute_v2path = base_path.join("unified").join(v2path);
+            let systemd_rs_subgroup =
+                absolute_v2path.join(format!("systemd_rs_{}", nix::unistd::getpid()));
+            let manager_cgroup = systemd_rs_subgroup.join(OWN_CGROUP_NAME);
+            trace!("Manager path (legacy): {manager_cgroup:?}");
+            if !manager_cgroup.exists() {
+                std::fs::create_dir_all(&manager_cgroup)
+                    .map_err(|e| CgroupError::IOErr(e, format!("{manager_cgroup:?}")))?;
+            }
+            move_self_to_cgroup(&manager_cgroup)?;
+        }
     }
     Ok(())
 }
 
 pub fn move_out_of_own_cgroup(base_path: &std::path::Path) -> Result<(), CgroupError> {
-    let proc_content = std::fs::read_to_string("/proc/self/cgroup").unwrap();
-    let proc_content_lines = proc_content.split('\n').collect::<Vec<_>>();
-    if let Some(v2path) = crate::platform::cgroups::get_own_cgroup_v2(&proc_content_lines) {
-        let absolute_v2path = base_path.join(v2path);
-        let mut parent_group = absolute_v2path.clone();
-        parent_group.pop();
-        trace!("Move rust-systemd to parent cgroup: {parent_group:?}");
-        crate::platform::cgroups::move_self_to_cgroup(&parent_group)?;
+    if let Some(v2_root) = detect_v2_root(base_path) {
+        let init_scope = v2_root.join(INIT_SCOPE_NAME);
+        if init_scope.exists() {
+            trace!("Move rust-systemd to cgroup root: {v2_root:?}");
+            move_self_to_cgroup(&v2_root)?;
+            trace!("Remove init.scope: {init_scope:?}");
+            let _ = std::fs::remove_dir(&init_scope);
+        }
+    } else {
+        let proc_content = std::fs::read_to_string("/proc/self/cgroup").unwrap();
+        let proc_content_lines = proc_content.split('\n').collect::<Vec<_>>();
+        if let Some(v2path) = get_own_cgroup_v2(&proc_content_lines) {
+            let absolute_v2path = base_path.join(v2path);
+            let mut parent_group = absolute_v2path.clone();
+            parent_group.pop();
+            trace!("Move rust-systemd to parent cgroup: {parent_group:?}");
+            move_self_to_cgroup(&parent_group)?;
 
-        let self_cgroup = absolute_v2path.join("systemd_rs_self");
-        trace!("Remove manager cgroup: {self_cgroup:?}");
-        std::fs::remove_dir(&self_cgroup)
-            .map_err(|e| CgroupError::IOErr(e, format!("{self_cgroup:?}")))?;
+            let self_cgroup = absolute_v2path.join("systemd_rs_self");
+            trace!("Remove manager cgroup: {self_cgroup:?}");
+            std::fs::remove_dir(&self_cgroup)
+                .map_err(|e| CgroupError::IOErr(e, format!("{self_cgroup:?}")))?;
 
-        trace!("Remove rust-systemd managed cgroup: {absolute_v2path:?}");
-        std::fs::remove_dir(&absolute_v2path)
-            .map_err(|e| CgroupError::IOErr(e, format!("{absolute_v2path:?}")))?;
+            trace!("Remove rust-systemd managed cgroup: {absolute_v2path:?}");
+            std::fs::remove_dir(&absolute_v2path)
+                .map_err(|e| CgroupError::IOErr(e, format!("{absolute_v2path:?}")))?;
+        }
     }
     Ok(())
+}
+
+/// Get the cgroup v2 root where service cgroups should be created.
+/// This returns the root of the cgroup hierarchy (e.g. `/sys/fs/cgroup/`),
+/// NOT PID 1's own cgroup. Service cgroups are placed directly under this
+/// root (with slice hierarchy), matching real systemd's layout.
+pub fn get_cgroup_root(base_path: &std::path::Path) -> Result<std::path::PathBuf, CgroupError> {
+    if let Some(v2_root) = detect_v2_root(base_path) {
+        trace!("Cgroup root: {v2_root:?}");
+        Ok(v2_root)
+    } else {
+        // Fallback to get_own_freezer for non-v2 systems
+        get_own_freezer(base_path)
+    }
 }
 
 /// `base_path` should normally be /sys/fs/cgroup

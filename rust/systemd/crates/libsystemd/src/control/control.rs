@@ -2180,6 +2180,11 @@ fn write_transient_service_file(
         }
     }
 
+    // Write Slice= if specified
+    if let Some(ref slice) = params.slice {
+        writeln!(f, "Slice={slice}")?;
+    }
+
     // Write environment variables
     if !params.environment.is_empty() {
         let env_str = params
@@ -2540,12 +2545,16 @@ fn create_transient_unit(
     let platform_specific = PlatformSpecificServiceFields {
         #[cfg(target_os = "linux")]
         cgroup_path: {
-            let root = std::path::PathBuf::from("/sys/fs/cgroup/rust-systemd");
+            let root = crate::platform::cgroups::get_cgroup_root(&std::path::PathBuf::from(
+                "/sys/fs/cgroup",
+            ))
+            .unwrap_or_else(|_| std::path::PathBuf::from("/sys/fs/cgroup"));
             if let Some(ref slice_name) = effective_slice {
                 crate::units::from_parsed_config::slice_cgroup_path(&root, slice_name)
                     .join(unit_name)
             } else {
-                root.join(unit_name)
+                crate::units::from_parsed_config::slice_cgroup_path(&root, "system.slice")
+                    .join(unit_name)
             }
         },
     };
@@ -5407,6 +5416,24 @@ pub fn execute_command(
         }
         Command::Freeze(ref unit_name) | Command::Thaw(ref unit_name) => {
             let freeze = matches!(cmd, Command::Freeze(_));
+
+            // Auto-create implicit slice units if needed
+            if unit_name.ends_with(".slice") {
+                let mut ri_mut = run_info.write_poisoned();
+                let exists = ri_mut.unit_table.values().any(|u| u.id.name == *unit_name);
+                if !exists {
+                    create_or_update_implicit_slice(unit_name, &mut ri_mut);
+                }
+                // Ensure the slice is marked as active
+                if let Some(unit) = ri_mut.unit_table.values().find(|u| u.id.name == *unit_name) {
+                    let status = unit.common.status.read_poisoned().clone();
+                    if !matches!(status, UnitStatus::Started(_)) {
+                        *unit.common.status.write_poisoned() =
+                            UnitStatus::Started(crate::units::StatusStarted::Running);
+                    }
+                }
+            }
+
             let ri = run_info.read_poisoned();
             let units = find_units_with_name(unit_name, &ri.unit_table);
             if units.is_empty() {
@@ -5423,24 +5450,136 @@ pub fn execute_command(
                 ));
             }
 
-            // Write to the cgroup freezer
+            // Helper: write freeze state to a cgroup path
             #[cfg(target_os = "linux")]
-            if let Specific::Service(svc) = &unit.specific {
-                let cgroup_path = &svc.conf.platform_specific.cgroup_path;
+            fn write_cgroup_freeze(cgroup_path: &std::path::Path, freeze: bool) {
                 let freeze_file = cgroup_path.join("cgroup.freeze");
                 let val = if freeze { "1" } else { "0" };
                 if let Err(e) = std::fs::write(&freeze_file, val) {
-                    warn!("Failed to write {} to {:?}: {}", val, freeze_file, e);
+                    log::warn!("Failed to write {} to {:?}: {}", val, freeze_file, e);
                 }
             }
 
-            // Update the FreezerState
-            let new_state = if freeze {
-                crate::units::FreezerState::Frozen
+            // Write to the cgroup freezer for service units
+            #[cfg(target_os = "linux")]
+            if let Specific::Service(svc) = &unit.specific {
+                write_cgroup_freeze(&svc.conf.platform_specific.cgroup_path, freeze);
+            }
+
+            // Handle slice units: compute cgroup path and freeze/thaw recursively
+            #[cfg(target_os = "linux")]
+            if let Specific::Slice(_) = &unit.specific {
+                // Get the slice's cgroup path
+                if let Ok(cgroup_root) = crate::platform::cgroups::get_cgroup_root(
+                    &std::path::PathBuf::from("/sys/fs/cgroup"),
+                ) {
+                    let slice_cgroup = crate::units::from_parsed_config::slice_cgroup_path(
+                        &cgroup_root,
+                        unit_name,
+                    );
+                    write_cgroup_freeze(&slice_cgroup, freeze);
+                }
+
+                // Recursively freeze/thaw child units in this slice
+                let slice_name = unit_name.clone();
+                for child_unit in ri.unit_table.values() {
+                    let child_slice = match &child_unit.specific {
+                        Specific::Service(svc) => svc.conf.slice.as_deref(),
+                        _ => None,
+                    };
+                    if child_slice != Some(&slice_name) {
+                        continue;
+                    }
+                    let child_status = child_unit.common.status.read_poisoned().clone();
+                    if !matches!(child_status, UnitStatus::Started(_)) {
+                        continue;
+                    }
+
+                    if freeze {
+                        // When freezing parent: write cgroup freeze for child
+                        if let Specific::Service(svc) = &child_unit.specific {
+                            write_cgroup_freeze(&svc.conf.platform_specific.cgroup_path, true);
+                        }
+                        // Set child state based on whether it was already frozen
+                        let current_state =
+                            crate::control::unit_properties::get_freezer_state_pub(child_unit);
+                        if current_state == crate::units::FreezerState::Running {
+                            crate::control::unit_properties::set_freezer_state(
+                                child_unit,
+                                crate::units::FreezerState::FrozenByParent,
+                            );
+                        }
+                        // If already Frozen (by direct request), keep it as Frozen
+                    } else {
+                        // When thawing parent: only thaw children that are frozen-by-parent
+                        let current_state =
+                            crate::control::unit_properties::get_freezer_state_pub(child_unit);
+                        if current_state == crate::units::FreezerState::FrozenByParent {
+                            if let Specific::Service(svc) = &child_unit.specific {
+                                write_cgroup_freeze(&svc.conf.platform_specific.cgroup_path, false);
+                                // Reset watchdog ping timestamp after thaw
+                                let mut state = svc.state.write_poisoned();
+                                if state.srvc.watchdog_last_ping.is_some() {
+                                    state.srvc.watchdog_last_ping = Some(std::time::Instant::now());
+                                }
+                            }
+                            crate::control::unit_properties::set_freezer_state(
+                                child_unit,
+                                crate::units::FreezerState::Running,
+                            );
+                        }
+                        // If Frozen (by direct request), leave it frozen
+                    }
+                }
+            }
+
+            // Update the FreezerState for the target unit
+            if freeze {
+                let current_state = crate::control::unit_properties::get_freezer_state_pub(unit);
+                // If freezing a unit that is frozen-by-parent, promote to Frozen
+                let new_state = crate::units::FreezerState::Frozen;
+                let _ = current_state; // suppress unused warning
+                crate::control::unit_properties::set_freezer_state(unit, new_state);
             } else {
-                crate::units::FreezerState::Running
-            };
-            crate::control::unit_properties::set_freezer_state(unit, new_state);
+                // Thawing: check if parent slice is frozen
+                let parent_frozen = if let Specific::Service(svc) = &unit.specific
+                    && let Some(ref slice_name) = svc.conf.slice
+                {
+                    // Check if the parent slice is frozen
+                    ri.unit_table.values().any(|u| {
+                        u.id.name == *slice_name
+                            && matches!(
+                                crate::control::unit_properties::get_freezer_state_pub(u),
+                                crate::units::FreezerState::Frozen
+                            )
+                    })
+                } else {
+                    false
+                };
+
+                if parent_frozen {
+                    // Thawing a child while parent is frozen: demote to frozen-by-parent
+                    crate::control::unit_properties::set_freezer_state(
+                        unit,
+                        crate::units::FreezerState::FrozenByParent,
+                    );
+                    // Don't actually write cgroup.freeze=0 since parent is frozen
+                } else {
+                    crate::control::unit_properties::set_freezer_state(
+                        unit,
+                        crate::units::FreezerState::Running,
+                    );
+                    // Reset the watchdog ping timestamp so the watchdog doesn't
+                    // immediately kill the service after thaw (the process was
+                    // frozen and couldn't send WATCHDOG=1 pings).
+                    if let Specific::Service(svc) = &unit.specific {
+                        let mut state = svc.state.write_poisoned();
+                        if state.srvc.watchdog_last_ping.is_some() {
+                            state.srvc.watchdog_last_ping = Some(std::time::Instant::now());
+                        }
+                    }
+                }
+            }
 
             return Ok(serde_json::json!(null));
         }
@@ -5890,14 +6029,20 @@ pub fn execute_command(
             // We always re-apply drop-ins to pick up changes since last query.
             if unit_name.ends_with(".slice") {
                 let mut ri_mut = run_info.write_poisoned();
-                // Only create/update if there's no fragment file on disk
-                let has_file = ri_mut
-                    .config
-                    .unit_dirs
-                    .iter()
-                    .any(|d| d.join(&unit_name).exists());
-                if !has_file {
-                    create_or_update_implicit_slice(&unit_name, &mut ri_mut);
+                // Only create implicit slice if it doesn't already exist in the
+                // unit table AND there's no fragment file on disk.  Re-creating
+                // an existing slice would reset runtime state (e.g. FreezerState).
+                let already_loaded =
+                    !find_units_with_name(&unit_name, &ri_mut.unit_table).is_empty();
+                if !already_loaded {
+                    let has_file = ri_mut
+                        .config
+                        .unit_dirs
+                        .iter()
+                        .any(|d| d.join(&unit_name).exists());
+                    if !has_file {
+                        create_or_update_implicit_slice(&unit_name, &mut ri_mut);
+                    }
                 }
             }
 
@@ -6946,6 +7091,17 @@ pub fn execute_command(
                         // Silently skip units not found (matches real systemd
                         // behaviour for multi-unit stop).
                         continue;
+                    }
+
+                    // Reject stopping a frozen unit (matches real systemd behaviour)
+                    let freezer_state =
+                        crate::control::unit_properties::get_freezer_state_pub(units[0]);
+                    if matches!(
+                        freezer_state,
+                        crate::units::FreezerState::Frozen
+                            | crate::units::FreezerState::FrozenByParent
+                    ) {
+                        return Err(format!("Unit {unit_name} is frozen, cannot stop."));
                     }
 
                     units[0].id.clone()

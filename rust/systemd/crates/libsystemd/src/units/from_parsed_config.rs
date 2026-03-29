@@ -41,13 +41,13 @@ pub fn slice_cgroup_path(root: &std::path::Path, slice_name: &str) -> PathBuf {
 
 #[cfg(feature = "cgroups")]
 fn make_cgroup_path(srvc_name: &str, slice: Option<&str>) -> Result<PathBuf, String> {
-    let systemd_rs_cgroup =
-        crate::platform::cgroups::get_own_freezer(&PathBuf::from("/sys/fs/cgroup"))
-            .map_err(|e| format!("Couldnt get own cgroup: {}", e))?;
+    let cgroup_root = crate::platform::cgroups::get_cgroup_root(&PathBuf::from("/sys/fs/cgroup"))
+        .map_err(|e| format!("Couldnt get cgroup root: {}", e))?;
     let base = if let Some(slice_name) = slice {
-        slice_cgroup_path(&systemd_rs_cgroup, slice_name)
+        slice_cgroup_path(&cgroup_root, slice_name)
     } else {
-        systemd_rs_cgroup
+        // Default to system.slice like real systemd
+        slice_cgroup_path(&cgroup_root, "system.slice")
     };
     let service_cgroup = base.join(srvc_name);
     trace!(

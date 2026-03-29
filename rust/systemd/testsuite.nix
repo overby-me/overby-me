@@ -277,7 +277,6 @@ in
 
       test_cmd = (
           f"cd {units_dir} && "
-          "export TEST_SKIP_TESTCASES='testcase_hierarchical_slice_dropins testcase_transient_slice_dropins testcase_transient_service_dropins' && "
           "bash -x ./${testName}.sh 2>&1"
       )
 

@@ -631,8 +631,16 @@ fn pid1_specific_setup() {}
 fn prepare_runtimeinfo(conf: &config::Config, dry_run: bool) -> runtime_info::ArcMutRuntimeInfo {
     // initial loading of the units and matching of the various before/after settings
     // also opening all fildescriptors in the socket files
-    let mut unit_table =
-        units::load_all_units(&conf.unit_dirs, &conf.target_unit).expect("loading unit files");
+    //
+    // During daemon-reexec, skip pruning so that transient units (e.g. from
+    // systemd-run) that are not reachable from the boot target are still loaded.
+    let is_reexec = std::env::var("SYSTEMD_RS_REEXEC").is_ok_and(|v| v == "1");
+    let mut unit_table = if is_reexec {
+        units::load_all_units_no_prune(&conf.unit_dirs, &conf.target_unit)
+    } else {
+        units::load_all_units(&conf.unit_dirs, &conf.target_unit)
+    }
+    .expect("loading unit files");
     trace!("Finished loading units");
 
     // Break dependency cycles instead of aborting, matching systemd behavior.

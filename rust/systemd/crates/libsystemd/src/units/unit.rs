@@ -784,11 +784,13 @@ pub struct CommonState {
 }
 
 /// Cgroup freezer state for a unit.
-#[derive(Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum FreezerState {
     #[default]
     Running,
     Frozen,
+    /// Frozen because a parent slice was frozen, not by direct request.
+    FrozenByParent,
 }
 
 impl FreezerState {
@@ -796,6 +798,7 @@ impl FreezerState {
         match self {
             FreezerState::Running => "running",
             FreezerState::Frozen => "frozen",
+            FreezerState::FrozenByParent => "frozen-by-parent",
         }
     }
 }

@@ -105,6 +105,16 @@ fn check_watchdog_timeouts(run_info: &ArcMutRuntimeInfo) {
             let state = srvc_specific.state.read_poisoned();
             let srvc = &state.srvc;
 
+            // Skip frozen units — the watchdog must not fire while a unit is
+            // frozen (the process is stopped in the cgroup freezer and cannot
+            // send WATCHDOG=1 pings).
+            if !matches!(
+                state.common.freezer_state,
+                crate::units::FreezerState::Running
+            ) {
+                continue;
+            }
+
             // --- RuntimeMaxSec enforcement ---
             // If the service has sent EXTEND_TIMEOUT_USEC, use the extended
             // deadline (extend_timeout_timestamp + extend_timeout_usec) instead
