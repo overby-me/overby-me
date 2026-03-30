@@ -1193,10 +1193,10 @@ impl Parser {
 
         // Parse leading assignments
         while words.is_empty() {
-            if let Some(assign) = self.try_parse_assignment() {
-                assignments.push(assign);
-            } else {
-                break;
+            match self.try_parse_assignment() {
+                Some(Ok(assign)) => assignments.push(assign),
+                Some(Err(e)) => return Err(e),
+                None => break,
             }
         }
 
@@ -1209,11 +1209,15 @@ impl Parser {
             }
 
             // Assignments can appear interspersed with redirections before command words
-            if words.is_empty()
-                && let Some(assign) = self.try_parse_assignment()
-            {
-                assignments.push(assign);
-                continue;
+            if words.is_empty() {
+                match self.try_parse_assignment() {
+                    Some(Ok(assign)) => {
+                        assignments.push(assign);
+                        continue;
+                    }
+                    Some(Err(e)) => return Err(e),
+                    None => {}
+                }
             }
 
             // Check for inline array assignment: if we see word ending with = followed by (
@@ -1230,7 +1234,7 @@ impl Parser {
                 };
                 if last_ends_with_eq {
                     self.advance(); // consume (
-                    let elements = self.parse_array_elements();
+                    let elements = self.parse_array_elements()?;
                     // For array assignments in command args (declare/local),
                     // expand each element individually and join with \x01 separator.
                     // This preserves the structure for the builtin to split.
@@ -1283,7 +1287,7 @@ impl Parser {
         })
     }
 
-    fn try_parse_assignment(&mut self) -> Option<Assignment> {
+    fn try_parse_assignment(&mut self) -> Option<Result<Assignment, String>> {
         // Extract all info from the current token without holding a borrow
         let info = if let Token::Word(parts) = &self.current {
             if parts.is_empty() {
@@ -1400,11 +1404,16 @@ impl Parser {
         if after_eq == "(" && num_parts == 1 {
             self.advance();
             let elements = self.parse_array_elements();
-            return Some(Assignment {
-                name: full_name,
-                value: AssignValue::Array(elements),
-                append,
-            });
+            match elements {
+                Ok(elems) => {
+                    return Some(Ok(Assignment {
+                        name: full_name,
+                        value: AssignValue::Array(elems),
+                        append,
+                    }));
+                }
+                Err(e) => return Some(Err(e)),
+            }
         }
 
         // Case 2: "name=" as one token, then LParen as next token
@@ -1415,11 +1424,16 @@ impl Parser {
             if self.current == Token::LParen {
                 self.advance();
                 let elements = self.parse_array_elements();
-                return Some(Assignment {
-                    name: full_name,
-                    value: AssignValue::Array(elements),
-                    append,
-                });
+                match elements {
+                    Ok(elems) => {
+                        return Some(Ok(Assignment {
+                            name: full_name,
+                            value: AssignValue::Array(elems),
+                            append,
+                        }));
+                    }
+                    Err(e) => return Some(Err(e)),
+                }
             }
             // Not an array — backtrack
             self.lexer.restore_position(saved_pos);
@@ -1430,15 +1444,15 @@ impl Parser {
         self.advance();
         let value = AssignValue::Scalar(value_parts);
 
-        Some(Assignment {
+        Some(Ok(Assignment {
             name: full_name,
             value,
             append,
-        })
+        }))
     }
 
     /// Parse array elements: `word1 [n]=word2 word3 ...` until `)`
-    fn parse_array_elements(&mut self) -> Vec<ArrayElement> {
+    fn parse_array_elements(&mut self) -> Result<Vec<ArrayElement>, String> {
         let mut elements = Vec::new();
         self.skip_newlines();
 
@@ -1496,14 +1510,25 @@ impl Parser {
                     });
                 }
             } else {
-                break;
+                // Unexpected token inside array compound assignment (e.g. & | ;)
+                let token_str = self.token_to_str();
+                // Skip to closing ) or end of line to recover parser state
+                while !matches!(self.current, Token::RParen | Token::Newline | Token::Eof) {
+                    self.advance();
+                }
+                self.eat(&Token::RParen);
+                // Mark as recoverable so run_string doesn't exit the shell
+                return Err(format!(
+                    "\x01RECOVERABLE\x01syntax error near unexpected token `{}'",
+                    token_str
+                ));
             }
             self.skip_newlines();
         }
 
         // Consume the closing )
         self.eat(&Token::RParen);
-        elements
+        Ok(elements)
     }
 
     fn try_parse_redirection(&mut self) -> Result<Option<Redirection>, String> {

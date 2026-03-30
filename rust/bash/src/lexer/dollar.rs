@@ -1337,10 +1337,55 @@ fn read_param_op(chars: &[char], i: &mut usize, _name: &str, in_dquote: bool) ->
                     let mut brace_depth = 0i32;
                     while *i < chars.len() && !(chars[*i] == '}' && brace_depth == 0) {
                         match chars[*i] {
+                            '`' => {
+                                // Backtick command substitution — consume until matching `
+                                offset.push(chars[*i]);
+                                *i += 1;
+                                while *i < chars.len() && chars[*i] != '`' {
+                                    if chars[*i] == '\\' && *i + 1 < chars.len() {
+                                        offset.push(chars[*i]);
+                                        *i += 1;
+                                    }
+                                    offset.push(chars[*i]);
+                                    *i += 1;
+                                }
+                                if *i < chars.len() {
+                                    offset.push(chars[*i]); // closing `
+                                    *i += 1;
+                                }
+                                continue;
+                            }
+                            '"' if brace_depth == 0 && paren_depth == 0 => {
+                                // Double-quoted string — consume until matching "
+                                offset.push(chars[*i]);
+                                *i += 1;
+                                while *i < chars.len() && chars[*i] != '"' {
+                                    if chars[*i] == '\\' && *i + 1 < chars.len() {
+                                        offset.push(chars[*i]);
+                                        *i += 1;
+                                    }
+                                    offset.push(chars[*i]);
+                                    *i += 1;
+                                }
+                                if *i < chars.len() {
+                                    offset.push(chars[*i]); // closing "
+                                    *i += 1;
+                                }
+                                continue;
+                            }
+                            '$' if *i + 1 < chars.len() && chars[*i + 1] == '(' => {
+                                // $(...) command substitution — track via paren_depth
+                                offset.push(chars[*i]);
+                                *i += 1;
+                                offset.push(chars[*i]);
+                                *i += 1;
+                                paren_depth += 1;
+                                continue;
+                            }
                             '{' => brace_depth += 1,
                             '}' => brace_depth -= 1,
                             '(' => paren_depth += 1,
-                            ')' => paren_depth -= 1,
+                            ')' if paren_depth > 0 => paren_depth -= 1,
                             '?' if paren_depth == 0 && brace_depth == 0 => ternary_depth += 1,
                             ':' if paren_depth == 0 && brace_depth == 0 => {
                                 if ternary_depth > 0 {
@@ -1358,12 +1403,56 @@ fn read_param_op(chars: &[char], i: &mut usize, _name: &str, in_dquote: bool) ->
                         *i += 1;
                         let mut l = String::new();
                         let mut brace_depth2 = 0i32;
+                        let mut paren_depth2 = 0i32;
                         while *i < chars.len() && !(chars[*i] == '}' && brace_depth2 == 0) {
-                            if chars[*i] == '{' {
-                                brace_depth2 += 1;
-                            }
-                            if chars[*i] == '}' {
-                                brace_depth2 -= 1;
+                            match chars[*i] {
+                                '`' => {
+                                    l.push(chars[*i]);
+                                    *i += 1;
+                                    while *i < chars.len() && chars[*i] != '`' {
+                                        if chars[*i] == '\\' && *i + 1 < chars.len() {
+                                            l.push(chars[*i]);
+                                            *i += 1;
+                                        }
+                                        l.push(chars[*i]);
+                                        *i += 1;
+                                    }
+                                    if *i < chars.len() {
+                                        l.push(chars[*i]);
+                                        *i += 1;
+                                    }
+                                    continue;
+                                }
+                                '"' if brace_depth2 == 0 && paren_depth2 == 0 => {
+                                    l.push(chars[*i]);
+                                    *i += 1;
+                                    while *i < chars.len() && chars[*i] != '"' {
+                                        if chars[*i] == '\\' && *i + 1 < chars.len() {
+                                            l.push(chars[*i]);
+                                            *i += 1;
+                                        }
+                                        l.push(chars[*i]);
+                                        *i += 1;
+                                    }
+                                    if *i < chars.len() {
+                                        l.push(chars[*i]);
+                                        *i += 1;
+                                    }
+                                    continue;
+                                }
+                                '$' if *i + 1 < chars.len() && chars[*i + 1] == '(' => {
+                                    l.push(chars[*i]);
+                                    *i += 1;
+                                    l.push(chars[*i]);
+                                    *i += 1;
+                                    paren_depth2 += 1;
+                                    continue;
+                                }
+                                '{' => brace_depth2 += 1,
+                                '}' => brace_depth2 -= 1,
+                                '(' => paren_depth2 += 1,
+                                ')' if paren_depth2 > 0 => paren_depth2 -= 1,
+                                _ => {}
                             }
                             l.push(chars[*i]);
                             *i += 1;

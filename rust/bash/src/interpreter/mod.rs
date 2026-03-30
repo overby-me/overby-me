@@ -941,6 +941,14 @@ impl Shell {
                     }
                 }
                 Err(e) => {
+                    // Check for recoverable syntax errors (e.g. bad array compound assignment)
+                    // These are marked by the parser with a \x01RECOVERABLE\x01 prefix
+                    let (recoverable, e) = if let Some(msg) = e.strip_prefix("\x01RECOVERABLE\x01")
+                    {
+                        (true, msg.to_string())
+                    } else {
+                        (false, e)
+                    };
                     if let Some(msg) = e.strip_prefix("\x00COND_ERROR") {
                         // Conditional expression error — print with prefix
                         eprintln!("{}: {}", self.syntax_error_prefix(), msg);
@@ -1047,9 +1055,12 @@ impl Shell {
                             eprintln!("{}: `{}'", self.error_prefix(), line.trim_end());
                         }
                     }
-                    status = 2;
-                    if e.contains("syntax error") {
-                        // Syntax errors in non-interactive shells cause exit
+                    status = if recoverable { 1 } else { 2 };
+                    if recoverable {
+                        self.last_status = 1;
+                    }
+                    if e.contains("syntax error") && !recoverable {
+                        // Non-recoverable syntax errors in non-interactive shells cause exit
                         return 2;
                     }
                     // Skip to the next newline to try to recover
