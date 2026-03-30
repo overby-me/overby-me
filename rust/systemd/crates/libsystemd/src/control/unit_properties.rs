@@ -942,10 +942,22 @@ pub fn format_properties(props: &PropertyMap, filter: Option<&[String]>) -> Stri
             None => true,
         };
         if include {
-            out.push_str(key);
-            out.push('=');
-            out.push_str(value);
-            out.push('\n');
+            // For multi-line values (e.g. IO device limits with multiple
+            // entries), emit each line as a separate key=value pair, matching
+            // upstream systemd's array property output.
+            if value.contains('\n') {
+                for line in value.split('\n') {
+                    out.push_str(key);
+                    out.push('=');
+                    out.push_str(line);
+                    out.push('\n');
+                }
+            } else {
+                out.push_str(key);
+                out.push('=');
+                out.push_str(value);
+                out.push('\n');
+            }
         }
     }
     out
@@ -1329,6 +1341,65 @@ fn insert_service_config(props: &mut PropertyMap, conf: &ServiceConfig) {
         insert(props, "LimitNOFILE", &format_rlimit_value(&rl.hard));
         insert(props, "LimitNOFILESoft", &format_rlimit_value(&rl.soft));
     }
+
+    // IO resource-control properties (same format as SliceConfig)
+    if !conf.io_device_weight.is_empty() {
+        let vals: Vec<String> = conf
+            .io_device_weight
+            .iter()
+            .map(|d| format!("{} {}", d.device, d.value))
+            .collect();
+        insert(props, "IODeviceWeight", &vals.join("\n"));
+    }
+    if !conf.io_read_bandwidth_max.is_empty() {
+        let vals: Vec<String> = conf
+            .io_read_bandwidth_max
+            .iter()
+            .map(|d| format!("{} {}", d.device, d.value))
+            .collect();
+        insert(props, "IOReadBandwidthMax", &vals.join("\n"));
+    }
+    if !conf.io_write_bandwidth_max.is_empty() {
+        let vals: Vec<String> = conf
+            .io_write_bandwidth_max
+            .iter()
+            .map(|d| format!("{} {}", d.device, d.value))
+            .collect();
+        insert(props, "IOWriteBandwidthMax", &vals.join("\n"));
+    }
+    if !conf.io_read_iops_max.is_empty() {
+        let vals: Vec<String> = conf
+            .io_read_iops_max
+            .iter()
+            .map(|d| format!("{} {}", d.device, d.value))
+            .collect();
+        insert(props, "IOReadIOPSMax", &vals.join("\n"));
+    }
+    if !conf.io_write_iops_max.is_empty() {
+        let vals: Vec<String> = conf
+            .io_write_iops_max
+            .iter()
+            .map(|d| format!("{} {}", d.device, d.value))
+            .collect();
+        insert(props, "IOWriteIOPSMax", &vals.join("\n"));
+    }
+
+    // Memory resource-control properties
+    match &conf.memory_max {
+        Some(crate::units::MemoryLimit::Bytes(n)) => insert(props, "MemoryMax", &n.to_string()),
+        Some(crate::units::MemoryLimit::Percent(p)) => insert(props, "MemoryMax", &format!("{p}%")),
+        Some(crate::units::MemoryLimit::Infinity) | None => insert(props, "MemoryMax", "infinity"),
+    }
+    match &conf.memory_high {
+        Some(crate::units::MemoryLimit::Bytes(n)) => insert(props, "MemoryHigh", &n.to_string()),
+        Some(crate::units::MemoryLimit::Percent(p)) => {
+            insert(props, "MemoryHigh", &format!("{p}%"))
+        }
+        Some(crate::units::MemoryLimit::Infinity) | None => insert(props, "MemoryHigh", "infinity"),
+    }
+
+    // IOAccounting
+    insert_bool(props, "IOAccounting", conf.io_accounting.unwrap_or(false));
 }
 
 fn insert_exec_config(props: &mut PropertyMap, conf: &ExecConfig) {
@@ -1761,7 +1832,7 @@ fn insert_slice_config(props: &mut PropertyMap, conf: &SliceConfig) {
             .iter()
             .map(|d| format!("{} {}", d.device, d.value))
             .collect();
-        insert(props, "IODeviceWeight", &vals.join(" "));
+        insert(props, "IODeviceWeight", &vals.join("\n"));
     }
     if !conf.io_read_bandwidth_max.is_empty() {
         let vals: Vec<String> = conf
@@ -1769,7 +1840,7 @@ fn insert_slice_config(props: &mut PropertyMap, conf: &SliceConfig) {
             .iter()
             .map(|d| format!("{} {}", d.device, d.value))
             .collect();
-        insert(props, "IOReadBandwidthMax", &vals.join(" "));
+        insert(props, "IOReadBandwidthMax", &vals.join("\n"));
     }
     if !conf.io_write_bandwidth_max.is_empty() {
         let vals: Vec<String> = conf
@@ -1777,7 +1848,7 @@ fn insert_slice_config(props: &mut PropertyMap, conf: &SliceConfig) {
             .iter()
             .map(|d| format!("{} {}", d.device, d.value))
             .collect();
-        insert(props, "IOWriteBandwidthMax", &vals.join(" "));
+        insert(props, "IOWriteBandwidthMax", &vals.join("\n"));
     }
     if !conf.io_read_iops_max.is_empty() {
         let vals: Vec<String> = conf
@@ -1785,7 +1856,7 @@ fn insert_slice_config(props: &mut PropertyMap, conf: &SliceConfig) {
             .iter()
             .map(|d| format!("{} {}", d.device, d.value))
             .collect();
-        insert(props, "IOReadIOPSMax", &vals.join(" "));
+        insert(props, "IOReadIOPSMax", &vals.join("\n"));
     }
     if !conf.io_write_iops_max.is_empty() {
         let vals: Vec<String> = conf
@@ -1793,7 +1864,7 @@ fn insert_slice_config(props: &mut PropertyMap, conf: &SliceConfig) {
             .iter()
             .map(|d| format!("{} {}", d.device, d.value))
             .collect();
-        insert(props, "IOWriteIOPSMax", &vals.join(" "));
+        insert(props, "IOWriteIOPSMax", &vals.join("\n"));
     }
     if !conf.io_device_latency_target_sec.is_empty() {
         insert(
@@ -2449,11 +2520,11 @@ mod tests {
         }];
         conf.io_read_bandwidth_max = vec![crate::units::IoDeviceLimit {
             device: "/dev/sda".to_owned(),
-            value: 1048576,
+            value: 1000000,
         }];
         conf.io_write_bandwidth_max = vec![crate::units::IoDeviceLimit {
             device: "/dev/sdb".to_owned(),
-            value: 524288,
+            value: 500000,
         }];
         conf.io_read_iops_max = vec![crate::units::IoDeviceLimit {
             device: "/dev/sda".to_owned(),
@@ -2470,8 +2541,8 @@ mod tests {
         insert_slice_config(&mut props, &conf);
 
         assert_eq!(props.get("IODeviceWeight").unwrap(), "/dev/sda 200");
-        assert_eq!(props.get("IOReadBandwidthMax").unwrap(), "/dev/sda 1048576");
-        assert_eq!(props.get("IOWriteBandwidthMax").unwrap(), "/dev/sdb 524288");
+        assert_eq!(props.get("IOReadBandwidthMax").unwrap(), "/dev/sda 1000000");
+        assert_eq!(props.get("IOWriteBandwidthMax").unwrap(), "/dev/sdb 500000");
         assert_eq!(props.get("IOReadIOPSMax").unwrap(), "/dev/sda 1000");
         assert_eq!(props.get("IOWriteIOPSMax").unwrap(), "/dev/sda 500");
         assert_eq!(

@@ -5202,6 +5202,40 @@ pub fn execute_command(
                                     "TasksMax" => {
                                         svc.conf.tasks_max = Some(parse_tasks_max(value));
                                     }
+                                    "IOAccounting" => {
+                                        svc.conf.io_accounting =
+                                            Some(value == "yes" || value == "true" || value == "1");
+                                    }
+                                    "IOReadBandwidthMax"
+                                    | "IOWriteBandwidthMax"
+                                    | "IOReadIOPSMax"
+                                    | "IOWriteIOPSMax"
+                                    | "IODeviceWeight" => {
+                                        if let Ok(Some(limit)) =
+                                            crate::units::parse_io_device_limit(value)
+                                        {
+                                            let list = match key {
+                                                "IOReadBandwidthMax" => {
+                                                    &mut svc.conf.io_read_bandwidth_max
+                                                }
+                                                "IOWriteBandwidthMax" => {
+                                                    &mut svc.conf.io_write_bandwidth_max
+                                                }
+                                                "IOReadIOPSMax" => &mut svc.conf.io_read_iops_max,
+                                                "IOWriteIOPSMax" => &mut svc.conf.io_write_iops_max,
+                                                "IODeviceWeight" => &mut svc.conf.io_device_weight,
+                                                _ => unreachable!(),
+                                            };
+                                            // Replace existing entry for same device, or append
+                                            if let Some(existing) =
+                                                list.iter_mut().find(|e| e.device == limit.device)
+                                            {
+                                                existing.value = limit.value;
+                                            } else {
+                                                list.push(limit);
+                                            }
+                                        }
+                                    }
                                     _ => {}
                                 },
                                 _ => {}

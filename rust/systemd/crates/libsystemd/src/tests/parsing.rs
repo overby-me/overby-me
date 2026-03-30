@@ -46078,7 +46078,7 @@ fn test_parse_io_device_limit_with_suffix() {
         .unwrap()
         .unwrap();
     assert_eq!(result.device, "/dev/sda");
-    assert_eq!(result.value, 10 * 1024 * 1024);
+    assert_eq!(result.value, 10 * 1000 * 1000);
 }
 
 #[test]
@@ -46087,7 +46087,7 @@ fn test_parse_io_device_limit_with_g_suffix() {
         .unwrap()
         .unwrap();
     assert_eq!(result.device, "/dev/nvme0n1");
-    assert_eq!(result.value, 1024 * 1024 * 1024);
+    assert_eq!(result.value, 1000 * 1000 * 1000);
 }
 
 #[test]

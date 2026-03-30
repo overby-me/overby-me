@@ -3634,8 +3634,9 @@ pub fn parse_io_device_limit(val: &str) -> Result<Option<IoDeviceLimit>, String>
         .split_once(char::is_whitespace)
         .ok_or_else(|| format!("IODevice limit must be 'DEVICE VALUE': {val}"))?;
     let value_str = value_str.trim();
-    // Try byte-size parsing first (handles K/M/G suffixes), fall back to plain u64
-    let value = parse_byte_size(value_str).or_else(|_| {
+    // Try SI byte-size parsing first (handles K/M/G suffixes with base 1000,
+    // matching upstream systemd's IO limit parsing), fall back to plain u64
+    let value = parse_byte_size_si(value_str).or_else(|_| {
         value_str
             .parse::<u64>()
             .map_err(|_| format!("IODevice limit value is not valid: {value_str}"))
@@ -3670,13 +3671,16 @@ pub fn parse_memory_limit(val: &str) -> Result<Option<MemoryLimit>, String> {
     Ok(Some(MemoryLimit::Bytes(bytes)))
 }
 
-/// Parse a systemd byte-size value with optional K, M, G, T, P, E suffix (base 1024).
+/// Parse a systemd byte-size value with optional K, M, G, T, P, E suffix.
 /// Returns the value in bytes as a `u64`.
 ///
 /// Accepts plain integers (e.g. "8388608") as well as suffixed values
 /// (e.g. "128K", "128M", "1G"). The suffix is case-insensitive.
 /// Returns an error for empty, non-numeric, or otherwise invalid strings.
-pub fn parse_byte_size(val: &str) -> Result<u64, String> {
+///
+/// The `base` parameter controls the multiplier: 1024 for memory/binary
+/// (KiB, MiB, …), 1000 for IO bandwidth/SI (KB, MB, …).
+fn parse_byte_size_base(val: &str, base: u64) -> Result<u64, String> {
     let val = val.trim();
     if val.is_empty() {
         return Err("byte size value is empty".to_owned());
@@ -3684,14 +3688,14 @@ pub fn parse_byte_size(val: &str) -> Result<u64, String> {
     let last = val.as_bytes()[val.len() - 1];
     let (num_str, multiplier): (&str, u64) = match last | 0x20 {
         // case-insensitive
-        b'k' => (&val[..val.len() - 1], 1024),
-        b'm' => (&val[..val.len() - 1], 1024 * 1024),
-        b'g' => (&val[..val.len() - 1], 1024 * 1024 * 1024),
-        b't' => (&val[..val.len() - 1], 1024 * 1024 * 1024 * 1024),
-        b'p' => (&val[..val.len() - 1], 1024 * 1024 * 1024 * 1024 * 1024),
+        b'k' => (&val[..val.len() - 1], base),
+        b'm' => (&val[..val.len() - 1], base * base),
+        b'g' => (&val[..val.len() - 1], base * base * base),
+        b't' => (&val[..val.len() - 1], base * base * base * base),
+        b'p' => (&val[..val.len() - 1], base * base * base * base * base),
         b'e' => (
             &val[..val.len() - 1],
-            1024 * 1024 * 1024 * 1024 * 1024 * 1024,
+            base * base * base * base * base * base,
         ),
         _ => (val, 1),
     };
@@ -3701,6 +3705,17 @@ pub fn parse_byte_size(val: &str) -> Result<u64, String> {
         .map_err(|_| format!("not a valid byte size: {val}"))?;
     num.checked_mul(multiplier)
         .ok_or_else(|| format!("byte size overflows u64: {val}"))
+}
+
+/// Parse a byte-size value with binary (base-1024) suffixes for memory limits.
+pub fn parse_byte_size(val: &str) -> Result<u64, String> {
+    parse_byte_size_base(val, 1024)
+}
+
+/// Parse a byte-size value with SI (base-1000) suffixes for IO bandwidth/IOPS.
+/// Matches upstream systemd's `parse_size(rvalue, 1000, &num)`.
+pub fn parse_byte_size_si(val: &str) -> Result<u64, String> {
+    parse_byte_size_base(val, 1000)
 }
 
 /// A single rlimit value: either a numeric value or infinity
