@@ -256,7 +256,7 @@
         # issue-27953.sh, issue-31752.sh, issue-14566.sh, socket-on-failure.sh;
         # remove subtests requiring unimplemented features.
         patchScript = ''
-          sed -i '/mountpoint \/issue2730/d; /systemctl --no-block exit 123/d' TEST-07-PID1.sh
+          sed -i '/systemctl --no-block exit 123/d' TEST-07-PID1.sh
           # Remove PrivateUsersEx lines (not implemented), keep PrivateUsers=yes
           sed -i '/PrivateUsersEx/d' TEST-07-PID1.private-users.sh
           # issue-30412: socat triggers socket activation. Run it in
