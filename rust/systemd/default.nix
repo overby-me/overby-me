@@ -220,6 +220,9 @@
         patchScript = ''
           # Fix upstream typo: propagatesstopto → propagatestopto
           sed -i 's/propagatesstopto-indirect/propagatestopto-indirect/g' TEST-03-JOBS.sh
+
+          # Remove varlinkctl section (needs varlink server in PID 1)
+          sed -i '/^IDS_FILE=/,/^done$/d' TEST-03-JOBS.sh
         '';
       }
       {
