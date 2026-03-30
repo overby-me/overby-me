@@ -8,34 +8,46 @@
 
 - **Started at**: 64/77 (arith diff 30, heredoc diff 111, comsub-posix diff 20)
 - **Now at**: 64/77 (same count — sub-tests still block nix pass)
-- **arith**: main test 0 diff ✅ (was 30), sub-tests still have ~100 lines diff
-- **heredoc**: main test ~20 diff locally (was 111), no longer hangs in nix, sub-tests ~85 diff
-- **comsub-posix**: 0 diff locally ✅ (was 20), still fails in nix due to error message sub-tests
-- **posixexp**: 6 diff locally (was 7), nix still fails on IFS/$@ issues
+- **heredoc**: main test 0 real diff locally ✅ (was ~20, only PID diffs remain), nix sub-tests ~85 diff
+- **arith**: main test 0 diff ✅, sub-tests still have ~100 lines diff
+- **comsub-posix**: 0 diff locally ✅, still fails in nix due to error message sub-tests
+- **posixexp**: 2 diff locally (was 6), nix still fails on IFS/$@ issues
+- **varenv**: 6 diff locally (was 36), 4 are PID diffs — only ~chet expansion remains
+- **builtins**: 79 diff locally (was 93), fixed continue N, hash msg, exit, set -o, kill -l
 - **trap**: flaky — 1 extra CHLD signal (non-deterministic)
 - **printf**: flaky — timing-dependent date format mismatch
 
 ### Fixes Applied This Session
 
-1. **Fix arithmetic short-circuit assignment errors** (`src/interpreter/arithmetic.rs`) — `0 && B=42` and `1 || B=88` now correctly error with "attempted assignment to non-variable". Added general non-variable detection for simple `=` after `&&`/`||`. Added ternary `?:` awareness: `1 ? 20 : x+=2` errors (LHS is `(1 ? 20 : x)`) but `0 ? x+=2 : 20` works (inside then-branch). Skip compound `+=`/`-=` when preceded by same char (e.g. `x++=7` is `x++ =7`, not `x +=...`).
+1. **Fix heredoc backslash handling for `\"`** (`src/lexer/heredoc.rs`) — In unquoted heredoc body parsing (`parse_double_quoted_content`), `\"` should remain literal (not strip backslash). Only `$`, `` ` ``, `\`, and `\n` are special after backslash in heredocs. Removed `'"'` from the match pattern.
 
-2. **Fix `--x++` lvalue error** (`src/interpreter/arithmetic.rs`) — Pre-decrement/increment followed by post-increment/decrement now errors with "assignment requires lvalue". Detects `name.ends_with("++")` or `name.ends_with("--")` in `++`/`--` prefix handlers.
+2. **Fix here-string `<<<` inside `$(...)` command substitution** (`src/lexer/dollar.rs`) — Added `<<<` handler before the `<<` (heredoc) handler in the `$(...)` comsub parser. Previously, `<<<` was misrecognized: the first `<` fell through, then the remaining `<<` was parsed as a heredoc, consuming the rest of the input. Now `<<<` is passed through as three literal `<` characters and the here-string word is handled by normal comsub parsing.
 
-3. **Fix backtick command substitution in arithmetic** (`src/interpreter/arithmetic.rs`) — Added `` `...` `` handling in `expand_comsubs_in_arith`. Also trigger expansion when expr contains `` ` `` (not just `$`). Handles `\`` escaping inside backticks.
+3. **Fix double line counting in heredoc delimiter backslash-newline** (`src/lexer/heredoc.rs`) — In `register_heredoc`, when a `\<newline>` line continuation appears in the delimiter (e.g., `cat << EO\<NL>F`), `self.advance()` already increments `self.line` when consuming `\n`. Removed the duplicate `self.line += 1` that caused all subsequent line numbers to be off by 1.
 
-4. **Fix arithmetic error token trailing spaces** (`src/interpreter/arithmetic.rs`) — When inner expression is a suffix of top expression, use top-expression suffix to preserve trailing whitespace (bash includes trailing space in error tokens like `$iv`).
+4. **Fix `set -a` (allexport) to actually export variables** (`src/builtins/set.rs`, `src/interpreter/commands.rs`, `src/interpreter/mod.rs`) — The `-a` flag in `builtin_set` was in the "known but not fully implemented" group, silently accepted without setting `opt_allexport`. Fixed to properly set the flag. Added `'a'` to `get_opt_flags()` for `$-` reflection. Added auto-export logic in `set_var()`: when `opt_allexport` is true, newly assigned variables are automatically added to `exports`.
 
-5. **Fix arithmetic error abort in assignments** (`src/interpreter/commands.rs`) — After `execute_assignment`, check `take_arith_error()` and return status 1. Fixes `declare -i i; i=0#4` continuing past the error.
+5. **Fix `shopt -so physical` and other options** (`src/builtins/set.rs`) — The `shopt -so` handler for set-options fell through to a default case that only updated `shopt_options` but didn't set the corresponding struct fields. Added explicit handling for `physical` (→ `opt_physical`), `hashall` (→ `opt_hashall`), `keyword` (→ `opt_keyword`), `noexec` (→ `opt_noexec`), `monitor` (→ `opt_monitor`). Also called `update_shellopts()` after `shopt -so/-uo` changes to keep `$SHELLOPTS` in sync.
 
-6. **Fix heredoc fd redirection `N<<EOF`** (`src/parser.rs`) — Added `DLess`, `DLessDash`, `TripleLess` to `try_parse_redir_fd`'s numeric fd redirect operator match. `3<<EOF` now recognized as fd 3 heredoc.
+6. **Fix `set -o ignoreeof` to set `IGNOREEOF=10`** (`src/builtins/set.rs`) — Separated `ignoreeof` from the compound match arm (which incorrectly set `opt_monitor` for all grouped options). Now `set -o ignoreeof` sets `IGNOREEOF=10` and `set +o ignoreeof` unsets it. Same handling added in `shopt -so/-uo ignoreeof`.
 
-7. **Fix heredoc body ordering for multiple heredocs** (`src/parser.rs`) — Always use empty placeholder for heredoc bodies in `try_parse_redirection`. Added `resolve_heredoc_in_command` / `resolve_heredoc_in_program` / `resolve_heredoc_in_redirections` helpers that recursively fill in bodies for all command types (While, Until, If, For, Case, BraceGroup, Subshell, FunctionDef, Coproc). Prevents body swapping when `<<EOF1 3<<EOF2` appear on one line.
+7. **Fix `set -o monitor` leaking to other options** (`src/builtins/set.rs`) — The compound match arm for `braceexpand|emacs|errtrace|functrace|histexpand|history|ignoreeof|interactive-comments|monitor` unconditionally set `shell.opt_monitor = enable`. Separated `monitor` and `ignoreeof` into their own arms. Now only `monitor` sets `opt_monitor`.
 
-8. **Fix heredoc pipe fd leak** (`src/interpreter/redirects.rs`) — When the pipe read end is already the target fd (e.g. pipe returns fd 3 and we redirect to fd 3), don't close it after dup2 (which is a no-op).
+8. **Fix `set -o -B` option parsing** (`src/builtins/set.rs`) — When `set -o` is followed by an argument starting with `-` or `+` (like `-B`), it should display the option list AND then process the flag, not treat `-B` as an option name. Changed the condition to check whether the next arg starts with `-`/`+` before consuming it as an option name.
 
-9. **Use memfd for heredoc content** (`src/interpreter/redirects.rs`) — Replaced pipe with `memfd_create` + `write` + `lseek` for heredoc/herestring content. Pipes deadlock when content exceeds ~64KB buffer because write blocks with nobody reading. memfd is seekable and has no size limit. Fixes `heredoc5.sub` hang.
+9. **Mark `SHELLOPTS` and `BASHOPTS` as readonly** (`src/interpreter/mod.rs`) — Added `readonly_vars.insert("SHELLOPTS")` and `readonly_vars.insert("BASHOPTS")` during shell initialization (after `update_shellopts()`). `update_shellopts()` uses `vars.insert()` directly (bypassing `set_var`), so it can still update the value.
 
-10. **Handle backslash-newline in heredoc bodies** (`src/lexer/heredoc.rs`) — For unquoted heredocs, when a line ends with `\`, join with the next line before checking for the delimiter. Fixes `cat <<EOF\nnext\<NL>EOF\nEOF` producing `nextEOF`.
+10. **Fix `export` of unset variables** (`src/builtins/vars.rs`) — `export ivar` after `unset ivar` should mark the variable for export without setting a value. Previously, the code used `unwrap_or_default()` which inserted an empty string into both `exports` and effectively "set" the variable. Now, if the variable doesn't exist in `vars` or environment, it's added to `declared_unset` + `exports` without inserting into `vars`, so `${ivar-unset}` correctly expands to `unset`.
+
+11. **Implement `local` with no arguments** (`src/builtins/vars.rs`) — `local` with no args now lists all local variables in the current scope using `declare` format, matching bash behavior. Handles scalars, indexed arrays, and associative arrays with proper flag display (`-a`, `-A`, `-i`, `-r`, `-x`).
+
+12. **Fix `continue N` for nested loops** (`src/interpreter/commands.rs`) — `continue 2` in an inner loop should break out of the inner loop and continue the outer loop. Previously, decrementing `continuing` just continued the current loop's next iteration, causing extra iterations. Now, after decrementing, if `continuing` is still > 0, the loop `break`s to propagate to the parent. Applied to `run_for_inner`, `run_arith_for_inner`, `run_while`, and `run_until`.
+
+13. **Fix `hash` empty message format** (`src/builtins/exec.rs`) — `hash: hash table empty` should not include the script name/line prefix. Changed from `eprintln!("{}: hash: hash table empty", shell.error_prefix())` to plain `eprintln!("hash: hash table empty")`.
+
+14. **Fix `exit` with non-numeric argument** (`src/builtins/flow.rs`) — `exit status` (non-numeric) should print an error but NOT actually exit the shell in script mode. Changed to `return 2` instead of falling through to `std::process::exit()`.
+
+15. **Fix `kill -l` with out-of-range signal numbers** (`src/builtins/trap.rs`) — `kill -l 4096` should report "invalid signal specification". Previously, when the number parsed successfully but wasn't found in the signal table, it silently produced no output. Added an else branch to print the error.
 
 ## How to Run Tests
 
@@ -73,12 +85,12 @@ Suggested nix timeout: 30s for most tests, 120s for trap.
 
 ### Easiest (< 30 diff lines)
 
-#### 1. posixexp (6 lines local, 3 issues remain in nix)
+#### 1. posixexp (2 lines local, 3 issues remain in nix)
 
-Three issues:
+Three issues in posixexp4.sub:
 
 - **`<12>` vs `<1>\n<2>`**: `recho $a` after `IFS=; a=$@` with `set -- 1 2`. Our shell produces `<12>` (single arg), bash produces `<1><2>` (two args). Relates to how `$@` assignment interacts with null IFS — the assigned value should preserve the field boundaries for later `$a` expansion.
-- **IFS splitting in `${var-$@}`**: With `IFS=:` or unset IFS, `${var-$@}` should join positional params by space (not split them individually). Our shell splits `$@` in the default word into separate fields. Two instances in posixexp4.sub.
+- **IFS splitting in `${var-$@}`**: With `IFS=:` or unset IFS, `${var-$@}` should join positional params by space (not split them individually). Our shell splits `$@` in the default word into separate fields. Two instances in posixexp4.sub. This requires `$@` in `${var-word}` to produce multiple fields, which needs refactoring of the expansion system to propagate field boundaries.
 
 #### 2. comsub-posix (0 lines local, ~35 lines nix)
 
@@ -99,64 +111,66 @@ Main `arith.tests` now passes with 0 diff. Sub-test issues in arith10.sub:
 
 ### Medium (30-200 diff lines)
 
-#### 4. heredoc (~20 lines local, ~85 lines nix)
+#### 4. heredoc (0 real lines local, ~85 lines nix)
 
-Major improvements this session (111→20 local, no longer hangs in nix). Remaining:
+Main `heredoc.tests` now matches perfectly (only PID diffs remain, normalized by nix). Sub-test issues:
 
-- **heredoc3.sub**: Tab-stripped heredoc delimiter parsing, backslash continuation edge cases, `cat <<x*x` glob in delimiter.
-- **heredoc7.sub**: Command substitution interacting with heredocs — unterminated heredoc in comsub.
+- **heredoc3.sub**: Tab-stripped heredoc delimiter parsing, backslash continuation edge cases, `cat <<x*x` glob in delimiter, `(cat <<EOF\n...\nEOF)` — EOF not on its own line.
+- **heredoc7.sub**: Command substitution interacting with heredocs — `cat << EOF)` unterminated heredoc in comsub.
 - **heredoc9.sub**: `HERE; then` and `HERE; do` — heredoc delimiter followed by `;` and keyword on same line in function body printing.
-- **Last block**: `echo $(cat <<< "comsub here-string")` and `cat <<''` (empty delimiter).
-- **`echo "` vs `echo \"`**: Quoting difference in heredoc display.
 
-#### 5. assoc (75 lines local, was 527)
+#### 5. varenv (6 lines local, was 36 → was 340)
+
+Massive improvement. Only remaining real issue:
+
+- **`~chet` expansion**: Produces `/a/b/c` instead of `/usr/chet`. User-specific, differs by environment. The nix test also differs here.
+- **Nix sub-tests**: varenv3.sub (local scoping), varenv4.sub (assoc array conversion), varenv25.sub (local -p).
+
+#### 6. assoc (75 lines local, was 527)
 
 Significant improvement. Remaining:
 
-- Associative array `declare -p` key quoting differences.
-- `[*]` key handling.
+- Associative array `declare -p` key quoting differences (trailing space in `([key]="val" )`).
+- `[*]` key handling — should be quoted as `["*"]`.
 - Tilde expansion in associative array keys/values.
+- `BASH_ALIASES` and `BASH_CMDS` arrays appearing in `declare -A` output.
+- `chaff[hello world]` subscript with spaces not handled.
 
-#### 6. new-exp (87 lines local, was ~375)
+#### 7. builtins (79 lines local, was 93 → was 336)
+
+Significant improvement. Remaining:
+
+- **`enable -n` not implemented** (~34 diff lines) — disable builtins at runtime. The test explicitly checks this feature.
+- `pushd`/`popd` with numeric args and error handling (~4 lines).
+- `declare -p` after pre-command assignments (`foo="" export foo`) (~8 lines).
+- `-printenv` error format difference (~2 lines).
+- PID differences (~6 lines, normalized in nix).
+
+#### 8. new-exp (87 lines local, was ~375)
 
 Remaining issues:
 
 - `${HOME-'}'}` — single quotes don't protect `}` inside `${:-}` in dquote context.
 - Backtick command substitution not expanded in `${var:offset}` arithmetic.
 - `${#z}` used as substring offset not evaluated to variable length.
+- `set -u` / `$9` unbound variable error message format differences.
+- `$((${#RECEIVED}-1))` arithmetic syntax errors.
 - Various expansion edge cases.
+- Note: many tests depend on `recho` which isn't available locally.
 
-#### 7. builtins (93 lines local, was 336)
-
-Significant improvement. Remaining:
-
-- `enable -n` not implemented (disable builtins at runtime).
-- `pushd`/`popd` with numeric args and error handling.
-- `cd` with `--` argument.
-- Hash table empty message format.
-
-#### 8. quotearray (185 lines)
+#### 9. quotearray (185 lines)
 
 Associative array keys with special chars in arithmetic contexts.
 
-#### 9. comsub2 (196 lines)
+#### 10. comsub2 (196 lines)
 
 `local` outside function context, alias handling in subshells, function definition inside command substitution.
 
 ### Hard (200+ diff lines)
 
-#### 10. nameref (258 lines local, was 750)
+#### 11. nameref (258 lines local, was 750)
 
 `declare -n` improvements but still substantially broken: wrong variable resolution, unset through nameref, nameref chains.
-
-#### 11. varenv (36 lines local, was 340)
-
-Significant improvement. Remaining:
-
-- PATH handling differences.
-- `local` inside function not finding variables from outer scope.
-- SHELLOPTS/physical differences.
-- Export propagation issues.
 
 #### 12. array (446 lines local, was 1755)
 
@@ -183,11 +197,13 @@ Timing-dependent: `%(fmt)T` date format test can mismatch if test crosses a seco
 | `src/ast.rs` | AST types, `WordPart` (includes `SyntaxError` variant) |
 | `src/builtins/io.rs` | `read`, `echo` (EPIPE handling), `printf`, `mapfile` |
 | `src/builtins/exec.rs` | `type`, `command`, `hash` |
-| `src/builtins/vars.rs` | `declare`, `local`, `export`, `let` |
-| `src/builtins/mod.rs` | `parse_array_literal`, function body formatting |
-| `src/builtins/set.rs` | `set`, `shopt` |
-| `src/interpreter/mod.rs` | Shell struct, `declared_unset`, `run_string` (error recovery), `resolve_nameref` |
-| `src/interpreter/commands.rs` | Command execution, `expand_word*`, `get_opt_flags`, `update_shellopts`, `execute_assignment` (now checks arith errors) |
+| `src/builtins/flow.rs` | `break`, `continue`, `exit`, `return` |
+| `src/builtins/vars.rs` | `declare`, `local` (now with no-args listing), `export` (unset var handling), `let` |
+| `src/builtins/mod.rs` | `parse_array_literal`, function body formatting, `quote_for_declare` |
+| `src/builtins/set.rs` | `set` (allexport, physical, ignoreeof), `shopt` (update_shellopts call) |
+| `src/builtins/trap.rs` | `trap`, `kill` (kill -l range check) |
+| `src/interpreter/mod.rs` | Shell struct, `declared_unset`, `run_string`, `resolve_nameref`, `set_var` (auto-export), SHELLOPTS/BASHOPTS readonly |
+| `src/interpreter/commands.rs` | Command execution, `expand_word*`, `get_opt_flags` (allexport `a` flag), `update_shellopts`, `execute_assignment`, `continue N` fix |
 | `src/interpreter/arithmetic.rs` | Arithmetic eval, `expand_comsubs_in_arith` (handles `\$` and backticks), error tokens, short-circuit assignment validation, ternary precedence |
 | `src/interpreter/redirects.rs` | Redirections (vredir `{var}` fds, memfd heredocs, pipe fd leak fix) |
 | `src/interpreter/pipeline.rs` | Pipeline execution, PIPESTATUS |
@@ -196,24 +212,24 @@ Timing-dependent: `%(fmt)T` date format test can mismatch if test crosses a seco
 | `src/expand/arithmetic.rs` | `eval_arith_full`, `resolve_arith_vars` (handles `${var:-default}`) |
 | `src/parser.rs` | Parser, `parse_array_elements` (returns Result), `skip_to_next_command`, heredoc body resolution (full recursive `resolve_heredoc_in_command`) |
 | `src/lexer/mod.rs` | Lexer, thread-locals (`DQUOTE_TOGGLED`) |
-| `src/lexer/dollar.rs` | `${}` parsing, `parse_brace_param` (detects missing `}`), substring offset loop |
+| `src/lexer/dollar.rs` | `${}` parsing, `parse_brace_param`, `$(...)` comsub parser (now handles `<<<` here-strings) |
 | `src/lexer/word.rs` | `read_param_word_impl`, `skip_comsub` (case state machine), `take_heredoc_body` |
-| `src/lexer/heredoc.rs` | `register_heredoc`, `read_heredoc_bodies` (backslash-newline continuation) |
+| `src/lexer/heredoc.rs` | `register_heredoc` (line count fix), `read_heredoc_bodies` (backslash-newline), `parse_double_quoted_content` (backslash fix for `\"`) |
 | `rust/bash/testsuite.nix` | Test harness with path/PID normalization |
 
 ## Recommended Next Priorities
 
-1. **Fix IFS splitting in `${var-$@}`** — In `read_param_word_impl` or the expansion engine, `$@` inside `${var-word}` should be joined by space (not IFS) before field splitting. Would fix 4 of 6 remaining posixexp diff lines. (~4 diff lines)
+1. **Fix `$@` expansion in `${var-$@}`** — Requires refactoring expansion to propagate field boundaries through `ParamOp::Default`. Currently `expand_word_nosplit_ctx` returns a single string, but `$@` in default words should produce multiple fields. This is architecturally hard but would fix 4 of 6 remaining posixexp nix diff lines.
 
-2. **Fix `$@` assignment with null IFS** — `IFS=; a=$@` should preserve field boundaries so later `$a` splits into separate args. Would fix remaining 2 posixexp lines. (~2 diff lines)
+2. **Fix comsub-posix error messages** — Improve error reporting for intentional syntax errors inside `$(...)` in case patterns. Need parser to detect reserved words like `done` in wrong context. (~35 nix diff lines)
 
-3. **Fix comsub-posix error messages** — Improve error reporting for intentional syntax errors inside `$(...)` in case patterns. Need parser to detect reserved words like `done` in wrong context. (~35 nix diff lines)
+3. **Fix arith10.sub array subscript quoting** — Handle `a[" "]`, `a[\ \]`, `a[\\]` in arithmetic array subscripts. (~100 nix diff lines)
 
-4. **Fix arith10.sub array subscript quoting** — Handle `a[" "]`, `a[\ \]`, `a[\\]` in arithmetic array subscripts. (~100 nix diff lines)
+4. **Implement `enable -n`** — Disable builtins at runtime. Would fix ~34 lines in builtins test. Needs a set of disabled builtins and checking it before dispatching.
 
 5. **Fix heredoc sub-test issues** — heredoc3.sub (delimiter edge cases), heredoc7.sub (comsub+heredoc interaction), heredoc9.sub (function body printing). (~85 nix diff lines)
 
-6. **Fix varenv remaining issues** — PATH handling, `local` scope, SHELLOPTS. Down to ~36 lines.
+6. **Fix varenv nix sub-tests** — varenv3.sub (local scoping), varenv4.sub (assoc array conversion), varenv25.sub (local -p).
 
 ## Approach
 
