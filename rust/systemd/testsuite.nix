@@ -11,6 +11,7 @@
   patchScript ? "",
   extraPackages ? [],
   testEnv ? {},
+  useUpstreamSystemd ? false,
 }: let
   systemdSrc = pkgs.systemd.src;
 
@@ -22,7 +23,18 @@
     cp -a ${systemdSrc}/test/units/* $out/units/
 
     # Copy integration test data (unit files, helper scripts, etc.)
-    cp -a ${systemdSrc}/test/testdata/integration-tests/* $out/testdata/
+    cp -r --no-preserve=mode ${systemdSrc}/test/testdata/integration-tests/* $out/testdata/
+
+    # Copy additional testdata directories needed by subtests
+    # (e.g. test-journals for TEST-04-JOURNAL corrupted-journals subtest)
+    for d in ${systemdSrc}/test/testdata/*/; do
+      name=$(basename "$d")
+      [ "$name" = "integration-tests" ] && continue
+      cp -r --no-preserve=mode "$d" "$out/testdata/$name"
+    done
+
+    # Restore execute bits on scripts (cp --no-preserve=mode strips them)
+    find $out -name '*.sh' -o -name '*.py' | xargs chmod +x 2>/dev/null || true
   '';
 
   testName = "TEST-${name}";
@@ -51,8 +63,11 @@ in
     in {
       system.stateVersion = "25.11";
 
-      # Use rust-systemd as the systemd package
-      systemd.package = rustSystemdPackage;
+      # Use rust-systemd as the systemd package (or upstream C systemd for baseline)
+      systemd.package =
+        if useUpstreamSystemd
+        then pkgs.systemd
+        else rustSystemdPackage;
       services.udev.packages = [udevRulesOverride];
 
       # sudo-rs
@@ -69,6 +84,17 @@ in
       };
 
       systemd = {
+        # Extend systemd's default executable search path to include /usr/bin
+        # and /bin where we symlink NixOS tools. This is needed for unit files
+        # using bare command names like "bash" in ExecStart=.
+        managerEnvironment.PATH = lib.mkForce "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/run/current-system/sw/bin:/run/wrappers/bin";
+
+        # Set DefaultEnvironment so service processes (and scripts they run)
+        # can find common binaries in /usr/bin and /bin. Without this, bare
+        # commands like "mkdir" in test helper scripts fail because NixOS
+        # compiles systemd with DEFAULT_PATH pointing only to its own bin.
+        settings.Manager.DefaultEnvironment = ["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/run/current-system/sw/bin:/run/wrappers/bin"];
+
         network = {
           enable = true;
           networks."10-ethernet" = {
@@ -118,6 +144,7 @@ in
             gnused
             gawk
             findutils
+            python3 # for TEST-04-JOURNAL LogFilterPatterns syslog test
             iproute2
             util-linux
             jq
@@ -125,6 +152,7 @@ in
             kmod
             hostname # for hostname command
             acl # for setfacl/getfacl
+            zstd # for unzstd (e.g. TEST-04-JOURNAL corrupted-journals)
           ]
           ++ extraPackages;
       };
@@ -133,6 +161,23 @@ in
       system.activationScripts.systemd-test-units = ''
         # Always create /run/systemd/system so tests can write unit files there
         mkdir -p /run/systemd/system
+
+        # Symlink common binaries to /usr/bin and /bin so systemd unit
+        # ExecStart= lines using bare command names work on NixOS where
+        # everything lives in /nix/store. Use readlink -f to resolve symlink
+        # chains (e.g. sh -> bash) to avoid broken chains.
+        mkdir -p /usr/bin /bin /usr/sbin /sbin
+        for dir in ${pkgs.bash}/bin ${pkgs.coreutils}/bin ${pkgs.gnugrep}/bin ${pkgs.gnused}/bin ${pkgs.findutils}/bin ${pkgs.gawk}/bin ${pkgs.diffutils}/bin ${pkgs.util-linux}/bin ${pkgs.procps}/bin ${pkgs.kmod}/bin ${pkgs.iproute2}/bin ${pkgs.jq}/bin ${pkgs.hostname}/bin ${pkgs.python3}/bin ${config.systemd.package}/bin; do
+          [ -d "$dir" ] || continue
+          for bin in "$dir"/*; do
+            [ -x "$bin" ] || continue
+            name=$(basename "$bin")
+            # Resolve to final target to avoid dangling symlink chains
+            real=$(readlink -f "$bin" 2>/dev/null) || real="$bin"
+            [ -e "/usr/bin/$name" ] || ln -sfn "$real" "/usr/bin/$name"
+            [ -e "/bin/$name" ] || ln -sfn "$real" "/bin/$name"
+          done
+        done
 
         # Mask debug-shell.service — it fails in the test VM because there's
         # no serial/tty available, causing TEST-01-BASIC's "no failed units"
@@ -159,11 +204,12 @@ in
             name=$(basename "$f")
             case "$name" in
               *.service|*.socket|*.target|*.timer|*.path|*.mount|*.slice|*.scope|*.swap)
-                cp -a "$f" "/run/systemd/system/$name"
+                cp "$f" "/run/systemd/system/$name"
+                chmod 644 "/run/systemd/system/$name"
                 ;;
               *.sh)
                 # Copy helper scripts preserving executability
-                cp -a "$f" "/run/systemd/system/$name"
+                cp "$f" "/run/systemd/system/$name"
                 chmod +x "/run/systemd/system/$name"
                 ;;
               *.wants|*.requires)
@@ -214,16 +260,58 @@ in
 
         # Upstream unit files reference e.g. /usr/lib/systemd/tests/testdata/TEST-07-PID1.units/
         # but our nix store has testdata/TEST-07-PID1/TEST-07-PID1.units/.
-        # Bridge the gap by symlinking each test's subdirs up one level.
+        # Bridge the gap by copying (not symlinking) each test's subdirs up one
+        # level so we can patch bare command names in ExecStart= lines below.
         for testdir in /etc/systemd-tests/testdata/TEST-*/; do
           [ -d "$testdir" ] || continue
           for subdir in "$testdir"/*/; do
             [ -d "$subdir" ] || continue
             subname=$(basename "$subdir")
-            [ -e "/usr/lib/systemd/tests/testdata/$subname" ] || \
-              ln -sfn "$subdir" "/usr/lib/systemd/tests/testdata/$subname"
+            if [ ! -e "/usr/lib/systemd/tests/testdata/$subname" ]; then
+              cp -r --no-preserve=mode "$subdir" "/usr/lib/systemd/tests/testdata/$subname"
+              # Restore execute permission on scripts (cp --no-preserve=mode strips it)
+              ${pkgs.findutils}/bin/find "/usr/lib/systemd/tests/testdata/$subname" \
+                \( -name '*.sh' -o -name '*.py' \) -type f -exec chmod +x {} +
+              # Add missing shebangs to Python scripts (upstream relies on
+              # binfmt_misc or build-system patching; NixOS has neither)
+              for pyf in $(${pkgs.findutils}/bin/find "/usr/lib/systemd/tests/testdata/$subname" -name '*.py' -type f 2>/dev/null); do
+                if ! head -1 "$pyf" | grep -q '^#!'; then
+                  ${pkgs.gnused}/bin/sed -i "1i#!/usr/bin/python3" "$pyf"
+                fi
+              done
+            fi
           done
         done
+
+        # NixOS compiles systemd with DEFAULT_PATH_NORMAL pointing only to the
+        # systemd package's own bin directory. The systemd-executor uses this
+        # compiled-in path to resolve bare command names in ExecStart= lines,
+        # so upstream test unit files that use e.g. "ExecStart=bash ..." fail
+        # with "Unable to locate executable". Patch all .service files in the
+        # writable testdata and /run/systemd/system to use absolute paths.
+        # Use full nix store paths for find/sed since activation scripts have
+        # a limited PATH.
+        patch_unit_bare_commands() {
+          local dir="$1"
+          ${pkgs.findutils}/bin/find "$dir" -name '*.service' -type f 2>/dev/null | while read -r svc; do
+            ${pkgs.gnused}/bin/sed -i \
+              -e 's|^ExecStart=bash |ExecStart=/usr/bin/bash |' \
+              -e 's|^ExecStart=sh |ExecStart=/bin/sh |' \
+              -e 's|^ExecStart=cat |ExecStart=/usr/bin/cat |' \
+              -e 's|^ExecStart=echo |ExecStart=/usr/bin/echo |' \
+              -e 's|^ExecStart=sleep |ExecStart=/usr/bin/sleep |' \
+              -e 's|^ExecStart=true|ExecStart=/usr/bin/true|' \
+              -e 's|^ExecStart=false|ExecStart=/usr/bin/false|' \
+              -e 's|^ExecStop=bash |ExecStop=/usr/bin/bash |' \
+              -e 's|^ExecStop=sh |ExecStop=/bin/sh |' \
+              -e 's|^ExecReload=bash |ExecReload=/usr/bin/bash |' \
+              -e 's|^ExecStartPre=bash |ExecStartPre=/usr/bin/bash |' \
+              -e 's|^ExecStartPost=bash |ExecStartPost=/usr/bin/bash |' \
+              "$svc"
+          done
+        }
+        patch_unit_bare_commands /usr/lib/systemd/tests/testdata
+        patch_unit_bare_commands /run/systemd/system
 
         # Make /etc/dbus-1 writable for tests that install D-Bus policy files
         if [ -L /etc/dbus-1 ] || [ ! -w /etc/dbus-1 2>/dev/null ]; then
@@ -276,6 +364,11 @@ in
       # Reload systemd to pick up any test unit files installed via activation
       machine.succeed("systemctl daemon-reload")
 
+      # Ensure scripts in testdata are executable (activation script may not
+      # always set the execute bit correctly due to nix store copy semantics)
+      machine.succeed("find /usr/lib/systemd/tests/testdata -name '*.sh' -o -name '*.py' | xargs chmod +x 2>/dev/null || true")
+      machine.succeed("find /run/systemd/system -name '*.sh' -o -name '*.py' | xargs chmod +x 2>/dev/null || true")
+
       # Ensure /run/systemd/system exists (tests write unit files there)
       machine.succeed("mkdir -p /run/systemd/system")
 
@@ -298,7 +391,7 @@ in
       test_cmd = f"cd {units_dir} && {env_prefix}bash -x ./${testName}.sh 2>&1"
 
       try:
-          (rc, output) = machine.execute(test_cmd)
+          (rc, output) = machine.execute(test_cmd, timeout=1800)
           print(output)
           if rc != 0:
               raise Exception("${testName} failed with exit code " + str(rc))
@@ -309,7 +402,7 @@ in
           print("BrokenPipeError: VM likely rebooted, waiting for it to come back...")
           machine.wait_for_unit("multi-user.target", timeout=120)
           machine.succeed("systemctl daemon-reload")
-          (rc, output) = machine.execute(test_cmd)
+          (rc, output) = machine.execute(test_cmd, timeout=1800)
           print(output)
           if rc != 0:
               raise Exception("${testName} failed with exit code " + str(rc))

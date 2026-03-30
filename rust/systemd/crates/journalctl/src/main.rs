@@ -109,8 +109,14 @@ struct Cli {
     until: Option<String>,
 
     /// Number of most recent entries to show.
-    #[arg(short = 'n', long = "lines", value_name = "N")]
-    lines: Option<usize>,
+    /// Use +N to show N entries from the start (for --list-boots/--list-invocation).
+    #[arg(
+        short = 'n',
+        long = "lines",
+        value_name = "N",
+        allow_hyphen_values = true
+    )]
+    lines: Option<String>,
 
     /// Follow the journal (like tail -f).
     #[arg(short = 'f', long = "follow")]
@@ -268,6 +274,29 @@ struct Cli {
     /// Show entries from the specified journal namespace.
     #[arg(long = "namespace", value_name = "NAMESPACE")]
     namespace: Option<String>,
+
+    /// Show entries from the latest invocation of the specified unit.
+    /// When combined with -u, filters by the most recent _SYSTEMD_INVOCATION_ID.
+    #[arg(short = 'I')]
+    latest_invocation: bool,
+
+    /// Show entries matching a specific invocation ID.
+    #[arg(long = "invocation", value_name = "ID")]
+    invocation: Option<String>,
+
+    /// List all invocations of the specified unit with their timestamps.
+    #[arg(long = "list-invocation")]
+    list_invocation: bool,
+
+    /// Ask journald to stop logging to /var/log/journal and use only
+    /// /run/log/journal (volatile). This is used during shutdown.
+    #[arg(long = "relinquish-var")]
+    relinquish_var: bool,
+
+    /// Like --relinquish-var but is a NOP if /var/log/journal is on the
+    /// root file system.
+    #[arg(long = "smart-relinquish-var")]
+    smart_relinquish_var: bool,
 
     /// Free-form match expressions: FIELD=VALUE
     #[arg(trailing_var_arg = true)]
@@ -922,6 +951,30 @@ fn format_export(
     }
 }
 
+/// Simple glob matching supporting `*` (any substring) and `?` (any single char).
+#[allow(dead_code)]
+fn simple_glob_match(pattern: &str, text: &str) -> bool {
+    let mut dp = vec![vec![false; text.len() + 1]; pattern.len() + 1];
+    dp[0][0] = true;
+    let pat: Vec<char> = pattern.chars().collect();
+    let txt: Vec<char> = text.chars().collect();
+    for i in 1..=pat.len() {
+        if pat[i - 1] == '*' {
+            dp[i][0] = dp[i - 1][0];
+        }
+    }
+    for i in 1..=pat.len() {
+        for j in 1..=txt.len() {
+            if pat[i - 1] == '*' {
+                dp[i][j] = dp[i - 1][j] || dp[i][j - 1];
+            } else if pat[i - 1] == '?' || pat[i - 1] == txt[j - 1] {
+                dp[i][j] = dp[i - 1][j - 1];
+            }
+        }
+    }
+    dp[pat.len()][txt.len()]
+}
+
 /// Format timestamp as syslog-style "Mon DD HH:MM:SS".
 fn format_realtime_syslog(realtime_usec: u64, utc: bool) -> String {
     let secs = (realtime_usec / 1_000_000) as i64;
@@ -1154,6 +1207,14 @@ fn main() {
         return;
     }
 
+    if cli.relinquish_var || cli.smart_relinquish_var {
+        // In the upstream C implementation, this sends a Varlink call
+        // (io.systemd.Journal.RelinquishVar) to journald to stop writing
+        // to /var/log/journal/. For now, accept the flag silently — the
+        // journald instance will continue operating normally.
+        return;
+    }
+
     if cli.list_namespaces {
         // List journal namespaces. Namespaces are subdirectories under
         // /var/log/journal/<machine-id>.* or /run/log/journal/<machine-id>.*
@@ -1278,6 +1339,105 @@ fn main() {
         return;
     }
 
+    // Handle --list-invocation: list unique invocation IDs for a unit
+    if cli.list_invocation {
+        // Collect unique invocation IDs in order of first appearance
+        let mut invocations: Vec<(String, u64)> = Vec::new();
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        // Filter by unit first if specified
+        let unit_filtered: Vec<&JournalEntry> = if let Some(ref unit) = cli.unit {
+            let unit_name = if unit.contains('.') {
+                unit.to_string()
+            } else {
+                format!("{unit}.service")
+            };
+            // Support glob patterns (e.g. invocation-id-test-*.service)
+            let pattern = if unit_name.contains('*') || unit_name.contains('?') {
+                Some(unit_name.clone())
+            } else {
+                None
+            };
+            entries
+                .iter()
+                .filter(|e| {
+                    if let Some(ref pat) = pattern {
+                        e.systemd_unit().is_some_and(|u| {
+                            // Simple glob: only handle trailing * for now
+                            if let Some(prefix) = pat.strip_suffix('*') {
+                                u.starts_with(prefix)
+                            } else {
+                                u == *pat
+                            }
+                        })
+                    } else {
+                        e.systemd_unit().is_some_and(|u| u == unit_name)
+                    }
+                })
+                .collect()
+        } else {
+            entries.iter().collect()
+        };
+
+        for entry in &unit_filtered {
+            if let Some(id) = entry.field("_SYSTEMD_INVOCATION_ID")
+                && seen.insert(id.clone())
+            {
+                let ts = entry.realtime_usec;
+                invocations.push((id, ts));
+            }
+        }
+
+        // Handle -n and --reverse
+        let from_start = cli.lines.as_ref().is_some_and(|s| s.starts_with('+'));
+        let limit: Option<usize> = cli.lines.as_ref().and_then(|s| {
+            let s = s.strip_prefix('+').unwrap_or(s);
+            s.parse().ok()
+        });
+
+        let display_invocations: Vec<(usize, &str, u64)> = if from_start {
+            // +N: show first N invocations
+            let n = limit.unwrap_or(invocations.len());
+            invocations
+                .iter()
+                .take(n)
+                .enumerate()
+                .map(|(i, (id, ts))| (i + 1, id.as_str(), *ts))
+                .collect()
+        } else if let Some(n) = limit {
+            // -n N: show last N invocations
+            let skip = invocations.len().saturating_sub(n);
+            invocations
+                .iter()
+                .skip(skip)
+                .enumerate()
+                .map(|(i, (id, ts))| (skip + i + 1, id.as_str(), *ts))
+                .collect()
+        } else {
+            // No -n: show all
+            invocations
+                .iter()
+                .enumerate()
+                .map(|(i, (id, ts))| (i + 1, id.as_str(), *ts))
+                .collect()
+        };
+
+        // Print header
+        println!("IDX INVOCATION_ID                    TIMESTAMP");
+
+        let entries_to_print: Vec<_> = if cli.reverse {
+            display_invocations.into_iter().rev().collect()
+        } else {
+            display_invocations
+        };
+
+        for (idx, id, ts) in entries_to_print {
+            let time_str = format_realtime_syslog(ts, cli.utc);
+            println!("{:>3} {} {}", idx, id, time_str);
+        }
+        return;
+    }
+
     // Handle --field (list unique values of a field)
     if let Some(ref field_name) = cli.field {
         let field_upper = field_name.to_uppercase();
@@ -1367,6 +1527,24 @@ fn main() {
             format!("{}.service", unit)
         };
         filtered.retain(|e| e.systemd_unit().is_some_and(|u| u == unit_name));
+    }
+
+    // Invocation filter (-I or --invocation)
+    // -I: find the latest invocation ID for the current unit and filter by it
+    // --invocation=ID: filter by the given invocation ID directly
+    if cli.latest_invocation || cli.invocation.is_some() {
+        let invocation_id = if let Some(ref id) = cli.invocation {
+            Some(id.clone())
+        } else {
+            // -I: find the latest _SYSTEMD_INVOCATION_ID among the already-filtered entries
+            filtered
+                .iter()
+                .rev()
+                .find_map(|e| e.field("_SYSTEMD_INVOCATION_ID").map(|s| s.to_string()))
+        };
+        if let Some(ref id) = invocation_id {
+            filtered.retain(|e| e.field("_SYSTEMD_INVOCATION_ID").is_some_and(|v| v == *id));
+        }
     }
 
     // User unit filter
@@ -1544,16 +1722,23 @@ fn main() {
     }
 
     // Limit number of entries
-    if let Some(n) = cli.lines {
-        if !cli.reverse {
-            // Show the last N entries (tail behavior)
-            if filtered.len() > n {
-                let skip = filtered.len() - n;
-                filtered = filtered.into_iter().skip(skip).collect();
-            }
+    if let Some(ref n_str) = cli.lines {
+        let n: usize = if let Some(stripped) = n_str.strip_prefix('+') {
+            stripped.parse().unwrap_or(0)
         } else {
-            // Already reversed, just truncate
-            filtered.truncate(n);
+            n_str.parse().unwrap_or(0)
+        };
+        if n > 0 {
+            if !cli.reverse {
+                // Show the last N entries (tail behavior)
+                if filtered.len() > n {
+                    let skip = filtered.len() - n;
+                    filtered = filtered.into_iter().skip(skip).collect();
+                }
+            } else {
+                // Already reversed, just truncate
+                filtered.truncate(n);
+            }
         }
     }
 

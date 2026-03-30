@@ -38,11 +38,12 @@ fn open_stdio(setting: &Option<StdIoOption>) -> Result<StdIo, String> {
         Some(StdIoOption::Inherit)
         | Some(StdIoOption::Journal)
         | Some(StdIoOption::Kmsg)
-        | Some(StdIoOption::Tty) => {
-            // For inherit/journal/kmsg/tty: use a pipe so the service manager can
-            // capture and forward the output. The exec_helper will handle
-            // overriding stdout/stderr to the TTY when StandardInput=tty is set
-            // or when StandardOutput/StandardError=tty is set independently.
+        | Some(StdIoOption::Tty)
+        | Some(StdIoOption::Socket) => {
+            // For inherit/journal/kmsg/tty/socket: use a pipe so the service
+            // manager can capture and forward the output. The exec_helper will
+            // handle overriding stdout/stderr to the TTY or socket fd when
+            // the appropriate StandardOutput/StandardError is set.
             let (r, w) = nix::unistd::pipe().unwrap();
             Ok(super::StdIo::Piped(r.into_raw_fd(), w.into_raw_fd()))
         }

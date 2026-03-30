@@ -1481,43 +1481,58 @@ fn stdout_socket_listener(state: Arc<JournaldState>, activated_listener: Option<
 
 /// Handle a single stdout stream connection.
 ///
-/// The connection starts with a header block (newline-separated KEY=VALUE)
-/// terminated by an empty line, followed by the actual log data (one line
-/// per log message).
+/// The stdout stream protocol sends a 7-line positional header:
+///   1. syslog identifier
+///   2. unit ID (empty for standalone processes)
+///   3. priority (decimal 0-7)
+///   4. level_prefix (0 or 1)
+///   5. forward_to_syslog (0 or 1) — ignored
+///   6. forward_to_kmsg (0 or 1) — ignored
+///   7. forward_to_console (0 or 1) — ignored
+///
+/// After the header, each subsequent line is a log message.
 fn handle_stdout_connection(stream: UnixStream, state: Arc<JournaldState>) {
     let reader = BufReader::new(stream);
     let mut lines = reader.lines();
 
-    // Parse the header: KEY=VALUE lines until an empty line
+    // Read the 7-line positional header
     let mut identifier = String::from("unknown");
     let mut priority: u8 = 6; // default: info
-    let mut level_prefix = true;
     let mut unit_name = String::new();
 
-    // Read header lines
-    loop {
-        match lines.next() {
-            Some(Ok(line)) => {
-                if line.is_empty() {
-                    break; // End of header
-                }
-                if let Some((key, value)) = line.split_once('=') {
-                    match key {
-                        "SYSLOG_IDENTIFIER" => identifier = value.to_string(),
-                        "PRIORITY" => {
-                            if let Ok(p) = value.parse::<u8>() {
-                                priority = p;
-                            }
-                        }
-                        "LEVEL_PREFIX" => level_prefix = value == "1" || value == "true",
-                        "_SYSTEMD_UNIT" | "UNIT" => unit_name = value.to_string(),
-                        _ => {}
-                    }
-                }
+    // Helper to read one header line
+    macro_rules! read_header_line {
+        () => {
+            match lines.next() {
+                Some(Ok(line)) => line,
+                _ => return,
             }
-            Some(Err(_)) | None => return,
-        }
+        };
     }
+
+    // Line 1: syslog identifier
+    let id_line = read_header_line!();
+    if !id_line.is_empty() {
+        identifier = id_line;
+    }
+    // Line 2: unit ID
+    let unit_line = read_header_line!();
+    if !unit_line.is_empty() {
+        unit_name = unit_line;
+    }
+    // Line 3: priority
+    if let Ok(p) = read_header_line!().parse::<u8>()
+        && p <= 7
+    {
+        priority = p;
+    }
+    // Line 4: level_prefix
+    let lp = read_header_line!();
+    let level_prefix = lp != "0";
+    // Lines 5-7: forward_to_syslog, forward_to_kmsg, forward_to_console (ignored)
+    let _ = read_header_line!();
+    let _ = read_header_line!();
+    let _ = read_header_line!();
 
     // Process log lines
     for line in lines {
@@ -1539,6 +1554,12 @@ fn handle_stdout_connection(stream: UnixStream, state: Arc<JournaldState>) {
         } else {
             (priority, line.as_str())
         };
+
+        // Strip trailing whitespace (matches C journald behavior)
+        let message = message.trim_end();
+        if message.is_empty() {
+            continue;
+        }
 
         let mut entry = JournalEntry::new();
         entry.set_field("MESSAGE", message);

@@ -154,4 +154,8 @@ impl UdpSocketConfig {
 #[derive(Clone, Debug)]
 pub struct Socket {
     pub activated: bool,
+    /// Monotonically increasing counter for generating Accept=yes instance names.
+    pub accept_counter: u64,
+    /// Number of currently active Accept=yes connections.
+    pub active_accept_connections: u64,
 }

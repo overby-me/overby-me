@@ -3885,6 +3885,9 @@ pub enum StdIoOption {
     File(PathBuf),
     /// Append to a specific file
     AppendFile(PathBuf),
+    /// Connect to the socket fd (for Accept=yes socket-activated services).
+    /// The socket fd (fd 3, the first LISTEN_FD) is dup'd to stdout/stderr.
+    Socket,
 }
 
 /// How stdin should be set up for the service process.
@@ -3900,6 +3903,10 @@ pub enum StandardInput {
     TtyForce,
     /// Like Tty, but fail if the TTY cannot be opened exclusively
     TtyFail,
+    /// stdin is connected to the socket fd (for Accept=yes socket-activated
+    /// services). The accepted connection fd (fd 3, the first LISTEN_FD) is
+    /// dup'd to stdin.
+    Socket,
 }
 
 #[derive(Clone, Eq, PartialEq, Debug)]

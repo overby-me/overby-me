@@ -841,6 +841,8 @@ mod tests {
             watchdog_usec_override: None,
             stored_fds: Vec::new(),
             notify_access_override: None,
+            accepted_fd: None,
+            accepted_peer_uid: None,
             notifications: None,
             notifications_path: None,
             stdout: None,

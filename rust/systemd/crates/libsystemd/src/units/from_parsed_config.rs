@@ -211,6 +211,8 @@ pub fn unit_from_parsed_service(conf: ParsedServiceConfig) -> Result<Unit, Strin
                     watchdog_usec_override: None,
                     stored_fds: Vec::new(),
                     notify_access_override: None,
+                    accepted_fd: None,
+                    accepted_peer_uid: None,
                     notifications: None,
                     notifications_path: None,
                     stdout: None,
@@ -319,7 +321,11 @@ pub fn unit_from_parsed_socket(conf: ParsedSocketConfig) -> Result<Unit, String>
             },
             state: RwLock::new(SocketState {
                 common: CommonState::default(),
-                sock: Socket { activated: false },
+                sock: Socket {
+                    activated: false,
+                    accept_counter: 0,
+                    active_accept_connections: 0,
+                },
             }),
         }),
     })

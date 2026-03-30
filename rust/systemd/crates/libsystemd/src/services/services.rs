@@ -142,6 +142,13 @@ pub struct Service {
     /// Use [`effective_notify_access()`] to get the effective value.
     pub notify_access_override: Option<NotifyKind>,
 
+    /// Accepted connection fd for Accept=yes socket-activated service instances.
+    /// When set, this fd is passed as LISTEN_FDS=1 (fd 3) instead of the
+    /// listening socket fd. Set by the socket activation thread after accept().
+    pub accepted_fd: Option<RawFd>,
+    /// Peer UID of the accepted connection (for MaxConnectionsPerSource tracking).
+    pub accepted_peer_uid: Option<u32>,
+
     pub notifications: Option<UnixDatagram>,
     pub notifications_path: Option<std::path::PathBuf>,
 
@@ -329,11 +336,9 @@ impl Service {
         if let Some(pgid) = self.process_group {
             return Err(ServiceErrorReason::AlreadyHasPID(pgid));
         }
-        if conf.accept {
-            return Err(ServiceErrorReason::Generic(
-                "Inetd style activation is not supported".into(),
-            ));
-        }
+        // Accept=yes services are started per-connection by the socket
+        // activation thread. The accepted fd is set on self.accepted_fd
+        // before start() is called.
         // Always start the service when start() is called.  If the service
         // has associated sockets, the socket units will already have been
         // activated (opened) before we get here thanks to Requires=/After=

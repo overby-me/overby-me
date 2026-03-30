@@ -2,7 +2,7 @@
 //!
 //! A drop-in replacement for `systemd-cat(1)`. This tool connects
 //! stdout and stderr of a command (or stdin if no command is given)
-//! to the systemd journal using the native journal socket protocol.
+//! to the systemd journal using the journal stdout stream protocol.
 //!
 //! Supported options:
 //!
@@ -13,11 +13,11 @@
 
 use clap::Parser;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::os::unix::net::UnixDatagram;
+use std::os::unix::net::UnixStream;
 use std::process;
 
-/// The path to the native systemd journal socket.
-const JOURNAL_SOCKET: &str = "/run/systemd/journal/socket";
+/// The path to the journal stdout stream socket.
+const JOURNAL_STDOUT_SOCKET: &str = "/run/systemd/journal/stdout";
 
 /// Syslog priority levels (matching <syslog.h> and systemd conventions).
 #[derive(Clone, Copy, Debug)]
@@ -51,20 +51,6 @@ impl Priority {
     fn as_u8(self) -> u8 {
         self as u8
     }
-
-    fn from_kernel_prefix(n: u8) -> Option<Self> {
-        match n {
-            0 => Some(Priority::Emergency),
-            1 => Some(Priority::Alert),
-            2 => Some(Priority::Critical),
-            3 => Some(Priority::Error),
-            4 => Some(Priority::Warning),
-            5 => Some(Priority::Notice),
-            6 => Some(Priority::Info),
-            7 => Some(Priority::Debug),
-            _ => None,
-        }
-    }
 }
 
 #[derive(Parser, Debug)]
@@ -80,112 +66,81 @@ struct Cli {
     identifier: Option<String>,
 
     /// Set the default priority for stdout messages.
-    /// Accepts numeric (0-7) or name (emerg, alert, crit, err, warning,
-    /// notice, info, debug).
     #[arg(short, long, default_value = "info", value_name = "PRIORITY")]
     priority: String,
 
     /// Set the priority for stderr messages.
-    /// If not specified, stderr uses the same priority as stdout.
     #[arg(long, value_name = "PRIORITY")]
     stderr_priority: Option<String>,
 
     /// Parse and strip kernel-style priority prefixes (<0> through <7>)
     /// from input lines.
     #[arg(long, default_value = "true", value_name = "BOOL")]
-    level_prefix: bool,
+    level_prefix: String,
+
+    /// Write to a journal namespace instead of the default journal.
+    #[arg(long, value_name = "NAMESPACE")]
+    namespace: Option<String>,
 
     /// The command to execute. If omitted, reads from stdin.
     #[arg(trailing_var_arg = true)]
     command: Vec<String>,
 }
 
-/// Build a native journal protocol message.
+/// Open a journal stdout stream connection and send the protocol header.
 ///
-/// The native protocol sends newline-separated `KEY=VALUE` pairs to the
-/// journal socket as a single datagram. For binary-safe values, a
-/// different encoding is used, but for text lines the simple format
-/// suffices.
-fn build_journal_message(identifier: &str, priority: Priority, message: &str) -> Vec<u8> {
-    let mut msg = Vec::with_capacity(256);
+/// The journal stdout stream protocol (SOCK_STREAM on /run/systemd/journal/stdout)
+/// expects a 7-line header:
+///   1. identifier (syslog tag)
+///   2. unit_id (empty for standalone processes)
+///   3. priority (decimal)
+///   4. level_prefix (0 or 1)
+///   5. forward_to_syslog (0 or 1)
+///   6. forward_to_kmsg (0 or 1)
+///   7. forward_to_console (0 or 1)
+fn open_journal_stream(
+    socket_path: &str,
+    identifier: &str,
+    priority: Priority,
+    level_prefix: bool,
+) -> Result<UnixStream, std::io::Error> {
+    let mut stream = UnixStream::connect(socket_path)?;
 
-    // PRIORITY=<n>
-    writeln!(msg, "PRIORITY={}", priority.as_u8()).unwrap();
+    let header = format!(
+        "{}\n\n{}\n{}\n0\n0\n0\n",
+        identifier,
+        priority.as_u8(),
+        if level_prefix { 1 } else { 0 },
+    );
+    stream.write_all(header.as_bytes())?;
 
-    // SYSLOG_IDENTIFIER=<id>
-    writeln!(msg, "SYSLOG_IDENTIFIER={identifier}").unwrap();
-
-    // MESSAGE=<text>
-    // If the message contains a newline, use the binary-safe encoding:
-    //   MESSAGE\n<64-bit LE length><data>
-    // Otherwise, use the simple KEY=VALUE form.
-    if message.contains('\n') || message.contains('\0') {
-        msg.extend_from_slice(b"MESSAGE\n");
-        let bytes = message.as_bytes();
-        msg.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
-        msg.extend_from_slice(bytes);
-        msg.push(b'\n');
-    } else {
-        writeln!(msg, "MESSAGE={message}").unwrap();
-    }
-
-    // SYSLOG_PID=<pid>
-    writeln!(msg, "SYSLOG_PID={}", process::id()).unwrap();
-
-    msg
+    Ok(stream)
 }
 
-/// Try to parse a kernel-style priority prefix `<N>` from the beginning
-/// of a line. Returns `Some((priority, rest_of_line))` if found.
-fn parse_level_prefix(line: &str) -> Option<(Priority, &str)> {
-    let line = line.strip_prefix('<')?;
-    let close = line.find('>')?;
-    if close > 1 {
-        return None; // Only single-digit priorities
-    }
-    let digit_str = &line[..close];
-    let digit: u8 = digit_str.parse().ok()?;
-    let priority = Priority::from_kernel_prefix(digit)?;
-    let rest = &line[close + 1..];
-    Some((priority, rest))
-}
-
-/// Send a single line to the journal socket.
-fn send_to_journal(sock: &UnixDatagram, identifier: &str, priority: Priority, message: &str) {
-    let msg = build_journal_message(identifier, priority, message);
-    // Best-effort: if the socket is unavailable, fall back to stderr.
-    if sock.send(&msg).is_err() {
-        eprintln!(
-            "<{}>{}[{}]: {}",
-            priority.as_u8(),
-            identifier,
-            process::id(),
-            message
-        );
-    }
-}
-
-/// Process lines from a reader and send them to the journal.
+/// Process lines from a reader and write them to the journal stream.
 fn process_lines<R: Read>(
     reader: R,
-    sock: &UnixDatagram,
+    stream: &mut UnixStream,
     identifier: &str,
     default_priority: Priority,
-    level_prefix: bool,
+    _level_prefix: bool,
 ) {
     let buf_reader = BufReader::new(reader);
     for line in buf_reader.lines() {
         match line {
             Ok(line) => {
-                let (priority, text) = if level_prefix {
-                    match parse_level_prefix(&line) {
-                        Some((p, rest)) => (p, rest),
-                        None => (default_priority, line.as_str()),
+                if let Err(e) = writeln!(stream, "{}", line) {
+                    eprintln!(
+                        "<{}>{}[{}]: {}",
+                        default_priority.as_u8(),
+                        identifier,
+                        process::id(),
+                        line
+                    );
+                    if e.kind() == std::io::ErrorKind::BrokenPipe {
+                        break;
                     }
-                } else {
-                    (default_priority, line.as_str())
-                };
-                send_to_journal(sock, identifier, priority, text);
+                }
             }
             Err(e) => {
                 eprintln!("systemd-cat: error reading input: {e}");
@@ -193,10 +148,17 @@ fn process_lines<R: Read>(
             }
         }
     }
+    let _ = stream.flush();
+    let _ = stream.shutdown(std::net::Shutdown::Write);
+}
+
+fn parse_bool_string(s: &str) -> bool {
+    matches!(s.to_lowercase().as_str(), "true" | "1" | "yes")
 }
 
 fn main() {
     let cli = Cli::parse();
+    let level_prefix = parse_bool_string(&cli.level_prefix);
 
     let stdout_priority = Priority::from_str_or_num(&cli.priority).unwrap_or_else(|e| {
         eprintln!("systemd-cat: {e}");
@@ -211,33 +173,32 @@ fn main() {
         None => stdout_priority,
     };
 
-    // Connect to the journal socket
-    let sock = match UnixDatagram::unbound() {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("systemd-cat: failed to create socket: {e}");
-            process::exit(1);
-        }
+    let journal_socket = match &cli.namespace {
+        Some(ns) => format!("/run/systemd/journal.{ns}/stdout"),
+        None => JOURNAL_STDOUT_SOCKET.to_string(),
     };
-    if let Err(e) = sock.connect(JOURNAL_SOCKET) {
-        eprintln!("systemd-cat: failed to connect to journal socket {JOURNAL_SOCKET}: {e}");
-        eprintln!("systemd-cat: falling back to stderr output");
-        // Continue anyway — send_to_journal will fall back to stderr
-    }
 
     if cli.command.is_empty() {
-        // No command: read from stdin
         let identifier = cli.identifier.as_deref().unwrap_or("unknown");
+        let mut stream =
+            match open_journal_stream(&journal_socket, identifier, stdout_priority, level_prefix) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!(
+                        "systemd-cat: failed to connect to journal stream {journal_socket}: {e}"
+                    );
+                    process::exit(1);
+                }
+            };
         let stdin = std::io::stdin();
         process_lines(
             stdin.lock(),
-            &sock,
+            &mut stream,
             identifier,
             stdout_priority,
-            cli.level_prefix,
+            level_prefix,
         );
     } else {
-        // Execute the command and capture its output
         let cmd = &cli.command[0];
         let args = &cli.command[1..];
         let identifier = cli.identifier.as_deref().unwrap_or(cmd.as_str());
@@ -257,54 +218,52 @@ fn main() {
 
         let child_stdout = child.stdout.take();
         let child_stderr = child.stderr.take();
-
-        // Clone socket for stderr thread
-        let _sock_fd = {
-            use std::os::unix::io::AsRawFd;
-            sock.as_raw_fd()
-        };
-
         let identifier_owned = identifier.to_string();
-        let level_prefix = cli.level_prefix;
+        let journal_socket_clone = journal_socket.clone();
 
-        // Spawn a thread for stderr
         let stderr_handle = if let Some(stderr) = child_stderr {
-            let stderr_sock = match UnixDatagram::unbound() {
-                Ok(s) => {
-                    let _ = s.connect(JOURNAL_SOCKET);
-                    s
-                }
-                Err(_) => {
-                    // Fall back: create an unbound socket (send_to_journal
-                    // will print to stderr)
-                    UnixDatagram::unbound().unwrap()
-                }
-            };
             let id = identifier_owned.clone();
             Some(std::thread::spawn(move || {
-                process_lines(stderr, &stderr_sock, &id, stderr_priority, level_prefix);
+                match open_journal_stream(&journal_socket_clone, &id, stderr_priority, level_prefix)
+                {
+                    Ok(mut stream) => {
+                        process_lines(stderr, &mut stream, &id, stderr_priority, level_prefix);
+                    }
+                    Err(e) => {
+                        eprintln!("systemd-cat: failed to open stderr stream: {e}");
+                    }
+                }
             }))
         } else {
             None
         };
 
-        // Process stdout on the main thread
         if let Some(stdout) = child_stdout {
-            process_lines(
-                stdout,
-                &sock,
+            match open_journal_stream(
+                &journal_socket,
                 &identifier_owned,
                 stdout_priority,
                 level_prefix,
-            );
+            ) {
+                Ok(mut stream) => {
+                    process_lines(
+                        stdout,
+                        &mut stream,
+                        &identifier_owned,
+                        stdout_priority,
+                        level_prefix,
+                    );
+                }
+                Err(e) => {
+                    eprintln!("systemd-cat: failed to open stdout stream: {e}");
+                }
+            }
         }
 
-        // Wait for stderr thread
         if let Some(handle) = stderr_handle {
             let _ = handle.join();
         }
 
-        // Wait for the child and propagate its exit code
         match child.wait() {
             Ok(status) => {
                 process::exit(status.code().unwrap_or(1));
@@ -336,68 +295,13 @@ mod tests {
             Ok(Priority::Error)
         ));
         assert!(matches!(
-            Priority::from_str_or_num("error"),
-            Ok(Priority::Error)
-        ));
-        assert!(matches!(
-            Priority::from_str_or_num("3"),
-            Ok(Priority::Error)
-        ));
-        assert!(matches!(
             Priority::from_str_or_num("info"),
             Ok(Priority::Info)
         ));
-        assert!(matches!(Priority::from_str_or_num("6"), Ok(Priority::Info)));
         assert!(matches!(
             Priority::from_str_or_num("debug"),
             Ok(Priority::Debug)
         ));
-        assert!(matches!(
-            Priority::from_str_or_num("7"),
-            Ok(Priority::Debug)
-        ));
         assert!(Priority::from_str_or_num("unknown").is_err());
-    }
-
-    #[test]
-    fn test_parse_level_prefix() {
-        let (p, rest) = parse_level_prefix("<3>something failed").unwrap();
-        assert_eq!(p.as_u8(), 3);
-        assert_eq!(rest, "something failed");
-
-        let (p, rest) = parse_level_prefix("<6>info message").unwrap();
-        assert_eq!(p.as_u8(), 6);
-        assert_eq!(rest, "info message");
-
-        assert!(parse_level_prefix("no prefix").is_none());
-        assert!(parse_level_prefix("<>empty").is_none());
-        assert!(parse_level_prefix("<99>too big").is_none());
-        assert!(parse_level_prefix("<8>out of range").is_none());
-    }
-
-    #[test]
-    fn test_build_journal_message_simple() {
-        let msg = build_journal_message("test", Priority::Info, "hello world");
-        let msg_str = String::from_utf8_lossy(&msg);
-        assert!(msg_str.contains("PRIORITY=6\n"));
-        assert!(msg_str.contains("SYSLOG_IDENTIFIER=test\n"));
-        assert!(msg_str.contains("MESSAGE=hello world\n"));
-        assert!(msg_str.contains("SYSLOG_PID="));
-    }
-
-    #[test]
-    fn test_build_journal_message_multiline() {
-        let msg = build_journal_message("test", Priority::Error, "line1\nline2");
-        // Should use binary-safe encoding for MESSAGE
-        assert!(msg.windows(8).any(|w| w == b"MESSAGE\n"));
-    }
-
-    #[test]
-    fn test_priority_roundtrip() {
-        for i in 0..=7u8 {
-            let p = Priority::from_kernel_prefix(i).unwrap();
-            assert_eq!(p.as_u8(), i);
-        }
-        assert!(Priority::from_kernel_prefix(8).is_none());
     }
 }

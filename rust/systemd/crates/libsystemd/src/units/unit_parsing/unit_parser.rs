@@ -1127,6 +1127,7 @@ fn make_stdio_option(setting: &str) -> Result<StdIoOption, ParsingErrorReason> {
         "tty" => Ok(StdIoOption::Tty),
         "journal" | "syslog" | "journal+console" | "syslog+console" => Ok(StdIoOption::Journal),
         "kmsg" | "kmsg+console" => Ok(StdIoOption::Kmsg),
+        "socket" => Ok(StdIoOption::Socket),
         _ if setting.starts_with("file:") => {
             let p = setting.trim_start_matches("file:");
             Ok(StdIoOption::File(p.into()))
@@ -1479,6 +1480,7 @@ pub fn parse_exec_section(
                     "tty" => super::StandardInput::Tty,
                     "tty-force" => super::StandardInput::TtyForce,
                     "tty-fail" => super::StandardInput::TtyFail,
+                    "socket" => super::StandardInput::Socket,
                     other => {
                         trace!("Unsupported StandardInput={}, falling back to null", other);
                         super::StandardInput::Null

@@ -1743,8 +1743,8 @@ fn handle_response(
                 println!("{s}");
             }
         }
-        "help" => {
-            // systemctl help <unit> — success, nothing to print
+        "help" | "reload" => {
+            // systemctl help <unit> / daemon-reload — success, nothing to print
         }
         "mask" => {
             if let Some(result) = result

@@ -147,30 +147,51 @@ fn start_service_with_filedescriptors(
     let mut fds = Vec::new();
     let mut names = Vec::new();
 
-    for socket in &conf.sockets {
-        // Skip sockets whose FDs aren't in the store — this can happen when
-        // a socket unit's conditions failed (e.g. ConditionSecurity=audit on
-        // systemd-journald-audit.socket) and the socket was never opened.
-        let Some(global_fds) = fd_store.get_global(&socket.name) else {
-            log::trace!(
-                "Socket {} has no FDs in store (condition-skipped?), skipping for service {name}",
-                socket.name
-            );
-            continue;
+    // For Accept=yes service instances, use the accepted connection fd
+    // instead of the listening socket fds.
+    if let Some(accepted_fd) = srvc.accepted_fd {
+        fds.push(accepted_fd);
+        // Use the socket's FileDescriptorName if available, otherwise "connection"
+        let fd_name = if !conf.sockets.is_empty() {
+            if let Some(global_fds) = fd_store.get_global(&conf.sockets[0].name) {
+                if let Some((_, name, _)) = global_fds.first() {
+                    name.clone()
+                } else {
+                    "connection".to_string()
+                }
+            } else {
+                "connection".to_string()
+            }
+        } else {
+            "connection".to_string()
         };
+        names.push(fd_name);
+    } else {
+        for socket in &conf.sockets {
+            // Skip sockets whose FDs aren't in the store — this can happen when
+            // a socket unit's conditions failed (e.g. ConditionSecurity=audit on
+            // systemd-journald-audit.socket) and the socket was never opened.
+            let Some(global_fds) = fd_store.get_global(&socket.name) else {
+                log::trace!(
+                    "Socket {} has no FDs in store (condition-skipped?), skipping for service {name}",
+                    socket.name
+                );
+                continue;
+            };
 
-        let sock_fds = global_fds
-            .iter()
-            .map(|(_, _, fd)| fd.as_raw_fd())
-            .collect::<Vec<_>>();
+            let sock_fds = global_fds
+                .iter()
+                .map(|(_, _, fd)| fd.as_raw_fd())
+                .collect::<Vec<_>>();
 
-        let sock_names = global_fds
-            .iter()
-            .map(|(_, name, _)| name.clone())
-            .collect::<Vec<_>>();
+            let sock_names = global_fds
+                .iter()
+                .map(|(_, name, _)| name.clone())
+                .collect::<Vec<_>>();
 
-        fds.extend(sock_fds);
-        names.extend(sock_names);
+            fds.extend(sock_fds);
+            names.extend(sock_names);
+        }
     }
 
     // Also pass any file descriptors stored via FDSTORE=1 sd_notify messages.
@@ -445,6 +466,8 @@ fn start_service_with_filedescriptors(
             conf.exec_config.stderr_path,
             Some(StdIoOption::AppendFile(_))
         ),
+        stdout_is_socket: matches!(conf.exec_config.stdout_path, Some(StdIoOption::Socket)),
+        stderr_is_socket: matches!(conf.exec_config.stderr_path, Some(StdIoOption::Socket)),
         ambient_capabilities: conf.exec_config.ambient_capabilities.clone(),
 
         // Security & sandboxing directives

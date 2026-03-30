@@ -315,6 +315,14 @@ pub struct ExecHelperConfig {
     /// When true AND stdin is a TTY, stderr will be dup'd from the TTY fd.
     #[serde(default = "default_true")]
     pub stderr_is_inherit: bool,
+    /// Whether StandardOutput is set to socket (for Accept=yes services).
+    /// When true, stdout (fd 1) is dup'd from the first LISTEN_FD (fd 3).
+    #[serde(default)]
+    pub stdout_is_socket: bool,
+    /// Whether StandardError is set to socket (for Accept=yes services).
+    /// When true, stderr (fd 2) is dup'd from the first LISTEN_FD (fd 3).
+    #[serde(default)]
+    pub stderr_is_socket: bool,
     /// Whether StandardOutput is explicitly set to tty.
     /// When true AND stdin is NOT a TTY, the TTY is opened independently for stdout.
     #[serde(default)]
@@ -958,7 +966,7 @@ fn setup_tty_output(config: &ExecHelperConfig) {
     // already dup2'd the TTY fd onto stdout/stderr via stdout_is_inherit).
     match config.stdin_option {
         StandardInput::Tty | StandardInput::TtyForce | StandardInput::TtyFail => return,
-        StandardInput::Null => {}
+        StandardInput::Null | StandardInput::Socket => {}
     }
 
     let tty_path = config
@@ -1018,6 +1026,15 @@ fn setup_stdin(config: &ExecHelperConfig) {
                     libc::dup2(null_fd, libc::STDIN_FILENO);
                     libc::close(null_fd);
                 }
+            }
+        }
+        StandardInput::Socket => {
+            // For Accept=yes socket-activated services, dup the first
+            // LISTEN_FD (fd 3) to stdin. The accepted connection fd was
+            // placed at fd 3 by the fork_child fd duplication logic.
+            let listen_fd = libc::STDERR_FILENO + 1; // fd 3
+            unsafe {
+                libc::dup2(listen_fd, libc::STDIN_FILENO);
             }
         }
         StandardInput::Tty | StandardInput::TtyForce | StandardInput::TtyFail => {
@@ -1252,6 +1269,22 @@ pub fn run_exec_helper() {
             unsafe {
                 libc::dup2(fd, libc::STDERR_FILENO);
                 libc::close(fd);
+            }
+        }
+    }
+
+    // StandardOutput=socket / StandardError=socket: dup the first LISTEN_FD
+    // (fd 3) to stdout/stderr. Used by Accept=yes socket-activated services.
+    {
+        let listen_fd = libc::STDERR_FILENO + 1; // fd 3
+        if config.stdout_is_socket {
+            unsafe {
+                libc::dup2(listen_fd, libc::STDOUT_FILENO);
+            }
+        }
+        if config.stderr_is_socket {
+            unsafe {
+                libc::dup2(listen_fd, libc::STDERR_FILENO);
             }
         }
     }
