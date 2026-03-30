@@ -318,15 +318,23 @@ impl JournalEntry {
     pub fn to_export_format(&self, cursor: &str) -> Vec<u8> {
         let mut out = Vec::with_capacity(1024);
 
-        // Address fields
+        // Address / pseudo-fields (always present, not affected by --output-fields)
         out.extend_from_slice(format!("__CURSOR={}\n", cursor).as_bytes());
         out.extend_from_slice(format!("__REALTIME_TIMESTAMP={}\n", self.realtime_usec).as_bytes());
         out.extend_from_slice(
             format!("__MONOTONIC_TIMESTAMP={}\n", self.monotonic_usec).as_bytes(),
         );
+        out.extend_from_slice(format!("__SEQNUM={}\n", self.seqnum).as_bytes());
+        out.extend_from_slice(b"__SEQNUM_ID=0\n");
+        if let Some(boot_id) = self.boot_id() {
+            out.extend_from_slice(format!("_BOOT_ID={}\n", boot_id).as_bytes());
+        }
 
-        // User and trusted fields
+        // User and trusted fields (skip _BOOT_ID — already in header above)
         for (key, value) in &self.fields {
+            if key == "_BOOT_ID" {
+                continue;
+            }
             if is_binary_safe(value) {
                 out.extend_from_slice(key.as_bytes());
                 out.push(b'=');

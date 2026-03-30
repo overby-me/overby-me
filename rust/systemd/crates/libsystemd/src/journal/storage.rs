@@ -492,6 +492,19 @@ impl JournalStorage {
         Ok(storage)
     }
 
+    /// Open journal storage in read-only mode.  Does not create directories
+    /// or files and does not open any write handles.
+    pub fn open_read_only(config: StorageConfig) -> io::Result<Self> {
+        let machine_id = read_machine_id();
+
+        Ok(JournalStorage {
+            config,
+            active_file: None,
+            next_seqnum: 0,
+            machine_id,
+        })
+    }
+
     /// Append a journal entry.  Handles rotation if the active file is
     /// too large.  Returns the assigned sequence number.
     pub fn append(&mut self, entry: &JournalEntry) -> io::Result<u64> {
@@ -597,6 +610,8 @@ impl JournalStorage {
             && let Some(ref mut writer) = file.writer
         {
             writer.flush()?;
+            // fsync to ensure data is visible to other processes
+            writer.get_ref().sync_all()?;
         }
         Ok(())
     }
@@ -687,14 +702,20 @@ impl JournalStorage {
         let mut files = list_journal_files(&journal_dir)?;
         files.sort();
 
+        // Scan ALL files to find the highest tail_seqnum, ensuring the
+        // counter never goes backwards even if files sort out of order.
+        for path in &files {
+            if let Ok(jf) = JournalFile::open(path, false)
+                && jf.header.tail_seqnum >= self.next_seqnum
+            {
+                self.next_seqnum = jf.header.tail_seqnum + 1;
+            }
+        }
+
         if let Some(newest) = files.last() {
             // Try to open the newest file for appending
             match JournalFile::open(newest, true) {
                 Ok(jf) => {
-                    // Resume sequence numbers from where this file left off
-                    if jf.header.tail_seqnum >= self.next_seqnum {
-                        self.next_seqnum = jf.header.tail_seqnum + 1;
-                    }
                     // Only reuse if it's under the size limit
                     if jf.size() < self.config.max_file_size {
                         self.active_file = Some(jf);
@@ -718,13 +739,14 @@ impl JournalStorage {
     fn create_new_active_file(&mut self) -> io::Result<()> {
         let journal_dir = self.config.directory.join(&self.machine_id);
 
-        // File name format: system@<hex-random>-<timestamp>.journal
+        // File name format: system@<timestamp>-<hex-random>.journal
+        // Timestamp comes first so alphabetical sort matches creation order.
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_micros();
         let random_part = generate_random_u128() & 0xFFFF_FFFF;
-        let filename = format!("system@{:08x}-{:016x}.journal", random_part, timestamp);
+        let filename = format!("system@{:016x}-{:08x}.journal", timestamp, random_part);
         let path = journal_dir.join(filename);
 
         let jf = JournalFile::create(&path)?;

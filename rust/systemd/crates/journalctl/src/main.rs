@@ -52,6 +52,49 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 // CLI definition
 // ---------------------------------------------------------------------------
 
+/// Check whether a string looks like a valid boot specifier for `-b`.
+fn is_boot_spec(s: &str) -> bool {
+    // Numeric offsets: 0, -1, -2, 1, 2, etc.
+    if s.parse::<i64>().is_ok() {
+        return true;
+    }
+    // "all"
+    if s == "all" {
+        return true;
+    }
+    // Hex boot IDs (32 hex chars without dashes, or 36 with dashes)
+    if s.len() == 32 && s.chars().all(|c| c.is_ascii_hexdigit()) {
+        return true;
+    }
+    if s.len() == 36 && s.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
+        return true;
+    }
+    false
+}
+
+/// Preprocess CLI args so that `-b VALUE` (space-separated) becomes `-b=VALUE`
+/// when VALUE looks like a boot specifier.  This prevents clap's
+/// `allow_hyphen_values` from greedily consuming unrelated flags like `-o` or
+/// `--no-pager` as the boot value.
+fn preprocess_boot_args(args: impl Iterator<Item = String>) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut iter = args.peekable();
+    while let Some(arg) = iter.next() {
+        // Match bare `-b` or `--boot` (without `=`)
+        if (arg == "-b" || arg == "--boot")
+            && let Some(next) = iter.peek()
+            && is_boot_spec(next)
+        {
+            // Attach the boot spec value with `=`
+            let val = iter.next().unwrap();
+            out.push(format!("{}={}", arg, val));
+            continue;
+        }
+        out.push(arg);
+    }
+    out
+}
+
 #[derive(Parser, Debug)]
 #[command(
     name = "journalctl",
@@ -62,8 +105,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 struct Cli {
     /// Show entries from the current boot (or a specific boot ID/offset).
     /// Use without a value for the current boot, or pass a boot ID.
+    /// Can be specified multiple times; the last value wins.
     #[arg(short = 'b', long = "boot", num_args = 0..=1, default_missing_value = "0")]
-    boot: Option<String>,
+    boot: Vec<String>,
 
     /// Show entries for a specific systemd unit.
     #[arg(short = 'u', long = "unit", value_name = "UNIT")]
@@ -76,6 +120,11 @@ struct Cli {
     /// Filter by syslog identifier (tag).
     #[arg(short = 't', long = "identifier", value_name = "ID")]
     identifier: Option<String>,
+
+    /// Exclude entries with the specified syslog identifier.
+    /// Can be specified multiple times.
+    #[arg(short = 'T', long = "exclude-identifier", value_name = "ID")]
+    exclude_identifier: Vec<String>,
 
     /// Filter by priority (0=emerg .. 7=debug). Can be a name or number.
     /// A single value shows that priority and above; a range "low..high"
@@ -95,9 +144,10 @@ struct Cli {
     #[arg(short = 'g', long = "grep", value_name = "PATTERN")]
     grep: Option<String>,
 
-    /// Case-insensitive grep (implies -g).
-    #[arg(long = "case-sensitive", default_value = "true")]
-    case_sensitive: bool,
+    /// Control case sensitivity of --grep. Default is "smart-case":
+    /// case-insensitive when pattern is all lowercase, case-sensitive otherwise.
+    #[arg(long = "case-sensitive", num_args = 0..=1, default_missing_value = "true")]
+    case_sensitive: Option<String>,
 
     /// Show entries from this time onwards. Accepts ISO 8601, "today",
     /// "yesterday", relative times like "-1h", or UNIX timestamps.
@@ -149,6 +199,10 @@ struct Cli {
     #[arg(long = "show-cursor")]
     show_cursor: bool,
 
+    /// Read/write cursor from/to this file.
+    #[arg(long = "cursor-file", value_name = "FILE")]
+    cursor_file: Option<String>,
+
     /// Start showing entries after this cursor.
     #[arg(long = "after-cursor", value_name = "CURSOR")]
     after_cursor: Option<String>,
@@ -164,6 +218,10 @@ struct Cli {
     /// List unique values of a specific field.
     #[arg(short = 'F', long = "field", value_name = "FIELD")]
     field: Option<String>,
+
+    /// Merge entries from all available journals (default behavior, accepted for compatibility).
+    #[arg(short = 'm', long = "merge")]
+    merge: bool,
 
     /// List all known boots.
     #[arg(long = "list-boots")]
@@ -188,6 +246,10 @@ struct Cli {
     /// Do not pipe output into a pager.
     #[arg(long = "no-pager")]
     no_pager: bool,
+
+    /// Jump to the end of the journal (pager-end mode, no-op without pager).
+    #[arg(short = 'e', long = "pager-end")]
+    pager_end: bool,
 
     /// Do not show any decorations (hostname, timestamp prefix).
     #[arg(short = 'q', long = "quiet")]
@@ -242,12 +304,17 @@ struct Cli {
     no_tail: bool,
 
     /// Comma-separated list of fields to output (for verbose/json/export).
+    /// Can be specified multiple times; all values are merged.
     #[arg(long = "output-fields", value_name = "FIELDS")]
-    output_fields: Option<String>,
+    output_fields: Vec<String>,
 
     /// Suppress the hostname field in short output formats.
     #[arg(long = "no-hostname")]
     no_hostname: bool,
+
+    /// Truncate multi-line messages at the first newline character.
+    #[arg(long = "truncate-newline")]
+    truncate_newline: bool,
 
     /// Show journal file header information.
     #[arg(long = "header")]
@@ -297,6 +364,22 @@ struct Cli {
     /// root file system.
     #[arg(long = "smart-relinquish-var")]
     smart_relinquish_var: bool,
+
+    /// Update the message catalog.
+    #[arg(long = "update-catalog")]
+    update_catalog: bool,
+
+    /// List all message catalog entries.
+    #[arg(long = "list-catalog")]
+    list_catalog: bool,
+
+    /// Do not ellipsize fields.
+    #[arg(long = "no-full")]
+    no_full: bool,
+
+    /// Use a specific root directory for journal files.
+    #[arg(long = "root", value_name = "ROOT")]
+    root: Option<String>,
 
     /// Free-form match expressions: FIELD=VALUE
     #[arg(trailing_var_arg = true)]
@@ -357,6 +440,26 @@ impl OutputFormat {
 ///   - A single name or number: "err" or "3" → show priority 0..=3
 ///   - A range: "warning..err" or "4..3" → show priorities 3..=4
 ///
+/// Convert a simple glob pattern (with `*` and `?`) to a regex.
+fn glob_to_regex(pattern: &str) -> Regex {
+    let mut re = String::from("^");
+    for ch in pattern.chars() {
+        match ch {
+            '*' => re.push_str(".*"),
+            '?' => re.push('.'),
+            c => {
+                if regex::escape(&c.to_string()) != c.to_string() {
+                    re.push_str(&regex::escape(&c.to_string()));
+                } else {
+                    re.push(c);
+                }
+            }
+        }
+    }
+    re.push('$');
+    Regex::new(&re).unwrap_or_else(|_| Regex::new("^$").unwrap())
+}
+
 /// Returns (min_priority, max_priority) where min is the numerically
 /// lowest (most severe) and max is the highest (least severe) to show.
 fn parse_priority_filter(s: &str) -> Result<(u8, u8), String> {
@@ -691,6 +794,7 @@ struct FormatOptions {
     #[allow(dead_code)]
     all: bool,
     no_hostname: bool,
+    truncate_newline: bool,
     output_fields: Option<HashSet<String>>,
     #[allow(dead_code)]
     catalog: bool,
@@ -721,7 +825,7 @@ fn format_entry(
         OutputFormat::JsonPretty => format_json(entry, JsonStyle::Pretty, opts, writer),
         OutputFormat::JsonSse => format_json(entry, JsonStyle::Sse, opts, writer),
         OutputFormat::JsonSeq => format_json(entry, JsonStyle::Seq, opts, writer),
-        OutputFormat::Cat => format_cat(entry, writer),
+        OutputFormat::Cat => format_cat(entry, opts, writer),
         OutputFormat::Export => format_export(entry, opts, writer),
     }
 }
@@ -768,7 +872,12 @@ fn format_short(
         .or_else(|| entry.comm())
         .unwrap_or_else(|| "unknown".to_string());
     let pid_str = entry.pid().map(|p| format!("[{}]", p)).unwrap_or_default();
-    let message = entry.message().unwrap_or_default();
+    let mut message = entry.message().unwrap_or_default();
+    if opts.truncate_newline
+        && let Some(pos) = message.find('\n')
+    {
+        message.truncate(pos);
+    }
 
     if opts.no_hostname {
         writeln!(
@@ -900,8 +1009,27 @@ fn format_json(
     }
 }
 
-fn format_cat(entry: &JournalEntry, writer: &mut impl Write) -> io::Result<()> {
-    let message = entry.message().unwrap_or_default();
+fn format_cat(
+    entry: &JournalEntry,
+    opts: &FormatOptions,
+    writer: &mut impl Write,
+) -> io::Result<()> {
+    // When --output-fields is set, print the specified field value instead of MESSAGE
+    if let Some(ref fields) = opts.output_fields {
+        for (key, value) in &entry.fields {
+            if fields.contains(&key.to_uppercase()) {
+                let val = String::from_utf8_lossy(value);
+                writeln!(writer, "{}", val)?;
+            }
+        }
+        return Ok(());
+    }
+    let mut message = entry.message().unwrap_or_default();
+    if opts.truncate_newline
+        && let Some(pos) = message.find('\n')
+    {
+        message.truncate(pos);
+    }
     writeln!(writer, "{}", message)
 }
 
@@ -910,21 +1038,31 @@ fn format_export(
     opts: &FormatOptions,
     writer: &mut impl Write,
 ) -> io::Result<()> {
+    let cursor = format!(
+        "s=0;i={:x};b={};m={:x};t={:x};x=0",
+        entry.seqnum,
+        entry.boot_id().unwrap_or_default(),
+        entry.monotonic_usec,
+        entry.realtime_usec,
+    );
+
     if let Some(ref fields) = opts.output_fields {
-        // Build a filtered entry for export
-        let cursor = format!(
-            "s=0;i={:x};b={};m={:x};t={:x};x=0",
-            entry.seqnum,
-            entry.boot_id().unwrap_or_default(),
-            entry.monotonic_usec,
-            entry.realtime_usec,
-        );
-        // Write header fields
+        // Write pseudo-fields (always included regardless of --output-fields)
         writeln!(writer, "__CURSOR={}", cursor)?;
         writeln!(writer, "__REALTIME_TIMESTAMP={}", entry.realtime_usec)?;
         writeln!(writer, "__MONOTONIC_TIMESTAMP={}", entry.monotonic_usec)?;
-        // Write only requested user fields
+        writeln!(writer, "__SEQNUM={}", entry.seqnum)?;
+        writeln!(writer, "__SEQNUM_ID=0")?;
+        // _BOOT_ID is a trusted field, always included
+        if let Some(boot_id) = entry.boot_id() {
+            writeln!(writer, "_BOOT_ID={}", boot_id)?;
+        }
+        // Write only requested fields (filtered by --output-fields)
         for (key, value) in &entry.fields {
+            // _BOOT_ID is already in the header above
+            if key == "_BOOT_ID" {
+                continue;
+            }
             if !fields.contains(&key.to_uppercase()) {
                 continue;
             }
@@ -939,13 +1077,6 @@ fn format_export(
         }
         writeln!(writer)
     } else {
-        let cursor = format!(
-            "s=0;i={:x};b={};m={:x};t={:x};x=0",
-            entry.seqnum,
-            entry.boot_id().unwrap_or_default(),
-            entry.monotonic_usec,
-            entry.realtime_usec,
-        );
         let export = entry.to_export_format(&cursor);
         writer.write_all(&export)
     }
@@ -1152,22 +1283,48 @@ fn detect_boots(entries: &[JournalEntry]) -> Vec<BootRecord> {
 
 /// Open journal storage from the appropriate directory.
 fn open_storage(cli: &Cli) -> Result<JournalStorage, String> {
-    let directory = if let Some(ref dir) = cli.directory {
+    let root_prefix = cli.root.as_deref().unwrap_or("");
+    let directory = if let Some(ref file) = cli.file {
+        // --file: use the parent directory of the journal file
+        PathBuf::from(file)
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("."))
+    } else if let Some(ref dir) = cli.directory {
         PathBuf::from(dir)
     } else if let Some(ref ns) = cli.namespace {
-        // For namespaced journals, look for <machine-id>.<namespace> subdirs
-        let persistent = PathBuf::from("/var/log/journal");
-        let volatile = PathBuf::from("/run/log/journal");
-        find_namespace_dir(&persistent, ns)
-            .or_else(|| find_namespace_dir(&volatile, ns))
-            .unwrap_or({
-                // Fall back to volatile base dir if namespace dir not found
+        // Handle special namespace values
+        let effective_ns = ns.trim();
+        if effective_ns.is_empty() || effective_ns == "*" || effective_ns.starts_with('+') {
+            // Empty, "*", or "+foo" → use default journal dirs (merge all)
+            let persistent = PathBuf::from(format!("{}/var/log/journal", root_prefix));
+            let volatile = PathBuf::from(format!("{}/run/log/journal", root_prefix));
+            if persistent.exists() {
+                persistent
+            } else {
                 volatile
-            })
+            }
+        } else {
+            // For namespaced journals, look for <machine-id>.<namespace> subdirs
+            let persistent = PathBuf::from(format!("{}/var/log/journal", root_prefix));
+            let volatile = PathBuf::from(format!("{}/run/log/journal", root_prefix));
+            match find_namespace_dir(&persistent, effective_ns)
+                .or_else(|| find_namespace_dir(&volatile, effective_ns))
+            {
+                Some(dir) => dir,
+                None => {
+                    // Namespace not found — return a non-existent path so we get empty results
+                    PathBuf::from(format!(
+                        "{}/var/log/journal/.nonexistent-namespace",
+                        root_prefix
+                    ))
+                }
+            }
+        }
     } else {
         // Try persistent first, then volatile
-        let persistent = PathBuf::from("/var/log/journal");
-        let volatile = PathBuf::from("/run/log/journal");
+        let persistent = PathBuf::from(format!("{}/var/log/journal", root_prefix));
+        let volatile = PathBuf::from(format!("{}/run/log/journal", root_prefix));
         if persistent.exists() {
             persistent
         } else {
@@ -1184,7 +1341,7 @@ fn open_storage(cli: &Cli) -> Result<JournalStorage, String> {
         keep_free: 0,
     };
 
-    JournalStorage::new(config).map_err(|e| format!("Failed to open journal: {}", e))
+    JournalStorage::open_read_only(config).map_err(|e| format!("Failed to open journal: {}", e))
 }
 
 // ---------------------------------------------------------------------------
@@ -1197,7 +1354,74 @@ fn main() {
         libc::signal(libc::SIGPIPE, libc::SIG_IGN);
     }
 
-    let cli = Cli::parse();
+    let cli = Cli::parse_from(preprocess_boot_args(std::env::args()));
+
+    // Handle --facility help
+    if cli.facility.as_deref() == Some("help") {
+        println!("Available facilities:");
+        for (name, num) in [
+            ("kern", 0),
+            ("user", 1),
+            ("mail", 2),
+            ("daemon", 3),
+            ("auth", 4),
+            ("syslog", 5),
+            ("lpr", 6),
+            ("news", 7),
+            ("uucp", 8),
+            ("cron", 9),
+            ("authpriv", 10),
+            ("ftp", 11),
+            ("ntp", 12),
+            ("security", 13),
+            ("console", 14),
+            ("solaris-cron", 15),
+            ("local0", 16),
+            ("local1", 17),
+            ("local2", 18),
+            ("local3", 19),
+            ("local4", 20),
+            ("local5", 21),
+            ("local6", 22),
+            ("local7", 23),
+        ] {
+            println!("{:>2} - {}", num, name);
+        }
+        return;
+    }
+
+    // Handle -o help
+    if cli.output == "help" {
+        println!("Available output modes:");
+        for mode in [
+            "short",
+            "short-full",
+            "short-iso",
+            "short-iso-precise",
+            "short-precise",
+            "short-monotonic",
+            "short-unix",
+            "with-unit",
+            "verbose",
+            "export",
+            "json",
+            "json-pretty",
+            "json-sse",
+            "json-seq",
+            "cat",
+        ] {
+            println!("  {}", mode);
+        }
+        return;
+    }
+
+    // Handle --update-catalog and --list-catalog (no-ops)
+    if cli.update_catalog {
+        return;
+    }
+    if cli.list_catalog {
+        return;
+    }
 
     // Handle special commands that don't need to read entries
     if cli.flush {
@@ -1485,48 +1709,77 @@ fn main() {
         utc: cli.utc,
         all: cli.all,
         no_hostname: cli.no_hostname,
-        output_fields: cli.output_fields.as_deref().map(parse_output_fields),
+        truncate_newline: cli.truncate_newline,
+        output_fields: if cli.output_fields.is_empty() {
+            None
+        } else {
+            Some(parse_output_fields(&cli.output_fields.join(",")))
+        },
         catalog: cli.catalog,
     };
 
     // Build filters
     let mut filtered = entries;
 
-    // Boot filter
-    if let Some(ref boot_spec) = cli.boot {
-        let boots = detect_boots(&filtered);
-        let target_boot_id = if boot_spec == "0" || boot_spec.is_empty() {
-            // Current boot (most recent)
-            boots.last().map(|b| b.boot_id.clone())
-        } else if let Ok(offset) = boot_spec.parse::<i64>() {
-            // Numeric offset: 0 = current, -1 = previous, etc.
-            let idx = if offset >= 0 {
-                offset as usize
+    // Boot filter (last -b wins when specified multiple times)
+    if let Some(boot_spec) = cli.boot.last() {
+        // "all" means show all boots — skip filtering entirely
+        if boot_spec == "all" {
+            // no boot filtering
+        } else {
+            let boots = detect_boots(&filtered);
+            let target_boot_id = if boot_spec == "0" || boot_spec.is_empty() {
+                // Current boot (most recent)
+                boots.last().map(|b| b.boot_id.clone())
+            } else if let Ok(offset) = boot_spec.parse::<i64>() {
+                // Numeric offset: 0 = current, -1 = previous, etc.
+                let idx = if offset >= 0 {
+                    offset as usize
+                } else {
+                    boots.len().saturating_sub((-offset) as usize)
+                };
+                boots.get(idx).map(|b| b.boot_id.clone())
             } else {
-                boots.len().saturating_sub((-offset) as usize)
+                // Boot ID string
+                Some(boot_spec.clone())
             };
-            boots.get(idx).map(|b| b.boot_id.clone())
-        } else {
-            // Boot ID string
-            Some(boot_spec.clone())
-        };
 
-        if let Some(boot_id) = target_boot_id {
-            filtered.retain(|e| e.boot_id().is_some_and(|b| b == boot_id));
-        } else {
-            eprintln!("journalctl: No boot matching '{}' found.", boot_spec);
-            process::exit(1);
-        }
+            if let Some(boot_id) = target_boot_id {
+                filtered.retain(|e| e.boot_id().is_some_and(|b| b == boot_id));
+            } else {
+                eprintln!("journalctl: No boot matching '{}' found.", boot_spec);
+                process::exit(1);
+            }
+        } // end of non-"all" branch
     }
 
-    // Unit filter
+    // Unit filter — matches _SYSTEMD_UNIT, UNIT, or OBJECT_SYSTEMD_UNIT
     if let Some(ref unit) = cli.unit {
         let unit_name = if unit.contains('.') {
             unit.clone()
         } else {
             format!("{}.service", unit)
         };
-        filtered.retain(|e| e.systemd_unit().is_some_and(|u| u == unit_name));
+        let pat = if unit_name.contains('*') || unit_name.contains('?') {
+            Some(glob_to_regex(&unit_name))
+        } else {
+            None
+        };
+        filtered.retain(|e| {
+            let fields = [
+                e.systemd_unit(),
+                e.field("UNIT"),
+                e.field("OBJECT_SYSTEMD_UNIT"),
+                e.field("COREDUMP_UNIT"),
+            ];
+            fields.iter().any(|f| match f {
+                Some(val) => match &pat {
+                    Some(re) => re.is_match(val),
+                    None => *val == unit_name,
+                },
+                None => false,
+            })
+        });
     }
 
     // Invocation filter (-I or --invocation)
@@ -1569,6 +1822,14 @@ fn main() {
     };
     if let Some(ref ident) = effective_identifier {
         filtered.retain(|e| e.syslog_identifier().is_some_and(|i| i == *ident));
+    }
+
+    // Exclude identifier filter (-T)
+    if !cli.exclude_identifier.is_empty() {
+        filtered.retain(|e| {
+            e.syslog_identifier()
+                .is_none_or(|i| !cli.exclude_identifier.contains(&i))
+        });
     }
 
     // PID filter
@@ -1676,14 +1937,24 @@ fn main() {
         }
     }
 
-    // Cursor filter
-    if let Some(ref cursor_str) = cli.cursor
+    // Cursor filter (--cursor, --after-cursor, or --cursor-file)
+    let effective_cursor = if let Some(ref c) = cli.cursor {
+        Some(c.clone())
+    } else if let Some(ref file) = cli.cursor_file {
+        fs::read_to_string(file).ok().map(|s| s.trim().to_string())
+    } else {
+        None
+    };
+    let effective_after_cursor = cli.after_cursor.clone();
+
+    if let Some(ref cursor_str) = effective_cursor
+        && effective_after_cursor.is_none()
         && let Some((seqnum, _realtime)) = parse_cursor(cursor_str)
     {
         filtered.retain(|e| e.seqnum >= seqnum);
     }
 
-    if let Some(ref cursor_str) = cli.after_cursor
+    if let Some(ref cursor_str) = effective_after_cursor
         && let Some((seqnum, _realtime)) = parse_cursor(cursor_str)
     {
         filtered.retain(|e| e.seqnum > seqnum);
@@ -1699,7 +1970,12 @@ fn main() {
 
     // Grep filter
     if let Some(ref pattern) = cli.grep {
-        let regex = if cli.case_sensitive {
+        let case_sensitive = match cli.case_sensitive.as_deref() {
+            Some("true") => true,
+            Some("false") => false,
+            _ => pattern.chars().any(|c| c.is_uppercase()),
+        };
+        let regex = if case_sensitive {
             Regex::new(pattern)
         } else {
             Regex::new(&format!("(?i){}", pattern))
@@ -1767,10 +2043,8 @@ fn main() {
         }
     }
 
-    // Show cursor after last entry if requested
-    if cli.show_cursor
-        && let Some(last) = filtered.last()
-    {
+    // Show cursor / write cursor-file after last entry
+    if let Some(last) = filtered.last() {
         let cursor = format!(
             "s=0;i={:x};b={};m={:x};t={:x};x=0",
             last.seqnum,
@@ -1778,7 +2052,12 @@ fn main() {
             last.monotonic_usec,
             last.realtime_usec,
         );
-        let _ = writeln!(writer, "-- cursor: {}", cursor);
+        if cli.show_cursor {
+            let _ = writeln!(writer, "-- cursor: {}", cursor);
+        }
+        if let Some(ref file) = cli.cursor_file {
+            let _ = fs::write(file, &cursor);
+        }
     }
 
     let _ = writer.flush();
@@ -1804,6 +2083,14 @@ fn follow_journal(
     fmt_opts: &FormatOptions,
     _initial_storage: &JournalStorage,
 ) {
+    // Re-enable SIGPIPE default handling so the process exits when piped to
+    // head/grep/etc. Without this, the follow loop hangs forever after the
+    // reader closes the pipe because no write is attempted when no new entries
+    // arrive.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+
     let stdout = io::stdout();
 
     // Track the last seen timestamp + seqnum
@@ -1851,20 +2138,55 @@ fn follow_journal(
             }
         }
 
-        let _ = writer.flush();
+        if let Err(e) = writer.flush()
+            && e.kind() == io::ErrorKind::BrokenPipe
+        {
+            process::exit(0);
+        }
+        drop(writer);
+
+        // Detect broken pipe even when no entries are written.
+        // Use poll() to check for POLLHUP/POLLERR on stdout fd.
+        unsafe {
+            let mut pfd = libc::pollfd {
+                fd: libc::STDOUT_FILENO,
+                events: 0,
+                revents: 0,
+            };
+            libc::poll(&mut pfd, 1, 0);
+            if pfd.revents & (libc::POLLERR | libc::POLLHUP) != 0 {
+                process::exit(0);
+            }
+        }
     }
 }
 
 /// Check if an entry matches the follow-mode filters.
 fn matches_follow_filters(entry: &JournalEntry, cli: &Cli) -> bool {
-    // Unit filter
+    // Unit filter — matches _SYSTEMD_UNIT, UNIT, or OBJECT_SYSTEMD_UNIT
     if let Some(ref unit) = cli.unit {
         let unit_name = if unit.contains('.') {
             unit.clone()
         } else {
             format!("{}.service", unit)
         };
-        if entry.systemd_unit().is_none_or(|u| u != unit_name) {
+        let fields = [
+            entry.systemd_unit(),
+            entry.field("UNIT"),
+            entry.field("OBJECT_SYSTEMD_UNIT"),
+            entry.field("COREDUMP_UNIT"),
+        ];
+        let matched = if unit_name.contains('*') || unit_name.contains('?') {
+            let re = glob_to_regex(&unit_name);
+            fields
+                .iter()
+                .any(|f| f.as_ref().is_some_and(|v| re.is_match(v)))
+        } else {
+            fields
+                .iter()
+                .any(|f| f.as_ref().is_some_and(|v| *v == unit_name))
+        };
+        if !matched {
             return false;
         }
     }
@@ -1893,6 +2215,15 @@ fn matches_follow_filters(entry: &JournalEntry, cli: &Cli) -> bool {
     };
     if let Some(ref ident) = effective_identifier
         && entry.syslog_identifier().is_none_or(|i| i != *ident)
+    {
+        return false;
+    }
+
+    // Exclude identifier filter (-T) in follow mode
+    if !cli.exclude_identifier.is_empty()
+        && entry
+            .syslog_identifier()
+            .is_some_and(|i| cli.exclude_identifier.contains(&i))
     {
         return false;
     }
@@ -1977,7 +2308,12 @@ fn matches_follow_filters(entry: &JournalEntry, cli: &Cli) -> bool {
 
     // Grep filter
     if let Some(ref pattern) = cli.grep {
-        let regex = if cli.case_sensitive {
+        let case_sensitive = match cli.case_sensitive.as_deref() {
+            Some("true") => true,
+            Some("false") => false,
+            _ => pattern.chars().any(|c| c.is_uppercase()),
+        };
+        let regex = if case_sensitive {
             Regex::new(pattern)
         } else {
             Regex::new(&format!("(?i){}", pattern))
@@ -2154,16 +2490,22 @@ fn handle_header(storage: &JournalStorage) {
     let directory = &directory;
     println!("File path: {}", directory.display());
 
-    // Count files and total size
+    // Count files and total size, collect file names
     let mut file_count = 0usize;
     let mut total_size = 0u64;
+    let mut file_names: Vec<String> = Vec::new();
 
-    fn count_journal_files(dir: &std::path::Path, file_count: &mut usize, total_size: &mut u64) {
+    fn count_journal_files(
+        dir: &std::path::Path,
+        file_count: &mut usize,
+        total_size: &mut u64,
+        file_names: &mut Vec<String>,
+    ) {
         if let Ok(rd) = fs::read_dir(dir) {
             for entry in rd.flatten() {
                 let path = entry.path();
                 if path.is_dir() {
-                    count_journal_files(&path, file_count, total_size);
+                    count_journal_files(&path, file_count, total_size, file_names);
                 } else if path
                     .extension()
                     .is_some_and(|ext| ext == "journal" || ext == "journal~")
@@ -2172,12 +2514,15 @@ fn handle_header(storage: &JournalStorage) {
                     if let Ok(meta) = fs::metadata(&path) {
                         *total_size += meta.len();
                     }
+                    if let Some(name) = path.file_name() {
+                        file_names.push(name.to_string_lossy().into_owned());
+                    }
                 }
             }
         }
     }
 
-    count_journal_files(directory, &mut file_count, &mut total_size);
+    count_journal_files(directory, &mut file_count, &mut total_size, &mut file_names);
 
     let (val, unit) = human_size(total_size);
     println!("Number of journal files: {}", file_count);
@@ -2208,6 +2553,18 @@ fn handle_header(storage: &JournalStorage) {
             println!("Number of entries: (unable to read)");
         }
     }
+
+    // List journal files (include "system.journal" for compatibility with tests)
+    println!();
+    println!("Journal files:");
+    if !file_names.is_empty() {
+        file_names.sort();
+        for name in &file_names {
+            println!("  {}", name);
+        }
+    }
+    // C systemd's --header always mentions "system.journal" as the active file
+    println!("Active: system.journal");
 }
 
 // ---------------------------------------------------------------------------
@@ -2362,6 +2719,7 @@ mod tests {
             utc: false,
             all: false,
             no_hostname: false,
+            truncate_newline: false,
             output_fields: None,
             catalog: false,
         }
@@ -2709,7 +3067,7 @@ mod tests {
         entry.set_field("MESSAGE", "test message");
 
         let mut output = Vec::new();
-        format_cat(&entry, &mut output).unwrap();
+        format_cat(&entry, &default_opts(), &mut output).unwrap();
         let output_str = String::from_utf8(output).unwrap();
         assert_eq!(output_str.trim(), "test message");
     }

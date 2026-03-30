@@ -524,6 +524,8 @@ struct JournaldState {
     shutdown: AtomicBool,
     /// Flush requested (SIGUSR1).
     flush_requested: AtomicBool,
+    /// Sync requested (SIGRTMIN+1, triggered by `journalctl --sync`).
+    sync_requested: AtomicBool,
     /// Rotate requested (SIGUSR2).
     rotate_requested: AtomicBool,
     /// When the current active journal file was opened (for time-based rotation).
@@ -635,6 +637,7 @@ impl JournaldState {
             seqnum: AtomicU64::new(1),
             shutdown: AtomicBool::new(false),
             flush_requested: AtomicBool::new(false),
+            sync_requested: AtomicBool::new(false),
             rotate_requested: AtomicBool::new(false),
             active_file_opened: Mutex::new(Instant::now()),
             seal_state: Mutex::new(seal_state),
@@ -729,8 +732,17 @@ impl JournaldState {
 
         // Store the entry
         let mut storage = self.storage.lock().unwrap();
-        if let Err(e) = storage.append(&entry) {
-            eprintln!("journald: Failed to store entry: {}", e);
+        match storage.append(&entry) {
+            Ok(seqnum) => {
+                if let Some(id) = entry.syslog_identifier()
+                    && !id.starts_with("systemd")
+                {
+                    eprintln!("journald: stored entry seqnum={} id={}", seqnum, id);
+                }
+            }
+            Err(e) => {
+                eprintln!("journald: Failed to store entry: {}", e);
+            }
         }
     }
 }
@@ -1491,7 +1503,31 @@ fn stdout_socket_listener(state: Arc<JournaldState>, activated_listener: Option<
 ///   7. forward_to_console (0 or 1) — ignored
 ///
 /// After the header, each subsequent line is a log message.
+fn get_peer_cred(stream: &UnixStream) -> Option<libc::ucred> {
+    use std::os::unix::io::AsRawFd;
+    let fd = stream.as_raw_fd();
+    let mut cred: libc::ucred = unsafe { std::mem::zeroed() };
+    let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    let ret = unsafe {
+        libc::getsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            &mut cred as *mut _ as *mut libc::c_void,
+            &mut len,
+        )
+    };
+    if ret == 0 && cred.pid > 0 {
+        Some(cred)
+    } else {
+        None
+    }
+}
+
 fn handle_stdout_connection(stream: UnixStream, state: Arc<JournaldState>) {
+    // Get peer credentials for trusted _PID/_UID/_GID fields
+    let peer_cred = get_peer_cred(&stream);
+
     let reader = BufReader::new(stream);
     let mut lines = reader.lines();
 
@@ -1569,6 +1605,11 @@ fn handle_stdout_connection(stream: UnixStream, state: Arc<JournaldState>) {
             entry.set_field("_SYSTEMD_UNIT", &unit_name);
         }
         entry.set_field("_TRANSPORT", "stdout");
+        if let Some(ref cred) = peer_cred {
+            entry.set_trusted_process_fields(cred.pid as u32);
+            entry.set_field("_UID", cred.uid.to_string());
+            entry.set_field("_GID", cred.gid.to_string());
+        }
         entry.set_boot_id();
         entry.set_machine_id();
         entry.set_hostname();
@@ -1666,6 +1707,10 @@ fn setup_signal_handlers(state: Arc<JournaldState>) {
         &state.flush_requested as *const AtomicBool as u64,
         Ordering::Release,
     );
+    GLOBAL_SYNC.store(
+        &state.sync_requested as *const AtomicBool as u64,
+        Ordering::Release,
+    );
     GLOBAL_ROTATE.store(
         &state.rotate_requested as *const AtomicBool as u64,
         Ordering::Release,
@@ -1673,11 +1718,19 @@ fn setup_signal_handlers(state: Arc<JournaldState>) {
 
     let _ = unsafe { libc::signal(libc::SIGUSR1, signal_handler_flush as libc::sighandler_t) };
     let _ = unsafe { libc::signal(libc::SIGUSR2, signal_handler_rotate as libc::sighandler_t) };
+    // SIGRTMIN+1 is used by `journalctl --sync` to request a sync to disk
+    let _ = unsafe {
+        libc::signal(
+            libc::SIGRTMIN() + 1,
+            signal_handler_sync as libc::sighandler_t,
+        )
+    };
 }
 
 // Global atomic pointers for signal handlers (they can't capture state)
 static GLOBAL_SHUTDOWN: AtomicU64 = AtomicU64::new(0);
 static GLOBAL_FLUSH: AtomicU64 = AtomicU64::new(0);
+static GLOBAL_SYNC: AtomicU64 = AtomicU64::new(0);
 static GLOBAL_ROTATE: AtomicU64 = AtomicU64::new(0);
 
 extern "C" fn signal_handler_shutdown(_sig: libc::c_int) {
@@ -1690,6 +1743,14 @@ extern "C" fn signal_handler_shutdown(_sig: libc::c_int) {
 
 extern "C" fn signal_handler_flush(_sig: libc::c_int) {
     let ptr = GLOBAL_FLUSH.load(Ordering::Acquire);
+    if ptr != 0 {
+        let flag = unsafe { &*(ptr as *const AtomicBool) };
+        flag.store(true, Ordering::Release);
+    }
+}
+
+extern "C" fn signal_handler_sync(_sig: libc::c_int) {
+    let ptr = GLOBAL_SYNC.load(Ordering::Acquire);
     if ptr != 0 {
         let flag = unsafe { &*(ptr as *const AtomicBool) };
         flag.store(true, Ordering::Release);
@@ -1751,6 +1812,17 @@ fn maintenance_thread(state: Arc<JournaldState>) {
             .is_ok()
         {
             eprintln!("journald: Flushing journal to persistent storage");
+            let mut storage = state.storage.lock().unwrap();
+            let _ = storage.flush();
+        }
+
+        // Handle sync request (SIGRTMIN+1, from `journalctl --sync`)
+        if state
+            .sync_requested
+            .compare_exchange(true, false, Ordering::AcqRel, Ordering::Relaxed)
+            .is_ok()
+        {
+            eprintln!("journald: Syncing journal to disk");
             let mut storage = state.storage.lock().unwrap();
             let _ = storage.flush();
         }
@@ -1911,6 +1983,10 @@ fn main() {
         libc::signal(libc::SIGINT, signal_handler_shutdown as libc::sighandler_t);
         libc::signal(libc::SIGUSR1, signal_handler_flush as libc::sighandler_t);
         libc::signal(libc::SIGUSR2, signal_handler_rotate as libc::sighandler_t);
+        libc::signal(
+            libc::SIGRTMIN() + 1,
+            signal_handler_sync as libc::sighandler_t,
+        );
     }
 
     eprintln!("systemd-journald starting...");
@@ -1983,8 +2059,6 @@ fn main() {
 
     // Check for socket activation (LISTEN_FDS from PID 1)
     let activated = receive_socket_activation_fds();
-    let socket_activated = activated.native.is_some() || activated.stdout.is_some();
-
     // Start listener threads
     let state_native = Arc::clone(&state);
     let activated_native = activated.native;
@@ -2064,14 +2138,12 @@ fn main() {
         let _ = storage.flush();
     }
 
-    // Clean up PID file. Only remove socket files if we created them ourselves
-    // (not socket-activated). When socket-activated, PID 1 owns the socket FDs
-    // and the filesystem entries — removing them would break re-activation.
+    // Clean up PID file. Never remove the journal/stdout socket files — they
+    // may be managed by a socket unit (systemd-journald.socket) and removing
+    // them would break socket activation on restart. If the next start is not
+    // socket-activated, create_datagram_socket/create_stream_listener will
+    // remove stale files before re-binding.
     let _ = fs::remove_file(PID_FILE_PATH);
-    if !socket_activated {
-        let _ = fs::remove_file(JOURNAL_SOCKET_PATH);
-        let _ = fs::remove_file(STDOUT_SOCKET_PATH);
-    }
     // Syslog socket is never socket-activated — always clean it up
     let _ = fs::remove_file(SYSLOG_SOCKET_PATH);
 
