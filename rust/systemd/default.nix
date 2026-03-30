@@ -218,12 +218,6 @@
       {
         name = "03-JOBS";
         patchScript = ''
-          # Remove job merging/ordering tests (needs proper job queue)
-          sed -i '/^# Test merging/,/^# Some basic testing/{
-            /^# Some basic testing/b
-            d
-          }' TEST-03-JOBS.sh
-
           # Remove show-transaction tests (needs systemd-importd)
           sed -i '/^# Some basic testing that --show-transaction/,/^$/d' TEST-03-JOBS.sh
 

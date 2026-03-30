@@ -254,8 +254,14 @@ pub fn unstarted_deps(
                 // Hard dependency: must be fully started
                 status_locked.is_started()
             } else if is_pull_dep {
-                // Soft pull dependency (Wants=): must have left NeverStarted
-                *status_locked != UnitStatus::NeverStarted
+                // Soft pull dependency (Wants=/Upholds=): the dep must have
+                // completed (Started or Stopped) before we proceed.  After=
+                // means "wait for completion", and Wants deps that are also
+                // in the After list must finish before this unit starts.
+                matches!(
+                    &*status_locked,
+                    UnitStatus::Started(_) | UnitStatus::Stopped(_, _)
+                )
             } else {
                 // Pure ordering dep (After= without Wants=/Requires=/BindsTo=):
                 // Only block if the dep is actively being started (status is
