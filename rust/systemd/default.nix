@@ -242,12 +242,10 @@
       }
       {
         name = "05-RLIMITS";
-        # Skip upstream subtests that need unimplemented features:
-        # - rlimit: needs system.conf.d drop-ins, DefaultLimitNOFILE manager properties,
-        #   and systemd-run --wait -t (TTY allocation)
-        # - effective-limit: needs slice units with MemoryMax/MemoryHigh/TasksMax,
-        #   EffectiveMemory* properties, and systemctl set-property
-        testEnv.TEST_SKIP_SUBTESTS = "effective-limit";
+        # Skip rlimit subtest: needs systemd-run --wait -t (TTY allocation).
+        # effective-limit works: slice MemoryMax/MemoryHigh/TasksMax,
+        # EffectiveMemory* properties, and set-property are all implemented.
+        testEnv.TEST_SKIP_SUBTESTS = "\\.rlimit\\.";
       }
       {
         name = "07-PID1";
