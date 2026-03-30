@@ -2397,7 +2397,11 @@ impl Shell {
             }
             if self.continuing > 0 {
                 self.continuing -= 1;
-                // continue to next iteration
+                if self.continuing > 0 {
+                    // Still more levels to continue — break out of this loop
+                    break;
+                }
+                // continuing == 0: continue to next iteration of this loop
             }
         }
 
@@ -2457,6 +2461,9 @@ impl Shell {
             // Handle continue: decrement counter and skip to step
             if self.continuing > 0 {
                 self.continuing -= 1;
+                if self.continuing > 0 {
+                    break;
+                }
             }
 
             if !clause.step.is_empty() {
@@ -2512,6 +2519,9 @@ impl Shell {
             }
             if self.continuing > 0 {
                 self.continuing -= 1;
+                if self.continuing > 0 {
+                    break;
+                }
             }
 
             // Check signals at the end of each loop iteration too
@@ -2545,6 +2555,9 @@ impl Shell {
 
             if self.continuing > 0 {
                 self.continuing -= 1;
+                if self.continuing > 0 {
+                    break;
+                }
                 continue;
             }
 
