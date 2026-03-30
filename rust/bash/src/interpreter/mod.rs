@@ -420,7 +420,12 @@ impl Shell {
             lowercase_vars: HashSet::new(),
             capitalize_vars: HashSet::new(),
             arrays: HashMap::new(),
-            assoc_arrays: HashMap::new(),
+            assoc_arrays: {
+                let mut m = HashMap::new();
+                m.insert("BASH_ALIASES".to_string(), AssocArray::default());
+                m.insert("BASH_CMDS".to_string(), AssocArray::default());
+                m
+            },
             functions: HashMap::new(),
             func_redirections: HashMap::new(),
             func_has_keyword: HashSet::new(),

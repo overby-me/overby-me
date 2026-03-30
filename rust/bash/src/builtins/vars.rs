@@ -950,8 +950,10 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                             })
                             .collect();
                         println!("declare {} {}=({})", flags, name, elements.join(" "));
-                    } else {
+                    } else if shell.declared_unset.contains(name) {
                         println!("declare {} {}", flags, name);
+                    } else {
+                        println!("declare {} {}=()", flags, name);
                     }
                 }
             }
@@ -960,8 +962,10 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             assoc_names.sort();
             for name in assoc_names {
                 let assoc = &shell.assoc_arrays[name];
-                if assoc.is_empty() {
+                if assoc.is_empty() && shell.declared_unset.contains(name) {
                     println!("declare -A {}", name);
+                } else if assoc.is_empty() {
+                    println!("declare -A {}=()", name);
                 } else {
                     let elements: Vec<String> = assoc
                         .iter()
@@ -1012,8 +1016,10 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     if shell.readonly_vars.contains(name.as_str()) {
                         flags.push('r');
                     }
-                    if assoc.is_empty() {
+                    if assoc.is_empty() && shell.declared_unset.contains(name.as_str()) {
                         println!("declare {} {}", flags, name);
+                    } else if assoc.is_empty() {
+                        println!("declare {} {}=()", flags, name);
                     } else {
                         let elements: Vec<String> = assoc
                             .iter()
@@ -1129,8 +1135,10 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                         .map(|(i, v)| format!("[{}]=\"{}\"", i, v))
                         .collect();
                     println!("declare -a {}=({})", name, elements.join(" "));
-                } else {
+                } else if shell.declared_unset.contains(name.as_str()) {
                     println!("declare -a {}", name);
+                } else {
+                    println!("declare -a {}=()", name);
                 }
             }
         }
@@ -1153,8 +1161,10 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
         sorted.sort();
         for name in sorted {
             if let Some(assoc) = shell.assoc_arrays.get(name) {
-                if assoc.is_empty() {
+                if assoc.is_empty() && shell.declared_unset.contains(name.as_str()) {
                     println!("declare -A {}", name);
+                } else if assoc.is_empty() {
+                    println!("declare -A {}=()", name);
                 } else {
                     let elements: Vec<String> = assoc
                         .iter()
