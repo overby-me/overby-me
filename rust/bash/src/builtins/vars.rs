@@ -780,15 +780,20 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                         flags.push('x');
                     }
                     let arr = &shell.arrays[name];
-                    let elements: Vec<String> = arr
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(i, v)| {
-                            v.as_ref()
-                                .map(|s| format!("[{}]={}", i, quote_for_declare(s)))
-                        })
-                        .collect();
-                    println!("declare {} {}=({})", flags, name, elements.join(" "));
+                    let has_elements = arr.iter().any(|v| v.is_some());
+                    if shell.declared_unset.contains(name) && !has_elements {
+                        println!("declare {} {}", flags, name);
+                    } else {
+                        let elements: Vec<String> = arr
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(i, v)| {
+                                v.as_ref()
+                                    .map(|s| format!("[{}]={}", i, quote_for_declare(s)))
+                            })
+                            .collect();
+                        println!("declare {} {}=({})", flags, name, elements.join(" "));
+                    }
                 } else {
                     let mut flags = String::from("-");
                     if shell.integer_vars.contains(name) {
@@ -803,7 +808,44 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     if flags == "-" {
                         flags.push('-');
                     }
-                    println!("declare {} {}={}", flags, name, quote_for_declare(&value));
+                    if shell.declared_unset.contains(name) {
+                        println!("declare {} {}", flags, name);
+                    } else {
+                        println!("declare {} {}={}", flags, name, quote_for_declare(&value));
+                    }
+                }
+            }
+            // Also print declared-but-unset variables not in vars
+            {
+                let mut unset_names: Vec<&String> = shell
+                    .declared_unset
+                    .iter()
+                    .filter(|n| !shell.vars.contains_key(n.as_str()))
+                    .collect();
+                unset_names.sort();
+                for name in unset_names {
+                    let mut flags = String::from("-");
+                    if shell.integer_vars.contains(name) {
+                        flags.push('i');
+                    }
+                    if shell.readonly_vars.contains(name) {
+                        flags.push('r');
+                    }
+                    if shell.exports.contains_key(name) {
+                        flags.push('x');
+                    }
+                    if flags == "-" {
+                        flags.push('-');
+                    }
+                    if shell.arrays.contains_key(name) {
+                        let mut aflags = String::from("-a");
+                        if shell.readonly_vars.contains(name) {
+                            aflags.push('r');
+                        }
+                        println!("declare {} {}", aflags, name);
+                    } else {
+                        println!("declare {} {}", flags, name);
+                    }
                 }
             }
             // Also print arrays not in vars
@@ -867,15 +909,20 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     if shell.exports.contains_key(name.as_str()) {
                         flags.push('x');
                     }
-                    let elements: Vec<String> = arr
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(i, v)| {
-                            v.as_ref()
-                                .map(|s| format!("[{}]={}", i, quote_for_declare(s)))
-                        })
-                        .collect();
-                    println!("declare {} {}=({})", flags, name, elements.join(" "));
+                    let has_elements = arr.iter().any(|v| v.is_some());
+                    if shell.declared_unset.contains(name) && !has_elements {
+                        println!("declare {} {}", flags, name);
+                    } else {
+                        let elements: Vec<String> = arr
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(i, v)| {
+                                v.as_ref()
+                                    .map(|s| format!("[{}]={}", i, quote_for_declare(s)))
+                            })
+                            .collect();
+                        println!("declare {} {}=({})", flags, name, elements.join(" "));
+                    }
                 } else if let Some(assoc) = shell.assoc_arrays.get(name) {
                     let mut flags = String::from("-A");
                     if shell.readonly_vars.contains(name.as_str()) {
@@ -900,7 +947,30 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     if flags == "-" {
                         flags.push('-');
                     }
-                    println!("declare {} {}={}", flags, name, quote_for_declare(value));
+                    if shell.declared_unset.contains(name) {
+                        println!("declare {} {}", flags, name);
+                    } else {
+                        println!("declare {} {}={}", flags, name, quote_for_declare(value));
+                    }
+                } else if shell.declared_unset.contains(name) {
+                    let mut flags = String::from("-");
+                    if shell.integer_vars.contains(name.as_str()) {
+                        flags.push('i');
+                    }
+                    if shell.readonly_vars.contains(name.as_str()) {
+                        flags.push('r');
+                    }
+                    if shell.exports.contains_key(name.as_str()) {
+                        flags.push('x');
+                    }
+                    if flags == "-" {
+                        flags.push('-');
+                    }
+                    if shell.arrays.contains_key(name) {
+                        println!("declare -a{} {}", &flags[1..], name);
+                    } else {
+                        println!("declare {} {}", flags, name);
+                    }
                 } else {
                     eprintln!("{}: declare: {}: not found", shell.error_prefix(), name);
                     return 1;
@@ -1130,11 +1200,19 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             if flag_nameref {
                 shell.namerefs.entry(name.to_string()).or_default();
             } else if flag_assoc {
-                shell.assoc_arrays.entry(name.to_string()).or_default();
+                if !shell.assoc_arrays.contains_key(name) {
+                    shell.assoc_arrays.entry(name.to_string()).or_default();
+                    shell.declared_unset.insert(name.to_string());
+                }
             } else if flag_array {
-                shell.arrays.entry(name.to_string()).or_default();
-            } else {
-                shell.vars.entry(name.to_string()).or_default();
+                if !shell.arrays.contains_key(name) {
+                    shell.arrays.entry(name.to_string()).or_default();
+                    shell.declared_unset.insert(name.to_string());
+                }
+            } else if !shell.vars.contains_key(name) {
+                // declare without = marks the variable as declared-but-unset
+                // (don't insert into vars — bash distinguishes this from "")
+                shell.declared_unset.insert(name.to_string());
             }
 
             if flag_integer {

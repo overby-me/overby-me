@@ -237,6 +237,7 @@ type SavedOpts = (bool, bool, bool, bool, bool, bool);
 pub struct Shell {
     pub vars: HashMap<String, String>,
     pub exports: HashMap<String, String>,
+    pub declared_unset: HashSet<String>,
     pub readonly_vars: HashSet<String>,
     pub readonly_funcs: HashSet<String>,
     pub integer_vars: HashSet<String>,
@@ -409,6 +410,7 @@ impl Shell {
         let mut shell = Self {
             vars,
             exports,
+            declared_unset: HashSet::new(),
             readonly_vars: HashSet::new(),
             readonly_funcs: HashSet::new(),
             integer_vars: HashSet::new(),
@@ -699,6 +701,7 @@ impl Shell {
         if resolved == "POSIXLY_CORRECT" {
             self.opt_posix = true;
         }
+        self.declared_unset.remove(&resolved);
         self.vars.insert(resolved, value);
     }
 
@@ -752,7 +755,14 @@ impl Shell {
     #[allow(dead_code)]
     pub fn set_array(&mut self, name: &str, values: Vec<Option<String>>) {
         let resolved = self.resolve_nameref(name);
-        self.arrays.insert(resolved, values);
+        self.insert_array(resolved, values);
+    }
+
+    /// Insert an array and clear declared_unset status.
+    /// Use this instead of `self.arrays.insert(...)` directly.
+    pub fn insert_array(&mut self, name: String, values: Vec<Option<String>>) {
+        self.declared_unset.remove(&name);
+        self.arrays.insert(name, values);
     }
 
     pub fn run_string(&mut self, input: &str) -> i32 {
