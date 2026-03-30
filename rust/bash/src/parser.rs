@@ -338,8 +338,9 @@ impl Parser {
         })
     }
 
-    /// Fill in empty heredoc bodies that couldn't be resolved during parsing
-    /// (happens when heredoc is in a pipeline: cmd <<EOF | cmd2)
+    /// Fill in empty heredoc bodies after the full command has been parsed.
+    /// All heredoc redirections use empty placeholders during parsing; this
+    /// method assigns the actual bodies from the lexer queue in order.
     fn resolve_heredoc_bodies(&mut self, list: &mut AndOrList) {
         self.resolve_heredoc_in_pipeline(&mut list.first);
         for (_, pipeline) in &mut list.rest {
@@ -347,35 +348,95 @@ impl Parser {
         }
     }
 
+    fn resolve_heredoc_in_redirections(&mut self, redirections: &mut [Redirection]) {
+        for redir in redirections {
+            if matches!(redir.kind, RedirectKind::HereDoc(_, _))
+                && (redir.target.is_empty()
+                    || (redir.target.len() == 1
+                        && matches!(&redir.target[0], WordPart::Literal(s) if s.is_empty())))
+                && let Some(body) = self.lexer.take_heredoc_body()
+            {
+                redir.target = body;
+            }
+        }
+    }
+
+    fn resolve_heredoc_in_program(&mut self, program: &mut Program) {
+        for cc in program.iter_mut() {
+            self.resolve_heredoc_in_complete_command(cc);
+        }
+    }
+
+    fn resolve_heredoc_in_complete_command(&mut self, cc: &mut CompleteCommand) {
+        self.resolve_heredoc_in_pipeline(&mut cc.list.first);
+        for (_, pipeline) in &mut cc.list.rest {
+            self.resolve_heredoc_in_pipeline(pipeline);
+        }
+    }
+
+    fn resolve_heredoc_in_command(&mut self, cmd: &mut Command) {
+        match cmd {
+            Command::Simple(sc) => {
+                self.resolve_heredoc_in_redirections(&mut sc.redirections);
+            }
+            Command::Compound(compound, redirections) => {
+                // First resolve heredocs inside the compound command's sub-commands
+                match compound {
+                    CompoundCommand::While(wc) | CompoundCommand::Until(wc) => {
+                        self.resolve_heredoc_in_program(&mut wc.condition);
+                        self.resolve_heredoc_in_program(&mut wc.body);
+                    }
+                    CompoundCommand::If(ic) => {
+                        self.resolve_heredoc_in_program(&mut ic.condition);
+                        self.resolve_heredoc_in_program(&mut ic.then_body);
+                        for (cond, body) in &mut ic.elif_parts {
+                            self.resolve_heredoc_in_program(cond);
+                            self.resolve_heredoc_in_program(body);
+                        }
+                        if let Some(eb) = &mut ic.else_body {
+                            self.resolve_heredoc_in_program(eb);
+                        }
+                    }
+                    CompoundCommand::For(fc) => {
+                        self.resolve_heredoc_in_program(&mut fc.body);
+                    }
+                    CompoundCommand::ArithFor(afc) => {
+                        self.resolve_heredoc_in_program(&mut afc.body);
+                    }
+                    CompoundCommand::Case(cc) => {
+                        for item in &mut cc.items {
+                            self.resolve_heredoc_in_program(&mut item.body);
+                        }
+                    }
+                    CompoundCommand::BraceGroup(prog) | CompoundCommand::Subshell(prog) => {
+                        self.resolve_heredoc_in_program(prog);
+                    }
+                    CompoundCommand::Conditional(_) | CompoundCommand::Arithmetic(_) => {}
+                }
+                // Then resolve heredocs on the compound command's own redirections
+                self.resolve_heredoc_in_redirections(redirections);
+            }
+            Command::Coproc(_, inner_cmd) => {
+                self.resolve_heredoc_in_command(inner_cmd);
+            }
+            Command::FunctionDef {
+                body, redirections, ..
+            } => {
+                // Resolve inside the function body (a CompoundCommand)
+                // We wrap it temporarily to reuse resolve logic
+                let mut tmp_cmd = Command::Compound(*body.clone(), redirections.clone());
+                self.resolve_heredoc_in_command(&mut tmp_cmd);
+                if let Command::Compound(new_body, new_redirs) = tmp_cmd {
+                    *body = Box::new(new_body);
+                    *redirections = new_redirs;
+                }
+            }
+        }
+    }
+
     fn resolve_heredoc_in_pipeline(&mut self, pipeline: &mut Pipeline) {
         for cmd in &mut pipeline.commands {
-            match cmd {
-                Command::Simple(sc) => {
-                    for redir in &mut sc.redirections {
-                        if matches!(redir.kind, RedirectKind::HereDoc(_, _))
-                            && (redir.target.is_empty()
-                                || (redir.target.len() == 1
-                                    && matches!(&redir.target[0], WordPart::Literal(s) if s.is_empty())))
-                            && let Some(body) = self.lexer.take_heredoc_body()
-                        {
-                            redir.target = body;
-                        }
-                    }
-                }
-                Command::Compound(_, redirections) => {
-                    for redir in redirections {
-                        if matches!(redir.kind, RedirectKind::HereDoc(_, _))
-                            && (redir.target.is_empty()
-                                || (redir.target.len() == 1
-                                    && matches!(&redir.target[0], WordPart::Literal(s) if s.is_empty())))
-                            && let Some(body) = self.lexer.take_heredoc_body()
-                        {
-                            redir.target = body;
-                        }
-                    }
-                }
-                _ => {}
-            }
+            self.resolve_heredoc_in_command(cmd);
         }
     }
 
@@ -1566,12 +1627,14 @@ impl Parser {
                         RedirectKind::HereDoc(strip, _) => RedirectKind::HereDoc(strip, delim),
                         _ => kind,
                     };
-                    // Heredoc body is read when the next newline is tokenized.
-                    // Use empty placeholder if not available yet (pipeline case).
-                    let target = self
-                        .lexer
-                        .take_heredoc_body()
-                        .unwrap_or_else(|| vec![WordPart::Literal(String::new())]);
+                    // Always use empty placeholder for the body here.
+                    // resolve_heredoc_bodies() fills in all bodies after the
+                    // full command is parsed.  This avoids misordering when
+                    // multiple heredocs appear on one line (e.g. <<EOF1 3<<EOF2):
+                    // the first heredoc's body may not be available yet while the
+                    // second's advance triggers read_heredoc_bodies, which would
+                    // hand body[0] to the wrong redirection.
+                    let target = vec![WordPart::Literal(String::new())];
                     Ok(Some(Redirection { fd, kind, target }))
                 }
                 _ => {
@@ -1646,6 +1709,9 @@ impl Parser {
                         | Token::Clobber
                         | Token::AmpGreat
                         | Token::AmpDGreat
+                        | Token::DLess
+                        | Token::DLessDash
+                        | Token::TripleLess
                 );
             if is_redir {
                 let n: i32 = s.parse().unwrap();

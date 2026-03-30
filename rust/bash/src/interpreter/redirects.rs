@@ -349,8 +349,14 @@ impl Shell {
                     nix::unistd::write(&pipe_w, &content_bytes).map_err(|e| e.to_string())?;
                     let pipe_r_raw = pipe_r.as_raw_fd();
                     drop(pipe_w);
-                    nix::unistd::dup2(pipe_r_raw, fd).map_err(|e| e.to_string())?;
-                    drop(pipe_r);
+                    if pipe_r_raw != fd {
+                        nix::unistd::dup2(pipe_r_raw, fd).map_err(|e| e.to_string())?;
+                        drop(pipe_r);
+                    } else {
+                        // pipe_r is already the target fd — don't close it!
+                        // Leak the OwnedFd so it isn't closed on drop.
+                        std::mem::forget(pipe_r);
+                    }
                 }
                 RedirectKind::ReadWrite => {
                     let fd = self.resolve_redir_fd(&redir.fd, 0);
