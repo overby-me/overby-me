@@ -6,22 +6,18 @@
 
 ### Progress This Session
 
-- **Started at**: 62/77
-- **Now at**: 64/77 (+2: comsub, lastpipe)
+- **Started at**: 64/77
+- **Now at**: 64/77 (same count, but diff reductions in arith and posixexp)
 - **Trap**: flaky — passes sometimes, fails with extra CHLD signals other times
-- **Significant diff reductions**: new-exp (719→382), array (1595→1755 but now produces output instead of aborting)
+- **Significant diff reductions**: arith (79→30), posixexp fixed dquote `}` detection
 
 ### Fixes Applied This Session
 
-1. **EPIPE handling** (`src/builtins/io.rs`) — Report "Broken pipe" from echo when NOT in a pipeline child. Fixes comsub + lastpipe tests.
+1. **Detect missing `}` in param expansion when nested dquote consumes it** (`src/ast.rs`, `src/lexer/dollar.rs`, `src/lexer/mod.rs`, `src/expand/mod.rs`, `src/builtins/mod.rs`) — Added `SyntaxError` WordPart variant. In `parse_brace_param`, after `read_param_op` returns, check if `}` is present; if not (consumed by inner `"..."` pair), return `SyntaxError("unexpected EOF while looking for matching '}'")`. Fixes `echo "${foo:-"a}"` producing `bar` instead of error. Posixexp dquote toggle issue resolved.
 
-2. **Parser error recovery for array compound assignments** (`src/parser.rs`, `src/interpreter/mod.rs`) — `parse_array_elements` returns `Result`, detects unexpected tokens (e.g. `&`), reports correct error token, skips to `)`, marks error as recoverable. `run_string` no longer exits on recoverable syntax errors.
+2. **Rewrite `skip_comsub` with proper case statement state machine** (`src/lexer/word.rs`) — Replaced simple `case_depth` counter with a `Vec<i32>` state stack tracking: 0=not-in-case, 1=saw-case-waiting-for-in, 2=in-pattern-position, 3=in-case-body. Added `;;`/`;&`/`;;&` detection to transition back to pattern state. Added `(` handling in pattern position (optional leading paren). Added comment skipping and `\` escape handling. Fixes normal `$(case x in x) echo y;; esac)` patterns.
 
-3. **Backtick tracking in `${var:offset}` substring parsing** (`src/lexer/dollar.rs`) — Added `` ` ``, `"`, and `$(...)` tracking in the Substring offset and length character loops so `}` inside backtick/dquote/comsub contexts doesn't prematurely close the `${...}` expansion. Fixes cascading parse failure in new-exp.
-
-4. **`${var:-default}` in arithmetic evaluation** (`src/expand/arithmetic.rs`) — Added `${...}` parameter expansion handling to `resolve_arith_vars`, supporting `${var}`, `${var:-default}`, `${var:+alt}`, `${var:=assign}`, `${#var}`, and subscript syntax. Fixes `${PARAM:${OFFSET:-0}}` in arith7.sub.
-
-5. **Declared-but-unset variable tracking** (`src/interpreter/mod.rs`, `src/builtins/vars.rs`) — Added `declared_unset: HashSet<String>` to Shell. `declare name` without `=` marks the variable as declared-but-unset instead of inserting empty string into vars. `declare -p` prints without `=""` for these. `set_var` clears the flag on assignment.
+3. **Fix arithmetic error tokens for literal dollar expressions** (`src/interpreter/arithmetic.rs`) — Error token at fallthrough now shows the inner expression (e.g. `$iv`) instead of the full top-level expression (`jv += $iv`). Added `\$` handling in `expand_comsubs_in_arith` to preserve backslash-dollar as literal (skip expansion). Added `\\$` prefix check in `eval_arith_expr_inner` to skip `$var` expansion for `\$var` from `$(( \$iv ))`. Arith diff reduced from 79 to ~30 lines.
 
 ## How to Run Tests
 
@@ -50,50 +46,54 @@ diff <("$THIS_SH" ./NAME.tests 2>&1) <(bash ./NAME.tests 2>&1)
 | trap | 7.0s | ~17s | Uses `sleep` internally |
 | arith | 0.035s | 1.7s | Hot loops |
 | posixexp | 0.037s | 1.4s | Hot loops |
-| heredoc | 0.06s | **hangs** | Timeout in nix |
-| quotearray | 0.01s | **hangs** | Timeout in nix |
+| heredoc | 0.06s | **fails** | fd / backslash issues |
+| quotearray | 0.01s | **fails** | Assoc array + arith |
 
-Suggested nix timeout: 30s for most tests, 120s for trap. heredoc and quotearray hang.
+Suggested nix timeout: 30s for most tests, 120s for trap.
 
 ## 13 Failing Tests (sorted by diff size)
 
 ### Easiest (< 30 diff lines)
 
-#### 1. posixexp (13 lines)
+#### 1. posixexp (7 lines nix, 3 issues remain)
 
-Four issues:
+Three issues (dquote `}` detection FIXED):
 
-- **`<12>` vs `<1>\n<2>`**: Word splitting in some expansion context (nix-only, likely sub-test environment difference).
-- **IFS splitting**: `< abc def ghi jkl >` not split into `< abc>`, `<def ghi>`, `<jkl >` — two instances.
-- **Parser bug**: `echo "${foo:-"a}"` should produce `unexpected EOF while looking for matching '}'`. In bash, `"` inside `${var:-word}` when in dquote context toggles the quote state. Our `read_param_word_impl` in `src/lexer/word.rs` treats inner `"` as opening a nested dquote, which incorrectly protects `}` from closing the expansion.
+- **`<12>` vs `<1>\n<2>`**: `recho $a` after `IFS=; a=$@` with `set -- 1 2`. Our shell produces `<12>` (single arg), bash produces `<1><2>` (two args). Relates to how `$@` assignment interacts with null IFS — the assigned value should preserve the field boundaries for later `$a` expansion.
+- **IFS splitting in `${var-$@}`**: With `IFS=:` or unset IFS, `${var-$@}` should join positional params by space (not split them individually). Our shell splits `$@` in the default word into separate fields. Two instances in posixexp4.sub.
 
 #### 2. comsub-posix (20 lines)
 
-`case` statement parsing inside `$(...)` command substitutions. The `)` in case patterns like `x)` confuses the comsub delimiter matching in `skip_comsub` (`src/lexer/word.rs` L889-995). The function tracks `case_depth` but has edge cases with patterns like `$(case x in x) ;; x) done esac)`.
+Normal `case` inside `$(...)` now works. Remaining issues are error messages from intentionally-bad syntax in `${THIS_SH} -c '...'` invocations:
+
+- `$(case x in x) ;; x) done esac)` — our shell silently succeeds, bash detects `done` as unexpected reserved word
+- `$(case x in x) (esac) esac)` — wrong error message format
+- Error line numbers off by 1 in multi-line `-c` scripts
+- Script continues after syntax error instead of stopping
+
+#### 3. arith (~30 lines, was 79)
+
+Remaining issues (literal `$` and error token FIXED):
+
+- **Short-circuit assignment**: `0 && B=42` in `$(( ))` should error "attempted assignment to non-variable". Similarly `1 || B=88`.
+- **`--x++`**: Should error "assignment requires lvalue" instead of evaluating.
+- **Backtick comsub**: `` `echo 1+1` `` not expanded inside `$(( ))`.
+- **`2#110#11`**: Double hash not detected as invalid number.
+- **Escaped array subscripts**: `a[" "]`, `a[\ \]`, `a[\\]` — quoting in array subscript arithmetic.
+- **Minor**: Trailing space missing in some error tokens (e.g. `$iv` vs `$iv`).
 
 ### Medium (30-200 diff lines)
 
-#### 3. arith (79 lines)
+#### 4. heredoc (111 lines)
 
-Multiple issues:
-
-- **`let` and literal `$`**: `let 'jv += $iv'` should error — `$iv` is literal (single-quoted). Our shell expands it.
-- **Short-circuit assignment**: `0 && B=42` in `$(( ))` should error "attempted assignment to non-variable".
-- **`--x++`**: Should error "assignment requires lvalue".
-- **Backtick comsub**: `` `echo 1+1` `` not expanded inside `$(( ))`.
-- **Error prefix**: `let:` prefix missing; `((:` prefix missing from some messages.
-- **Escaped array subscripts**: `a[" "]`, `a[\ \]`, `a[\\]` — quoting in array subscript arithmetic.
-
-#### 4. heredoc (111 lines, hangs in nix)
-
-- Heredoc fd redirection (`3<<EOF`) not working properly.
-- Tab-stripped heredocs (`<<-EOF`) issues.
-- Backslash-newline in heredoc delimiters.
+- Heredoc fd redirection (`3<<EOF`) not working properly — Bad file descriptor.
+- Backslash-newline in heredoc delimiters — `next\` + `EOF` should produce `nextEOF`.
+- `EOF: command not found` — heredoc delimiter not recognized.
 - Sub-file tests (`heredoc1.sub` through `heredoc10.sub`).
 
-#### 5. quotearray (178 lines, hangs in nix)
+#### 5. quotearray (178 lines)
 
-Associative array keys with special chars in arithmetic contexts. Hangs locally after ~30s.
+Associative array keys with special chars in arithmetic contexts.
 
 #### 6. comsub2 (185 lines)
 
@@ -116,9 +116,9 @@ Associative array keys with special chars in arithmetic contexts. Hangs locally 
 - Export propagation issues.
 - `declare -p` for readonly variables in function scope.
 
-#### 9. new-exp (382 lines)
+#### 9. new-exp (~375 lines)
 
-Cascading failure fixed (was 719). Remaining issues:
+Remaining issues:
 
 - `${HOME-'}'}` — single quotes don't protect `}` inside `${:-}` in dquote context.
 - Backtick command substitution not expanded in `${var:offset}` arithmetic.
@@ -153,6 +153,7 @@ Extra CHLD signals (non-deterministic). Sometimes passes, sometimes fails with 2
 
 | File | Contents |
 |------|----------|
+| `src/ast.rs` | AST types, `WordPart` (now includes `SyntaxError` variant) |
 | `src/builtins/io.rs` | `read`, `echo` (EPIPE handling), `printf`, `mapfile` |
 | `src/builtins/exec.rs` | `type`, `command`, `hash` |
 | `src/builtins/vars.rs` | `declare`, `local`, `export`, `let` |
@@ -160,28 +161,29 @@ Extra CHLD signals (non-deterministic). Sometimes passes, sometimes fails with 2
 | `src/builtins/set.rs` | `set`, `shopt` |
 | `src/interpreter/mod.rs` | Shell struct, `declared_unset`, `run_string` (error recovery), `resolve_nameref` |
 | `src/interpreter/commands.rs` | Command execution, `expand_word*`, `get_opt_flags`, `update_shellopts` |
-| `src/interpreter/arithmetic.rs` | Arithmetic eval, `expand_comsubs_in_arith` |
+| `src/interpreter/arithmetic.rs` | Arithmetic eval, `expand_comsubs_in_arith` (now handles `\$`), error tokens |
 | `src/interpreter/redirects.rs` | Redirections (vredir `{var}` fds) |
 | `src/interpreter/pipeline.rs` | Pipeline execution, PIPESTATUS |
-| `src/expand/mod.rs` | Word expansion, `ExpCtx`, procsub handling |
+| `src/expand/mod.rs` | Word expansion, `ExpCtx`, procsub handling, `SyntaxError` handler |
 | `src/expand/params.rs` | Parameter expansion (`${...}` operators), `parse_arith_offset` |
 | `src/expand/arithmetic.rs` | `eval_arith_full`, `resolve_arith_vars` (now handles `${var:-default}`) |
 | `src/parser.rs` | Parser, `parse_array_elements` (now returns Result), `skip_to_next_command` |
-| `src/lexer/dollar.rs` | `${}` parsing, substring offset loop (now tracks backticks/dquotes) |
-| `src/lexer/word.rs` | `read_param_word_impl`, `skip_comsub` (case depth tracking) |
+| `src/lexer/mod.rs` | Lexer, thread-locals (`DQUOTE_TOGGLED` added) |
+| `src/lexer/dollar.rs` | `${}` parsing, `parse_brace_param` (now detects missing `}`), substring offset loop |
+| `src/lexer/word.rs` | `read_param_word_impl`, `skip_comsub` (rewritten with case state machine) |
 | `rust/bash/testsuite.nix` | Test harness with path/PID normalization |
 
 ## Recommended Next Priorities
 
-1. **Fix posixexp dquote toggle** — Make `"` inside `${:-word}` when `in_dquote=true` close the outer dquote instead of opening nested dquote. Tricky: must still allow `"${foo:-"a"}"` (balanced inner quotes). (+1 test if all 4 issues fixed)
+1. **Fix short-circuit assignment in arith** — `0 && B=42` and `1 || B=88` in `$(( ))` should error. Need to detect assignment operators in the RHS of `&&`/`||` when the short-circuit means the RHS shouldn't execute but the parser still validates it. (~6 diff lines)
 
-2. **Fix `case` inside `$()` in comsub-posix** — Improve `skip_comsub` to handle case patterns where `)` appears without leading `(`. (+1 test)
+2. **Fix `--x++` in arith** — Should error "assignment requires lvalue". Need pre-decrement followed by post-increment detection. (~4 diff lines)
 
-3. **Fix `let` literal `$` in arith** — Skip `$var` expansion when `arith_is_let` is true and the expression came from single-quoted `let` arg.
+3. **Fix heredoc fd redirection** — `3<<EOF` should work. Likely need to wire up non-standard fd numbers in heredoc setup. Could unblock many heredoc sub-tests.
 
-4. **Fix heredoc hanging** — Investigate what causes the test to hang (likely an fd issue or infinite read loop).
+4. **Fix IFS splitting in `${var-$@}`** — In `read_param_word_impl` or the expansion engine, `$@` inside `${var-word}` should be joined by space (not IFS) before field splitting. Affects posixexp.
 
-5. **Fix vredir** — The `{var}` fd mechanism exists but has issues with save/restore and closing. The test produces 734K diff lines suggesting an infinite loop or incorrect fd handling.
+5. **Fix comsub-posix error messages** — Improve error reporting for intentional syntax errors inside `$(...)` in case patterns. Needs parser changes to detect reserved words like `done` in wrong context.
 
 ## Approach
 
