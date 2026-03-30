@@ -2,7 +2,26 @@
 
 ## Current State
 
-**62/77 tests passing** on bookmark `push-nkqwvorqmnkn`. All changes committed and pushed.
+**64/77 tests passing** on bookmark `push-nkqwvorqmnkn`. All changes committed and pushed.
+
+### Progress This Session
+
+- **Started at**: 62/77
+- **Now at**: 64/77 (+2: comsub, lastpipe)
+- **Trap**: flaky — passes sometimes, fails with extra CHLD signals other times
+- **Significant diff reductions**: new-exp (719→382), array (1595→1755 but now produces output instead of aborting)
+
+### Fixes Applied This Session
+
+1. **EPIPE handling** (`src/builtins/io.rs`) — Report "Broken pipe" from echo when NOT in a pipeline child. Fixes comsub + lastpipe tests.
+
+2. **Parser error recovery for array compound assignments** (`src/parser.rs`, `src/interpreter/mod.rs`) — `parse_array_elements` returns `Result`, detects unexpected tokens (e.g. `&`), reports correct error token, skips to `)`, marks error as recoverable. `run_string` no longer exits on recoverable syntax errors.
+
+3. **Backtick tracking in `${var:offset}` substring parsing** (`src/lexer/dollar.rs`) — Added `` ` ``, `"`, and `$(...)` tracking in the Substring offset and length character loops so `}` inside backtick/dquote/comsub contexts doesn't prematurely close the `${...}` expansion. Fixes cascading parse failure in new-exp.
+
+4. **`${var:-default}` in arithmetic evaluation** (`src/expand/arithmetic.rs`) — Added `${...}` parameter expansion handling to `resolve_arith_vars`, supporting `${var}`, `${var:-default}`, `${var:+alt}`, `${var:=assign}`, `${#var}`, and subscript syntax. Fixes `${PARAM:${OFFSET:-0}}` in arith7.sub.
+
+5. **Declared-but-unset variable tracking** (`src/interpreter/mod.rs`, `src/builtins/vars.rs`) — Added `declared_unset: HashSet<String>` to Shell. `declare name` without `=` marks the variable as declared-but-unset instead of inserting empty string into vars. `declare -p` prints without `=""` for these. `set_var` clears the flag on assignment.
 
 ## How to Run Tests
 
@@ -17,148 +36,152 @@ nix build --keep-going .#checks.x86_64-linux.rust-bash-test-{alias,appendop,...}
 nix log .#checks.x86_64-linux.rust-bash-test-NAME
 
 # Local testing (faster iteration)
-cd /tmp/bash-tests/bash-5.3/tests
-export PATH="/tmp/bash-tests:$PATH"
+cd /tmp/bash-5.3/tests
+export PATH="/tmp/bash-5.3/tests:$PATH"
 export THIS_SH=/home/noverby/Work/overby.me/rust/bash/target/debug/bash
 diff <("$THIS_SH" ./NAME.tests 2>&1) <(bash ./NAME.tests 2>&1)
 ```
 
-## Recent Changes (This Session)
+### Reference Bash Test Times
 
-1. **Sparse array support** — Changed `pub arrays: HashMap<String, Vec<String>>` to `Vec<Option<String>>` across the entire codebase (~96 call sites). `None` = unset slot, `Some("")` = set-to-empty. Fixed `${!A[@]}` indices, `${#A[@]}` length, `unset arr[n]`, declare -p formatting, test -v checks.
+| Test | Ref Bash | Rust Bash | Notes |
+|------|----------|-----------|-------|
+| Most tests | < 0.1s | < 2s | OK |
+| trap | 7.0s | ~17s | Uses `sleep` internally |
+| arith | 0.035s | 1.7s | Hot loops |
+| posixexp | 0.037s | 1.4s | Hot loops |
+| heredoc | 0.06s | **hangs** | Timeout in nix |
+| quotearray | 0.01s | **hangs** | Timeout in nix |
 
-2. **IFS trailing delimiter stripping in `read`** — Matches bash's complex rules for multi-var read in `src/builtins/io.rs` L~1820-1945. Rules: single-var strips all trailing IFS; multi-var strips one trailing non-ws IFS delimiter only when remainder has no internal non-ws IFS delimiters AND no IFS-whitespace between non-IFS content.
+Suggested nix timeout: 30s for most tests, 120s for trap. heredoc and quotearray hang.
 
-3. **Hash table** — Added `hash_order: Vec<String>` to Shell struct for insertion-order printing. Increment hit counts in `type` builtin lookups (`src/builtins/exec.rs`).
+## 13 Failing Tests (sorted by diff size)
 
-4. **`set -P` / `set -o physical`** — Added `opt_physical` field to Shell, wired to `get_opt_flags()` and `update_shellopts()`.
+### Easiest (< 30 diff lines)
 
-5. **Function body formatting** (`src/builtins/mod.rs` L~798-840) — Fixed `ends_with_heredoc` heuristic to exclude `done`/`fi`/`esac` lines. Added `is_closing_keyword_with_heredoc` to suppress semicolons after `done`/`fi`/`esac` when the compound command contains a heredoc.
+#### 1. posixexp (13 lines)
 
-6. **PID normalization** in `rust/bash/testsuite.nix` — sed regexes normalize PIDs in temp paths and Rust panic messages.
+Four issues:
 
-7. **Echo EPIPE** — Currently suppressed (`src/builtins/io.rs` L~57). Causes comsub/lastpipe regressions because reference bash reports the error in some contexts.
+- **`<12>` vs `<1>\n<2>`**: Word splitting in some expansion context (nix-only, likely sub-test environment difference).
+- **IFS splitting**: `< abc def ghi jkl >` not split into `< abc>`, `<def ghi>`, `<jkl >` — two instances.
+- **Parser bug**: `echo "${foo:-"a}"` should produce `unexpected EOF while looking for matching '}'`. In bash, `"` inside `${var:-word}` when in dquote context toggles the quote state. Our `read_param_word_impl` in `src/lexer/word.rs` treats inner `"` as opening a nested dquote, which incorrectly protects `}` from closing the expansion.
 
-## 15 Failing Tests
+#### 2. comsub-posix (20 lines)
 
-### Easiest / Highest Impact
+`case` statement parsing inside `$(...)` command substitutions. The `)` in case patterns like `x)` confuses the comsub delimiter matching in `skip_comsub` (`src/lexer/word.rs` L889-995). The function tracks `case_depth` but has edge cases with patterns like `$(case x in x) ;; x) done esac)`.
 
-#### 1. comsub (1 line diff)
+### Medium (30-200 diff lines)
 
-Reference bash prints `echo: write error: Broken pipe` on line 90 of comsub.tests; our shell doesn't. The echo is inside a process substitution `<(echo a)` whose pipe reader closes early. Our shell suppresses EPIPE from echo (`src/builtins/io.rs` L~57). Bash's behavior is context-dependent: it reports EPIPE in process substitutions but not in pipeline children. Fix: report EPIPE when NOT `in_pipeline_child` (the original code before suppression). This was reverted because it caused comsub to fail. The real issue is that reference nix bash reports it but we don't — possibly our procsub doesn't set up the pipe the same way so we never get EPIPE. Check `src/expand/mod.rs` procsub handling.
-
-#### 2. lastpipe (1 line diff)
-
-Same EPIPE pattern. Reference bash reports Broken Pipe on line 46 of lastpipe.tests. Fix comsub EPIPE handling and this likely fixes too.
-
-#### 3. posixexp (~10 lines)
-
-Two issues:
-
-- **Test environment**: `cp ${THIS_SH} $TMPDIR/sh` fails for some sub-tests. Minor.
-- **Parser bug**: `echo "${foo:-"a}"` should be a parse error in non-POSIX mode. The inner `"` inside `${var:-...}` should close the outer double-quote context, but our parser in `src/lexer/dollar.rs` treats it as a nested quote inside the expansion. The fix is in the `${}` parameter expansion parser — when already inside double quotes, a `"` in the default/alt word should close the outer quote.
-
-#### 4. arith (~27 lines locally)
+#### 3. arith (79 lines)
 
 Multiple issues:
 
-- **`let` and literal `$`**: `let 'jv += $iv'` should error because `$iv` is a literal dollar sign (single-quoted). Our `expand_comsubs_in_arith` in `src/interpreter/arithmetic.rs` L~1300+ expands `$var` references but shouldn't for literal `$` from `let`. Fix: skip `$var` expansion when expression comes from `let` (check `self.arith_is_let`).
-- **Short-circuit assignment**: `0 && B=42` in `$(( ))` should error "attempted assignment to non-variable" but our shell evaluates it silently. The `&&` short-circuit should not allow assignment in the false branch.
-- **`--x++`**: Should error "assignment requires lvalue" but our shell handles it differently.
+- **`let` and literal `$`**: `let 'jv += $iv'` should error — `$iv` is literal (single-quoted). Our shell expands it.
+- **Short-circuit assignment**: `0 && B=42` in `$(( ))` should error "attempted assignment to non-variable".
+- **`--x++`**: Should error "assignment requires lvalue".
 - **Backtick comsub**: `` `echo 1+1` `` not expanded inside `$(( ))`.
-- **Error prefix**: `let:` prefix missing from some error messages. Check `arith_cmd_prefix()` in `src/interpreter/commands.rs`.
+- **Error prefix**: `let:` prefix missing; `((:` prefix missing from some messages.
+- **Escaped array subscripts**: `a[" "]`, `a[\ \]`, `a[\\]` — quoting in array subscript arithmetic.
 
-#### 5. trap (flaky, 1-3 lines)
+#### 4. heredoc (111 lines, hangs in nix)
 
-- Extra CHLD signal (non-deterministic — sometimes passes, sometimes fails).
-- xtrace formatting: `+[8] false+[8] false` (concatenated) vs `+[8] false\n+[8] false` (separate lines). Likely a stdout flushing issue in xtrace output.
-- Broken Pipe error from reference bash that our shell doesn't produce.
+- Heredoc fd redirection (`3<<EOF`) not working properly.
+- Tab-stripped heredocs (`<<-EOF`) issues.
+- Backslash-newline in heredoc delimiters.
+- Sub-file tests (`heredoc1.sub` through `heredoc10.sub`).
 
-### Medium
+#### 5. quotearray (178 lines, hangs in nix)
 
-#### 6. varenv (~many lines in nix)
+Associative array keys with special chars in arithmetic contexts. Hangs locally after ~30s.
 
-- `declare -- string=""` vs `declare -- string` — unset variables should print without `=""`.
-- `local` inside function not finding variables from outer scope in some cases.
-- Missing `declare -x FOOFOO` — export not propagating.
-- Some SHELLOPTS/physical differences (partially fixed).
-
-#### 7. heredoc (~48 lines)
-
-- Tab-stripped heredocs (`<<-EOF`) not stripping tabs in some contexts.
-- Backslash-newline in heredoc delimiters not handled.
-- Heredoc inside eval'd function body doesn't create files properly (seen in type3.sub).
-
-#### 8. builtins (~90 lines)
-
-- `enable -n` not implemented — the feature to disable builtins at runtime. Would need a disabled-builtins set in Shell and checking it before builtin dispatch.
-- Extra output from `export` with appended values.
-- Hash table empty message format.
-
-#### 9. assoc (~114 lines)
-
-- Associative array formatting in `declare -p` — key quoting differences.
-- `[*]` key handling.
-
-### Hard
-
-#### 10. quotearray (~178 lines)
-
-Associative array keys with special chars in arithmetic contexts.
-
-#### 11. comsub2 (~189 lines)
+#### 6. comsub2 (185 lines)
 
 `local` outside function context, alias handling in subshells, function definition inside command substitution.
 
-#### 12. comsub-posix (~33 lines in nix)
+### Hard (200+ diff lines)
 
-`case` statement parsing inside `$(...)` command substitutions. The parser doesn't correctly handle `case ... esac` inside `$()`. The `)` in case patterns confuses the comsub delimiter matching.
+#### 7. builtins (336 lines)
 
-#### 13. nameref (~238 lines)
+- `enable -n` not implemented (disable builtins at runtime).
+- `pushd`/`popd` with numeric args and error handling.
+- `cd` with `--` argument.
+- Hash table empty message format.
+
+#### 8. varenv (340 lines)
+
+- PATH handling differences.
+- `local` inside function not finding variables from outer scope.
+- SHELLOPTS/physical differences.
+- Export propagation issues.
+- `declare -p` for readonly variables in function scope.
+
+#### 9. new-exp (382 lines)
+
+Cascading failure fixed (was 719). Remaining issues:
+
+- `${HOME-'}'}` — single quotes don't protect `}` inside `${:-}` in dquote context.
+- Backtick command substitution not expanded in `${var:offset}` arithmetic.
+- `${#z}` used as substring offset not evaluated to variable length.
+- Various expansion edge cases.
+
+#### 10. assoc (527 lines)
+
+- Associative array `declare -p` key quoting differences.
+- `[*]` key handling.
+- Tilde expansion in associative array keys/values.
+
+#### 11. nameref (750 lines)
 
 `declare -n` extensively broken: wrong variable resolution, unset through nameref, nameref chains. The nameref implementation in `src/interpreter/mod.rs` `resolve_nameref()` is too simple.
 
-#### 14. new-exp (~719 lines)
+#### 12. array (1755 lines)
 
-Parser cascading failure from `${HOME'}` — single-quote inside `${...}` expansion causes a parse error that makes the parser lose track, and all subsequent commands fail. Fix parser error recovery in `src/interpreter/mod.rs` `run_string()` L~784 — `skip_to_next_command()` doesn't advance properly past certain syntax errors.
+Parser error recovery now works (was aborting on line 34). Remaining issues are array feature bugs in array32.sub, array33.sub (injection protection, type conversion errors).
 
-#### 15. array (~1595 lines)
+#### 13. vredir (734K lines)
 
-Parser error recovery: `test=(first & second)` produces a syntax error (expected) but our shell aborts instead of continuing. The error token differs (`')'` vs `'&'`). After the error, `skip_to_next_command()` gets stuck and the rest of the test produces no output.
+`{var}>file` variable fd redirection is partially implemented (parser + `resolve_redir_fd` work) but produces massive output differences. The test uses `exec {v}>>file`, heredocs with variable fds, and closing variable fds with `{v}>&-`. Sub-files vredir1-8.sub test complex scenarios.
 
-#### 16. vredir (huge output)
+### Flaky
 
-`{var}>file` variable fd redirection not implemented. Causes infinite loop/huge output. Implementation needed in `src/interpreter/redirects.rs` — the `{var}` syntax allocates a new fd ≥10 and stores the fd number in `var`.
+#### trap (0-4 lines)
+
+Extra CHLD signals (non-deterministic). Sometimes passes, sometimes fails with 2 extra `CHLD` lines.
 
 ## Key Source Files
 
 | File | Contents |
 |------|----------|
-| `src/builtins/io.rs` | `read` (L1153-1940), `echo` (L3-89, EPIPE at L57), `printf`, `mapfile` |
+| `src/builtins/io.rs` | `read`, `echo` (EPIPE handling), `printf`, `mapfile` |
 | `src/builtins/exec.rs` | `type`, `command`, `hash` |
 | `src/builtins/vars.rs` | `declare`, `local`, `export`, `let` |
-| `src/builtins/mod.rs` | `parse_array_literal`, function body formatting (L798+) |
+| `src/builtins/mod.rs` | `parse_array_literal`, function body formatting |
 | `src/builtins/set.rs` | `set`, `shopt` |
-| `src/interpreter/mod.rs` | Shell struct, `run_string` (error recovery L784+), `resolve_nameref` |
+| `src/interpreter/mod.rs` | Shell struct, `declared_unset`, `run_string` (error recovery), `resolve_nameref` |
 | `src/interpreter/commands.rs` | Command execution, `expand_word*`, `get_opt_flags`, `update_shellopts` |
-| `src/interpreter/arithmetic.rs` | Arithmetic eval, `expand_comsubs_in_arith` (L1300+) |
-| `src/interpreter/redirects.rs` | Redirections (vredir) |
+| `src/interpreter/arithmetic.rs` | Arithmetic eval, `expand_comsubs_in_arith` |
+| `src/interpreter/redirects.rs` | Redirections (vredir `{var}` fds) |
 | `src/interpreter/pipeline.rs` | Pipeline execution, PIPESTATUS |
 | `src/expand/mod.rs` | Word expansion, `ExpCtx`, procsub handling |
-| `src/expand/params.rs` | Parameter expansion (`${...}` operators) |
-| `src/parser.rs` | Parser |
-| `src/lexer/dollar.rs` | `${}` parsing (posixexp nested quote issue) |
+| `src/expand/params.rs` | Parameter expansion (`${...}` operators), `parse_arith_offset` |
+| `src/expand/arithmetic.rs` | `eval_arith_full`, `resolve_arith_vars` (now handles `${var:-default}`) |
+| `src/parser.rs` | Parser, `parse_array_elements` (now returns Result), `skip_to_next_command` |
+| `src/lexer/dollar.rs` | `${}` parsing, substring offset loop (now tracks backticks/dquotes) |
+| `src/lexer/word.rs` | `read_param_word_impl`, `skip_comsub` (case depth tracking) |
 | `rust/bash/testsuite.nix` | Test harness with path/PID normalization |
 
-## Recommended Priority
+## Recommended Next Priorities
 
-1. **Fix EPIPE handling** to pass comsub + lastpipe (+2 tests, net +2)
-2. **Fix parser error recovery** for new-exp and array (huge line-count reduction, net +2 if both fixed)
-3. **Implement `{var}` fd redirection** to fix vredir (infinite loop → potential crash, +1)
-4. **Fix `declare` unset variable formatting** for varenv (many small fixes, +1)
-5. **Fix `case` inside `$()` parsing** for comsub-posix (+1)
-6. **Fix `let` literal `$` handling** for arith (+1)
-7. **Fix posixexp nested quote parsing** (+1)
+1. **Fix posixexp dquote toggle** — Make `"` inside `${:-word}` when `in_dquote=true` close the outer dquote instead of opening nested dquote. Tricky: must still allow `"${foo:-"a"}"` (balanced inner quotes). (+1 test if all 4 issues fixed)
+
+2. **Fix `case` inside `$()` in comsub-posix** — Improve `skip_comsub` to handle case patterns where `)` appears without leading `(`. (+1 test)
+
+3. **Fix `let` literal `$` in arith** — Skip `$var` expansion when `arith_is_let` is true and the expression came from single-quoted `let` arg.
+
+4. **Fix heredoc hanging** — Investigate what causes the test to hang (likely an fd issue or infinite read loop).
+
+5. **Fix vredir** — The `{var}` fd mechanism exists but has issues with save/restore and closing. The test produces 734K diff lines suggesting an infinite loop or incorrect fd handling.
 
 ## Approach
 
