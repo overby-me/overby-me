@@ -345,17 +345,29 @@ impl Shell {
                     let mut content_bytes = crate::builtins::string_to_raw_bytes(&target_str);
                     content_bytes.push(b'\n');
 
-                    let (pipe_r, pipe_w) = nix::unistd::pipe().map_err(|e| e.to_string())?;
-                    nix::unistd::write(&pipe_w, &content_bytes).map_err(|e| e.to_string())?;
-                    let pipe_r_raw = pipe_r.as_raw_fd();
-                    drop(pipe_w);
-                    if pipe_r_raw != fd {
-                        nix::unistd::dup2(pipe_r_raw, fd).map_err(|e| e.to_string())?;
-                        drop(pipe_r);
+                    // Use an anonymous file (memfd) instead of a pipe to avoid
+                    // blocking when heredoc content exceeds the pipe buffer
+                    // size (~64KB).  The pipe approach would deadlock because
+                    // write() blocks when the buffer is full and nobody is
+                    // reading yet.  memfd_create gives us a seekable anonymous
+                    // file with no filesystem footprint.
+                    let memfd = nix::sys::memfd::memfd_create(
+                        c"bash-heredoc",
+                        nix::sys::memfd::MemFdCreateFlag::MFD_CLOEXEC,
+                    )
+                    .map_err(|e| e.to_string())?;
+                    let mem_raw = memfd.as_raw_fd();
+                    nix::unistd::write(&memfd, &content_bytes).map_err(|e| e.to_string())?;
+                    nix::sys::stat::fstat(mem_raw).ok(); // no-op to keep borrow checker happy
+                    // Seek back to the beginning so reads start from offset 0
+                    nix::unistd::lseek(mem_raw, 0, nix::unistd::Whence::SeekSet)
+                        .map_err(|e| e.to_string())?;
+                    if mem_raw != fd {
+                        nix::unistd::dup2(mem_raw, fd).map_err(|e| e.to_string())?;
+                        drop(memfd);
                     } else {
-                        // pipe_r is already the target fd — don't close it!
-                        // Leak the OwnedFd so it isn't closed on drop.
-                        std::mem::forget(pipe_r);
+                        // memfd is already the target fd — don't close it.
+                        std::mem::forget(memfd);
                     }
                 }
                 RedirectKind::ReadWrite => {
