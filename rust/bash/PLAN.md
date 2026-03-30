@@ -13,7 +13,7 @@
 - **comsub-posix**: 0 diff locally ✅, still fails in nix due to error message sub-tests
 - **posixexp**: 2 diff locally (was 6), nix still fails on IFS/$@ issues
 - **varenv**: 6 diff locally (was 36), 4 are PID diffs — only ~chet expansion remains
-- **builtins**: 79 diff locally (was 93), fixed continue N, hash msg, exit, set -o, kill -l
+- **builtins**: 40 diff locally (was 93), implemented enable -n, fixed continue N, hash msg, exit, set -o, kill -l
 - **trap**: flaky — 1 extra CHLD signal (non-deterministic)
 - **printf**: flaky — timing-dependent date format mismatch
 
@@ -48,6 +48,10 @@
 14. **Fix `exit` with non-numeric argument** (`src/builtins/flow.rs`) — `exit status` (non-numeric) should print an error but NOT actually exit the shell in script mode. Changed to `return 2` instead of falling through to `std::process::exit()`.
 
 15. **Fix `kill -l` with out-of-range signal numbers** (`src/builtins/trap.rs`) — `kill -l 4096` should report "invalid signal specification". Previously, when the number parsed successfully but wasn't found in the signal table, it silently produced no output. Added an else branch to print the error.
+
+16. **Implement `enable -n` builtin disabling** (`src/builtins/trap.rs`, `src/interpreter/mod.rs`, `src/interpreter/commands.rs`, `src/builtins/exec.rs`) — Full implementation of `enable -n NAME` (disable builtin), `enable NAME` (re-enable), `enable -n` (list disabled), `enable -ps` (list special builtins), `enable -aps` (list all), `enable -d` (dynamic unload error). Added `disabled_builtins: HashSet<String>` to Shell struct. Builtin dispatch in `run_simple_command` now skips disabled builtins (falls through to external command lookup). `type -t` also respects disabled builtins. Reduced builtins diff from 79 to 40.
+
+17. **Fix `enable -d` error messages** (`src/builtins/trap.rs`) — Unknown builtins get "not a shell builtin", known builtins get "not dynamically loaded".
 
 ## How to Run Tests
 
@@ -136,11 +140,10 @@ Significant improvement. Remaining:
 - `BASH_ALIASES` and `BASH_CMDS` arrays appearing in `declare -A` output.
 - `chaff[hello world]` subscript with spaces not handled.
 
-#### 7. builtins (79 lines local, was 93 → was 336)
+#### 7. builtins (40 lines local, was 93 → was 336)
 
-Significant improvement. Remaining:
+Major improvement. `enable -n` now implemented. Remaining:
 
-- **`enable -n` not implemented** (~34 diff lines) — disable builtins at runtime. The test explicitly checks this feature.
 - `pushd`/`popd` with numeric args and error handling (~4 lines).
 - `declare -p` after pre-command assignments (`foo="" export foo`) (~8 lines).
 - `-printenv` error format difference (~2 lines).
@@ -201,9 +204,9 @@ Timing-dependent: `%(fmt)T` date format test can mismatch if test crosses a seco
 | `src/builtins/vars.rs` | `declare`, `local` (now with no-args listing), `export` (unset var handling), `let` |
 | `src/builtins/mod.rs` | `parse_array_literal`, function body formatting, `quote_for_declare` |
 | `src/builtins/set.rs` | `set` (allexport, physical, ignoreeof), `shopt` (update_shellopts call) |
-| `src/builtins/trap.rs` | `trap`, `kill` (kill -l range check) |
-| `src/interpreter/mod.rs` | Shell struct, `declared_unset`, `run_string`, `resolve_nameref`, `set_var` (auto-export), SHELLOPTS/BASHOPTS readonly |
-| `src/interpreter/commands.rs` | Command execution, `expand_word*`, `get_opt_flags` (allexport `a` flag), `update_shellopts`, `execute_assignment`, `continue N` fix |
+| `src/builtins/trap.rs` | `trap`, `kill` (kill -l range check), `enable` (full -n/-s/-a/-d impl) |
+| `src/interpreter/mod.rs` | Shell struct, `declared_unset`, `disabled_builtins`, `run_string`, `resolve_nameref`, `set_var` (auto-export), SHELLOPTS/BASHOPTS readonly |
+| `src/interpreter/commands.rs` | Command execution (disabled builtin check), `expand_word*`, `get_opt_flags` (allexport `a` flag), `update_shellopts`, `execute_assignment`, `continue N` fix |
 | `src/interpreter/arithmetic.rs` | Arithmetic eval, `expand_comsubs_in_arith` (handles `\$` and backticks), error tokens, short-circuit assignment validation, ternary precedence |
 | `src/interpreter/redirects.rs` | Redirections (vredir `{var}` fds, memfd heredocs, pipe fd leak fix) |
 | `src/interpreter/pipeline.rs` | Pipeline execution, PIPESTATUS |
@@ -225,11 +228,11 @@ Timing-dependent: `%(fmt)T` date format test can mismatch if test crosses a seco
 
 3. **Fix arith10.sub array subscript quoting** — Handle `a[" "]`, `a[\ \]`, `a[\\]` in arithmetic array subscripts. (~100 nix diff lines)
 
-4. **Implement `enable -n`** — Disable builtins at runtime. Would fix ~34 lines in builtins test. Needs a set of disabled builtins and checking it before dispatching.
+4. **Fix heredoc sub-test issues** — heredoc3.sub (delimiter edge cases), heredoc7.sub (comsub+heredoc interaction), heredoc9.sub (function body printing). (~85 nix diff lines)
 
-5. **Fix heredoc sub-test issues** — heredoc3.sub (delimiter edge cases), heredoc7.sub (comsub+heredoc interaction), heredoc9.sub (function body printing). (~85 nix diff lines)
+5. **Fix varenv nix sub-tests** — varenv3.sub (local scoping), varenv4.sub (assoc array conversion), varenv25.sub (local -p).
 
-6. **Fix varenv nix sub-tests** — varenv3.sub (local scoping), varenv4.sub (assoc array conversion), varenv25.sub (local -p).
+6. **Fix builtins remaining issues** — pushd/popd numeric args, declare -p after pre-command assignments. (~12 real diff lines)
 
 ## Approach
 
