@@ -895,6 +895,9 @@ fn make_common_from_parsed(
         },
         timestamps: RwLock::new(UnitTimestamps::default()),
         n_restarts: std::sync::atomic::AtomicU64::new(0),
+        deactivation_in_progress: std::sync::atomic::AtomicBool::new(false),
+        deactivation_irreversible: std::sync::atomic::AtomicBool::new(false),
+        start_requested_during_deactivation: std::sync::atomic::AtomicBool::new(false),
     })
 }
 

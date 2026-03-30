@@ -41,6 +41,15 @@ pub struct Common {
     /// so `systemctl show -P NRestarts` can read it even while the service
     /// state write-lock is held during `reactivate` → `wait_for_service`.
     pub n_restarts: std::sync::atomic::AtomicU64,
+    /// Set when a deactivation (stop) is in progress for this unit.
+    /// Used to detect conflicting start requests during ExecStop.
+    pub deactivation_in_progress: std::sync::atomic::AtomicBool,
+    /// Set when the deactivation is irreversible (--job-mode=replace-irreversibly).
+    /// Conflicting start requests are silently rejected.
+    pub deactivation_irreversible: std::sync::atomic::AtomicBool,
+    /// Set by StartNoBlock when a start is requested during a non-irreversible
+    /// deactivation. The Stop handler checks this after ExecStop to fail the stop.
+    pub start_requested_during_deactivation: std::sync::atomic::AtomicBool,
 }
 
 /// Lifecycle timestamps for a unit, tracking when it transitions between

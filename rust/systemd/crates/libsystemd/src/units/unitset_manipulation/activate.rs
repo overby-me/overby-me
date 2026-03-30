@@ -311,6 +311,12 @@ pub enum ActivationSource {
     /// this bypasses the StoppedFinal/StoppedUnexpected early-return guards so
     /// that a service can be re-started after it exits.
     TriggerActivation,
+    /// Non-blocking activation: starts the service process but does NOT wait
+    /// for READY=1 on Type=notify services.  This prevents the activation
+    /// thread from holding the RuntimeInfo read lock indefinitely, which would
+    /// deadlock write-lock requests (e.g. loading new unit files) due to
+    /// glibc's writer-preferring RwLock.
+    NonBlocking,
 }
 
 impl ActivationSource {
@@ -747,6 +753,18 @@ pub fn activate_needed_units(
     target_id: UnitId,
     run_info: ArcMutRuntimeInfo,
 ) -> Vec<UnitOperationError> {
+    activate_needed_units_with_source(target_id, run_info, ActivationSource::Regular)
+}
+
+/// Like [`activate_needed_units`] but with a custom [`ActivationSource`].
+///
+/// `NonBlocking` skips the READY=1 wait for Type=notify services, preventing
+/// thread-pool threads from holding the RuntimeInfo read lock indefinitely.
+pub fn activate_needed_units_with_source(
+    target_id: UnitId,
+    run_info: ArcMutRuntimeInfo,
+    source: ActivationSource,
+) -> Vec<UnitOperationError> {
     let mut needed_ids = vec![target_id.clone()];
     {
         let run_info = run_info.read_poisoned();
@@ -803,6 +821,7 @@ pub fn activate_needed_units(
         run_info.clone(),
         tpool.clone(),
         errors.clone(),
+        source,
     );
 
     tpool.join();
@@ -887,6 +906,7 @@ fn activate_units_recursive(
     run_info: ArcMutRuntimeInfo,
     tpool: ThreadPool,
     errors: Arc<Mutex<Vec<UnitOperationError>>>,
+    source: ActivationSource,
 ) {
     // Log what we were called with (only interesting units, not empty calls)
     if !ids_to_start.is_empty() {
@@ -946,7 +966,7 @@ fn activate_units_recursive(
             // a second read lock (which would deadlock on glibc's
             // writer-preferring rwlock if a writer is pending).
             let ri_guard = run_info_copy.read_poisoned();
-            let result = activate_unit(id, &ri_guard, ActivationSource::Regular);
+            let result = activate_unit(id, &ri_guard, source);
 
             match result {
                 Ok(StartResult::Started(next_services_ids)) => {
@@ -1002,6 +1022,7 @@ fn activate_units_recursive(
                             run_info_copy2,
                             tpool_copy2,
                             errors_copy2,
+                            source,
                         );
                     };
                     tpool_copy.execute(next_services_job);

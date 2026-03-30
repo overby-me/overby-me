@@ -1835,6 +1835,9 @@ pub fn generate_fstab_mount_units(unit_table: &mut HashMap<UnitId, Unit>) {
                     },
                     timestamps: RwLock::new(UnitTimestamps::default()),
                     n_restarts: std::sync::atomic::AtomicU64::new(0),
+                    deactivation_in_progress: std::sync::atomic::AtomicBool::new(false),
+                    deactivation_irreversible: std::sync::atomic::AtomicBool::new(false),
+                    start_requested_during_deactivation: std::sync::atomic::AtomicBool::new(false),
                 },
                 specific: Specific::Swap(SwapSpecific {
                     conf: SwapConfig {
@@ -2002,6 +2005,9 @@ pub fn generate_fstab_mount_units(unit_table: &mut HashMap<UnitId, Unit>) {
                 },
                 timestamps: RwLock::new(UnitTimestamps::default()),
                 n_restarts: std::sync::atomic::AtomicU64::new(0),
+                deactivation_in_progress: std::sync::atomic::AtomicBool::new(false),
+                deactivation_irreversible: std::sync::atomic::AtomicBool::new(false),
+                start_requested_during_deactivation: std::sync::atomic::AtomicBool::new(false),
             },
             specific: Specific::Mount(MountSpecific {
                 conf: MountConfig {
@@ -2631,6 +2637,9 @@ mod tests {
                 status: RwLock::new(UnitStatus::NeverStarted),
                 timestamps: RwLock::new(UnitTimestamps::default()),
                 n_restarts: std::sync::atomic::AtomicU64::new(0),
+                deactivation_in_progress: std::sync::atomic::AtomicBool::new(false),
+                deactivation_irreversible: std::sync::atomic::AtomicBool::new(false),
+                start_requested_during_deactivation: std::sync::atomic::AtomicBool::new(false),
             },
             specific: Specific::Target(crate::units::TargetSpecific {
                 state: RwLock::new(crate::units::TargetState {

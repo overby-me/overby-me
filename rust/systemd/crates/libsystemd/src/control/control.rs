@@ -3741,6 +3741,9 @@ fn create_transient_unit(
             status: RwLock::new(UnitStatus::NeverStarted),
             timestamps: RwLock::new(UnitTimestamps::default()),
             n_restarts: std::sync::atomic::AtomicU64::new(0),
+            deactivation_in_progress: std::sync::atomic::AtomicBool::new(false),
+            deactivation_irreversible: std::sync::atomic::AtomicBool::new(false),
+            start_requested_during_deactivation: std::sync::atomic::AtomicBool::new(false),
         },
         specific: Specific::Service(ServiceSpecific {
             conf: service_conf,
@@ -3971,6 +3974,9 @@ fn create_transient_unit(
                 status: RwLock::new(UnitStatus::Started(crate::units::StatusStarted::Running)),
                 timestamps: RwLock::new(UnitTimestamps::default()),
                 n_restarts: std::sync::atomic::AtomicU64::new(0),
+                deactivation_in_progress: std::sync::atomic::AtomicBool::new(false),
+                deactivation_irreversible: std::sync::atomic::AtomicBool::new(false),
+                start_requested_during_deactivation: std::sync::atomic::AtomicBool::new(false),
             },
             specific: Specific::Timer(crate::units::TimerSpecific {
                 conf: timer_config,
@@ -4119,6 +4125,9 @@ fn create_transient_unit(
                 status: RwLock::new(UnitStatus::Started(crate::units::StatusStarted::Running)),
                 timestamps: RwLock::new(UnitTimestamps::default()),
                 n_restarts: std::sync::atomic::AtomicU64::new(0),
+                deactivation_in_progress: std::sync::atomic::AtomicBool::new(false),
+                deactivation_irreversible: std::sync::atomic::AtomicBool::new(false),
+                start_requested_during_deactivation: std::sync::atomic::AtomicBool::new(false),
             },
             specific: Specific::Path(crate::units::PathSpecific {
                 conf: path_config,
@@ -6793,7 +6802,9 @@ pub fn execute_command(
                     warn!("Error re-starting dependency after restart: {err}");
                 }
             }
-            // Re-activate reverse deps (required_by/bound_by) that were stopped
+            // Re-activate reverse deps (required_by/bound_by) that were stopped.
+            // Use background threads so that Type=notify services that never send
+            // READY=1 (e.g. always-activating.service) don't block the Restart handler.
             for dep_id in stopped_reverse_deps {
                 {
                     let ri = run_info.read_poisoned();
@@ -6804,19 +6815,28 @@ pub fn execute_command(
                         }
                     }
                 }
-                {
+                let should_activate = {
                     let ri = run_info.read_poisoned();
-                    if let Some(dep) = ri.unit_table.get(&dep_id) {
-                        let status = dep.common.status.read_poisoned();
-                        if matches!(&*status, crate::units::UnitStatus::NeverStarted) {
-                            drop(status);
-                            let errs =
-                                crate::units::activate_needed_units(dep_id, run_info.clone());
-                            for err in &errs {
-                                warn!("Error re-activating reverse dep: {err}");
-                            }
+                    ri.unit_table
+                        .get(&dep_id)
+                        .map(|dep| {
+                            let status = dep.common.status.read_poisoned();
+                            matches!(&*status, crate::units::UnitStatus::NeverStarted)
+                        })
+                        .unwrap_or(false)
+                };
+                if should_activate {
+                    let run_info_clone = run_info.clone();
+                    std::thread::spawn(move || {
+                        let errs = crate::units::activate_needed_units_with_source(
+                            dep_id,
+                            run_info_clone,
+                            crate::units::ActivationSource::NonBlocking,
+                        );
+                        for err in &errs {
+                            warn!("Error re-activating reverse dep: {err}");
                         }
-                    }
+                    });
                 }
             }
         }
@@ -7413,6 +7433,35 @@ pub fn execute_command(
             // Like Start but returns immediately — activation runs in background.
             for unit_name in &unit_names {
                 let id = find_or_load_unit(unit_name, &run_info)?;
+
+                // Check if this unit is currently being stopped. If so, signal
+                // the conflict instead of actually starting it (simulates real
+                // systemd's job queue conflict detection).
+                {
+                    let ri = run_info.read_poisoned();
+                    if let Some(unit) = ri.unit_table.get(&id)
+                        && unit
+                            .common
+                            .deactivation_in_progress
+                            .load(std::sync::atomic::Ordering::SeqCst)
+                    {
+                        if unit
+                            .common
+                            .deactivation_irreversible
+                            .load(std::sync::atomic::Ordering::SeqCst)
+                        {
+                            // Irreversible stop: silently reject the start.
+                            continue;
+                        }
+                        // Non-irreversible stop: signal that a start was
+                        // requested so the Stop handler can fail.
+                        unit.common
+                            .start_requested_during_deactivation
+                            .store(true, std::sync::atomic::Ordering::SeqCst);
+                        continue;
+                    }
+                }
+
                 load_dependency_units(&id, &run_info);
                 refresh_directory_deps(&id.name, &run_info);
                 {
@@ -7515,8 +7564,20 @@ pub fn execute_command(
             crate::units::remove_unit_with_dependencies(id, run_info)?;
         }
         Command::Stop(unit_names) => {
+            // Extract --job-mode= from the unit names list (passed as a pseudo-param)
+            let mut job_mode: Option<String> = None;
+            let mut actual_names: Vec<String> = Vec::new();
+            for name in &unit_names {
+                if let Some(jm) = name.strip_prefix("--job-mode=") {
+                    job_mode = Some(jm.to_string());
+                } else {
+                    actual_names.push(name.clone());
+                }
+            }
+            let irreversible = job_mode.as_deref() == Some("replace-irreversibly");
+
             let run_info = &*run_info.read_poisoned();
-            for unit_name in &unit_names {
+            for unit_name in &actual_names {
                 let id = {
                     let units = find_units_with_name(unit_name, &run_info.unit_table);
                     if units.len() > 1 {
@@ -7545,8 +7606,57 @@ pub fn execute_command(
                     units[0].id.clone()
                 };
 
-                crate::units::deactivate_unit_recursive(&id, run_info)
-                    .map_err(|e| format!("{e}"))?;
+                // Set deactivation flags so concurrent StartNoBlock can detect
+                // the conflict (simulates real systemd's job queue behavior).
+                if let Some(unit) = run_info.unit_table.get(&id) {
+                    unit.common
+                        .deactivation_in_progress
+                        .store(true, std::sync::atomic::Ordering::SeqCst);
+                    unit.common
+                        .deactivation_irreversible
+                        .store(irreversible, std::sync::atomic::Ordering::SeqCst);
+                    unit.common
+                        .start_requested_during_deactivation
+                        .store(false, std::sync::atomic::Ordering::SeqCst);
+                }
+
+                let deactivation_result = crate::units::deactivate_unit_recursive(&id, run_info)
+                    .map_err(|e| format!("{e}"));
+
+                // Clear deactivation flags.
+                let restart_requested = if let Some(unit) = run_info.unit_table.get(&id) {
+                    let requested = unit
+                        .common
+                        .start_requested_during_deactivation
+                        .load(std::sync::atomic::Ordering::SeqCst);
+                    unit.common
+                        .deactivation_in_progress
+                        .store(false, std::sync::atomic::Ordering::SeqCst);
+                    unit.common
+                        .deactivation_irreversible
+                        .store(false, std::sync::atomic::Ordering::SeqCst);
+                    unit.common
+                        .start_requested_during_deactivation
+                        .store(false, std::sync::atomic::Ordering::SeqCst);
+                    requested
+                } else {
+                    false
+                };
+
+                deactivation_result?;
+
+                // If a start was requested during a non-irreversible stop,
+                // the stop should fail (the service is "unstoppable").
+                // Restore the unit to Started state since in real systemd
+                // the stop job would have been cancelled (service never stopped).
+                if restart_requested && !irreversible {
+                    if let Some(unit) = run_info.unit_table.get(&id) {
+                        let mut status = unit.common.status.write_poisoned();
+                        *status =
+                            crate::units::UnitStatus::Started(crate::units::StatusStarted::Running);
+                    }
+                    return Err(format!("Job for {} canceled.", id.name,));
+                }
             }
         }
         Command::StopNoBlock(unit_names) => {
@@ -8220,6 +8330,9 @@ mod tests {
                 status: RwLock::new(UnitStatus::NeverStarted),
                 timestamps: RwLock::new(UnitTimestamps::default()),
                 n_restarts: std::sync::atomic::AtomicU64::new(0),
+                deactivation_in_progress: std::sync::atomic::AtomicBool::new(false),
+                deactivation_irreversible: std::sync::atomic::AtomicBool::new(false),
+                start_requested_during_deactivation: std::sync::atomic::AtomicBool::new(false),
             },
             specific: Specific::Target(TargetSpecific {
                 state: RwLock::new(TargetState {

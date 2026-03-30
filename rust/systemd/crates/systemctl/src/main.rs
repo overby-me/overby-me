@@ -1905,7 +1905,29 @@ Examples:
 }
 
 fn send_unix(path: &str, payload: &str) -> Result<Value, Box<dyn std::error::Error>> {
-    let mut stream = std::os::unix::net::UnixStream::connect(path)?;
+    // Retry on EAGAIN/WouldBlock — PID 1's listen backlog may be
+    // temporarily full when many commands are processed concurrently.
+    let mut stream = {
+        let mut last_err = None;
+        let mut connected = None;
+        for _ in 0..50 {
+            match std::os::unix::net::UnixStream::connect(path) {
+                Ok(s) => {
+                    connected = Some(s);
+                    break;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    last_err = Some(e);
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+        match connected {
+            Some(s) => s,
+            None => return Err(last_err.unwrap().into()),
+        }
+    };
     stream.set_read_timeout(Some(std::time::Duration::from_secs(60)))?;
     stream.write_all(payload.as_bytes())?;
     stream.shutdown(std::net::Shutdown::Write)?;

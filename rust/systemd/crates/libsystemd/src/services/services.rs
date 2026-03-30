@@ -321,7 +321,7 @@ impl Service {
         id: UnitId,
         name: &str,
         run_info: &RuntimeInfo,
-        _source: ActivationSource,
+        source: ActivationSource,
     ) -> Result<StartResult, ServiceErrorReason> {
         if let Some(pid) = self.pid {
             return Err(ServiceErrorReason::AlreadyHasPID(pid));
@@ -474,7 +474,11 @@ impl Service {
                 }
 
                 // Only wait for the service if it was actually spawned (has a PID).
-                if self.pid.is_some() {
+                // NonBlocking: skip the READY=1 wait so the calling thread
+                // releases the RuntimeInfo read lock quickly.  The process is
+                // started (InvocationID set) but Type=notify services remain
+                // in Starting state instead of transitioning to Started.
+                if self.pid.is_some() && !matches!(source, ActivationSource::NonBlocking) {
                     super::fork_parent::wait_for_service(self, conf, name, run_info).map_err(
                         |start_err| match self.run_poststop(conf, id.clone(), name, run_info) {
                             Ok(()) => ServiceErrorReason::StartFailed(start_err),
