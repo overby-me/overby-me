@@ -246,9 +246,23 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
         "try-restart" | "condrestart" => {
             let name = match &call.params {
                 Some(Value::String(s)) => s.clone(),
+                Some(Value::Array(arr)) => {
+                    // Extract unit name, ignoring --job-mode= pseudo-params
+                    let names: Vec<&str> = arr
+                        .iter()
+                        .filter_map(|v| v.as_str())
+                        .filter(|s| !s.starts_with("--job-mode="))
+                        .collect();
+                    if names.len() != 1 {
+                        return Err(ParseError::ParamsInvalid(
+                            "try-restart requires exactly one unit name".to_string(),
+                        ));
+                    }
+                    names[0].to_string()
+                }
                 Some(_) | None => {
                     return Err(ParseError::ParamsInvalid(
-                        "Params must be a single string".to_string(),
+                        "Params must be a string or array".to_string(),
                     ));
                 }
             };

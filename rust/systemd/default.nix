@@ -217,22 +217,15 @@
       {name = "01-BASIC";}
       {
         name = "03-JOBS";
-        # Minimal patches on upstream test:
-        # - Remove unstoppable/replace-irreversibly section (needs job queue)
-        # - Remove varlinkctl section (needs varlink server)
-        # - Fix upstream typo: propagatesstopto → propagatestopto
         patchScript = ''
           # Remove job merging/ordering tests (needs proper job queue)
-          sed -i '/^# Test merging/,/^# TODO: add more job/{
-            /^# TODO: add more job/b
+          sed -i '/^# Test merging/,/^# Some basic testing/{
+            /^# Some basic testing/b
             d
           }' TEST-03-JOBS.sh
 
           # Remove show-transaction tests (needs systemd-importd)
           sed -i '/^# Some basic testing that --show-transaction/,/^$/d' TEST-03-JOBS.sh
-
-          # Remove try-restart NOP test (needs job queue)
-          sed -i '/^# Test for a crash when enqueuing/,/^$/d' TEST-03-JOBS.sh
 
           # Remove always-activating InvocationID test (needs restart propagation
           # to required_by units and InvocationID generation before notify-ready)
