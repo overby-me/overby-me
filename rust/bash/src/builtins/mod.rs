@@ -802,7 +802,10 @@ fn format_program_impl(program: &Program, indent: usize, semi_last: bool) -> Str
             let is_keyword = trimmed.ends_with('{')
                 || trimmed.ends_with("then")
                 || trimmed.ends_with("do")
-                || trimmed.ends_with("else");
+                || trimmed.ends_with("else")
+                || trimmed.ends_with("done")
+                || trimmed.ends_with("fi")
+                || trimmed.ends_with("esac");
             // Check if the command ends with a heredoc body
             // (the last line is the heredoc delimiter, e.g., "EOF")
             let ends_with_heredoc = if let Some(last_line) = line.rsplit('\n').next() {
@@ -813,6 +816,10 @@ fn format_program_impl(program: &Program, indent: usize, semi_last: bool) -> Str
                     && !llt.ends_with(';')
                     && !llt.ends_with('}')
                     && !llt.ends_with(')')
+                    && !matches!(
+                        llt,
+                        "done" | "fi" | "esac" | "then" | "do" | "else" | "elif"
+                    )
                     && line.contains("<<")
             } else {
                 false
