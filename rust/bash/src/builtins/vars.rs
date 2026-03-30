@@ -493,7 +493,9 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
                         pairs.sort_by_key(|(k, _)| (*k).clone());
                         let elems: Vec<String> = pairs
                             .iter()
-                            .map(|(k, v)| format!("[{}]={}", k, quote_for_declare(v)))
+                            .map(|(k, v)| {
+                                format!("[{}]={}", quote_assoc_key(k), quote_for_declare(v))
+                            })
                             .collect();
                         println!("declare {} {}=({} )", flags, name, elems.join(" "));
                     }
@@ -969,7 +971,7 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 } else {
                     let elements: Vec<String> = assoc
                         .iter()
-                        .map(|(k, v)| format!("[{}]={}", k, quote_for_declare(v)))
+                        .map(|(k, v)| format!("[{}]={}", quote_assoc_key(k), quote_for_declare(v)))
                         .collect();
                     println!("declare -A {}=({} )", name, elements.join(" "));
                 }
@@ -1023,7 +1025,9 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     } else {
                         let elements: Vec<String> = assoc
                             .iter()
-                            .map(|(k, v)| format!("[{}]={}", k, quote_for_declare(v)))
+                            .map(|(k, v)| {
+                                format!("[{}]={}", quote_assoc_key(k), quote_for_declare(v))
+                            })
                             .collect();
                         println!("declare {} {}=({} )", flags, name, elements.join(" "));
                     }
@@ -1168,7 +1172,7 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 } else {
                     let elements: Vec<String> = assoc
                         .iter()
-                        .map(|(k, v)| format!("[{}]=\"{}\"", k, v))
+                        .map(|(k, v)| format!("[{}]=\"{}\"", quote_assoc_key(k), v))
                         .collect();
                     println!("declare -A {}=({} )", name, elements.join(" "));
                 }

@@ -324,6 +324,30 @@ fn quote_for_declare(s: &str) -> String {
     }
 }
 
+/// Quote an associative array key for `declare -p` output.
+/// Keys containing non-alphanumeric/underscore characters are wrapped in `"..."`,
+/// with `$`, `\`, `"`, and `` ` `` escaped. Plain identifier keys are unquoted.
+fn quote_assoc_key(key: &str) -> String {
+    let needs_quoting =
+        key.is_empty() || !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    if needs_quoting {
+        let mut out = String::from("\"");
+        for ch in key.chars() {
+            match ch {
+                '$' | '`' | '\\' | '"' => {
+                    out.push('\\');
+                    out.push(ch);
+                }
+                _ => out.push(ch),
+            }
+        }
+        out.push('"');
+        out
+    } else {
+        key.to_string()
+    }
+}
+
 fn io_error_message(e: &std::io::Error) -> &'static str {
     match e.kind() {
         std::io::ErrorKind::NotFound => "No such file or directory",
