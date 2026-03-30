@@ -191,6 +191,15 @@ in
           [ -e "/usr/lib/systemd/$name" ] || ln -sfn "$bin" "/usr/lib/systemd/$name"
         done
 
+        # Symlink generator directories so tests referencing
+        # /usr/lib/systemd/system-generators/ and /usr/lib/systemd/user-environment-generators/
+        # can find generator binaries (e.g. TEST-81-GENERATORS)
+        for gendir in system-generators user-environment-generators user-generators; do
+          if [ -d "${config.systemd.package}/lib/systemd/$gendir" ]; then
+            ln -sfn "${config.systemd.package}/lib/systemd/$gendir" "/usr/lib/systemd/$gendir"
+          fi
+        done
+
         # Create standard systemd testdata path so unit files referencing
         # /usr/lib/systemd/tests/testdata/ can find helper scripts.
         # We create a real directory instead of a plain symlink so we can

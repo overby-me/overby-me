@@ -4505,6 +4505,7 @@
           # Use upstream main script (sources test-control.sh and calls run_subtests)
           # but remove subtests that need unimplemented features
           rm -f TEST-19-CGROUP.delegate.sh \
+               TEST-19-CGROUP.ExitType-cgroup.sh \
                TEST-19-CGROUP.IPAddressAllow-Deny.sh \
                TEST-19-CGROUP.keyed-properties.sh
 
@@ -8299,6 +8300,18 @@
 
         '';
         extraPackages = pkgs: [pkgs.openssl];
+      }
+      {name = "76-SYSCTL";}
+      {
+        name = "81-GENERATORS";
+        # Use upstream subtests. These test generator binaries directly
+        # (not through PID 1) so they don't need D-Bus or other PID 1 features.
+        patchScript = ''
+          # Remove environment-d-generator subtest: it tests a user-session
+          # generator that requires XDG_CONFIG_DIRS and user-level paths
+          # which differ significantly on NixOS.
+          rm -f TEST-81-GENERATORS.environment-d-generator.sh
+        '';
       }
     ];
   in
