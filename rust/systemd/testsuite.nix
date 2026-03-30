@@ -173,8 +173,16 @@ in
           done
         fi
 
-        # Create writable /usr/lib/systemd/system/ for tests that write units there
+        # Create writable /usr/lib/systemd/system/ for tests that write units there.
+        # Also symlink upstream systemd unit files that tests reference (e.g.
+        # systemd-importd.service for TEST-03-JOBS).  We don't symlink ALL
+        # upstream units because loading hundreds of extra units at boot can
+        # overwhelm PID 1.
         mkdir -p /usr/lib/systemd/system
+        for f in ${config.systemd.package}/example/systemd/system/systemd-importd.service; do
+          name=$(basename "$f")
+          [ -e "/usr/lib/systemd/system/$name" ] || ln -sfn "$f" "/usr/lib/systemd/system/$name"
+        done
 
         # Symlink helper binaries (systemd-sysctl, etc.) so tests referencing
         # /usr/lib/systemd/systemd-* can find them (NixOS puts them in the store)

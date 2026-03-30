@@ -1211,23 +1211,17 @@ fn find_units_with_name<'a>(unit_name: &str, unit_table: &'a UnitTable) -> Vec<&
                         .iter()
                         .any(|alias| alias == unit_name)
             } else {
-                // No suffix: match "name.suffix" by stripping the suffix and
-                // comparing the base. This handles "a" matching "a.service"
-                // but NOT "a-b-c.service" or "autovt@tty1.service".
-                let matches_base = |full: &str| -> bool {
-                    full == unit_name
-                        || full
-                            .rfind('.')
-                            .map(|dot| &full[..dot] == unit_name)
-                            .unwrap_or(false)
-                };
-                matches_base(name)
+                // No suffix: default to ".service" (matching real systemd).
+                // "systemd-importd" → "systemd-importd.service".
+                let with_suffix = format!("{unit_name}.service");
+                let matches_default = |full: &str| -> bool { full == with_suffix };
+                matches_default(name)
                     || unit
                         .common
                         .unit
                         .aliases
                         .iter()
-                        .any(|alias| matches_base(alias))
+                        .any(|alias| matches_default(alias))
             }
         })
         .collect()
