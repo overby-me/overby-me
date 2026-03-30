@@ -4,5 +4,6 @@
 mod control;
 pub mod jsonrpc2;
 pub mod unit_properties;
+pub mod varlink;
 
 pub use control::*;

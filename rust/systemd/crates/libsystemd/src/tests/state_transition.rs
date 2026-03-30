@@ -71,6 +71,10 @@ fn test_service_state_transitions_inner() {
             std::collections::HashMap::new(),
         )),
         unit_markers: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        transactions_with_cycle: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        units_in_cycles: std::sync::Arc::new(std::sync::Mutex::new(
+            std::collections::HashSet::new(),
+        )),
     }));
 
     let signals = signal_hook::iterator::Signals::new([signal_hook::consts::SIGCHLD]).unwrap();

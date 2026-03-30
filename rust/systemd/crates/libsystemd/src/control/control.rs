@@ -40,13 +40,10 @@ pub fn open_all_sockets(run_info: ArcMutRuntimeInfo, conf: &crate::config::Confi
     // socket to 0666 so any user can issue control commands — matching real
     // systemd's /run/systemd/private socket behaviour.
     let _ = std::fs::set_permissions(&control_sock_path, std::fs::Permissions::from_mode(0o666));
-    accept_control_connections_unix_socket(run_info, unixsock);
-    //let tcpsock = std::net::TcpListener::bind("127.0.0.1:8080").unwrap();
-    //accept_control_connections_tcp(
-    //    run_info.clone(),
-    //    conf.notification_sockets_dir.clone(),
-    //    tcpsock,
-    //);
+    accept_control_connections_unix_socket(run_info.clone(), unixsock);
+
+    // Start the varlink server on /run/systemd/io.systemd.Manager
+    super::varlink::start_varlink_server(run_info);
 }
 
 #[derive(Debug)]
@@ -7078,6 +7075,29 @@ pub fn execute_command(
 
             for unit_name in &actual_names {
                 let id = find_or_load_unit(unit_name, &run_info)?;
+
+                // If this unit was part of a broken ordering cycle, record a
+                // per-start transaction ID.  Upstream systemd detects cycles
+                // per-transaction (per `systemctl start`); rust-systemd breaks
+                // cycles permanently during daemon-reload, so we track which
+                // units were involved and generate IDs on each start instead.
+                {
+                    let ri = run_info.read_poisoned();
+                    let in_cycle = ri.units_in_cycles.lock().unwrap().contains(&id.name);
+                    if in_cycle {
+                        let txn_id = crate::control::varlink::next_transaction_id();
+                        ri.transactions_with_cycle.lock().unwrap().push(txn_id);
+                        let cycle_names = id.name.clone();
+                        let msg = format!("Found ordering cycle starting with {cycle_names}");
+                        warn!("{msg}");
+                        let txn_str = txn_id.to_string();
+                        crate::control::varlink::journal_log_with_fields(
+                            &msg,
+                            &[("TRANSACTION_ID", &txn_str)],
+                        );
+                    }
+                }
+
                 if !ignore_deps {
                     // Load all dependency units from disk so the full graph is available.
                     load_dependency_units(&id, &run_info);
@@ -7972,6 +7992,36 @@ pub fn execute_command(
 
             let mut response_object = serde_json::Map::new();
             insert_new_units(new_units, run_info)?;
+
+            // Detect and break ordering cycles in the updated unit table,
+            // recording transaction IDs for each cycle found.
+            let broken_cycles = crate::units::break_dependency_cycles(&mut run_info.unit_table);
+            if !broken_cycles.is_empty() {
+                let txn_tracker = run_info.transactions_with_cycle.clone();
+                let mut txns = txn_tracker.lock().unwrap();
+                let cycle_set = run_info.units_in_cycles.clone();
+                let mut cycle_units = cycle_set.lock().unwrap();
+                for cycle in &broken_cycles {
+                    let txn_id = crate::control::varlink::next_transaction_id();
+                    txns.push(txn_id);
+                    let cycle_names: Vec<String> = cycle.iter().map(|id| id.name.clone()).collect();
+                    for name in &cycle_names {
+                        cycle_units.insert(name.clone());
+                    }
+                    let msg = format!(
+                        "Found ordering cycle starting with {}",
+                        cycle_names.join(" -> ")
+                    );
+                    warn!("{msg}");
+                    // Log with structured TRANSACTION_ID field for journalctl
+                    let txn_str = txn_id.to_string();
+                    crate::control::varlink::journal_log_with_fields(
+                        &msg,
+                        &[("TRANSACTION_ID", &txn_str)],
+                    );
+                }
+            }
+
             response_object.insert("Added".into(), serde_json::Value::Array(new_units_names));
             response_object.insert(
                 "Updated".into(),

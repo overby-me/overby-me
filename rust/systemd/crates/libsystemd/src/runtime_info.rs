@@ -46,6 +46,17 @@ pub type ManagerEnvironment = Arc<Mutex<HashMap<String, String>>>;
 /// Per-unit markers (e.g. "needs-restart"), keyed by unit name.
 pub type UnitMarkers = Arc<Mutex<HashMap<String, Vec<String>>>>;
 
+/// Transaction IDs for ordering cycles detected during unit loading.
+/// Each cycle detected during daemon-reload or boot gets a unique uint64 ID,
+/// matching systemd's `TransactionsWithOrderingCycle` varlink/D-Bus property.
+pub type TransactionsWithCycle = Arc<Mutex<Vec<u64>>>;
+
+/// Set of unit names that are part of ordering cycles.
+/// Used to generate per-start transaction IDs when `systemctl start` targets
+/// a unit that was involved in a cycle (matching upstream systemd's per-transaction
+/// cycle detection behavior).
+pub type UnitsInCycles = Arc<Mutex<std::collections::HashSet<String>>>;
+
 /// This will be passed through to all the different threads as a central state struct
 pub struct RuntimeInfo {
     pub unit_table: UnitTable,
@@ -59,6 +70,8 @@ pub struct RuntimeInfo {
     pub pending_activations: PendingActivations,
     pub manager_environment: ManagerEnvironment,
     pub unit_markers: UnitMarkers,
+    pub transactions_with_cycle: TransactionsWithCycle,
+    pub units_in_cycles: UnitsInCycles,
 }
 
 impl RuntimeInfo {

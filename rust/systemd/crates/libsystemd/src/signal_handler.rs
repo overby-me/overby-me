@@ -826,6 +826,10 @@ mod tests {
             unit_markers: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),
             )),
+            transactions_with_cycle: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            units_in_cycles: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashSet::new(),
+            )),
         }));
 
         let tmp = tempfile::NamedTempFile::new().unwrap();
@@ -888,6 +892,10 @@ mod tests {
             )),
             unit_markers: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),
+            )),
+            transactions_with_cycle: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            units_in_cycles: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashSet::new(),
             )),
         }));
 
@@ -958,6 +966,10 @@ mod tests {
             )),
             unit_markers: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),
+            )),
+            transactions_with_cycle: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            units_in_cycles: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashSet::new(),
             )),
         }));
 

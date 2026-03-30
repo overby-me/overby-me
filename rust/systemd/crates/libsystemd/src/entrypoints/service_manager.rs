@@ -671,10 +671,12 @@ fn prepare_runtimeinfo(conf: &config::Config, dry_run: bool) -> runtime_info::Ar
     // Break dependency cycles instead of aborting, matching systemd behavior.
     // systemd warns about cycles and removes ordering edges to break them.
     let broken_cycles = units::break_dependency_cycles(&mut unit_table);
-    if !broken_cycles.is_empty() {
+    // Boot-time cycle IDs are recorded after RuntimeInfo is created (see below).
+    let boot_cycle_count = broken_cycles.len();
+    if boot_cycle_count > 0 {
         warn!(
             "Broke {} dependency cycle(s). See warnings above for details.",
-            broken_cycles.len()
+            boot_cycle_count
         );
     }
     trace!("Unit dependencies passed sanity checks");
@@ -707,6 +709,33 @@ fn prepare_runtimeinfo(conf: &config::Config, dry_run: bool) -> runtime_info::Ar
             std::sync::Arc::new(std::sync::Mutex::new(env))
         },
         unit_markers: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        transactions_with_cycle: {
+            let mut ids = Vec::new();
+            for cycle in &broken_cycles {
+                let txn_id = crate::control::varlink::next_transaction_id();
+                ids.push(txn_id);
+                let cycle_names: Vec<String> = cycle.iter().map(|id| id.name.clone()).collect();
+                let msg = format!(
+                    "Found ordering cycle starting with {}",
+                    cycle_names.join(" -> ")
+                );
+                let txn_str = txn_id.to_string();
+                crate::control::varlink::journal_log_with_fields(
+                    &msg,
+                    &[("TRANSACTION_ID", &txn_str)],
+                );
+            }
+            std::sync::Arc::new(std::sync::Mutex::new(ids))
+        },
+        units_in_cycles: {
+            let mut cycle_units = std::collections::HashSet::new();
+            for cycle in &broken_cycles {
+                for id in cycle {
+                    cycle_units.insert(id.name.clone());
+                }
+            }
+            std::sync::Arc::new(std::sync::Mutex::new(cycle_units))
+        },
     }))
 }
 
