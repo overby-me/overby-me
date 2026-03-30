@@ -1232,7 +1232,12 @@ impl Shell {
                 }
             }
             result
-        } else if let Some(builtin) = self.builtins.get(command_name.as_str()).copied() {
+        } else if let Some(builtin) = self
+            .builtins
+            .get(command_name.as_str())
+            .copied()
+            .filter(|_| !self.disabled_builtins.contains(command_name.as_str()))
+        {
             // For assignment builtins (readonly, export, declare, local), handle
             // compound array assignments: name=(val) — perform the assignment and
             // pass just the name to the builtin (bash parser-level assignment behavior)

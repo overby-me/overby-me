@@ -406,11 +406,12 @@ pub(super) fn builtin_type(shell: &mut Shell, args: &[String]) -> i32 {
                         | ":"
                 )
                 && builtin_map.contains_key(name)
+                && !shell.disabled_builtins.contains(name)
             {
                 println!("builtin");
             } else if shell.functions.contains_key(name) {
                 println!("function");
-            } else if builtin_map.contains_key(name) {
+            } else if builtin_map.contains_key(name) && !shell.disabled_builtins.contains(name) {
                 println!("builtin");
             } else if find_in_path_opt(name).is_some() {
                 println!("file");
@@ -490,6 +491,7 @@ pub(super) fn builtin_type(shell: &mut Shell, args: &[String]) -> i32 {
                         | ":"
                 )
                 && builtin_map.contains_key(name)
+                && !shell.disabled_builtins.contains(name)
             {
                 println!("{} is a special shell builtin", name);
                 found = true;
@@ -505,7 +507,7 @@ pub(super) fn builtin_type(shell: &mut Shell, args: &[String]) -> i32 {
                 }
             }
             // Builtin (skip if already shown as special builtin)
-            if builtin_map.contains_key(name) {
+            if builtin_map.contains_key(name) && !shell.disabled_builtins.contains(name) {
                 let already_shown_as_special = shell.opt_posix
                     && matches!(
                         name,

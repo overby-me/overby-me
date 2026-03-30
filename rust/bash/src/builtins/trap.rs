@@ -643,19 +643,120 @@ pub(super) fn builtin_kill(shell: &mut Shell, args: &[String]) -> i32 {
 }
 
 pub(super) fn builtin_enable(shell: &mut Shell, args: &[String]) -> i32 {
-    let builtins = builtins();
-    let mut status = 0;
+    let builtin_map = builtins();
+
+    // POSIX special builtins
+    let special_builtins: std::collections::HashSet<&str> = [
+        ".", ":", "break", "continue", "eval", "exec", "exit", "export", "readonly", "return",
+        "set", "shift", "source", "times", "trap", "unset",
+    ]
+    .iter()
+    .copied()
+    .collect();
+
+    let mut flag_n = false; // disable
+    let mut _flag_p = false; // print
+    let mut flag_s = false; // special builtins only
+    let mut flag_a = false; // all (include disabled)
+    let mut flag_d = false; // delete dynamically loaded
+    let mut names: Vec<String> = Vec::new();
+
     for arg in args {
-        if arg.starts_with('-') {
-            continue; // skip flags
+        if arg.starts_with('-') && arg.len() > 1 {
+            for ch in arg[1..].chars() {
+                match ch {
+                    'n' => flag_n = true,
+                    'p' => _flag_p = true,
+                    's' => flag_s = true,
+                    'a' => flag_a = true,
+                    'd' => flag_d = true,
+                    _ => {
+                        eprintln!("{}: enable: -{}: invalid option", shell.error_prefix(), ch);
+                        return 2;
+                    }
+                }
+            }
+        } else {
+            names.push(arg.clone());
         }
-        if !builtins.contains_key(arg.as_str()) {
+    }
+
+    // enable -d NAME: attempt to unload dynamically loaded builtin (we don't support dynamic loading)
+    if flag_d {
+        for name in &names {
+            if builtin_map.contains_key(name.as_str()) {
+                eprintln!(
+                    "{}: enable: {}: not dynamically loaded",
+                    shell.error_prefix(),
+                    name
+                );
+            } else {
+                eprintln!(
+                    "{}: enable: {}: not a shell builtin",
+                    shell.error_prefix(),
+                    name
+                );
+            }
+        }
+        return if names.is_empty() { 0 } else { 1 };
+    }
+
+    // If no names given, list builtins
+    if names.is_empty() {
+        let mut all_names: Vec<&&str> = builtin_map.keys().collect();
+        all_names.sort();
+
+        if flag_n && !flag_a {
+            // enable -n: list disabled builtins
+            let mut disabled: Vec<&String> = shell.disabled_builtins.iter().collect();
+            disabled.sort();
+            for name in disabled {
+                if flag_s && !special_builtins.contains(name.as_str()) {
+                    continue;
+                }
+                println!("enable -n {}", name);
+            }
+        } else {
+            // List enabled (and optionally disabled) builtins
+            for name in &all_names {
+                let is_disabled = shell.disabled_builtins.contains(**name);
+                if flag_s && !special_builtins.contains(**name) {
+                    continue;
+                }
+                if flag_a {
+                    // Show all
+                    if is_disabled {
+                        println!("enable -n {}", name);
+                    } else {
+                        println!("enable {}", name);
+                    }
+                } else if !is_disabled {
+                    // Only show enabled
+                    println!("enable {}", name);
+                }
+            }
+        }
+        return 0;
+    }
+
+    // Process named builtins
+    let mut status = 0;
+    for name in &names {
+        if !builtin_map.contains_key(name.as_str()) {
             eprintln!(
                 "{}: enable: {}: not a shell builtin",
                 shell.error_prefix(),
-                arg
+                name
             );
             status = 1;
+            continue;
+        }
+        if flag_n {
+            // Disable the builtin
+            shell.disabled_builtins.insert(name.clone());
+        } else {
+            // Re-enable the builtin
+            shell.disabled_builtins.remove(name.as_str());
         }
     }
     status
