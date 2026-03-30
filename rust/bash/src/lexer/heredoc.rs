@@ -108,6 +108,20 @@ impl Lexer {
                         Some(ch) => line.push(ch),
                     }
                 }
+                // Backslash-newline line continuation for unquoted heredocs:
+                // if the line ends with `\`, join with the next line before
+                // checking for the delimiter (bash processes \<newline> first).
+                if !hd.quoted && line.ends_with('\\') {
+                    line.pop(); // remove trailing backslash
+                    // Read the next line and append
+                    loop {
+                        match self.advance() {
+                            None => break,
+                            Some('\n') => break,
+                            Some(ch) => line.push(ch),
+                        }
+                    }
+                }
                 let check_line = if hd.strip_tabs {
                     line.trim_start_matches('\t').to_string()
                 } else {
