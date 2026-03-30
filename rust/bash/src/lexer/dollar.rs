@@ -325,6 +325,21 @@ fn parse_dollar_inner(
                             *i += 2;
                             continue;
                         }
+                        // Here-string: <<< inside comsub — just pass through
+                        '<' if *i + 2 < chars.len()
+                            && chars[*i + 1] == '<'
+                            && chars[*i + 2] == '<' =>
+                        {
+                            cmd.push(chars[*i]); // first <
+                            *i += 1;
+                            cmd.push(chars[*i]); // second <
+                            *i += 1;
+                            cmd.push(chars[*i]); // third <
+                            *i += 1;
+                            // The here-string word follows and will be consumed
+                            // by normal comsub parsing (quotes, etc.)
+                            continue;
+                        }
                         // Heredoc: << or <<- inside comsub
                         '<' if *i + 1 < chars.len()
                             && chars[*i + 1] == '<'

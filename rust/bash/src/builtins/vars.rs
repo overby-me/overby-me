@@ -120,15 +120,22 @@ pub(super) fn builtin_export(shell: &mut Shell, args: &[String]) -> i32 {
                 unsafe { std::env::set_var(name, &final_value) };
             }
         } else {
-            // Export existing variable
-            let value = shell
+            // Export existing variable (or mark unset variable for export)
+            if let Some(value) = shell
                 .vars
                 .get(arg.as_str())
                 .cloned()
                 .or_else(|| std::env::var(arg).ok())
-                .unwrap_or_default();
-            shell.exports.insert(arg.clone(), value.clone());
-            unsafe { std::env::set_var(arg, &value) };
+            {
+                shell.exports.insert(arg.clone(), value.clone());
+                unsafe { std::env::set_var(arg, &value) };
+            } else {
+                // Variable is unset — mark it for export without setting a value.
+                // Use declared_unset + exports so the export attribute persists
+                // and takes effect when the variable is later assigned.
+                shell.declared_unset.insert(arg.clone());
+                shell.exports.insert(arg.clone(), String::new());
+            }
         }
     }
     0

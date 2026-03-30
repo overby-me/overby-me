@@ -61,7 +61,8 @@ pub(super) fn builtin_exit(shell: &mut Shell, args: &[String]) -> i32 {
                     shell.error_prefix(),
                     arg
                 );
-                2
+                // Non-numeric argument: don't exit, just return error status 2
+                return 2;
             }
         }
     } else {

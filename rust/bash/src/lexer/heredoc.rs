@@ -37,7 +37,6 @@ impl Lexer {
                             if next == '\n' {
                                 // Line continuation: \<newline> is discarded, join next line
                                 self.advance();
-                                self.line += 1;
                             } else {
                                 delimiter.push(next);
                                 self.advance();
@@ -186,7 +185,7 @@ fn parse_double_quoted_content(s: &str) -> Word {
         match chars[i] {
             '\\' if i + 1 < chars.len() => {
                 let next = chars[i + 1];
-                if matches!(next, '$' | '`' | '"' | '\\' | '\n') {
+                if matches!(next, '$' | '`' | '\\' | '\n') {
                     if next != '\n' {
                         literal.push(next);
                     }

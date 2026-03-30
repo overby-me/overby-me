@@ -819,7 +819,7 @@ pub(super) fn builtin_hash(shell: &mut Shell, args: &[String]) -> i32 {
     if args.is_empty() {
         // Print hash table (currently empty since we don't cache)
         if shell.hash_table.is_empty() {
-            eprintln!("{}: hash: hash table empty", shell.error_prefix());
+            eprintln!("hash: hash table empty");
         } else {
             println!("hits\tcommand");
             for name in &shell.hash_order {

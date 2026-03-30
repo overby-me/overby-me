@@ -28,8 +28,12 @@ pub(super) fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
 
             if flags == "o" {
                 // set -o option / set +o option
-                i += 1;
-                if i < args.len() {
+                // If next arg starts with - or +, it's a separate flag, not an option name
+                if i + 1 < args.len()
+                    && !args[i + 1].starts_with('-')
+                    && !args[i + 1].starts_with('+')
+                {
+                    i += 1;
                     let option = &args[i];
                     match option.as_str() {
                         "allexport" => shell.opt_allexport = enable,
@@ -49,9 +53,19 @@ pub(super) fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
                         | "functrace"
                         | "histexpand"
                         | "history"
-                        | "ignoreeof"
-                        | "interactive-comments"
-                        | "monitor" => {
+                        | "interactive-comments" => {
+                            shell.shopt_options.insert(option.to_string(), enable);
+                        }
+                        "ignoreeof" => {
+                            shell.shopt_options.insert(option.to_string(), enable);
+                            if enable {
+                                shell.set_var("IGNOREEOF", "10".to_string());
+                            } else {
+                                shell.vars.remove("IGNOREEOF");
+                                shell.exports.remove("IGNOREEOF");
+                            }
+                        }
+                        "monitor" => {
                             shell.shopt_options.insert(option.to_string(), enable);
                             shell.opt_monitor = enable;
                         }
@@ -132,7 +146,8 @@ pub(super) fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
                             shell.opt_physical = enable;
                             shell.shopt_options.insert("physical".to_string(), enable);
                         }
-                        'a' | 'b' | 'p' | 't' | 'v' | 'B' | 'E' | 'H' | 'T' => {
+                        'a' => shell.opt_allexport = enable,
+                        'b' | 'p' | 't' | 'v' | 'B' | 'E' | 'H' | 'T' => {
                             // Known but not fully implemented flags — accept silently
                         }
                         _ => {
@@ -359,8 +374,23 @@ pub(super) fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
                         "xtrace" => shell.opt_xtrace = true,
                         "noclobber" => shell.opt_noclobber = true,
                         "noglob" => shell.opt_noglob = true,
+                        "noexec" => shell.opt_noexec = true,
                         "posix" => shell.opt_posix = true,
                         "pipefail" => shell.opt_pipefail = true,
+                        "hashall" => shell.opt_hashall = true,
+                        "keyword" => shell.opt_keyword = true,
+                        "physical" => {
+                            shell.opt_physical = true;
+                            shell.shopt_options.insert(opt.to_string(), true);
+                        }
+                        "monitor" => {
+                            shell.opt_monitor = true;
+                            shell.shopt_options.insert(opt.to_string(), true);
+                        }
+                        "ignoreeof" => {
+                            shell.shopt_options.insert(opt.to_string(), true);
+                            shell.set_var("IGNOREEOF", "10".to_string());
+                        }
                         _ => {
                             shell.shopt_options.insert(opt.to_string(), true);
                         }
@@ -373,8 +403,24 @@ pub(super) fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
                         "xtrace" => shell.opt_xtrace = false,
                         "noclobber" => shell.opt_noclobber = false,
                         "noglob" => shell.opt_noglob = false,
+                        "noexec" => shell.opt_noexec = false,
                         "posix" => shell.opt_posix = false,
                         "pipefail" => shell.opt_pipefail = false,
+                        "hashall" => shell.opt_hashall = false,
+                        "keyword" => shell.opt_keyword = false,
+                        "physical" => {
+                            shell.opt_physical = false;
+                            shell.shopt_options.insert(opt.to_string(), false);
+                        }
+                        "monitor" => {
+                            shell.opt_monitor = false;
+                            shell.shopt_options.insert(opt.to_string(), false);
+                        }
+                        "ignoreeof" => {
+                            shell.shopt_options.insert(opt.to_string(), false);
+                            shell.vars.remove("IGNOREEOF");
+                            shell.exports.remove("IGNOREEOF");
+                        }
                         _ => {
                             shell.shopt_options.insert(opt.to_string(), false);
                         }
@@ -397,6 +443,7 @@ pub(super) fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
                 status = 1;
             }
         }
+        shell.update_shellopts();
         return status;
     }
 

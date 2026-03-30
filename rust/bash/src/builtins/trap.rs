@@ -481,6 +481,13 @@ pub(super) fn builtin_kill(shell: &mut Shell, args: &[String]) -> i32 {
                         let num = if num > 128 { num - 128 } else { num };
                         if let Some((name, _)) = sig_names.iter().find(|(_, n)| *n == num) {
                             println!("{}", name);
+                        } else {
+                            eprintln!(
+                                "{}: kill: {}: invalid signal specification",
+                                shell.error_prefix(),
+                                arg
+                            );
+                            return 1;
                         }
                     } else {
                         // kill -l <name> — print signal number

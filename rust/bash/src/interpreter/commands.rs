@@ -715,6 +715,9 @@ impl Shell {
 
     pub(super) fn get_opt_flags(&self) -> String {
         let mut flags = String::new();
+        if self.opt_allexport {
+            flags.push('a');
+        }
         if self.opt_errexit {
             flags.push('e');
         }

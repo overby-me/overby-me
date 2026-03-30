@@ -571,6 +571,8 @@ impl Shell {
         }
 
         shell.update_shellopts();
+        shell.readonly_vars.insert("SHELLOPTS".to_string());
+        shell.readonly_vars.insert("BASHOPTS".to_string());
         shell
     }
 
@@ -700,6 +702,11 @@ impl Shell {
         // POSIXLY_CORRECT enables POSIX mode
         if resolved == "POSIXLY_CORRECT" {
             self.opt_posix = true;
+        }
+        // Auto-export when set -a (allexport) is active
+        if self.opt_allexport && !self.exports.contains_key(&resolved) {
+            self.exports.insert(resolved.clone(), value.clone());
+            unsafe { std::env::set_var(&resolved, &value) };
         }
         self.declared_unset.remove(&resolved);
         self.vars.insert(resolved, value);
