@@ -17,9 +17,10 @@
   - Fixed `set -u` nounset for positional params (`$9: unbound variable`)
   - Fixed nounset errors to exit shell/subshell (no more "after N" continuation)
 - **varenv**: 18 diff locally (was 6 real + PID). ~chet + PID diffs only
-- **assoc**: 71 diff locally (was 75). Fixed declare -p formatting
+- **assoc**: 65 diff locally (was 75). Fixed declare -p formatting, BASH_ALIASES/BASH_CMDS, key quoting
 - **arith**: 0 diff ✅
 - **heredoc**: 8 diff locally (PID diffs + sub-tests)
+- **comsub-posix**: 0 diff locally ✅
 
 ### Progress Previous Session
 
@@ -47,13 +48,17 @@
 
 24. **Fix `echo -e "\c"` to suppress trailing newline** (`src/builtins/mod.rs`, `src/builtins/io.rs`) — `interpret_echo_escapes` now returns `(String, bool)` where the bool signals `\c` was found. The caller suppresses the trailing newline when `\c` is encountered, matching bash's `echo -e "bar\c "; echo foo` → `barfoo`.
 
-25. **Fix `declare -p` output for empty arrays** (`src/builtins/vars.rs`) — Empty associative and indexed arrays now output `declare -A name` / `declare -a name` without `=()`, matching bash. Applied to `declare -p NAME`, `declare -A`, `declare -a`, and `local` no-args listing.
+25. **Fix `declare -p` output for empty arrays** (`src/builtins/vars.rs`) — Empty associative and indexed arrays: `declare -A name` (no `=()`) for declared-but-unset arrays, `declare -A name=()` for explicitly-set empty arrays. Uses `declared_unset` set to distinguish.
 
 26. **Fix `declare -p` trailing space for indexed vs assoc arrays** (`src/builtins/vars.rs`) — Bash uses `([0]="x" [1]="y")` for indexed arrays (no trailing space) but `([key]="val" )` for associative arrays (trailing space). Fixed all indexed array outputs to omit the trailing space.
 
 27. **Fix `set -u` (nounset) for positional params** (`src/expand/mod.rs`, `src/expand/params.rs`) — `$9` with `set -u` now correctly reports `$9: unbound variable` (with `$` prefix for unbraced positional params). `${9}` reports `9: unbound variable` (no `$` prefix for braced). Regular variables like `$UNSET` report `UNSET: unbound variable` (no `$` prefix), matching bash exactly.
 
 28. **Fix nounset errors to exit shell/subshell** (`src/expand/mod.rs`, `src/interpreter/commands.rs`) — Added `NOUNSET_ERROR` thread-local flag. When `set -u` triggers on an unset variable, the shell/subshell now exits immediately (via `std::process::exit(1)`), preventing subsequent commands from running. This matches bash behavior: `( echo $UNSET ; echo after )` no longer prints "after".
+
+29. **Initialize `BASH_ALIASES` and `BASH_CMDS`** (`src/interpreter/mod.rs`) — Added empty `BASH_ALIASES` and `BASH_CMDS` associative arrays at shell startup, so `declare -A` output matches bash.
+
+30. **Quote associative array keys in `declare -p`** (`src/builtins/mod.rs`, `src/builtins/vars.rs`) — Keys containing non-alphanumeric/underscore characters are now quoted with `"..."` in `declare -p` output (e.g., `["*"]`, `["hello world"]`, `["\$x"]`), matching bash behavior.
 
 ### Fixes Applied Previous Session
 
@@ -170,15 +175,17 @@ Massive improvement. Only remaining real issue:
 - **`~chet` expansion**: Produces `/a/b/c` instead of `/usr/chet`. User-specific, differs by environment. The nix test also differs here.
 - **Nix sub-tests**: varenv3.sub (local scoping), varenv4.sub (assoc array conversion), varenv25.sub (local -p).
 
-#### 6. assoc (71 lines local, was 527)
+#### 6. assoc (65 lines local, was 527)
 
 Significant improvement. Remaining:
 
-- Associative array `declare -p` key quoting differences (trailing space in `([key]="val" )`).
-- `[*]` key handling — should be quoted as `["*"]`.
+- ~~`[*]` key handling~~ ✅ Now quoted as `["*"]`.
+- ~~`BASH_ALIASES` and `BASH_CMDS` arrays~~ ✅ Now initialized at startup.
+- `declare -Ai` (integer flag) not evaluating values as arithmetic.
+- `declare -Ar` (readonly flag) not shown in declare -p output for assoc arrays.
+- `chaff[hello world]` subscript with spaces not handled (treated as two words).
+- Compound assignment `hash=([key]=value)` parsing for assoc arrays.
 - Tilde expansion in associative array keys/values.
-- `BASH_ALIASES` and `BASH_CMDS` arrays appearing in `declare -A` output.
-- `chaff[hello world]` subscript with spaces not handled.
 
 #### 7. builtins (18 lines local = PID only, was 93 → was 336) ✅
 
@@ -189,6 +196,7 @@ Significant improvement. Remaining:
 - ✅ `-printenv` error (was exec -c not clearing env)
 - ✅ source/dot positional params (`set --` in sourced file persists)
 - ✅ POSIX `:` special builtin prefix assignments
+- ✅ `declare -p` value quoting (`\$\$`)
 - Remaining 18 diff lines are all PID differences (normalized in nix)
 
 #### 8. new-exp (60 lines local, was 87 → was ~375)
@@ -199,12 +207,12 @@ Remaining issues:
 
 - `${HOME-'}'}` — single quotes don't protect `}` inside `${:-}` in dquote context.
 - Backtick command substitution not expanded in `${var:offset}` arithmetic.
-- `$((${#RECEIVED}-1))` arithmetic syntax errors (recho not available locally — may work in nix).
-- `bad-var: invalid variable name` error not generated.
+- `$((${#RECEIVED}-1))` — works locally but `recho` unavailable (may pass in nix).
+- `bad-var: invalid variable name` error not generated for invalid var names.
 - `${$(($#-1))}: bad substitution` not generated.
 - Substring expression `< 0` error messages missing.
 - Various expansion edge cases.
-- Note: many tests depend on `recho` which isn't available locally.
+- Note: many tests depend on `recho` which isn't available locally — nix diff may be smaller.
 
 #### 9. quotearray (185 lines)
 
@@ -247,15 +255,15 @@ Timing-dependent: `%(fmt)T` date format test can mismatch if test crosses a seco
 | `src/builtins/exec.rs` | `type`, `command`, `hash` |
 | `src/builtins/flow.rs` | `break`, `continue`, `exit`, `return` |
 | `src/builtins/vars.rs` | `declare`, `local` (now with no-args listing), `export` (unset var handling), `let` |
-| `src/builtins/mod.rs` | `parse_array_literal`, function body formatting, `quote_for_declare` |
+| `src/builtins/mod.rs` | `parse_array_literal`, function body formatting, `quote_for_declare`, `quote_assoc_key`, `interpret_echo_escapes` (returns `(String, bool)` for `\c` stop) |
 | `src/builtins/set.rs` | `set` (allexport, physical, ignoreeof), `shopt` (update_shellopts call) |
 | `src/builtins/trap.rs` | `trap`, `kill` (kill -l range check), `enable` (full -n/-s/-a/-d impl) |
-| `src/interpreter/mod.rs` | Shell struct, `declared_unset`, `disabled_builtins`, `run_string`, `resolve_nameref`, `set_var` (auto-export), SHELLOPTS/BASHOPTS readonly |
+| `src/interpreter/mod.rs` | Shell struct, `declared_unset`, `disabled_builtins`, `source_set_params`, `run_string`, `resolve_nameref`, `set_var` (auto-export), SHELLOPTS/BASHOPTS readonly, BASH_ALIASES/BASH_CMDS init |
 | `src/interpreter/commands.rs` | Command execution (disabled builtin check), `expand_word*`, `get_opt_flags` (allexport `a` flag), `update_shellopts`, `execute_assignment`, `continue N` fix |
 | `src/interpreter/arithmetic.rs` | Arithmetic eval, `expand_comsubs_in_arith` (handles `\$` and backticks), error tokens, short-circuit assignment validation, ternary precedence |
 | `src/interpreter/redirects.rs` | Redirections (vredir `{var}` fds, memfd heredocs, pipe fd leak fix) |
 | `src/interpreter/pipeline.rs` | Pipeline execution, PIPESTATUS |
-| `src/expand/mod.rs` | Word expansion, `ExpCtx`, procsub handling, `SyntaxError` handler |
+| `src/expand/mod.rs` | Word expansion, `ExpCtx`, procsub handling, `SyntaxError` handler, `NOUNSET_ERROR` flag, `$` prefix for positional param nounset errors |
 | `src/expand/params.rs` | Parameter expansion (`${...}` operators), `parse_arith_offset` |
 | `src/expand/arithmetic.rs` | `eval_arith_full`, `resolve_arith_vars` (handles `${var:-default}`) |
 | `src/parser.rs` | Parser, `parse_array_elements` (returns Result), `skip_to_next_command`, heredoc body resolution (full recursive `resolve_heredoc_in_command`) |
@@ -279,7 +287,9 @@ Timing-dependent: `%(fmt)T` date format test can mismatch if test crosses a seco
 
 6. **Fix new-exp remaining issues** — `${HOME-'}'}` quoting, `bad-var: invalid variable name`, substring expression errors. (~60 diff lines locally, may be less in nix where recho is available)
 
-7. **Fix assoc remaining issues** — `BASH_ALIASES`/`BASH_CMDS` arrays, `[*]` key quoting as `["*"]`, `chaff[hello world]` subscript parsing, `declare -p` key ordering. (~71 diff lines)
+7. **Fix assoc remaining issues** — `declare -Ai` (integer assoc), `declare -Ar` (readonly flag display), `chaff[hello world]` subscript parsing, compound assignment `hash=([key]=value)`. (~65 diff lines)
+
+8. **Fix nameref basic operations** — `declare -n foo=bar; echo $foo` doesn't resolve correctly. Deep refactor needed for nameref resolution. (~258 diff lines)
 
 ## Approach
 
