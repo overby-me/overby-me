@@ -85,7 +85,9 @@ pub(super) fn builtin_export(shell: &mut Shell, args: &[String]) -> i32 {
                 // -a flag with (value): parse as array
                 let arr = parse_array_literal(value);
                 let export_val = arr.first().cloned().unwrap_or_default();
-                shell.arrays.insert(name.to_string(), arr);
+                shell
+                    .arrays
+                    .insert(name.to_string(), arr.into_iter().map(Some).collect());
                 shell.exports.insert(name.to_string(), export_val.clone());
                 unsafe { std::env::set_var(name, &export_val) };
             } else if shell.arrays.contains_key(name) {
@@ -93,9 +95,9 @@ pub(super) fn builtin_export(shell: &mut Shell, args: &[String]) -> i32 {
                 let final_value = value.to_string();
                 if let Some(arr) = shell.arrays.get_mut(name) {
                     if arr.is_empty() {
-                        arr.push(final_value.clone());
+                        arr.push(Some(final_value.clone()));
                     } else {
-                        arr[0] = final_value.clone();
+                        arr[0] = Some(final_value.clone());
                     }
                 }
                 shell.exports.insert(name.to_string(), final_value.clone());
@@ -247,7 +249,7 @@ pub(super) fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
                         raw_idx as usize
                     };
                     if idx < arr.len() {
-                        arr[idx] = String::new();
+                        arr[idx] = None;
                     }
                 }
             }
@@ -398,14 +400,16 @@ pub(super) fn builtin_readonly(shell: &mut Shell, args: &[String]) -> i32 {
                 } else if array_mode && value.starts_with('(') && value.ends_with(')') {
                     // -a flag with (value): parse as array
                     let arr = parse_array_literal(value);
-                    shell.arrays.insert(vname.to_string(), arr);
+                    shell
+                        .arrays
+                        .insert(vname.to_string(), arr.into_iter().map(Some).collect());
                 } else if shell.arrays.contains_key(vname) {
                     // Existing array: assign to element 0
                     if let Some(arr) = shell.arrays.get_mut(vname) {
                         if arr.is_empty() {
-                            arr.push(value.to_string());
+                            arr.push(Some(value.to_string()));
                         } else {
-                            arr[0] = value.to_string();
+                            arr[0] = Some(value.to_string());
                         }
                     }
                 } else {
@@ -495,7 +499,9 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
                 shell.namerefs.insert(name.to_string(), value.to_string());
             } else if flag_array {
                 let arr = parse_array_literal(value);
-                shell.arrays.insert(name.to_string(), arr);
+                shell
+                    .arrays
+                    .insert(name.to_string(), arr.into_iter().map(Some).collect());
             } else if flag_integer {
                 let n = shell.eval_arith_expr(value);
                 shell.set_var(name, n.to_string());
@@ -777,7 +783,10 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     let elements: Vec<String> = arr
                         .iter()
                         .enumerate()
-                        .map(|(i, v)| format!("[{}]={}", i, quote_for_declare(v)))
+                        .filter_map(|(i, v)| {
+                            v.as_ref()
+                                .map(|s| format!("[{}]={}", i, quote_for_declare(s)))
+                        })
                         .collect();
                     println!("declare {} {}=({})", flags, name, elements.join(" "));
                 } else {
@@ -816,7 +825,10 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     let elements: Vec<String> = arr
                         .iter()
                         .enumerate()
-                        .map(|(i, v)| format!("[{}]={}", i, quote_for_declare(v)))
+                        .filter_map(|(i, v)| {
+                            v.as_ref()
+                                .map(|s| format!("[{}]={}", i, quote_for_declare(s)))
+                        })
                         .collect();
                     println!("declare {} {}=({})", flags, name, elements.join(" "));
                 }
@@ -858,7 +870,10 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     let elements: Vec<String> = arr
                         .iter()
                         .enumerate()
-                        .map(|(i, v)| format!("[{}]={}", i, quote_for_declare(v)))
+                        .filter_map(|(i, v)| {
+                            v.as_ref()
+                                .map(|s| format!("[{}]={}", i, quote_for_declare(s)))
+                        })
                         .collect();
                     println!("declare {} {}=({})", flags, name, elements.join(" "));
                 } else if let Some(assoc) = shell.assoc_arrays.get(name) {
@@ -950,7 +965,7 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 let elements: Vec<String> = arr
                     .iter()
                     .enumerate()
-                    .filter(|(_, v)| !v.is_empty())
+                    .filter_map(|(i, v)| v.as_ref().map(|s| (i, s)))
                     .map(|(i, v)| format!("[{}]=\"{}\"", i, v))
                     .collect();
                 println!("declare -a {}=({})", name, elements.join(" "));
@@ -1001,6 +1016,10 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
 
             // Check if variable is readonly
             if shell.readonly_vars.contains(name) && !make_local {
+                // declare -n on a readonly variable: silently skip (bash behavior)
+                if flag_nameref {
+                    continue;
+                }
                 eprintln!(
                     "{}: declare: {}: readonly variable",
                     shell.error_prefix(),
@@ -1024,7 +1043,9 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 }
             } else if flag_array {
                 let arr = parse_array_literal(value);
-                shell.arrays.insert(name.to_string(), arr);
+                shell
+                    .arrays
+                    .insert(name.to_string(), arr.into_iter().map(Some).collect());
                 if flag_integer {
                     shell.integer_vars.insert(name.to_string());
                 }

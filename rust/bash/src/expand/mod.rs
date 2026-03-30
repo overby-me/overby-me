@@ -251,7 +251,7 @@ pub enum Segment {
 pub fn expand_word(
     word: &Word,
     vars: &HashMap<String, String>,
-    arrays: &HashMap<String, Vec<String>>,
+    arrays: &HashMap<String, Vec<Option<String>>>,
     assoc_arrays: &HashMap<String, crate::interpreter::AssocArray>,
     namerefs: &HashMap<String, String>,
     positional: &[String],
@@ -317,7 +317,7 @@ pub fn expand_word(
 pub fn expand_word_nosplit(
     word: &Word,
     vars: &HashMap<String, String>,
-    arrays: &HashMap<String, Vec<String>>,
+    arrays: &HashMap<String, Vec<Option<String>>>,
     assoc_arrays: &HashMap<String, crate::interpreter::AssocArray>,
     namerefs: &HashMap<String, String>,
     positional: &[String],
@@ -364,7 +364,7 @@ pub fn expand_word_nosplit(
 pub fn expand_word_pattern(
     word: &Word,
     vars: &HashMap<String, String>,
-    arrays: &HashMap<String, Vec<String>>,
+    arrays: &HashMap<String, Vec<Option<String>>>,
     assoc_arrays: &HashMap<String, crate::interpreter::AssocArray>,
     namerefs: &HashMap<String, String>,
     positional: &[String],
@@ -398,7 +398,7 @@ pub fn expand_word_pattern(
 
 struct ExpCtx<'a> {
     vars: &'a HashMap<String, String>,
-    arrays: &'a HashMap<String, Vec<String>>,
+    arrays: &'a HashMap<String, Vec<Option<String>>>,
     assoc_arrays: &'a HashMap<String, crate::interpreter::AssocArray>,
     namerefs: &'a HashMap<String, String>,
     positional: &'a [String],
@@ -900,7 +900,7 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                 {
                     // Apply operation to each element separately
                     let mut first = true;
-                    for elem in arr {
+                    for elem in arr.iter().filter_map(|v| v.as_ref()) {
                         if !first {
                             out.push(if idx == "@" {
                                 Segment::SplitHere
@@ -930,7 +930,7 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                 if (idx == "@" || idx == "*") && matches!(expr.op, ParamOp::Substring(..)) {
                     let elements: Option<Vec<String>> = if let Some(arr) = ctx.arrays.get(&resolved)
                     {
-                        Some(arr.clone())
+                        Some(arr.iter().filter_map(|v| v.clone()).collect())
                     } else {
                         ctx.assoc_arrays
                             .get(&resolved)

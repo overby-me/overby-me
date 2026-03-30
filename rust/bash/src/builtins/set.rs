@@ -55,7 +55,11 @@ pub(super) fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
                             shell.shopt_options.insert(option.to_string(), enable);
                             shell.opt_monitor = enable;
                         }
-                        "notify" | "onecmd" | "physical" | "privileged" | "verbose" | "vi" => {
+                        "physical" => {
+                            shell.shopt_options.insert(option.to_string(), enable);
+                            shell.opt_physical = enable;
+                        }
+                        "notify" | "onecmd" | "privileged" | "verbose" | "vi" => {
                             shell.shopt_options.insert(option.to_string(), enable);
                         }
                         _ => {
@@ -124,7 +128,11 @@ pub(super) fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
                         'n' => shell.opt_noexec = enable,
                         'h' => shell.opt_hashall = enable,
                         'm' => shell.opt_monitor = enable,
-                        'a' | 'b' | 'p' | 't' | 'v' | 'B' | 'E' | 'H' | 'P' | 'T' => {
+                        'P' => {
+                            shell.opt_physical = enable;
+                            shell.shopt_options.insert("physical".to_string(), enable);
+                        }
+                        'a' | 'b' | 'p' | 't' | 'v' | 'B' | 'E' | 'H' | 'T' => {
                             // Known but not fully implemented flags — accept silently
                         }
                         _ => {

@@ -7,9 +7,6 @@ impl Shell {
         {
             // Check signals 1-64
             for signum in 1..=64 {
-                // Note: we allow SIGCHLD to be processed during foreground waits.
-                // Bash runs SIGCHLD trap for background children even while a
-                // foreground process is running.
                 if take_pending_signal(signum) {
                     // Convert signal number to name
                     let sig_name = match signum {

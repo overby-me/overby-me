@@ -28,7 +28,7 @@ pub fn is_valid_identifier(s: &str) -> bool {
 #[derive(Clone)]
 pub struct SavedVar {
     pub scalar: Option<String>,
-    pub array: Option<Vec<String>>,
+    pub array: Option<Vec<Option<String>>>,
     pub assoc: Option<AssocArray>,
     pub was_integer: bool,
     pub was_readonly: bool,
@@ -243,7 +243,7 @@ pub struct Shell {
     pub uppercase_vars: HashSet<String>,
     pub lowercase_vars: HashSet<String>,
     pub capitalize_vars: HashSet<String>,
-    pub arrays: HashMap<String, Vec<String>>,
+    pub arrays: HashMap<String, Vec<Option<String>>>,
     pub assoc_arrays: HashMap<String, AssocArray>,
     pub functions: HashMap<String, CompoundCommand>,
     pub func_redirections: HashMap<String, Vec<Redirection>>, // function name → redirects
@@ -251,6 +251,7 @@ pub struct Shell {
     pub func_body_lines: HashMap<String, usize>, // function name → body start line
     pub traced_funcs: HashSet<String>,
     pub hash_table: HashMap<String, (String, u32)>,
+    pub hash_order: Vec<String>,
     pub positional: Vec<String>,
     pub last_status: i32,
     pub last_bg_pid: i32,
@@ -296,6 +297,7 @@ pub struct Shell {
     pub opt_posix: bool,
     pub opt_hashall: bool,
     pub opt_monitor: bool,      // set -m / set -o monitor (job control)
+    pub opt_physical: bool,     // set -P / set -o physical (resolve symlinks in cd/pwd)
     pub script_fd: Option<i32>, // original script fd (for exec 0< detection)
     pub login_shell: bool,
     /// Name of the currently executing builtin (for error messages)
@@ -421,6 +423,7 @@ impl Shell {
             func_body_lines: HashMap::new(),
             traced_funcs: HashSet::new(),
             hash_table: HashMap::new(),
+            hash_order: Vec::new(),
             positional: vec!["bash".to_string()],
             last_status: 0,
             last_bg_pid: 0,
@@ -458,6 +461,7 @@ impl Shell {
             opt_posix: false,
             opt_hashall: true, // enabled by default
             opt_monitor: false,
+            opt_physical: false,
             script_fd: None,
             login_shell: false,
             current_builtin: None,
@@ -488,12 +492,12 @@ impl Shell {
         shell.arrays.insert(
             "BASH_VERSINFO".to_string(),
             vec![
-                "5".to_string(),
-                "3".to_string(),
-                "0".to_string(),
-                "1".to_string(),
-                "release".to_string(),
-                std::env::consts::ARCH.to_string(),
+                Some("5".to_string()),
+                Some("3".to_string()),
+                Some("0".to_string()),
+                Some("1".to_string()),
+                Some("release".to_string()),
+                Some(std::env::consts::ARCH.to_string()),
             ],
         );
 
@@ -503,7 +507,7 @@ impl Shell {
             let gid = unsafe { libc::getgid() };
             shell
                 .arrays
-                .insert("GROUPS".to_string(), vec![gid.to_string()]);
+                .insert("GROUPS".to_string(), vec![Some(gid.to_string())]);
             // GROUPS is noassign (silently ignored, not readonly)
 
             // Detect privileged mode: if effective UID != real UID or effective GID != real GID
@@ -715,19 +719,38 @@ impl Shell {
             );
             // Remove readonly for the local scope (will be re-applied if -r is used)
             self.readonly_vars.remove(name);
+            // When OPTIND is made local, also save/restore the internal
+            // getopts character-offset variable so that recursive getopts
+            // calls (e.g. inside functions that `typeset OPTIND=1`) don't
+            // clobber the caller's offset state.
+            if name == "OPTIND" {
+                let ofs_name = "_GETOPTS_OPTOFS".to_string();
+                if !scope.contains_key(&ofs_name) {
+                    scope.insert(
+                        ofs_name.clone(),
+                        SavedVar {
+                            scalar: self.vars.get(&ofs_name).cloned(),
+                            array: None,
+                            assoc: None,
+                            was_integer: false,
+                            was_readonly: false,
+                        },
+                    );
+                }
+            }
         }
     }
 
     /// Get an array, resolving namerefs.
     #[allow(dead_code)]
-    pub fn get_array(&self, name: &str) -> Option<&Vec<String>> {
+    pub fn get_array(&self, name: &str) -> Option<&Vec<Option<String>>> {
         let resolved = self.resolve_nameref(name);
         self.arrays.get(&resolved)
     }
 
     /// Set an array, resolving namerefs.
     #[allow(dead_code)]
-    pub fn set_array(&mut self, name: &str, values: Vec<String>) {
+    pub fn set_array(&mut self, name: &str, values: Vec<Option<String>>) {
         let resolved = self.resolve_nameref(name);
         self.arrays.insert(resolved, values);
     }

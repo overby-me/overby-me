@@ -140,7 +140,7 @@ impl Shell {
                     statuses.push(status);
                     self.arrays.insert(
                         "PIPESTATUS".to_string(),
-                        statuses.iter().map(|s| s.to_string()).collect(),
+                        statuses.iter().map(|s| Some(s.to_string())).collect(),
                     );
 
                     let final_status = if self.opt_pipefail {
@@ -239,7 +239,7 @@ impl Shell {
             // Store PIPESTATUS array
             self.arrays.insert(
                 "PIPESTATUS".to_string(),
-                statuses.iter().map(|s| s.to_string()).collect(),
+                statuses.iter().map(|s| Some(s.to_string())).collect(),
             );
 
             let status = if self.opt_pipefail {

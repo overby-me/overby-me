@@ -100,12 +100,12 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
 
     // Handle options
     if args[0].starts_with('-') && args[0] != "-v" && args[0] != "--" {
-        eprintln!("printf: usage: printf [-v var] format [arguments]");
         eprintln!(
             "{}: printf: {}: invalid option",
             shell.error_prefix(),
             args[0]
         );
+        eprintln!("printf: usage: printf [-v var] format [arguments]");
         return 2;
     }
 
@@ -309,6 +309,7 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                 }
                 // Parse precision
                 let mut precision: Option<usize> = None;
+                let mut inline_precision_overflow = false;
                 if chars.peek() == Some(&'.') {
                     chars.next();
                     if chars.peek() == Some(&'*') {
@@ -325,11 +326,12 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                             });
                         if p_overflow {
                             eprintln!(
-                                "{}: printf: Value too large for defined data type",
-                                shell.error_prefix()
+                                "{}: printf: {}: Numerical result out of range",
+                                shell.error_prefix(),
+                                p_arg
                             );
                             had_error = true;
-                            precision = Some(usize::MAX / 2); // large but not 0 — strings still print
+                            precision = None; // continue with no truncation
                         } else {
                             precision = Some(p_parsed.unwrap_or(0).max(0) as usize);
                         }
@@ -352,13 +354,13 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                                     !prec_str.is_empty()
                                         && prec_str.chars().all(|c| c.is_ascii_digit())
                                 });
+                        inline_precision_overflow = pp_overflow;
                         if pp_overflow {
-                            eprintln!(
-                                "{}: printf: Value too large for defined data type",
-                                shell.error_prefix()
-                            );
                             had_error = true;
-                            precision = Some(usize::MAX / 2);
+                            // Don't break here; let the format specifier decide
+                            // whether to output or not. %Q/%q still output,
+                            // %s and others do not.
+                            precision = None;
                         } else {
                             precision = Some(pp.unwrap_or(0).max(0) as usize);
                         }
@@ -503,6 +505,13 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                         arg_idx += 1;
                     }
                     Some('s') | Some('S') => {
+                        if inline_precision_overflow {
+                            eprintln!(
+                                "{}: printf: Value too large for defined data type",
+                                shell.error_prefix()
+                            );
+                            break;
+                        }
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("");
                         // Apply precision (truncate string, byte-safe)
                         let truncated = if let Some(p) = precision {
@@ -518,17 +527,27 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                         };
                         let w = w.min(4096);
                         if w > 0 {
+                            let printed_len = w.max(truncated.len());
                             if left {
                                 print!("{:<w$}", truncated);
                             } else {
                                 print!("{:>w$}", truncated);
                             }
+                            bytes_written += printed_len;
                         } else {
                             print!("{}", truncated);
+                            bytes_written += truncated.len();
                         }
                         arg_idx += 1;
                     }
                     Some('d') | Some('i') => {
+                        if inline_precision_overflow {
+                            eprintln!(
+                                "{}: printf: Value too large for defined data type",
+                                shell.error_prefix()
+                            );
+                            break;
+                        }
                         let arg_provided = arg_idx < fmt_args.len();
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
                         let n: i64 = parse_printf_int(arg);
@@ -583,27 +602,57 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                             if left {
                                 let ew = effective_width.min(4096);
                                 print!("{:<ew$}", formatted);
+                                bytes_written += ew.max(formatted.len());
                             } else if use_zero_pad {
                                 // Zero-pad: sign first, then zeros
                                 let total_len = formatted.len();
                                 if total_len < effective_width {
                                     let pad = effective_width - total_len;
                                     print!("{}{}{}", prefix, "0".repeat(pad), digits);
+                                    bytes_written += effective_width;
                                 } else {
                                     print!("{}", formatted);
+                                    bytes_written += formatted.len();
                                 }
                             } else {
                                 let ew = effective_width.min(4096);
                                 print!("{:>ew$}", formatted);
+                                bytes_written += ew.max(formatted.len());
                             }
                         } else {
                             print!("{}", formatted);
+                            bytes_written += formatted.len();
                         }
                         arg_idx += 1;
                     }
                     Some(hex_ch @ ('x' | 'X')) => {
+                        if inline_precision_overflow {
+                            eprintln!(
+                                "{}: printf: Value too large for defined data type",
+                                shell.error_prefix()
+                            );
+                            break;
+                        }
+                        let arg_provided = arg_idx < fmt_args.len();
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
                         let n: i64 = parse_printf_int(arg);
+                        if arg_provided && !arg.starts_with('\'') && !arg.starts_with('"') {
+                            let abs_arg = arg.strip_prefix('-').unwrap_or(arg);
+                            if arg.is_empty()
+                                || (arg.parse::<i64>().is_err()
+                                    && abs_arg.parse::<u64>().is_err()
+                                    && !arg.starts_with("0x")
+                                    && !arg.starts_with("0X")
+                                    && !(arg.starts_with('0') && arg.len() > 1))
+                            {
+                                eprintln!(
+                                    "{}: printf: {}: invalid number",
+                                    shell.error_prefix(),
+                                    arg
+                                );
+                                had_error = true;
+                            }
+                        }
                         // Apply precision (minimum digits) for hex
                         let raw_hex = if hex_ch == 'x' {
                             format!("{:x}", n)
@@ -627,6 +676,7 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                         // Precision overrides 0 flag for integers
                         let use_zero = zero_pad && precision.is_none();
                         if w > 0 {
+                            let printed_len = w.max(formatted.len());
                             if left {
                                 print!("{:<w$}", formatted);
                             } else if use_zero {
@@ -634,20 +684,48 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                             } else {
                                 print!("{:>w$}", formatted);
                             }
+                            bytes_written += printed_len;
                         } else {
                             print!("{}", formatted);
+                            bytes_written += formatted.len();
                         }
                         arg_idx += 1;
                     }
                     Some('o') => {
+                        if inline_precision_overflow {
+                            eprintln!(
+                                "{}: printf: Value too large for defined data type",
+                                shell.error_prefix()
+                            );
+                            break;
+                        }
+                        let arg_provided = arg_idx < fmt_args.len();
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
                         let n: i64 = parse_printf_int(arg);
+                        if arg_provided && !arg.starts_with('\'') && !arg.starts_with('"') {
+                            let abs_arg = arg.strip_prefix('-').unwrap_or(arg);
+                            if arg.is_empty()
+                                || (arg.parse::<i64>().is_err()
+                                    && abs_arg.parse::<u64>().is_err()
+                                    && !arg.starts_with("0x")
+                                    && !arg.starts_with("0X")
+                                    && !(arg.starts_with('0') && arg.len() > 1))
+                            {
+                                eprintln!(
+                                    "{}: printf: {}: invalid number",
+                                    shell.error_prefix(),
+                                    arg
+                                );
+                                had_error = true;
+                            }
+                        }
                         let formatted = if flags.contains('#') {
                             format!("0{:o}", n) // C-style 0 prefix, not Rust's 0o
                         } else {
                             format!("{:o}", n)
                         };
                         if w > 0 {
+                            let printed_len = w.max(formatted.len());
                             if left {
                                 print!("{:<w$}", formatted);
                             } else if zero_pad {
@@ -655,16 +733,44 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                             } else {
                                 print!("{:>w$}", formatted);
                             }
+                            bytes_written += printed_len;
                         } else {
                             print!("{}", formatted);
+                            bytes_written += formatted.len();
                         }
                         arg_idx += 1;
                     }
                     Some('u') => {
+                        if inline_precision_overflow {
+                            eprintln!(
+                                "{}: printf: Value too large for defined data type",
+                                shell.error_prefix()
+                            );
+                            break;
+                        }
+                        let arg_provided = arg_idx < fmt_args.len();
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
                         let n: u64 = parse_printf_int(arg) as u64;
+                        if arg_provided && !arg.starts_with('\'') && !arg.starts_with('"') {
+                            let abs_arg = arg.strip_prefix('-').unwrap_or(arg);
+                            if arg.is_empty()
+                                || (arg.parse::<i64>().is_err()
+                                    && abs_arg.parse::<u64>().is_err()
+                                    && !arg.starts_with("0x")
+                                    && !arg.starts_with("0X")
+                                    && !(arg.starts_with('0') && arg.len() > 1))
+                            {
+                                eprintln!(
+                                    "{}: printf: {}: invalid number",
+                                    shell.error_prefix(),
+                                    arg
+                                );
+                                had_error = true;
+                            }
+                        }
                         let formatted = format!("{}", n);
                         if w > 0 {
+                            let printed_len = w.max(formatted.len());
                             if left {
                                 print!("{:<w$}", formatted);
                             } else if zero_pad {
@@ -672,12 +778,21 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                             } else {
                                 print!("{:>w$}", formatted);
                             }
+                            bytes_written += printed_len;
                         } else {
                             print!("{}", formatted);
+                            bytes_written += formatted.len();
                         }
                         arg_idx += 1;
                     }
                     Some(fmt_ch @ ('f' | 'F' | 'e' | 'E' | 'g' | 'G')) => {
+                        if inline_precision_overflow {
+                            eprintln!(
+                                "{}: printf: Value too large for defined data type",
+                                shell.error_prefix()
+                            );
+                            break;
+                        }
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
                         let n: f64 = if arg.starts_with("0x") || arg.starts_with("0X") {
                             i64::from_str_radix(&arg[2..], 16).unwrap_or(0) as f64
@@ -766,6 +881,7 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                         if w > 0 {
                             if left {
                                 print!("{:<w$}", display);
+                                bytes_written += w.max(display.len());
                             } else if zero_pad && !left {
                                 // Zero-pad: put sign first, then zeros, then number
                                 let total_len = display.len();
@@ -777,36 +893,60 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                                     } else {
                                         print!("{}{}", "0".repeat(pad_count), display);
                                     }
+                                    bytes_written += w;
                                 } else {
                                     print!("{}", display);
+                                    bytes_written += display.len();
                                 }
                             } else {
                                 print!("{:>w$}", display);
+                                bytes_written += w.max(display.len());
                             }
                         } else {
                             print!("{}", display);
+                            bytes_written += display.len();
                         }
                         arg_idx += 1;
                     }
                     Some('c') | Some('C') => {
+                        if inline_precision_overflow {
+                            eprintln!(
+                                "{}: printf: Value too large for defined data type",
+                                shell.error_prefix()
+                            );
+                            break;
+                        }
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("");
-                        let ch_str = arg
-                            .chars()
-                            .next()
-                            .map(|c| c.to_string())
-                            .unwrap_or_default();
-                        if w > 0 {
-                            if left {
-                                print!("{:<w$}", ch_str);
+                        if let Some(ch) = arg.chars().next() {
+                            let ch_str = ch.to_string();
+                            if w > 0 {
+                                let printed_len = w.max(ch_str.len());
+                                if left {
+                                    print!("{:<w$}", ch_str);
+                                } else {
+                                    print!("{:>w$}", ch_str);
+                                }
+                                bytes_written += printed_len;
                             } else {
-                                print!("{:>w$}", ch_str);
+                                print!("{}", ch_str);
+                                bytes_written += ch_str.len();
                             }
                         } else {
-                            print!("{}", ch_str);
+                            // Empty/missing argument: output a NUL byte (bash behavior)
+                            use std::io::Write;
+                            std::io::stdout().write_all(&[0u8]).ok();
+                            bytes_written += 1;
                         }
                         arg_idx += 1;
                     }
                     Some('b') => {
+                        if inline_precision_overflow {
+                            eprintln!(
+                                "{}: printf: Value too large for defined data type",
+                                shell.error_prefix()
+                            );
+                            break;
+                        }
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("");
                         let has_stop = arg.contains("\\c");
                         // Check for \x with no hex digits in %b argument
@@ -851,17 +991,19 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                         };
                         let w = w.min(4096);
                         if w > 0 {
+                            let printed_len = w.max(truncated.len());
                             if left {
                                 print!("{:<w$}", truncated);
                             } else {
                                 print!("{:>w$}", truncated);
                             }
+                            bytes_written += printed_len;
                         } else {
                             // Use raw byte output for %b (supports NUL bytes and raw bytes)
+                            let raw = string_to_raw_bytes(truncated);
+                            bytes_written += raw.len();
                             use std::io::Write;
-                            std::io::stdout()
-                                .write_all(&string_to_raw_bytes(truncated))
-                                .ok();
+                            std::io::stdout().write_all(&raw).ok();
                         }
                         arg_idx += 1;
                         // \c in %b stops all further printf output
@@ -872,6 +1014,14 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                         }
                     }
                     Some('q') => {
+                        if inline_precision_overflow {
+                            // %q with inline overflow: print error but still output
+                            eprintln!(
+                                "{}: printf: Value too large for defined data type",
+                                shell.error_prefix()
+                            );
+                            // precision is already None, so no truncation — fall through
+                        }
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("");
                         let use_locale_quote = flags.contains('#');
                         let mut quoted = if arg.is_empty() {
@@ -888,17 +1038,29 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                             quoted = truncated;
                         }
                         if w > 0 {
+                            let printed_len = w.max(quoted.len());
                             if left {
                                 print!("{:<w$}", quoted);
                             } else {
                                 print!("{:>w$}", quoted);
                             }
+                            bytes_written += printed_len;
                         } else {
                             print!("{}", quoted);
+                            bytes_written += quoted.len();
                         }
                         arg_idx += 1;
                     }
                     Some('Q') => {
+                        if inline_precision_overflow {
+                            // %Q with inline overflow: use "Numerical result out of range"
+                            // and still output (bash behavior)
+                            eprintln!(
+                                "{}: printf: Value too large for defined data type",
+                                shell.error_prefix()
+                            );
+                            // precision is already None, so no truncation — fall through
+                        }
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("");
                         // %Q: precision truncates the value BEFORE quoting
                         let truncated = if let Some(p) = precision {
@@ -912,13 +1074,16 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                             shell_escape(truncated)
                         };
                         if w > 0 {
+                            let printed_len = w.max(quoted.len());
                             if left {
                                 print!("{:<w$}", quoted);
                             } else {
                                 print!("{:>w$}", quoted);
                             }
+                            bytes_written += printed_len;
                         } else {
                             print!("{}", quoted);
+                            bytes_written += quoted.len();
                         }
                         arg_idx += 1;
                     }
@@ -943,9 +1108,9 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                     }
                     Some('%') => print!("%"),
                     Some(c) => {
-                        // Invalid format character — flush stdout first so output order is correct
-                        use std::io::Write;
-                        std::io::stdout().flush().ok();
+                        // Invalid format character — do NOT flush stdout here;
+                        // bash lets the error (stderr, unbuffered) appear before
+                        // any pending stdout content.
                         eprintln!(
                             "{}: printf: `{}': invalid format character",
                             shell.error_prefix(),
@@ -988,6 +1153,7 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
 pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
     let mut prompt = String::new();
     let mut raw = false;
+    let mut _use_readline = false;
     let mut var_names = Vec::new();
     let mut array_name: Option<String> = None;
     let mut delim: Option<char> = None;
@@ -1005,7 +1171,8 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
             while j < fchars.len() {
                 match fchars[j] {
                     'r' => raw = true,
-                    's' | 'e' => {}
+                    's' => {}
+                    'e' => _use_readline = true,
                     'p' => {
                         // -p takes next arg (or rest of combined flag)
                         i += 1;
@@ -1096,6 +1263,14 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
                         i += 1;
                         if i < args.len() {
                             match args[i].parse::<f64>() {
+                                Ok(t) if t < 0.0 => {
+                                    eprintln!(
+                                        "{}: read: {}: invalid timeout specification",
+                                        shell.error_prefix(),
+                                        args[i]
+                                    );
+                                    return 2;
+                                }
                                 Ok(t) => timeout_secs = Some(t),
                                 Err(_) => {
                                     eprintln!(
@@ -1103,7 +1278,7 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
                                         shell.error_prefix(),
                                         args[i]
                                     );
-                                    return 1;
+                                    return 2;
                                 }
                             }
                         }
@@ -1129,7 +1304,8 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
         }
         match args[i].as_str() {
             "-r" => raw = true,
-            "-s" | "-e" => {}
+            "-s" => {}
+            "-e" => _use_readline = true,
             "-p" => {
                 i += 1;
                 if i < args.len() {
@@ -1168,7 +1344,25 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
             "-t" => {
                 i += 1;
                 if i < args.len() {
-                    timeout_secs = args[i].parse().ok();
+                    match args[i].parse::<f64>() {
+                        Ok(t) if t < 0.0 => {
+                            eprintln!(
+                                "{}: read: {}: invalid timeout specification",
+                                shell.error_prefix(),
+                                args[i]
+                            );
+                            return 2;
+                        }
+                        Ok(t) => timeout_secs = Some(t),
+                        Err(_) => {
+                            eprintln!(
+                                "{}: read: {}: invalid timeout specification",
+                                shell.error_prefix(),
+                                args[i]
+                            );
+                            return 2;
+                        }
+                    }
                 }
             }
             "-u" => {
@@ -1258,23 +1452,6 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
             // fd is closed/invalid — return 1 (failure)
             return 1;
         }
-        // Check if fd points to /dev/null (Rust opens /dev/null on fds 0-2 if closed)
-        // read -t 0 on /dev/null should return 1 (no data available)
-        // Only check when no explicit -u fd was specified (use default stdin)
-        if timeout_secs == Some(0.0)
-            && fd.is_none()
-            && let Ok(stat) = nix::sys::stat::fstat(read_fd)
-        {
-            let major = nix::sys::stat::major(stat.st_rdev);
-            let minor = nix::sys::stat::minor(stat.st_rdev);
-            if nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode)
-                .contains(nix::sys::stat::SFlag::S_IFCHR)
-                && major == 1
-                && minor == 3
-            {
-                return 1;
-            }
-        }
     }
 
     // Handle timeout: check if data is available within the timeout period
@@ -1286,12 +1463,15 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
             unsafe { BorrowedFd::borrow_raw(read_fd) },
             PollFlags::POLLIN,
         );
-        let timeout_ms = (secs * 1000.0) as i32;
-        let is_poll = timeout_ms <= 0; // -t 0 is just a polling check
+        // -t 0 (exactly zero) is a polling check (returns 0 if data ready, 1 otherwise).
+        // Very small positive values (e.g. 0.00001) are real timeouts that should
+        // return 142 on expiry, so clamp them to at least 1ms.
+        let is_poll = secs == 0.0;
         let timeout = if is_poll {
             PollTimeout::ZERO
         } else {
-            PollTimeout::from(timeout_ms as u16)
+            let ms = (secs * 1000.0).ceil().max(1.0) as i32;
+            PollTimeout::from(ms.min(i32::from(u16::MAX)) as u16)
         };
         match nix::poll::poll(&mut [poll_fd], timeout) {
             Ok(0) => {
@@ -1554,7 +1734,9 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
             let new_last = last.trim_end_matches(|c: char| ifs_ws_chars.contains(&c));
             *last = new_last.to_string();
         }
-        shell.arrays.insert(arr_name, fields);
+        shell
+            .arrays
+            .insert(arr_name, fields.into_iter().map(Some).collect());
         return 0;
     }
 
@@ -1584,36 +1766,83 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
             ci += 1;
         } else if fields.len() < max_fields - 1 && ifs.contains(ch) {
             // IFS character — end current field
+            //
+            // POSIX rule: a sequence of zero or more IFS-whitespace chars,
+            // followed by an optional IFS-non-whitespace char, followed by
+            // zero or more IFS-whitespace chars, forms a *single* delimiter.
+            //
+            // Strategy: when we see ANY IFS character we scan ahead to
+            // consume the entire delimiter sequence before pushing a field.
             if ifs_ws.contains(&ch) {
-                // IFS whitespace: skip consecutive whitespace
+                // Started with IFS whitespace — skip all consecutive ws
+                let mut scan = ci + 1;
+                while scan < chars.len() && ifs_ws.contains(&chars[scan]) {
+                    scan += 1;
+                }
+                // Check if a non-whitespace IFS char follows (merges into
+                // a single delimiter with the surrounding whitespace).
+                if scan < chars.len()
+                    && ifs.contains(chars[scan])
+                    && !ifs_ws.contains(&chars[scan])
+                    && fields.len() < max_fields - 1
+                {
+                    // Absorb the non-ws IFS char
+                    scan += 1;
+                    // …and any trailing IFS whitespace after it
+                    while scan < chars.len() && ifs_ws.contains(&chars[scan]) {
+                        scan += 1;
+                    }
+                    // This whole span is ONE delimiter — push one field
+                    fields.push(std::mem::take(&mut current));
+                    last_escaped_pos = None;
+                    ci = scan;
+                    continue;
+                }
+                // Plain whitespace (no following non-ws IFS char):
+                // only acts as delimiter if the current field is non-empty
                 if !current.is_empty() {
                     fields.push(std::mem::take(&mut current));
                     last_escaped_pos = None;
                 }
-                while ci + 1 < chars.len() && ifs_ws.contains(&chars[ci + 1]) {
-                    ci += 1;
-                }
+                ci = scan;
+                continue;
             } else {
-                // IFS non-whitespace: always produces a field boundary
+                // Started with IFS non-whitespace — always produces a
+                // field boundary.  Also absorb trailing IFS whitespace.
                 fields.push(std::mem::take(&mut current));
                 last_escaped_pos = None;
+                ci += 1;
+                while ci < chars.len() && ifs_ws.contains(&chars[ci]) {
+                    ci += 1;
+                }
+                continue;
             }
-            ci += 1;
         } else {
             current.push(ch);
             ci += 1;
         }
     }
-    // Strip trailing IFS characters from last field
-    // For single variable: strip all trailing IFS chars (even escaped)
-    // For multiple variables: strip trailing IFS whitespace, then trailing IFS non-ws
+    // Strip trailing IFS characters from the last field.
+    //
+    // For single variable: strip ALL trailing IFS chars (whitespace and
+    // non-whitespace delimiters) unconditionally.  Bash does not protect
+    // escaped chars in the single-var case.
+    //
+    // For multiple variables: strip trailing IFS whitespace.  Then, if the
+    // entire remaining content (after whitespace strip) is exactly ONE
+    // non-whitespace IFS delimiter character and nothing else, strip it.
+    // This matches bash: `a:b:c:` → z="c" (trailing `:` stripped because
+    // the remainder `c:` after stripping `c` is just `:`), but `a:b:c::`
+    // → z="c::" (remainder is more than a single delimiter).
+    // For `:::` with 3 vars, remainder is `:` (single char) → stripped.
+    // For `::::` with 3 vars, remainder is `::` → NOT stripped.
     let trim_limit = if var_names.len() == 1 {
         0
     } else {
         last_escaped_pos.map(|p| p + 1).unwrap_or(0)
     };
     let mut end = current.len();
-    // First strip trailing IFS whitespace
+    // Strip trailing IFS whitespace
     while end > trim_limit {
         if let Some(c) = current[..end].chars().last() {
             if ifs_ws.contains(&c) {
@@ -1625,9 +1854,9 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
             break;
         }
     }
-    // Then strip trailing non-whitespace IFS delimiters from the last field
-    // (when there are multiple variables and this is the remainder)
-    if var_names.len() > 1 {
+    if var_names.len() == 1 {
+        // For single variable: strip ALL trailing non-whitespace IFS
+        // delimiters (and their preceding whitespace) in a loop.
         while end > trim_limit {
             if let Some(c) = current[..end].chars().last() {
                 if ifs.contains(c) && !ifs_ws.contains(&c) {
@@ -1649,6 +1878,66 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
                 }
             } else {
                 break;
+            }
+        }
+    } else {
+        // For multiple variables: strip a trailing non-whitespace IFS
+        // delimiter ONLY when the remainder (after IFS-whitespace stripping)
+        // contains NO internal IFS characters that act as delimiters.
+        //
+        // Specifically, do NOT strip if the remainder before the trailing
+        // delimiter contains:
+        //   - any non-ws IFS delimiters (e.g. `b:c:` keeps trailing `:`)
+        //   - IFS whitespace BETWEEN non-IFS content (e.g. `a b:` with
+        //     IFS=": " keeps trailing `:` because the space between `a`
+        //     and `b` is an IFS delimiter)
+        //
+        // Examples with IFS=':' and 3 vars:
+        //   remainder ":"    → strip → ""
+        //   remainder "::"   → keep  → "::"
+        //   remainder "c:"   → strip → "c"
+        //   remainder "c::"  → keep  → "c::"
+        //   remainder "b:c:" → keep  → "b:c:"
+        // Examples with IFS=": " and 2 vars:
+        //   remainder "a b:" → keep  → "a b:" (space is IFS between content)
+        //   remainder "a:"   → strip → "a"
+        if end > trim_limit
+            && let Some(c) = current[..end].chars().last()
+            && ifs.contains(c)
+            && !ifs_ws.contains(&c)
+        {
+            let tentative = end - c.len_utf8();
+            // Check if the remainder (before the trailing delimiter)
+            // contains any non-ws IFS delimiters.
+            let has_internal_non_ws_ifs = current[trim_limit..tentative]
+                .chars()
+                .any(|ch| ifs.contains(ch) && !ifs_ws.contains(&ch));
+            // Check if the remainder has IFS whitespace BETWEEN
+            // non-IFS content (i.e., IFS ws that acts as a word
+            // separator, not just leading/trailing padding).
+            let has_ifs_ws_between_content = {
+                let inner = &current[trim_limit..tentative];
+                // Trim leading and trailing IFS whitespace, then
+                // check if any IFS whitespace remains inside.
+                let trimmed = inner
+                    .trim_start_matches(|ch: char| ifs_ws.contains(&ch))
+                    .trim_end_matches(|ch: char| ifs_ws.contains(&ch));
+                trimmed.chars().any(|ch| ifs_ws.contains(&ch))
+            };
+            if !has_internal_non_ws_ifs && !has_ifs_ws_between_content {
+                end = tentative;
+                // Also strip IFS whitespace before the removed delimiter
+                while end > trim_limit {
+                    if let Some(c2) = current[..end].chars().last() {
+                        if ifs_ws.contains(&c2) {
+                            end -= c2.len_utf8();
+                        } else {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
             }
         }
     }
@@ -1871,14 +2160,14 @@ pub(super) fn builtin_mapfile(shell: &mut Shell, args: &[String]) -> i32 {
     let arr = shell.arrays.entry(varname.clone()).or_default();
     // Extend array to fit origin + lines
     while arr.len() < origin {
-        arr.push(String::new());
+        arr.push(None);
     }
     for (idx, line) in lines.iter().enumerate() {
         let pos = origin + idx;
         if pos < arr.len() {
-            arr[pos] = line.clone();
+            arr[pos] = Some(line.clone());
         } else {
-            arr.push(line.clone());
+            arr.push(Some(line.clone()));
         }
     }
 

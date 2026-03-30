@@ -252,11 +252,14 @@ impl Shell {
                         let idx = self.eval_arith_expr_impl(idx_str) as usize;
                         let arr = self.arrays.entry(resolved).or_default();
                         while arr.len() <= idx {
-                            arr.push(String::new());
+                            arr.push(None);
                         }
-                        let lhs: i64 = arr[idx].parse().unwrap_or(0);
+                        let lhs: i64 = arr[idx]
+                            .as_deref()
+                            .and_then(|v| v.parse().ok())
+                            .unwrap_or(0);
                         let result = func(lhs, rhs);
-                        arr[idx] = result.to_string();
+                        arr[idx] = Some(result.to_string());
                         return result;
                     }
                     let lhs: i64 = self
@@ -339,9 +342,9 @@ impl Shell {
                     let idx = self.eval_arith_expr_impl(idx_str) as usize;
                     let arr = self.arrays.entry(resolved).or_default();
                     while arr.len() <= idx {
-                        arr.push(String::new());
+                        arr.push(None);
                     }
-                    arr[idx] = val.to_string();
+                    arr[idx] = Some(val.to_string());
                 } else {
                     self.set_var(name, val.to_string());
                 }
@@ -381,10 +384,13 @@ impl Shell {
                     let idx = self.eval_arith_expr(idx_str) as usize;
                     let arr = self.arrays.entry(resolved).or_default();
                     while arr.len() <= idx {
-                        arr.push(String::new());
+                        arr.push(None);
                     }
-                    let val: i64 = arr[idx].parse().unwrap_or(0);
-                    arr[idx] = (val + delta).to_string();
+                    let val: i64 = arr[idx]
+                        .as_deref()
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(0);
+                    arr[idx] = Some((val + delta).to_string());
                     return val;
                 }
                 if name.chars().all(|c| c.is_alphanumeric() || c == '_') {
@@ -447,14 +453,15 @@ impl Shell {
                         .arrays
                         .get(base)
                         .and_then(|a| a.get(idx))
+                        .and_then(|v| v.as_deref())
                         .and_then(|v| v.parse().ok())
                         .unwrap_or(0);
                     let new_val = val + 1;
                     let arr = self.arrays.entry(base.to_string()).or_default();
                     while arr.len() <= idx {
-                        arr.push(String::new());
+                        arr.push(None);
                     }
-                    arr[idx] = new_val.to_string();
+                    arr[idx] = Some(new_val.to_string());
                     return new_val;
                 } else {
                     let val: i64 = self
@@ -501,14 +508,15 @@ impl Shell {
                         .arrays
                         .get(base)
                         .and_then(|a| a.get(idx))
+                        .and_then(|v| v.as_deref())
                         .and_then(|v| v.parse().ok())
                         .unwrap_or(0);
                     let new_val = val - 1;
                     let arr = self.arrays.entry(base.to_string()).or_default();
                     while arr.len() <= idx {
-                        arr.push(String::new());
+                        arr.push(None);
                     }
-                    arr[idx] = new_val.to_string();
+                    arr[idx] = Some(new_val.to_string());
                     return new_val;
                 } else {
                     let val: i64 = self
@@ -1210,7 +1218,11 @@ impl Shell {
             let resolved = self.resolve_nameref(name);
             let idx = self.eval_arith_expr_impl(idx_str) as usize;
             if let Some(arr) = self.arrays.get(&resolved) {
-                return arr.get(idx).and_then(|v| v.parse().ok()).unwrap_or(0);
+                return arr
+                    .get(idx)
+                    .and_then(|v| v.as_deref())
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0);
             }
             // Check nounset for unset array
             if self.opt_nounset && !self.vars.contains_key(&resolved) {

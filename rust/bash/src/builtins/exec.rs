@@ -293,7 +293,7 @@ pub(super) fn builtin_source(shell: &mut Shell, args: &[String]) -> i32 {
 
             // Push source file onto BASH_SOURCE stack
             let bash_source = shell.arrays.entry("BASH_SOURCE".to_string()).or_default();
-            bash_source.insert(0, path.clone());
+            bash_source.insert(0, Some(path.clone()));
 
             let saved_sourcing = shell.sourcing;
             shell.sourcing = true;
@@ -383,6 +383,9 @@ pub(super) fn builtin_type(shell: &mut Shell, args: &[String]) -> i32 {
                 println!("alias");
             } else if is_keyword {
                 println!("keyword");
+            } else if let Some((_, hits)) = shell.hash_table.get_mut(name) {
+                *hits += 1;
+                println!("file");
             } else if shell.opt_posix
                 && matches!(
                     name,
@@ -417,8 +420,12 @@ pub(super) fn builtin_type(shell: &mut Shell, args: &[String]) -> i32 {
                 status = 1;
             }
         } else if flag_p {
-            // Print path only for external commands
-            if let Some(path) = find_in_path_opt(name) {
+            // Print path only for external commands — check hash table first
+            if let Some((path, hits)) = shell.hash_table.get_mut(name) {
+                *hits += 1;
+                let path = path.clone();
+                println!("{}", path);
+            } else if let Some(path) = find_in_path_opt(name) {
                 println!("{}", path);
             } else {
                 status = 1;
@@ -526,9 +533,21 @@ pub(super) fn builtin_type(shell: &mut Shell, args: &[String]) -> i32 {
                     }
                 }
             }
+            // Check hash table first
+            if let Some((hpath, hits)) = shell.hash_table.get_mut(name) {
+                *hits += 1;
+                let hpath = hpath.clone();
+                println!("{} is hashed ({})", name, hpath);
+                found = true;
+                if !flag_a {
+                    continue;
+                }
+            }
             // File
             if let Some(path) = find_in_path_opt(name) {
-                println!("{} is {}", name, path);
+                if !found {
+                    println!("{} is {}", name, path);
+                }
                 found = true;
                 if !flag_a {
                     continue;
@@ -639,7 +658,9 @@ pub(super) fn builtin_command(shell: &mut Shell, args: &[String]) -> i32 {
                 );
                 if is_keyword {
                     println!("{} is a shell keyword", name);
-                } else if let Some(value) = shell.aliases.get(name.as_str()) {
+                } else if shell.shopt_expand_aliases
+                    && let Some(value) = shell.aliases.get(name.as_str())
+                {
                     println!("{} is aliased to `{}'", name, value);
                 } else if shell.opt_posix
                     && matches!(
@@ -679,6 +700,8 @@ pub(super) fn builtin_command(shell: &mut Shell, args: &[String]) -> i32 {
                     println!("{}{} () \n{}", prefix, name, body);
                 } else if builtin_map.contains_key(name.as_str()) {
                     println!("{} is a shell builtin", name);
+                } else if let Some((hpath, _)) = shell.hash_table.get(name.as_str()) {
+                    println!("{} is hashed ({})", name, hpath);
                 } else if let Some(path) = find_in_path_opt(name) {
                     println!("{} is {}", name, path);
                 } else {
@@ -734,11 +757,13 @@ pub(super) fn builtin_command(shell: &mut Shell, args: &[String]) -> i32 {
                 && builtin_map.contains_key(name.as_str());
             if is_keyword || is_posix_special || shell.functions.contains_key(name.as_str()) {
                 println!("{}", name);
-            } else if shell.aliases.contains_key(name.as_str()) {
+            } else if shell.shopt_expand_aliases && shell.aliases.contains_key(name.as_str()) {
                 let val = &shell.aliases[name.as_str()];
                 println!("alias {}='{}'", name, val);
             } else if builtin_map.contains_key(name.as_str()) {
                 println!("{}", name);
+            } else if let Some((hpath, _)) = shell.hash_table.get(name.as_str()) {
+                println!("{}", hpath);
             } else if let Some(path) = find_in_path_opt(name) {
                 println!("{}", path);
             } else {
@@ -797,9 +822,10 @@ pub(super) fn builtin_hash(shell: &mut Shell, args: &[String]) -> i32 {
             eprintln!("{}: hash: hash table empty", shell.error_prefix());
         } else {
             println!("hits\tcommand");
-            for (name, (path, hits)) in &shell.hash_table {
-                println!("   {}\t{}", hits, path);
-                let _ = name;
+            for name in &shell.hash_order {
+                if let Some((path, hits)) = shell.hash_table.get(name) {
+                    println!("   {}\t{}", hits, path);
+                }
             }
         }
         return 0;
@@ -811,9 +837,13 @@ pub(super) fn builtin_hash(shell: &mut Shell, args: &[String]) -> i32 {
         match args[i].as_str() {
             "-r" => {
                 shell.hash_table.clear();
+                shell.hash_order.clear();
             }
             "-l" => {
-                for (name, (path, _)) in &shell.hash_table {
+                for name in &shell.hash_order {
+                    let Some((path, _)) = shell.hash_table.get(name) else {
+                        continue;
+                    };
                     println!("builtin hash -p {} {}", path, name);
                 }
             }
@@ -840,6 +870,7 @@ pub(super) fn builtin_hash(shell: &mut Shell, args: &[String]) -> i32 {
                     return 1;
                 }
                 shell.hash_table.remove(&args[i]);
+                shell.hash_order.retain(|n| n != &args[i]);
             }
             "-p" => {
                 if !shell.opt_hashall {
@@ -851,6 +882,9 @@ pub(super) fn builtin_hash(shell: &mut Shell, args: &[String]) -> i32 {
                     let path = args[i].clone();
                     i += 1;
                     let name = args[i].clone();
+                    if !shell.hash_table.contains_key(&name) {
+                        shell.hash_order.push(name.clone());
+                    }
                     shell.hash_table.insert(name, (path, 0));
                 }
             }
@@ -862,6 +896,9 @@ pub(super) fn builtin_hash(shell: &mut Shell, args: &[String]) -> i32 {
             name => {
                 // Look up command and add to hash table
                 if let Some(path) = find_command_path(name) {
+                    if !shell.hash_table.contains_key(name) {
+                        shell.hash_order.push(name.to_string());
+                    }
                     shell.hash_table.insert(name.to_string(), (path, 0));
                 } else {
                     eprintln!("{}: hash: {}: not found", shell.error_prefix(), name);

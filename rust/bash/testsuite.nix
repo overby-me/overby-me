@@ -50,6 +50,14 @@ pkgs.runCommand "rust-bash-test-${name}" {
   sed -i "s|$REF_BASH|bash|g" "$TMPDIR/expected"
   sed -i "s|$TEST_BASH|bash|g" "$TMPDIR/actual"
 
+  # Normalize PIDs in temp paths used by tests.  Tests create paths like
+  # /tmp-<pid>, /type-<pid>, /bash-zzz-<pid>, /zero-length-file-<pid>.
+  # Match: a hyphen followed by 2-7 digits at end of a path-like token.
+  sed -i -E 's|(-[a-z]*)-([0-9]{2,7})\b|\1-PID|g' "$TMPDIR/expected" "$TMPDIR/actual"
+
+  # Normalize thread/process IDs in Rust panic messages
+  sed -i -E "s|thread '([^']*)' \([0-9]+\)|thread '\1' (PID)|g" "$TMPDIR/expected" "$TMPDIR/actual"
+
   # Compare
   if diff --text "$TMPDIR/actual" "$TMPDIR/expected"; then
     touch $out

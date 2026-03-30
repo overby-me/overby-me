@@ -27,18 +27,27 @@ pub(super) fn builtin_getopts(shell: &mut Shell, args: &[String]) -> i32 {
     let raw_optstring = &args[0];
     let varname = &args[1];
 
-    // Validate variable name
-    if !varname.chars().all(|c| c.is_alphanumeric() || c == '_')
+    // Validate variable name — if invalid, we still process the option
+    // (advancing OPTIND etc.) but use a dummy variable name for assignment.
+    // Print error and use dummy so the rest of the function runs normally
+    // (bash behavior: getopts with invalid varname still advances OPTIND).
+    let invalid_varname = !varname.chars().all(|c| c.is_alphanumeric() || c == '_')
         || varname.chars().next().is_some_and(|c| c.is_ascii_digit())
-        || varname.is_empty()
-    {
+        || varname.is_empty();
+    if invalid_varname {
         eprintln!(
             "{}: getopts: `{}': not a valid identifier",
             shell.error_prefix(),
             varname
         );
-        return 1;
     }
+    // When the variable name is invalid, redirect assignments to a dummy
+    // variable so OPTIND still advances.  We clean it up before returning.
+    let varname = if invalid_varname {
+        "_GETOPTS_DUMMY_VAR_"
+    } else {
+        varname.as_str()
+    };
 
     // Check for silent error mode (leading ':') and OPTERR
     let opterr = shell
@@ -81,6 +90,9 @@ pub(super) fn builtin_getopts(shell: &mut Shell, args: &[String]) -> i32 {
 
     if optind == 0 || optind > opt_args.len() {
         shell.set_var(varname, "?".to_string());
+        if invalid_varname {
+            shell.vars.remove("_GETOPTS_DUMMY_VAR_");
+        }
         return 1;
     }
 
@@ -92,11 +104,17 @@ pub(super) fn builtin_getopts(shell: &mut Shell, args: &[String]) -> i32 {
         shell.set_var("OPTIND", (optind + 1).to_string());
         shell.vars.remove("_GETOPTS_OPTOFS");
         shell.set_var(varname, "?".to_string());
+        if invalid_varname {
+            shell.vars.remove("_GETOPTS_DUMMY_VAR_");
+        }
         return 1;
     }
 
     if !current.starts_with('-') || current == "-" {
         shell.set_var(varname, "?".to_string());
+        if invalid_varname {
+            shell.vars.remove("_GETOPTS_DUMMY_VAR_");
+        }
         return 1;
     }
 
@@ -111,6 +129,9 @@ pub(super) fn builtin_getopts(shell: &mut Shell, args: &[String]) -> i32 {
         shell.set_var("OPTIND", (optind + 1).to_string());
         shell.vars.remove("_GETOPTS_OPTOFS");
         shell.set_var(varname, "?".to_string());
+        if invalid_varname {
+            shell.vars.remove("_GETOPTS_DUMMY_VAR_");
+        }
         return 1;
     }
 
@@ -162,10 +183,18 @@ pub(super) fn builtin_getopts(shell: &mut Shell, args: &[String]) -> i32 {
                     }
                     shell.set_var("OPTIND", (optind + 1).to_string());
                     shell.vars.remove("_GETOPTS_OPTOFS");
+                    if invalid_varname {
+                        shell.vars.remove("_GETOPTS_DUMMY_VAR_");
+                        return 1;
+                    }
                     return 0;
                 }
 
                 shell.set_var(varname, opt_char.to_string());
+                if invalid_varname {
+                    shell.vars.remove("_GETOPTS_DUMMY_VAR_");
+                    return 1;
+                }
                 return 0;
             }
 
@@ -181,6 +210,10 @@ pub(super) fn builtin_getopts(shell: &mut Shell, args: &[String]) -> i32 {
                 // Done with this argument — advance OPTIND
                 shell.set_var("OPTIND", (optind + 1).to_string());
                 shell.vars.remove("_GETOPTS_OPTOFS");
+            }
+            if invalid_varname {
+                shell.vars.remove("_GETOPTS_DUMMY_VAR_");
+                return 1;
             }
             0
         }
@@ -207,6 +240,10 @@ pub(super) fn builtin_getopts(shell: &mut Shell, args: &[String]) -> i32 {
             } else {
                 shell.set_var("OPTIND", (optind + 1).to_string());
                 shell.vars.remove("_GETOPTS_OPTOFS");
+            }
+            if invalid_varname {
+                shell.vars.remove("_GETOPTS_DUMMY_VAR_");
+                return 1;
             }
             0
         }

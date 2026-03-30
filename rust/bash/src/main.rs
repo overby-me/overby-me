@@ -8,6 +8,33 @@ mod parser;
 use interpreter::Shell;
 use std::io::{self, BufRead, Write};
 
+/// Record whether SIGPIPE was SIG_IGN *before* the Rust runtime touches it.
+/// We use a `.init_array` constructor which the dynamic linker calls before
+/// the Rust runtime's own init code that unconditionally sets SIGPIPE to
+/// SIG_IGN (on editions < 2024 and current rustc ≤ 1.91).
+#[cfg(unix)]
+static SIGPIPE_WAS_IGNORED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(unix)]
+unsafe extern "C" fn check_sigpipe_early() {
+    unsafe {
+        let prev = libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+        // Restore immediately — we only wanted to query
+        libc::signal(libc::SIGPIPE, prev);
+        if prev == libc::SIG_IGN {
+            SIGPIPE_WAS_IGNORED.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+}
+
+/// Place the constructor in `.init_array` so it runs before Rust runtime init.
+/// Priority 101 is the earliest user-accessible slot (below 100 is reserved).
+#[cfg(unix)]
+#[used]
+#[unsafe(link_section = ".init_array.00101")]
+static INIT_CHECK_SIGPIPE: unsafe extern "C" fn() = check_sigpipe_early;
+
 fn main() {
     // Ignore SIGPIPE so builtins can handle write errors gracefully.
     // External commands reset SIGPIPE to SIG_DFL before exec.
@@ -16,21 +43,32 @@ fn main() {
         libc::signal(libc::SIGPIPE, libc::SIG_IGN);
     }
 
-    let code = run();
+    #[cfg(unix)]
+    let sigpipe_was_ignored = SIGPIPE_WAS_IGNORED.load(std::sync::atomic::Ordering::Relaxed);
+    #[cfg(not(unix))]
+    let sigpipe_was_ignored = false;
+
+    let code = run(sigpipe_was_ignored);
     // Flush stdout before exiting - std::process::exit() doesn't flush
     std::io::stdout().flush().ok();
     std::io::stderr().flush().ok();
     std::process::exit(code);
 }
 
-fn run() -> i32 {
+fn run(sigpipe_was_ignored: bool) -> i32 {
     let args: Vec<String> = std::env::args().collect();
     let mut shell = Shell::new();
 
-    // Record SIGPIPE ignore in trap table (so `trap` shows it like bash does)
+    // Only record SIGPIPE in the trap table when the *parent* process had
+    // it set to SIG_IGN (i.e. it was inherited).  Real bash behaves the
+    // same way: it shows `trap -- '' SIGPIPE` only when SIGPIPE was
+    // already ignored at startup, not when the shell ignores it internally.
     #[cfg(unix)]
     {
-        shell.traps.insert("PIPE".to_string(), String::new());
+        if sigpipe_was_ignored {
+            shell.traps.insert("PIPE".to_string(), String::new());
+            shell.original_ignored_signals.insert("PIPE".to_string());
+        }
         // Check which signals were already ignored (SIG_IGN) at startup.
         // These cannot be trapped by the shell (POSIX requirement).
         let signals_to_check: &[(i32, &str)] = &[
@@ -227,9 +265,10 @@ fn run() -> i32 {
 
     // Set BASH_SOURCE array
     if !shell.script_name.is_empty() {
-        shell
-            .arrays
-            .insert("BASH_SOURCE".to_string(), vec![shell.script_name.clone()]);
+        shell.arrays.insert(
+            "BASH_SOURCE".to_string(),
+            vec![Some(shell.script_name.clone())],
+        );
     }
 
     // Execute based on mode

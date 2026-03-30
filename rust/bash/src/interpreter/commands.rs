@@ -104,12 +104,23 @@ impl Shell {
         let coproc_arrays: Vec<(String, Vec<i32>)> = self
             .arrays
             .iter()
-            .filter(|(_, v)| v.len() == 2 && v.iter().all(|s| s.parse::<i32>().is_ok()))
+            .filter(|(_, v)| {
+                v.len() == 2
+                    && v.iter()
+                        .all(|s| s.as_deref().and_then(|s| s.parse::<i32>().ok()).is_some())
+            })
             .filter(|(k, _)| {
                 // Check if there's a corresponding _PID variable
                 self.vars.contains_key(&format!("{}_PID", k))
             })
-            .map(|(k, v)| (k.clone(), v.iter().filter_map(|s| s.parse().ok()).collect()))
+            .map(|(k, v)| {
+                (
+                    k.clone(),
+                    v.iter()
+                        .filter_map(|s| s.as_deref().and_then(|s| s.parse().ok()))
+                        .collect(),
+                )
+            })
             .collect();
         for (name, fds) in &coproc_arrays {
             for fd in fds {
@@ -182,7 +193,7 @@ impl Shell {
                 // Set COPROC array: [0]=read_fd, [1]=write_fd
                 self.arrays.insert(
                     coproc_name.to_string(),
-                    vec![read_fd.to_string(), write_fd.to_string()],
+                    vec![Some(read_fd.to_string()), Some(write_fd.to_string())],
                 );
 
                 // Set COPROC_PID
@@ -268,7 +279,6 @@ impl Shell {
         let word = self.eval_arith_in_word(word);
         let mut vars = self.vars.clone();
         self.inject_transform_attrs(&word, &mut vars);
-        let arrays = self.arrays.clone();
         let assoc_arrays = self.assoc_arrays.clone();
         let namerefs = self.namerefs.clone();
         let positional = self.positional.clone();
@@ -301,14 +311,17 @@ impl Shell {
         let self_ptr = self as *mut Shell;
         let mut procsub_runner = move |cmd: &str| -> i32 {
             let shell = unsafe { &mut *self_ptr };
-            // Mark as pipeline child so EPIPE errors are suppressed in process sub children
-            let saved = shell.in_pipeline_child;
-            shell.in_pipeline_child = true;
-            let status = shell.run_string(cmd);
-            shell.in_pipeline_child = saved;
-            status
+            // Set comsub_line_offset so LINENO inside procsub reflects the script line
+            let lineno: usize = shell
+                .vars
+                .get("LINENO")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(1);
+            shell.comsub_line_offset = lineno.saturating_sub(1);
+            shell.run_string(cmd)
         };
         crate::expand::set_procsub_runner(&mut procsub_runner as *mut dyn FnMut(&str) -> i32);
+        let arrays = self.arrays.clone();
         let mut cmd_sub = |cmd: &str| -> String { self.capture_output(cmd) };
         let result = expand::expand_word(
             &word,
@@ -402,7 +415,6 @@ impl Shell {
         );
         let mut vars = self.vars.clone();
         self.inject_transform_attrs(&word, &mut vars);
-        let arrays = self.arrays.clone();
         let assoc_arrays = self.assoc_arrays.clone();
         let namerefs = self.namerefs.clone();
         let positional = self.positional.clone();
@@ -416,13 +428,17 @@ impl Shell {
         let self_ptr2 = self as *mut Shell;
         let mut procsub_runner = move |cmd: &str| -> i32 {
             let shell = unsafe { &mut *self_ptr2 };
-            let saved = shell.in_pipeline_child;
-            shell.in_pipeline_child = true;
-            let status = shell.run_string(cmd);
-            shell.in_pipeline_child = saved;
-            status
+            // Set comsub_line_offset so LINENO inside procsub reflects the script line
+            let lineno: usize = shell
+                .vars
+                .get("LINENO")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(1);
+            shell.comsub_line_offset = lineno.saturating_sub(1);
+            shell.run_string(cmd)
         };
         crate::expand::set_procsub_runner(&mut procsub_runner as *mut dyn FnMut(&str) -> i32);
+        let arrays = self.arrays.clone();
         let mut cmd_sub = |cmd: &str| -> String { self.capture_output(cmd) };
         let result = expand::expand_word_nosplit(
             &word,
@@ -446,7 +462,6 @@ impl Shell {
         self.apply_assign_defaults(word);
         let word = self.eval_arith_in_word(word);
         let vars = self.vars.clone();
-        let arrays = self.arrays.clone();
         let assoc_arrays = self.assoc_arrays.clone();
         let namerefs = self.namerefs.clone();
         let positional = self.positional.clone();
@@ -454,6 +469,7 @@ impl Shell {
         let last_bg_pid = self.last_bg_pid;
         let top_pid = self.top_level_pid;
         let opt_flags = self.get_opt_flags();
+        let arrays = self.arrays.clone();
         let mut cmd_sub = |cmd: &str| -> String { self.capture_output(cmd) };
         expand::expand_word_pattern(
             &word,
@@ -720,6 +736,9 @@ impl Shell {
         // Always-on flags
         flags.push('h'); // hashall
         flags.push('B'); // braceexpand
+        if self.opt_physical {
+            flags.push('P');
+        }
         flags
     }
 
@@ -749,6 +768,9 @@ impl Shell {
         }
         if self.opt_nounset {
             opts.push("nounset");
+        }
+        if self.opt_physical {
+            opts.push("physical");
         }
         if self.opt_pipefail {
             opts.push("pipefail");
@@ -1266,7 +1288,8 @@ impl Shell {
                                 self.assoc_arrays.insert(name.to_string(), map);
                             } else {
                                 let arr = crate::builtins::parse_array_literal(value);
-                                self.arrays.insert(name.to_string(), arr);
+                                self.arrays
+                                    .insert(name.to_string(), arr.into_iter().map(Some).collect());
                             }
                             new_args.push(name.to_string());
                             modified = true;
@@ -1503,13 +1526,19 @@ impl Shell {
                                 raw_idx as usize
                             };
                             while arr.len() <= idx {
-                                arr.push(String::new());
+                                arr.push(None);
                             }
                             if is_int {
-                                let existing: i64 = arr[idx].parse().unwrap_or(0);
-                                arr[idx] = (existing + addend).to_string();
+                                let existing: i64 = arr[idx]
+                                    .as_deref()
+                                    .and_then(|v| v.parse().ok())
+                                    .unwrap_or(0);
+                                arr[idx] = Some((existing + addend).to_string());
                             } else {
-                                arr[idx].push_str(&value);
+                                match &mut arr[idx] {
+                                    Some(s) => s.push_str(&value),
+                                    None => arr[idx] = Some(value.clone()),
+                                }
                             }
                         }
                     } else if self.assoc_arrays.contains_key(&resolved) {
@@ -1527,18 +1556,22 @@ impl Shell {
                             let n = self.eval_arith_expr(&value);
                             let arr = self.arrays.entry(resolved).or_default();
                             if arr.is_empty() {
-                                arr.push(n.to_string());
+                                arr.push(Some(n.to_string()));
                             } else {
-                                let existing: i64 = arr[0].parse().unwrap_or(0);
-                                arr[0] = (existing + n).to_string();
+                                let existing: i64 =
+                                    arr[0].as_deref().and_then(|v| v.parse().ok()).unwrap_or(0);
+                                arr[0] = Some((existing + n).to_string());
                             }
                         } else {
                             // String array: arr+=val appends to element 0
                             let arr = self.arrays.entry(resolved).or_default();
                             if arr.is_empty() {
-                                arr.push(value);
+                                arr.push(Some(value));
                             } else {
-                                arr[0].push_str(&value);
+                                match &mut arr[0] {
+                                    Some(s) => s.push_str(&value),
+                                    None => arr[0] = Some(value.clone()),
+                                }
                             }
                         }
                     } else if self.integer_vars.contains(&resolved) {
@@ -1606,9 +1639,9 @@ impl Shell {
                                     raw_idx as usize
                                 };
                                 while arr.len() <= idx {
-                                    arr.push(String::new());
+                                    arr.push(None);
                                 }
-                                arr[idx] = value;
+                                arr[idx] = Some(value);
                             }
                         }
                     } else {
@@ -1669,25 +1702,31 @@ impl Shell {
                             let idx_str = self.expand_word_single(idx_word);
                             let idx = self.eval_arith_expr(&idx_str).max(0) as usize;
                             while arr.len() <= idx {
-                                arr.push(String::new());
+                                arr.push(None);
                             }
                             if elem.append {
                                 if is_integer {
-                                    let existing: i64 = arr[idx].parse().unwrap_or(0);
+                                    let existing: i64 = arr[idx]
+                                        .as_deref()
+                                        .and_then(|v| v.parse().ok())
+                                        .unwrap_or(0);
                                     let addend: i64 = value.parse().unwrap_or(0);
-                                    arr[idx] = (existing + addend).to_string();
+                                    arr[idx] = Some((existing + addend).to_string());
                                 } else {
-                                    arr[idx].push_str(&value);
+                                    match &mut arr[idx] {
+                                        Some(s) => s.push_str(&value),
+                                        None => arr[idx] = Some(value.clone()),
+                                    }
                                 }
                             } else {
-                                arr[idx] = value;
+                                arr[idx] = Some(value);
                             }
                             next_idx = idx + 1;
                         } else {
                             while arr.len() <= next_idx {
-                                arr.push(String::new());
+                                arr.push(None);
                             }
-                            arr[next_idx] = value;
+                            arr[next_idx] = Some(value);
                             next_idx += 1;
                         }
                     }
@@ -1722,7 +1761,11 @@ impl Shell {
         self.saved_opts_stack.push(None); // Will be set by `local -`
         self.arrays.insert(
             "FUNCNAME".to_string(),
-            self.func_names.iter().rev().cloned().collect(),
+            self.func_names
+                .iter()
+                .rev()
+                .map(|s| Some(s.clone()))
+                .collect(),
         );
         // Set BASH_SOURCE to current source file
         let source_file = self
@@ -1735,7 +1778,10 @@ impl Shell {
         if bash_source.is_empty() {
             bash_source.push(String::new());
         }
-        self.arrays.insert("BASH_SOURCE".to_string(), bash_source);
+        self.arrays.insert(
+            "BASH_SOURCE".to_string(),
+            bash_source.into_iter().map(Some).collect(),
+        );
         // Set BASH_LINENO
         let lineno = self
             .vars
@@ -1743,7 +1789,10 @@ impl Shell {
             .cloned()
             .unwrap_or_else(|| "0".to_string());
         let bash_lineno = vec![lineno; self.func_names.len().saturating_sub(1)];
-        self.arrays.insert("BASH_LINENO".to_string(), bash_lineno);
+        self.arrays.insert(
+            "BASH_LINENO".to_string(),
+            bash_lineno.into_iter().map(Some).collect(),
+        );
 
         // Save procsub fds so inner commands don't close them
         let saved_fds = crate::expand::take_procsub_fds();
@@ -1891,7 +1940,11 @@ impl Shell {
         } else {
             self.arrays.insert(
                 "FUNCNAME".to_string(),
-                self.func_names.iter().rev().cloned().collect(),
+                self.func_names
+                    .iter()
+                    .rev()
+                    .map(|s| Some(s.clone()))
+                    .collect(),
             );
         }
         // Restore positional params but preserve $0 (BASH_ARGV0 may have changed it)
@@ -1914,7 +1967,21 @@ impl Shell {
             // from appearing after the external command's output
             std::io::Write::flush(&mut std::io::stdout()).ok();
 
-            let path = builtins::find_executable(name);
+            // Check hash table first, then PATH lookup.
+            // Only use existing hash entries (populated by `hash` builtin
+            // or previous PATH lookups via `hash`).  Do NOT auto-populate
+            // the hash table here — bash only caches on explicit `hash`
+            // or when hashall (set -h) is active.
+            let path = if !name.contains('/') {
+                if let Some((hpath, hits)) = self.hash_table.get_mut(name) {
+                    *hits += 1;
+                    hpath.clone()
+                } else {
+                    builtins::find_executable(name)
+                }
+            } else {
+                builtins::find_executable(name)
+            };
 
             match unsafe { nix::unistd::fork() } {
                 Ok(nix::unistd::ForkResult::Child) => {
@@ -2766,8 +2833,8 @@ impl Shell {
             if let Some(arr) = self.arrays.get_mut(&name) {
                 let mut updated = false;
                 for elem in arr.iter_mut() {
-                    if *elem == fd_str {
-                        *elem = "-1".to_string();
+                    if elem.as_deref() == Some(&*fd_str) {
+                        *elem = Some("-1".to_string());
                         updated = true;
                     }
                 }
@@ -2866,7 +2933,7 @@ impl Shell {
                         let matched = lval.contains(&rval);
                         if matched {
                             self.arrays
-                                .insert("BASH_REMATCH".to_string(), vec![rval.clone()]);
+                                .insert("BASH_REMATCH".to_string(), vec![Some(rval.clone())]);
                         } else {
                             self.arrays.insert("BASH_REMATCH".to_string(), Vec::new());
                         }
@@ -2998,9 +3065,9 @@ impl Shell {
                     if idx == "@" || idx == "*" {
                         self.arrays.contains_key(base) || self.assoc_arrays.contains_key(base)
                     } else if let Ok(n) = idx.parse::<usize>() {
-                        self.arrays
-                            .get(base)
-                            .is_some_and(|a| n < a.len() && !a[n].is_empty())
+                        self.arrays.get(base).is_some_and(|a| {
+                            n < a.len() && a[n].as_ref().is_some_and(|s| !s.is_empty())
+                        })
                     } else {
                         self.assoc_arrays
                             .get(base)
@@ -3107,8 +3174,8 @@ impl Shell {
                             for i in 0..caps.len() {
                                 rematch.push(
                                     caps.get(i)
-                                        .map(|m| m.as_str().to_string())
-                                        .unwrap_or_default(),
+                                        .map(|m| Some(m.as_str().to_string()))
+                                        .unwrap_or(Some(String::new())),
                                 );
                             }
                             self.arrays.insert("BASH_REMATCH".to_string(), rematch);

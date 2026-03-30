@@ -70,7 +70,7 @@ pub(super) fn get_array_elements(expr: &ParamExpr, ctx: &ExpCtx) -> Vec<String> 
         let resolved = ctx.resolve_nameref(&expr.name);
         if let Some(arr) = ctx.arrays.get(&resolved) {
             return (0..arr.len())
-                .filter(|&i| !arr[i].is_empty() || i == 0)
+                .filter(|&i| arr[i].is_some())
                 .map(|i| i.to_string())
                 .collect();
         }
@@ -83,7 +83,7 @@ pub(super) fn get_array_elements(expr: &ParamExpr, ctx: &ExpCtx) -> Vec<String> 
         let base = &expr.name[..bracket];
         let resolved = ctx.resolve_nameref(base);
         if let Some(arr) = ctx.arrays.get(&resolved) {
-            return arr.clone();
+            return arr.iter().filter_map(|v| v.clone()).collect();
         }
         if let Some(assoc) = ctx.assoc_arrays.get(&resolved) {
             return assoc.values().cloned().collect();
@@ -195,7 +195,11 @@ pub(super) fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
                 return match idx_str {
                     "@" | "*" => {
                         if let Some(arr) = ctx.arrays.get(&resolved) {
-                            arr.join(" ")
+                            arr.iter()
+                                .filter_map(|v| v.as_ref())
+                                .cloned()
+                                .collect::<Vec<_>>()
+                                .join(" ")
                         } else if let Some(assoc) = ctx.assoc_arrays.get(&resolved) {
                             assoc.values().cloned().collect::<Vec<_>>().join(" ")
                         } else if let Some(val) = ctx.vars.get(&resolved) {
@@ -256,7 +260,7 @@ pub(super) fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
                             } else {
                                 raw_idx as usize
                             };
-                            arr.get(idx).cloned().unwrap_or_default()
+                            arr.get(idx).and_then(|v| v.clone()).unwrap_or_default()
                         } else if raw_idx == 0 {
                             ctx.vars.get(&resolved).cloned().unwrap_or_default()
                         } else {
@@ -283,7 +287,9 @@ pub(super) fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
                 .cloned()
                 .or_else(|| {
                     // If it's also an array, return element 0
-                    ctx.arrays.get(&resolved).and_then(|a| a.first().cloned())
+                    ctx.arrays
+                        .get(&resolved)
+                        .and_then(|a| a.first().and_then(|v| v.clone()))
                 })
                 .or_else(|| {
                     // For associative arrays, $var returns element with key "0"
@@ -591,7 +597,7 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
         {
             let resolved = ctx.resolve_nameref(base);
             let elements: Vec<String> = if let Some(arr) = ctx.arrays.get(&resolved) {
-                arr.clone()
+                arr.iter().filter_map(|v| v.clone()).collect()
             } else if let Some(assoc) = ctx.assoc_arrays.get(&resolved) {
                 assoc.values().cloned().collect()
             } else if let Some(val) = ctx.vars.get(&resolved) {
@@ -655,7 +661,7 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                 let resolved = ctx.resolve_nameref(base);
                 if idx_str == "@" || idx_str == "*" {
                     if let Some(arr) = ctx.arrays.get(&resolved) {
-                        return arr.len().to_string();
+                        return arr.iter().filter(|v| v.is_some()).count().to_string();
                     }
                     if let Some(assoc) = ctx.assoc_arrays.get(&resolved) {
                         return assoc.len().to_string();
@@ -695,7 +701,7 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
             let resolved = ctx.resolve_nameref(&expr.name);
             if let Some(arr) = ctx.arrays.get(&resolved) {
                 let indices: Vec<String> = (0..arr.len())
-                    .filter(|&i| !arr[i].is_empty() || i == 0)
+                    .filter(|&i| arr[i].is_some())
                     .map(|i| i.to_string())
                     .collect();
                 indices.join(" ")

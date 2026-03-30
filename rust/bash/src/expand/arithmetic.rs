@@ -3,7 +3,7 @@ use super::*;
 pub fn eval_arith_full(
     expr: &str,
     vars: &HashMap<String, String>,
-    _arrays: &HashMap<String, Vec<String>>,
+    _arrays: &HashMap<String, Vec<Option<String>>>,
     positional: &[String],
     last_status: i32,
 ) -> i64 {
