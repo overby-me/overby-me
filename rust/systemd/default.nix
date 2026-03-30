@@ -3800,10 +3800,8 @@
       {
         name = "19-CGROUP";
         patchScript = ''
-          # Use upstream main script (sources test-control.sh and calls run_subtests)
-          # but remove subtests that need unimplemented features
+          # Remove subtests needing DynamicUser, BPF IP filtering, or runtime set-property
           rm -f TEST-19-CGROUP.delegate.sh \
-               TEST-19-CGROUP.ExitType-cgroup.sh \
                TEST-19-CGROUP.IPAddressAllow-Deny.sh \
                TEST-19-CGROUP.keyed-properties.sh
         '';
