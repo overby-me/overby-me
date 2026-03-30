@@ -892,10 +892,32 @@ impl Lexer {
         s.push(self.input[self.pos]); // '('
         self.pos += 1;
         let mut depth = 1i32;
-        let mut case_depth = 0i32;
+
+        // Case statement state tracking.  Each nested case pushes state.
+        // States per case level:
+        //   0 = not in case
+        //   1 = saw "case", waiting for "in"
+        //   2 = in pattern position (after "in", after ";;"/";;&"/";&", or after "(")
+        //   3 = in case body (after pattern's closing ")")
+        let mut case_states: Vec<i32> = Vec::new();
+
+        // Helper: current case state (0 if no active case)
+        let case_state = |cs: &[i32]| -> i32 { cs.last().copied().unwrap_or(0) };
+
+        // Are we in a position where ) is a case pattern delimiter?
+        let in_case_pattern = |cs: &[i32]| -> bool { case_state(cs) == 2 };
+
         while self.pos < self.input.len() && depth > 0 {
             let ch = self.input[self.pos];
             match ch {
+                '\\' if self.pos + 1 < self.input.len() => {
+                    // Backslash — consume next char literally
+                    s.push(ch);
+                    self.pos += 1;
+                    s.push(self.input[self.pos]);
+                    self.pos += 1;
+                    continue;
+                }
                 '\'' => {
                     // Single-quoted string — skip entirely
                     s.push(ch);
@@ -946,9 +968,32 @@ impl Lexer {
                     }
                     continue;
                 }
-                '(' => depth += 1,
+                '$' if self.pos + 1 < self.input.len() && self.input[self.pos + 1] == '(' => {
+                    // Nested $(...) — recurse by pushing onto depth
+                    s.push(ch);
+                    self.pos += 1;
+                    s.push(self.input[self.pos]); // '('
+                    self.pos += 1;
+                    depth += 1;
+                    continue;
+                }
+                '(' => {
+                    if in_case_pattern(&case_states) {
+                        // '(' in case pattern position is the optional leading
+                        // paren of a pattern like `(x)`.  It does NOT increase
+                        // the subshell depth — it's just part of the case
+                        // syntax.  Stay in pattern state.
+                    } else {
+                        depth += 1;
+                    }
+                }
                 ')' => {
-                    if case_depth <= 0 {
+                    if in_case_pattern(&case_states) {
+                        // ')' closes a case pattern — transition to body state
+                        if let Some(st) = case_states.last_mut() {
+                            *st = 3; // now in case body
+                        }
+                    } else {
                         depth -= 1;
                         if depth == 0 {
                             s.push(ch);
@@ -956,12 +1001,70 @@ impl Lexer {
                             return s;
                         }
                     }
-                    // Inside a case block, ) is a pattern delimiter — skip
+                }
+                ';' => {
+                    // Check for ;; / ;;& / ;&
+                    if case_state(&case_states) == 3 {
+                        if self.pos + 1 < self.input.len() && self.input[self.pos + 1] == ';' {
+                            // ;; or ;;&
+                            s.push(ch);
+                            self.pos += 1;
+                            s.push(self.input[self.pos]);
+                            self.pos += 1;
+                            if self.pos < self.input.len() && self.input[self.pos] == '&' {
+                                s.push(self.input[self.pos]);
+                                self.pos += 1;
+                            }
+                            // Back to pattern position
+                            if let Some(st) = case_states.last_mut() {
+                                *st = 2;
+                            }
+                            continue;
+                        } else if self.pos + 1 < self.input.len() && self.input[self.pos + 1] == '&'
+                        {
+                            // ;&
+                            s.push(ch);
+                            self.pos += 1;
+                            s.push(self.input[self.pos]);
+                            self.pos += 1;
+                            // Back to pattern position
+                            if let Some(st) = case_states.last_mut() {
+                                *st = 2;
+                            }
+                            continue;
+                        }
+                    }
+                }
+                '#' => {
+                    // Comment — skip to end of line (only at word boundary)
+                    // Check if previous char is whitespace/newline/start or a separator
+                    let prev = if s.is_empty() {
+                        ' '
+                    } else {
+                        s.chars().last().unwrap_or(' ')
+                    };
+                    if prev == ' '
+                        || prev == '\t'
+                        || prev == '\n'
+                        || prev == ';'
+                        || prev == '&'
+                        || prev == '|'
+                        || prev == '('
+                    {
+                        s.push(ch);
+                        self.pos += 1;
+                        while self.pos < self.input.len() && self.input[self.pos] != '\n' {
+                            s.push(self.input[self.pos]);
+                            self.pos += 1;
+                        }
+                        continue;
+                    }
                 }
                 _ => {}
             }
-            // Track case/esac keywords
-            if ch.is_alphabetic() {
+            // Track keywords by reading alphanumeric words
+            if ch.is_alphabetic() || ch == '_' {
+                let word_start = self.pos;
                 let mut word = String::new();
                 while self.pos < self.input.len()
                     && (self.input[self.pos].is_alphanumeric() || self.input[self.pos] == '_')
@@ -969,7 +1072,7 @@ impl Lexer {
                     word.push(self.input[self.pos]);
                     self.pos += 1;
                 }
-                // Check for case/esac keywords, also through aliases
+                // Resolve aliases if enabled
                 let effective_word = if self.shopt_expand_aliases {
                     self.aliases
                         .get(word.as_str())
@@ -978,12 +1081,35 @@ impl Lexer {
                 } else {
                     word.clone()
                 };
-                if effective_word == "case" {
-                    case_depth += 1;
-                } else if effective_word == "esac" || word == "esac" {
-                    case_depth -= 1;
-                } else if effective_word == "(" {
-                    depth += 1;
+                // Only treat as keyword if at a command position (preceded by
+                // whitespace, newline, semicolon, pipe, start, etc.)
+                let prev = if word_start == 0 || s.is_empty() {
+                    ' '
+                } else {
+                    s.chars().last().unwrap_or(' ')
+                };
+                let at_keyword_pos = prev == ' '
+                    || prev == '\t'
+                    || prev == '\n'
+                    || prev == ';'
+                    || prev == '&'
+                    || prev == '|'
+                    || prev == '('
+                    || prev == '`';
+
+                if at_keyword_pos {
+                    if effective_word == "case" {
+                        case_states.push(1); // waiting for "in"
+                    } else if (effective_word == "esac" || word == "esac")
+                        && !case_states.is_empty()
+                    {
+                        case_states.pop();
+                    } else if effective_word == "in" && case_state(&case_states) == 1 {
+                        // "in" after "case WORD" — transition to pattern position
+                        if let Some(st) = case_states.last_mut() {
+                            *st = 2;
+                        }
+                    }
                 }
                 s.push_str(&word);
                 continue;
