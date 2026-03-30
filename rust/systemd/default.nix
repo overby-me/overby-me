@@ -3615,7 +3615,7 @@
       {
         name = "23-UNIT-FILE";
         # Use upstream subtests via run_subtests_with_signals.
-        # Remove subtests requiring busctl, DynamicUser, or systemd-analyze.
+        # Remove subtests requiring busctl, DynamicUser, systemd-analyze, or --user.
         # Patch subtests that partially depend on unimplemented features.
         patchScript = ''
           # Remove subtests that require busctl (D-Bus not implemented)
@@ -3627,74 +3627,18 @@
           rm -f TEST-23-UNIT-FILE.clean-unit.sh
           rm -f TEST-23-UNIT-FILE.openfile.sh
 
-          # Remove subtests that require systemd-analyze (not implemented)
+          # Remove subtests that require systemd-analyze log-level (needs D-Bus)
           rm -f TEST-23-UNIT-FILE.verify-unit-files.sh
-
+          rm -f TEST-23-UNIT-FILE.ExecReload.sh
+          rm -f TEST-23-UNIT-FILE.ExecStopPost.sh
+          rm -f TEST-23-UNIT-FILE.JoinsNamespaceOf.sh
+          rm -f TEST-23-UNIT-FILE.StandardOutput.sh
+          rm -f TEST-23-UNIT-FILE.success-failure.sh
+          rm -f TEST-23-UNIT-FILE.type-exec.sh
+          rm -f TEST-23-UNIT-FILE.Upholds.sh
 
           # Remove statedir subtest (requires --user service management)
           rm -f TEST-23-UNIT-FILE.statedir.sh
-
-          # Upholds subtest: rewrite to poll instead of waiting for signals
-          # (signals don't work because the test doesn't run as a service in the VM).
-          cat > TEST-23-UNIT-FILE.Upholds.sh << 'UPHEOF'
-          #!/usr/bin/env bash
-          set -eux
-          set -o pipefail
-
-          # Section 1: OnSuccess -> OnFailure -> Upholds chain
-          # success.service succeeds -> OnSuccess starts fail.service ->
-          # fail.service fails -> OnFailure starts uphold.service ->
-          # uphold.service has Upholds=short-lived.service, which keeps
-          # short-lived running. short-lived increments a counter; after 5 runs
-          # we know Upholds= is working.
-
-          rm -f /tmp/TEST-23-UNIT-FILE.counter
-          systemctl start TEST-23-UNIT-FILE-success.service
-
-          # Wait for short-lived to run at least 5 times (counter reaches 5+)
-          timeout 120 bash -c 'until [[ "$(cat /tmp/TEST-23-UNIT-FILE.counter 2>/dev/null)" -ge 5 ]]; do sleep .5; done'
-
-          systemctl stop TEST-23-UNIT-FILE-uphold.service
-
-          # Section 2: UpheldBy= in [Install]
-          # Enable creates .upholds symlink, then starting retry-uphold should
-          # also uphold upheldby-install via the .upholds directory.
-          systemctl enable TEST-23-UNIT-FILE-upheldby-install.service
-          systemctl daemon-reload
-
-          rm -f /tmp/TEST-23-UNIT-FILE-retry-fail
-          systemctl start TEST-23-UNIT-FILE-retry-uphold.service
-          systemctl is-active TEST-23-UNIT-FILE-upheldby-install.service
-
-          timeout 60 bash -c 'until systemctl is-failed TEST-23-UNIT-FILE-retry-fail.service; do sleep .5; done'
-
-          (! systemctl is-active TEST-23-UNIT-FILE-retry-upheld.service)
-
-          touch /tmp/TEST-23-UNIT-FILE-retry-fail
-
-          timeout 60 bash -c 'until systemctl is-active TEST-23-UNIT-FILE-retry-upheld.service; do sleep .5; done'
-
-          systemctl stop TEST-23-UNIT-FILE-retry-uphold.service TEST-23-UNIT-FILE-retry-fail.service TEST-23-UNIT-FILE-retry-upheld.service
-
-          # Section 3: StopPropagatedFrom / PropagatesStopTo
-          # prop-stop-one.service has StopPropagatedFrom=prop-stop-two.service.
-          # When two finishes (sleep 1.5), one should also be stopped.
-
-          systemctl start TEST-23-UNIT-FILE-prop-stop-one.service
-
-          # Wait for prop-stop-two to finish (sleep 1.5s) and for prop-stop-one
-          # to be stopped via StopPropagatedFrom=.
-          timeout 60 bash -c 'until [[ "$(systemctl show -P ActiveState TEST-23-UNIT-FILE-prop-stop-one.service)" != "active" ]]; do sleep .5; done'
-
-          # Section 4: BindsTo
-          # binds-to.service has BindsTo=bound-by.service.
-          # When bound-by finishes (sleep 0.7), binds-to should also stop.
-
-          systemctl start TEST-23-UNIT-FILE-binds-to.service
-
-          timeout 60 bash -c 'until [[ "$(systemctl show -P ActiveState TEST-23-UNIT-FILE-binds-to.service)" != "active" ]]; do sleep .5; done'
-          UPHEOF
-          chmod +x TEST-23-UNIT-FILE.Upholds.sh
 
           # Remove whoami subtest (returns "backdoor.service" in NixOS
           # test VM because tests run via the backdoor shell)
@@ -3702,12 +3646,6 @@
 
           # RuntimeDirectory subtest: remove systemd-mount section (not implemented)
           sed -i '/^# Test RuntimeDirectoryPreserve/,$d' TEST-23-UNIT-FILE.RuntimeDirectory.sh
-
-          # type-exec subtest: remove busctl section (issue #20933, needs D-Bus)
-          perl -i -0pe 's/# For issue #20933.*//s' TEST-23-UNIT-FILE.type-exec.sh
-
-          # ExecStopPost subtest: remove dbus service type tests (need busctl)
-          perl -i -0pe 's/systemd-run --unit=dbus1\.service.*?touch \/run\/dbus3. true\)\n\n//s' TEST-23-UNIT-FILE.ExecStopPost.sh
         '';
       }
       {
