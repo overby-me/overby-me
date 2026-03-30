@@ -439,6 +439,74 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
         );
         return 1;
     }
+
+    // `local` with no args: print all local variables in declare format
+    if args.is_empty() {
+        if let Some(scope) = shell.local_scopes.last() {
+            let mut sorted: Vec<_> = scope.keys().collect();
+            sorted.sort();
+            for name in sorted {
+                // Build flags string
+                let mut flags = String::from("-");
+                if shell.arrays.contains_key(name.as_str()) {
+                    flags.push('a');
+                }
+                if shell.assoc_arrays.contains_key(name.as_str()) {
+                    flags.push('A');
+                }
+                if shell.integer_vars.contains(name.as_str()) {
+                    flags.push('i');
+                }
+                if shell.readonly_vars.contains(name.as_str()) {
+                    flags.push('r');
+                }
+                if shell.exports.contains_key(name.as_str()) {
+                    flags.push('x');
+                }
+                // If only "-", use "--"
+                if flags == "-" {
+                    flags = "--".to_string();
+                }
+
+                if shell.arrays.contains_key(name.as_str()) {
+                    let arr = &shell.arrays[name.as_str()];
+                    let has_elements = arr.iter().any(|v| v.is_some());
+                    if has_elements {
+                        let elems: Vec<String> = arr
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(i, v)| {
+                                v.as_ref()
+                                    .map(|s| format!("[{}]={}", i, quote_for_declare(s)))
+                            })
+                            .collect();
+                        println!("declare {} {}=({})", flags, name, elems.join(" "));
+                    } else {
+                        println!("declare {} {}=()", flags, name);
+                    }
+                } else if shell.assoc_arrays.contains_key(name.as_str()) {
+                    let map = &shell.assoc_arrays[name.as_str()];
+                    if map.is_empty() {
+                        println!("declare {} {}=()", flags, name);
+                    } else {
+                        let mut pairs: Vec<_> = map.iter().collect();
+                        pairs.sort_by_key(|(k, _)| (*k).clone());
+                        let elems: Vec<String> = pairs
+                            .iter()
+                            .map(|(k, v)| format!("[{}]={}", k, quote_for_declare(v)))
+                            .collect();
+                        println!("declare {} {}=({})", flags, name, elems.join(" "));
+                    }
+                } else if let Some(val) = shell.vars.get(name.as_str()) {
+                    println!("declare {} {}={}", flags, name, quote_for_declare(val));
+                } else {
+                    println!("declare {} {}", flags, name);
+                }
+            }
+        }
+        return 0;
+    }
+
     let mut flag_array = false;
     let mut flag_readonly = false;
     let mut flag_nameref = false;
