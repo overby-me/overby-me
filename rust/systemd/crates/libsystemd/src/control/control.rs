@@ -6724,7 +6724,9 @@ pub fn execute_command(
                     {
                         if let Some(dep) = ri.unit_table.get(dep_id) {
                             let status = dep.common.status.read_poisoned();
-                            if status.is_started() {
+                            if status.is_started()
+                                || matches!(&*status, crate::units::UnitStatus::Starting)
+                            {
                                 deps_to_stop.push(dep_id.clone());
                             }
                         }

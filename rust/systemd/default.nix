@@ -218,11 +218,6 @@
       {
         name = "03-JOBS";
         patchScript = ''
-          # Remove always-activating InvocationID test (needs restart propagation
-          # to required_by units and InvocationID generation before notify-ready)
-          sed -i '/^# Test that restart propagates/,/^$/d' TEST-03-JOBS.sh
-          sed -i '/^# TODO: add more job/d' TEST-03-JOBS.sh
-
           # Remove "Test for irreversible jobs" section (needs job queue)
           sed -i '/^# Test for irreversible jobs/,/^# Test waiting for/{
             /^# Test waiting for/b
