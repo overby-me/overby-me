@@ -3289,6 +3289,9 @@ impl Shell {
 
     /// Execute `(( arithmetic expression ))` — exit status 0 if result != 0.
     fn run_arithmetic(&mut self, expr: &str) -> i32 {
+        if self.opt_xtrace {
+            self.xtrace_write(&format!("+ (( {} ))", expr));
+        }
         self.arith_is_command = true;
         let result = self.eval_arith_expr(expr);
         self.arith_is_command = false;
