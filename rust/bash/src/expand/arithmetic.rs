@@ -51,6 +51,140 @@ fn resolve_arith_vars(
             } else if i < chars.len() && chars[i] == '$' {
                 result.push_str(&std::process::id().to_string());
                 i += 1;
+            } else if i < chars.len() && chars[i] == '{' {
+                // ${var}, ${var:-default}, ${var:+alt}, ${#var}, etc.
+                i += 1; // skip '{'
+                // Check for ${#var} (length)
+                let is_length = i < chars.len() && chars[i] == '#';
+                if is_length {
+                    i += 1;
+                }
+                let mut name = String::new();
+                while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') {
+                    name.push(chars[i]);
+                    i += 1;
+                }
+                // Check for subscript [...]
+                if i < chars.len() && chars[i] == '[' {
+                    name.push('[');
+                    i += 1;
+                    let mut bracket_depth = 1;
+                    while i < chars.len() && bracket_depth > 0 {
+                        if chars[i] == '[' {
+                            bracket_depth += 1;
+                        } else if chars[i] == ']' {
+                            bracket_depth -= 1;
+                        }
+                        name.push(chars[i]);
+                        i += 1;
+                    }
+                }
+                let ctx_dummy = ExpCtx {
+                    vars,
+                    arrays: &HashMap::new(),
+                    assoc_arrays: &HashMap::new(),
+                    namerefs: &HashMap::new(),
+                    positional,
+                    last_status,
+                    last_bg_pid: 0,
+                    top_level_pid: std::process::id(),
+                    opt_flags: "",
+                };
+                let raw_val = lookup_var(&name, &ctx_dummy);
+                // Handle operator
+                if i < chars.len() && chars[i] == '}' {
+                    i += 1; // simple ${var}
+                    if is_length {
+                        result.push_str(&raw_val.len().to_string());
+                    } else {
+                        let val = if raw_val.is_empty() {
+                            "0".to_string()
+                        } else {
+                            raw_val
+                        };
+                        result.push_str(&val);
+                    }
+                } else if i < chars.len() {
+                    // Parse operator: :-, :+, :=, :?, -, +, =, ?
+                    let has_colon = chars[i] == ':';
+                    if has_colon {
+                        i += 1;
+                    }
+                    let op_char = if i < chars.len() { chars[i] } else { '}' };
+                    if matches!(op_char, '-' | '+' | '=' | '?') {
+                        i += 1; // skip operator char
+                        // Read the word until closing }
+                        let mut word = String::new();
+                        let mut brace_depth = 1i32;
+                        while i < chars.len() && brace_depth > 0 {
+                            if chars[i] == '{' {
+                                brace_depth += 1;
+                            } else if chars[i] == '}' {
+                                brace_depth -= 1;
+                                if brace_depth == 0 {
+                                    i += 1;
+                                    break;
+                                }
+                            }
+                            word.push(chars[i]);
+                            i += 1;
+                        }
+                        let is_set =
+                            !raw_val.is_empty() || (!has_colon && vars.contains_key(&name));
+                        let val = match op_char {
+                            '-' => {
+                                if is_set {
+                                    raw_val.clone()
+                                } else {
+                                    word.clone()
+                                }
+                            }
+                            '+' => {
+                                if is_set {
+                                    word.clone()
+                                } else {
+                                    String::new()
+                                }
+                            }
+                            '=' => {
+                                if is_set {
+                                    raw_val.clone()
+                                } else {
+                                    word.clone()
+                                }
+                            }
+                            '?' => raw_val.clone(),
+                            _ => raw_val.clone(),
+                        };
+                        let val = if val.is_empty() { "0".to_string() } else { val };
+                        result.push_str(&val);
+                    } else {
+                        // Unknown operator — skip to closing }
+                        let mut brace_depth = 1i32;
+                        while i < chars.len() && brace_depth > 0 {
+                            if chars[i] == '{' {
+                                brace_depth += 1;
+                            } else if chars[i] == '}' {
+                                brace_depth -= 1;
+                            }
+                            i += 1;
+                        }
+                        let val = if raw_val.is_empty() {
+                            "0".to_string()
+                        } else {
+                            raw_val
+                        };
+                        result.push_str(&val);
+                    }
+                } else {
+                    // Unterminated ${
+                    let val = if raw_val.is_empty() {
+                        "0".to_string()
+                    } else {
+                        raw_val
+                    };
+                    result.push_str(&val);
+                }
             } else {
                 let mut name = String::new();
                 while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') {
