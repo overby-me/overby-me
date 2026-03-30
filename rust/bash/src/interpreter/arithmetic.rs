@@ -1014,7 +1014,11 @@ impl Shell {
         // $var and ${var} reference — strip $ and treat as variable name
         // But NOT when arith_is_let is true: literal $ from single-quoted
         // let args (e.g. let 'jv += $iv') should produce an error.
+        // Also skip when preceded by backslash (\$var from $(( \$iv ))):
+        // the backslash was preserved by expand_comsubs_in_arith to signal
+        // that $ is literal.
         if !self.arith_is_let
+            && !expr.trim().starts_with("\\$")
             && let Some(stripped) = expr.strip_prefix('$')
         {
             let name = stripped.trim();
@@ -1290,12 +1294,25 @@ impl Shell {
             }
         }
         let top_expr = self.arith_top_expr.as_deref().unwrap_or(expr);
+        // Use the current (inner) expression as error token when it differs
+        // from the top-level expression — e.g. for `let 'jv += $iv'` the
+        // error token should be "$iv", not the whole "jv += $iv".
+        // Use trim_start only so trailing whitespace is preserved (bash
+        // includes trailing space in error tokens like "$iv ").
+        let trimmed_expr = expr.trim_start().replace("\\$", "$");
+        let error_token_owned: String;
+        let error_token = if top_expr != trimmed_expr && !trimmed_expr.is_empty() {
+            error_token_owned = trimmed_expr;
+            error_token_owned.as_str()
+        } else {
+            top_expr
+        };
         eprintln!(
             "{}: {}{}: arithmetic syntax error: operand expected (error token is \"{}\")",
             self.arith_error_prefix(),
             self.arith_cmd_prefix(),
             top_expr,
-            top_expr
+            error_token
         );
         crate::expand::set_arith_error();
         0
@@ -1314,6 +1331,15 @@ impl Shell {
         let chars: Vec<char> = expr.chars().collect();
         let mut i = 0;
         while i < chars.len() {
+            // \$ → keep as literal \$ (skip expansion). The arithmetic
+            // evaluator will strip the backslash later for display but
+            // will NOT treat $ as a variable prefix.
+            if chars[i] == '\\' && i + 1 < chars.len() && chars[i + 1] == '$' {
+                result.push('\\');
+                result.push('$');
+                i += 2;
+                continue;
+            }
             // Handle ${ command; } funsub
             if i + 2 < chars.len() && chars[i] == '$' && chars[i + 1] == '{' && chars[i + 2] == ' '
             {
