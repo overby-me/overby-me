@@ -218,8 +218,16 @@
       {
         name = "03-JOBS";
         patchScript = ''
-          # Remove show-transaction tests (needs systemd-importd)
-          sed -i '/^# Some basic testing that --show-transaction/,/^$/d' TEST-03-JOBS.sh
+          # Provide a stub systemd-importd.service for the show-transaction test.
+          # The upstream test uses systemd-importd as a convenient target; the
+          # actual test is that -T/--show-transaction flags are accepted.
+          cat > /run/systemd/system/systemd-importd.service <<'UNIT'
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          ExecStart=echo "importd stub"
+          UNIT
+          systemctl daemon-reload
 
           # Remove always-activating InvocationID test (needs restart propagation
           # to required_by units and InvocationID generation before notify-ready)
