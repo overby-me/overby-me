@@ -96,10 +96,11 @@ impl Shell {
             return 0;
         }
 
-        // Expand command substitutions $(...) and parameter expansions ${...}
+        // Expand command substitutions $(...), parameter expansions ${...},
+        // and backtick comsubs `...`
         // BEFORE stripping quotes, since commands inside $() need their quotes preserved
         let expanded_cs: String;
-        let expr = if expr.contains('$') {
+        let expr = if expr.contains('$') || expr.contains('`') {
             expanded_cs = self.expand_comsubs_in_arith(expr);
             // Update top expression with expanded version for error messages
             if self.arith_depth == 1
@@ -224,11 +225,54 @@ impl Shell {
 
         for &(op, func) in assign_ops {
             if let Some(pos) = Self::find_top_level_arith_op(expr, op) {
+                // Skip `+=` when preceded by `+` (i.e. `x++=7` is `x++ = 7`, not `x += =7`)
+                // Similarly skip `-=` when preceded by `-` (i.e. `x--=7` is `x-- = 7`)
+                if pos > 0 {
+                    let prev = expr.as_bytes()[pos - 1];
+                    if (op == "+=" && prev == b'+') || (op == "-=" && prev == b'-') {
+                        continue;
+                    }
+                }
                 let name = expr[..pos].trim();
-                if !name.is_empty()
+                // Check if the assignment op is inside a ternary then-branch:
+                // if the LHS contains an unmatched `?` (no corresponding `:`),
+                // then the `+=` etc. is between `?` and `:` — skip and let the
+                // ternary handler deal with it.
+                let has_unmatched_question = {
+                    let mut q = 0i32;
+                    for ch in name.chars() {
+                        if ch == '?' {
+                            q += 1;
+                        }
+                        if ch == ':' {
+                            q -= 1;
+                        }
+                    }
+                    q > 0
+                };
+                if has_unmatched_question {
+                    // Skip — this assignment op is inside a ternary branch
+                    continue;
+                }
+                // Check if LHS is a valid variable name (or array element)
+                let is_valid_lhs = !name.is_empty()
                     && name.chars().next().is_some_and(|c| !c.is_ascii_digit())
-                    && (name.chars().all(|c| c.is_alphanumeric() || c == '_') || name.contains('['))
-                {
+                    && (name.chars().all(|c| c.is_alphanumeric() || c == '_')
+                        || name.contains('['));
+                if !is_valid_lhs && !name.is_empty() {
+                    // LHS is not a valid variable — "attempted assignment to non-variable"
+                    let top_expr = self.arith_top_expr.as_deref().unwrap_or(expr);
+                    eprintln!(
+                        "{}: {}{}: attempted assignment to non-variable (error token is \"{}\")",
+                        self.arith_error_prefix(),
+                        self.arith_cmd_prefix(),
+                        top_expr,
+                        &expr[pos..]
+                    );
+                    crate::expand::set_arith_error();
+                    return 0;
+                }
+                if is_valid_lhs {
                     let rhs = self.eval_arith_expr_impl(&expr[pos + op.len()..]);
                     // Check for division by zero in /= and %=
                     if (op == "/=" || op == "%=") && rhs == 0 {
@@ -350,20 +394,40 @@ impl Shell {
                 }
                 return val;
             }
-            // Assignment to non-variable (e.g., 7=4) — only if name is purely numeric/alphanumeric
-            if !name.is_empty()
-                && name.chars().next().is_some_and(|c| c.is_ascii_digit())
-                && name.chars().all(|c| c.is_alphanumeric() || c == '_')
-            {
-                eprintln!(
-                    "{}: {}{}: attempted assignment to non-variable (error token is \"{}\")",
-                    self.arith_error_prefix(),
-                    self.arith_cmd_prefix(),
-                    expr,
-                    &expr[pos..]
-                );
-                crate::expand::set_arith_error();
-                return 0;
+            // Assignment to non-variable (e.g., 7=4, or 0 && B=42)
+            // But skip if LHS has unmatched `?` (inside ternary then-branch)
+            if !name.is_empty() {
+                let has_unmatched_question = {
+                    let mut q = 0i32;
+                    for ch in name.chars() {
+                        if ch == '?' {
+                            q += 1;
+                        }
+                        if ch == ':' {
+                            q -= 1;
+                        }
+                    }
+                    q > 0
+                };
+                if !has_unmatched_question {
+                    // Check if this looks like a space-separated expression
+                    // (e.g. "x=9 y=41") — bash reports "syntax error in expression"
+                    // rather than "attempted assignment to non-variable" for those
+                    if name.contains(' ') && !name.contains('&') && !name.contains('|') {
+                        // Fall through to expression syntax error at end of function
+                    } else {
+                        let top_expr = self.arith_top_expr.as_deref().unwrap_or(expr);
+                        eprintln!(
+                            "{}: {}{}: attempted assignment to non-variable (error token is \"{}\")",
+                            self.arith_error_prefix(),
+                            self.arith_cmd_prefix(),
+                            top_expr,
+                            &expr[pos..]
+                        );
+                        crate::expand::set_arith_error();
+                        return 0;
+                    }
+                }
             }
         }
 
@@ -428,6 +492,21 @@ impl Shell {
                 crate::expand::set_arith_error();
                 return 0;
             }
+            // Check for ++x++ or ++x-- (post-increment/decrement on result of pre-increment)
+            if name.ends_with("++") || name.ends_with("--") {
+                let suffix_op = if name.ends_with("++") { "++" } else { "--" };
+                let top_expr = self.arith_top_expr.as_deref().unwrap_or(expr);
+                eprintln!(
+                    "{}: {}{}: {}: assignment requires lvalue (error token is \"{} \")",
+                    self.arith_error_prefix(),
+                    self.arith_cmd_prefix(),
+                    top_expr,
+                    suffix_op,
+                    suffix_op,
+                );
+                crate::expand::set_arith_error();
+                return 0;
+            }
             // Check for simple var or array element (name[...])
             // First char must be letter or _ (not digit — ++7 is not a pre-increment)
             let first_ok = name
@@ -481,6 +560,21 @@ impl Shell {
                 eprintln!(
                     "{}: ((: -- : arithmetic syntax error: operand expected (error token is \"- \")",
                     self.arith_error_prefix()
+                );
+                crate::expand::set_arith_error();
+                return 0;
+            }
+            // Check for --x++ or --x-- (post-increment/decrement on result of pre-decrement)
+            if name.ends_with("++") || name.ends_with("--") {
+                let suffix_op = if name.ends_with("++") { "++" } else { "--" };
+                let top_expr = self.arith_top_expr.as_deref().unwrap_or(expr);
+                eprintln!(
+                    "{}: {}{}: {}: assignment requires lvalue (error token is \"{} \")",
+                    self.arith_error_prefix(),
+                    self.arith_cmd_prefix(),
+                    top_expr,
+                    suffix_op,
+                    suffix_op,
                 );
                 crate::expand::set_arith_error();
                 return 0;
@@ -1297,13 +1391,21 @@ impl Shell {
         // Use the current (inner) expression as error token when it differs
         // from the top-level expression — e.g. for `let 'jv += $iv'` the
         // error token should be "$iv", not the whole "jv += $iv".
-        // Use trim_start only so trailing whitespace is preserved (bash
-        // includes trailing space in error tokens like "$iv ").
+        // When the inner expression is a suffix of the top expression, use
+        // the suffix from the top expression to preserve trailing whitespace
+        // (bash includes trailing space in error tokens like "$iv ").
         let trimmed_expr = expr.trim_start().replace("\\$", "$");
         let error_token_owned: String;
         let error_token = if top_expr != trimmed_expr && !trimmed_expr.is_empty() {
-            error_token_owned = trimmed_expr;
-            error_token_owned.as_str()
+            // Check if the trimmed inner expr is a suffix of the top expr
+            // (ignoring trailing whitespace on the inner expr). If so, use
+            // the top-expr suffix which preserves trailing space.
+            if let Some(pos) = top_expr.find(trimmed_expr.trim_end()) {
+                &top_expr[pos..]
+            } else {
+                error_token_owned = trimmed_expr;
+                error_token_owned.as_str()
+            }
         } else {
             top_expr
         };
@@ -1547,6 +1649,29 @@ impl Shell {
                 let expanded =
                     self.expand_word_single(&crate::lexer::parse_word_string(&param_text));
                 result.push_str(&expanded);
+            } else if chars[i] == '`' {
+                // Backtick command substitution: `...`
+                let start = i;
+                i += 1; // skip opening backtick
+                let mut cmd = String::new();
+                while i < chars.len() && chars[i] != '`' {
+                    if chars[i] == '\\' && i + 1 < chars.len() {
+                        // In backtick comsubs, \` is an escaped backtick
+                        if chars[i + 1] == '`' || chars[i + 1] == '\\' || chars[i + 1] == '$' {
+                            cmd.push(chars[i + 1]);
+                            i += 2;
+                            continue;
+                        }
+                    }
+                    cmd.push(chars[i]);
+                    i += 1;
+                }
+                if i < chars.len() {
+                    i += 1; // skip closing backtick
+                }
+                let output = self.capture_output(&cmd);
+                result.push_str(output.trim_end_matches('\n'));
+                let _ = start; // suppress unused warning
             } else {
                 result.push(chars[i]);
                 i += 1;

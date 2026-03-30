@@ -1032,6 +1032,12 @@ impl Shell {
                         }
                     }
                     self.execute_assignment(assign);
+                    // Check for arithmetic errors (e.g., declare -i i; i=0#4)
+                    // In non-interactive shells, this should abort the script
+                    if crate::expand::take_arith_error() {
+                        self.last_status = 1;
+                        return 1;
+                    }
                 }
             }
         }
