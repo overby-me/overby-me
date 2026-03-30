@@ -18,6 +18,11 @@ thread_local! {
     static PATTERN_WORD: Cell<bool> = const { Cell::new(false) };
     /// POSIX mode flag for dollar expansion (disables ${!name} indirect)
     pub(super) static POSIX_MODE_DOLLAR: Cell<bool> = const { Cell::new(false) };
+    /// Set by `read_param_word_impl` when a `"` inside `${...:- }` toggles the
+    /// outer dquote state an odd number of times.  The Lexer's `read_word`
+    /// checks this after returning from `parse_dollar` inside a dquote context
+    /// so it can exit the dquote loop (the outer `"` was already closed).
+    pub(super) static DQUOTE_TOGGLED: Cell<bool> = const { Cell::new(false) };
     /// Aliases available for comsub keyword expansion
     static COMSUB_ALIASES: std::cell::RefCell<HashMap<String, String>> = std::cell::RefCell::new(HashMap::new());
     /// Heredoc EOF warnings from comsub scanner (line, start_line, delimiter)

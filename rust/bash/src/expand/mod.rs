@@ -1211,6 +1211,19 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
             // Push empty to avoid breaking segment collection
             out.push(Segment::Unquoted(String::new()));
         }
+        WordPart::SyntaxError(msg) => {
+            let prefix = EXPAND_ERROR_PREFIX.with(|p| {
+                let p = p.borrow();
+                if p.is_empty() {
+                    "bash".to_string()
+                } else {
+                    p.clone()
+                }
+            });
+            eprintln!("{}: {}", prefix, msg);
+            set_arith_error(); // Signal expansion error to abort command
+            out.push(Segment::Unquoted(String::new()));
+        }
     }
 }
 

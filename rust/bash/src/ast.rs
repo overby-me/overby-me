@@ -200,6 +200,9 @@ pub enum WordPart {
     ProcessSub(ProcessSubKind, String),
     /// Bad substitution — produces an error at expansion time
     BadSubstitution(String),
+    /// Syntax error detected during lexing (e.g. missing `}` in `${...}`)
+    /// Produces an error at expansion time with the stored message
+    SyntaxError(String),
 }
 
 /// Check if a word contains an incomplete funsub marker

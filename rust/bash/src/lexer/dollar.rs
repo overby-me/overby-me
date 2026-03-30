@@ -1174,16 +1174,29 @@ fn parse_brace_param(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart
         }
     }
 
-    // Skip to closing } — handles unrecognized syntax gracefully
-    // Skip to closing }, handling nested braces
-    let mut depth = 1i32;
-    while *i < chars.len() && depth > 0 {
-        match chars[*i] {
-            '{' => depth += 1,
-            '}' => depth -= 1,
-            _ => {}
+    // The closing } should be right here after read_param_op consumed the word.
+    // If it's not, a nested "..." inside the word consumed the } (e.g. "${foo:-"a}").
+    if *i < chars.len() && chars[*i] == '}' {
+        *i += 1; // consume the closing }
+    } else {
+        // Skip to closing }, handling nested braces — try to recover
+        let mut depth = 1i32;
+        let start_i = *i;
+        while *i < chars.len() && depth > 0 {
+            match chars[*i] {
+                '{' => depth += 1,
+                '}' => depth -= 1,
+                _ => {}
+            }
+            *i += 1;
         }
-        *i += 1;
+        if depth > 0 || *i == start_i {
+            // No closing } found — a quoted string inside the word consumed it.
+            // Bash reports: "unexpected EOF while looking for matching `}'"
+            return WordPart::SyntaxError(
+                "unexpected EOF while looking for matching `}'".to_string(),
+            );
+        }
     }
     WordPart::Param(ParamExpr { name, op })
 }
