@@ -1012,7 +1012,11 @@ impl Shell {
         }
 
         // $var and ${var} reference — strip $ and treat as variable name
-        if let Some(stripped) = expr.strip_prefix('$') {
+        // But NOT when arith_is_let is true: literal $ from single-quoted
+        // let args (e.g. let 'jv += $iv') should produce an error.
+        if !self.arith_is_let
+            && let Some(stripped) = expr.strip_prefix('$')
+        {
             let name = stripped.trim();
             if name == "?" {
                 return self.last_status as i64;
@@ -1299,6 +1303,13 @@ impl Shell {
 
     /// Expand command substitutions $(...) and $var within an arithmetic expression string.
     fn expand_comsubs_in_arith(&mut self, expr: &str) -> String {
+        // When arith_is_let is true, the expression came from `let` with a
+        // literal $ (e.g. let 'jv += $iv').  Don't expand $var references —
+        // the $ should be passed through so the arithmetic evaluator produces
+        // an "operand expected" error, matching bash behaviour.
+        if self.arith_is_let {
+            return expr.to_string();
+        }
         let mut result = String::new();
         let chars: Vec<char> = expr.chars().collect();
         let mut i = 0;
