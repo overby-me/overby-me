@@ -4827,7 +4827,6 @@
       }
       {name = "31-DEVICE-ENUMERATION";}
       {name = "66-DEVICE-ISOLATION";}
-      {name = "76-SYSCTL";}
       {
         name = "74-AUX-UTILS";
         # Use upstream subtests where possible. Remove subtests needing
