@@ -803,6 +803,13 @@ fn format_program_impl(program: &Program, indent: usize, semi_last: bool) -> Str
                 || trimmed.ends_with("then")
                 || trimmed.ends_with("do")
                 || trimmed.ends_with("else");
+            // Bash omits the semicolon after done/fi/esac when the
+            // compound command body contains a heredoc.
+            let is_closing_keyword_with_heredoc = line.contains("<<")
+                && matches!(
+                    trimmed.rsplit('\n').next().unwrap_or("").trim(),
+                    "done" | "fi" | "esac"
+                );
             // Check if the command ends with a heredoc body
             // (the last line is the heredoc delimiter, e.g., "EOF")
             let ends_with_heredoc = if let Some(last_line) = line.rsplit('\n').next() {
@@ -823,6 +830,7 @@ fn format_program_impl(program: &Program, indent: usize, semi_last: bool) -> Str
             };
             if add_semi
                 && !is_keyword
+                && !is_closing_keyword_with_heredoc
                 && !trimmed.ends_with('&')
                 && !trimmed.is_empty()
                 && !ends_with_heredoc
