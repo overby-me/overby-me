@@ -232,9 +232,6 @@
             d
           }' TEST-03-JOBS.sh
 
-          # Remove systemd-run --scope test (needs RuntimeMaxSec for scopes)
-          sed -i '/^# Test time-limited scopes/,/^\[\[.*RESULT.*-ne/d' TEST-03-JOBS.sh
-
           # Fix upstream typo: propagatesstopto → propagatestopto
           sed -i 's/propagatesstopto-indirect/propagatestopto-indirect/g' TEST-03-JOBS.sh
 

@@ -523,7 +523,10 @@ fn try_create_transient_unit(
         properties.insert("scope".into(), Value::Bool(true));
     }
 
-    if cli.wait || cli.pipe {
+    // --scope implies --wait: scope units run in the caller's context and
+    // systemd-run must block until the command finishes (matching real
+    // systemd behaviour).
+    if cli.wait || cli.pipe || cli.scope {
         properties.insert("wait".into(), Value::Bool(true));
     }
 
@@ -745,9 +748,9 @@ fn main() {
                 eprintln!("Running as unit: {unit_name}");
             }
 
-            // When --wait was set, the control socket blocked until the unit
-            // finished and the response contains the exit code.
-            if cli.wait || cli.pipe {
+            // When --wait/--scope was set, the control socket blocked until
+            // the unit finished and the response contains the exit code.
+            if cli.wait || cli.pipe || cli.scope {
                 // When --pipe, relay captured stdout/stderr to the caller.
                 if cli.pipe {
                     if let Some(data) = resp.get("stdout").and_then(|v| v.as_str()) {
