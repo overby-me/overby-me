@@ -4857,11 +4857,7 @@
           # Remove run.sh (needs user sessions, run0, ProtectProc, --pty, systemd-analyze verify)
           rm -f TEST-74-AUX-UTILS.run.sh
 
-          # Patch cgls: remove lines needing standard cgroup paths (system.slice, init.scope)
-          # and user session tests not available in test VM
-          sed -i '/system.slice/d' TEST-74-AUX-UTILS.cgls.sh
-          sed -i '/init.scope/d' TEST-74-AUX-UTILS.cgls.sh
-          sed -i '/--unit=systemd-journald/d' TEST-74-AUX-UTILS.cgls.sh
+          # Patch cgls: remove user session tests not available in test VM
           sed -i '/systemd-run --user --wait --pipe -M testuser/d' TEST-74-AUX-UTILS.cgls.sh
           sed -i '/--user-unit/d' TEST-74-AUX-UTILS.cgls.sh
 
