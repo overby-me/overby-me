@@ -955,8 +955,13 @@ impl Shell {
         }
 
         // Check for arithmetic errors during word expansion (e.g., echo $(( 1/0 )))
+        let had_nounset = crate::expand::take_nounset_error();
         if crate::expand::take_arith_error() {
             self.last_status = 1;
+            // Nounset errors are always fatal (exit the shell/subshell)
+            if had_nounset {
+                std::process::exit(1);
+            }
             // In POSIX mode, expansion errors are fatal
             if self.opt_posix {
                 std::process::exit(1);
@@ -1149,7 +1154,7 @@ impl Shell {
         let is_posix_special_builtin = self.opt_posix
             && matches!(
                 command_name.as_str(),
-                "break"
+                ":" | "break"
                     | "."
                     | "source"
                     | "continue"
@@ -1161,6 +1166,7 @@ impl Shell {
                     | "return"
                     | "set"
                     | "shift"
+                    | "times"
                     | "trap"
                     | "unset"
             );
@@ -1378,12 +1384,17 @@ impl Shell {
                     return 1;
                 }
             }
-            let saved: Vec<(String, Option<String>)> = prefix_exports
+            // Save old vars AND exports, then set prefix assignments in both
+            // so that builtins like `declare -p` see the -x flag during execution.
+            let saved: Vec<(String, Option<String>, Option<String>)> = prefix_exports
                 .iter()
                 .map(|(k, v)| {
-                    let old = self.vars.get(k).cloned();
+                    let old_var = self.vars.get(k).cloned();
+                    let old_export = self.exports.get(k).cloned();
                     self.vars.insert(k.clone(), v.clone());
-                    (k.clone(), old)
+                    self.exports.insert(k.clone(), v.clone());
+                    unsafe { std::env::set_var(k, v) };
+                    (k.clone(), old_var, old_export)
                 })
                 .collect();
 
@@ -1394,7 +1405,7 @@ impl Shell {
             // In POSIX mode, prefix assignments to special builtins persist
             let is_special = matches!(
                 command_name.as_str(),
-                "break"
+                ":" | "break"
                     | "."
                     | "source"
                     | "continue"
@@ -1406,6 +1417,7 @@ impl Shell {
                     | "return"
                     | "set"
                     | "shift"
+                    | "times"
                     | "trap"
                     | "unset"
             );
@@ -1433,14 +1445,30 @@ impl Shell {
                     std::process::exit(result);
                 }
             }
-            if !(expanded_words.is_empty() || self.opt_posix && is_special) {
-                for (k, old) in saved {
-                    match old {
+            // Prefix assignments to `export` and `declare -x` always persist
+            // (they are equivalent to export). In POSIX mode, all special
+            // builtins persist prefix assignments.
+            let is_export_like = matches!(command_name.as_str(), "export")
+                || (matches!(command_name.as_str(), "declare" | "typeset")
+                    && args.iter().any(|a| a.starts_with('-') && a.contains('x')));
+            if !(expanded_words.is_empty() || self.opt_posix && is_special || is_export_like) {
+                for (k, old_var, old_export) in saved {
+                    match old_var {
                         Some(v) => {
-                            self.vars.insert(k, v);
+                            self.vars.insert(k.clone(), v);
                         }
                         None => {
                             self.vars.remove(&k);
+                        }
+                    }
+                    match old_export {
+                        Some(v) => {
+                            self.exports.insert(k.clone(), v.clone());
+                            unsafe { std::env::set_var(&k, &v) };
+                        }
+                        None => {
+                            self.exports.remove(&k);
+                            unsafe { std::env::remove_var(&k) };
                         }
                     }
                 }

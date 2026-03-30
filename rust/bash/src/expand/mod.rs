@@ -20,6 +20,8 @@ thread_local! {
     static SCRIPT_NAME: RefCell<String> = const { RefCell::new(String::new()) };
     /// Flag set when arithmetic evaluation encounters an error.
     static ARITH_ERROR: RefCell<bool> = const { RefCell::new(false) };
+    /// Flag set when a nounset (set -u) error occurs — should exit the shell/subshell.
+    static NOUNSET_ERROR: RefCell<bool> = const { RefCell::new(false) };
     /// RANDOM PRNG state (bash-compatible linear congruential generator)
     static RANDOM_STATE: RefCell<u32> = const { RefCell::new(0) };
     static RANDOM_SEEDED: RefCell<bool> = const { RefCell::new(false) };
@@ -191,6 +193,16 @@ pub fn take_arith_error() -> bool {
 /// Set the arithmetic error flag.
 pub fn set_arith_error() {
     ARITH_ERROR.with(|f| *f.borrow_mut() = true);
+}
+
+/// Check and clear the nounset error flag.
+pub fn take_nounset_error() -> bool {
+    NOUNSET_ERROR.with(|f| std::mem::replace(&mut *f.borrow_mut(), false))
+}
+
+/// Set the nounset error flag (signals that the shell/subshell should exit).
+pub fn set_nounset_error() {
+    NOUNSET_ERROR.with(|f| *f.borrow_mut() = true);
 }
 
 /// Take all pending process substitution fds (draining the list).
@@ -529,14 +541,20 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                     }
                     WordPart::Variable(name) => {
                         let val = lookup_var(name, ctx);
+                        let is_pos_unbound = if let Ok(n) = name.parse::<usize>() {
+                            n > 0 && n >= ctx.positional.len()
+                        } else {
+                            false
+                        };
                         if val.is_empty()
                             && ctx.opt_flags.contains('u')
                             && !matches!(name.as_str(), "?" | "$" | "#" | "@" | "*" | "-" | "0")
                             && !(name == "!" && ctx.last_bg_pid != 0)
-                            && name.parse::<usize>().is_err()
-                            && !ctx.vars.contains_key(name.as_str())
-                            && !ctx.arrays.contains_key(name.as_str())
-                            && std::env::var(name.as_str()).is_err()
+                            && (is_pos_unbound
+                                || (name.parse::<usize>().is_err()
+                                    && !ctx.vars.contains_key(name.as_str())
+                                    && !ctx.arrays.contains_key(name.as_str())
+                                    && std::env::var(name.as_str()).is_err()))
                         {
                             let sname = ctx
                                 .vars
@@ -545,8 +563,17 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                                 .map(|s| s.as_str())
                                 .unwrap_or("bash");
                             let lineno = ctx.vars.get("LINENO").map(|s| s.as_str()).unwrap_or("0");
-                            eprintln!("{}: line {}: {}: unbound variable", sname, lineno, name);
+                            // Include $ prefix only for positional params (numeric names)
+                            if name.chars().all(|c| c.is_ascii_digit()) {
+                                eprintln!(
+                                    "{}: line {}: ${}: unbound variable",
+                                    sname, lineno, name
+                                );
+                            } else {
+                                eprintln!("{}: line {}: {}: unbound variable", sname, lineno, name);
+                            }
                             set_arith_error();
+                            set_nounset_error();
                         }
                         s.push_str(&val);
                     }
@@ -818,19 +845,21 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
         }
         WordPart::Variable(name) => {
             let val = lookup_var(name, ctx);
+            let is_pos_unbound = if let Ok(n) = name.parse::<usize>() {
+                n > 0 && n >= ctx.positional.len()
+            } else {
+                false
+            };
             if val.is_empty()
                 && ctx.opt_flags.contains('u')
                 && !matches!(name.as_str(), "?" | "$" | "#" | "@" | "*" | "-" | "0")
                 // $! is unbound when no background job has been started
                 && !(name == "!" && ctx.last_bg_pid != 0)
-                && (name.parse::<usize>().is_err()
-                    || name
-                        .parse::<usize>()
-                        .map(|n| n >= ctx.positional.len())
-                        .unwrap_or(false))
-                && !ctx.vars.contains_key(name.as_str())
-                && !ctx.arrays.contains_key(name.as_str())
-                && std::env::var(name.as_str()).is_err()
+                && (is_pos_unbound
+                    || (name.parse::<usize>().is_err()
+                        && !ctx.vars.contains_key(name.as_str())
+                        && !ctx.arrays.contains_key(name.as_str())
+                        && std::env::var(name.as_str()).is_err()))
             {
                 let sname = ctx
                     .vars
@@ -839,8 +868,14 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                     .map(|s| s.as_str())
                     .unwrap_or("bash");
                 let lineno = ctx.vars.get("LINENO").map(|s| s.as_str()).unwrap_or("0");
-                eprintln!("{}: line {}: {}: unbound variable", sname, lineno, name);
+                // Include $ prefix only for positional params (numeric names)
+                if name.chars().all(|c| c.is_ascii_digit()) {
+                    eprintln!("{}: line {}: ${}: unbound variable", sname, lineno, name);
+                } else {
+                    eprintln!("{}: line {}: {}: unbound variable", sname, lineno, name);
+                }
                 set_arith_error();
+                set_nounset_error();
             }
             // Unquoted $@ produces separate words even with null IFS
             // (the splitting is inherent to $@, not dependent on IFS)

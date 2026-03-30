@@ -145,6 +145,7 @@ pub(super) fn builtin_exec(shell: &mut Shell, args: &[String]) -> i32 {
     // Parse exec flags: -a NAME (set argv[0]), -c (clear env), -l (login shell)
     let mut argv0_override: Option<String> = None;
     let mut clear_env = false;
+    let mut login_shell = false;
     let mut cmd_start = 0;
 
     let mut i = 0;
@@ -158,8 +159,7 @@ pub(super) fn builtin_exec(shell: &mut Shell, args: &[String]) -> i32 {
             }
             "-c" => clear_env = true,
             "-l" => {
-                // Login shell — prefix argv[0] with -
-                // Will be applied below
+                login_shell = true;
             }
             s if s.starts_with('-') && s.len() > 1 => {
                 eprintln!("{}: exec: {}: invalid option", shell.error_prefix(), s);
@@ -186,15 +186,20 @@ pub(super) fn builtin_exec(shell: &mut Shell, args: &[String]) -> i32 {
     if let Some(ref a0) = argv0_override {
         cmd_args[0] = a0.clone();
     }
+    // -l flag: prefix argv[0] with '-' to indicate login shell
+    if login_shell {
+        cmd_args[0] = format!("-{}", cmd_args[0]);
+    }
 
     // Set up environment
     if clear_env {
         for (key, _) in std::env::vars() {
             unsafe { std::env::remove_var(&key) };
         }
-    }
-    for (key, value) in &shell.exports {
-        unsafe { std::env::set_var(key, value) };
+    } else {
+        for (key, value) in &shell.exports {
+            unsafe { std::env::set_var(key, value) };
+        }
     }
 
     #[cfg(unix)]
@@ -289,6 +294,7 @@ pub(super) fn builtin_source(shell: &mut Shell, args: &[String]) -> i32 {
                 let prog = shell.positional.first().cloned().unwrap_or_default();
                 shell.positional = vec![prog];
                 shell.positional.extend(args[1..].to_vec());
+                shell.source_set_params = false;
             }
 
             // Push source file onto BASH_SOURCE stack
@@ -311,7 +317,11 @@ pub(super) fn builtin_source(shell: &mut Shell, args: &[String]) -> i32 {
             // Run RETURN trap after sourced script completes
             shell.run_return_trap();
 
-            shell.positional = saved_positional;
+            // Only restore positional params if we set them for this source invocation
+            // AND the sourced file didn't explicitly change them with `set --`
+            if args.len() > 1 && !shell.source_set_params {
+                shell.positional = saved_positional;
+            }
             result
         }
         Err(e) => {

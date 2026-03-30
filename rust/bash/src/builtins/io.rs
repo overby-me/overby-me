@@ -34,11 +34,14 @@ pub(super) fn builtin_echo(shell: &mut Shell, args: &[String]) -> i32 {
     }
 
     let text = args[start..].join(" ");
-    let output = if interpret_escapes {
+    let (output, stop) = if interpret_escapes {
         interpret_echo_escapes(&text)
     } else {
-        text
+        (text, false)
     };
+    if stop {
+        newline = false;
+    }
 
     // Convert to bytes: chars in U+0080..U+00FF range are written as single
     // bytes (raw byte output like bash), not as multi-byte UTF-8
@@ -977,7 +980,7 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                                 i += 1;
                             }
                         }
-                        let expanded = interpret_echo_escapes(arg);
+                        let (expanded, _) = interpret_echo_escapes(arg);
                         // Apply precision (truncate) then width (pad)
                         let truncated = if let Some(p) = precision {
                             let end = expanded

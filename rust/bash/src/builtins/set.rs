@@ -20,6 +20,7 @@ pub(super) fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
             let prog = shell.positional.first().cloned().unwrap_or_default();
             shell.positional = vec![prog];
             shell.positional.extend(new_positional);
+            shell.source_set_params = true;
             return 0;
         }
         if arg.starts_with('-') || arg.starts_with('+') {
@@ -166,6 +167,7 @@ pub(super) fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
             let prog = shell.positional.first().cloned().unwrap_or_default();
             shell.positional = vec![prog];
             shell.positional.extend(new_positional);
+            shell.source_set_params = true;
             return 0;
         }
         i += 1;

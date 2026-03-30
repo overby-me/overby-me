@@ -155,9 +155,10 @@ pub fn string_to_raw_bytes(s: &str) -> Vec<u8> {
     bytes
 }
 
-fn interpret_echo_escapes(s: &str) -> String {
+fn interpret_echo_escapes(s: &str) -> (String, bool) {
     let mut result = String::new();
     let mut chars = s.chars();
+    let mut found_stop = false;
     while let Some(ch) = chars.next() {
         if ch == '\\' {
             match chars.next() {
@@ -170,7 +171,10 @@ fn interpret_echo_escapes(s: &str) -> String {
                 Some('f') => result.push('\x0c'),
                 Some('v') => result.push('\x0b'),
                 Some('e') | Some('E') => result.push('\x1b'),
-                Some('c') => break, // Stop output
+                Some('c') => {
+                    found_stop = true;
+                    break;
+                }
                 Some(first @ '0'..='7') => {
                     // \0NNN or \NNN — octal escape
                     let mut val = first as u8 - b'0';
@@ -251,7 +255,7 @@ fn interpret_echo_escapes(s: &str) -> String {
             result.push(ch);
         }
     }
-    result
+    (result, found_stop)
 }
 
 fn parse_printf_int(arg: &str) -> i64 {
@@ -305,7 +309,18 @@ fn quote_for_declare(s: &str) -> String {
         out.push('\'');
         out
     } else {
-        format!("\"{}\"", s)
+        let mut out = String::from("\"");
+        for ch in s.chars() {
+            match ch {
+                '$' | '`' | '\\' | '"' => {
+                    out.push('\\');
+                    out.push(ch);
+                }
+                _ => out.push(ch),
+            }
+        }
+        out.push('"');
+        out
     }
 }
 

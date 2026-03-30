@@ -617,6 +617,14 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
 
     // set -u (nounset): error on unset variables, unless operation provides a default
     // Operations that provide defaults (:-,  :=, :+, :?) are OK; trim/replace/etc are not
+    // set -u (nounset): check positional params ($1..$9, ${10}...) as unbound
+    // when they exceed the number of set positional params
+    let is_positional_unbound = if let Ok(n) = expr.name.parse::<usize>() {
+        n > 0 && n >= ctx.positional.len()
+    } else {
+        false
+    };
+
     if val.is_empty()
         && ctx.opt_flags.contains('u')
         && !matches!(
@@ -629,21 +637,26 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
         )
         // $! is only exempt from nounset if a background job has been started
         && !(expr.name == "!" && ctx.last_bg_pid != 0)
-        && expr.name.parse::<usize>().is_err()
-        && !ctx.vars.contains_key(&expr.name)
-        && !ctx.arrays.contains_key(&expr.name)
-        && !ctx.assoc_arrays.contains_key(&expr.name)
-        && std::env::var(&expr.name).is_err()
+        && (is_positional_unbound
+            || (expr.name.parse::<usize>().is_err()
+                && !ctx.vars.contains_key(&expr.name)
+                && !ctx.arrays.contains_key(&expr.name)
+                && !ctx.assoc_arrays.contains_key(&expr.name)
+                && std::env::var(&expr.name).is_err()))
     {
-        let name = ctx
+        let sname = ctx
             .vars
             .get("_BASH_SOURCE_FILE")
             .or_else(|| ctx.positional.first())
             .map(|s| s.as_str())
             .unwrap_or("bash");
         let lineno = ctx.vars.get("LINENO").map(|s| s.as_str()).unwrap_or("0");
-        eprintln!("{}: line {}: {}: unbound variable", name, lineno, expr.name);
+        eprintln!(
+            "{}: line {}: {}: unbound variable",
+            sname, lineno, expr.name
+        );
         set_arith_error(); // Reuse arith error flag to signal abort
+        set_nounset_error();
         return String::new();
     }
 
