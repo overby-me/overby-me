@@ -3294,8 +3294,6 @@
          TEST-07-PID1.issue-3171.sh \
          TEST-07-PID1.prefix-shell.sh \
          TEST-07-PID1.resource-limits.sh \
-         TEST-07-PID1.exec-timestamps.sh \
-         TEST-07-PID1.startv.sh \
          TEST-07-PID1.socket-max-connection.sh
   '';
   extraPackages = pkgs: [pkgs.e2fsprogs pkgs.socat pkgs.nmap]; # chattr for socket-on-failure, socat for issue-30412, nmap/ncat for issue-3171
