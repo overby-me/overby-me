@@ -1340,7 +1340,8 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
     }
 
     // declare -r with no names: list readonly variables
-    if flag_readonly && names.is_empty() {
+    // Skip when -a or -A is also set — let the array listing sections handle it
+    if flag_readonly && names.is_empty() && !flag_array && !flag_assoc {
         let mut sorted: Vec<_> = shell.readonly_vars.iter().collect();
         sorted.sort();
         for name in sorted {
@@ -1375,6 +1376,10 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
         let mut sorted: Vec<_> = shell.arrays.keys().collect();
         sorted.sort();
         for name in sorted {
+            // When -r flag is also set (declare -ar), only list readonly arrays
+            if flag_readonly && !shell.readonly_vars.contains(name.as_str()) {
+                continue;
+            }
             if let Some(arr) = shell.arrays.get(name) {
                 let mut flags = String::from("-a");
                 if shell.integer_vars.contains(name.as_str()) {
@@ -1729,23 +1734,15 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 }
             }
         } else {
-            // Strip [subscript] from name when -A or -a flag is set,
-            // or when the variable is already an array.
+            // Strip [subscript] from name in no-value declare.
+            // Bash always strips subscripts in this context:
             // e.g., `declare -A chaff[200]` → treat as `declare -A chaff`
-            // e.g., `declare -r c[100]` when c is an array → treat as `declare -r c`
-            let name = if name_arg.contains('[') {
+            // e.g., `declare -r c[100]` → treat as `declare -r c` (creates array c)
+            let (name, had_subscript) = if name_arg.contains('[') {
                 let base = name_arg.split('[').next().unwrap_or(name_arg.as_str());
-                if flag_assoc
-                    || flag_array
-                    || shell.arrays.contains_key(base)
-                    || shell.assoc_arrays.contains_key(base)
-                {
-                    base
-                } else {
-                    name_arg.as_str()
-                }
+                (base, true)
             } else {
-                name_arg.as_str()
+                (name_arg.as_str(), false)
             };
             // Can't remove readonly attribute
             if flag_unset_readonly && shell.readonly_vars.contains(name) {
@@ -1812,6 +1809,10 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                         shell.declared_unset.insert(name.to_string());
                     }
                 }
+            } else if had_subscript && !shell.arrays.contains_key(name) {
+                // declare -r c[100] (with subscript, no -a flag): create empty array
+                shell.arrays.entry(name.to_string()).or_default();
+                shell.declared_unset.insert(name.to_string());
             } else if !shell.vars.contains_key(name) {
                 // declare without = marks the variable as declared-but-unset
                 // (don't insert into vars — bash distinguishes this from "")

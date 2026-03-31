@@ -1375,9 +1375,23 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
                 }
             }
             arg if !arg.starts_with('-') => {
-                // Validate identifier
-                if !arg.chars().all(|c| c.is_alphanumeric() || c == '_')
-                    || arg.chars().next().is_some_and(|c| c.is_ascii_digit())
+                // Validate identifier (allow array subscripts like x[1], x[key])
+                let base = if let Some(bracket) = arg.find('[') {
+                    if !arg.ends_with(']') {
+                        eprintln!(
+                            "{}: read: `{}': not a valid identifier",
+                            shell.error_prefix(),
+                            arg
+                        );
+                        return 1;
+                    }
+                    &arg[..bracket]
+                } else {
+                    arg
+                };
+                if !base.chars().all(|c| c.is_alphanumeric() || c == '_')
+                    || base.chars().next().is_some_and(|c| c.is_ascii_digit())
+                    || base.is_empty()
                 {
                     eprintln!(
                         "{}: read: `{}': not a valid identifier",
@@ -1405,9 +1419,23 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
         return 1;
     }
 
-    // Validate variable names
+    // Validate variable names (allow array subscripts like x[1], x[key])
     for name in &var_names {
-        if !is_valid_identifier(name) {
+        let base = if let Some(bracket) = name.find('[') {
+            // Array subscript: validate the base name, allow any subscript content
+            if !name.ends_with(']') {
+                eprintln!(
+                    "{}: read: `{}': not a valid identifier",
+                    shell.error_prefix(),
+                    name
+                );
+                return 1;
+            }
+            &name[..bracket]
+        } else {
+            name.as_str()
+        };
+        if !is_valid_identifier(base) {
             eprintln!(
                 "{}: read: `{}': not a valid identifier",
                 shell.error_prefix(),
@@ -1950,7 +1978,54 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
     let mut read_status = if eof_reached { 1 } else { 0 };
     for (j, name) in var_names.iter().enumerate() {
         let value = fields.get(j).cloned().unwrap_or_default();
-        if shell.readonly_vars.contains(name.as_str())
+        // Handle array subscript: read x[1] → set array element x[1]
+        if let Some(bracket) = name.find('[') {
+            let base = &name[..bracket];
+            let idx_str = if name.ends_with(']') {
+                &name[bracket + 1..name.len() - 1]
+            } else {
+                &name[bracket + 1..]
+            };
+            let resolved_base = shell.resolve_nameref(base);
+            if shell.readonly_vars.contains(&resolved_base) {
+                eprintln!(
+                    "{}: {}: readonly variable",
+                    shell.error_prefix(),
+                    resolved_base
+                );
+                if !eof_reached {
+                    read_status = 2;
+                }
+                break;
+            }
+            if shell.assoc_arrays.contains_key(&resolved_base) {
+                shell
+                    .assoc_arrays
+                    .entry(resolved_base)
+                    .or_default()
+                    .insert(idx_str.to_string(), value);
+            } else {
+                let raw_idx = shell.eval_arith_expr(idx_str);
+                let idx = if raw_idx < 0 {
+                    0usize
+                } else {
+                    raw_idx as usize
+                };
+                // Convert scalar to array if needed
+                if !shell.arrays.contains_key(&resolved_base)
+                    && let Some(scalar_val) = shell.vars.remove(&resolved_base)
+                {
+                    shell
+                        .arrays
+                        .insert(resolved_base.clone(), vec![Some(scalar_val)]);
+                }
+                let arr = shell.arrays.entry(resolved_base).or_default();
+                while arr.len() <= idx {
+                    arr.push(None);
+                }
+                arr[idx] = Some(value);
+            }
+        } else if shell.readonly_vars.contains(name.as_str())
             || shell.readonly_vars.contains(&shell.resolve_nameref(name))
         {
             let resolved = shell.resolve_nameref(name);
@@ -1959,8 +2034,9 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
                 read_status = 2;
             }
             break; // bash stops assigning after readonly error
+        } else {
+            shell.set_var(name, value);
         }
-        shell.set_var(name, value);
     }
 
     read_status
