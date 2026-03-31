@@ -1,12 +1,10 @@
 {
   name = "53-TIMER";
-  # Skip timer subtests that depend on time-jump detection:
-  # - RandomizedDelaySec-reload: recalculates to next occurrence instead
-  #   of staying within the original window after a time jump.
-  # - restart-trigger: timer doesn't fire when system clock jumps past
-  #   OnCalendar= time.
+  # Skip RandomizedDelaySec-reload subtest: recalculates to next occurrence
+  # instead of staying within the original window after a time jump.
+  # restart-trigger is now enabled — clock-jump detection uses pre-jump
+  # wall-clock time as reference for OnCalendar= re-evaluation.
   patchScript = ''
     rm -f TEST-53-TIMER.RandomizedDelaySec-reload.sh
-    rm -f TEST-53-TIMER.restart-trigger.sh
   '';
 }

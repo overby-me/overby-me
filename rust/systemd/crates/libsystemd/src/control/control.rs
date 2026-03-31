@@ -5766,8 +5766,12 @@ pub fn execute_command(
                     // Use $'...' quoting when value contains characters that need escaping
                     // (leading/trailing whitespace, control characters, backslashes, single quotes)
                     let needs_quoting = v.is_empty()
-                        || v.as_bytes().first().is_some_and(|&b| b == b' ' || b == b'\t')
-                        || v.as_bytes().last().is_some_and(|&b| b == b' ' || b == b'\t')
+                        || v.as_bytes()
+                            .first()
+                            .is_some_and(|&b| b == b' ' || b == b'\t')
+                        || v.as_bytes()
+                            .last()
+                            .is_some_and(|&b| b == b' ' || b == b'\t')
                         || v.contains('\\')
                         || v.contains('\'')
                         || v.bytes().any(|b| b < 0x20 && b != b'\t');

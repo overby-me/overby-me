@@ -10,6 +10,8 @@
 //! weekday filters, ranges, lists, and repetitions.
 
 use log::{debug, info, trace, warn};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::time::{Duration, Instant, SystemTime};
 
 use crate::calendar_spec::CalendarSpec;
@@ -64,15 +66,16 @@ impl ChangeDetector {
 
     /// Check if the system clock has jumped since the last call.
     /// Detects jumps by comparing wall-clock delta vs monotonic delta.
-    fn clock_changed(&mut self) -> bool {
+    /// Returns `(changed, previous_wallclock)` so callers can use the
+    /// pre-jump wall-clock time for OnCalendar re-evaluation.
+    fn clock_changed(&mut self) -> (bool, Option<SystemTime>) {
         let now_wall = SystemTime::now();
         let now_mono = Instant::now();
+        let prev_wall = self.last_wallclock;
 
-        let changed = if let (Some(prev_wall), Some(prev_mono)) =
-            (self.last_wallclock, self.last_monotonic)
-        {
+        let changed = if let (Some(pw), Some(prev_mono)) = (prev_wall, self.last_monotonic) {
             let mono_delta = now_mono.duration_since(prev_mono);
-            let wall_delta = now_wall.duration_since(prev_wall).unwrap_or(Duration::ZERO);
+            let wall_delta = now_wall.duration_since(pw).unwrap_or(Duration::ZERO);
             let diff = (wall_delta.as_secs() as i64) - (mono_delta.as_secs() as i64);
             diff.abs() > CLOCK_JUMP_THRESHOLD_SECS
         } else {
@@ -81,8 +84,38 @@ impl ChangeDetector {
 
         self.last_wallclock = Some(now_wall);
         self.last_monotonic = Some(now_mono);
-        changed
+        (changed, if changed { prev_wall } else { None })
     }
+}
+
+/// Compute the randomized delay for a timer.
+///
+/// If `FixedRandomDelay=true`, the delay is deterministic based on the unit name
+/// (stable across reboots — same timer always gets the same offset).
+/// If `FixedRandomDelay=false`, the delay uses a per-boot seed combined with the
+/// unit name (changes each boot but stable within a boot).
+fn compute_randomized_delay(
+    conf: &TimerConfig,
+    timer_name: &str,
+    boot_instant: Instant,
+) -> Duration {
+    if conf.randomized_delay_sec.is_zero() {
+        return Duration::ZERO;
+    }
+    let max_micros = conf.randomized_delay_sec.as_micros() as u64;
+    if max_micros == 0 {
+        return Duration::ZERO;
+    }
+    let mut hasher = DefaultHasher::new();
+    timer_name.hash(&mut hasher);
+    if !conf.fixed_random_delay {
+        // Per-boot variation: include the boot instant's debug representation
+        // as entropy that changes each boot.
+        format!("{:?}", boot_instant).hash(&mut hasher);
+    }
+    let hash_val = hasher.finish();
+    let delay_micros = hash_val % max_micros;
+    Duration::from_micros(delay_micros)
 }
 
 /// Boot instant — captured once when the scheduler starts.
@@ -116,7 +149,7 @@ pub fn start_timer_scheduler_thread(run_info: ArcMutRuntimeInfo) {
             loop {
                 // Detect clock/timezone changes before checking timers
                 let tz_changed = change_detector.timezone_changed();
-                let clock_changed = change_detector.clock_changed();
+                let (clock_changed, pre_jump_wallclock) = change_detector.clock_changed();
 
                 if tz_changed {
                     info!("Timezone change detected");
@@ -131,6 +164,7 @@ pub fn start_timer_scheduler_thread(run_info: ArcMutRuntimeInfo) {
                     &mut last_fired,
                     tz_changed,
                     clock_changed,
+                    pre_jump_wallclock,
                 );
                 // Use a shorter interval (1s) to detect clock/timezone changes
                 // promptly. The original 15s interval is too slow for tests that
@@ -148,6 +182,7 @@ fn check_and_fire_timers(
     last_fired: &mut std::collections::HashMap<String, Instant>,
     timezone_changed: bool,
     clock_changed: bool,
+    pre_jump_wallclock: Option<SystemTime>,
 ) {
     let now = Instant::now();
     let elapsed_since_boot = now.duration_since(boot_instant);
@@ -178,6 +213,7 @@ fn check_and_fire_timers(
                     last_fired,
                     timezone_changed,
                     clock_changed,
+                    pre_jump_wallclock,
                 ) {
                     timers_to_fire.push((unit.id.clone(), target_unit.clone()));
                 }
@@ -226,6 +262,7 @@ fn check_and_fire_timers(
 }
 
 /// Determine if a timer should fire based on its configuration and current state.
+#[allow(clippy::too_many_arguments)]
 fn should_fire_timer(
     conf: &TimerConfig,
     timer_name: &str,
@@ -234,12 +271,17 @@ fn should_fire_timer(
     last_fired: &std::collections::HashMap<String, Instant>,
     timezone_changed: bool,
     clock_changed: bool,
+    pre_jump_wallclock: Option<SystemTime>,
 ) -> bool {
     let last = last_fired.get(timer_name).copied();
 
+    // Compute the randomized delay for this timer (stable within a boot).
+    let boot_instant = BOOT_INSTANT.get().copied().unwrap_or_else(Instant::now);
+    let random_delay = compute_randomized_delay(conf, timer_name, boot_instant);
+
     // OnBootSec= / OnStartupSec= — fire once after boot + duration
     for dur in conf.on_boot_sec.iter().chain(conf.on_startup_sec.iter()) {
-        if elapsed_since_boot >= *dur {
+        if elapsed_since_boot >= *dur + random_delay {
             // Should have fired by now. Check if we already did.
             if last.is_none() {
                 trace!(
@@ -255,7 +297,7 @@ fn should_fire_timer(
     // Since we don't track when the timer was activated separately, we
     // approximate by using boot time (timers are activated during boot).
     for dur in &conf.on_active_sec {
-        if elapsed_since_boot >= *dur && last.is_none() {
+        if elapsed_since_boot >= *dur + random_delay && last.is_none() {
             trace!("Timer {}: OnActiveSec {:?} elapsed", timer_name, dur);
             return true;
         }
@@ -269,7 +311,7 @@ fn should_fire_timer(
         match last {
             Some(last_time) => {
                 let since_last = now.duration_since(last_time);
-                if since_last >= *dur {
+                if since_last >= *dur + random_delay {
                     trace!(
                         "Timer {}: OnUnitActiveSec {:?} elapsed ({:?} since last fire)",
                         timer_name, dur, since_last
@@ -279,7 +321,7 @@ fn should_fire_timer(
             }
             None => {
                 // First run after boot — fire if boot elapsed >= dur
-                if elapsed_since_boot >= *dur {
+                if elapsed_since_boot >= *dur + random_delay {
                     return true;
                 }
             }
@@ -294,12 +336,12 @@ fn should_fire_timer(
         }
         match last {
             Some(last_time) => {
-                if now.duration_since(last_time) >= *dur {
+                if now.duration_since(last_time) >= *dur + random_delay {
                     return true;
                 }
             }
             None => {
-                if elapsed_since_boot >= *dur {
+                if elapsed_since_boot >= *dur + random_delay {
                     return true;
                 }
             }
@@ -337,7 +379,24 @@ fn should_fire_timer(
                 // is one second after the last fire time (so we don't re-trigger
                 // for the same calendar tick). If we haven't fired, the reference
                 // is boot time (or epoch if Persistent=true to catch missed runs).
-                let reference_dt = if let Some(last_instant) = last {
+                //
+                // When a clock change (jump) is detected: use the pre-jump
+                // wall-clock time as reference so that any calendar events that
+                // were skipped over by the jump are caught.
+                let reference_dt = if clock_changed {
+                    if let Some(pre_jump) = pre_jump_wallclock {
+                        // Use the wall-clock time from before the jump so the
+                        // calendar spec finds events between the old time and now.
+                        let pre_dt = CalendarSpec::system_time_to_datetime(pre_jump);
+                        let pre_unix = CalendarSpec::datetime_to_unix(&pre_dt);
+                        crate::calendar_spec::unix_to_datetime(pre_unix + 1)
+                    } else {
+                        // Fallback: use boot time
+                        let boot_unix = CalendarSpec::datetime_to_unix(&now_dt)
+                            - elapsed_since_boot.as_secs() as i64;
+                        crate::calendar_spec::unix_to_datetime(boot_unix)
+                    }
+                } else if let Some(last_instant) = last {
                     // Convert the last-fired Instant to a wall-clock DateTime.
                     // We do this by computing the offset from `now` Instant to
                     // `now` SystemTime, then applying that offset.
@@ -365,12 +424,13 @@ fn should_fire_timer(
                 };
 
                 if let Some(next) = spec.next_elapse(reference_dt) {
-                    let next_unix = CalendarSpec::datetime_to_unix(&next);
+                    let next_unix =
+                        CalendarSpec::datetime_to_unix(&next) + random_delay.as_secs() as i64;
                     let now_unix = CalendarSpec::datetime_to_unix(&now_dt);
                     if next_unix <= now_unix {
                         trace!(
-                            "Timer {}: OnCalendar={} next elapse {:?} <= now {:?}",
-                            timer_name, expr, next, now_dt
+                            "Timer {}: OnCalendar={} next elapse {:?} + {:?} delay <= now {:?}",
+                            timer_name, expr, next, random_delay, now_dt
                         );
                         return true;
                     }
@@ -612,6 +672,7 @@ mod tests {
             &last_fired,
             false,
             false,
+            None,
         );
         assert!(!result);
     }
@@ -645,6 +706,7 @@ mod tests {
             &last_fired,
             false,
             false,
+            None,
         );
         assert!(result);
     }
@@ -679,6 +741,7 @@ mod tests {
             &last_fired,
             false,
             false,
+            None,
         );
         assert!(!result);
     }
@@ -717,6 +780,7 @@ mod tests {
             &last_fired,
             false,
             false,
+            None,
         );
         assert!(result);
     }
@@ -755,6 +819,7 @@ mod tests {
             &last_fired,
             false,
             false,
+            None,
         );
         assert!(!result);
     }
@@ -793,6 +858,7 @@ mod tests {
             &last_fired,
             false,
             false,
+            None,
         );
         assert!(result);
     }
@@ -834,6 +900,7 @@ mod tests {
             &last_fired,
             false,
             false,
+            None,
         );
         assert!(!result);
     }
@@ -867,6 +934,7 @@ mod tests {
             &last_fired,
             false,
             false,
+            None,
         );
         assert!(!result);
     }
@@ -901,6 +969,7 @@ mod tests {
             &last_fired,
             false,
             false,
+            None,
         );
         assert!(result);
     }
@@ -936,5 +1005,130 @@ mod tests {
         assert_eq!(parse_timespan("1hr"), Some(Duration::from_secs(3600)));
         assert_eq!(parse_timespan(""), None);
         assert_eq!(parse_timespan("30"), Some(Duration::from_secs(30)));
+    }
+
+    #[test]
+    fn test_randomized_delay_sec_defers_boot_timer() {
+        // A timer with OnBootSec=5min and RandomizedDelaySec=10min should not
+        // fire at 6 minutes since boot (5 + up-to-10 delay might push it out).
+        // We can't predict the exact delay, but with a 10min random window the
+        // probability of the hash-based delay being < 1min is low (~10%).
+        // Instead, test with a very large delay that guarantees deferral.
+        let conf = TimerConfig {
+            on_boot_sec: vec![Duration::from_secs(300)],
+            on_startup_sec: vec![],
+            on_active_sec: vec![],
+            on_unit_active_sec: vec![],
+            on_unit_inactive_sec: vec![],
+            on_calendar: vec![],
+            accuracy_sec: Duration::from_secs(60),
+            randomized_delay_sec: Duration::from_secs(86400), // 1 day delay
+            fixed_random_delay: false,
+            persistent: false,
+            wake_system: false,
+            remain_after_elapse: true,
+            on_clock_change: false,
+            on_timezone_change: false,
+            unit: "test.service".into(),
+        };
+        let last_fired = std::collections::HashMap::new();
+        // 10 minutes since boot, but with up to 1 day of random delay,
+        // it definitely should NOT fire yet.
+        let result = should_fire_timer(
+            &conf,
+            "test.timer",
+            Duration::from_secs(600),
+            Instant::now(),
+            &last_fired,
+            false,
+            false,
+            None,
+        );
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_randomized_delay_zero_does_not_defer() {
+        let conf = TimerConfig {
+            on_boot_sec: vec![Duration::from_secs(300)],
+            on_startup_sec: vec![],
+            on_active_sec: vec![],
+            on_unit_active_sec: vec![],
+            on_unit_inactive_sec: vec![],
+            on_calendar: vec![],
+            accuracy_sec: Duration::from_secs(60),
+            randomized_delay_sec: Duration::ZERO,
+            fixed_random_delay: false,
+            persistent: false,
+            wake_system: false,
+            remain_after_elapse: true,
+            on_clock_change: false,
+            on_timezone_change: false,
+            unit: "test.service".into(),
+        };
+        let last_fired = std::collections::HashMap::new();
+        // 10 minutes since boot, no delay — should fire
+        let result = should_fire_timer(
+            &conf,
+            "test.timer",
+            Duration::from_secs(600),
+            Instant::now(),
+            &last_fired,
+            false,
+            false,
+            None,
+        );
+        assert!(result);
+    }
+
+    #[test]
+    fn test_fixed_random_delay_is_deterministic() {
+        let boot = Instant::now();
+        let delay1 = compute_randomized_delay(
+            &TimerConfig {
+                on_boot_sec: vec![],
+                on_startup_sec: vec![],
+                on_active_sec: vec![],
+                on_unit_active_sec: vec![],
+                on_unit_inactive_sec: vec![],
+                on_calendar: vec![],
+                accuracy_sec: Duration::from_secs(60),
+                randomized_delay_sec: Duration::from_secs(3600),
+                fixed_random_delay: true,
+                persistent: false,
+                wake_system: false,
+                remain_after_elapse: true,
+                on_clock_change: false,
+                on_timezone_change: false,
+                unit: "test.service".into(),
+            },
+            "my-timer.timer",
+            boot,
+        );
+        let delay2 = compute_randomized_delay(
+            &TimerConfig {
+                on_boot_sec: vec![],
+                on_startup_sec: vec![],
+                on_active_sec: vec![],
+                on_unit_active_sec: vec![],
+                on_unit_inactive_sec: vec![],
+                on_calendar: vec![],
+                accuracy_sec: Duration::from_secs(60),
+                randomized_delay_sec: Duration::from_secs(3600),
+                fixed_random_delay: true,
+                persistent: false,
+                wake_system: false,
+                remain_after_elapse: true,
+                on_clock_change: false,
+                on_timezone_change: false,
+                unit: "test.service".into(),
+            },
+            "my-timer.timer",
+            boot,
+        );
+        // FixedRandomDelay=true means same name → same delay
+        assert_eq!(delay1, delay2);
+        // Delay should be within range
+        assert!(delay1 < Duration::from_secs(3600));
     }
 }
