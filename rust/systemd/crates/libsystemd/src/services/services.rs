@@ -63,6 +63,31 @@ impl LogFilter {
     }
 }
 
+/// Path to journald's stdout stream socket.
+const JOURNAL_STDOUT_SOCKET: &str = "/run/systemd/journal/stdout";
+
+/// Open a connection to journald's stdout stream socket and send the 7-line
+/// protocol header. Returns the connected stream, or `None` if the socket is
+/// unavailable (e.g. journald hasn't started yet).
+///
+/// Protocol header lines:
+///   1. SYSLOG_IDENTIFIER (typically the service name without `.service`)
+///   2. _SYSTEMD_UNIT (the full unit name)
+///   3. PRIORITY (0-7, default 6 = info)
+///   4. level_prefix (1 = parse `<N>` syslog-style prefixes, 0 = don't)
+///   5. forward_to_syslog (0)
+///   6. forward_to_kmsg (0)
+///   7. forward_to_console (0)
+pub fn open_journal_stream(unit_name: &str) -> Option<UnixStream> {
+    let stream = UnixStream::connect(JOURNAL_STDOUT_SOCKET).ok()?;
+    let identifier = unit_name.strip_suffix(".service").unwrap_or(unit_name);
+    let header = format!("{identifier}\n{unit_name}\n6\n1\n0\n0\n0\n",);
+    use std::io::Write;
+    let mut s = stream;
+    s.write_all(header.as_bytes()).ok()?;
+    Some(s)
+}
+
 /// Check if a unit is masked (symlink to /dev/null) on disk.
 fn is_unit_masked(name: &str) -> bool {
     let runtime = std::path::Path::new("/run/systemd/system").join(name);
@@ -107,7 +132,7 @@ use std::os::unix::io::AsRawFd;
 use std::os::unix::io::BorrowedFd;
 use std::os::unix::io::IntoRawFd;
 use std::os::unix::io::RawFd;
-use std::os::unix::net::UnixDatagram;
+use std::os::unix::net::{UnixDatagram, UnixStream};
 use std::process::{Command, Stdio};
 
 /// This looks like `std::process::Stdio` but it can be some more stuff like journal or kmsg so I explicitly
@@ -209,6 +234,10 @@ pub struct Service {
 
     pub stdout: Option<StdIo>,
     pub stderr: Option<StdIo>,
+    /// Connected stream to journald's `/run/systemd/journal/stdout` socket.
+    /// When set, stdout/stderr lines are also forwarded to journald so they
+    /// appear in the journal with proper `_SYSTEMD_UNIT` metadata.
+    pub journal_stream: Option<std::os::unix::net::UnixStream>,
     pub notifications_buffer: String,
     pub stdout_buffer: Vec<u8>,
     pub stderr_buffer: Vec<u8>,
@@ -1136,6 +1165,16 @@ impl Service {
             {
                 continue;
             }
+            // Forward to journald stdout stream (if connected)
+            if let Some(ref mut stream) = self.journal_stream {
+                let mut jbuf = Vec::with_capacity(line.len() + 1);
+                jbuf.extend(line);
+                jbuf.push(b'\n');
+                // Best-effort: if the journal socket errors, drop it silently
+                if stream.write_all(&jbuf).is_err() {
+                    self.journal_stream = None;
+                }
+            }
             outbuf.clear();
             outbuf.extend(prefix.as_bytes());
             outbuf.extend(line);
@@ -1175,6 +1214,15 @@ impl Service {
                 && !f.should_log(line_str)
             {
                 continue;
+            }
+            // Forward to journald stdout stream (if connected)
+            if let Some(ref mut stream) = self.journal_stream {
+                let mut jbuf = Vec::with_capacity(line.len() + 1);
+                jbuf.extend(line);
+                jbuf.push(b'\n');
+                if stream.write_all(&jbuf).is_err() {
+                    self.journal_stream = None;
+                }
             }
             outbuf.clear();
             outbuf.extend(prefix.as_bytes());

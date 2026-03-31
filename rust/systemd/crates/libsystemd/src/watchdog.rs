@@ -401,6 +401,7 @@ mod tests {
             notifications_path: None,
             stdout: None,
             stderr: None,
+            journal_stream: None,
             notifications_buffer: String::new(),
             stdout_buffer: Vec::new(),
             stderr_buffer: Vec::new(),
