@@ -729,7 +729,7 @@
 
 | Status | Component | Current | Research & Development | Compatibility | Legacy |
 |:-:|-|-|-|-|-|
-| ✅ | Event Hosting | [Smoke Signal Events 🌐🌀](https://smokesignal.events), [Meetup 🔒🇪🇺](https://meetup.com) | | [AT Protocol 🌀](https://atproto.com) | [Meta Facebook Events 🔒🇺🇸](https://facebook.com) |
+| ✅ | Event Hosting | [Smoke Signal Events 🌐🌀](https://smokesignal.events), [Atmo 🌀](https://atmo.rsvp), [Meetup 🔒🇪🇺](https://meetup.com) | | [AT Protocol 🌀](https://atproto.com) | [Meta Facebook Events 🔒🇺🇸](https://facebook.com) |
 | ✅ | Dating | [Veggly 🔒👁️🇧🇷](https://veggly.net) | | 🆗 | [Tinder 🔒🇺🇸](https://en.wikipedia.org/wiki/Tinder_(app)) |
 
 </details>
