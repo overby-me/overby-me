@@ -169,8 +169,9 @@ const resolveStack = async (stack: string): Promise<string> => {
 				});
 				if (pos.source) {
 					const fn = pos.name ?? frame.functionName ?? "<anonymous>";
+					const source = pos.source.replace(/^(\.\.\/)+/, "");
 					resolvedLines.push(
-						`  at ${fn} (${pos.source}:${pos.line}:${(pos.column ?? 0) + 1})`,
+						`  at ${fn} (${source}:${pos.line}:${(pos.column ?? 0) + 1})`,
 					);
 					continue;
 				}
