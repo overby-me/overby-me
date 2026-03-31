@@ -229,6 +229,7 @@
               patchScript = t.patchScript or "";
               extraPackages = (t.extraPackages or (_: [])) pkgs;
               testEnv = t.testEnv or {};
+              testTimeout = t.testTimeout or 1800;
             };
         })
         tests)
@@ -241,6 +242,7 @@
               patchScript = t.patchScript or "";
               extraPackages = (t.extraPackages or (_: [])) pkgs;
               testEnv = t.testEnv or {};
+              testTimeout = t.testTimeout or 1800;
               useUpstreamSystemd = true;
             };
         })

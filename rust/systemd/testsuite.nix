@@ -11,6 +11,7 @@
   patchScript ? "",
   extraPackages ? [],
   testEnv ? {},
+  testTimeout ? 1800,
   useUpstreamSystemd ? false,
 }: let
   systemdSrc = pkgs.systemd.src;
@@ -391,7 +392,7 @@ in
       test_cmd = f"cd {units_dir} && {env_prefix}bash -x ./${testName}.sh 2>&1"
 
       try:
-          (rc, output) = machine.execute(test_cmd, timeout=1800)
+          (rc, output) = machine.execute(test_cmd, timeout=${toString testTimeout})
           print(output)
           if rc != 0:
               raise Exception("${testName} failed with exit code " + str(rc))
@@ -402,7 +403,7 @@ in
           print("BrokenPipeError: VM likely rebooted, waiting for it to come back...")
           machine.wait_for_unit("multi-user.target", timeout=120)
           machine.succeed("systemctl daemon-reload")
-          (rc, output) = machine.execute(test_cmd, timeout=1800)
+          (rc, output) = machine.execute(test_cmd, timeout=${toString testTimeout})
           print(output)
           if rc != 0:
               raise Exception("${testName} failed with exit code " + str(rc))
