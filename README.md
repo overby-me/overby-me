@@ -634,6 +634,7 @@
 | ✅ | Local Provider | [Ollama 🐹🏡🇪🇺](https://github.com/ollama/ollama) | | 🆗 | |
 | ✅ | Hosted Provider | [Mistral 🇪🇺](https://mistral.ai), [Anthropic Claude ⚖️🇺🇸](https://claude.ai) | [Lumo 🇪🇺](https://lumo.proton.me) | 🆗 | [OpenAI 🔒🇺🇸](https://openai.com) |
 | ✅ | Personal AI Assistant | [IronClaw 🦀🏡](https://github.com/nearai/ironclaw) | | 🆗 | [OpenClaw 🐒🏡](https://github.com/openclaw/openclaw) |
+| 🚧 | TTS/STT | | [Vox 🦀](https://github.com/rtk-ai/vox) | 🆗 | |
 
 #### Communication & Productivity
 
