@@ -49,6 +49,7 @@ pub(super) fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
                         "posix" => shell.opt_posix = enable,
                         "hashall" => shell.opt_hashall = enable,
                         "braceexpand"
+                        | "emacs"
                         | "errtrace"
                         | "functrace"
                         | "histexpand"
@@ -73,15 +74,7 @@ pub(super) fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
                             shell.shopt_options.insert(option.to_string(), enable);
                             shell.opt_physical = enable;
                         }
-                        "emacs" | "vi" => {
-                            eprintln!(
-                                "{}: set: {}: invalid option name",
-                                shell.error_prefix(),
-                                option
-                            );
-                            return 2;
-                        }
-                        "notify" | "onecmd" | "privileged" | "verbose" => {
+                        "notify" | "onecmd" | "privileged" | "verbose" | "vi" => {
                             shell.shopt_options.insert(option.to_string(), enable);
                         }
                         _ => {
@@ -100,6 +93,7 @@ pub(super) fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
                     let options: Vec<(&str, bool)> = vec![
                         ("allexport", shell.opt_allexport),
                         ("braceexpand", so("braceexpand", true)),
+                        ("emacs", so("emacs", false)),
                         ("errexit", shell.opt_errexit),
                         ("errtrace", so("errtrace", false)),
                         ("functrace", so("functrace", false)),
@@ -122,6 +116,7 @@ pub(super) fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
                         ("posix", shell.opt_posix),
                         ("privileged", so("privileged", false)),
                         ("verbose", so("verbose", false)),
+                        ("vi", so("vi", false)),
                         ("xtrace", shell.opt_xtrace),
                     ];
                     if enable {
@@ -236,6 +231,10 @@ pub(super) fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
                     .copied()
                     .unwrap_or(true),
             ),
+            (
+                "emacs",
+                shell.shopt_options.get("emacs").copied().unwrap_or(false),
+            ),
             ("errexit", shell.opt_errexit),
             (
                 "errtrace",
@@ -321,6 +320,10 @@ pub(super) fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
             (
                 "verbose",
                 shell.shopt_options.get("verbose").copied().unwrap_or(false),
+            ),
+            (
+                "vi",
+                shell.shopt_options.get("vi").copied().unwrap_or(false),
             ),
             ("xtrace", shell.opt_xtrace),
         ];
@@ -465,6 +468,9 @@ pub(super) fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
         "compat42",
         "compat43",
         "compat44",
+        "complete_fullquote",
+        "direxpand",
+        "dirspell",
         "dotglob",
         "execfail",
         "expand_aliases",
@@ -472,11 +478,15 @@ pub(super) fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
         "extglob",
         "extquote",
         "failglob",
+        "force_fignore",
         "globasciiranges",
         "globskipdots",
         "globstar",
         "gnu_errfmt",
         "histappend",
+        "histreedit",
+        "histverify",
+        "hostcomplete",
         "huponexit",
         "inherit_errexit",
         "interactive_comments",
@@ -486,11 +496,14 @@ pub(super) fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
         "localvar_unset",
         "login_shell",
         "mailwarn",
+        "no_empty_cmd_completion",
         "nocaseglob",
         "nocasematch",
         "noexpand_translation",
         "nullglob",
         "patsub_replacement",
+        "progcomp",
+        "progcomp_alias",
         "promptvars",
         "restricted_shell",
         "shift_verbose",
@@ -529,11 +542,15 @@ pub(super) fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
     let defaults: &[(&str, bool)] = &[
         ("checkwinsize", false),
         ("cmdhist", true),
+        ("complete_fullquote", true),
         ("extquote", true),
+        ("force_fignore", true),
         ("globasciiranges", true),
         ("globskipdots", true),
+        ("hostcomplete", true),
         ("interactive_comments", true),
         ("patsub_replacement", true),
+        ("progcomp", true),
         ("promptvars", true),
         ("sourcepath", true),
     ];
@@ -555,6 +572,9 @@ pub(super) fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
         "compat42",
         "compat43",
         "compat44",
+        "complete_fullquote",
+        "direxpand",
+        "dirspell",
         "dotglob",
         "execfail",
         "expand_aliases",
@@ -562,11 +582,15 @@ pub(super) fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
         "extglob",
         "extquote",
         "failglob",
+        "force_fignore",
         "globasciiranges",
         "globskipdots",
         "globstar",
         "gnu_errfmt",
         "histappend",
+        "histreedit",
+        "histverify",
+        "hostcomplete",
         "huponexit",
         "inherit_errexit",
         "interactive_comments",
@@ -576,11 +600,14 @@ pub(super) fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
         "localvar_unset",
         "login_shell",
         "mailwarn",
+        "no_empty_cmd_completion",
         "nocaseglob",
         "nocasematch",
         "noexpand_translation",
         "nullglob",
         "patsub_replacement",
+        "progcomp",
+        "progcomp_alias",
         "promptvars",
         "restricted_shell",
         "shift_verbose",
