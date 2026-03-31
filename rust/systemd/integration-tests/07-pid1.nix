@@ -1144,6 +1144,18 @@
     systemctl stop "$UNIT.service"
     [[ ! -e "/run/$UNIT" ]]
 
+    : "Environment= with whitespace in values (issue #31214)"
+    systemd-run --wait --pipe -p Environment="FOO='bar4    '" \
+        bash -xec '[[ $FOO == "bar4    " ]]'
+    systemd-run --wait --pipe -p Environment="FOO='bar4    ' BAR='\n\n'" \
+        bash -xec "[[ \$FOO == 'bar4    ' && \$BAR == \$'\n\n' ]]"
+
+    : "show-environment quoting for values with whitespace"
+    systemctl unset-environment FOO_WITH_SPACES 2>/dev/null || true
+    systemctl set-environment FOO_WITH_SPACES="foo   "
+    systemctl show-environment | grep -F "FOO_WITH_SPACES=\$'foo   '"
+    systemctl unset-environment FOO_WITH_SPACES
+
     TESTEOF
     chmod +x TEST-07-PID1.exec-context.sh
     # Rewrite private-pids test: keep only testcase_basic.

@@ -5760,7 +5760,38 @@ pub fn execute_command(
         Command::ShowEnvironment => {
             let ri = run_info.read_poisoned();
             let env = ri.manager_environment.lock().unwrap();
-            let mut lines: Vec<String> = env.iter().map(|(k, v)| format!("{k}={v}")).collect();
+            let mut lines: Vec<String> = env
+                .iter()
+                .map(|(k, v)| {
+                    // Use $'...' quoting when value contains characters that need escaping
+                    // (leading/trailing whitespace, control characters, backslashes, single quotes)
+                    let needs_quoting = v.is_empty()
+                        || v.as_bytes().first().is_some_and(|&b| b == b' ' || b == b'\t')
+                        || v.as_bytes().last().is_some_and(|&b| b == b' ' || b == b'\t')
+                        || v.contains('\\')
+                        || v.contains('\'')
+                        || v.bytes().any(|b| b < 0x20 && b != b'\t');
+                    if needs_quoting {
+                        let mut escaped = String::new();
+                        for ch in v.chars() {
+                            match ch {
+                                '\\' => escaped.push_str("\\\\"),
+                                '\'' => escaped.push_str("\\'"),
+                                '\n' => escaped.push_str("\\n"),
+                                '\t' => escaped.push_str("\\t"),
+                                '\r' => escaped.push_str("\\r"),
+                                c if (c as u32) < 0x20 => {
+                                    escaped.push_str(&format!("\\x{:02x}", c as u32));
+                                }
+                                c => escaped.push(c),
+                            }
+                        }
+                        format!("{k}=$'{escaped}'")
+                    } else {
+                        format!("{k}={v}")
+                    }
+                })
+                .collect();
             lines.sort();
             return Ok(serde_json::json!({ "environment": lines }));
         }
