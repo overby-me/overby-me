@@ -1714,7 +1714,12 @@ fn main() {
         // Send SIGUSR2 to journald to trigger rotation
         eprintln!("Requesting rotation of journal files...");
         send_signal_to_journald(libc::SIGUSR2);
-        return;
+        // If vacuum is also requested, continue to process it; otherwise return
+        if cli.vacuum_size.is_none() && cli.vacuum_time.is_none() && cli.vacuum_files.is_none() {
+            return;
+        }
+        // Give journald a moment to finish rotation before vacuuming
+        std::thread::sleep(Duration::from_millis(500));
     }
 
     // Open storage
