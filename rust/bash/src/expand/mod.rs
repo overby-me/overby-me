@@ -1019,11 +1019,18 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
             }
             // For Default/Alt words in unquoted context, check if we should
             // expand per-part for mixed quoting (e.g., ${IFS+foo 'bar' baz})
+            // Clear any pre-existing arith error so we only detect errors
+            // from this specific lookup_var call.
+            let had_prior_error = take_arith_error();
             let orig_val = lookup_var(&expr.name, ctx);
             // If lookup_var triggered an error (e.g., bad array subscript),
             // bail out early to avoid duplicate errors from expand_param.
             if get_arith_error() {
                 return;
+            }
+            // Restore prior error flag if there was one
+            if had_prior_error {
+                set_arith_error();
             }
             let orig_set = ctx.is_param_set(&expr.name);
             let is_default_alt_active = match &expr.op {
