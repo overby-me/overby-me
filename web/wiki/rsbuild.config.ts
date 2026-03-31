@@ -21,7 +21,7 @@ export default defineConfig({
 		sourceMap: {
 			js:
 				process.env.NODE_ENV === "production"
-					? "hidden-source-map"
+					? "source-map"
 					: "cheap-module-source-map",
 		},
 	},
