@@ -3254,8 +3254,6 @@
          TEST-07-PID1.user-namespace-path.sh \
          TEST-07-PID1.issue-27953.sh \
          TEST-07-PID1.issue-3171.sh \
-         TEST-07-PID1.prefix-shell.sh \
-         TEST-07-PID1.resource-limits.sh \
          TEST-07-PID1.exec-timestamps.sh \
          TEST-07-PID1.startv.sh \
          TEST-07-PID1.transient.sh \
