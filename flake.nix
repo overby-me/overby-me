@@ -8,6 +8,12 @@
       flake = false;
     };
 
+    # Agent Skills
+    modular-skills = {
+      url = "github:modular/skills";
+      flake = false;
+    };
+
     # Nix
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
     nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixos-unstable";

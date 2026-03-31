@@ -189,6 +189,12 @@ in {
 
       # RTK awareness instructions for Claude Code agents
       ".claude/RTK.md".source = rtkAwarenessMd;
+
+      # Modular agent skills (Mojo/MAX)
+      ".claude/skills/new-modular-project".source = "${inputs.modular-skills}/new-modular-project";
+      ".claude/skills/mojo-syntax".source = "${inputs.modular-skills}/mojo-syntax";
+      ".claude/skills/mojo-gpu-fundamentals".source = "${inputs.modular-skills}/mojo-gpu-fundamentals";
+      ".claude/skills/mojo-python-interop".source = "${inputs.modular-skills}/mojo-python-interop";
     };
     # Copy settings.json and CLAUDE.md (not symlink) so Claude Code can write to them
     activation.claudeSettings = lib.hm.dag.entryAfter ["writeBoundary"] ''
