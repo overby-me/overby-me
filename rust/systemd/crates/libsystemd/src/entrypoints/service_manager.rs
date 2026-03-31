@@ -722,6 +722,7 @@ fn prepare_runtimeinfo(conf: &config::Config, dry_run: bool) -> runtime_info::Ar
                 let txn_str = txn_id.to_string();
                 crate::control::varlink::journal_log_with_fields(
                     &msg,
+                    4,
                     &[("TRANSACTION_ID", &txn_str)],
                 );
             }

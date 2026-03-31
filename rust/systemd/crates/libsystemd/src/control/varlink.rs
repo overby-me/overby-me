@@ -151,7 +151,8 @@ fn process_varlink_message(
 
 /// Send a structured log message to the journal with custom fields.
 /// Uses the native journal protocol (datagram to /run/systemd/journal/socket).
-pub fn journal_log_with_fields(message: &str, fields: &[(&str, &str)]) {
+/// `priority` follows syslog levels: 4=warning, 6=info, etc.
+pub fn journal_log_with_fields(message: &str, priority: u8, fields: &[(&str, &str)]) {
     let sock = match UnixDatagram::unbound() {
         Ok(s) => s,
         Err(_) => return,
@@ -159,13 +160,20 @@ pub fn journal_log_with_fields(message: &str, fields: &[(&str, &str)]) {
 
     let mut payload = String::new();
     payload.push_str(&format!("MESSAGE={message}\n"));
-    payload.push_str("PRIORITY=4\n"); // LOG_WARNING
+    payload.push_str(&format!("PRIORITY={priority}\n"));
     payload.push_str("SYSLOG_IDENTIFIER=systemd\n");
     for (key, value) in fields {
         payload.push_str(&format!("{key}={value}\n"));
     }
 
     let _ = sock.send_to(payload.as_bytes(), "/run/systemd/journal/socket");
+}
+
+/// Log a unit lifecycle event to the journal (e.g. "Starting ...", "Started ...",
+/// "Deactivated successfully."). These correspond to the structured messages
+/// that C systemd's PID 1 sends with UNIT= and SYSLOG_IDENTIFIER=systemd.
+pub fn journal_log_unit_lifecycle(message: &str, unit_name: &str) {
+    journal_log_with_fields(message, 6, &[("UNIT", unit_name)]);
 }
 
 /// Build the response for `io.systemd.Manager.Describe`.

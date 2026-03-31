@@ -335,6 +335,17 @@ impl ServiceState {
                 // Record the instant the service became Running so the
                 // watchdog thread can enforce RuntimeMaxSec=.
                 self.srvc.runtime_started_at = Some(std::time::Instant::now());
+                let desc = if let Some(unit) = run_info.unit_table.get(id) {
+                    unit.common.unit.description.clone()
+                } else {
+                    String::new()
+                };
+                let msg = if desc.is_empty() {
+                    format!("Started {}.", id.name)
+                } else {
+                    format!("Started {desc}.")
+                };
+                crate::control::varlink::journal_log_unit_lifecycle(&msg, &id.name);
                 Ok(UnitStatus::Started(StatusStarted::Running))
             }
             Ok(crate::services::StartResult::ConditionSkipped) => {
@@ -1125,6 +1136,13 @@ impl Unit {
 
         if unstarted_deps.is_empty() {
             **self_lock.get_mut(&self.id).unwrap() = UnitStatus::Starting;
+            let desc = &self.common.unit.description;
+            let msg = if desc.is_empty() {
+                format!("Starting {}...", self.id.name)
+            } else {
+                format!("Starting {desc}...")
+            };
+            crate::control::varlink::journal_log_unit_lifecycle(&msg, &self.id.name);
             Ok(())
         } else {
             Err(unstarted_deps)
@@ -1476,6 +1494,13 @@ impl Unit {
                 .timestamps
                 .write_poisoned()
                 .record_inactive_enter();
+            let desc = &self.common.unit.description;
+            let msg = if desc.is_empty() {
+                format!("Deactivated successfully: {}.", self.id.name)
+            } else {
+                format!("Deactivated successfully: {desc}.")
+            };
+            crate::control::varlink::journal_log_unit_lifecycle(&msg, &self.id.name);
         }
 
         result

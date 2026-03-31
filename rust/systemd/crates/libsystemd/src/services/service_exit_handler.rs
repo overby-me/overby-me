@@ -437,6 +437,17 @@ pub(crate) fn service_exit_handler(
                         crate::units::StatusStopped::StoppedUnexpected,
                         vec![reason],
                     );
+                    let fail_reason = match &main_code {
+                        ChildTermination::Exit(c) => format!("exit-code (status {c})"),
+                        ChildTermination::Signal(s) => format!("signal (signal {s})"),
+                    };
+                    let desc = &unit.common.unit.description;
+                    let msg = if desc.is_empty() {
+                        format!("Failed with result '{fail_reason}': {}.", id.name)
+                    } else {
+                        format!("Failed with result '{fail_reason}': {desc}.")
+                    };
+                    crate::control::varlink::journal_log_unit_lifecycle(&msg, &id.name);
                 }
 
                 // Clean up the cgroup directory.
@@ -720,6 +731,17 @@ pub(crate) fn service_exit_handler(
                     "Oneshot service {name} failed with {:?}, marked as failed",
                     code
                 );
+                let fail_reason = match &code {
+                    ChildTermination::Exit(c) => format!("exit-code (status {c})"),
+                    ChildTermination::Signal(s) => format!("signal (signal {s})"),
+                };
+                let desc = &unit.common.unit.description;
+                let msg = if desc.is_empty() {
+                    format!("Failed with result '{fail_reason}': {name}.")
+                } else {
+                    format!("Failed with result '{fail_reason}': {desc}.")
+                };
+                crate::control::varlink::journal_log_unit_lifecycle(&msg, name);
             }
 
             // Collect OnSuccess=/OnFailure= trigger info for the oneshot service.
@@ -1172,6 +1194,17 @@ pub(crate) fn service_exit_handler(
             *status =
                 UnitStatus::Stopped(crate::units::StatusStopped::StoppedUnexpected, vec![reason]);
             info!("Service {name} failed with {:?}, marked as failed", code);
+            let fail_reason = match &code {
+                ChildTermination::Exit(c) => format!("exit-code (status {c})"),
+                ChildTermination::Signal(s) => format!("signal (signal {s})"),
+            };
+            let desc = &unit.common.unit.description;
+            let msg = if desc.is_empty() {
+                format!("Failed with result '{fail_reason}': {name}.")
+            } else {
+                format!("Failed with result '{fail_reason}': {desc}.")
+            };
+            crate::control::varlink::journal_log_unit_lifecycle(&msg, name);
         }
 
         // Clean up the cgroup directory now that the service has stopped.
