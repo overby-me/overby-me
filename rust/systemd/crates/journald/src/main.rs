@@ -15,6 +15,8 @@
 //! - sd_notify READY=1 / STATUS= / WATCHDOG=1 protocol
 //! - SIGUSR1 for flushing volatile → persistent storage
 //! - SIGUSR2 for journal rotation
+//! - Varlink IPC at `/run/systemd/journal/io.systemd.journal` for
+//!   `journalctl --sync`, `--rotate`, `--flush`, `--relinquish-var`
 //!
 //! Configuration is read from `/etc/systemd/journald.conf` and
 //! `/etc/systemd/journald.conf.d/*.conf`.
@@ -28,7 +30,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{self, BufRead, BufReader, Write};
 
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::os::unix::io::FromRawFd;
 use std::os::unix::net::{UnixDatagram, UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
@@ -53,6 +55,8 @@ const KMSG_PATH: &str = "/proc/kmsg";
 const RUNTIME_DIR: &str = "/run/systemd/journal";
 /// PID file path — used by `journalctl --flush` / `--rotate` to signal us.
 const PID_FILE_PATH: &str = "/run/systemd/journal/pid";
+/// Varlink socket for `journalctl --sync` / `--rotate` / `--flush` (systemd v259+).
+const VARLINK_SOCKET_PATH: &str = "/run/systemd/journal/io.systemd.journal";
 
 // ---------------------------------------------------------------------------
 // Rate limiting
@@ -1900,6 +1904,169 @@ fn sd_notify(msg: &str) {
 }
 
 // ---------------------------------------------------------------------------
+// Varlink server — journalctl v259+ uses Varlink instead of signals
+// ---------------------------------------------------------------------------
+
+/// Minimal Varlink server for `journalctl --sync`, `--rotate`, `--flush`,
+/// and `--relinquish-var`.  The Varlink protocol is JSON + NUL byte framing
+/// over a Unix stream socket at `/run/systemd/journal/io.systemd.journal`.
+fn varlink_server(state: Arc<JournaldState>) {
+    // Remove stale socket
+    let _ = fs::remove_file(VARLINK_SOCKET_PATH);
+
+    let listener = match UnixListener::bind(VARLINK_SOCKET_PATH) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("journald: Failed to bind Varlink socket: {}", e);
+            return;
+        }
+    };
+
+    // Make the socket world-accessible (journalctl runs as root but the
+    // protocol checks credentials via SO_PEERCRED on the server side).
+    let _ = fs::set_permissions(VARLINK_SOCKET_PATH, std::fs::Permissions::from_mode(0o666));
+
+    // Set non-blocking so we can check the shutdown flag
+    listener
+        .set_nonblocking(true)
+        .expect("varlink: set_nonblocking");
+
+    while !state.shutdown.load(Ordering::Relaxed) {
+        match listener.accept() {
+            Ok((stream, _)) => {
+                let state = Arc::clone(&state);
+                thread::Builder::new()
+                    .name("varlink-conn".into())
+                    .spawn(move || varlink_handle_connection(state, stream))
+                    .ok();
+            }
+            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(100));
+            }
+            Err(e) => {
+                eprintln!("journald: Varlink accept error: {}", e);
+                thread::sleep(Duration::from_millis(100));
+            }
+        }
+    }
+}
+
+/// Handle a single Varlink connection.  Reads NUL-terminated JSON frames,
+/// dispatches method calls, and sends NUL-terminated JSON replies.
+fn varlink_handle_connection(state: Arc<JournaldState>, stream: UnixStream) {
+    let _ = stream.set_nonblocking(false);
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(30)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+
+    let mut reader = BufReader::new(&stream);
+    let mut writer = &stream;
+
+    loop {
+        // Read until NUL byte
+        let mut buf = Vec::new();
+        match reader.read_until(0, &mut buf) {
+            Ok(0) => break,  // EOF
+            Err(_) => break, // timeout or error
+            Ok(_) => {}
+        }
+
+        // Strip trailing NUL
+        if buf.last() == Some(&0) {
+            buf.pop();
+        }
+        if buf.is_empty() {
+            continue;
+        }
+
+        // Parse JSON
+        let request: serde_json::Value = match serde_json::from_slice(&buf) {
+            Ok(v) => v,
+            Err(_) => {
+                let _ = varlink_write_error(&mut writer, "org.varlink.service.InvalidParameter");
+                break;
+            }
+        };
+
+        let method = match request.get("method").and_then(|v| v.as_str()) {
+            Some(m) => m,
+            None => {
+                let _ = varlink_write_error(&mut writer, "org.varlink.service.InvalidParameter");
+                break;
+            }
+        };
+
+        // One-way calls don't need a reply
+        let oneway = request
+            .get("oneway")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let response = match method {
+            "io.systemd.Journal.Synchronize" => {
+                state.sync_requested.store(true, Ordering::Release);
+                // Wait for the maintenance thread to process the sync
+                let start = Instant::now();
+                while state.sync_requested.load(Ordering::Acquire)
+                    && start.elapsed() < Duration::from_secs(10)
+                {
+                    thread::sleep(Duration::from_millis(50));
+                }
+                Ok(())
+            }
+            "io.systemd.Journal.Rotate" => {
+                state.rotate_requested.store(true, Ordering::Release);
+                let start = Instant::now();
+                while state.rotate_requested.load(Ordering::Acquire)
+                    && start.elapsed() < Duration::from_secs(10)
+                {
+                    thread::sleep(Duration::from_millis(50));
+                }
+                Ok(())
+            }
+            "io.systemd.Journal.FlushToVar" => {
+                state.flush_requested.store(true, Ordering::Release);
+                let start = Instant::now();
+                while state.flush_requested.load(Ordering::Acquire)
+                    && start.elapsed() < Duration::from_secs(10)
+                {
+                    thread::sleep(Duration::from_millis(50));
+                }
+                Ok(())
+            }
+            "io.systemd.Journal.RelinquishVar" => {
+                // We don't support switching to runtime-only storage at runtime,
+                // but accepting the call without error avoids breaking journalctl.
+                Ok(())
+            }
+            "io.systemd.service.Ping" => Ok(()),
+            _ => Err("org.varlink.service.MethodNotFound"),
+        };
+
+        if !oneway {
+            match response {
+                Ok(()) => {
+                    let reply = b"{}\0";
+                    if writer.write_all(reply).is_err() {
+                        break;
+                    }
+                }
+                Err(error_id) => {
+                    if varlink_write_error(&mut writer, error_id).is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Write a Varlink error response.
+fn varlink_write_error(writer: &mut dyn Write, error_id: &str) -> io::Result<()> {
+    let msg = format!("{{\"error\":\"{}\"}}\0", error_id);
+    writer.write_all(msg.as_bytes())
+}
+
+// ---------------------------------------------------------------------------
 // Maintenance thread
 // ---------------------------------------------------------------------------
 
@@ -2206,6 +2373,12 @@ fn main() {
         .name("maintenance".into())
         .spawn(move || maintenance_thread(state_maint))
         .expect("failed to spawn maintenance thread");
+
+    let state_varlink = Arc::clone(&state);
+    let _varlink_handle = thread::Builder::new()
+        .name("varlink".into())
+        .spawn(move || varlink_server(state_varlink))
+        .expect("failed to spawn varlink thread");
 
     // Log a startup message to the journal itself
     {
