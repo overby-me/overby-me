@@ -10,7 +10,7 @@ pub type BuiltinFn = fn(&mut Shell, &[String]) -> i32;
 mod compgen;
 mod exec;
 mod flow;
-mod fs;
+pub(crate) mod fs;
 mod io;
 mod misc;
 mod set;

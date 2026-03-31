@@ -144,7 +144,7 @@ pub(super) fn builtin_export(shell: &mut Shell, args: &[String]) -> i32 {
 pub(super) fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
     let mut unset_functions = false;
     let mut unset_variables = false;
-    let mut _unset_nameref = false;
+    let mut unset_nameref = false;
     let mut names = Vec::new();
     let mut parsing_opts = true;
 
@@ -154,7 +154,7 @@ pub(super) fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
             match opt {
                 "-v" => unset_variables = true,
                 "-f" => unset_functions = true,
-                "-n" => _unset_nameref = true,
+                "-n" => unset_nameref = true,
                 "--" => parsing_opts = false,
                 _ => {
                     eprintln!(
@@ -260,9 +260,50 @@ pub(super) fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
                     }
                 }
             }
-        } else {
+        } else if unset_nameref {
+            // unset -n: remove the nameref itself, not the target
+            if shell.readonly_vars.contains(name) {
+                eprintln!(
+                    "{}: unset: {}: cannot unset: readonly variable",
+                    shell.error_prefix(),
+                    name
+                );
+                status = 1;
+                continue;
+            }
+            shell.namerefs.remove(name);
+            shell.vars.remove(name);
+            shell.exports.remove(name);
+            shell.integer_vars.remove(name);
+            shell.uppercase_vars.remove(name);
+            shell.lowercase_vars.remove(name);
+            shell.capitalize_vars.remove(name);
+            unsafe { std::env::remove_var(name) };
+        } else if shell.namerefs.contains_key(name) {
+            // unset through nameref: unset the target variable, keep the nameref
             let resolved = shell.resolve_nameref(name);
             if shell.readonly_vars.contains(&resolved) {
+                eprintln!(
+                    "{}: unset: {}: cannot unset: readonly variable",
+                    shell.error_prefix(),
+                    name
+                );
+                status = 1;
+                continue;
+            }
+            shell.vars.remove(&resolved);
+            shell.exports.remove(&resolved);
+            shell.arrays.remove(&resolved);
+            shell.assoc_arrays.remove(&resolved);
+            shell.integer_vars.remove(&resolved);
+            shell.uppercase_vars.remove(&resolved);
+            shell.lowercase_vars.remove(&resolved);
+            shell.capitalize_vars.remove(&resolved);
+            // Don't remove the nameref itself — it stays
+            unsafe { std::env::remove_var(&resolved) };
+        } else {
+            // Regular variable unset
+            if shell.readonly_vars.contains(name) {
                 eprintln!(
                     "{}: unset: {}: cannot unset: readonly variable",
                     shell.error_prefix(),
@@ -620,6 +661,8 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
     let mut flag_unset_readonly = false;
     let mut flag_export = false;
     let mut flag_integer = false;
+    // Names already consumed by +n processing (should not be re-processed)
+    let mut nameref_consumed: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut flag_uppercase = false;
     let mut flag_lowercase = false;
     let mut flag_capitalize = false;
@@ -675,6 +718,7 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             let mut unset_lowercase = false;
             let mut unset_capitalize = false;
             let mut unset_trace = false;
+            let mut unset_nameref = false;
             for ch in arg[1..].chars() {
                 match ch {
                     'r' => flag_unset_readonly = true,
@@ -686,6 +730,7 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     'l' => unset_lowercase = true,
                     'c' => unset_capitalize = true,
                     't' => unset_trace = true,
+                    'n' => unset_nameref = true,
                     _ => {}
                 }
             }
@@ -736,8 +781,36 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 if unset_trace {
                     shell.traced_funcs.remove(pure);
                 }
+                if unset_nameref {
+                    // typeset +n foo=value: first assign value through the
+                    // nameref (to the target variable), then remove the
+                    // nameref attribute.  foo retains the target name as its
+                    // plain string value.
+                    if let Some(eq) = rname.find('=') {
+                        let val = &rname[eq + 1..];
+                        if let Some(target) = shell.namerefs.get(pure).cloned() {
+                            // Assign through nameref to the target variable
+                            shell.set_var(&target, val.to_string());
+                        }
+                        // After removing nameref, foo's value is the old
+                        // target name (not the assigned value)
+                        if let Some(target) = shell.namerefs.remove(pure) {
+                            shell.vars.insert(pure.to_string(), target);
+                        }
+                        // Mark as consumed so the main declare body doesn't
+                        // re-process this name=value and overwrite our result
+                        nameref_consumed.insert(rname.clone());
+                    } else {
+                        // typeset +n foo (no value): just remove nameref,
+                        // set foo to the old target name
+                        if let Some(target) = shell.namerefs.remove(pure) {
+                            shell.vars.insert(pure.to_string(), target);
+                        }
+                        nameref_consumed.insert(rname.clone());
+                    }
+                }
             }
-        } else {
+        } else if !nameref_consumed.contains(arg) {
             names.push(arg.clone());
         }
         i += 1;
@@ -1397,6 +1470,7 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             }
 
             if flag_nameref {
+                shell.vars.remove(name);
                 shell.namerefs.insert(name.to_string(), value.to_string());
             } else if flag_assoc {
                 let map = parse_assoc_literal(value);
@@ -1497,7 +1571,11 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 shell.declare_local(name);
             }
             if flag_nameref {
-                shell.namerefs.entry(name.to_string()).or_default();
+                // `typeset -n foo` (no value): use foo's current value as the
+                // nameref target, then remove it from regular vars.  This matches
+                // bash: `foo=bar; typeset -n foo` → foo is a nameref to "bar".
+                let target = shell.vars.remove(name).unwrap_or_default();
+                shell.namerefs.insert(name.to_string(), target);
             } else if flag_assoc {
                 if !shell.assoc_arrays.contains_key(name) {
                     let mut new_map = crate::interpreter::AssocArray::default();

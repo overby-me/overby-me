@@ -2011,8 +2011,13 @@ impl Parser {
                         | Token::TripleLess
                 );
             if is_redir {
-                let n: i32 = s.parse().unwrap();
-                return Some(RedirFd::Number(n));
+                if let Ok(n) = s.parse::<i32>() {
+                    return Some(RedirFd::Number(n));
+                }
+                // Number too large for fd — backtrack and treat as word
+                self.lexer.restore_position(saved_pos);
+                self.current = saved_tok;
+                return None;
             }
             // Not a redirect — backtrack
             self.lexer.restore_position(saved_pos);
