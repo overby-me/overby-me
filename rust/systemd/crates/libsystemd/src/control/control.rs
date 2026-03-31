@@ -3825,7 +3825,7 @@ fn create_transient_unit(
                 && matches!(&*status, UnitStatus::Started(_))
                 && matches!(&u.specific, Specific::Service(svc) if {
                     svc.conf.srcv_type == crate::units::ServiceType::OneShot
-                    && svc.state.try_read().map_or(false, |s| s.srvc.main_exit_pid.is_some())
+                    && svc.state.try_read().is_ok_and(|s| s.srvc.main_exit_pid.is_some())
                 });
             (u.id.clone(), is_done || is_completed_oneshot)
         });

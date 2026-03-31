@@ -4,8 +4,6 @@
   testEnv.TEST_SKIP_SUBTESTS = builtins.concatStringsSep " " [
     "bsod" # needs systemd-bsod binary not in VM
     "JOURNAL\\.cat\\." # needs journal namespace (systemd-journald@ template socket)
-    "JOURNAL\\.invocation\\." # needs systemd-run --wait (oneshot deadlock) + journalctl --list-invocation
-
     "journal-append" # needs test-journal-append test binary
     "journal-corrupt\\." # needs systemd-run --user -M (machined)
     # journal-gatewayd and journal-remote self-skip when binary is missing
@@ -34,10 +32,6 @@
     # Restart=always in journald unit ensures journald restarts after SIGKILL.
     # --directory test with zstd decompressed journal data uses C journalctl
     # directly against test journal files — doesn't require our journald.
-    # Remove systemd-run --unit tests (need systemd-run --wait) — entire block including heredoc
-    sed -i '/UNIT_NAME=/,/^EOF$/d' TEST-04-JOURNAL.journal.sh
-    # Remove orphaned rm of $CURSOR_FILE (defined inside deleted UNIT_NAME block)
-    sed -i '/^rm -f "\$CURSOR_FILE"$/d' TEST-04-JOURNAL.journal.sh
     # LogFilterPatterns: remove syslog variant (needs journald-level cgroup filtering)
     # and delegated-cgroup variant (needs cgroup xattr delegation)
     sed -i '/logs-filtering-syslog/d' TEST-04-JOURNAL.LogFilterPatterns.sh

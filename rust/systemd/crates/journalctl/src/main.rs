@@ -1828,27 +1828,18 @@ fn main() {
             } else {
                 format!("{unit}.service")
             };
-            // Support glob patterns (e.g. invocation-id-test-*.service)
-            let pattern = if unit_name.contains('*') || unit_name.contains('?') {
-                Some(unit_name.clone())
-            } else {
-                None
-            };
+            // Support glob patterns (e.g. invocation-*-test-12345.service)
+            let is_glob = unit_name.contains('*') || unit_name.contains('?');
             entries
                 .iter()
                 .filter(|e| {
-                    if let Some(ref pat) = pattern {
-                        e.systemd_unit().is_some_and(|u| {
-                            // Simple glob: only handle trailing * for now
-                            if let Some(prefix) = pat.strip_suffix('*') {
-                                u.starts_with(prefix)
-                            } else {
-                                u == *pat
-                            }
-                        })
-                    } else {
-                        e.systemd_unit().is_some_and(|u| u == unit_name)
-                    }
+                    e.systemd_unit().is_some_and(|u| {
+                        if is_glob {
+                            simple_glob_match(&unit_name, &u)
+                        } else {
+                            u == unit_name
+                        }
+                    })
                 })
                 .collect()
         } else {
