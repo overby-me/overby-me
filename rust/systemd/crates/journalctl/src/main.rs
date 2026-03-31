@@ -1265,8 +1265,16 @@ impl MatchCondition {
             }
             MatchCondition::Exe(exe) => entry.exe().is_some_and(|e| e == *exe),
             MatchCondition::Script { interpreter, comm } => {
+                // _COMM from /proc/pid/comm is truncated to 15 chars by the kernel,
+                // so match using a prefix when the name exceeds 15 chars.
                 entry.exe().is_some_and(|e| e == *interpreter)
-                    && entry.comm().is_some_and(|c| c == *comm)
+                    && entry.comm().is_some_and(|c| {
+                        if comm.len() > 15 {
+                            c == comm[..15]
+                        } else {
+                            c == *comm
+                        }
+                    })
             }
             MatchCondition::KernelDevice(dev) => {
                 entry.field("_KERNEL_DEVICE").is_some_and(|d| d == *dev)

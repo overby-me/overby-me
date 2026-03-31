@@ -34,7 +34,7 @@
     sed -i '/verbose-success/d' TEST-04-JOURNAL.journal.sh
     # Remove silent-success tests (need per-service journal stdout streams)
     sed -i '/silent-success/d' TEST-04-JOURNAL.journal.sh
-    # Remove path-as-boot-spec test (C systemd treats invalid boot ID differently)
+    # Remove script-as-path test (script's bash process has no matching journal entries)
     sed -i '/journalctl -b.*readlink/d' TEST-04-JOURNAL.journal.sh
     # Remove emerg test (needs --stderr-priority)
     sed -i '/stderr-priority/d' TEST-04-JOURNAL.journal.sh
