@@ -8,7 +8,6 @@
     "journal-corrupt\\." # needs systemd-run --user -M (machined)
     # journal-gatewayd and journal-remote self-skip when binary is missing
     # LogFilterPatterns: stdout variant enabled; syslog and delegated-cgroup variants patched out
-    "reload" # uses systemd-run --wait (oneshot deadlock) + verify_journals with -D
     "journalctl-varlink" # not a real subtest file — skip is harmless
     "SYSTEMD_JOURNAL_COMPRESS" # needs journalctl --verify and compression env var support
   ];
