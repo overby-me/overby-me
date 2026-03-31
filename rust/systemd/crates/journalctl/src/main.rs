@@ -1673,6 +1673,8 @@ fn main() {
         // Send SIGUSR1 to journald to trigger a flush
         eprintln!("Requesting flush of journal to persistent storage...");
         send_signal_to_journald(libc::SIGUSR1);
+        // Wait for journald to complete the flush (no ack mechanism, use a brief sleep)
+        std::thread::sleep(Duration::from_millis(250));
         return;
     }
 
@@ -1707,6 +1709,8 @@ fn main() {
         if let Some(ref ns) = cli.namespace {
             send_signal_to_journald_namespace(ns, libc::SIGRTMIN() + 1);
         }
+        // Wait for journald to complete the fsync (no ack mechanism, use a brief sleep)
+        std::thread::sleep(Duration::from_millis(250));
         return;
     }
 
