@@ -1997,8 +1997,12 @@ fn main() {
                 };
                 boots.get(idx).map(|b| b.boot_id.clone())
             } else {
-                // Boot ID string
-                Some(boot_spec.clone())
+                // Boot ID string — normalize by stripping dashes for comparison
+                let normalized = boot_spec.replace('-', "");
+                boots
+                    .iter()
+                    .find(|b| b.boot_id == normalized)
+                    .map(|b| b.boot_id.clone())
             };
 
             if let Some(boot_id) = target_boot_id {
