@@ -2298,13 +2298,17 @@ fn main() {
 
     // Limit number of entries
     if let Some(ref n_str) = cli.lines {
+        let from_start = n_str.starts_with('+');
         let n: usize = if let Some(stripped) = n_str.strip_prefix('+') {
             stripped.parse().unwrap_or(0)
         } else {
             n_str.parse().unwrap_or(0)
         };
         if n > 0 {
-            if !cli.reverse {
+            if from_start {
+                // +N: show the first N entries from the start
+                filtered.truncate(n);
+            } else if !cli.reverse {
                 // Show the last N entries (tail behavior)
                 if filtered.len() > n {
                     let skip = filtered.len() - n;
