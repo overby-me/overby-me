@@ -17,8 +17,9 @@ export const initBugfender = async () => {
 			overrideConsoleMethods: true,
 			// Print logs to browser console as well (useful for development)
 			printToConsole: process.env.NODE_ENV === "development",
-			// Automatically register global error handlers for unhandled errors
-			registerErrorHandler: true,
+			// Disable built-in error handler — our custom listeners below provide
+			// source-mapped stacks with richer context instead.
+			registerErrorHandler: false,
 			// Log browser events (page loads, navigation, etc.)
 			logBrowserEvents: true,
 			// Log UI events (clicks, form submissions, etc.)
