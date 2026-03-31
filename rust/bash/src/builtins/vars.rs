@@ -667,9 +667,74 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             }
         } else if arg.starts_with('+') && arg.len() > 1 {
             // +<flag> unsets attribute
+            let mut unset_array = false;
+            let mut unset_assoc = false;
+            let mut unset_integer = false;
+            let mut unset_export = false;
+            let mut unset_uppercase = false;
+            let mut unset_lowercase = false;
+            let mut unset_capitalize = false;
+            let mut unset_trace = false;
             for ch in arg[1..].chars() {
-                if ch == 'r' {
-                    flag_unset_readonly = true;
+                match ch {
+                    'r' => flag_unset_readonly = true,
+                    'a' => unset_array = true,
+                    'A' => unset_assoc = true,
+                    'i' => unset_integer = true,
+                    'x' => unset_export = true,
+                    'u' => unset_uppercase = true,
+                    'l' => unset_lowercase = true,
+                    'c' => unset_capitalize = true,
+                    't' => unset_trace = true,
+                    _ => {}
+                }
+            }
+            // Check for +A or +a to flag array destruction attempt
+            if unset_assoc || unset_array {
+                // Process names to emit error
+                let remaining_names: Vec<String> = args[i + 1..]
+                    .iter()
+                    .filter(|a| !a.starts_with('-') && !a.starts_with('+'))
+                    .cloned()
+                    .collect();
+                for rname in &remaining_names {
+                    let pure = rname.split('=').next().unwrap_or(rname);
+                    if shell.assoc_arrays.contains_key(pure) || shell.arrays.contains_key(pure) {
+                        eprintln!(
+                            "{}: declare: {}: cannot destroy array variables in this way",
+                            shell.error_prefix(),
+                            pure
+                        );
+                        return 1;
+                    }
+                }
+            }
+            // Apply attribute removal to names that follow
+            let remaining_names: Vec<String> = args[i + 1..]
+                .iter()
+                .filter(|a| !a.starts_with('-') && !a.starts_with('+'))
+                .cloned()
+                .collect();
+            for rname in &remaining_names {
+                let pure = rname.split('=').next().unwrap_or(rname);
+                if unset_integer {
+                    shell.integer_vars.remove(pure);
+                }
+                if unset_export {
+                    shell.exports.remove(pure);
+                    unsafe { std::env::remove_var(pure) };
+                }
+                if unset_uppercase {
+                    shell.uppercase_vars.remove(pure);
+                }
+                if unset_lowercase {
+                    shell.lowercase_vars.remove(pure);
+                }
+                if unset_capitalize {
+                    shell.capitalize_vars.remove(pure);
+                }
+                if unset_trace {
+                    shell.traced_funcs.remove(pure);
                 }
             }
         } else {
@@ -964,16 +1029,23 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             assoc_names.sort();
             for name in assoc_names {
                 let assoc = &shell.assoc_arrays[name];
+                let mut flags = String::from("-A");
+                if shell.integer_vars.contains(name.as_str()) {
+                    flags.push('i');
+                }
+                if shell.readonly_vars.contains(name.as_str()) {
+                    flags.push('r');
+                }
                 if assoc.is_empty() && shell.declared_unset.contains(name) {
-                    println!("declare -A {}", name);
+                    println!("declare {} {}", flags, name);
                 } else if assoc.is_empty() {
-                    println!("declare -A {}=()", name);
+                    println!("declare {} {}=()", flags, name);
                 } else {
                     let elements: Vec<String> = assoc
                         .iter()
                         .map(|(k, v)| format!("[{}]={}", quote_assoc_key(k), quote_for_declare(v)))
                         .collect();
-                    println!("declare -A {}=({} )", name, elements.join(" "));
+                    println!("declare {} {}=({} )", flags, name, elements.join(" "));
                 }
             }
             // Print namerefs not in vars
@@ -1015,6 +1087,9 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     }
                 } else if let Some(assoc) = shell.assoc_arrays.get(name) {
                     let mut flags = String::from("-A");
+                    if shell.integer_vars.contains(name.as_str()) {
+                        flags.push('i');
+                    }
                     if shell.readonly_vars.contains(name.as_str()) {
                         flags.push('r');
                     }
@@ -1165,16 +1240,23 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
         sorted.sort();
         for name in sorted {
             if let Some(assoc) = shell.assoc_arrays.get(name) {
+                let mut flags = String::from("-A");
+                if shell.integer_vars.contains(name.as_str()) {
+                    flags.push('i');
+                }
+                if shell.readonly_vars.contains(name.as_str()) {
+                    flags.push('r');
+                }
                 if assoc.is_empty() && shell.declared_unset.contains(name.as_str()) {
-                    println!("declare -A {}", name);
+                    println!("declare {} {}", flags, name);
                 } else if assoc.is_empty() {
-                    println!("declare -A {}=()", name);
+                    println!("declare {} {}=()", flags, name);
                 } else {
                     let elements: Vec<String> = assoc
                         .iter()
                         .map(|(k, v)| format!("[{}]=\"{}\"", quote_assoc_key(k), v))
                         .collect();
-                    println!("declare -A {}=({} )", name, elements.join(" "));
+                    println!("declare {} {}=({} )", flags, name, elements.join(" "));
                 }
             }
         }
@@ -1194,6 +1276,106 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             } else {
                 (&name_arg[..eq_pos], &name_arg[eq_pos + 1..], false)
             };
+
+            // Check for subscripted name: name[key]=value
+            if let Some(bracket) = name.find('[') {
+                let base = &name[..bracket];
+                let idx_str = if name.ends_with(']') {
+                    &name[bracket + 1..name.len() - 1]
+                } else {
+                    &name[bracket + 1..]
+                };
+                let resolved_base = shell.resolve_nameref(base);
+
+                // Check readonly on the base name
+                if shell.readonly_vars.contains(&resolved_base) {
+                    eprintln!(
+                        "{}: declare: {}: readonly variable",
+                        shell.error_prefix(),
+                        resolved_base
+                    );
+                    status = 1;
+                    continue;
+                }
+
+                if shell.assoc_arrays.contains_key(&resolved_base) {
+                    // Assoc array element assignment
+                    let val = if flag_integer || shell.integer_vars.contains(&resolved_base) {
+                        shell.eval_arith_expr(value).to_string()
+                    } else {
+                        value.to_string()
+                    };
+                    if is_append {
+                        let is_int = flag_integer || shell.integer_vars.contains(&resolved_base);
+                        shell
+                            .assoc_arrays
+                            .entry(resolved_base)
+                            .or_default()
+                            .entry(idx_str.to_string())
+                            .and_modify(|v| {
+                                if is_int {
+                                    let existing: i64 = v.parse().unwrap_or(0);
+                                    let addend: i64 = val.parse().unwrap_or(0);
+                                    *v = (existing + addend).to_string();
+                                } else {
+                                    v.push_str(&val);
+                                }
+                            })
+                            .or_insert(val);
+                    } else {
+                        shell
+                            .assoc_arrays
+                            .entry(resolved_base)
+                            .or_default()
+                            .insert(idx_str.to_string(), val);
+                    }
+                } else {
+                    // Indexed array element assignment
+                    let raw_idx = shell.eval_arith_expr(idx_str);
+                    let is_int = flag_integer || shell.integer_vars.contains(&resolved_base);
+                    let val = if is_int {
+                        shell.eval_arith_expr(value).to_string()
+                    } else {
+                        value.to_string()
+                    };
+                    let arr = shell.arrays.entry(resolved_base).or_default();
+                    let idx = if raw_idx < 0 {
+                        let len = arr.len() as i64;
+                        (len + raw_idx).max(0) as usize
+                    } else {
+                        raw_idx as usize
+                    };
+                    while arr.len() <= idx {
+                        arr.push(None);
+                    }
+                    if is_append {
+                        if is_int {
+                            let existing: i64 = arr[idx]
+                                .as_deref()
+                                .and_then(|v| v.parse().ok())
+                                .unwrap_or(0);
+                            let addend: i64 = val.parse().unwrap_or(0);
+                            arr[idx] = Some((existing + addend).to_string());
+                        } else {
+                            match &mut arr[idx] {
+                                Some(s) => s.push_str(&val),
+                                None => arr[idx] = Some(val),
+                            }
+                        }
+                    } else {
+                        arr[idx] = Some(val);
+                    }
+                }
+                if flag_readonly {
+                    shell.readonly_vars.insert(base.to_string());
+                }
+                if flag_export {
+                    let val = shell.get_var(base).unwrap_or_default();
+                    shell.exports.insert(base.to_string(), val.clone());
+                    unsafe { std::env::set_var(base, &val) };
+                }
+                continue;
+            }
 
             // Check if variable is readonly
             if shell.readonly_vars.contains(name) && !make_local {
@@ -1293,7 +1475,13 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 }
             }
         } else {
-            let name = name_arg.as_str();
+            // Strip [subscript] from name when -A or -a flag is set
+            // e.g., `declare -A chaff[200]` → treat as `declare -A chaff`
+            let name = if (flag_assoc || flag_array) && name_arg.contains('[') {
+                name_arg.split('[').next().unwrap_or(name_arg.as_str())
+            } else {
+                name_arg.as_str()
+            };
             // Can't remove readonly attribute
             if flag_unset_readonly && shell.readonly_vars.contains(name) {
                 eprintln!(
@@ -1312,8 +1500,22 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 shell.namerefs.entry(name.to_string()).or_default();
             } else if flag_assoc {
                 if !shell.assoc_arrays.contains_key(name) {
-                    shell.assoc_arrays.entry(name.to_string()).or_default();
-                    shell.declared_unset.insert(name.to_string());
+                    let mut new_map = crate::interpreter::AssocArray::default();
+                    // Convert existing scalar value to element [0]
+                    if let Some(val) = shell.vars.remove(name) {
+                        new_map.insert("0".to_string(), val);
+                    } else {
+                        shell.declared_unset.insert(name.to_string());
+                    }
+                    // Convert existing indexed array to assoc array
+                    if let Some(arr) = shell.arrays.remove(name) {
+                        for (i, v) in arr.into_iter().enumerate() {
+                            if let Some(val) = v {
+                                new_map.insert(i.to_string(), val);
+                            }
+                        }
+                    }
+                    shell.assoc_arrays.insert(name.to_string(), new_map);
                 }
             } else if flag_array {
                 if !shell.arrays.contains_key(name) {
@@ -1370,6 +1572,7 @@ pub fn parse_assoc_literal(s: &str) -> crate::interpreter::AssocArray {
     } else {
         vec![inner]
     };
+    let has_sep = inner.contains('\x1F');
     for entry in entries {
         let mut rest = entry.trim();
         while !rest.is_empty() {
@@ -1378,7 +1581,11 @@ pub fn parse_assoc_literal(s: &str) -> crate::interpreter::AssocArray {
             {
                 let key = &rest[1..close];
                 let after = &rest[close + 2..];
-                let (value, remaining) = if let Some(stripped) = after.strip_prefix('"') {
+                // When entries are separated by \x1F, each entry is a single
+                // key=value pair, so the entire remainder is the value.
+                let (value, remaining) = if has_sep {
+                    (after, "")
+                } else if let Some(stripped) = after.strip_prefix('"') {
                     if let Some(end) = stripped.find('"') {
                         (&stripped[..end], stripped[end + 1..].trim_start())
                     } else {

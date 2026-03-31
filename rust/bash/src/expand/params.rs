@@ -211,7 +211,17 @@ pub(super) fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
                     _ => {
                         // Check associative array first (string key)
                         if let Some(assoc) = ctx.assoc_arrays.get(&resolved) {
-                            return assoc.get(idx_str).cloned().unwrap_or_default();
+                            // Strip surrounding quotes from subscript key
+                            // e.g., ${arr["0"]} → key "0", ${arr['key']} → key "key"
+                            let stripped_key = if idx_str.len() >= 2
+                                && ((idx_str.starts_with('"') && idx_str.ends_with('"'))
+                                    || (idx_str.starts_with('\'') && idx_str.ends_with('\'')))
+                            {
+                                &idx_str[1..idx_str.len() - 1]
+                            } else {
+                                idx_str
+                            };
+                            return assoc.get(stripped_key).cloned().unwrap_or_default();
                         }
                         // Numeric index for indexed arrays (supports negative)
                         // Expand $var and ${var} references in subscript

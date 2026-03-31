@@ -6,6 +6,37 @@
 
 ### Progress This Session (Latest)
 
+- **assoc**: 2 diff locally (was 65). **Massive improvement — 63 lines reduced**
+  - Fixed `declare -Ai` arithmetic evaluation for assoc array compound assignments
+  - Fixed bare values in assoc compound assignment to error ("must use subscript")
+  - Fixed `declare fluff[qux]=assigned` — subscripted names in declare for assoc/indexed arrays
+  - Fixed `declare -p` to show `-Ai` and `-Ar` flags for assoc arrays (all output paths)
+  - Fixed `declare +A chaff` — "cannot destroy array variables in this way" error
+  - Fixed `declare +i`, `+x`, `+u`, `+l`, `+c`, `+t` to actually unset variable attributes
+  - Fixed `declare -A chaff[200]` — strip subscript from name when `-A`/`-a` flag set
+  - Fixed readonly error message to show base name (`waste` not `waste[stuff]`)
+  - Fixed compound assignment with spaced keys (`wheat=([foo bar]="qux qix")`) — parser merges tokens until `]=` found
+  - Fixed compound assignment with quoted keys (`hash=(["key"]="value")`) — parser walks across WordParts
+  - Fixed element-level `+=` in assoc compound assignments (`assoc+=([one]+=more)`)
+  - Fixed scalar assignment to assoc array — assigns to element `[0]`
+  - Fixed scalar-to-assoc conversion (`assoc=assoc; declare -A assoc` → `[0]="assoc"`)
+  - Fixed `${xpath["0"]}` — strip surrounding quotes from assoc array subscript keys
+  - Fixed `chaff[hello world]=flip` at command level — parser multi-token bracket merge
+  - Fixed subscripted append to check assoc arrays first (string key, not arithmetic eval)
+  - Fixed `declare -A` listing mode to include `i` and `r` flags
+  - Fixed `parse_assoc_literal` to use full value when `\x1F` separators present
+  - Fixed arithmetic panic on unclosed `[` expressions (e.g., `[foo` with no `]`)
+- **posixexp**: 3 diff locally (was 6). Improved by 3 lines
+- **varenv**: 14 diff locally (was 18). Improved by 4 lines
+- **nameref**: 248 diff locally (was 258). Improved by 10 lines
+- **array**: 424 diff locally (was 446). Improved by 22 lines
+- **arith**: 0 diff ✅
+- **builtins**: 18 diff locally (PID only) ✅
+- **heredoc**: 8 diff locally (PID diffs + sub-tests)
+- **comsub-posix**: 0 diff locally ✅
+
+### Progress Previous Session
+
 - **builtins**: 18 diff locally → **all PID diffs** (was 40). Should now pass in nix ✅
   - Fixed `exec -c` (clear env), `exec -l` (login shell argv[0] prefix)
   - Fixed `foo="" export foo` prefix assignment persistence
@@ -22,7 +53,7 @@
 - **heredoc**: 8 diff locally (PID diffs + sub-tests)
 - **comsub-posix**: 0 diff locally ✅
 
-### Progress Previous Session
+### Progress Two Sessions Ago
 
 - **Started at**: 64/77 (arith diff 30, heredoc diff 111, comsub-posix diff 20)
 - **heredoc**: main test 0 real diff locally ✅ (was ~20, only PID diffs remain), nix sub-tests ~85 diff
@@ -33,6 +64,40 @@
 - **printf**: flaky — timing-dependent date format mismatch
 
 ### Fixes Applied This Session (Latest)
+
+31. **Fix `declare -Ai` arithmetic evaluation for assoc arrays** (`src/interpreter/commands.rs`) — Compound assignment to assoc arrays with `-i` flag now evaluates values as arithmetic (e.g., `[zero]=1+4` → `5`). Also handles element-level `+=` for assoc compound assignments.
+
+32. **Error for bare values in assoc compound assignment** (`src/interpreter/commands.rs`) — `chaff=([zero]=1+4 four)` now reports `chaff: four: must use subscript when assigning associative array` instead of silently assigning to key `"0"`.
+
+33. **Fix `declare fluff[qux]=assigned` subscripted names** (`src/builtins/vars.rs`) — `declare` with subscripted names like `fluff[qux]=assigned` now correctly assigns to the assoc/indexed array element instead of treating `fluff[qux]` as the variable name.
+
+34. **Fix `declare -p` flags for assoc arrays** (`src/builtins/vars.rs`) — All `declare -p` output paths now include `i` (integer) and `r` (readonly) flags for associative arrays. Previously `-Ai` showed as `-A` and `-Ar` showed as `-A`.
+
+35. **Fix `declare +A` and `declare +a`** (`src/builtins/vars.rs`) — `declare +A chaff` now emits `cannot destroy array variables in this way` error. Also added proper handling for `+i`, `+x`, `+u`, `+l`, `+c`, `+t` to remove variable attributes.
+
+36. **Fix readonly error to show base name** (`src/interpreter/commands.rs`) — `waste[stuff]=other` where `waste` is readonly now reports `waste: readonly variable` instead of `waste[stuff]: readonly variable`.
+
+37. **Fix compound assignment with spaced keys** (`src/parser.rs`) — `wheat=([foo bar]="qux qix")` now works. Added `find_bracket_close_in_parts` and token-merging logic in `parse_array_elements` to merge tokens split at spaces inside `[...]` subscripts.
+
+38. **Fix compound assignment with quoted keys** (`src/parser.rs`) — `hash=(["key"]="value")` now works. Added `extract_array_index` helper that walks across multiple `WordPart`s to find `]=` in quoted subscripts.
+
+39. **Fix scalar assignment to assoc array** (`src/interpreter/commands.rs`) — `T='([a]=1)'` on an assoc array now assigns the literal string to key `"0"` instead of dropping it. Also handles scalar assignment to indexed arrays.
+
+40. **Fix scalar-to-assoc conversion** (`src/builtins/vars.rs`) — `assoc=assoc; declare -A assoc` now converts the scalar value to `[0]="assoc"` in the new assoc array instead of creating an empty array.
+
+41. **Fix `${xpath["0"]}` quoted subscript** (`src/expand/params.rs`) — Assoc array lookups now strip surrounding quotes from subscript keys (e.g., `"0"` → `0`, `'key'` → `key`).
+
+42. **Fix command-level `chaff[hello world]=flip`** (`src/parser.rs`) — Added multi-token bracket merge in `try_parse_assignment`: when a token has `name[` but no `]=`, subsequent tokens are consumed and merged until `]=` is found.
+
+43. **Fix subscripted append for assoc arrays** (`src/interpreter/commands.rs`) — `wheat[foo bar]+=" blat"` now checks for assoc arrays first, using string key instead of arithmetic evaluation, preventing spurious arithmetic errors.
+
+44. **Fix `declare -A chaff[200]`** (`src/builtins/vars.rs`) — Strip `[...]` subscripts from names when `-A` or `-a` flag is set, matching bash behavior.
+
+45. **Fix `parse_assoc_literal` value truncation** (`src/builtins/vars.rs`) — When `\x1F` separators are present, the entire remainder after `]=` is the value (no whitespace splitting), fixing `declare -A wheat=([foo bar]="qux qix")` via builtins.
+
+46. **Fix arithmetic panic on unclosed brackets** (`src/interpreter/arithmetic.rs`) — `eval_arith_expr_inner` no longer panics when `]` is not found (e.g., `[foo` without closing `]`).
+
+### Fixes Applied Two Sessions Ago
 
 18. **Fix `exec -c` to actually clear environment** (`src/builtins/exec.rs`) — `exec -c` was clearing env vars then re-applying all shell exports, defeating the purpose. Now the else branch only applies exports when `-c` is not set.
 
@@ -128,15 +193,15 @@ diff <("$THIS_SH" ./NAME.tests 2>&1) <(bash ./NAME.tests 2>&1)
 
 Suggested nix timeout: 30s for most tests, 120s for trap.
 
-## 12 Failing Tests (sorted by diff size)
+## Failing Tests (sorted by diff size)
 
 *builtins likely now passes in nix (only PID diffs locally)*
 
 ### Easiest (< 30 diff lines)
 
-#### 1. posixexp (2-6 lines local, 3 issues remain in nix)
+#### 1. posixexp (3 lines local, issues remain in nix)
 
-Three issues in posixexp4.sub:
+Two remaining local diff lines (path-dependent `/var/tmp/sh` errors). Nix issues in posixexp4.sub:
 
 - **`<12>` vs `<1>\n<2>`**: `recho $a` after `IFS=; a=$@` with `set -- 1 2`. Our shell produces `<12>` (single arg), bash produces `<1><2>` (two args). Relates to how `$@` assignment interacts with null IFS — the assigned value should preserve the field boundaries for later `$a` expansion.
 - **IFS splitting in `${var-$@}`**: With `IFS=:` or unset IFS, `${var-$@}` should join positional params by space (not split them individually). Our shell splits `$@` in the default word into separate fields. Two instances in posixexp4.sub. This requires `$@` in `${var-word}` to produce multiple fields, which needs refactoring of the expansion system to propagate field boundaries.
@@ -168,24 +233,19 @@ Main `heredoc.tests` now matches perfectly (only PID diffs remain, normalized by
 - **heredoc7.sub**: Command substitution interacting with heredocs — `cat << EOF)` unterminated heredoc in comsub.
 - **heredoc9.sub**: `HERE; then` and `HERE; do` — heredoc delimiter followed by `;` and keyword on same line in function body printing.
 
-#### 5. varenv (18 lines local = ~chet + PID diffs, was 36 → was 340)
+#### 5. varenv (14 lines local = ~chet + PID diffs, was 18 → was 340)
 
-Massive improvement. Only remaining real issue:
+Improved further (assoc-related fixes helped). Only remaining real issue:
 
 - **`~chet` expansion**: Produces `/a/b/c` instead of `/usr/chet`. User-specific, differs by environment. The nix test also differs here.
 - **Nix sub-tests**: varenv3.sub (local scoping), varenv4.sub (assoc array conversion), varenv25.sub (local -p).
 
-#### 6. assoc (65 lines local, was 527)
+#### 6. assoc (2 lines local, was 65 → was 527) ✅
 
-Significant improvement. Remaining:
+**Nearly passing.** Only remaining issue:
 
-- ~~`[*]` key handling~~ ✅ Now quoted as `["*"]`.
-- ~~`BASH_ALIASES` and `BASH_CMDS` arrays~~ ✅ Now initialized at startup.
-- `declare -Ai` (integer flag) not evaluating values as arithmetic.
-- `declare -Ar` (readonly flag) not shown in declare -p output for assoc arrays.
-- `chaff[hello world]` subscript with spaces not handled (treated as two words).
-- Compound assignment `hash=([key]=value)` parsing for assoc arrays.
-- Tilde expansion in associative array keys/values.
+- `${#wheat[$unset]}` — empty/unset subscript should give "bad array subscript" error for assoc arrays. Currently returns 0.
+- All other issues fixed: `declare -Ai`, `declare -Ar`, `chaff[hello world]`, compound assignment with spaced/quoted keys, `declare +A`, scalar-to-assoc conversion, etc.
 
 #### 7. builtins (18 lines local = PID only, was 93 → was 336) ✅
 
@@ -224,11 +284,11 @@ Associative array keys with special chars in arithmetic contexts.
 
 ### Hard (200+ diff lines)
 
-#### 11. nameref (258 lines local, was 750)
+#### 11. nameref (248 lines local, was 258 → was 750)
 
 `declare -n` improvements but still substantially broken: wrong variable resolution, unset through nameref, nameref chains.
 
-#### 12. array (446 lines local, was 1755)
+#### 12. array (424 lines local, was 446 → was 1755)
 
 Major improvement. Remaining issues in array32.sub, array33.sub (injection protection, type conversion errors).
 
@@ -275,7 +335,7 @@ Timing-dependent: `%(fmt)T` date format test can mismatch if test crosses a seco
 
 ## Recommended Next Priorities
 
-1. **Fix `$@` expansion in `${var-$@}`** — Requires refactoring expansion to propagate field boundaries through `ParamOp::Default`. Currently `expand_word_nosplit_ctx` returns a single string, but `$@` in default words should produce multiple fields. This is architecturally hard but would fix 4 of 6 remaining posixexp nix diff lines.
+1. **Fix new-exp remaining issues** — `${HOME-'}'}` quoting, `bad-var: invalid variable name`, substring expression errors. (~60 diff lines locally, may be less in nix where recho is available)
 
 2. **Fix comsub-posix error messages** — Improve error reporting for intentional syntax errors inside `$(...)` in case patterns. Need parser to detect reserved words like `done` in wrong context. (~35 nix diff lines)
 
@@ -285,11 +345,11 @@ Timing-dependent: `%(fmt)T` date format test can mismatch if test crosses a seco
 
 5. **Fix varenv nix sub-tests** — varenv3.sub (local scoping), varenv4.sub (assoc array conversion), varenv25.sub (local -p).
 
-6. **Fix new-exp remaining issues** — `${HOME-'}'}` quoting, `bad-var: invalid variable name`, substring expression errors. (~60 diff lines locally, may be less in nix where recho is available)
+6. **Fix `$@` expansion in `${var-$@}`** — Requires refactoring expansion to propagate field boundaries through `ParamOp::Default`. Architecturally hard but would fix remaining posixexp nix diff lines.
 
-7. **Fix assoc remaining issues** — `declare -Ai` (integer assoc), `declare -Ar` (readonly flag display), `chaff[hello world]` subscript parsing, compound assignment `hash=([key]=value)`. (~65 diff lines)
+7. **Fix nameref basic operations** — `declare -n foo=bar; echo $foo` doesn't resolve correctly. Deep refactor needed for nameref resolution. (~248 diff lines)
 
-8. **Fix nameref basic operations** — `declare -n foo=bar; echo $foo` doesn't resolve correctly. Deep refactor needed for nameref resolution. (~258 diff lines)
+8. **Fix quotearray arithmetic assoc key handling** — Assoc array subscripts with special chars in `((...))` context. (~185+ diff lines)
 
 ## Approach
 

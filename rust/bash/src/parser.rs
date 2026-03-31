@@ -1389,17 +1389,20 @@ impl Parser {
                 } else if s.ends_with('[') || s.contains('[') {
                     // Handle array assignment with quoted subscript: name[quoted_key]=value
                     // The = is in a later part (e.g., BASH_ALIASES['\$']=xx)
+                    // Also handles spaced subscripts: chaff[hello world]=flip
+                    // where the lexer splits at the space into separate tokens.
                     let base_end = s.find('[').unwrap();
                     let base_name = &s[..base_end];
                     if !base_name.is_empty()
                         && base_name.chars().all(|c| c.is_alphanumeric() || c == '_')
                         && !base_name.chars().next().unwrap().is_ascii_digit()
                     {
-                        // Find ]=  or ]+=  in a later Literal part
+                        // Find ]=  or ]+=  in a later Literal part of the CURRENT token
                         let mut found_eq = false;
                         let mut name_text = s.to_string();
                         let mut value_parts = Vec::new();
                         let mut eq_part_idx = 0;
+                        let mut needs_multi_token = false;
                         for (idx, part) in parts[1..].iter().enumerate() {
                             if found_eq {
                                 value_parts.push(part.clone());
@@ -1439,10 +1442,27 @@ impl Parser {
                                 }
                             }
                         }
+                        if !found_eq {
+                            // The bracket is unclosed within this token — check if the
+                            // subscript has spaces and spans multiple tokens, e.g.
+                            // chaff[hello world]=flip → tokens: "chaff[hello" "world]=flip"
+                            // We flag this for multi-token merging below.
+                            needs_multi_token = true;
+                        }
                         if found_eq {
                             let append = name_text.ends_with("+=");
                             let _ = eq_part_idx;
                             Some((name_text, append, String::new(), parts.len(), value_parts))
+                        } else if needs_multi_token {
+                            // Save state for multi-token bracket merge
+                            // We pass a sentinel to trigger the merge logic below
+                            Some((
+                                name_text,
+                                false,
+                                "\x02MERGE_BRACKET".to_string(),
+                                parts.len(),
+                                value_parts,
+                            ))
                         } else {
                             None
                         }
@@ -1460,6 +1480,98 @@ impl Parser {
         };
 
         let (full_name, append, after_eq, num_parts, value_parts) = info?;
+
+        // Case 0: Multi-token bracket merge for spaced subscripts
+        // e.g., chaff[hello world]=flip → tokens: "chaff[hello" "world]=flip"
+        if after_eq == "\x02MERGE_BRACKET" {
+            let saved_pos = self.lexer.save_position();
+            let saved_tok = self.current.clone();
+            self.advance();
+
+            let mut merged_name = full_name.clone();
+            let mut found = false;
+            let mut final_value_parts: Vec<WordPart> = Vec::new();
+            let mut final_append = false;
+            let mut tokens_consumed = 0;
+
+            // Try merging up to ~20 subsequent tokens (generous limit for long keys)
+            for _ in 0..20 {
+                if matches!(self.current, Token::Eof | Token::Newline) {
+                    break;
+                }
+                if let Token::Word(ref parts) = self.current {
+                    // Check each part for ]+= or ]=
+                    let mut part_name = String::new();
+                    let mut part_found = false;
+                    let mut pval_parts: Vec<WordPart> = Vec::new();
+                    for (pi, part) in parts.iter().enumerate() {
+                        if part_found {
+                            pval_parts.push(part.clone());
+                            continue;
+                        }
+                        if let WordPart::Literal(lit) = part {
+                            if let Some(pos) = lit.find("]+=") {
+                                part_name.push_str(&lit[..pos + 1]);
+                                let after = &lit[pos + 3..];
+                                if !after.is_empty() {
+                                    pval_parts.push(WordPart::Literal(after.to_string()));
+                                }
+                                pval_parts.extend(parts[pi + 1..].iter().cloned());
+                                part_found = true;
+                                final_append = true;
+                            } else if let Some(pos) = lit.find("]=") {
+                                part_name.push_str(&lit[..pos + 1]);
+                                let after = &lit[pos + 2..];
+                                if !after.is_empty() {
+                                    pval_parts.push(WordPart::Literal(after.to_string()));
+                                }
+                                pval_parts.extend(parts[pi + 1..].iter().cloned());
+                                part_found = true;
+                            } else {
+                                part_name.push_str(lit);
+                            }
+                        } else if let WordPart::SingleQuoted(sq) = part {
+                            part_name.push_str(sq);
+                        } else if let WordPart::DoubleQuoted(dq) = part {
+                            for dp in dq {
+                                if let WordPart::Literal(l) = dp {
+                                    part_name.push_str(l);
+                                }
+                            }
+                        } else {
+                            part_name.push_str(&crate::ast::word_to_string(&vec![part.clone()]));
+                        }
+                    }
+                    // Merge with a space separator (the lexer split at the space)
+                    merged_name.push(' ');
+                    merged_name.push_str(&part_name);
+                    tokens_consumed += 1;
+                    self.advance();
+
+                    if part_found {
+                        final_value_parts = pval_parts;
+                        found = true;
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+
+            if found {
+                let value = AssignValue::Scalar(final_value_parts);
+                return Some(Ok(Assignment {
+                    name: merged_name,
+                    value,
+                    append: final_append,
+                }));
+            }
+            // Failed to find ]= — backtrack
+            let _ = tokens_consumed;
+            self.lexer.restore_position(saved_pos);
+            self.current = saved_tok;
+            return None;
+        }
 
         // Case 1: "name=(" all in one token
         if after_eq == "(" && num_parts == 1 {
@@ -1512,51 +1624,236 @@ impl Parser {
         }))
     }
 
+    /// Extract `[index]=value` or `[index]+=value` from a word's parts.
+    /// Returns `(index_parts, value_parts, is_append)` if found, else `None`.
+    fn extract_array_index(parts: &[WordPart]) -> Option<(Vec<WordPart>, Vec<WordPart>, bool)> {
+        // The first literal must start with '['
+        let first_lit = match parts.first() {
+            Some(WordPart::Literal(s)) if s.starts_with('[') => s,
+            _ => return None,
+        };
+
+        // Fast path: everything in the first literal, e.g. [key]=value or [key]+=value
+        if let Some(close) = first_lit.find("]+=") {
+            let idx_str = first_lit[1..close].to_string();
+            let after = first_lit[close + 3..].to_string();
+            let rest: Vec<WordPart> = parts[1..].to_vec();
+            let mut value_parts = Vec::new();
+            if !after.is_empty() {
+                value_parts.push(WordPart::Literal(after));
+            }
+            value_parts.extend(rest);
+            return Some((vec![WordPart::Literal(idx_str)], value_parts, true));
+        }
+        if let Some(close) = first_lit.find("]=") {
+            let idx_str = first_lit[1..close].to_string();
+            let after = first_lit[close + 2..].to_string();
+            let rest: Vec<WordPart> = parts[1..].to_vec();
+            let mut value_parts = Vec::new();
+            if !after.is_empty() {
+                value_parts.push(WordPart::Literal(after));
+            }
+            value_parts.extend(rest);
+            return Some((vec![WordPart::Literal(idx_str)], value_parts, false));
+        }
+
+        // Slow path: key spans multiple parts, e.g. ["key"]=value
+        // Walk parts looking for a Literal containing "]+=" or "]="
+        let mut idx_parts: Vec<WordPart> = Vec::new();
+        // Strip the leading '[' from the first literal
+        let stripped = first_lit[1..].to_string();
+        if !stripped.is_empty() {
+            idx_parts.push(WordPart::Literal(stripped));
+        }
+
+        for (i, part) in parts.iter().enumerate().skip(1) {
+            if let WordPart::Literal(s) = part {
+                // Check for ]+=
+                if let Some(pos) = s.find("]+=") {
+                    let before = &s[..pos];
+                    if !before.is_empty() {
+                        idx_parts.push(WordPart::Literal(before.to_string()));
+                    }
+                    let after = &s[pos + 3..];
+                    let mut value_parts = Vec::new();
+                    if !after.is_empty() {
+                        value_parts.push(WordPart::Literal(after.to_string()));
+                    }
+                    value_parts.extend(parts[i + 1..].to_vec());
+                    return Some((idx_parts, value_parts, true));
+                }
+                // Check for ]=
+                if let Some(pos) = s.find("]=") {
+                    let before = &s[..pos];
+                    if !before.is_empty() {
+                        idx_parts.push(WordPart::Literal(before.to_string()));
+                    }
+                    let after = &s[pos + 2..];
+                    let mut value_parts = Vec::new();
+                    if !after.is_empty() {
+                        value_parts.push(WordPart::Literal(after.to_string()));
+                    }
+                    value_parts.extend(parts[i + 1..].to_vec());
+                    return Some((idx_parts, value_parts, false));
+                }
+                // No close bracket in this literal — accumulate
+                idx_parts.push(part.clone());
+            } else {
+                // Non-literal part (quoted string, etc.) — accumulate as part of key
+                idx_parts.push(part.clone());
+            }
+        }
+
+        // Never found ']=' — not an indexed element
+        None
+    }
+
+    /// Find `]=` or `]+=` in a token's parts, splitting into before-close and after-close parts.
+    /// Returns `(key_tail_parts, value_parts, is_append)` if found.
+    fn find_bracket_close_in_parts(
+        parts: &[WordPart],
+    ) -> Option<(Vec<WordPart>, Vec<WordPart>, bool)> {
+        for (i, part) in parts.iter().enumerate() {
+            if let WordPart::Literal(s) = part {
+                // Check for ]+=
+                if let Some(pos) = s.find("]+=") {
+                    let before = &s[..pos];
+                    let after = &s[pos + 3..];
+                    let mut key_tail = Vec::new();
+                    if !before.is_empty() {
+                        key_tail.push(WordPart::Literal(before.to_string()));
+                    }
+                    let mut value_parts = Vec::new();
+                    if !after.is_empty() {
+                        value_parts.push(WordPart::Literal(after.to_string()));
+                    }
+                    value_parts.extend(parts[i + 1..].iter().cloned());
+                    return Some((key_tail, value_parts, true));
+                }
+                // Check for ]=
+                if let Some(pos) = s.find("]=") {
+                    let before = &s[..pos];
+                    let after = &s[pos + 2..];
+                    let mut key_tail = Vec::new();
+                    if !before.is_empty() {
+                        key_tail.push(WordPart::Literal(before.to_string()));
+                    }
+                    let mut value_parts = Vec::new();
+                    if !after.is_empty() {
+                        value_parts.push(WordPart::Literal(after.to_string()));
+                    }
+                    value_parts.extend(parts[i + 1..].iter().cloned());
+                    return Some((key_tail, value_parts, false));
+                }
+            }
+        }
+        None
+    }
+
     /// Parse array elements: `word1 [n]=word2 word3 ...` until `)`
     fn parse_array_elements(&mut self) -> Result<Vec<ArrayElement>, String> {
         let mut elements = Vec::new();
         self.skip_newlines();
 
         while self.current != Token::RParen && self.current != Token::Eof {
-            // Check for [index]=value syntax by extracting info first
+            // Check for [index]=value syntax by examining all word parts.
+            // The key may span multiple parts, e.g. ["key"]="value" produces:
+            //   [Literal("["), DoubleQuoted(...), Literal("]="), DoubleQuoted(...)]
+            // Or simple: [key]=value produces:
+            //   [Literal("[key]=value")]
             let indexed_info = if let Token::Word(parts) = &self.current {
-                if let Some(WordPart::Literal(s)) = parts.first() {
-                    if s.starts_with('[') {
-                        if let Some(close) = s.find("]+=") {
-                            // [idx]+=value — per-element append
-                            let idx_str = s[1..close].to_string();
-                            let after = s[close + 3..].to_string();
-                            let rest_parts: Vec<WordPart> = parts[1..].to_vec();
-                            Some((idx_str, after, rest_parts, true))
-                        } else if let Some(close) = s.find("]=") {
-                            let idx_str = s[1..close].to_string();
-                            let after = s[close + 2..].to_string();
-                            let rest_parts: Vec<WordPart> = parts[1..].to_vec();
-                            Some((idx_str, after, rest_parts, false))
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
+                Self::extract_array_index(parts)
             } else {
                 None
             };
 
-            if let Some((idx_str, after, rest_parts, elem_append)) = indexed_info {
+            if let Some((idx_parts, value_parts, elem_append)) = indexed_info {
                 self.advance();
-                let mut value_parts = Vec::new();
-                if !after.is_empty() {
-                    value_parts.push(WordPart::Literal(after));
-                }
-                value_parts.extend(rest_parts);
                 elements.push(ArrayElement {
-                    index: Some(vec![WordPart::Literal(idx_str)]),
+                    index: Some(idx_parts),
                     value: value_parts,
                     append: elem_append,
+                });
+                self.skip_newlines();
+                continue;
+            }
+
+            // Check if current token starts with '[' but doesn't contain ']='.
+            // This means the key has spaces and was split by the lexer, e.g.
+            // [foo bar]="qux qix" → tokens: [foo, bar]="qux qix"
+            // We need to merge tokens until we find one containing ']=' or ']+='.
+            let starts_with_bracket = if let Token::Word(parts) = &self.current {
+                if let Some(WordPart::Literal(s)) = parts.first() {
+                    s.starts_with('[')
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+
+            if starts_with_bracket {
+                // Collect parts from the current token (strip leading '[')
+                let mut merged_parts: Vec<WordPart> = Vec::new();
+                if let Token::Word(parts) = &self.current {
+                    for (pi, part) in parts.iter().enumerate() {
+                        if pi == 0 {
+                            if let WordPart::Literal(s) = part {
+                                let stripped = &s[1..]; // remove '['
+                                if !stripped.is_empty() {
+                                    merged_parts.push(WordPart::Literal(stripped.to_string()));
+                                }
+                            } else {
+                                merged_parts.push(part.clone());
+                            }
+                        } else {
+                            merged_parts.push(part.clone());
+                        }
+                    }
+                }
+                self.advance();
+
+                // Keep merging subsequent tokens, inserting space between them,
+                // until we find one containing ']=' or ']+='
+                let mut found_close = false;
+                while self.current != Token::RParen && self.current != Token::Eof {
+                    if let Token::Word(parts) = &self.current {
+                        // Check if this token contains ']=' or ']+='
+                        let close_info = Self::find_bracket_close_in_parts(parts);
+                        if let Some((before_parts, after_parts, is_append)) = close_info {
+                            // Add space separator + before-close parts to the key
+                            merged_parts.push(WordPart::Literal(" ".to_string()));
+                            merged_parts.extend(before_parts);
+                            self.advance();
+                            elements.push(ArrayElement {
+                                index: Some(merged_parts.clone()),
+                                value: after_parts,
+                                append: is_append,
+                            });
+                            found_close = true;
+                            break;
+                        } else {
+                            // No close bracket — accumulate as part of the key
+                            merged_parts.push(WordPart::Literal(" ".to_string()));
+                            merged_parts.extend(parts.iter().cloned());
+                            self.advance();
+                        }
+                    } else {
+                        break;
+                    }
+                }
+                if found_close {
+                    self.skip_newlines();
+                    continue;
+                }
+                // If we never found ']=' — treat the accumulated parts as a bare word
+                // (re-add the '[' we stripped)
+                let mut restored = vec![WordPart::Literal("[".to_string())];
+                restored.extend(merged_parts);
+                elements.push(ArrayElement {
+                    index: None,
+                    value: restored,
+                    append: false,
                 });
                 self.skip_newlines();
                 continue;

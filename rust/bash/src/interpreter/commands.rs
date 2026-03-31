@@ -1526,7 +1526,7 @@ impl Shell {
             let lineno = self.vars.get("LINENO").map(|s| s.as_str()).unwrap_or("0");
             eprintln!(
                 "{}: line {}: {}: readonly variable",
-                name, lineno, assign.name
+                name, lineno, resolved_base
             );
             return;
         }
@@ -1552,34 +1552,59 @@ impl Shell {
                     // Check if it's an array element append (x[n]+=val)
                     if let Some(bracket) = assign.name.find('[') {
                         let idx_str = &assign.name[bracket + 1..assign.name.len() - 1];
-                        let raw_idx = self.eval_arith_expr(idx_str);
-                        let is_int = self.integer_vars.contains(&resolved);
-                        let addend = if is_int {
-                            self.eval_arith_expr(&value)
-                        } else {
-                            0
-                        };
-                        if let Some(arr) = self.arrays.get_mut(&resolved) {
-                            // Handle negative indices
-                            let idx = if raw_idx < 0 {
-                                let len = arr.len() as i64;
-                                (len + raw_idx).max(0) as usize
-                            } else {
-                                raw_idx as usize
-                            };
-                            while arr.len() <= idx {
-                                arr.push(None);
-                            }
+                        // Check for assoc array FIRST — use string key, not arithmetic
+                        if self.assoc_arrays.contains_key(&resolved) {
+                            let is_int = self.integer_vars.contains(&resolved);
+                            let key = idx_str.to_string();
                             if is_int {
-                                let existing: i64 = arr[idx]
-                                    .as_deref()
-                                    .and_then(|v| v.parse().ok())
-                                    .unwrap_or(0);
-                                arr[idx] = Some((existing + addend).to_string());
+                                let addend = self.eval_arith_expr(&value);
+                                self.assoc_arrays
+                                    .entry(resolved)
+                                    .or_default()
+                                    .entry(key)
+                                    .and_modify(|v| {
+                                        let existing: i64 = v.parse().unwrap_or(0);
+                                        *v = (existing + addend).to_string();
+                                    })
+                                    .or_insert(addend.to_string());
                             } else {
-                                match &mut arr[idx] {
-                                    Some(s) => s.push_str(&value),
-                                    None => arr[idx] = Some(value.clone()),
+                                self.assoc_arrays
+                                    .entry(resolved)
+                                    .or_default()
+                                    .entry(key)
+                                    .and_modify(|v| v.push_str(&value))
+                                    .or_insert(value.clone());
+                            }
+                        } else {
+                            let raw_idx = self.eval_arith_expr(idx_str);
+                            let is_int = self.integer_vars.contains(&resolved);
+                            let addend = if is_int {
+                                self.eval_arith_expr(&value)
+                            } else {
+                                0
+                            };
+                            if let Some(arr) = self.arrays.get_mut(&resolved) {
+                                // Handle negative indices
+                                let idx = if raw_idx < 0 {
+                                    let len = arr.len() as i64;
+                                    (len + raw_idx).max(0) as usize
+                                } else {
+                                    raw_idx as usize
+                                };
+                                while arr.len() <= idx {
+                                    arr.push(None);
+                                }
+                                if is_int {
+                                    let existing: i64 = arr[idx]
+                                        .as_deref()
+                                        .and_then(|v| v.parse().ok())
+                                        .unwrap_or(0);
+                                    arr[idx] = Some((existing + addend).to_string());
+                                } else {
+                                    match &mut arr[idx] {
+                                        Some(s) => s.push_str(&value),
+                                        None => arr[idx] = Some(value.clone()),
+                                    }
                                 }
                             }
                         }
@@ -1687,7 +1712,24 @@ impl Shell {
                             }
                         }
                     } else {
-                        self.set_var(&assign.name, value);
+                        // Scalar assignment to assoc array → assign to key "0"
+                        let resolved = self.resolve_nameref(&assign.name);
+                        if self.assoc_arrays.contains_key(&resolved) {
+                            self.assoc_arrays
+                                .entry(resolved)
+                                .or_default()
+                                .insert("0".to_string(), value);
+                        } else if self.arrays.contains_key(&resolved) {
+                            // Scalar assignment to indexed array → assign to element [0]
+                            let arr = self.arrays.entry(resolved).or_default();
+                            if arr.is_empty() {
+                                arr.push(Some(value));
+                            } else {
+                                arr[0] = Some(value);
+                            }
+                        } else {
+                            self.set_var(&assign.name, value);
+                        }
                     }
                 }
             }
@@ -1712,16 +1754,49 @@ impl Shell {
                         AssocArray::default()
                     };
                     let mut map = map;
+                    let is_integer = self.integer_vars.contains(&resolved);
                     for elem in elements {
                         let raw = self.expand_word_single(&elem.value);
+                        let value = if is_integer {
+                            self.eval_arith_expr(&raw).to_string()
+                        } else {
+                            raw
+                        };
                         if let Some(idx_word) = &elem.index {
                             let key = self.expand_word_single(idx_word);
-                            map.insert(key, raw);
+                            if elem.append {
+                                map.entry(key)
+                                    .and_modify(|v| {
+                                        if is_integer {
+                                            let existing: i64 = v.parse().unwrap_or(0);
+                                            let addend: i64 = value.parse().unwrap_or(0);
+                                            *v = (existing + addend).to_string();
+                                        } else {
+                                            v.push_str(&value);
+                                        }
+                                    })
+                                    .or_insert(value);
+                            } else {
+                                map.insert(key, value);
+                            }
                         } else {
-                            // foo+=(val) on assoc array → key "0"
-                            map.entry("0".to_string())
-                                .and_modify(|v| v.push_str(&raw))
-                                .or_insert(raw);
+                            // Bare value in assoc array compound assignment → error
+                            let val_str = self.expand_word_single(&elem.value);
+                            let name = self
+                                .vars
+                                .get("_BASH_SOURCE_FILE")
+                                .or_else(|| self.positional.first())
+                                .cloned()
+                                .unwrap_or_else(|| "bash".to_string());
+                            let lineno = self
+                                .vars
+                                .get("LINENO")
+                                .cloned()
+                                .unwrap_or_else(|| "0".to_string());
+                            eprintln!(
+                                "{}: line {}: {}: {}: must use subscript when assigning associative array",
+                                name, lineno, resolved, val_str
+                            );
                         }
                     }
                     self.assoc_arrays.insert(resolved, map);

@@ -1302,6 +1302,18 @@ impl Shell {
             if close <= bracket + 1 {
                 return 0;
             }
+            // No closing ']' found — not a valid array reference
+            if close >= expr.len() {
+                let top_expr = self.arith_top_expr.as_deref().unwrap_or(expr);
+                eprintln!(
+                    "{}: {}: arithmetic syntax error: operand expected (error token is \"{}\")",
+                    self.arith_error_prefix(),
+                    top_expr,
+                    expr
+                );
+                crate::expand::set_arith_error();
+                return 0;
+            }
             // Check for extra text after arr[idx] (e.g., b[c]d → "d" is extra)
             let after_bracket = &expr[close + 1..].trim();
             if !after_bracket.is_empty() {
