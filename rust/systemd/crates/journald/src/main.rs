@@ -1951,6 +1951,16 @@ fn varlink_server(state: Arc<JournaldState>) {
     }
 }
 
+/// Reply type for Varlink method handlers.
+enum VarlinkReply {
+    /// Empty success reply: `{}`
+    Empty,
+    /// Success reply with JSON parameters: `{"parameters": ...}`
+    Json(serde_json::Value),
+    /// Error reply: `{"error": "..."}`
+    Error(&'static str),
+}
+
 /// Handle a single Varlink connection.  Reads NUL-terminated JSON frames,
 /// dispatches method calls, and sends NUL-terminated JSON replies.
 fn varlink_handle_connection(state: Arc<JournaldState>, stream: UnixStream) {
@@ -2011,7 +2021,7 @@ fn varlink_handle_connection(state: Arc<JournaldState>, stream: UnixStream) {
                 {
                     thread::sleep(Duration::from_millis(50));
                 }
-                Ok(())
+                VarlinkReply::Empty
             }
             "io.systemd.Journal.Rotate" => {
                 state.rotate_requested.store(true, Ordering::Release);
@@ -2021,7 +2031,7 @@ fn varlink_handle_connection(state: Arc<JournaldState>, stream: UnixStream) {
                 {
                     thread::sleep(Duration::from_millis(50));
                 }
-                Ok(())
+                VarlinkReply::Empty
             }
             "io.systemd.Journal.FlushToVar" => {
                 state.flush_requested.store(true, Ordering::Release);
@@ -2031,26 +2041,42 @@ fn varlink_handle_connection(state: Arc<JournaldState>, stream: UnixStream) {
                 {
                     thread::sleep(Duration::from_millis(50));
                 }
-                Ok(())
+                VarlinkReply::Empty
             }
             "io.systemd.Journal.RelinquishVar" => {
                 // We don't support switching to runtime-only storage at runtime,
                 // but accepting the call without error avoids breaking journalctl.
-                Ok(())
+                VarlinkReply::Empty
             }
-            "io.systemd.service.Ping" => Ok(()),
-            _ => Err("org.varlink.service.MethodNotFound"),
+            "io.systemd.service.Ping" => VarlinkReply::Empty,
+            "org.varlink.service.GetInfo" => VarlinkReply::Json(serde_json::json!({
+                "vendor": "rust-systemd",
+                "product": "systemd-journald",
+                "version": "0.1.0",
+                "url": "https://tangled.org/overby.me/overby.me",
+                "interfaces": [
+                    "org.varlink.service",
+                    "io.systemd.Journal",
+                    "io.systemd.service"
+                ]
+            })),
+            _ => VarlinkReply::Error("org.varlink.service.MethodNotFound"),
         };
 
         if !oneway {
             match response {
-                Ok(()) => {
-                    let reply = b"{}\0";
-                    if writer.write_all(reply).is_err() {
+                VarlinkReply::Empty => {
+                    if writer.write_all(b"{}\0").is_err() {
                         break;
                     }
                 }
-                Err(error_id) => {
+                VarlinkReply::Json(value) => {
+                    let msg = format!("{{\"parameters\":{}}}\0", value);
+                    if writer.write_all(msg.as_bytes()).is_err() {
+                        break;
+                    }
+                }
+                VarlinkReply::Error(error_id) => {
                     if varlink_write_error(&mut writer, error_id).is_err() {
                         break;
                     }
