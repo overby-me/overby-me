@@ -1670,10 +1670,10 @@ fn main() {
 
     // Handle special commands that don't need to read entries
     if cli.flush {
-        send_signal_to_journald(libc::SIGUSR1);
-        // Wait for journald to complete the flush (no ack mechanism, use a brief sleep).
-        // Use 1s to ensure the maintenance loop (500ms period) has processed the request.
-        std::thread::sleep(Duration::from_secs(1));
+        if !varlink_call("io.systemd.Journal.FlushToVar") {
+            send_signal_to_journald(libc::SIGUSR1);
+            std::thread::sleep(Duration::from_secs(1));
+        }
         return;
     }
 
@@ -1701,25 +1701,27 @@ fn main() {
     }
 
     if cli.sync {
-        send_signal_to_journald(libc::SIGRTMIN() + 1);
-        if let Some(ref ns) = cli.namespace {
-            send_signal_to_journald_namespace(ns, libc::SIGRTMIN() + 1);
+        if !varlink_call("io.systemd.Journal.Synchronize") {
+            send_signal_to_journald(libc::SIGRTMIN() + 1);
+            if let Some(ref ns) = cli.namespace {
+                send_signal_to_journald_namespace(ns, libc::SIGRTMIN() + 1);
+            }
+            std::thread::sleep(Duration::from_secs(1));
         }
-        // Wait for journald to complete the fsync (no ack mechanism, use a brief sleep).
-        // Use 1s to ensure the maintenance loop (500ms period) has processed the request
-        // and all pending socket messages have been dispatched first.
-        std::thread::sleep(Duration::from_secs(1));
         return;
     }
 
     if cli.rotate {
-        send_signal_to_journald(libc::SIGUSR2);
-        // If vacuum is also requested, continue to process it; otherwise return
+        if !varlink_call("io.systemd.Journal.Rotate") {
+            send_signal_to_journald(libc::SIGUSR2);
+            if cli.vacuum_size.is_some() || cli.vacuum_time.is_some() || cli.vacuum_files.is_some()
+            {
+                std::thread::sleep(Duration::from_millis(500));
+            }
+        }
         if cli.vacuum_size.is_none() && cli.vacuum_time.is_none() && cli.vacuum_files.is_none() {
             return;
         }
-        // Give journald a moment to finish rotation before vacuuming
-        std::thread::sleep(Duration::from_millis(500));
     }
 
     // Open storage
@@ -2922,6 +2924,55 @@ fn human_size(bytes: u64) -> (f64, &'static str) {
     } else {
         (bytes as f64, "B")
     }
+}
+
+/// The varlink socket path for the journal daemon.
+const VARLINK_SOCKET_PATH: &str = "/run/systemd/journal/io.systemd.journal";
+
+/// Call a varlink method on journald. Returns true on success, false on failure.
+/// Falls back to signal-based communication if the varlink socket is unavailable.
+fn varlink_call(method: &str) -> bool {
+    use std::io::{Read, Write};
+    use std::os::unix::net::UnixStream;
+
+    let mut stream = match UnixStream::connect(VARLINK_SOCKET_PATH) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+
+    // Set a reasonable timeout
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(30)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+
+    // Send varlink request: JSON + NUL
+    let request = format!("{{\"method\":\"{method}\"}}\0");
+    if stream.write_all(request.as_bytes()).is_err() {
+        return false;
+    }
+
+    // Read response until NUL byte
+    let mut buf = Vec::new();
+    let mut byte = [0u8; 1];
+    loop {
+        match stream.read(&mut byte) {
+            Ok(0) => break,
+            Ok(1) => {
+                if byte[0] == 0 {
+                    break;
+                }
+                buf.push(byte[0]);
+            }
+            _ => break,
+        }
+    }
+
+    // Check for error in response
+    if let Ok(resp) = serde_json::from_slice::<serde_json::Value>(&buf) {
+        return resp.get("error").is_none();
+    }
+
+    // Empty response (VarlinkReply::Empty) is success
+    buf.is_empty() || buf == b"{}"
 }
 
 /// Send a signal to the running systemd-journald process.
