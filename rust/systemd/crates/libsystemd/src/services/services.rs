@@ -79,9 +79,14 @@ const JOURNAL_STDOUT_SOCKET: &str = "/run/systemd/journal/stdout";
 ///   6. forward_to_kmsg (0)
 ///   7. forward_to_console (0)
 ///   8. _SYSTEMD_INVOCATION_ID (rust-systemd extension, 32 hex chars)
-pub fn open_journal_stream(unit_name: &str, invocation_id: Option<&str>) -> Option<UnixStream> {
+pub fn open_journal_stream(
+    unit_name: &str,
+    invocation_id: Option<&str>,
+    syslog_identifier: Option<&str>,
+) -> Option<UnixStream> {
     let stream = UnixStream::connect(JOURNAL_STDOUT_SOCKET).ok()?;
-    let identifier = unit_name.strip_suffix(".service").unwrap_or(unit_name);
+    let identifier = syslog_identifier
+        .unwrap_or_else(|| unit_name.strip_suffix(".service").unwrap_or(unit_name));
     let inv_id = invocation_id.unwrap_or("");
     let header = format!("{identifier}\n{unit_name}\n6\n1\n0\n0\n0\n{inv_id}\n");
     use std::io::Write;

@@ -438,10 +438,24 @@ pub fn handle_all_std_out(run_info: ArcMutRuntimeInfo) {
                             } else {
                                 // Lazily open journal stdout stream on first data
                                 if mut_state.srvc.journal_stream.is_none() {
+                                    // SyslogIdentifier= from config, or derive
+                                    // from ExecStart binary name (matches C systemd).
+                                    let ident =
+                                        srvc.conf.exec_config.syslog_identifier.as_deref().or_else(
+                                            || {
+                                                srvc.conf.exec.first().map(|cmd| {
+                                                    std::path::Path::new(cmd.cmd.as_str())
+                                                        .file_name()
+                                                        .and_then(|n| n.to_str())
+                                                        .unwrap_or(cmd.cmd.as_str())
+                                                })
+                                            },
+                                        );
                                     mut_state.srvc.journal_stream =
                                         crate::services::open_journal_stream(
                                             &name,
                                             mut_state.srvc.invocation_id.as_deref(),
+                                            ident,
                                         );
                                 }
                                 mut_state.srvc.stdout_buffer.extend(&buf[..bytes]);
@@ -562,12 +576,24 @@ pub fn handle_all_std_err(run_info: ArcMutRuntimeInfo) {
                                 // Mark for cleanup to avoid a busy select loop.
                                 eof_ids.push((id.clone(), name));
                             } else {
-                                // Lazily open journal stdout stream on first data
+                                // Lazily open journal stderr stream on first data
                                 if mut_state.srvc.journal_stream.is_none() {
+                                    let ident =
+                                        srvc.conf.exec_config.syslog_identifier.as_deref().or_else(
+                                            || {
+                                                srvc.conf.exec.first().map(|cmd| {
+                                                    std::path::Path::new(cmd.cmd.as_str())
+                                                        .file_name()
+                                                        .and_then(|n| n.to_str())
+                                                        .unwrap_or(cmd.cmd.as_str())
+                                                })
+                                            },
+                                        );
                                     mut_state.srvc.journal_stream =
                                         crate::services::open_journal_stream(
                                             &name,
                                             mut_state.srvc.invocation_id.as_deref(),
+                                            ident,
                                         );
                                 }
                                 mut_state.srvc.stderr_buffer.extend(&buf[..bytes]);
