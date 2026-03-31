@@ -750,7 +750,19 @@ impl Shell {
             }
         }
         self.declared_unset.remove(&resolved);
-        self.vars.insert(resolved, value);
+        // If the variable is an existing indexed array, assign to element [0]
+        // instead of creating a separate scalar entry (bash behavior:
+        // `declare -a x; x=val` sets x[0]=val, not a scalar x)
+        if self.arrays.contains_key(&resolved) {
+            let arr = self.arrays.get_mut(&resolved).unwrap();
+            if arr.is_empty() {
+                arr.push(Some(value));
+            } else {
+                arr[0] = Some(value);
+            }
+        } else {
+            self.vars.insert(resolved, value);
+        }
     }
 
     /// Declare a local variable — saves the old value for restoration on function exit.
