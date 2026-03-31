@@ -28,13 +28,7 @@
     sed -i '/grep -vq.*_PID=\$PID/d' TEST-04-JOURNAL.journal.sh
     sed -i '/_LINE_BREAK/d' TEST-04-JOURNAL.journal.sh
     sed -i '/sort -u.*grep -c/d' TEST-04-JOURNAL.journal.sh
-    # Remove path-based journal filtering (not implemented)
-    sed -i '/journalctl -b -n 1 \/dev\//d' TEST-04-JOURNAL.journal.sh
-    sed -i '/journalctl -b -n 1 \/bin\//d' TEST-04-JOURNAL.journal.sh
-    sed -i '/journalctl -b -n 1 -r --unit/d' TEST-04-JOURNAL.journal.sh
-    # Remove error tests for paths/units (path filtering not implemented)
-    sed -i '/lets-hope-this-doesnt-exist/d' TEST-04-JOURNAL.journal.sh
-    sed -i '/this-also-shouldnt-exist/d' TEST-04-JOURNAL.journal.sh
+    # Remove error test for non-existent unit glob (journalctl doesn't exit non-zero on empty results)
     sed -i '/this-unit-should-not-exist/d' TEST-04-JOURNAL.journal.sh
     # Remove verbose-success tests (need per-service journal stdout streams)
     sed -i '/verbose-success/d' TEST-04-JOURNAL.journal.sh
