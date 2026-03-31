@@ -595,6 +595,13 @@ impl JournalStorage {
         Ok(())
     }
 
+    /// Update the storage configuration (e.g. after config reload).
+    /// This updates limits like max_disk_usage, max_files, max_file_size
+    /// without closing or moving files.
+    pub fn update_config(&mut self, config: StorageConfig) {
+        self.config = config;
+    }
+
     /// Return the total disk usage of all journal files.
     pub fn disk_usage(&self) -> io::Result<u64> {
         let journal_dir = self.journal_dir();

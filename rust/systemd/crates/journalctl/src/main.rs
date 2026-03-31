@@ -1678,10 +1678,11 @@ fn main() {
     }
 
     if cli.relinquish_var || cli.smart_relinquish_var {
-        // In the upstream C implementation, this sends a Varlink call
-        // (io.systemd.Journal.RelinquishVar) to journald to stop writing
-        // to /var/log/journal/. For now, accept the flag silently — the
-        // journald instance will continue operating normally.
+        if !varlink_call("io.systemd.Journal.RelinquishVar") {
+            // Signal fallback not available for relinquish — it's a varlink-only operation.
+            // If varlink fails, just return silently.
+            eprintln!("Warning: failed to send RelinquishVar via varlink");
+        }
         return;
     }
 

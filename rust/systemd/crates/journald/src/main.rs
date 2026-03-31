@@ -35,7 +35,7 @@ use std::os::unix::io::FromRawFd;
 use std::os::unix::net::{UnixDatagram, UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 use std::{process, thread};
 
@@ -187,8 +187,10 @@ struct JournaldConfig {
     system_max_use: u64,
     /// Maximum total disk usage for volatile journal.
     runtime_max_use: u64,
-    /// Maximum number of journal files.
-    max_files: usize,
+    /// Maximum number of persistent journal files.
+    system_max_files: usize,
+    /// Maximum number of volatile journal files.
+    runtime_max_files: usize,
     /// Rate limit interval in microseconds.
     rate_limit_interval_usec: u64,
     /// Rate limit burst count.
@@ -233,7 +235,8 @@ impl Default for JournaldConfig {
             max_file_size: 64 * 1024 * 1024,   // 64 MiB
             system_max_use: 512 * 1024 * 1024, // 512 MiB
             runtime_max_use: 64 * 1024 * 1024, // 64 MiB
-            max_files: 100,
+            system_max_files: 100,
+            runtime_max_files: 100,
             rate_limit_interval_usec: RATE_LIMIT_INTERVAL_USEC,
             rate_limit_burst: RATE_LIMIT_BURST,
             forward_to_syslog: false,
@@ -263,17 +266,25 @@ impl JournaldConfig {
             config.parse_config(&contents);
         }
 
-        // Load drop-in configs
-        if let Ok(entries) = fs::read_dir("/etc/systemd/journald.conf.d") {
-            let mut files: Vec<PathBuf> = entries
-                .filter_map(|e| e.ok())
-                .map(|e| e.path())
-                .filter(|p| p.extension().is_some_and(|ext| ext == "conf"))
-                .collect();
-            files.sort();
-            for path in files {
-                if let Ok(contents) = fs::read_to_string(&path) {
-                    config.parse_config(&contents);
+        // Load drop-in configs from all standard directories
+        // (later directories override earlier ones; within a directory, files
+        // are processed in lexicographic order)
+        for dir in &[
+            "/usr/lib/systemd/journald.conf.d",
+            "/etc/systemd/journald.conf.d",
+            "/run/systemd/journald.conf.d",
+        ] {
+            if let Ok(entries) = fs::read_dir(dir) {
+                let mut files: Vec<PathBuf> = entries
+                    .filter_map(|e| e.ok())
+                    .map(|e| e.path())
+                    .filter(|p| p.extension().is_some_and(|ext| ext == "conf"))
+                    .collect();
+                files.sort();
+                for path in files {
+                    if let Ok(contents) = fs::read_to_string(&path) {
+                        config.parse_config(&contents);
+                    }
                 }
             }
         }
@@ -318,9 +329,14 @@ impl JournaldConfig {
                             self.runtime_max_use = bytes;
                         }
                     }
-                    "MaxFiles" => {
+                    "SystemMaxFiles" => {
                         if let Ok(n) = value.parse::<usize>() {
-                            self.max_files = n;
+                            self.system_max_files = n;
+                        }
+                    }
+                    "RuntimeMaxFiles" => {
+                        if let Ok(n) = value.parse::<usize>() {
+                            self.runtime_max_files = n;
                         }
                     }
                     "MaxFileSec" => {
@@ -401,11 +417,47 @@ impl JournaldConfig {
             }
         }
     }
+
+    /// Build a `StorageConfig` for the given storage mode (persistent vs runtime).
+    fn make_storage_config(&self, persistent: bool) -> StorageConfig {
+        let storage_dir = if persistent {
+            PathBuf::from("/var/log/journal")
+        } else {
+            PathBuf::from("/run/log/journal")
+        };
+        StorageConfig {
+            directory: storage_dir,
+            max_file_size: self.max_file_size,
+            max_disk_usage: if persistent {
+                self.system_max_use
+            } else {
+                self.runtime_max_use
+            },
+            max_files: if persistent {
+                self.system_max_files
+            } else {
+                self.runtime_max_files
+            },
+            persistent,
+            keep_free: if persistent {
+                self.system_keep_free
+            } else {
+                self.runtime_keep_free
+            },
+            direct_directory: false,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Configuration parsing helpers
 // ---------------------------------------------------------------------------
+
+fn read_machine_id() -> String {
+    fs::read_to_string("/etc/machine-id")
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|_| "0".repeat(32))
+}
 
 fn parse_bool(s: &str) -> bool {
     matches!(s.to_lowercase().as_str(), "yes" | "true" | "1" | "on" | "y")
@@ -520,18 +572,24 @@ struct JournaldState {
     storage: Mutex<JournalStorage>,
     /// Rate limiter.
     rate_limiter: Mutex<RateLimiter>,
-    /// Configuration.
-    config: JournaldConfig,
+    /// Configuration (reloadable via SIGHUP).
+    config: RwLock<JournaldConfig>,
     /// Global sequence number counter.
     seqnum: AtomicU64,
     /// Shutdown flag.
     shutdown: AtomicBool,
-    /// Flush requested (SIGUSR1).
+    /// Flush requested (SIGUSR1 or Varlink FlushToVar).
     flush_requested: AtomicBool,
     /// Sync requested (SIGRTMIN+1, triggered by `journalctl --sync`).
     sync_requested: AtomicBool,
     /// Rotate requested (SIGUSR2).
     rotate_requested: AtomicBool,
+    /// Relinquish-var requested (Varlink RelinquishVar).
+    relinquish_requested: AtomicBool,
+    /// Reload config requested (SIGHUP, `systemctl reload`).
+    reload_requested: AtomicBool,
+    /// Whether we are currently in "relinquished" mode (writing to /run only).
+    relinquished: AtomicBool,
     /// When the current active journal file was opened (for time-based rotation).
     active_file_opened: Mutex<Instant>,
     /// Forward-secure sealing state (if enabled).
@@ -637,12 +695,15 @@ impl JournaldState {
         JournaldState {
             storage: Mutex::new(storage),
             rate_limiter: Mutex::new(RateLimiter::new()),
-            config,
+            config: RwLock::new(config),
             seqnum: AtomicU64::new(1),
             shutdown: AtomicBool::new(false),
             flush_requested: AtomicBool::new(false),
             sync_requested: AtomicBool::new(false),
             rotate_requested: AtomicBool::new(false),
+            relinquish_requested: AtomicBool::new(false),
+            reload_requested: AtomicBool::new(false),
+            relinquished: AtomicBool::new(false),
             active_file_opened: Mutex::new(Instant::now()),
             seal_state: Mutex::new(seal_state),
             last_vacuum: Mutex::new(Instant::now()),
@@ -651,9 +712,11 @@ impl JournaldState {
 
     /// Dispatch a fully-formed journal entry into storage.
     fn dispatch_entry(&self, mut entry: JournalEntry) {
+        let config = self.config.read().unwrap();
+
         // Check priority against MaxLevelStore
         if let Some(priority) = entry.priority()
-            && priority > self.config.max_level_store
+            && priority > config.max_level_store
         {
             return;
         }
@@ -667,8 +730,8 @@ impl JournaldState {
 
         {
             let mut rl = self.rate_limiter.lock().unwrap();
-            let interval = Duration::from_micros(self.config.rate_limit_interval_usec);
-            match rl.check(&source, self.config.rate_limit_burst, interval) {
+            let interval = Duration::from_micros(config.rate_limit_interval_usec);
+            match rl.check(&source, config.rate_limit_burst, interval) {
                 RateLimitResult::Suppressed => return,
                 RateLimitResult::WindowReset { suppressed } => {
                     // The previous window suppressed some messages — log a
@@ -702,7 +765,7 @@ impl JournaldState {
         }
 
         // Truncate oversized fields
-        let max_field = self.config.max_field_size;
+        let max_field = config.max_field_size;
         if max_field > 0 {
             let keys: Vec<String> = entry.fields.keys().cloned().collect();
             for key in keys {
@@ -719,17 +782,17 @@ impl JournaldState {
         entry.seqnum = seqnum;
 
         // Forward to console if configured
-        if self.config.forward_to_console
+        if config.forward_to_console
             && let Some(priority) = entry.priority()
-            && priority <= self.config.max_level_console
+            && priority <= config.max_level_console
         {
             let _ = writeln!(io::stderr(), "{}", entry);
         }
 
         // Forward to wall if configured (only for emerg/alert)
-        if self.config.forward_to_wall
+        if config.forward_to_wall
             && let Some(priority) = entry.priority()
-            && priority <= self.config.max_level_wall
+            && priority <= config.max_level_wall
         {
             forward_to_wall(&entry);
         }
@@ -1850,9 +1913,15 @@ fn setup_signal_handlers(state: Arc<JournaldState>) {
         &state.rotate_requested as *const AtomicBool as u64,
         Ordering::Release,
     );
+    GLOBAL_RELOAD.store(
+        &state.reload_requested as *const AtomicBool as u64,
+        Ordering::Release,
+    );
 
     let _ = unsafe { libc::signal(libc::SIGUSR1, signal_handler_flush as libc::sighandler_t) };
     let _ = unsafe { libc::signal(libc::SIGUSR2, signal_handler_rotate as libc::sighandler_t) };
+    // SIGHUP → reload configuration
+    let _ = unsafe { libc::signal(libc::SIGHUP, signal_handler_reload as libc::sighandler_t) };
     // SIGRTMIN+1 is used by `journalctl --sync` to request a sync to disk
     let _ = unsafe {
         libc::signal(
@@ -1867,6 +1936,7 @@ static GLOBAL_SHUTDOWN: AtomicU64 = AtomicU64::new(0);
 static GLOBAL_FLUSH: AtomicU64 = AtomicU64::new(0);
 static GLOBAL_SYNC: AtomicU64 = AtomicU64::new(0);
 static GLOBAL_ROTATE: AtomicU64 = AtomicU64::new(0);
+static GLOBAL_RELOAD: AtomicU64 = AtomicU64::new(0);
 
 extern "C" fn signal_handler_shutdown(_sig: libc::c_int) {
     let ptr = GLOBAL_SHUTDOWN.load(Ordering::Acquire);
@@ -1894,6 +1964,14 @@ extern "C" fn signal_handler_sync(_sig: libc::c_int) {
 
 extern "C" fn signal_handler_rotate(_sig: libc::c_int) {
     let ptr = GLOBAL_ROTATE.load(Ordering::Acquire);
+    if ptr != 0 {
+        let flag = unsafe { &*(ptr as *const AtomicBool) };
+        flag.store(true, Ordering::Release);
+    }
+}
+
+extern "C" fn signal_handler_reload(_sig: libc::c_int) {
+    let ptr = GLOBAL_RELOAD.load(Ordering::Acquire);
     if ptr != 0 {
         let flag = unsafe { &*(ptr as *const AtomicBool) };
         flag.store(true, Ordering::Release);
@@ -2061,8 +2139,13 @@ fn varlink_handle_connection(state: Arc<JournaldState>, stream: UnixStream) {
                 VarlinkReply::Empty
             }
             "io.systemd.Journal.RelinquishVar" => {
-                // We don't support switching to runtime-only storage at runtime,
-                // but accepting the call without error avoids breaking journalctl.
+                state.relinquish_requested.store(true, Ordering::Release);
+                let start = Instant::now();
+                while state.relinquish_requested.load(Ordering::Acquire)
+                    && start.elapsed() < Duration::from_secs(10)
+                {
+                    thread::sleep(Duration::from_millis(50));
+                }
                 VarlinkReply::Empty
             }
             "io.systemd.service.Ping" => VarlinkReply::Empty,
@@ -2129,15 +2212,147 @@ fn maintenance_thread(state: Arc<JournaldState>) {
             break;
         }
 
-        // Handle flush request (SIGUSR1)
+        // Handle flush request (SIGUSR1 or Varlink FlushToVar)
+        // In C systemd, flush moves journal files from /run to /var and
+        // switches the active storage to persistent.
         if state
             .flush_requested
             .compare_exchange(true, false, Ordering::AcqRel, Ordering::Relaxed)
             .is_ok()
         {
-            eprintln!("journald: Flushing journal to persistent storage");
-            let mut storage = state.storage.lock().unwrap();
-            let _ = storage.flush();
+            let config = state.config.read().unwrap();
+            let wants_persistent = config.use_persistent_storage();
+            drop(config);
+
+            if state.relinquished.load(Ordering::Acquire) && wants_persistent {
+                eprintln!("journald: Flushing runtime journal to persistent storage");
+                // Move journal files from /run to /var, then switch storage
+                let machine_id = read_machine_id();
+                let src_dir = PathBuf::from("/run/log/journal").join(&machine_id);
+                let dst_dir = PathBuf::from("/var/log/journal").join(&machine_id);
+                let _ = fs::create_dir_all(&dst_dir);
+
+                // Close the current (runtime) storage to release file handles
+                let mut storage = state.storage.lock().unwrap();
+                let _ = storage.flush();
+                drop(storage);
+
+                // Move archived journal files from runtime to persistent
+                if let Ok(entries) = fs::read_dir(&src_dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path
+                            .extension()
+                            .is_some_and(|e| e == "journal" || e == "journal~")
+                        {
+                            let dest = dst_dir.join(entry.file_name());
+                            if let Err(e) = fs::rename(&path, &dest) {
+                                // rename may fail across filesystems, fall back to copy+delete
+                                if let Ok(data) = fs::read(&path) {
+                                    if fs::write(&dest, &data).is_ok() {
+                                        let _ = fs::remove_file(&path);
+                                    } else {
+                                        eprintln!(
+                                            "journald: Failed to copy {} to {}: {}",
+                                            path.display(),
+                                            dest.display(),
+                                            e
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Open new persistent storage
+                let config = state.config.read().unwrap();
+                let sc = config.make_storage_config(true);
+                drop(config);
+                match JournalStorage::new(sc) {
+                    Ok(new_storage) => {
+                        *state.storage.lock().unwrap() = new_storage;
+                        state.relinquished.store(false, Ordering::Release);
+                        *state.active_file_opened.lock().unwrap() = Instant::now();
+                        eprintln!("journald: Switched to persistent storage");
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "journald: Failed to open persistent storage: {}; staying in runtime mode",
+                            e
+                        );
+                    }
+                }
+            } else {
+                // Already in persistent mode (or volatile config) — just sync to disk
+                let mut storage = state.storage.lock().unwrap();
+                let _ = storage.flush();
+            }
+        }
+
+        // Handle relinquish-var request (Varlink RelinquishVar)
+        // Switch from persistent to runtime-only storage.
+        if state
+            .relinquish_requested
+            .compare_exchange(true, false, Ordering::AcqRel, Ordering::Relaxed)
+            .is_ok()
+            && !state.relinquished.load(Ordering::Acquire)
+        {
+            eprintln!("journald: Relinquishing persistent storage, switching to runtime");
+            // Flush and close current persistent storage
+            {
+                let mut storage = state.storage.lock().unwrap();
+                let _ = storage.flush();
+            }
+
+            // Open new runtime storage
+            let config = state.config.read().unwrap();
+            let sc = config.make_storage_config(false);
+            drop(config);
+            match JournalStorage::new(sc) {
+                Ok(new_storage) => {
+                    *state.storage.lock().unwrap() = new_storage;
+                    state.relinquished.store(true, Ordering::Release);
+                    *state.active_file_opened.lock().unwrap() = Instant::now();
+                    eprintln!("journald: Now writing to runtime storage only");
+                }
+                Err(e) => {
+                    eprintln!(
+                        "journald: Failed to open runtime storage: {}; keeping persistent",
+                        e
+                    );
+                }
+            }
+        }
+
+        // Handle reload request (SIGHUP / `systemctl reload`)
+        if state
+            .reload_requested
+            .compare_exchange(true, false, Ordering::AcqRel, Ordering::Relaxed)
+            .is_ok()
+        {
+            eprintln!("journald: Reloading configuration");
+            let new_config = JournaldConfig::load();
+            let is_relinquished = state.relinquished.load(Ordering::Acquire);
+            let persistent = if is_relinquished {
+                false
+            } else {
+                new_config.use_persistent_storage()
+            };
+
+            // Update storage limits (max_disk_usage, max_files, max_file_size)
+            let sc = new_config.make_storage_config(persistent);
+            {
+                let mut storage = state.storage.lock().unwrap();
+                storage.update_config(sc);
+                // Vacuum with new limits
+                if let Err(e) = storage.vacuum() {
+                    eprintln!("journald: Vacuum after reload failed: {}", e);
+                }
+            }
+
+            *state.config.write().unwrap() = new_config;
+            eprintln!("journald: Configuration reloaded");
         }
 
         // Handle sync request (SIGRTMIN+1, from `journalctl --sync`)
@@ -2164,9 +2379,10 @@ fn maintenance_thread(state: Arc<JournaldState>) {
         }
 
         // Time-based rotation (MaxFileSec=)
-        if state.config.max_file_sec_usec > 0 {
+        let max_file_sec = state.config.read().unwrap().max_file_sec_usec;
+        if max_file_sec > 0 {
             let opened = *state.active_file_opened.lock().unwrap();
-            let max_age = Duration::from_micros(state.config.max_file_sec_usec);
+            let max_age = Duration::from_micros(max_file_sec);
             if opened.elapsed() >= max_age {
                 eprintln!("journald: Rotating journal file (MaxFileSec exceeded)");
                 let mut storage = state.storage.lock().unwrap();
@@ -2193,11 +2409,13 @@ fn maintenance_thread(state: Arc<JournaldState>) {
             let storage = state.storage.lock().unwrap();
             match storage.disk_usage() {
                 Ok(usage) => {
-                    let max_use = if state.config.use_persistent_storage() {
-                        state.config.system_max_use
+                    let config = state.config.read().unwrap();
+                    let max_use = if config.use_persistent_storage() {
+                        config.system_max_use
                     } else {
-                        state.config.runtime_max_use
+                        config.runtime_max_use
                     };
+                    drop(config);
                     let pct = if max_use > 0 {
                         (usage as f64 / max_use as f64 * 100.0) as u64
                     } else {
@@ -2307,6 +2525,7 @@ fn main() {
         libc::signal(libc::SIGINT, signal_handler_shutdown as libc::sighandler_t);
         libc::signal(libc::SIGUSR1, signal_handler_flush as libc::sighandler_t);
         libc::signal(libc::SIGUSR2, signal_handler_rotate as libc::sighandler_t);
+        libc::signal(libc::SIGHUP, signal_handler_reload as libc::sighandler_t);
         libc::signal(
             libc::SIGRTMIN() + 1,
             signal_handler_sync as libc::sighandler_t,
@@ -2318,44 +2537,7 @@ fn main() {
     // Load configuration
     let config = JournaldConfig::load();
     let persistent = config.use_persistent_storage();
-
-    // Determine storage directory
-    let storage_dir = if persistent {
-        PathBuf::from("/var/log/journal")
-    } else {
-        PathBuf::from("/run/log/journal")
-    };
-
-    // Ensure the storage directory exists
-    if let Err(e) = fs::create_dir_all(&storage_dir) {
-        eprintln!(
-            "journald: Failed to create storage directory {}: {}",
-            storage_dir.display(),
-            e
-        );
-    }
-
-    let max_use = if persistent {
-        config.system_max_use
-    } else {
-        config.runtime_max_use
-    };
-
-    let keep_free = if persistent {
-        config.system_keep_free
-    } else {
-        config.runtime_keep_free
-    };
-
-    let storage_config = StorageConfig {
-        directory: storage_dir,
-        max_file_size: config.max_file_size,
-        max_disk_usage: max_use,
-        max_files: config.max_files,
-        persistent,
-        keep_free,
-        direct_directory: false,
-    };
+    let storage_config = config.make_storage_config(persistent);
 
     let storage = match JournalStorage::new(storage_config) {
         Ok(s) => s,
@@ -2952,14 +3134,14 @@ SystemKeepFree=1G
 RuntimeKeepFree=512M
 MaxFileSec=1h
 Seal=no
-MaxFiles=50
+SystemMaxFiles=50
 "#,
         );
         assert_eq!(config.system_keep_free, 1024 * 1024 * 1024);
         assert_eq!(config.runtime_keep_free, 512 * 1024 * 1024);
         assert_eq!(config.max_file_sec_usec, 3_600_000_000); // 1h in µs
         assert!(!config.seal);
-        assert_eq!(config.max_files, 50);
+        assert_eq!(config.system_max_files, 50);
     }
 
     #[test]
@@ -2968,11 +3150,11 @@ MaxFiles=50
         config.parse_config(
             r#"
 [Journal]
-MaxFiles=42
+SystemMaxFiles=42
 MaxFileSec=30min
 "#,
         );
-        assert_eq!(config.max_files, 42);
+        assert_eq!(config.system_max_files, 42);
         assert_eq!(config.max_file_sec_usec, 30 * 60_000_000);
     }
 
