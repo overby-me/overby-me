@@ -39,6 +39,8 @@
 
 - **Do NOT add `Co-Authored-By` lines to commit messages.** Never append co-author trailers (e.g. `Co-Authored-By: Claude ...`) to commits.
 
+- **Always run `rtk jj diff --stat` before writing a commit message.** Base the commit message on the actual diff, not on memory of what was changed. This prevents misleading commit messages that reference changes from earlier (already-pushed) commits.
+
 - **The `jj` wrapper runs git hooks automatically.** The `jj` binary is wrapped to run `pre-commit` hooks before `jj commit`, `jj new`, and `jj squash`, and `prepare-commit-msg` hooks when `-m`/`--message` is provided. If a hook fails, fix the issue and run the command again — do not try to bypass hooks.
 
 ## Pre-commit file review
