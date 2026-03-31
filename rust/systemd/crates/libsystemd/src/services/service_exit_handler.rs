@@ -688,6 +688,12 @@ pub(crate) fn service_exit_handler(
                 // activation of later units that depend on it.  By
                 // leaving the service in its Started state we match
                 // real systemd's effective behavior.
+                //
+                // NOTE: ideally we would set StoppedFinal here so that
+                // `systemctl is-active` reports "inactive" (issue #27953),
+                // but doing so breaks boot — fast-exiting oneshot services
+                // race with the activation graph walker, causing deps to
+                // see StoppedFinal before their before-chain is dispatched.
             } else {
                 // Failed exit: full recursive deactivation including
                 // required_by to propagate the failure.
