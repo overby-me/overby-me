@@ -2,9 +2,19 @@
 
 ## Current State
 
-**64/77 tests passing** in nix on bookmark `push-nkqwvorqmnkn`. All changes committed and pushed. Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available).
+**~66/77 tests passing** in nix on bookmark `push-nkqwvorqmnkn`. All changes committed and pushed. Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available).
 
 ### Progress This Session (Latest)
+
+- **nameref**: 0 diff locally ✅ (was 30). **Fully passing!**
+  - Fixed `unset foo` where `foo` is a nameref to unset the **target** variable, not the nameref itself
+  - Implemented `unset -n foo` to remove just the nameref attribute
+  - All ~14 PID diffs also gone (sub-tests produce identical output)
+- **intl**: 0 diff locally ✅ (was 2). **Fully passing!**
+  - Fixed `${#var}` to count locale-aware multibyte characters: converts string to raw bytes via `string_to_raw_bytes`, then counts UTF-8 characters when in a UTF-8 locale
+  - `$'\303\251'` (raw bytes for é) now correctly reports length 1 instead of 2
+
+### Progress Previous Session
 
 - **comsub**: 0 diff locally ✅ (was 2). Fixed SIGPIPE in process substitution children
 - **lastpipe**: 0 diff locally ✅ (was 2). Fixed `in_pipeline_child` regression with lastpipe
@@ -26,7 +36,7 @@
 - **varenv**: 8 diff locally (was 18 = ~chet + PID diffs)
 - **array**: 425 diff locally (unchanged)
 
-### Progress Previous Session
+### Progress Two Sessions Ago
 
 - **assoc**: 2 diff locally (was 65). **Massive improvement — 63 lines reduced**
   - Fixed `declare -Ai` arithmetic evaluation for assoc array compound assignments
@@ -57,7 +67,7 @@
 - **heredoc**: 8 diff locally (PID diffs + sub-tests)
 - **comsub-posix**: 0 diff locally ✅
 
-### Progress Two Sessions Ago
+### Progress Four Sessions Ago
 
 - **assoc**: 0 real diff locally (was 2). Only timing diff remains ✅
   - Fixed `${#wheat[$unset]}` — empty subscript after expansion now emits "bad array subscript" error for assoc arrays
@@ -83,7 +93,7 @@
 - **nameref**: 252 diff locally (was 248)
 - **array**: 425 diff locally (was 424)
 
-### Progress Five Sessions Ago
+### Progress Seven Sessions Ago
 
 - **builtins**: 18 diff locally → **all PID diffs** (was 40). Should now pass in nix ✅
   - Fixed `exec -c` (clear env), `exec -l` (login shell argv[0] prefix)
@@ -101,7 +111,7 @@
 - **heredoc**: 8 diff locally (PID diffs + sub-tests)
 - **comsub-posix**: 0 diff locally ✅
 
-### Progress Three Sessions Ago
+### Progress Five Sessions Ago
 
 - **Started at**: 64/77 (arith diff 30, heredoc diff 111, comsub-posix diff 20)
 - **heredoc**: main test 0 real diff locally ✅ (was ~20, only PID diffs remain), nix sub-tests ~85 diff
@@ -112,6 +122,12 @@
 - **printf**: flaky — timing-dependent date format mismatch
 
 ### Fixes Applied This Session (Latest)
+
+76. **Fix `unset` through namerefs** (`src/builtins/vars.rs`) — `unset foo` where `foo` is a nameref now unsets the **target** variable (e.g., `bar`) while keeping the nameref itself intact, matching bash behavior. Previously it removed the nameref and left the target untouched. Also implemented `unset -n foo` to remove just the nameref attribute without touching the target. The `_unset_nameref` flag is now properly wired up. Three-way dispatch: `unset -n` removes the nameref, `unset` on a nameref unsets through to the target, plain `unset` on a regular variable removes it directly.
+
+77. **Fix `${#var}` locale-aware multibyte character counting** (`src/expand/params.rs`) — Added `mbstrlen()` helper that checks the current locale (`LC_ALL`/`LC_CTYPE`/`LANG`). In UTF-8 locales, converts the bash-style string (raw bytes stored as Latin-1 chars) to raw bytes via `string_to_raw_bytes`, then counts UTF-8 characters with `String::from_utf8_lossy`. In non-UTF-8 locales, falls back to `chars().count()` (byte counting). Fixes `${#x}` returning 2 instead of 1 for `x=$'\303\251'` (UTF-8 é).
+
+### Fixes Applied Previous Session
 
 65. **Fix `in_pipeline_child` regression with lastpipe** (`src/interpreter/pipeline.rs`) — `self.in_pipeline_child = !self.shopt_lastpipe` was wrong: when lastpipe is enabled, non-last forked pipeline children had `in_pipeline_child = false`, causing `echo` to print "Broken pipe" errors instead of silently exiting. Changed to `self.in_pipeline_child = true` unconditionally for all forked children.
 
@@ -135,7 +151,7 @@
 
 75. **Fix prefix assignment nameref resolution** (`src/interpreter/commands.rs`) — `foo=two eval 'echo $foo'` where `foo` is a nameref to `bar` now correctly resolves `foo` through the nameref for both function and builtin prefix assignments. The resolved name is used for save/restore and env export. Added empty-name guards to prevent panics when nameref targets are empty strings.
 
-### Fixes Applied Two Sessions Ago
+### Fixes Applied Three Sessions Ago
 
 47. **Fix `${#wheat[$unset]}` bad array subscript for assoc arrays** (`src/expand/params.rs`) — When an associative array subscript expands to empty (e.g., `$unset` is not set), now emits `[raw_subscript]: bad array subscript` error. Added `$` variable expansion in assoc array subscript keys inside `lookup_var`. Added `get_arith_error()` peek function to avoid duplicate errors when `expand_part` and `expand_param` both call `lookup_var`.
 
@@ -157,7 +173,7 @@
 
 56. **Remove readline-only shopt options** (`src/builtins/set.rs`) — Removed 10 options from shopt listing: `complete_fullquote`, `direxpand`, `dirspell`, `force_fignore`, `histreedit`, `histverify`, `hostcomplete`, `no_empty_cmd_completion`, `progcomp`, `progcomp_alias`. Also removed `emacs` and `vi` from `set -o` options. These require readline/completion support not present in our build.
 
-### Fixes Applied Five Sessions Ago
+### Fixes Applied Seven Sessions Ago
 
 31. **Fix `declare -Ai` arithmetic evaluation for assoc arrays** (`src/interpreter/commands.rs`) — Compound assignment to assoc arrays with `-i` flag now evaluates values as arithmetic (e.g., `[zero]=1+4` → `5`). Also handles element-level `+=` for assoc compound assignments.
 
@@ -191,7 +207,7 @@
 
 46. **Fix arithmetic panic on unclosed brackets** (`src/interpreter/arithmetic.rs`) — `eval_arith_expr_inner` no longer panics when `]` is not found (e.g., `[foo` without closing `]`).
 
-### Fixes Applied Four Sessions Ago
+### Fixes Applied Six Sessions Ago
 
 18. **Fix `exec -c` to actually clear environment** (`src/builtins/exec.rs`) — `exec -c` was clearing env vars then re-applying all shell exports, defeating the purpose. Now the else branch only applies exports when `-c` is not set.
 
@@ -219,7 +235,7 @@
 
 30. **Quote associative array keys in `declare -p`** (`src/builtins/mod.rs`, `src/builtins/vars.rs`) — Keys containing non-alphanumeric/underscore characters are now quoted with `"..."` in `declare -p` output (e.g., `["*"]`, `["hello world"]`, `["\$x"]`), matching bash behavior.
 
-### Fixes Applied Seven Sessions Ago
+### Fixes Applied Nine Sessions Ago
 
 1. **Fix heredoc backslash handling for `\"`** (`src/lexer/heredoc.rs`) — In unquoted heredoc body parsing (`parse_double_quoted_content`), `\"` should remain literal (not strip backslash). Only `$`, `` ` ``, `\`, and `\n` are special after backslash in heredocs. Removed `'"'` from the match pattern.
 
@@ -289,9 +305,9 @@ Suggested nix timeout: 30s for most tests, 120s for trap.
 
 ## Failing Tests (sorted by diff size)
 
-### Locally Passing (30 tests)
+### Locally Passing (31 tests)
 
-alias, appendop, arith, braces, case, casemod, comsub, comsub-posix, complete, globstar, lastpipe, mapfile, nquote, nquote2, nquote3, nquote4, nquote5, parser, posix2, posixexp, posixpat, precedence, printf, quote, rhs-exp, set-e, set-x, shopt, tilde
+alias, appendop, arith, braces, case, casemod, comsub, comsub-posix, complete, globstar, intl, lastpipe, mapfile, nameref, nquote, nquote2, nquote3, nquote4, nquote5, parser, posix2, posixexp, posixpat, precedence, printf, quote, rhs-exp, set-e, set-x, shopt, tilde
 
 Note: func/shopt/complete have small diffs against local non-readline bash but pass against full bash in nix. globstar/posixexp must be tested sequentially (parallel runs share TMPDIR).
 
@@ -317,10 +333,6 @@ Note: func/shopt/complete have small diffs against local non-readline bash but p
 
 - fd number differences (63/61 vs 62/57). Pipeline fd allocation order.
 
-#### 3. intl (2 lines)
-
-- `${#x}` character count fixed but test still has 1 diff line (4 vs 1 for multibyte char — may be locale-dependent encoding).
-
 ### Medium (30-200 diff lines)
 
 #### 4. comsub2 (196 lines)
@@ -333,15 +345,11 @@ Associative array keys with special chars in arithmetic contexts.
 
 ### Hard (200+ diff lines)
 
-#### 6. nameref (30 lines local, was 266)
-
-Core nameref resolution mostly fixed. Remaining: ~2 real lines (unset-through-nameref semantics) + ~14 PID diffs. Fixed: `typeset -n` target inference, `+n` removal, prefix assignment resolution. The `./` glob fix eliminated ~214 lines of sub-test script name prefix diffs.
-
-#### 7. array (425 lines local)
+#### 6. array (425 lines local)
 
 Remaining issues in array32.sub, array33.sub (injection protection, type conversion errors).
 
-#### 8. vredir (734K lines)
+#### 7. vredir (734K lines)
 
 `{var}>file` variable fd redirection is partially implemented but produces massive output differences.
 
@@ -391,15 +399,15 @@ Extra CHLD signals (non-deterministic). Sometimes passes, sometimes fails with 1
 
 ## Recommended Next Priorities
 
-1. **Fix nameref unset semantics** — `unset foo` where foo is a nameref should unset the target variable, not the nameref. Complex edge cases with self-referencing namerefs (e.g., `declare -n a="a[0]"`). (~2 real diff lines remaining)
+1. **Fix comsub-posix nix error messages** — Improve error reporting for intentional syntax errors inside `$(...)` in case patterns. Need parser to detect reserved words like `done` in wrong context. (~35 nix diff lines)
 
-2. **Fix comsub-posix nix error messages** — Improve error reporting for intentional syntax errors inside `$(...)` in case patterns. Need parser to detect reserved words like `done` in wrong context. (~35 nix diff lines)
+2. **Fix arith10.sub array subscript quoting** — Handle `a[" "]`, `a[\ \]`, `a[\\]` in arithmetic array subscripts. (~100 nix diff lines)
 
-3. **Fix arith10.sub array subscript quoting** — Handle `a[" "]`, `a[\ \]`, `a[\\]` in arithmetic array subscripts. (~100 nix diff lines)
+3. **Fix heredoc sub-test issues** — heredoc3.sub (delimiter edge cases), heredoc7.sub (comsub+heredoc interaction), heredoc9.sub (function body printing). (~85 nix diff lines)
 
-4. **Fix heredoc sub-test issues** — heredoc3.sub (delimiter edge cases), heredoc7.sub (comsub+heredoc interaction), heredoc9.sub (function body printing). (~85 nix diff lines)
+4. **Fix varenv nix sub-tests** — varenv3.sub (local scoping), varenv4.sub (assoc array conversion), varenv25.sub (local -p).
 
-5. **Fix varenv nix sub-tests** — varenv3.sub (local scoping), varenv4.sub (assoc array conversion), varenv25.sub (local -p).
+5. **Fix coproc fd allocation** — fd number differences (63/61 vs 62/57). Pipeline fd allocation order. (~6 diff lines)
 
 6. **Fix quotearray arithmetic assoc key handling** — Assoc array subscripts with special chars in `((...))` context. (~212 diff lines)
 
