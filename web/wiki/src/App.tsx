@@ -15,6 +15,7 @@ import { useTranslation } from "react-i18next";
 import { Route, BrowserRouter as Router, Routes } from "react-router-dom";
 import { Index } from "./pages";
 import Path from "./pages/[...path]";
+import Crash from "./pages/crash";
 import Login from "./pages/user/login";
 import Register from "./pages/user/register";
 import ResetPassword from "./pages/user/reset-password";
@@ -85,6 +86,7 @@ const App = () => {
 														path="/user/unverified"
 														element={<Unverified />}
 													/>
+													<Route path="/crash" element={<Crash />} />
 													<Route path="/*" element={<Path />} />
 												</Routes>
 											</Layout>
