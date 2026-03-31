@@ -1638,6 +1638,26 @@ impl Shell {
                                     .or_insert(value.clone());
                             }
                         } else {
+                            // Validate array subscript for indexed arrays
+                            if idx_str.is_empty() {
+                                eprintln!(
+                                    "{}: {}[]: bad array subscript",
+                                    self.error_prefix(),
+                                    base_name
+                                );
+                                self.last_status = 1;
+                                return;
+                            }
+                            if idx_str == "*" || idx_str == "@" {
+                                eprintln!(
+                                    "{}: {}[{}]: bad array subscript",
+                                    self.error_prefix(),
+                                    base_name,
+                                    idx_str
+                                );
+                                self.last_status = 1;
+                                return;
+                            }
                             let raw_idx = self.eval_arith_expr(idx_str);
                             let is_int = self.integer_vars.contains(&resolved);
                             let addend = if is_int {
@@ -1759,11 +1779,52 @@ impl Shell {
                                     .or_default()
                                     .insert(idx_str.to_string(), value);
                             } else {
+                                // Validate array subscript for indexed arrays
+                                if idx_str.is_empty() {
+                                    eprintln!(
+                                        "{}: {}[]: bad array subscript",
+                                        self.error_prefix(),
+                                        base
+                                    );
+                                    self.last_status = 1;
+                                    return;
+                                }
+                                if idx_str == "*" || idx_str == "@" {
+                                    eprintln!(
+                                        "{}: {}[{}]: bad array subscript",
+                                        self.error_prefix(),
+                                        base,
+                                        idx_str
+                                    );
+                                    self.last_status = 1;
+                                    return;
+                                }
                                 let raw_idx = self.eval_arith_expr(idx_str);
+                                if raw_idx < 0 && !self.arrays.contains_key(&resolved) {
+                                    eprintln!(
+                                        "{}: {}[{}]: bad array subscript",
+                                        self.error_prefix(),
+                                        base,
+                                        idx_str
+                                    );
+                                    self.last_status = 1;
+                                    return;
+                                }
                                 let arr = self.arrays.entry(resolved).or_default();
                                 let idx = if raw_idx < 0 {
                                     let len = arr.len() as i64;
-                                    (len + raw_idx).max(0) as usize
+                                    let computed = len + raw_idx;
+                                    if computed < 0 {
+                                        eprintln!(
+                                            "{}: {}[{}]: bad array subscript",
+                                            self.error_prefix(),
+                                            base,
+                                            idx_str
+                                        );
+                                        self.last_status = 1;
+                                        return;
+                                    }
+                                    computed as usize
                                 } else {
                                     raw_idx as usize
                                 };
@@ -1796,6 +1857,18 @@ impl Shell {
                 }
             }
             AssignValue::Array(elements) => {
+                // Cannot assign list to array member: d[7]=(...)
+                if assign.name.contains('[') {
+                    let base = assign.name.split('[').next().unwrap_or(&assign.name);
+                    eprintln!(
+                        "{}: {}[{}]: cannot assign list to array member",
+                        self.error_prefix(),
+                        base,
+                        &assign.name[base.len() + 1..assign.name.len() - 1]
+                    );
+                    self.last_status = 1;
+                    return;
+                }
                 let resolved = self.resolve_nameref(&assign.name);
                 // Check if this is an associative array
                 if self.assoc_arrays.contains_key(&resolved)
