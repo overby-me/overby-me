@@ -1352,8 +1352,8 @@ fn recv_with_cred(sock: &UnixDatagram, buf: &mut [u8]) -> io::Result<(usize, Opt
     };
 
     // Control buffer large enough for one SCM_CREDENTIALS message
-    let mut cmsg_buf = [0u8; unsafe { libc::CMSG_SPACE(std::mem::size_of::<libc::ucred>() as u32) }
-        as usize];
+    let mut cmsg_buf =
+        [0u8; unsafe { libc::CMSG_SPACE(std::mem::size_of::<libc::ucred>() as u32) } as usize];
 
     let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
     msg.msg_iov = &mut iov;
@@ -1371,8 +1371,7 @@ fn recv_with_cred(sock: &UnixDatagram, buf: &mut [u8]) -> io::Result<(usize, Opt
     unsafe {
         let mut cmsg = libc::CMSG_FIRSTHDR(&msg);
         while !cmsg.is_null() {
-            if (*cmsg).cmsg_level == libc::SOL_SOCKET
-                && (*cmsg).cmsg_type == libc::SCM_CREDENTIALS
+            if (*cmsg).cmsg_level == libc::SOL_SOCKET && (*cmsg).cmsg_type == libc::SCM_CREDENTIALS
             {
                 let data_ptr = libc::CMSG_DATA(cmsg) as *const libc::ucred;
                 cred = Some(std::ptr::read_unaligned(data_ptr));

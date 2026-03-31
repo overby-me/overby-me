@@ -169,6 +169,8 @@ fn main() {
     let mut kill_value: Option<i32> = None;
     let mut kill_signal_str: Option<String> = None;
     let mut job_mode: Option<String> = None;
+    let mut stdin_mode = false;
+    let mut dropin_name: Option<String> = None;
 
     let mut i = 0;
     let mut end_of_options = false;
@@ -183,6 +185,27 @@ fn main() {
         }
         if end_of_options {
             positional.push(arg.clone());
+            i += 1;
+            continue;
+        }
+
+        // --stdin flag (for `edit --stdin`)
+        if arg == "--stdin" {
+            stdin_mode = true;
+            i += 1;
+            continue;
+        }
+
+        // --drop-in flag (for `edit --drop-in=name.conf`)
+        if arg == "--drop-in" {
+            if i + 1 < args.len() {
+                dropin_name = Some(args[i + 1].clone());
+            }
+            i += 2;
+            continue;
+        }
+        if let Some(rest) = arg.strip_prefix("--drop-in=") {
+            dropin_name = Some(rest.to_string());
             i += 1;
             continue;
         }
@@ -689,185 +712,202 @@ fn main() {
             }
             std::process::exit(1);
         }
-        let unit_name = &positional[1];
+        let unit_names: Vec<String> = positional[1..].to_vec();
 
-        // Query PID 1 for the unit's fragment path and existing override content.
-        let mut query_arr = vec![Value::String(unit_name.clone())];
-        if full {
-            query_arr.push(Value::String("--full".to_owned()));
-        }
-        let query_call = Call {
-            method: "edit".to_string(),
-            params: Some(Value::Array(query_arr)),
-            id: None,
-        };
-        let query_str = serde_json::to_string(&query_call.to_json()).unwrap();
-        let query_result = if addr.starts_with('/') {
-            send_unix(&addr, &query_str)
+        // Read stdin content if --stdin mode.
+        let stdin_content = if stdin_mode {
+            use std::io::Read;
+            let mut buf = String::new();
+            std::io::stdin().read_to_string(&mut buf).ok();
+            Some(buf)
         } else {
-            send_tcp(&addr, &query_str)
+            None
         };
 
-        let info = match query_result {
-            Ok(resp) => {
-                if let Some(error) = resp.get("error") {
-                    let message = error
-                        .get("message")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown error");
-                    if !quiet {
-                        eprintln!("{}", message);
-                    }
-                    std::process::exit(1);
-                }
-                resp.get("result").cloned().unwrap_or(Value::Null)
-            }
-            Err(e) => {
-                if !quiet {
-                    eprintln!("Error communicating with rust-systemd: {e}");
-                }
-                std::process::exit(1);
-            }
-        };
-
-        // Determine the editor.
-        let editor = std::env::var("SYSTEMD_EDITOR")
-            .or_else(|_| std::env::var("EDITOR"))
-            .or_else(|_| std::env::var("VISUAL"))
-            .unwrap_or_else(|_| "vi".to_owned());
-
-        let is_full = info.get("full").and_then(|v| v.as_bool()).unwrap_or(false);
-
-        if is_full {
-            // --full mode: edit a full copy of the unit file in /etc/systemd/system/.
-            let original = info
-                .get("original_content")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let etc_path = std::path::Path::new("/etc/systemd/system").join(unit_name);
-
-            // Write existing content (or original) as starting point.
-            if !etc_path.exists()
-                && !original.is_empty()
-                && let Err(e) = std::fs::write(&etc_path, original)
-            {
-                if !quiet {
-                    eprintln!("Failed to write {}: {e}", etc_path.display());
-                }
-                std::process::exit(1);
-            }
-
-            let status = std::process::Command::new(&editor).arg(&etc_path).status();
-            match status {
-                Ok(s) if s.success() => {}
-                Ok(s) => {
-                    if !quiet {
-                        eprintln!("Editor exited with status {}", s.code().unwrap_or(-1));
-                    }
-                    std::process::exit(1);
-                }
-                Err(e) => {
-                    if !quiet {
-                        eprintln!("Failed to run editor '{}': {e}", editor);
-                    }
-                    std::process::exit(1);
-                }
-            }
+        // Base directory: /run for --runtime, /etc otherwise.
+        let base_dir = if runtime {
+            "/run/systemd/system"
         } else {
-            // Drop-in mode: edit /etc/systemd/system/<unit>.d/override.conf.
-            let default_dropin_dir = format!("/etc/systemd/system/{unit_name}.d");
-            let dropin_dir = info
-                .get("dropin_dir")
-                .and_then(|v| v.as_str())
-                .unwrap_or(&default_dropin_dir);
-            let default_override_path = format!("/etc/systemd/system/{unit_name}.d/override.conf");
-            let override_path = info
-                .get("override_path")
-                .and_then(|v| v.as_str())
-                .unwrap_or(&default_override_path);
-            let existing = info
-                .get("existing_override")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            "/etc/systemd/system"
+        };
 
-            // Ensure the drop-in directory exists.
-            if let Err(e) = std::fs::create_dir_all(dropin_dir) {
-                if !quiet {
-                    eprintln!("Failed to create {dropin_dir}: {e}");
-                }
-                std::process::exit(1);
-            }
+        for unit_name in &unit_names {
+            if full {
+                // --full mode: write a full copy of the unit file.
+                let dest_path = std::path::Path::new(base_dir).join(unit_name);
 
-            // Write a temp file with existing content for the editor.
-            let tmp_path = format!("{override_path}.tmp");
-            let initial_content = if existing.is_empty() {
-                "### Editing drop-in override for {}\n### Anything between here and the comment below will become the contents of the drop-in file\n\n[Service]\n\n### Lines below this comment will be discarded\n".replace("{}", unit_name)
-            } else {
-                existing.to_owned()
-            };
-            if let Err(e) = std::fs::write(&tmp_path, &initial_content) {
-                if !quiet {
-                    eprintln!("Failed to write {tmp_path}: {e}");
-                }
-                std::process::exit(1);
-            }
-
-            let status = std::process::Command::new(&editor).arg(&tmp_path).status();
-
-            match status {
-                Ok(s) if s.success() => {
-                    // Read the edited content and write to the override path.
-                    match std::fs::read_to_string(&tmp_path) {
-                        Ok(edited) => {
-                            // Strip comment lines starting with ### for the template.
-                            let clean: String = edited
-                                .lines()
-                                .filter(|l| !l.starts_with("### "))
-                                .collect::<Vec<_>>()
-                                .join("\n");
-                            let trimmed = clean.trim();
-                            if trimmed.is_empty() {
-                                // Empty content — remove the override if it existed.
-                                let _ = std::fs::remove_file(override_path);
-                                if !quiet {
-                                    eprintln!("Removed empty override for {unit_name}.");
-                                }
-                            } else {
-                                let mut final_content = trimmed.to_owned();
-                                if !final_content.ends_with('\n') {
-                                    final_content.push('\n');
-                                }
-                                if let Err(e) = std::fs::write(override_path, &final_content) {
-                                    if !quiet {
-                                        eprintln!("Failed to write {override_path}: {e}");
-                                    }
-                                    std::process::exit(1);
-                                }
+                if let Some(ref content) = stdin_content {
+                    // --stdin --full: write content directly
+                    let mut final_content = content.trim().to_owned();
+                    if !final_content.is_empty() && !final_content.ends_with('\n') {
+                        final_content.push('\n');
+                    }
+                    if let Err(e) = std::fs::write(&dest_path, &final_content) {
+                        if !quiet {
+                            eprintln!("Failed to write {}: {e}", dest_path.display());
+                        }
+                        std::process::exit(1);
+                    }
+                } else {
+                    // Interactive editor mode for --full
+                    // Query PID 1 for original content if not --force
+                    if !force {
+                        let query_arr = vec![
+                            Value::String(unit_name.clone()),
+                            Value::String("--full".to_owned()),
+                        ];
+                        let query_call = Call {
+                            method: "edit".to_string(),
+                            params: Some(Value::Array(query_arr)),
+                            id: None,
+                        };
+                        let query_str = serde_json::to_string(&query_call.to_json()).unwrap();
+                        let query_result = if addr.starts_with('/') {
+                            send_unix(&addr, &query_str)
+                        } else {
+                            send_tcp(&addr, &query_str)
+                        };
+                        if let Ok(resp) = query_result {
+                            let info = resp.get("result").cloned().unwrap_or(Value::Null);
+                            let original = info
+                                .get("original_content")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("");
+                            if !dest_path.exists() && !original.is_empty() {
+                                let _ = std::fs::write(&dest_path, original);
                             }
+                        }
+                    }
+
+                    let editor = std::env::var("SYSTEMD_EDITOR")
+                        .or_else(|_| std::env::var("EDITOR"))
+                        .or_else(|_| std::env::var("VISUAL"))
+                        .unwrap_or_else(|_| "vi".to_owned());
+
+                    let status = std::process::Command::new(&editor).arg(&dest_path).status();
+                    match status {
+                        Ok(s) if s.success() => {}
+                        Ok(s) => {
+                            if !quiet {
+                                eprintln!("Editor exited with status {}", s.code().unwrap_or(-1));
+                            }
+                            std::process::exit(1);
                         }
                         Err(e) => {
                             if !quiet {
-                                eprintln!("Failed to read {tmp_path}: {e}");
+                                eprintln!("Failed to run editor '{}': {e}", editor);
                             }
                             std::process::exit(1);
                         }
                     }
-                    // Clean up temp file.
-                    let _ = std::fs::remove_file(&tmp_path);
                 }
-                Ok(s) => {
-                    let _ = std::fs::remove_file(&tmp_path);
+            } else {
+                // Drop-in mode
+                let dropin_filename = dropin_name.as_deref().unwrap_or("override.conf");
+                let dropin_dir = format!("{base_dir}/{unit_name}.d");
+                let override_path = format!("{dropin_dir}/{dropin_filename}");
+
+                if let Err(e) = std::fs::create_dir_all(&dropin_dir) {
                     if !quiet {
-                        eprintln!("Editor exited with status {}", s.code().unwrap_or(-1));
+                        eprintln!("Failed to create {dropin_dir}: {e}");
                     }
                     std::process::exit(1);
                 }
-                Err(e) => {
-                    let _ = std::fs::remove_file(&tmp_path);
-                    if !quiet {
-                        eprintln!("Failed to run editor '{}': {e}", editor);
+
+                if let Some(ref content) = stdin_content {
+                    // --stdin mode: write content directly
+                    let mut final_content = content.trim().to_owned();
+                    if !final_content.is_empty() && !final_content.ends_with('\n') {
+                        final_content.push('\n');
                     }
-                    std::process::exit(1);
+                    if final_content.trim().is_empty() {
+                        let _ = std::fs::remove_file(&override_path);
+                    } else if let Err(e) = std::fs::write(&override_path, &final_content) {
+                        if !quiet {
+                            eprintln!("Failed to write {override_path}: {e}");
+                        }
+                        std::process::exit(1);
+                    }
+                } else {
+                    // Interactive editor mode
+                    let existing = std::fs::read_to_string(&override_path).unwrap_or_default();
+
+                    let tmp_path = format!("{override_path}.tmp");
+                    let initial_content = if existing.is_empty() {
+                        format!(
+                            "### Editing drop-in override for {unit_name}\n### Anything between here and the comment below will become the contents of the drop-in file\n\n[Service]\n\n### Lines below this comment will be discarded\n"
+                        )
+                    } else {
+                        existing
+                    };
+                    if let Err(e) = std::fs::write(&tmp_path, &initial_content) {
+                        if !quiet {
+                            eprintln!("Failed to write {tmp_path}: {e}");
+                        }
+                        std::process::exit(1);
+                    }
+
+                    let editor = std::env::var("SYSTEMD_EDITOR")
+                        .or_else(|_| std::env::var("EDITOR"))
+                        .or_else(|_| std::env::var("VISUAL"))
+                        .unwrap_or_else(|_| "vi".to_owned());
+
+                    let status = std::process::Command::new(&editor).arg(&tmp_path).status();
+
+                    match status {
+                        Ok(s) if s.success() => {
+                            match std::fs::read_to_string(&tmp_path) {
+                                Ok(edited) => {
+                                    let clean: String = edited
+                                        .lines()
+                                        .filter(|l| !l.starts_with("### "))
+                                        .collect::<Vec<_>>()
+                                        .join("\n");
+                                    let trimmed = clean.trim();
+                                    if trimmed.is_empty() {
+                                        let _ = std::fs::remove_file(&override_path);
+                                        if !quiet {
+                                            eprintln!("Removed empty override for {unit_name}.");
+                                        }
+                                    } else {
+                                        let mut final_content = trimmed.to_owned();
+                                        if !final_content.ends_with('\n') {
+                                            final_content.push('\n');
+                                        }
+                                        if let Err(e) =
+                                            std::fs::write(&override_path, &final_content)
+                                        {
+                                            if !quiet {
+                                                eprintln!("Failed to write {override_path}: {e}");
+                                            }
+                                            std::process::exit(1);
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    if !quiet {
+                                        eprintln!("Failed to read {tmp_path}: {e}");
+                                    }
+                                    std::process::exit(1);
+                                }
+                            }
+                            let _ = std::fs::remove_file(&tmp_path);
+                        }
+                        Ok(s) => {
+                            let _ = std::fs::remove_file(&tmp_path);
+                            if !quiet {
+                                eprintln!("Editor exited with status {}", s.code().unwrap_or(-1));
+                            }
+                            std::process::exit(1);
+                        }
+                        Err(e) => {
+                            let _ = std::fs::remove_file(&tmp_path);
+                            if !quiet {
+                                eprintln!("Failed to run editor '{}': {e}", editor);
+                            }
+                            std::process::exit(1);
+                        }
+                    }
                 }
             }
         }

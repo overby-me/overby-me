@@ -2234,11 +2234,7 @@ fn main() {
 
     // Cursor filter (--cursor, --after-cursor, or --cursor-file)
     // --cursor-file uses after-cursor (>) semantics, matching C systemd behavior
-    let effective_cursor = if let Some(ref c) = cli.cursor {
-        Some(c.clone())
-    } else {
-        None
-    };
+    let effective_cursor = cli.cursor.as_ref().cloned();
     let effective_after_cursor = if let Some(ref c) = cli.after_cursor {
         Some(c.clone())
     } else if let Some(ref file) = cli.cursor_file {
