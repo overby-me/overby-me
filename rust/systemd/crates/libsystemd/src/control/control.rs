@@ -7004,8 +7004,23 @@ pub fn execute_command(
                 }
             } else {
                 let id = find_or_load_unit(&unit_name, &run_info)?;
-                let ri = run_info.read_poisoned();
-                crate::units::reactivate_unit(id, &ri).map_err(|e| format!("{e}"))?;
+                // Try reload first if the service supports it (has ExecReload=)
+                let has_reload = {
+                    let ri = run_info.read_poisoned();
+                    ri.unit_table.get(&id).is_some_and(|unit| {
+                        if let Specific::Service(svc) = &unit.specific {
+                            !svc.conf.reload.is_empty()
+                        } else {
+                            false
+                        }
+                    })
+                };
+                if has_reload {
+                    execute_command(Command::Reload(unit_name), run_info.clone())?;
+                } else {
+                    let ri = run_info.read_poisoned();
+                    crate::units::reactivate_unit(id, &ri).map_err(|e| format!("{e}"))?;
+                }
             }
         }
         Command::IsActive(unit_name) => {

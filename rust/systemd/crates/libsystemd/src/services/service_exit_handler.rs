@@ -1170,9 +1170,18 @@ pub(crate) fn service_exit_handler(
 
         // Clean up the cgroup directory now that the service has stopped.
         // This matches real systemd's behavior of removing empty cgroup dirs.
+        // Skip cleanup if the unit is restarting (Stopping/Starting/Started)
+        // to avoid racing with the new process's cgroup setup.
         #[cfg(target_os = "linux")]
         if let Some(unit) = run_info.unit_table.get(&srvc_id)
             && let Specific::Service(svc) = &unit.specific
+            && !matches!(
+                *unit.common.status.read_poisoned(),
+                UnitStatus::Stopping
+                    | UnitStatus::Restarting
+                    | UnitStatus::Starting
+                    | UnitStatus::Started(_)
+            )
         {
             let cgroup_path = &svc.conf.platform_specific.cgroup_path;
             if cgroup_path.exists() {
