@@ -2,7 +2,7 @@
 
 ## Current State
 
-**64/77 tests passing** (likely **67+/77** — builtins, assoc, shopt, comsub, lastpipe should now pass in nix) on bookmark `push-nkqwvorqmnkn`. All changes committed and pushed.
+**64/77 tests passing** in nix on bookmark `push-nkqwvorqmnkn`. All changes committed and pushed. Gained comsub, lastpipe, func, shopt, extglob, procsub as new nix passes; builtins/arith/heredoc/assoc regressed due to sub-test issues (pushd/popd, arith10.sub, heredoc3/7/9.sub, BASH_CMDS).
 
 ### Progress This Session (Latest)
 
