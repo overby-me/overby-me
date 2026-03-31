@@ -83,12 +83,15 @@ pub fn open_journal_stream(
     unit_name: &str,
     invocation_id: Option<&str>,
     syslog_identifier: Option<&str>,
+    priority: u8,
+    level_prefix: bool,
 ) -> Option<UnixStream> {
     let stream = UnixStream::connect(JOURNAL_STDOUT_SOCKET).ok()?;
     let identifier = syslog_identifier
         .unwrap_or_else(|| unit_name.strip_suffix(".service").unwrap_or(unit_name));
     let inv_id = invocation_id.unwrap_or("");
-    let header = format!("{identifier}\n{unit_name}\n6\n1\n0\n0\n0\n{inv_id}\n");
+    let lp = if level_prefix { "1" } else { "0" };
+    let header = format!("{identifier}\n{unit_name}\n{priority}\n{lp}\n0\n0\n0\n{inv_id}\n");
     use std::io::Write;
     let mut s = stream;
     s.write_all(header.as_bytes()).ok()?;

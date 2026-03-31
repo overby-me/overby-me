@@ -170,7 +170,7 @@ pub fn journal_log_with_fields(message: &str, priority: u8, fields: &[(&str, &st
 }
 
 /// Convert a syslog level name to its numeric value.
-fn parse_log_level(level: &str) -> Option<u8> {
+pub fn parse_log_level(level: &str) -> Option<u8> {
     match level {
         "emerg" | "0" => Some(0),
         "alert" | "1" => Some(1),

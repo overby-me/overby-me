@@ -451,11 +451,23 @@ pub fn handle_all_std_out(run_info: ArcMutRuntimeInfo) {
                                                 })
                                             },
                                         );
+                                    // SyslogLevel= and SyslogLevelPrefix= from config
+                                    let priority = srvc
+                                        .conf
+                                        .exec_config
+                                        .syslog_level
+                                        .as_deref()
+                                        .and_then(crate::control::varlink::parse_log_level)
+                                        .unwrap_or(6);
+                                    let level_prefix =
+                                        srvc.conf.exec_config.syslog_level_prefix.unwrap_or(true);
                                     mut_state.srvc.journal_stream =
                                         crate::services::open_journal_stream(
                                             &name,
                                             mut_state.srvc.invocation_id.as_deref(),
                                             ident,
+                                            priority,
+                                            level_prefix,
                                         );
                                 }
                                 mut_state.srvc.stdout_buffer.extend(&buf[..bytes]);
@@ -589,11 +601,22 @@ pub fn handle_all_std_err(run_info: ArcMutRuntimeInfo) {
                                                 })
                                             },
                                         );
+                                    let priority = srvc
+                                        .conf
+                                        .exec_config
+                                        .syslog_level
+                                        .as_deref()
+                                        .and_then(crate::control::varlink::parse_log_level)
+                                        .unwrap_or(6);
+                                    let level_prefix =
+                                        srvc.conf.exec_config.syslog_level_prefix.unwrap_or(true);
                                     mut_state.srvc.journal_stream =
                                         crate::services::open_journal_stream(
                                             &name,
                                             mut_state.srvc.invocation_id.as_deref(),
                                             ident,
+                                            priority,
+                                            level_prefix,
                                         );
                                 }
                                 mut_state.srvc.stderr_buffer.extend(&buf[..bytes]);
