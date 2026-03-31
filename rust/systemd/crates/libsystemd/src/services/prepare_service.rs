@@ -109,8 +109,21 @@ pub fn prepare_service(
         )
         .map_err(|e| format!("Failed to chmod notify socket {notify_socket_env_var:?}: {e}"))?;
 
-        // close these fd's on exec. They must not show up in child processes
+        // Enable SO_PASSCRED so we receive SCM_CREDENTIALS with each
+        // datagram, allowing NotifyAccess= enforcement by sender PID.
         let new_listener_fd = stream.as_raw_fd();
+        unsafe {
+            let one: libc::c_int = 1;
+            libc::setsockopt(
+                new_listener_fd,
+                libc::SOL_SOCKET,
+                libc::SO_PASSCRED,
+                &one as *const libc::c_int as *const libc::c_void,
+                std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+            );
+        }
+
+        // close these fd's on exec. They must not show up in child processes
         nix::fcntl::fcntl(
             unsafe { BorrowedFd::borrow_raw(new_listener_fd) },
             nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::FD_CLOEXEC),

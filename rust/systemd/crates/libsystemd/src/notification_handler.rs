@@ -40,6 +40,61 @@ where
         })
 }
 
+/// Check whether a notification from `sender_pid` is allowed by the service's
+/// `NotifyAccess` policy.
+///
+/// - `None` / `NotifyAccess=none`: reject all notifications
+/// - `Main`: accept from the main PID or processes in the service's process
+///   group (covers `systemd-notify` binary spawned by the main process)
+/// - `Exec`: accept from any process in the service's process group
+/// - `All`: accept from any sender
+fn check_notify_access(
+    access: NotifyKind,
+    sender_pid: Option<libc::pid_t>,
+    srvc: &Service,
+    name: &str,
+) -> bool {
+    match access {
+        NotifyKind::All => true,
+        NotifyKind::None => {
+            trace!("Service {name}: rejecting notification (NotifyAccess=none)");
+            false
+        }
+        NotifyKind::Main | NotifyKind::Exec => {
+            let Some(sender) = sender_pid else {
+                // No credentials available — allow to avoid breaking services
+                // when SO_PASSCRED isn't working
+                return true;
+            };
+            // Accept from the main PID directly
+            let main = srvc.main_pid.or(srvc.pid).map(|p| p.as_raw());
+            if main == Some(sender) {
+                return true;
+            }
+            // Accept from processes in the service's process group.
+            // This covers child processes like systemd-notify (for Main)
+            // and all exec'd processes (for Exec).
+            if let Some(pgid) = srvc.process_group
+                && let Ok(sender_pgid) =
+                    nix::unistd::getpgid(Some(nix::unistd::Pid::from_raw(sender)))
+                && sender_pgid == pgid
+            {
+                return true;
+            }
+            let label = if matches!(access, NotifyKind::Main) {
+                "main"
+            } else {
+                "exec"
+            };
+            trace!(
+                "Service {name}: rejecting notification from PID {sender} \
+                 (NotifyAccess={label}, not in service process group)"
+            );
+            false
+        }
+    }
+}
+
 pub fn handle_all_streams(run_info: ArcMutRuntimeInfo) {
     let eventfd = { run_info.read_poisoned().notification_eventfd };
     loop {
@@ -71,9 +126,9 @@ pub fn handle_all_streams(run_info: ArcMutRuntimeInfo) {
                     trace!("Reset eventfd value");
                 }
                 let mut buf = [0u8; 4096];
-                // Space for up to 8 file descriptors via SCM_RIGHTS.
+                // Space for SCM_RIGHTS (up to 8 fds) and SCM_CREDENTIALS (sender PID/UID/GID).
                 // nix::cmsg_space! computes the correct buffer size.
-                let mut cmsg_buf = nix::cmsg_space!([RawFd; 8]);
+                let mut cmsg_buf = nix::cmsg_space!([RawFd; 8], libc::ucred);
                 for (fd, id) in &fd_to_srvc_id {
                     if fdset.contains(unsafe { borrow_fd(*fd) })
                         && let Some(srvc_unit) = unit_table.get(id)
@@ -121,17 +176,44 @@ pub fn handle_all_streams(run_info: ArcMutRuntimeInfo) {
                                         continue;
                                     }
 
-                                    // Collect any file descriptors from SCM_RIGHTS.
+                                    // Collect SCM_RIGHTS fds and SCM_CREDENTIALS sender PID.
                                     let mut received_fds: Vec<RawFd> = Vec::new();
+                                    let mut sender_pid: Option<libc::pid_t> = None;
                                     if let Ok(cmsgs) = msg.cmsgs() {
                                         for cmsg in cmsgs {
-                                            if let nix::sys::socket::ControlMessageOwned::ScmRights(
-                                                fds,
-                                            ) = cmsg
-                                            {
-                                                received_fds.extend_from_slice(&fds);
+                                            match cmsg {
+                                                nix::sys::socket::ControlMessageOwned::ScmRights(
+                                                    fds,
+                                                ) => {
+                                                    received_fds.extend_from_slice(&fds);
+                                                }
+                                                nix::sys::socket::ControlMessageOwned::ScmCredentials(
+                                                    cred,
+                                                ) => {
+                                                    sender_pid = Some(cred.pid());
+                                                }
+                                                _ => {}
                                             }
                                         }
+                                    }
+
+                                    // Enforce NotifyAccess= — check if the sender PID
+                                    // is authorized to send notifications to this service.
+                                    let effective_access = crate::services::effective_notify_access(
+                                        &mut_state.srvc,
+                                        &srvc.conf,
+                                    );
+                                    if !check_notify_access(
+                                        effective_access,
+                                        sender_pid,
+                                        &mut_state.srvc,
+                                        &srvc_unit.id.name,
+                                    ) {
+                                        // Close any received fds to avoid leaks
+                                        for fd in received_fds {
+                                            let _ = nix::unistd::close(fd);
+                                        }
+                                        continue;
                                     }
 
                                     let note_str =
