@@ -1,4 +1,5 @@
-use log::trace;
+use log::{trace, warn};
+use regex::Regex;
 
 use super::start_service::start_service;
 use crate::lock_ext::{MutexExt, RwLockExt};
@@ -7,6 +8,60 @@ use crate::units::{
     ActivationSource, Commandline, CommandlinePrefix, KillMode, NotifyKind, ServiceConfig,
     ServiceType, Specific, Timeout, UnitId, UnitStatus,
 };
+
+/// Compiled log filter patterns from `LogFilterPatterns=`.
+///
+/// Patterns prefixed with `~` are deny patterns (matching lines are suppressed).
+/// Patterns without prefix are allow patterns (only matching lines pass through).
+/// If allow patterns exist, a line must match at least one allow pattern.
+/// If deny patterns exist, a line must not match any deny pattern.
+pub struct LogFilter {
+    allow: Vec<Regex>,
+    deny: Vec<Regex>,
+}
+
+impl LogFilter {
+    /// Compile log filter patterns from the raw configuration strings.
+    /// Invalid regex patterns are logged and skipped.
+    pub fn compile(patterns: &[String]) -> Self {
+        let mut allow = Vec::new();
+        let mut deny = Vec::new();
+        for pat in patterns {
+            if let Some(re_str) = pat.strip_prefix('~') {
+                match Regex::new(re_str) {
+                    Ok(re) => deny.push(re),
+                    Err(e) => warn!("LogFilterPatterns: invalid deny regex '{}': {}", re_str, e),
+                }
+            } else {
+                match Regex::new(pat) {
+                    Ok(re) => allow.push(re),
+                    Err(e) => warn!("LogFilterPatterns: invalid allow regex '{}': {}", pat, e),
+                }
+            }
+        }
+        Self { allow, deny }
+    }
+
+    /// Returns true if the line should be logged (passes through the filter).
+    pub fn should_log(&self, line: &str) -> bool {
+        // If any deny pattern matches, suppress the line.
+        for re in &self.deny {
+            if re.is_match(line) {
+                return false;
+            }
+        }
+        // If there are allow patterns, at least one must match.
+        if !self.allow.is_empty() {
+            return self.allow.iter().any(|re| re.is_match(line));
+        }
+        true
+    }
+
+    /// Returns true if no patterns are configured (no filtering needed).
+    pub fn is_empty(&self) -> bool {
+        self.allow.is_empty() && self.deny.is_empty()
+    }
+}
 
 /// Check if a unit is masked (symlink to /dev/null) on disk.
 fn is_unit_masked(name: &str) -> bool {
@@ -874,13 +929,13 @@ impl Service {
                         let mut buf = Vec::new();
                         let _bytes = stream.read_to_end(&mut buf).unwrap();
                         self.stderr_buffer.extend(buf);
-                        self.log_stderr_lines(name, status).unwrap();
+                        self.log_stderr_lines(name, status, None).unwrap();
                     }
                     if let Some(stream) = &mut child.stdout {
                         let mut buf = Vec::new();
                         let _bytes = stream.read_to_end(&mut buf).unwrap();
                         self.stdout_buffer.extend(buf);
-                        self.log_stdout_lines(name, status).unwrap();
+                        self.log_stdout_lines(name, status, None).unwrap();
                     }
                 }
 
@@ -1051,7 +1106,12 @@ impl Service {
         res
     }
 
-    pub fn log_stdout_lines(&mut self, name: &str, status: &UnitStatus) -> std::io::Result<()> {
+    pub fn log_stdout_lines(
+        &mut self,
+        name: &str,
+        status: &UnitStatus,
+        filter: Option<&LogFilter>,
+    ) -> std::io::Result<()> {
         let mut prefix = String::new();
         prefix.push('[');
         prefix.push_str(name);
@@ -1069,6 +1129,13 @@ impl Service {
             if line.is_empty() {
                 continue;
             }
+            // Apply LogFilterPatterns=
+            if let Some(f) = filter
+                && let Ok(line_str) = std::str::from_utf8(line)
+                && !f.should_log(line_str)
+            {
+                continue;
+            }
             outbuf.clear();
             outbuf.extend(prefix.as_bytes());
             outbuf.extend(line);
@@ -1077,7 +1144,12 @@ impl Service {
         }
         Ok(())
     }
-    pub fn log_stderr_lines(&mut self, name: &str, status: &UnitStatus) -> std::io::Result<()> {
+    pub fn log_stderr_lines(
+        &mut self,
+        name: &str,
+        status: &UnitStatus,
+        filter: Option<&LogFilter>,
+    ) -> std::io::Result<()> {
         let mut prefix = String::new();
         prefix.push('[');
         prefix.push_str(name);
@@ -1095,6 +1167,13 @@ impl Service {
             let line = &line[0..line.len() - 1].to_vec();
             self.stderr_buffer = lines.to_vec();
             if line.is_empty() {
+                continue;
+            }
+            // Apply LogFilterPatterns=
+            if let Some(f) = filter
+                && let Ok(line_str) = std::str::from_utf8(line)
+                && !f.should_log(line_str)
+            {
                 continue;
             }
             outbuf.clear();

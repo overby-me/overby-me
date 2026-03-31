@@ -437,7 +437,18 @@ pub fn handle_all_std_out(run_info: ArcMutRuntimeInfo) {
                                 eof_ids.push((id.clone(), name));
                             } else {
                                 mut_state.srvc.stdout_buffer.extend(&buf[..bytes]);
-                                mut_state.srvc.log_stdout_lines(&name, &status).unwrap();
+                                let filter = if srvc.conf.exec_config.log_filter_patterns.is_empty()
+                                {
+                                    None
+                                } else {
+                                    Some(crate::services::LogFilter::compile(
+                                        &srvc.conf.exec_config.log_filter_patterns,
+                                    ))
+                                };
+                                mut_state
+                                    .srvc
+                                    .log_stdout_lines(&name, &status, filter.as_ref())
+                                    .unwrap();
                             }
                         }
                     }
@@ -544,7 +555,18 @@ pub fn handle_all_std_err(run_info: ArcMutRuntimeInfo) {
                                 eof_ids.push((id.clone(), name));
                             } else {
                                 mut_state.srvc.stderr_buffer.extend(&buf[..bytes]);
-                                mut_state.srvc.log_stderr_lines(&name, &status).unwrap();
+                                let filter = if srvc.conf.exec_config.log_filter_patterns.is_empty()
+                                {
+                                    None
+                                } else {
+                                    Some(crate::services::LogFilter::compile(
+                                        &srvc.conf.exec_config.log_filter_patterns,
+                                    ))
+                                };
+                                mut_state
+                                    .srvc
+                                    .log_stderr_lines(&name, &status, filter.as_ref())
+                                    .unwrap();
                             }
                         }
                     }
