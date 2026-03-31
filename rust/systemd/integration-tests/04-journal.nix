@@ -24,10 +24,9 @@
     sed -i '/grep -vq.*_PID=\$PID/d' TEST-04-JOURNAL.journal.sh
     sed -i '/_LINE_BREAK/d' TEST-04-JOURNAL.journal.sh
     sed -i '/sort -u.*grep -c/d' TEST-04-JOURNAL.journal.sh
-    # Remove verbose-success tests (ExecStartPre/ExecStopPost result logging not implemented)
+    # Remove verbose-success tests (needs PID 1 lifecycle messages with _SYSTEMD_UNIT in journal)
     sed -i '/verbose-success/d' TEST-04-JOURNAL.journal.sh
-    # Remove silent-success tests (ExecStartPre/ExecStopPost result logging not implemented)
-    sed -i '/silent-success/d' TEST-04-JOURNAL.journal.sh
+    # silent-success: passes because PID 1 doesn't write lifecycle messages to journal
     # Remove script-as-path test (script's bash process has no matching journal entries)
     sed -i '/journalctl -b.*readlink/d' TEST-04-JOURNAL.journal.sh
     # Remove forever-print-hola tests (journald restart resilience)
