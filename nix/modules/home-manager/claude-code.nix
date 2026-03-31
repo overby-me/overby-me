@@ -140,7 +140,21 @@
     ## Hook-Based Usage
 
     All other commands are automatically rewritten by the Claude Code hook.
-    Example: `git status` → `rtk git status` (transparent, 0 tokens overhead)
+
+    ## Version Control
+
+    **Always use `jj` (Jujutsu) instead of `git` for all VCS operations.**
+
+    ```bash
+    jj status             # Working copy status
+    jj log                # Commit log
+    jj diff               # Show changes
+    jj describe -m "msg"  # Set commit message on working copy
+    jj new                # Start a new change
+    jj bookmark set <name> -r @-  # Set bookmark (like a branch)
+    jj git push           # Push to remote
+    jj git fetch          # Fetch from remote
+    ```
   '';
 
   claudeSettingsJson = (pkgs.formats.json {}).generate "claude-settings.json" {
