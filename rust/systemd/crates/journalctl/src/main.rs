@@ -1670,8 +1670,6 @@ fn main() {
 
     // Handle special commands that don't need to read entries
     if cli.flush {
-        // Send SIGUSR1 to journald to trigger a flush
-        eprintln!("Requesting flush of journal to persistent storage...");
         send_signal_to_journald(libc::SIGUSR1);
         // Wait for journald to complete the flush (no ack mechanism, use a brief sleep)
         std::thread::sleep(Duration::from_millis(250));
@@ -1702,10 +1700,7 @@ fn main() {
     }
 
     if cli.sync {
-        // Send SIGRTMIN+1 to journald to trigger a sync to disk
-        eprintln!("Requesting sync of journal to persistent storage...");
         send_signal_to_journald(libc::SIGRTMIN() + 1);
-        // Also signal namespace-specific journald instances
         if let Some(ref ns) = cli.namespace {
             send_signal_to_journald_namespace(ns, libc::SIGRTMIN() + 1);
         }
@@ -1715,8 +1710,6 @@ fn main() {
     }
 
     if cli.rotate {
-        // Send SIGUSR2 to journald to trigger rotation
-        eprintln!("Requesting rotation of journal files...");
         send_signal_to_journald(libc::SIGUSR2);
         // If vacuum is also requested, continue to process it; otherwise return
         if cli.vacuum_size.is_none() && cli.vacuum_time.is_none() && cli.vacuum_files.is_none() {
