@@ -144,7 +144,7 @@ pub(super) fn builtin_export(shell: &mut Shell, args: &[String]) -> i32 {
 pub(super) fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
     let mut unset_functions = false;
     let mut unset_variables = false;
-    let mut _unset_nameref = false;
+    let mut unset_nameref = false;
     let mut names = Vec::new();
     let mut parsing_opts = true;
 
@@ -154,7 +154,7 @@ pub(super) fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
             match opt {
                 "-v" => unset_variables = true,
                 "-f" => unset_functions = true,
-                "-n" => _unset_nameref = true,
+                "-n" => unset_nameref = true,
                 "--" => parsing_opts = false,
                 _ => {
                     eprintln!(
@@ -260,9 +260,50 @@ pub(super) fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
                     }
                 }
             }
-        } else {
+        } else if unset_nameref {
+            // unset -n: remove the nameref itself, not the target
+            if shell.readonly_vars.contains(name) {
+                eprintln!(
+                    "{}: unset: {}: cannot unset: readonly variable",
+                    shell.error_prefix(),
+                    name
+                );
+                status = 1;
+                continue;
+            }
+            shell.namerefs.remove(name);
+            shell.vars.remove(name);
+            shell.exports.remove(name);
+            shell.integer_vars.remove(name);
+            shell.uppercase_vars.remove(name);
+            shell.lowercase_vars.remove(name);
+            shell.capitalize_vars.remove(name);
+            unsafe { std::env::remove_var(name) };
+        } else if shell.namerefs.contains_key(name) {
+            // unset through nameref: unset the target variable, keep the nameref
             let resolved = shell.resolve_nameref(name);
             if shell.readonly_vars.contains(&resolved) {
+                eprintln!(
+                    "{}: unset: {}: cannot unset: readonly variable",
+                    shell.error_prefix(),
+                    name
+                );
+                status = 1;
+                continue;
+            }
+            shell.vars.remove(&resolved);
+            shell.exports.remove(&resolved);
+            shell.arrays.remove(&resolved);
+            shell.assoc_arrays.remove(&resolved);
+            shell.integer_vars.remove(&resolved);
+            shell.uppercase_vars.remove(&resolved);
+            shell.lowercase_vars.remove(&resolved);
+            shell.capitalize_vars.remove(&resolved);
+            // Don't remove the nameref itself — it stays
+            unsafe { std::env::remove_var(&resolved) };
+        } else {
+            // Regular variable unset
+            if shell.readonly_vars.contains(name) {
                 eprintln!(
                     "{}: unset: {}: cannot unset: readonly variable",
                     shell.error_prefix(),

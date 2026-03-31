@@ -1,4 +1,30 @@
 use super::*;
+use crate::builtins::string_to_raw_bytes;
+
+/// Count the number of multibyte characters in a bash-style string.
+/// Bash stores raw bytes as chars with their byte value (Latin-1 mapping).
+/// In a UTF-8 locale, this interprets the raw byte sequence as UTF-8 and
+/// counts characters. In a non-UTF-8 locale, it counts bytes.
+fn mbstrlen(s: &str) -> usize {
+    // Check if we're in a UTF-8 locale
+    let is_utf8 = std::env::var("LC_ALL")
+        .or_else(|_| std::env::var("LC_CTYPE"))
+        .or_else(|_| std::env::var("LANG"))
+        .map(|v| {
+            let v = v.to_lowercase();
+            v.contains("utf-8") || v.contains("utf8")
+        })
+        .unwrap_or(false);
+
+    if !is_utf8 {
+        return s.chars().count();
+    }
+
+    // Convert to raw bytes (chars in U+0080..U+00FF become single bytes)
+    let raw = string_to_raw_bytes(s);
+    // Count UTF-8 characters in the raw byte sequence
+    String::from_utf8_lossy(&raw).chars().count()
+}
 
 /// Check if a ParamExpr is an array[@] expansion.
 pub(super) fn is_array_at_expansion(expr: &ParamExpr, ctx: &ExpCtx) -> bool {
@@ -822,7 +848,7 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                     }
                 }
             }
-            val.chars().count().to_string()
+            mbstrlen(&val).to_string()
         }
         ParamOp::Indirect => {
             // ${!var} — indirect expansion
