@@ -1175,6 +1175,11 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                                 nix::unistd::close(r_fd).ok();
                             }
                         }
+                        // Reset SIGPIPE to default so writes to closed pipes
+                        // kill the child instead of producing "write error: Broken pipe"
+                        unsafe {
+                            libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+                        }
                         // Run command inline if procsub runner is available
                         // (preserves LINENO and script name for error messages)
                         if let Some(status) = run_procsub_inline(cmd) {
