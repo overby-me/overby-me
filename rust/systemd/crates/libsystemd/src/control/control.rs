@@ -4571,7 +4571,11 @@ pub fn execute_command(
                             && state.srvc.main_exit_pid.is_some()
                         {
                             let exit_status = state.srvc.main_exit_status.unwrap_or(0);
-                            let result = if exit_status == 0 { "success" } else { "exit-code" };
+                            let result = if exit_status == 0 {
+                                "success"
+                            } else {
+                                "exit-code"
+                            };
                             let mut resp = serde_json::json!({
                                 "started": unit_name,
                                 "result": result,

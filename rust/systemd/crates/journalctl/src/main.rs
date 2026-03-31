@@ -1332,6 +1332,10 @@ fn open_storage(cli: &Cli) -> Result<JournalStorage, String> {
         }
     };
 
+    // When --directory or --file is specified, the path already points to
+    // the journal directory — don't append machine-id again.
+    let direct_directory = cli.directory.is_some() || cli.file.is_some() || cli.namespace.is_some();
+
     let config = StorageConfig {
         directory,
         max_file_size: u64::MAX,
@@ -1339,6 +1343,7 @@ fn open_storage(cli: &Cli) -> Result<JournalStorage, String> {
         max_files: usize::MAX,
         persistent: false,
         keep_free: 0,
+        direct_directory,
     };
 
     JournalStorage::open_read_only(config).map_err(|e| format!("Failed to open journal: {}", e))
@@ -1613,41 +1618,53 @@ fn main() {
         }
 
         // Handle -n and --reverse
+        // Index semantics match upstream systemd:
+        //   Default/`-n N`: negative indices from -(total-1) to 0, where 0 = latest
+        //   `+N`: positive indices from 1 to N, where 1 = oldest
         let from_start = cli.lines.as_ref().is_some_and(|s| s.starts_with('+'));
         let limit: Option<usize> = cli.lines.as_ref().and_then(|s| {
             let s = s.strip_prefix('+').unwrap_or(s);
             s.parse().ok()
         });
 
-        let display_invocations: Vec<(usize, &str, u64)> = if from_start {
-            // +N: show first N invocations
+        let total = invocations.len() as i64;
+
+        let display_invocations: Vec<(i64, &str, u64)> = if from_start {
+            // +N: show first N invocations with positive 1-based indices
             let n = limit.unwrap_or(invocations.len());
             invocations
                 .iter()
                 .take(n)
                 .enumerate()
-                .map(|(i, (id, ts))| (i + 1, id.as_str(), *ts))
+                .map(|(i, (id, ts))| (i as i64 + 1, id.as_str(), *ts))
                 .collect()
         } else if let Some(n) = limit {
-            // -n N: show last N invocations
+            // -n N: show last N invocations with negative indices
             let skip = invocations.len().saturating_sub(n);
             invocations
                 .iter()
                 .skip(skip)
                 .enumerate()
-                .map(|(i, (id, ts))| (skip + i + 1, id.as_str(), *ts))
+                .map(|(i, (id, ts))| {
+                    let global_pos = skip + i;
+                    let index = global_pos as i64 + 1 - total;
+                    (index, id.as_str(), *ts)
+                })
                 .collect()
         } else {
-            // No -n: show all
+            // Default: show all with negative indices (-(n-1) to 0)
             invocations
                 .iter()
                 .enumerate()
-                .map(|(i, (id, ts))| (i + 1, id.as_str(), *ts))
+                .map(|(i, (id, ts))| {
+                    let index = i as i64 + 1 - total;
+                    (index, id.as_str(), *ts)
+                })
                 .collect()
         };
 
         // Print header
-        println!("IDX INVOCATION_ID                    TIMESTAMP");
+        println!("IDX INVOCATION_ID                     TIMESTAMP");
 
         let entries_to_print: Vec<_> = if cli.reverse {
             display_invocations.into_iter().rev().collect()
@@ -1784,10 +1801,36 @@ fn main() {
 
     // Invocation filter (-I or --invocation)
     // -I: find the latest invocation ID for the current unit and filter by it
-    // --invocation=ID: filter by the given invocation ID directly
+    // --invocation=UUID: filter by the given invocation ID directly
+    // --invocation=N: resolve numeric offset to invocation UUID (asymmetric):
+    //   0 = latest, 1 = oldest, 2 = second-oldest, ..., -1 = second-latest, etc.
     if cli.latest_invocation || cli.invocation.is_some() {
         let invocation_id = if let Some(ref id) = cli.invocation {
-            Some(id.clone())
+            // Check if the value is a numeric offset
+            if let Ok(offset) = id.parse::<i64>() {
+                // Collect unique invocation IDs from the already-filtered entries
+                let mut invocations: Vec<String> = Vec::new();
+                let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+                for entry in &filtered {
+                    if let Some(inv_id) = entry.field("_SYSTEMD_INVOCATION_ID")
+                        && seen.insert(inv_id.clone())
+                    {
+                        invocations.push(inv_id);
+                    }
+                }
+                let total = invocations.len();
+                // Resolve offset to array index:
+                //   offset <= 0: index = (total - 1) + offset (0=latest, -1=second-latest)
+                //   offset > 0: index = offset - 1 (1=oldest, 2=second-oldest)
+                let array_idx = if offset <= 0 {
+                    (total as i64 - 1 + offset) as usize
+                } else {
+                    (offset - 1) as usize
+                };
+                invocations.get(array_idx).cloned()
+            } else {
+                Some(id.clone())
+            }
         } else {
             // -I: find the latest _SYSTEMD_INVOCATION_ID among the already-filtered entries
             filtered

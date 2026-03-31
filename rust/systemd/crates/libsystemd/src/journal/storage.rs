@@ -440,6 +440,11 @@ pub struct StorageConfig {
     /// journal files are vacuumed.  Defaults to 15% of the file system
     /// or 4 GiB, whichever is smaller (set to 0 to disable).
     pub keep_free: u64,
+
+    /// When true, `directory` is used as-is without appending the machine ID.
+    /// This is used when `--directory` is passed explicitly by the user (the
+    /// path already points to the journal directory).
+    pub direct_directory: bool,
 }
 
 /// Default keep-free value: 4 GiB (capped at 15% of filesystem in vacuum()).
@@ -454,6 +459,7 @@ impl Default for StorageConfig {
             max_files: DEFAULT_MAX_FILES,
             persistent: false,
             keep_free: DEFAULT_KEEP_FREE,
+            direct_directory: false,
         }
     }
 }
@@ -476,7 +482,11 @@ impl JournalStorage {
     /// (or creates) the active journal file.
     pub fn new(config: StorageConfig) -> io::Result<Self> {
         let machine_id = read_machine_id();
-        let journal_dir = config.directory.join(&machine_id);
+        let journal_dir = if config.direct_directory {
+            config.directory.clone()
+        } else {
+            config.directory.join(&machine_id)
+        };
         fs::create_dir_all(&journal_dir)?;
 
         let mut storage = JournalStorage {
@@ -535,7 +545,7 @@ impl JournalStorage {
     ///
     /// Supports both JRNL_RS and C systemd (LPKSHHRH) journal files.
     pub fn read_all(&self) -> io::Result<Vec<JournalEntry>> {
-        let journal_dir = self.config.directory.join(&self.machine_id);
+        let journal_dir = self.journal_dir();
         read_all_from_directory(&journal_dir)
     }
 
@@ -587,7 +597,7 @@ impl JournalStorage {
 
     /// Return the total disk usage of all journal files.
     pub fn disk_usage(&self) -> io::Result<u64> {
-        let journal_dir = self.config.directory.join(&self.machine_id);
+        let journal_dir = self.journal_dir();
         let files = list_journal_files(&journal_dir)?;
         let mut total = 0u64;
         for path in &files {
@@ -600,14 +610,23 @@ impl JournalStorage {
 
     /// Return the number of journal files.
     pub fn file_count(&self) -> io::Result<usize> {
-        let journal_dir = self.config.directory.join(&self.machine_id);
+        let journal_dir = self.journal_dir();
         let files = list_journal_files(&journal_dir)?;
         Ok(files.len())
     }
 
     /// Get the storage directory path.
     pub fn directory(&self) -> PathBuf {
-        self.config.directory.join(&self.machine_id)
+        self.journal_dir()
+    }
+
+    /// Resolve the actual journal directory, respecting `direct_directory`.
+    fn journal_dir(&self) -> PathBuf {
+        if self.config.direct_directory {
+            self.config.directory.clone()
+        } else {
+            self.config.directory.join(&self.machine_id)
+        }
     }
 
     /// Create a [`JournalReader`] for reading entries from this storage
@@ -667,7 +686,7 @@ impl JournalStorage {
     // ---------------------------------------------------------------
 
     fn open_or_create_active_file(&mut self) -> io::Result<()> {
-        let journal_dir = self.config.directory.join(&self.machine_id);
+        let journal_dir = self.journal_dir();
         let mut files = list_journal_files(&journal_dir)?;
         files.sort();
 
@@ -706,7 +725,7 @@ impl JournalStorage {
     }
 
     fn create_new_active_file(&mut self) -> io::Result<()> {
-        let journal_dir = self.config.directory.join(&self.machine_id);
+        let journal_dir = self.journal_dir();
 
         // File name format: system@<timestamp>-<hex-random>.journal
         // Timestamp comes first so alphabetical sort matches creation order.
@@ -728,7 +747,7 @@ impl JournalStorage {
     /// This is also exposed publicly so the daemon can trigger periodic
     /// vacuum from its maintenance thread without a full rotation.
     pub fn vacuum(&mut self) -> io::Result<()> {
-        let journal_dir = self.config.directory.join(&self.machine_id);
+        let journal_dir = self.journal_dir();
         let mut files = list_journal_files(&journal_dir)?;
         files.sort();
 
@@ -1380,6 +1399,7 @@ mod tests {
             max_files: DEFAULT_MAX_FILES,
             persistent: false,
             keep_free: 0,
+            direct_directory: false,
         };
 
         let mut storage = JournalStorage::new(config).unwrap();
@@ -1412,6 +1432,7 @@ mod tests {
             max_files: DEFAULT_MAX_FILES,
             persistent: false,
             keep_free: 0,
+            direct_directory: false,
         };
 
         let mut storage = JournalStorage::new(config).unwrap();
@@ -1447,6 +1468,7 @@ mod tests {
             max_files: 3,
             persistent: false,
             keep_free: 0,
+            direct_directory: false,
         };
 
         let mut storage = JournalStorage::new(config).unwrap();
@@ -1478,6 +1500,7 @@ mod tests {
             max_files: DEFAULT_MAX_FILES,
             persistent: false,
             keep_free: 0,
+            direct_directory: false,
         };
 
         let mut storage = JournalStorage::new(config).unwrap();
@@ -1645,6 +1668,7 @@ mod tests {
             max_files: DEFAULT_MAX_FILES,
             persistent: false,
             keep_free: 0,
+            direct_directory: false,
         };
         let storage = JournalStorage::new(config).unwrap();
         (dir, storage)
