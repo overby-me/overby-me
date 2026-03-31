@@ -215,6 +215,8 @@ const logErrorContext = async ({
 		}
 	}
 
+	const stack = resolvedStack ?? error?.stack;
+
 	const context = {
 		url: window.location.href,
 		handler,
@@ -222,13 +224,11 @@ const logErrorContext = async ({
 		filename,
 		line,
 		col,
-		stack: resolvedStack ?? error?.stack,
 		session: safeGetSession(),
 	};
 
 	bugfender.error(
-		`[ErrorContext] ${message}`,
-		JSON.stringify(context, null, 2),
+		`[ErrorContext] ${message}\n\n${JSON.stringify(context, null, 2)}\n\nStack:\n${stack ?? "N/A"}`,
 	);
 };
 
