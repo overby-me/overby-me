@@ -269,9 +269,10 @@ struct Cli {
     #[arg(short = 'D', long = "directory", value_name = "DIR")]
     directory: Option<String>,
 
-    /// Read from a specific journal file.
+    /// Read from specific journal file(s). Can be specified multiple times
+    /// or with shell globs (e.g. --file=/var/log/journal/*/*).
     #[arg(long = "file", value_name = "FILE")]
-    file: Option<String>,
+    file: Vec<String>,
 
     /// Show entries for a specific PID.
     #[arg(long = "pid", value_name = "PID")]
@@ -1489,11 +1490,17 @@ fn detect_boots(entries: &[JournalEntry]) -> Vec<BootRecord> {
 /// Open journal storage from the appropriate directory.
 fn open_storage(cli: &Cli) -> Result<JournalStorage, String> {
     let root_prefix = cli.root.as_deref().unwrap_or("");
-    let directory = if let Some(ref file) = cli.file {
-        // --file: use the parent directory of the journal file
-        PathBuf::from(file)
-            .parent()
-            .map(|p| p.to_path_buf())
+    let directory = if !cli.file.is_empty() {
+        // --file: collect unique parent directories from all specified files
+        let mut dirs: Vec<PathBuf> = cli
+            .file
+            .iter()
+            .filter_map(|f| PathBuf::from(f).parent().map(|p| p.to_path_buf()))
+            .collect();
+        dirs.sort();
+        dirs.dedup();
+        dirs.into_iter()
+            .next()
             .unwrap_or_else(|| PathBuf::from("."))
     } else if let Some(ref dir) = cli.directory {
         PathBuf::from(dir)
@@ -1542,7 +1549,7 @@ fn open_storage(cli: &Cli) -> Result<JournalStorage, String> {
     // For --namespace with special values (*, +foo, empty), the base dir still
     // needs machine-id appended, so don't set direct_directory for those.
     let direct_directory = cli.directory.is_some()
-        || cli.file.is_some()
+        || !cli.file.is_empty()
         || cli.namespace.as_ref().is_some_and(|ns| {
             let ns = ns.trim();
             // Only set direct when namespace resolved to a specific subdirectory

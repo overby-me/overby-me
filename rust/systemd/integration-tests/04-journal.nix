@@ -36,14 +36,12 @@
     sed -i '/silent-success/d' TEST-04-JOURNAL.journal.sh
     # Remove script-as-path test (script's bash process has no matching journal entries)
     sed -i '/journalctl -b.*readlink/d' TEST-04-JOURNAL.journal.sh
-    # Remove emerg test (needs --stderr-priority)
-    sed -i '/stderr-priority/d' TEST-04-JOURNAL.journal.sh
+    # Remove --follow --file test (glob doesn't expand inside --file= option value)
+    sed -i '/journalctl --follow --file/d' TEST-04-JOURNAL.journal.sh
     # Remove forever-print-hola tests (journald restart resilience)
     sed -i '/forever-print-hola/d' TEST-04-JOURNAL.journal.sh
     sed -i '/i-lose-my-logs/d' TEST-04-JOURNAL.journal.sh
     sed -i '/systemctl kill --signal=SIGKILL systemd-journald/d' TEST-04-JOURNAL.journal.sh
-    # Remove --follow --file tests (--file glob not supported)
-    sed -i '/journalctl --follow --file/d' TEST-04-JOURNAL.journal.sh
     # Remove --directory test with zstd decompressed journal data (entire block including heredoc)
     sed -i '/JOURNAL_DIR=/,/rm.*JOURNAL_DIR/d' TEST-04-JOURNAL.journal.sh
     # Remove systemd-run --unit tests (need systemd-run --wait) — entire block including heredoc
