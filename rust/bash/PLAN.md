@@ -8,16 +8,21 @@
 
 - **comsub**: 0 diff locally ✅ (was 2). Fixed SIGPIPE in process substitution children
 - **lastpipe**: 0 diff locally ✅ (was 2). Fixed `in_pipeline_child` regression with lastpipe
-- **nameref**: 50 diff locally (was 264). **Massive improvement — 214 lines reduced**
-  - Fixed `./` prefix stripping in glob expansion (affected all sub-test script name prefixes)
-  - Remaining: ~36 real nameref resolution lines + ~14 PID diffs
+- **nameref**: 30 diff locally (was 264). **Massive improvement — 234 lines reduced**
+  - Fixed `./` prefix stripping in glob expansion (affected all sub-test script name prefixes) → ~214 lines eliminated
+  - Fixed `typeset -n foo` (no value) to use foo's current value as the nameref target
+  - Fixed `declare -n foo=bar` to remove foo from regular vars when creating nameref
+  - Fixed `typeset +n foo=other` to assign through nameref first, then remove attribute
+  - Fixed prefix assignment nameref resolution (`foo=two eval ...` where foo is a nameref)
+  - Added empty-name guards to prevent panics in env::set_var/remove_var with empty nameref targets
+  - Remaining: ~2 real nameref unset-semantics lines + ~14 PID diffs
 - **new-exp**: PID diffs only (was 8+panics). **Panics fixed** ✅
   - Fixed parser panic on huge fd numbers (`1111111111111111111111</dev/stdin`)
   - Fixed multibyte panic in `${var/pattern/repl}` prefix/suffix replacement
 - **globstar**: 0 diff sequentially ✅ (84 diff was parallel test execution artifact sharing `/var/tmp`)
 - **posixexp**: 0 diff sequentially ✅ (6 diff was parallel test artifact sharing `/var/tmp/sh`)
 - **intl**: 2 diff locally (was 8). Fixed `${#var}` to return character count instead of byte length
-- **complete**: 0 diff locally ✅ (116→0). Fixed `command` builtin error message ("command not found" vs raw OS error)
+- **complete**: readline diff only ✅ (our shell has compgen/complete builtins, local non-readline bash doesn't). Passes in nix against full bash.
 - **varenv**: 8 diff locally (was 18 = ~chet + PID diffs)
 - **array**: 425 diff locally (unchanged)
 
@@ -121,6 +126,14 @@
 70. **Fix multibyte panics in pattern replacement** (`src/expand/params.rs`, `src/expand/pattern.rs`) — `${var/pattern/repl}` prefix/suffix replacement and `${var#pattern}`/`${var%pattern}` trim operations iterated over byte offsets (`0..=val.len()`) but sliced with `val[..i]`, panicking on multibyte characters. Added `is_char_boundary(i)` checks to skip non-boundary byte positions. Fixed 4 instances in `expand_param`, 4 in `apply_param_op`, and 4 in `trim_pattern`.
 
 71. **Fix `${#var}` to return character count** (`src/expand/params.rs`) — `val.len()` returns byte count but bash's `${#var}` returns character count. Changed to `val.chars().count()`. Fixes `${#x}` returning 2 instead of 1 for `x=é` (2-byte UTF-8, 1 character).
+
+72. **Fix `typeset -n foo` (no value) to use existing value as target** (`src/builtins/vars.rs`) — `typeset -n foo` where `foo` already has value `"bar"` now creates a nameref `foo→bar` (using the existing value) instead of `foo→""`. Also removes `foo` from regular `vars` when creating the nameref.
+
+73. **Fix `declare -n foo=bar` to clean up regular vars** (`src/builtins/vars.rs`) — `declare -n foo=bar` now removes `foo` from the regular `vars` map, preventing stale values from shadowing the nameref resolution.
+
+74. **Fix `typeset +n foo=other` nameref removal semantics** (`src/builtins/vars.rs`) — When removing the nameref attribute with a value (`+n foo=other`), the value is first assigned through the nameref to the target variable, then the nameref is removed and `foo` retains the old target name as its plain string value. Added `nameref_consumed` set to prevent double-processing of names in the declare body.
+
+75. **Fix prefix assignment nameref resolution** (`src/interpreter/commands.rs`) — `foo=two eval 'echo $foo'` where `foo` is a nameref to `bar` now correctly resolves `foo` through the nameref for both function and builtin prefix assignments. The resolved name is used for save/restore and env export. Added empty-name guards to prevent panics when nameref targets are empty strings.
 
 ### Fixes Applied Two Sessions Ago
 
@@ -320,9 +333,9 @@ Associative array keys with special chars in arithmetic contexts.
 
 ### Hard (200+ diff lines)
 
-#### 6. nameref (50 lines local, was 266)
+#### 6. nameref (30 lines local, was 266)
 
-Core nameref resolution still broken: `declare -n foo=bar; echo $foo` doesn't resolve. ~36 real diff lines + ~14 PID diffs. The `./` glob fix eliminated ~214 lines of sub-test script name prefix diffs.
+Core nameref resolution mostly fixed. Remaining: ~2 real lines (unset-through-nameref semantics) + ~14 PID diffs. Fixed: `typeset -n` target inference, `+n` removal, prefix assignment resolution. The `./` glob fix eliminated ~214 lines of sub-test script name prefix diffs.
 
 #### 7. array (425 lines local)
 
@@ -378,7 +391,7 @@ Extra CHLD signals (non-deterministic). Sometimes passes, sometimes fails with 1
 
 ## Recommended Next Priorities
 
-1. **Fix nameref basic operations** — `declare -n foo=bar; echo $foo` doesn't resolve correctly. Deep refactor needed for nameref resolution. (~36 real diff lines remaining after `./` fix)
+1. **Fix nameref unset semantics** — `unset foo` where foo is a nameref should unset the target variable, not the nameref. Complex edge cases with self-referencing namerefs (e.g., `declare -n a="a[0]"`). (~2 real diff lines remaining)
 
 2. **Fix comsub-posix nix error messages** — Improve error reporting for intentional syntax errors inside `$(...)` in case patterns. Need parser to detect reserved words like `done` in wrong context. (~35 nix diff lines)
 

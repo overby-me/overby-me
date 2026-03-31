@@ -1174,19 +1174,22 @@ impl Shell {
             && let Some(func_body) = self.functions.get(command_name).cloned()
         {
             // Apply prefix assignments temporarily for function calls
-            // Save: (name, set_value, old_var, old_export)
+            // Save: (resolved_name, set_value, old_var, old_export)
+            // Resolve namerefs so that `foo=two eval ...` where foo is a
+            // nameref to bar temporarily sets bar=two.
             let prefix_saves: Vec<(String, String, Option<String>, Option<String>)> = cmd
                 .assignments
                 .iter()
                 .map(|a| {
+                    let resolved = self.resolve_nameref(&a.name);
                     let v = match &a.value {
                         AssignValue::Scalar(w) => self.expand_word_single(w),
                         _ => String::new(),
                     };
-                    let old_var = self.vars.get(&a.name).cloned();
-                    let old_export = self.exports.get(&a.name).cloned();
+                    let old_var = self.vars.get(&resolved).cloned();
+                    let old_export = self.exports.get(&resolved).cloned();
                     let final_val = if a.append {
-                        if self.integer_vars.contains(&a.name) {
+                        if self.integer_vars.contains(&resolved) {
                             let existing = self.eval_arith_expr(old_var.as_deref().unwrap_or("0"));
                             let addend = self.eval_arith_expr(&v);
                             (existing + addend).to_string()
@@ -1197,11 +1200,13 @@ impl Shell {
                     } else {
                         v
                     };
-                    self.vars.insert(a.name.clone(), final_val.clone());
-                    // Export prefix assignments so printenv/child processes see them
-                    self.exports.insert(a.name.clone(), final_val.clone());
-                    unsafe { std::env::set_var(&a.name, &final_val) };
-                    (a.name.clone(), final_val, old_var, old_export)
+                    if !resolved.is_empty() {
+                        self.vars.insert(resolved.clone(), final_val.clone());
+                        // Export prefix assignments so printenv/child processes see them
+                        self.exports.insert(resolved.clone(), final_val.clone());
+                        unsafe { std::env::set_var(&resolved, &final_val) };
+                    }
+                    (resolved, final_val, old_var, old_export)
                 })
                 .collect();
 
@@ -1217,6 +1222,9 @@ impl Shell {
                     if current.as_deref() != Some(set_val.as_str()) {
                         continue; // variable was changed inside function, keep the change
                     }
+                }
+                if k.is_empty() {
+                    continue;
                 }
                 match old_var {
                     Some(v) => {
@@ -1351,25 +1359,27 @@ impl Shell {
                 cmd.assignments
                     .iter()
                     .map(|a| {
+                        let resolved = self.resolve_nameref(&a.name);
                         let v = match &a.value {
                             AssignValue::Scalar(w) => self.expand_word_single(w),
                             _ => String::new(),
                         };
                         let val = if a.append {
-                            if self.integer_vars.contains(&a.name) {
+                            if self.integer_vars.contains(&resolved) {
                                 let existing = self.eval_arith_expr(
-                                    &self.vars.get(&a.name).cloned().unwrap_or_default(),
+                                    &self.vars.get(&resolved).cloned().unwrap_or_default(),
                                 );
                                 let addend = self.eval_arith_expr(&v);
                                 (existing + addend).to_string()
                             } else {
-                                let existing = self.vars.get(&a.name).cloned().unwrap_or_default();
+                                let existing =
+                                    self.vars.get(&resolved).cloned().unwrap_or_default();
                                 format!("{}{}", existing, v)
                             }
                         } else {
                             v
                         };
-                        (a.name.clone(), val)
+                        (resolved, val)
                     })
                     .collect()
             } else {
@@ -1388,6 +1398,7 @@ impl Shell {
             // so that builtins like `declare -p` see the -x flag during execution.
             let saved: Vec<(String, Option<String>, Option<String>)> = prefix_exports
                 .iter()
+                .filter(|(k, _)| !k.is_empty())
                 .map(|(k, v)| {
                     let old_var = self.vars.get(k).cloned();
                     let old_export = self.exports.get(k).cloned();
@@ -1453,6 +1464,9 @@ impl Shell {
                     && args.iter().any(|a| a.starts_with('-') && a.contains('x')));
             if !(expanded_words.is_empty() || self.opt_posix && is_special || is_export_like) {
                 for (k, old_var, old_export) in saved {
+                    if k.is_empty() {
+                        continue;
+                    }
                     match old_var {
                         Some(v) => {
                             self.vars.insert(k.clone(), v);
