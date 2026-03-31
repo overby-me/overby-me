@@ -29,12 +29,9 @@
     # silent-success: passes because PID 1 doesn't write lifecycle messages to journal
     # Remove script-as-path test (script's bash process has no matching journal entries)
     sed -i '/journalctl -b.*readlink/d' TEST-04-JOURNAL.journal.sh
-    # Remove forever-print-hola tests (journald restart resilience)
-    # After SIGKILL, the Varlink socket file becomes stale and journalctl --sync
-    # fails with ECONNREFUSED. Fixing requires Varlink socket activation support.
-    sed -i '/forever-print-hola/d' TEST-04-JOURNAL.journal.sh
-    sed -i '/i-lose-my-logs/d' TEST-04-JOURNAL.journal.sh
-    sed -i '/systemctl kill --signal=SIGKILL systemd-journald/d' TEST-04-JOURNAL.journal.sh
+    # forever-print-hola: journald restart resilience tests work because PID 1
+    # holds the stdout pipe and reconnects to journald automatically.
+    # Restart=always in journald unit ensures journald restarts after SIGKILL.
     # --directory test with zstd decompressed journal data uses C journalctl
     # directly against test journal files — doesn't require our journald.
     # Remove systemd-run --unit tests (need systemd-run --wait) — entire block including heredoc
