@@ -2761,6 +2761,8 @@
     [[ "$(systemctl show -P Result success-exit-test.service)" == "success" ]]
 
     : "Without SuccessExitStatus=, same exit code is failure"
+    # Stop previous oneshot so re-start actually runs again
+    systemctl stop success-exit-test.service 2>/dev/null || true
     cat > /run/systemd/system/success-exit-test.service << EOF
     [Service]
     Type=oneshot
