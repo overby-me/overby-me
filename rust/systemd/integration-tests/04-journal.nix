@@ -5,13 +5,13 @@
     "bsod" # needs systemd-bsod binary not in VM
     "JOURNAL\\.cat\\." # needs journal namespace (systemd-journald@ template socket)
     "corrupted-journals" # journalctl --directory creates subdir structure that rm -f can't remove
-    "JOURNAL\\.invocation\\." # needs per-service journal stdout streams (_SYSTEMD_INVOCATION_ID not set)
+    "JOURNAL\\.invocation\\." # _SYSTEMD_INVOCATION_ID not in journal stream header protocol
 
     "journal-append" # needs test-journal-append test binary
     "journal-corrupt\\." # needs systemd-run --user -M (machined)
     "journal-gatewayd" # self-skips but needs binary check
     "journal-remote" # self-skips but needs binary check
-    "LogFilterPatterns" # LogFilterPatterns= not yet implemented in rust-systemd PID 1
+    "LogFilterPatterns" # test verifies via journalctl -I (needs invocation ID + syslog sender)
     "reload" # uses systemd-run --wait (oneshot deadlock) + verify_journals with -D
     "journalctl-varlink" # needs varlinkctl binary not in NixOS VM
     "SYSTEMD_JOURNAL_COMPRESS" # needs journalctl --verify and compression env var support
@@ -28,9 +28,9 @@
     sed -i '/grep -vq.*_PID=\$PID/d' TEST-04-JOURNAL.journal.sh
     sed -i '/_LINE_BREAK/d' TEST-04-JOURNAL.journal.sh
     sed -i '/sort -u.*grep -c/d' TEST-04-JOURNAL.journal.sh
-    # Remove verbose-success tests (need per-service journal stdout streams)
+    # Remove verbose-success tests (ExecStartPre/ExecStopPost result logging not implemented)
     sed -i '/verbose-success/d' TEST-04-JOURNAL.journal.sh
-    # Remove silent-success tests (need per-service journal stdout streams)
+    # Remove silent-success tests (ExecStartPre/ExecStopPost result logging not implemented)
     sed -i '/silent-success/d' TEST-04-JOURNAL.journal.sh
     # Remove script-as-path test (script's bash process has no matching journal entries)
     sed -i '/journalctl -b.*readlink/d' TEST-04-JOURNAL.journal.sh
@@ -40,8 +40,6 @@
     sed -i '/systemctl kill --signal=SIGKILL systemd-journald/d' TEST-04-JOURNAL.journal.sh
     # Remove --directory test with zstd decompressed journal data (entire block including heredoc)
     sed -i '/JOURNAL_DIR=/,/rm.*JOURNAL_DIR/d' TEST-04-JOURNAL.journal.sh
-    # Remove --unit glob test (PID 1 doesn't send journal entries with _SYSTEMD_UNIT for service lifecycle)
-    sed -i '/journalctl -b -n 1 -r --unit/d' TEST-04-JOURNAL.journal.sh
     # Remove systemd-run --unit tests (need systemd-run --wait) — entire block including heredoc
     sed -i '/UNIT_NAME=/,/^EOF$/d' TEST-04-JOURNAL.journal.sh
     # Remove orphaned rm of $CURSOR_FILE (defined inside deleted UNIT_NAME block)
