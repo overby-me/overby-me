@@ -1189,11 +1189,18 @@
     : "Error handling for non-existent commands"
     (! systemd-run --wait --pipe false)
 
-    : "show-environment quoting for values with whitespace"
-    systemctl unset-environment FOO_WITH_SPACES 2>/dev/null || true
-    systemctl set-environment FOO_WITH_SPACES="foo   "
+    : "show-environment quoting for values with whitespace and tabs"
+    systemctl unset-environment FOO_WITH_SPACES FOO_WITH_TABS 2>/dev/null || true
+    systemctl set-environment FOO_WITH_SPACES="foo   " FOO_WITH_TABS="foo\t\t\t"
     systemctl show-environment | grep -F "FOO_WITH_SPACES=\$'foo   '"
-    systemctl unset-environment FOO_WITH_SPACES
+    systemctl show-environment | grep -F "FOO_WITH_TABS=\$'foo\\\\t\\\\t\\\\t'"
+
+    : "show-environment survives daemon-reexec"
+    systemctl daemon-reexec
+    sleep 2
+    systemctl show-environment | grep -F "FOO_WITH_SPACES=\$'foo   '"
+    systemctl show-environment | grep -F "FOO_WITH_TABS=\$'foo\\\\t\\\\t\\\\t'"
+    systemctl unset-environment FOO_WITH_SPACES FOO_WITH_TABS
 
     TESTEOF
     chmod +x TEST-07-PID1.exec-context.sh
