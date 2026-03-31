@@ -33,11 +33,13 @@
     # Remove script-as-path test (script's bash process has no matching journal entries)
     sed -i '/journalctl -b.*readlink/d' TEST-04-JOURNAL.journal.sh
     # Remove forever-print-hola tests (journald restart resilience)
+    # After SIGKILL, the Varlink socket file becomes stale and journalctl --sync
+    # fails with ECONNREFUSED. Fixing requires Varlink socket activation support.
     sed -i '/forever-print-hola/d' TEST-04-JOURNAL.journal.sh
     sed -i '/i-lose-my-logs/d' TEST-04-JOURNAL.journal.sh
     sed -i '/systemctl kill --signal=SIGKILL systemd-journald/d' TEST-04-JOURNAL.journal.sh
-    # Remove --directory test with zstd decompressed journal data (entire block including heredoc)
-    sed -i '/JOURNAL_DIR=/,/rm.*JOURNAL_DIR/d' TEST-04-JOURNAL.journal.sh
+    # --directory test with zstd decompressed journal data uses C journalctl
+    # directly against test journal files — doesn't require our journald.
     # Remove systemd-run --unit tests (need systemd-run --wait) — entire block including heredoc
     sed -i '/UNIT_NAME=/,/^EOF$/d' TEST-04-JOURNAL.journal.sh
     # Remove orphaned rm of $CURSOR_FILE (defined inside deleted UNIT_NAME block)
