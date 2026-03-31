@@ -1251,6 +1251,54 @@ fn parse_space_separated_list(vec: Option<Vec<(u32, String)>>) -> Vec<String> {
     }
 }
 
+/// Like `parse_space_separated_list` but handles backslash-escaped spaces and
+/// colons in path entries (matching C systemd's `extract_first_word` with
+/// `EXTRACT_UNQUOTE`).  Backslash-space (`\ `) keeps the space in the token,
+/// backslash-colon (`\:`) keeps the colon literal, and `\\` produces a single
+/// backslash.  Used for BindPaths, ReadOnlyPaths, etc.
+fn parse_escaped_space_separated_list(vec: Option<Vec<(u32, String)>>) -> Vec<String> {
+    match vec {
+        Some(vec) => {
+            let mut entries = Vec::new();
+            for (_idx, line) in &vec {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    entries.clear();
+                    continue;
+                }
+                let mut current = String::new();
+                let mut chars = trimmed.chars().peekable();
+                while let Some(ch) = chars.next() {
+                    if ch == '\\' {
+                        if let Some(&next) = chars.peek() {
+                            match next {
+                                ' ' | ':' | '\\' => {
+                                    current.push(next);
+                                    chars.next();
+                                }
+                                _ => current.push(ch),
+                            }
+                        } else {
+                            current.push(ch);
+                        }
+                    } else if ch.is_whitespace() {
+                        if !current.is_empty() {
+                            entries.push(std::mem::take(&mut current));
+                        }
+                    } else {
+                        current.push(ch);
+                    }
+                }
+                if !current.is_empty() {
+                    entries.push(current);
+                }
+            }
+            entries
+        }
+        None => Vec::new(),
+    }
+}
+
 /// Parse an octal mode value (e.g. "0755") used by directory mode directives.
 fn parse_octal_mode(
     name: &str,
@@ -2702,24 +2750,7 @@ pub fn parse_exec_section(
             }
             None => Vec::new(),
         },
-        read_write_paths: match read_write_paths {
-            Some(vec) => {
-                let mut entries = Vec::new();
-                for (_idx, line) in &vec {
-                    let trimmed = line.trim();
-                    if trimmed.is_empty() {
-                        // Empty string resets the list
-                        entries.clear();
-                        continue;
-                    }
-                    for token in trimmed.split_whitespace() {
-                        entries.push(token.to_owned());
-                    }
-                }
-                entries
-            }
-            None => Vec::new(),
-        },
+        read_write_paths: parse_escaped_space_separated_list(read_write_paths),
         memory_deny_write_execute,
         lock_personality,
         protect_proc: match protect_proc {
@@ -2954,11 +2985,11 @@ pub fn parse_exec_section(
         runtime_directory_mode: parse_octal_mode("RuntimeDirectoryMode", runtime_directory_mode)?,
 
         // ── Path-based mount namespace directives ────────────────────
-        read_only_paths: parse_space_separated_list(read_only_paths),
-        inaccessible_paths: parse_space_separated_list(inaccessible_paths),
-        bind_paths: parse_space_separated_list(bind_paths),
-        bind_read_only_paths: parse_space_separated_list(bind_read_only_paths),
-        temporary_file_system: parse_space_separated_list(temporary_file_system),
+        read_only_paths: parse_escaped_space_separated_list(read_only_paths),
+        inaccessible_paths: parse_escaped_space_separated_list(inaccessible_paths),
+        bind_paths: parse_escaped_space_separated_list(bind_paths),
+        bind_read_only_paths: parse_escaped_space_separated_list(bind_read_only_paths),
+        temporary_file_system: parse_escaped_space_separated_list(temporary_file_system),
 
         // ── Logging directives ───────────────────────────────────────
         syslog_identifier: match syslog_identifier {
@@ -3090,8 +3121,8 @@ pub fn parse_exec_section(
             smack_process_label,
         )?,
         keyring_mode: parse_optional_single_string("KeyringMode", keyring_mode)?,
-        no_exec_paths: parse_space_separated_list(no_exec_paths),
-        exec_paths: parse_space_separated_list(exec_paths),
+        no_exec_paths: parse_escaped_space_separated_list(no_exec_paths),
+        exec_paths: parse_escaped_space_separated_list(exec_paths),
         coredump_filter: parse_optional_single_string("CoredumpFilter", coredump_filter)?,
 
         // ── Misc directives ─────────────────────────────────────────
@@ -3481,6 +3512,51 @@ mod tests {
     #[test]
     fn space_list_whitespace_only_resets() {
         let r = parse_space_separated_list(multi_val(&["/old", "   ", "/new"]));
+        assert_eq!(r, vec!["/new"]);
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // parse_escaped_space_separated_list
+    // ════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn escaped_space_list_basic() {
+        let r = parse_escaped_space_separated_list(single_val("/foo /bar"));
+        assert_eq!(r, vec!["/foo", "/bar"]);
+    }
+
+    #[test]
+    fn escaped_space_list_backslash_space() {
+        let r = parse_escaped_space_separated_list(single_val(r"/tmp/test\ file"));
+        assert_eq!(r, vec!["/tmp/test file"]);
+    }
+
+    #[test]
+    fn escaped_space_list_backslash_colon() {
+        let r = parse_escaped_space_separated_list(single_val(r"/tmp/test\:file"));
+        assert_eq!(r, vec!["/tmp/test:file"]);
+    }
+
+    #[test]
+    fn escaped_space_list_backslash_backslash() {
+        let r = parse_escaped_space_separated_list(single_val(r"/tmp/test\\file"));
+        assert_eq!(r, vec![r"/tmp/test\file"]);
+    }
+
+    #[test]
+    fn escaped_space_list_mixed() {
+        let r = parse_escaped_space_separated_list(single_val(
+            r"/etc /home:/mnt:norbind /tmp/test\ file\ with\ spaces",
+        ));
+        assert_eq!(
+            r,
+            vec!["/etc", "/home:/mnt:norbind", "/tmp/test file with spaces"]
+        );
+    }
+
+    #[test]
+    fn escaped_space_list_empty_resets() {
+        let r = parse_escaped_space_separated_list(multi_val(&["/old", "", "/new"]));
         assert_eq!(r, vec!["/new"]);
     }
 
