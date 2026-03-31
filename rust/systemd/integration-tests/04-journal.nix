@@ -4,7 +4,6 @@
   testEnv.TEST_SKIP_SUBTESTS = builtins.concatStringsSep " " [
     "bsod" # needs systemd-bsod binary not in VM
     "JOURNAL\\.cat\\." # needs journal namespace (systemd-journald@ template socket)
-    "corrupted-journals" # journalctl --directory creates subdir structure that rm -f can't remove
     "JOURNAL\\.invocation\\." # needs systemd-run --wait (oneshot deadlock) + journalctl --list-invocation
 
     "journal-append" # needs test-journal-append test binary
