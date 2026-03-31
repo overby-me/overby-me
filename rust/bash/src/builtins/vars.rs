@@ -614,7 +614,22 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
                 shell.integer_vars.insert(name.to_string());
             }
             if flag_nameref {
-                shell.namerefs.insert(name.to_string(), value.to_string());
+                // Detect circular nameref: if the target's base name matches
+                // the variable name, it's circular (e.g., local -n a=a[0])
+                let target_base = if let Some(bracket) = value.find('[') {
+                    &value[..bracket]
+                } else {
+                    value
+                };
+                if target_base == name {
+                    eprintln!(
+                        "{}: local: warning: {}: circular name reference",
+                        shell.error_prefix(),
+                        name
+                    );
+                } else {
+                    shell.namerefs.insert(name.to_string(), value.to_string());
+                }
             } else if flag_array {
                 let arr = parse_array_literal(value);
                 shell
@@ -633,6 +648,7 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
                 shell.integer_vars.insert(name_arg.clone());
             }
             if flag_nameref {
+                // No value provided — just mark as nameref (no circular risk)
                 shell.namerefs.entry(name_arg.clone()).or_default();
             } else if flag_array {
                 shell.arrays.entry(name_arg.clone()).or_default();
@@ -1494,8 +1510,23 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             }
 
             if flag_nameref {
-                shell.vars.remove(name);
-                shell.namerefs.insert(name.to_string(), value.to_string());
+                // Detect circular nameref: if the target's base name matches
+                // the variable name, it's circular (e.g., declare -n a=a[0])
+                let target_base = if let Some(bracket) = value.find('[') {
+                    &value[..bracket]
+                } else {
+                    value
+                };
+                if target_base == name {
+                    eprintln!(
+                        "{}: declare: warning: {}: circular name reference",
+                        shell.error_prefix(),
+                        name
+                    );
+                } else {
+                    shell.vars.remove(name);
+                    shell.namerefs.insert(name.to_string(), value.to_string());
+                }
             } else if flag_assoc {
                 let map = parse_assoc_literal(value);
                 shell.assoc_arrays.insert(name.to_string(), map);
@@ -1599,7 +1630,23 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 // nameref target, then remove it from regular vars.  This matches
                 // bash: `foo=bar; typeset -n foo` → foo is a nameref to "bar".
                 let target = shell.vars.remove(name).unwrap_or_default();
-                shell.namerefs.insert(name.to_string(), target);
+                // Detect circular nameref
+                let target_base = if let Some(bracket) = target.find('[') {
+                    &target[..bracket]
+                } else {
+                    target.as_str()
+                };
+                if !target.is_empty() && target_base == name {
+                    eprintln!(
+                        "{}: declare: warning: {}: circular name reference",
+                        shell.error_prefix(),
+                        name
+                    );
+                    // Put the value back since we're not creating the nameref
+                    shell.vars.insert(name.to_string(), target);
+                } else {
+                    shell.namerefs.insert(name.to_string(), target);
+                }
             } else if flag_assoc {
                 if !shell.assoc_arrays.contains_key(name) {
                     let mut new_map = crate::interpreter::AssocArray::default();

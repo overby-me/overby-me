@@ -601,15 +601,19 @@ impl Shell {
     }
 
     /// Resolve a variable name through namerefs.
+    /// Bash limits nameref resolution depth to 8 to prevent infinite loops.
     pub fn resolve_nameref(&self, name: &str) -> String {
+        const MAX_NAMEREF_DEPTH: usize = 8;
         let mut resolved = name.to_string();
         let mut seen = HashSet::new();
+        let mut depth = 0;
         while let Some(target) = self.namerefs.get(&resolved) {
-            if seen.contains(target) {
+            if seen.contains(target) || depth >= MAX_NAMEREF_DEPTH {
                 break;
             }
             seen.insert(target.clone());
             resolved = target.clone();
+            depth += 1;
         }
         resolved
     }
