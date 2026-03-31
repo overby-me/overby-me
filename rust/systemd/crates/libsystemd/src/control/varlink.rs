@@ -169,11 +169,36 @@ pub fn journal_log_with_fields(message: &str, priority: u8, fields: &[(&str, &st
     let _ = sock.send_to(payload.as_bytes(), "/run/systemd/journal/socket");
 }
 
+/// Convert a syslog level name to its numeric value.
+fn parse_log_level(level: &str) -> Option<u8> {
+    match level {
+        "emerg" | "0" => Some(0),
+        "alert" | "1" => Some(1),
+        "crit" | "2" => Some(2),
+        "err" | "error" | "3" => Some(3),
+        "warning" | "warn" | "4" => Some(4),
+        "notice" | "5" => Some(5),
+        "info" | "6" => Some(6),
+        "debug" | "7" => Some(7),
+        _ => None,
+    }
+}
+
 /// Log a unit lifecycle event to the journal (e.g. "Starting ...", "Started ...",
 /// "Deactivated successfully."). These correspond to the structured messages
 /// that C systemd's PID 1 sends with UNIT= and SYSLOG_IDENTIFIER=systemd.
-pub fn journal_log_unit_lifecycle(message: &str, unit_name: &str) {
-    journal_log_with_fields(message, 6, &[("UNIT", unit_name)]);
+///
+/// Respects `LogLevelMax=`: if the unit has a max log level set, lifecycle
+/// messages (priority 6/info) are suppressed when the max is below info.
+pub fn journal_log_unit_lifecycle(message: &str, unit_name: &str, log_level_max: Option<&str>) {
+    const LIFECYCLE_PRIORITY: u8 = 6; // LOG_INFO
+    if let Some(max_str) = log_level_max
+        && let Some(max_level) = parse_log_level(max_str)
+        && LIFECYCLE_PRIORITY > max_level
+    {
+        return;
+    }
+    journal_log_with_fields(message, LIFECYCLE_PRIORITY, &[("UNIT", unit_name)]);
 }
 
 /// Build the response for `io.systemd.Manager.Describe`.

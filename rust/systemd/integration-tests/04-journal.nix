@@ -24,9 +24,9 @@
     sed -i '/grep -vq.*_PID=\$PID/d' TEST-04-JOURNAL.journal.sh
     sed -i '/_LINE_BREAK/d' TEST-04-JOURNAL.journal.sh
     sed -i '/sort -u.*grep -c/d' TEST-04-JOURNAL.journal.sh
-    # Remove verbose-success tests (needs PID 1 lifecycle messages with _SYSTEMD_UNIT in journal)
-    sed -i '/verbose-success/d' TEST-04-JOURNAL.journal.sh
-    # silent-success: passes because PID 1 doesn't write lifecycle messages to journal
+    # verbose-success: PID 1 lifecycle logging provides SYSLOG_IDENTIFIER=systemd entries
+    # with UNIT= field; stdout stream uses exec binary name (bash) as identifier.
+    # silent-success: LogLevelMax=notice suppresses PID 1 lifecycle messages (priority 6/info)
     # Remove script-as-path test (script's bash process has no matching journal entries)
     sed -i '/journalctl -b.*readlink/d' TEST-04-JOURNAL.journal.sh
     # forever-print-hola: journald restart resilience tests work because PID 1

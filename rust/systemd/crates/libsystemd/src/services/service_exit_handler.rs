@@ -447,7 +447,12 @@ pub(crate) fn service_exit_handler(
                     } else {
                         format!("Failed with result '{fail_reason}': {desc}.")
                     };
-                    crate::control::varlink::journal_log_unit_lifecycle(&msg, &id.name);
+                    let log_level_max = unit.log_level_max();
+                    crate::control::varlink::journal_log_unit_lifecycle(
+                        &msg,
+                        &id.name,
+                        log_level_max.as_deref(),
+                    );
                 }
 
                 // Clean up the cgroup directory.
@@ -741,7 +746,12 @@ pub(crate) fn service_exit_handler(
                 } else {
                     format!("Failed with result '{fail_reason}': {desc}.")
                 };
-                crate::control::varlink::journal_log_unit_lifecycle(&msg, name);
+                let log_level_max = unit.log_level_max();
+                crate::control::varlink::journal_log_unit_lifecycle(
+                    &msg,
+                    name,
+                    log_level_max.as_deref(),
+                );
             }
 
             // Collect OnSuccess=/OnFailure= trigger info for the oneshot service.
@@ -1204,7 +1214,12 @@ pub(crate) fn service_exit_handler(
             } else {
                 format!("Failed with result '{fail_reason}': {desc}.")
             };
-            crate::control::varlink::journal_log_unit_lifecycle(&msg, name);
+            let log_level_max = unit.log_level_max();
+            crate::control::varlink::journal_log_unit_lifecycle(
+                &msg,
+                name,
+                log_level_max.as_deref(),
+            );
         }
 
         // Clean up the cgroup directory now that the service has stopped.

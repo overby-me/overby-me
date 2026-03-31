@@ -335,17 +335,21 @@ impl ServiceState {
                 // Record the instant the service became Running so the
                 // watchdog thread can enforce RuntimeMaxSec=.
                 self.srvc.runtime_started_at = Some(std::time::Instant::now());
-                let desc = if let Some(unit) = run_info.unit_table.get(id) {
-                    unit.common.unit.description.clone()
+                let (desc, log_level_max) = if let Some(unit) = run_info.unit_table.get(id) {
+                    (unit.common.unit.description.clone(), unit.log_level_max())
                 } else {
-                    String::new()
+                    (String::new(), None)
                 };
                 let msg = if desc.is_empty() {
                     format!("Started {}.", id.name)
                 } else {
                     format!("Started {desc}.")
                 };
-                crate::control::varlink::journal_log_unit_lifecycle(&msg, &id.name);
+                crate::control::varlink::journal_log_unit_lifecycle(
+                    &msg,
+                    &id.name,
+                    log_level_max.as_deref(),
+                );
                 Ok(UnitStatus::Started(StatusStarted::Running))
             }
             Ok(crate::services::StartResult::ConditionSkipped) => {
@@ -1083,6 +1087,14 @@ impl Unit {
         self.common.dependencies.dedup();
     }
 
+    /// Return the `LogLevelMax=` value from the service's exec config, if set.
+    pub fn log_level_max(&self) -> Option<String> {
+        match &self.specific {
+            Specific::Service(srvc) => srvc.conf.exec_config.log_level_max.clone(),
+            _ => None,
+        }
+    }
+
     /// Check if the transition to state 'Starting' can be done
     ///
     /// This is the case if:
@@ -1142,7 +1154,12 @@ impl Unit {
             } else {
                 format!("Starting {desc}...")
             };
-            crate::control::varlink::journal_log_unit_lifecycle(&msg, &self.id.name);
+            let log_level_max = self.log_level_max();
+            crate::control::varlink::journal_log_unit_lifecycle(
+                &msg,
+                &self.id.name,
+                log_level_max.as_deref(),
+            );
             Ok(())
         } else {
             Err(unstarted_deps)
@@ -1500,7 +1517,12 @@ impl Unit {
             } else {
                 format!("Deactivated successfully: {desc}.")
             };
-            crate::control::varlink::journal_log_unit_lifecycle(&msg, &self.id.name);
+            let log_level_max = self.log_level_max();
+            crate::control::varlink::journal_log_unit_lifecycle(
+                &msg,
+                &self.id.name,
+                log_level_max.as_deref(),
+            );
         }
 
         result
