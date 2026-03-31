@@ -1,9 +1,7 @@
-import { SourceMapConsumer } from "source-map-js";
-
 export let isInitialized = false;
 
 // Cache fetched source maps to avoid re-fetching
-// biome-ignore lint: using any for source map consumer cache since source-map-js types vary
+// biome-ignore lint/suspicious/noExplicitAny: source-map-js types vary across versions
 const sourceMapCache = new Map<string, any>();
 
 export const initBugfender = async () => {
@@ -118,6 +116,7 @@ const fetchSourceMapForUrl = async (jsUrl: string) => {
 			return null;
 		}
 		const rawMap = await res.text();
+		const { SourceMapConsumer } = await import("source-map-js");
 		const consumer = new SourceMapConsumer(JSON.parse(rawMap));
 		sourceMapCache.set(jsUrl, consumer);
 		return consumer;
