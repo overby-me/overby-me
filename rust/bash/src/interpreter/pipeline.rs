@@ -168,7 +168,7 @@ impl Shell {
                         // Clear EXIT trap in subshell (pipeline children are subshells)
                         self.traps.remove("EXIT");
                         self.traps.remove("0");
-                        self.in_pipeline_child = true;
+                        self.in_pipeline_child = !self.shopt_lastpipe;
                         if let Some(fd) = prev_read_fd
                             && fd != 0
                         {
