@@ -1967,7 +1967,17 @@ impl Parser {
         // Check for {varname} before redirect operator
         if s.starts_with('{') && s.ends_with('}') && s.len() > 2 {
             let varname = s[1..s.len() - 1].to_string();
-            if varname.chars().all(|c| c.is_alphanumeric() || c == '_') {
+            // Allow plain identifiers (e.g. {v}) and array subscripts (e.g. {fd[0]})
+            let is_valid_var_redir = if let Some(bracket) = varname.find('[') {
+                varname.ends_with(']')
+                    && varname[..bracket]
+                        .chars()
+                        .all(|c| c.is_alphanumeric() || c == '_')
+                    && !varname[..bracket].is_empty()
+            } else {
+                varname.chars().all(|c| c.is_alphanumeric() || c == '_')
+            };
+            if is_valid_var_redir {
                 let saved_pos = self.lexer.save_position();
                 let saved_tok = self.current.clone();
                 self.advance();
@@ -1979,6 +1989,8 @@ impl Parser {
                         | Token::LessAnd
                         | Token::GreatAnd
                         | Token::LessGreat
+                        | Token::DLess
+                        | Token::DLessDash
                 ) {
                     return Some(RedirFd::Var(varname));
                 }

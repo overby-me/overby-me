@@ -78,7 +78,10 @@ impl Shell {
 
             match &redir.kind {
                 RedirectKind::Output | RedirectKind::Clobber => {
-                    let fd = self.resolve_redir_fd(&redir.fd, 1);
+                    let (fd, var_readonly) = match self.resolve_redir_fd(&redir.fd, 1) {
+                        Ok(fd) => (fd, false),
+                        Err(fd) => (fd, true),
+                    };
                     if !is_var_fd(redir)
                         && let Ok(saved_fd) =
                             nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(10))
@@ -122,9 +125,17 @@ impl Shell {
                         nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::empty()),
                     )
                     .ok();
+                    if var_readonly {
+                        self.last_status = 1;
+                        self.restore_redirections(saved);
+                        return Err(String::new());
+                    }
                 }
                 RedirectKind::Append => {
-                    let fd = self.resolve_redir_fd(&redir.fd, 1);
+                    let (fd, var_readonly) = match self.resolve_redir_fd(&redir.fd, 1) {
+                        Ok(fd) => (fd, false),
+                        Err(fd) => (fd, true),
+                    };
                     if !is_var_fd(redir)
                         && let Ok(saved_fd) =
                             nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(10))
@@ -147,6 +158,11 @@ impl Shell {
                         nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::empty()),
                     )
                     .ok();
+                    if var_readonly {
+                        self.last_status = 1;
+                        self.restore_redirections(saved);
+                        return Err(String::new());
+                    }
                 }
                 RedirectKind::OutputAll | RedirectKind::AppendAll => {
                     // &> or &>> — redirect both stdout and stderr to file
@@ -175,7 +191,10 @@ impl Shell {
                     nix::unistd::close(raw_fd).ok();
                 }
                 RedirectKind::Input => {
-                    let fd = self.resolve_redir_fd(&redir.fd, 0);
+                    let (fd, var_readonly) = match self.resolve_redir_fd(&redir.fd, 0) {
+                        Ok(fd) => (fd, false),
+                        Err(fd) => (fd, true),
+                    };
                     if !is_var_fd(redir)
                         && let Ok(saved_fd) =
                             nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(10))
@@ -196,9 +215,14 @@ impl Shell {
                         nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::empty()),
                     )
                     .ok();
+                    if var_readonly {
+                        self.last_status = 1;
+                        self.restore_redirections(saved);
+                        return Err(String::new());
+                    }
                 }
                 RedirectKind::DupOutput => {
-                    let fd = self.resolve_redir_fd(&redir.fd, 1);
+                    let fd = self.resolve_redir_fd(&redir.fd, 1).unwrap_or_else(|fd| fd);
                     // Empty target from expansion is ambiguous redirect
                     if target_str.is_empty() {
                         self.restore_redirections(saved);
@@ -260,7 +284,7 @@ impl Shell {
                     }
                 }
                 RedirectKind::DupInput => {
-                    let fd = self.resolve_redir_fd(&redir.fd, 0);
+                    let fd = self.resolve_redir_fd(&redir.fd, 0).unwrap_or_else(|fd| fd);
                     if target_str.is_empty() {
                         self.restore_redirections(saved);
                         return Err(format!("{}: ambiguous redirect", raw_target));
@@ -306,7 +330,10 @@ impl Shell {
                     }
                 }
                 RedirectKind::HereDoc(_, _) | RedirectKind::HereString => {
-                    let fd = self.resolve_redir_fd(&redir.fd, 0);
+                    let (fd, var_readonly) = match self.resolve_redir_fd(&redir.fd, 0) {
+                        Ok(fd) => (fd, false),
+                        Err(fd) => (fd, true),
+                    };
                     if let Ok(saved_fd) =
                         nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(10))
                     {
@@ -369,9 +396,17 @@ impl Shell {
                         // memfd is already the target fd — don't close it.
                         std::mem::forget(memfd);
                     }
+                    if var_readonly {
+                        self.last_status = 1;
+                        self.restore_redirections(saved);
+                        return Err(String::new());
+                    }
                 }
                 RedirectKind::ReadWrite => {
-                    let fd = self.resolve_redir_fd(&redir.fd, 0);
+                    let (fd, var_readonly) = match self.resolve_redir_fd(&redir.fd, 0) {
+                        Ok(fd) => (fd, false),
+                        Err(fd) => (fd, true),
+                    };
                     if let Ok(saved_fd) =
                         nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(10))
                     {
@@ -396,6 +431,11 @@ impl Shell {
                         nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::empty()),
                     )
                     .ok();
+                    if var_readonly {
+                        self.last_status = 1;
+                        self.restore_redirections(saved);
+                        return Err(String::new());
+                    }
                 }
                 RedirectKind::ProcessSubIn | RedirectKind::ProcessSubOut => {
                     // Process substitution handled during word expansion
@@ -406,11 +446,23 @@ impl Shell {
         Ok(saved)
     }
 
+    /// Resolve the fd for a redirection. Returns `Ok(fd)` on success.
+    /// Returns `Err(fd)` when the variable is readonly — the fd is still
+    /// allocated (so the file open / dup2 can proceed and create files)
+    /// but the variable won't be assigned, and the caller must treat
+    /// the redirection as failed after the I/O operation completes.
     #[cfg(unix)]
-    fn resolve_redir_fd(&mut self, fd: &Option<RedirFd>, default: i32) -> i32 {
+    fn resolve_redir_fd(&mut self, fd: &Option<RedirFd>, default: i32) -> Result<i32, i32> {
         match fd {
-            Some(RedirFd::Number(n)) => *n,
+            Some(RedirFd::Number(n)) => Ok(*n),
             Some(RedirFd::Var(name)) => {
+                // For array subscripts like fd[0], check readonly on the base name
+                let base_name = if let Some(bracket) = name.find('[') {
+                    &name[..bracket]
+                } else {
+                    name.as_str()
+                };
+                let is_readonly = self.readonly_vars.contains(base_name);
                 // Auto-allocate fd: find unused fd >= 10
                 for candidate in 10..256i32 {
                     match nix::unistd::dup(candidate) {
@@ -420,14 +472,51 @@ impl Shell {
                         }
                         Err(_) => {
                             // fd is free — use it
-                            self.vars.insert(name.clone(), candidate.to_string());
-                            return candidate;
+                            if is_readonly {
+                                eprintln!("{}: {}: readonly variable", self.error_prefix(), name);
+                                eprintln!(
+                                    "{}: {}: cannot assign fd to variable",
+                                    self.error_prefix(),
+                                    name
+                                );
+                                return Err(candidate);
+                            }
+                            // Handle array subscript: {fd[0]} → set arrays["fd"][0]
+                            if let Some(bracket) = name.find('[') {
+                                let base = &name[..bracket];
+                                let subscript = &name[bracket + 1..name.len() - 1];
+                                if let Ok(idx) = subscript.parse::<usize>() {
+                                    let arr = self.arrays.entry(base.to_string()).or_default();
+                                    while arr.len() <= idx {
+                                        arr.push(None);
+                                    }
+                                    arr[idx] = Some(candidate.to_string());
+                                } else {
+                                    // Non-numeric subscript — treat as assoc array
+                                    let assoc =
+                                        self.assoc_arrays.entry(base.to_string()).or_default();
+                                    assoc.insert(subscript.to_string(), candidate.to_string());
+                                }
+                            } else {
+                                self.vars.insert(name.clone(), candidate.to_string());
+                            }
+                            return Ok(candidate);
                         }
                     }
                 }
-                default
+                if is_readonly {
+                    eprintln!("{}: {}: readonly variable", self.error_prefix(), name);
+                    eprintln!(
+                        "{}: {}: cannot assign fd to variable",
+                        self.error_prefix(),
+                        name
+                    );
+                    Err(default)
+                } else {
+                    Ok(default)
+                }
             }
-            None => default,
+            None => Ok(default),
         }
     }
 

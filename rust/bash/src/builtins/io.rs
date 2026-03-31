@@ -1705,7 +1705,7 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
     // When no variable names given (reading into REPLY), store raw line without IFS processing
     if is_reply {
         shell.set_var("REPLY", line);
-        return 0;
+        return if eof_reached { 1 } else { 0 };
     }
 
     // Handle -a: read into array
