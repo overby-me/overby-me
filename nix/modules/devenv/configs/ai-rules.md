@@ -1,7 +1,8 @@
 # RTK (token-optimized commands)
 
 - **Always prefix shell commands with `rtk`** to minimize token consumption. RTK filters and compresses command output before it reaches the LLM context, saving 60-90% tokens. Examples:
-  - `rtk git status` instead of `git status`
+  - `rtk jj status` instead of `jj status`
+  - `rtk jj log` instead of `jj log`
   - `rtk cargo test` instead of `cargo test`
   - `rtk ls src/` instead of `ls src/`
   - `rtk grep "pattern" src/` instead of `grep "pattern" src/`
