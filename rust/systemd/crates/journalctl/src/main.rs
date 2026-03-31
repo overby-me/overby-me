@@ -1334,7 +1334,15 @@ fn open_storage(cli: &Cli) -> Result<JournalStorage, String> {
 
     // When --directory or --file is specified, the path already points to
     // the journal directory — don't append machine-id again.
-    let direct_directory = cli.directory.is_some() || cli.file.is_some() || cli.namespace.is_some();
+    // For --namespace with special values (*, +foo, empty), the base dir still
+    // needs machine-id appended, so don't set direct_directory for those.
+    let direct_directory = cli.directory.is_some()
+        || cli.file.is_some()
+        || cli.namespace.as_ref().is_some_and(|ns| {
+            let ns = ns.trim();
+            // Only set direct when namespace resolved to a specific subdirectory
+            !ns.is_empty() && ns != "*" && !ns.starts_with('+')
+        });
 
     let config = StorageConfig {
         directory,
