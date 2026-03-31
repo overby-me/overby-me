@@ -2438,6 +2438,18 @@ fn follow_journal(
 
                 last_realtime = entry.realtime_usec;
                 last_seqnum = entry.seqnum;
+
+                // Write cursor-file after each entry so it's up-to-date on exit
+                if let Some(ref file) = cli.cursor_file {
+                    let cursor = format!(
+                        "s=0;i={:x};b={};m={:x};t={:x};x=0",
+                        entry.seqnum,
+                        entry.boot_id().unwrap_or_default(),
+                        entry.monotonic_usec,
+                        entry.realtime_usec,
+                    );
+                    let _ = fs::write(file, &cursor);
+                }
             }
         }
 
