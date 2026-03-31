@@ -557,21 +557,29 @@ fn try_create_transient_unit(
     }
 
     // Pass environment variables (resolve pass-through vars client-side)
-    if !cli.setenv.is_empty() {
-        let envs: Vec<Value> = cli
-            .setenv
-            .iter()
-            .filter_map(|s| {
-                if s.contains('=') {
-                    Some(Value::String(s.clone()))
-                } else {
-                    // Pass-through: resolve from current environment
-                    std::env::var(s)
-                        .ok()
-                        .map(|val| Value::String(format!("{s}={val}")))
+    {
+        let mut envs: Vec<Value> = Vec::new();
+
+        // For --scope, inherit the caller's full environment (real systemd
+        // scopes run in the caller's process tree and naturally inherit it).
+        if cli.scope {
+            for (key, val) in std::env::vars() {
+                envs.push(Value::String(format!("{key}={val}")));
+            }
+        }
+
+        // Explicit --setenv overrides (applied after inherited env)
+        for s in &cli.setenv {
+            if s.contains('=') {
+                envs.push(Value::String(s.clone()));
+            } else {
+                // Pass-through: resolve from current environment
+                if let Ok(val) = std::env::var(s) {
+                    envs.push(Value::String(format!("{s}={val}")));
                 }
-            })
-            .collect();
+            }
+        }
+
         if !envs.is_empty() {
             properties.insert("environment".into(), Value::Array(envs));
         }

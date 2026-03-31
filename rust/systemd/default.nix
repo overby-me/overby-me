@@ -287,10 +287,11 @@
       }
       {
         name = "05-RLIMITS";
-        # Skip rlimit subtest: needs systemd-run --wait -t (TTY allocation).
-        # effective-limit works: slice MemoryMax/MemoryHigh/TasksMax,
-        # EffectiveMemory* properties, and set-property are all implemented.
-        testEnv.TEST_SKIP_SUBTESTS = "\\.rlimit\\.";
+        # Patch rlimit subtest: remove systemd-run --wait -t lines (TTY allocation
+        # not available in test VM). Keep the systemctl show -P property checks.
+        patchScript = ''
+          sed -i '/systemd-run --wait -t/d' TEST-05-RLIMITS.rlimit.sh
+        '';
       }
       {
         name = "07-PID1";
@@ -4012,6 +4013,10 @@
           : "Transient scope basics"
           systemd-run --scope true
           systemd-run --scope bash -xec 'echo scope-works'
+
+          : "Transient scope inherits caller environment"
+          export SCOPE_TEST_VAR=hello_scope
+          systemd-run --scope bash -xec '[[ "$SCOPE_TEST_VAR" == hello_scope ]]'
 
           : "Transient scope with RuntimeMaxSec override"
           systemd-run --scope \
