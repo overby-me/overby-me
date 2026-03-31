@@ -24,6 +24,5 @@
 //! - [`storage::parse_cursor_realtime`] / [`storage::parse_cursor_boot_id`]
 //!   — helpers for extracting fields from cursor strings.
 
-pub mod c_journal;
 pub mod entry;
 pub mod storage;

@@ -1038,22 +1038,6 @@
         "url": "https://cdn.jsdelivr.net/npm/mermaid@11.12.3/dist/mermaid.min.js"
       }
     },
-    "modular-skills": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1774939858,
-        "narHash": "sha256-/5kkmP+BUPYbgnb0jNOo/bzMSkLQkHlbGBCRK/QMeXo=",
-        "owner": "modular",
-        "repo": "skills",
-        "rev": "474eaeb64aa7f4718ec543cf0e7f3ed918a3c785",
-        "type": "github"
-      },
-      "original": {
-        "owner": "modular",
-        "repo": "skills",
-        "type": "github"
-      }
-    },
     "nix": {
       "inputs": {
         "flake-compat": [
@@ -1611,7 +1595,6 @@
         "hercules-ci-effects": "hercules-ci-effects",
         "home-manager": "home-manager",
         "lix": "lix",
-        "modular-skills": "modular-skills",
         "nix-wallpaper": "nix-wallpaper",
         "nixos-hardware": "nixos-hardware",
         "nixos-raspberrypi": "nixos-raspberrypi",

@@ -4560,47 +4560,8 @@ pub fn execute_command(
                     crate::units::UnitStatus::NeverStarted => {
                         // Not started yet, keep waiting
                     }
-                    crate::units::UnitStatus::Started(_) => {
-                        // For oneshot services, the unit stays in Started
-                        // state after the process exits (to keep deps alive).
-                        // Detect completion by checking if the main process
-                        // has been reaped (main_exit_pid is set).
-                        if let crate::units::Specific::Service(svc) = &unit.specific
-                            && svc.conf.srcv_type == crate::units::ServiceType::OneShot
-                            && let Ok(state) = svc.state.try_read()
-                            && state.srvc.main_exit_pid.is_some()
-                        {
-                            let exit_status = state.srvc.main_exit_status.unwrap_or(0);
-                            let result = if exit_status == 0 {
-                                "success"
-                            } else {
-                                "exit-code"
-                            };
-                            let mut resp = serde_json::json!({
-                                "started": unit_name,
-                                "result": result,
-                                "exit_code": exit_status
-                            });
-                            if do_pipe {
-                                let stdout_path =
-                                    format!("/run/systemd/transient/{}.stdout", unit_name);
-                                let stderr_path =
-                                    format!("/run/systemd/transient/{}.stderr", unit_name);
-                                if let Ok(data) = std::fs::read_to_string(&stdout_path) {
-                                    resp["stdout"] = Value::String(data);
-                                    let _ = std::fs::remove_file(&stdout_path);
-                                }
-                                if let Ok(data) = std::fs::read_to_string(&stderr_path) {
-                                    resp["stderr"] = Value::String(data);
-                                    let _ = std::fs::remove_file(&stderr_path);
-                                }
-                            }
-                            return Ok(resp);
-                        }
-                        // Not a completed oneshot — keep waiting
-                    }
                     _ => {
-                        // Still starting, keep waiting
+                        // Still running/starting, keep waiting
                     }
                 }
             }

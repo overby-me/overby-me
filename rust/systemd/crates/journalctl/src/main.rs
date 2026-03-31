@@ -35,8 +35,6 @@
 //! - Catalog augmentation (`-x`, `--catalog`)
 //! - Output field selection (`--output-fields`)
 //! - Hostname suppression (`--no-hostname`)
-//! - Path-based matching (`/path/to/executable`, `/dev/device`)
-//! - Match groups with OR (`+` separator)
 //! - No pager mode (`--no-pager`)
 
 use clap::Parser;
@@ -75,29 +73,21 @@ fn is_boot_spec(s: &str) -> bool {
 }
 
 /// Preprocess CLI args so that `-b VALUE` (space-separated) becomes `-b=VALUE`
-/// when VALUE looks like a boot specifier.  When the next arg is NOT a boot
-/// specifier (e.g. a path like `/dev/null`), emit `-b=0` so clap doesn't
-/// greedily consume the path as the boot value.
+/// when VALUE looks like a boot specifier.  This prevents clap's
+/// `allow_hyphen_values` from greedily consuming unrelated flags like `-o` or
+/// `--no-pager` as the boot value.
 fn preprocess_boot_args(args: impl Iterator<Item = String>) -> Vec<String> {
     let mut out = Vec::new();
     let mut iter = args.peekable();
     while let Some(arg) = iter.next() {
         // Match bare `-b` or `--boot` (without `=`)
-        if arg == "-b" || arg == "--boot" {
-            if let Some(next) = iter.peek() {
-                if is_boot_spec(next) {
-                    // Attach the boot spec value with `=`
-                    let val = iter.next().unwrap();
-                    out.push(format!("{}={}", arg, val));
-                } else if !next.starts_with('-') {
-                    // Next arg is a positional (e.g. path) — use default boot
-                    out.push(format!("{}=0", arg));
-                } else {
-                    out.push(arg);
-                }
-            } else {
-                out.push(arg);
-            }
+        if (arg == "-b" || arg == "--boot")
+            && let Some(next) = iter.peek()
+            && is_boot_spec(next)
+        {
+            // Attach the boot spec value with `=`
+            let val = iter.next().unwrap();
+            out.push(format!("{}={}", arg, val));
             continue;
         }
         out.push(arg);
@@ -1241,201 +1231,6 @@ fn parse_match(s: &str) -> Option<(String, String)> {
 }
 
 // ---------------------------------------------------------------------------
-// Path/match group support
-// ---------------------------------------------------------------------------
-
-/// A single match condition that can test against a journal entry.
-#[derive(Debug, Clone)]
-enum MatchCondition {
-    /// FIELD=VALUE — exact field match
-    FieldEqual { key: String, value: String },
-    /// _EXE match (from executable path argument)
-    Exe(String),
-    /// _EXE + _COMM match (from script path argument)
-    Script { interpreter: String, comm: String },
-    /// _KERNEL_DEVICE match (from /dev/ path argument)
-    KernelDevice(String),
-}
-
-impl MatchCondition {
-    fn matches(&self, entry: &JournalEntry) -> bool {
-        match self {
-            MatchCondition::FieldEqual { key, value } => {
-                entry.field(key).is_some_and(|v| v == *value)
-            }
-            MatchCondition::Exe(exe) => entry.exe().is_some_and(|e| e == *exe),
-            MatchCondition::Script { interpreter, comm } => {
-                // _COMM from /proc/pid/comm is truncated to 15 chars by the kernel,
-                // so match using a prefix when the name exceeds 15 chars.
-                entry.exe().is_some_and(|e| e == *interpreter)
-                    && entry.comm().is_some_and(|c| {
-                        if comm.len() > 15 {
-                            c == comm[..15]
-                        } else {
-                            c == *comm
-                        }
-                    })
-            }
-            MatchCondition::KernelDevice(dev) => {
-                entry.field("_KERNEL_DEVICE").is_some_and(|d| d == *dev)
-            }
-        }
-    }
-}
-
-/// Resolve a /dev/ path to a _KERNEL_DEVICE value via /sys.
-///
-/// For block/char devices, the kernel device string is `+<subsystem>:<sysname>`.
-/// We resolve the device by checking /sys/dev/{block,char}/MAJOR:MINOR/subsystem
-/// and /sys/dev/{block,char}/MAJOR:MINOR (basename = sysname).
-fn resolve_kernel_device(path: &str) -> Option<String> {
-    use std::os::unix::fs::MetadataExt;
-    let meta = std::fs::metadata(path).ok()?;
-    let mode = meta.mode();
-    let rdev = meta.rdev();
-    // Check if it's a block or char device
-    let dev_type = if mode & 0o170000 == 0o060000 {
-        "block"
-    } else if mode & 0o170000 == 0o020000 {
-        "char"
-    } else {
-        return None;
-    };
-    let major = ((rdev >> 8) & 0xfff) | ((rdev >> 32) & !0xfff);
-    let minor = (rdev & 0xff) | ((rdev >> 12) & !0xff);
-    let sys_path = format!("/sys/dev/{dev_type}/{major}:{minor}");
-    // Get sysname from the symlink target basename
-    let real = std::fs::canonicalize(&sys_path).ok()?;
-    let sysname = real.file_name()?.to_str()?;
-    // Get subsystem from the "subsystem" symlink
-    let subsys_link = format!("{sys_path}/subsystem");
-    let subsys_path = std::fs::canonicalize(subsys_link).ok()?;
-    let subsystem = subsys_path.file_name()?.to_str()?;
-    Some(format!("+{subsystem}:{sysname}"))
-}
-
-/// Check if a file is a script (starts with `#!`) and return the interpreter path.
-fn script_interpreter(path: &str) -> Option<String> {
-    let data = std::fs::read(path).ok()?;
-    if !data.starts_with(b"#!") {
-        return None;
-    }
-    // Parse the shebang line
-    let line_end = data.iter().position(|&b| b == b'\n').unwrap_or(data.len());
-    let shebang = std::str::from_utf8(&data[2..line_end]).ok()?.trim();
-    // Handle "#!/usr/bin/env bash" → interpreter is bash (resolved)
-    if let Some(rest) = shebang.strip_prefix("/usr/bin/env ") {
-        let cmd = rest.split_whitespace().next()?;
-        // Resolve via PATH
-        which_executable(cmd)
-    } else {
-        // Direct interpreter path, e.g. "#!/bin/bash"
-        let interp = shebang.split_whitespace().next()?;
-        std::fs::canonicalize(interp)
-            .ok()
-            .and_then(|p| p.to_str().map(String::from))
-    }
-}
-
-/// Find an executable in PATH.
-fn which_executable(name: &str) -> Option<String> {
-    let path_var = std::env::var("PATH").ok()?;
-    for dir in path_var.split(':') {
-        let candidate = format!("{dir}/{name}");
-        if std::fs::metadata(&candidate)
-            .map(|m| m.is_file())
-            .unwrap_or(false)
-        {
-            return std::fs::canonicalize(&candidate)
-                .ok()
-                .and_then(|p| p.to_str().map(String::from));
-        }
-    }
-    None
-}
-
-/// Build match groups from CLI match arguments.
-///
-/// Arguments are split by `+` into groups (OR).  Within each group,
-/// FIELD=VALUE expressions and path arguments are AND-combined.
-/// Path arguments that don't exist cause an immediate exit with error.
-fn build_match_groups(matches: &[String]) -> Vec<Vec<MatchCondition>> {
-    let mut groups: Vec<Vec<MatchCondition>> = Vec::new();
-    let mut current: Vec<MatchCondition> = Vec::new();
-
-    for m in matches {
-        if m == "+" {
-            if !current.is_empty() {
-                groups.push(std::mem::take(&mut current));
-            }
-            continue;
-        }
-
-        if let Some((key, value)) = parse_match(m) {
-            // FIELD=VALUE
-            let key_upper = key.to_uppercase();
-            current.push(MatchCondition::FieldEqual {
-                key: key_upper,
-                value,
-            });
-        } else if m.starts_with('/') {
-            // Path argument
-            match std::fs::metadata(m) {
-                Ok(meta) => {
-                    use std::os::unix::fs::MetadataExt;
-                    let mode = meta.mode();
-                    let is_device = (mode & 0o170000 == 0o060000) || (mode & 0o170000 == 0o020000);
-                    if is_device {
-                        // Device path → _KERNEL_DEVICE match
-                        if let Some(kdev) = resolve_kernel_device(m) {
-                            current.push(MatchCondition::KernelDevice(kdev));
-                        } else {
-                            eprintln!("journalctl: Failed to resolve device path '{m}'");
-                            process::exit(1);
-                        }
-                    } else if meta.is_file() {
-                        // Executable or script
-                        let real_path = std::fs::canonicalize(m)
-                            .ok()
-                            .and_then(|p| p.to_str().map(String::from))
-                            .unwrap_or_else(|| m.to_string());
-                        if let Some(interp) = script_interpreter(&real_path) {
-                            // Script: match interpreter + comm
-                            let basename = std::path::Path::new(m)
-                                .file_name()
-                                .and_then(|n| n.to_str())
-                                .unwrap_or("")
-                                .to_string();
-                            current.push(MatchCondition::Script {
-                                interpreter: interp,
-                                comm: basename,
-                            });
-                        } else {
-                            // Regular executable
-                            current.push(MatchCondition::Exe(real_path));
-                        }
-                    } else {
-                        eprintln!("journalctl: File is neither a device nor a regular file: '{m}'");
-                        process::exit(1);
-                    }
-                }
-                Err(e) => {
-                    eprintln!("journalctl: {m}: {e}");
-                    process::exit(1);
-                }
-            }
-        }
-        // Silently ignore arguments that don't match any pattern
-    }
-
-    if !current.is_empty() {
-        groups.push(current);
-    }
-
-    groups
-}
-
-// ---------------------------------------------------------------------------
 // Boot detection
 // ---------------------------------------------------------------------------
 
@@ -1537,18 +1332,6 @@ fn open_storage(cli: &Cli) -> Result<JournalStorage, String> {
         }
     };
 
-    // When --directory or --file is specified, the path already points to
-    // the journal directory — don't append machine-id again.
-    // For --namespace with special values (*, +foo, empty), the base dir still
-    // needs machine-id appended, so don't set direct_directory for those.
-    let direct_directory = cli.directory.is_some()
-        || cli.file.is_some()
-        || cli.namespace.as_ref().is_some_and(|ns| {
-            let ns = ns.trim();
-            // Only set direct when namespace resolved to a specific subdirectory
-            !ns.is_empty() && ns != "*" && !ns.starts_with('+')
-        });
-
     let config = StorageConfig {
         directory,
         max_file_size: u64::MAX,
@@ -1556,7 +1339,6 @@ fn open_storage(cli: &Cli) -> Result<JournalStorage, String> {
         max_files: usize::MAX,
         persistent: false,
         keep_free: 0,
-        direct_directory,
     };
 
     JournalStorage::open_read_only(config).map_err(|e| format!("Failed to open journal: {}", e))
@@ -1831,53 +1613,41 @@ fn main() {
         }
 
         // Handle -n and --reverse
-        // Index semantics match upstream systemd:
-        //   Default/`-n N`: negative indices from -(total-1) to 0, where 0 = latest
-        //   `+N`: positive indices from 1 to N, where 1 = oldest
         let from_start = cli.lines.as_ref().is_some_and(|s| s.starts_with('+'));
         let limit: Option<usize> = cli.lines.as_ref().and_then(|s| {
             let s = s.strip_prefix('+').unwrap_or(s);
             s.parse().ok()
         });
 
-        let total = invocations.len() as i64;
-
-        let display_invocations: Vec<(i64, &str, u64)> = if from_start {
-            // +N: show first N invocations with positive 1-based indices
+        let display_invocations: Vec<(usize, &str, u64)> = if from_start {
+            // +N: show first N invocations
             let n = limit.unwrap_or(invocations.len());
             invocations
                 .iter()
                 .take(n)
                 .enumerate()
-                .map(|(i, (id, ts))| (i as i64 + 1, id.as_str(), *ts))
+                .map(|(i, (id, ts))| (i + 1, id.as_str(), *ts))
                 .collect()
         } else if let Some(n) = limit {
-            // -n N: show last N invocations with negative indices
+            // -n N: show last N invocations
             let skip = invocations.len().saturating_sub(n);
             invocations
                 .iter()
                 .skip(skip)
                 .enumerate()
-                .map(|(i, (id, ts))| {
-                    let global_pos = skip + i;
-                    let index = global_pos as i64 + 1 - total;
-                    (index, id.as_str(), *ts)
-                })
+                .map(|(i, (id, ts))| (skip + i + 1, id.as_str(), *ts))
                 .collect()
         } else {
-            // Default: show all with negative indices (-(n-1) to 0)
+            // No -n: show all
             invocations
                 .iter()
                 .enumerate()
-                .map(|(i, (id, ts))| {
-                    let index = i as i64 + 1 - total;
-                    (index, id.as_str(), *ts)
-                })
+                .map(|(i, (id, ts))| (i + 1, id.as_str(), *ts))
                 .collect()
         };
 
         // Print header
-        println!("IDX INVOCATION_ID                     TIMESTAMP");
+        println!("IDX INVOCATION_ID                    TIMESTAMP");
 
         let entries_to_print: Vec<_> = if cli.reverse {
             display_invocations.into_iter().rev().collect()
@@ -2014,36 +1784,10 @@ fn main() {
 
     // Invocation filter (-I or --invocation)
     // -I: find the latest invocation ID for the current unit and filter by it
-    // --invocation=UUID: filter by the given invocation ID directly
-    // --invocation=N: resolve numeric offset to invocation UUID (asymmetric):
-    //   0 = latest, 1 = oldest, 2 = second-oldest, ..., -1 = second-latest, etc.
+    // --invocation=ID: filter by the given invocation ID directly
     if cli.latest_invocation || cli.invocation.is_some() {
         let invocation_id = if let Some(ref id) = cli.invocation {
-            // Check if the value is a numeric offset
-            if let Ok(offset) = id.parse::<i64>() {
-                // Collect unique invocation IDs from the already-filtered entries
-                let mut invocations: Vec<String> = Vec::new();
-                let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-                for entry in &filtered {
-                    if let Some(inv_id) = entry.field("_SYSTEMD_INVOCATION_ID")
-                        && seen.insert(inv_id.clone())
-                    {
-                        invocations.push(inv_id);
-                    }
-                }
-                let total = invocations.len();
-                // Resolve offset to array index:
-                //   offset <= 0: index = (total - 1) + offset (0=latest, -1=second-latest)
-                //   offset > 0: index = offset - 1 (1=oldest, 2=second-oldest)
-                let array_idx = if offset <= 0 {
-                    (total as i64 - 1 + offset) as usize
-                } else {
-                    (offset - 1) as usize
-                };
-                invocations.get(array_idx).cloned()
-            } else {
-                Some(id.clone())
-            }
+            Some(id.clone())
         } else {
             // -I: find the latest _SYSTEMD_INVOCATION_ID among the already-filtered entries
             filtered
@@ -2216,24 +1960,11 @@ fn main() {
         filtered.retain(|e| e.seqnum > seqnum);
     }
 
-    // Free-form match expressions: FIELD=VALUE, /path/to/executable, or + (OR)
-    //
-    // Matches are split into groups separated by "+".  Within a group, all
-    // conditions must match (AND).  Between groups, any group matching is
-    // sufficient (OR).  This mirrors C systemd's journalctl behavior.
-    //
-    // Path arguments:
-    //   /dev/<device>  → _KERNEL_DEVICE match (via sysfs resolution)
-    //   /path/to/exec  → _EXE match (resolves symlinks)
-    //   scripts (#!)   → _EXE=<interpreter> AND _COMM=<basename>
-    if !cli.matches.is_empty() {
-        let match_groups = build_match_groups(&cli.matches);
-        if !match_groups.is_empty() {
-            filtered.retain(|e| {
-                match_groups
-                    .iter()
-                    .any(|group| group.iter().all(|cond| cond.matches(e)))
-            });
+    // Free-form match expressions: FIELD=VALUE
+    for m in &cli.matches {
+        if let Some((key, value)) = parse_match(m) {
+            let key_upper = key.to_uppercase();
+            filtered.retain(|e| e.field(&key_upper).is_some_and(|v| v == value));
         }
     }
 
@@ -2594,15 +2325,13 @@ fn matches_follow_filters(entry: &JournalEntry, cli: &Cli) -> bool {
         }
     }
 
-    // Free-form matches (including path-based filters and + groups)
-    if !cli.matches.is_empty() {
-        let match_groups = build_match_groups(&cli.matches);
-        if !match_groups.is_empty()
-            && !match_groups
-                .iter()
-                .any(|group| group.iter().all(|cond| cond.matches(entry)))
-        {
-            return false;
+    // Free-form matches
+    for m in &cli.matches {
+        if let Some((key, value)) = parse_match(m) {
+            let key_upper = key.to_uppercase();
+            if entry.field(&key_upper).is_none_or(|v| v != value) {
+                return false;
+            }
         }
     }
 

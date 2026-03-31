@@ -267,20 +267,6 @@ impl JournalEntry {
                 }
             }
         }
-
-        // _SYSTEMD_INVOCATION_ID — read INVOCATION_ID from process environment
-        if let Ok(environ) = std::fs::read(format!("{}/environ", proc_base)) {
-            // environ is NUL-separated KEY=VALUE pairs
-            for entry in environ.split(|&b| b == 0) {
-                if let Some(id) = entry.strip_prefix(b"INVOCATION_ID=")
-                    && let Ok(id_str) = std::str::from_utf8(id)
-                    && !id_str.is_empty()
-                {
-                    self.set_field("_SYSTEMD_INVOCATION_ID", id_str);
-                    break;
-                }
-            }
-        }
     }
 
     /// Set the boot ID from /proc/sys/kernel/random/boot_id.

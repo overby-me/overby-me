@@ -2030,7 +2030,6 @@ fn main() {
         max_files: config.max_files,
         persistent,
         keep_free,
-        direct_directory: false,
     };
 
     let storage = match JournalStorage::new(storage_config) {
