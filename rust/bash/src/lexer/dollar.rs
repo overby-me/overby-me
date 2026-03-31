@@ -1124,6 +1124,29 @@ fn parse_brace_param(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart
 
     let name = read_param_name_with_subscript(chars, i);
 
+    // ${$(...)} or ${$((...))}: special param $ followed by ( is bad substitution
+    // Also covers empty name followed by $ (shouldn't happen but defensive)
+    if *i < chars.len() && chars[*i] == '(' && (name == "$" || name.is_empty()) {
+        // Reconstruct the full content inside ${...} by scanning to closing }
+        let start_content = *i;
+        let mut depth = 1;
+        while *i < chars.len() && depth > 0 {
+            if chars[*i] == '{' {
+                depth += 1;
+            } else if chars[*i] == '}' {
+                depth -= 1;
+            }
+            if depth > 0 {
+                *i += 1;
+            }
+        }
+        let rest: String = chars[start_content..*i].iter().collect();
+        if *i < chars.len() {
+            *i += 1;
+        }
+        return WordPart::BadSubstitution(format!("${{{}{}}}", name, rest));
+    }
+
     // ${' is bad substitution (quoted variable names not allowed)
     if name.is_empty() && *i < chars.len() && chars[*i] == '\'' {
         // Scan to closing } and return as bad substitution

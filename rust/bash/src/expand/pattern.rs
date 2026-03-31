@@ -75,6 +75,10 @@ pub(super) fn pattern_replace(value: &str, pattern: &str, replacement: &str, all
             i += 1;
         }
     }
+    // Handle empty value: if pattern matches empty string, replace
+    if chars.is_empty() && shell_pattern_match("", pattern) {
+        result.push_str(replacement);
+    }
     result
 }
 

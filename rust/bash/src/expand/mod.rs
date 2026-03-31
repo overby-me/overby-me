@@ -195,6 +195,11 @@ pub fn set_arith_error() {
     ARITH_ERROR.with(|f| *f.borrow_mut() = true);
 }
 
+/// Peek at the arithmetic error flag without clearing it.
+pub fn get_arith_error() -> bool {
+    ARITH_ERROR.with(|f| *f.borrow())
+}
+
 /// Check and clear the nounset error flag.
 pub fn take_nounset_error() -> bool {
     NOUNSET_ERROR.with(|f| std::mem::replace(&mut *f.borrow_mut(), false))
@@ -1015,6 +1020,11 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
             // For Default/Alt words in unquoted context, check if we should
             // expand per-part for mixed quoting (e.g., ${IFS+foo 'bar' baz})
             let orig_val = lookup_var(&expr.name, ctx);
+            // If lookup_var triggered an error (e.g., bad array subscript),
+            // bail out early to avoid duplicate errors from expand_param.
+            if get_arith_error() {
+                return;
+            }
             let orig_set = ctx.is_param_set(&expr.name);
             let is_default_alt_active = match &expr.op {
                 ParamOp::Default(colon, _) => {

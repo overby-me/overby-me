@@ -221,7 +221,62 @@ pub(super) fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
                             } else {
                                 idx_str
                             };
-                            return assoc.get(stripped_key).cloned().unwrap_or_default();
+                            // Expand $var and ${var} references in the subscript key
+                            let expanded_key = if stripped_key.contains('$') {
+                                let mut expanded = stripped_key.to_string();
+                                while let Some(pos) = expanded.find('$') {
+                                    let rest = &expanded[pos + 1..];
+                                    if rest.starts_with('{') {
+                                        if let Some(close) = rest.find('}') {
+                                            let var_name = &rest[1..close];
+                                            let var_val =
+                                                ctx.vars.get(var_name).cloned().unwrap_or_default();
+                                            expanded = format!(
+                                                "{}{}{}",
+                                                &expanded[..pos],
+                                                var_val,
+                                                &rest[close + 1..]
+                                            );
+                                        } else {
+                                            break;
+                                        }
+                                    } else {
+                                        let var_end = rest
+                                            .find(|c: char| !c.is_alphanumeric() && c != '_')
+                                            .unwrap_or(rest.len());
+                                        let var_name = &rest[..var_end];
+                                        let var_val =
+                                            ctx.vars.get(var_name).cloned().unwrap_or_default();
+                                        expanded = format!(
+                                            "{}{}{}",
+                                            &expanded[..pos],
+                                            var_val,
+                                            &rest[var_end..]
+                                        );
+                                    }
+                                }
+                                expanded
+                            } else {
+                                stripped_key.to_string()
+                            };
+                            // Empty key after expansion is invalid for associative arrays
+                            if expanded_key.is_empty() {
+                                let prefix = EXPAND_ERROR_PREFIX.with(|p| {
+                                    let p = p.borrow();
+                                    if p.is_empty() {
+                                        "bash".to_string()
+                                    } else {
+                                        p.clone()
+                                    }
+                                });
+                                eprintln!("{}: [{}]: bad array subscript", prefix, idx_str);
+                                crate::expand::set_arith_error();
+                                return String::new();
+                            }
+                            return assoc
+                                .get(expanded_key.as_str())
+                                .cloned()
+                                .unwrap_or_default();
                         }
                         // Numeric index for indexed arrays (supports negative)
                         // Expand $var and ${var} references in subscript
@@ -319,6 +374,18 @@ pub(super) fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
 fn parse_arith_offset(s: &str, param_name: &str, ctx: &ExpCtx) -> i64 {
     if s.is_empty() {
         return 0;
+    }
+    // Handle $((...)) arithmetic expansion: strip outer $(( and )) and evaluate inner
+    let trimmed = s.trim();
+    if trimmed.starts_with("$((") && trimmed.ends_with("))") {
+        let inner = &trimmed[3..trimmed.len() - 2];
+        return crate::expand::arithmetic::eval_arith_full(
+            inner,
+            ctx.vars,
+            &std::collections::HashMap::new(),
+            ctx.positional,
+            ctx.last_status,
+        );
     }
     // Try direct integer parse first
     if let Ok(v) = s.parse::<i64>() {
@@ -540,6 +607,33 @@ pub(super) fn apply_param_op(
     }
 }
 
+fn is_valid_var_ref(name: &str) -> bool {
+    if name.is_empty() {
+        return false;
+    }
+    // Special parameters
+    if matches!(name, "@" | "*" | "#" | "?" | "-" | "$" | "!" | "0" | "_") {
+        return true;
+    }
+    // Positional params
+    if name.parse::<usize>().is_ok() {
+        return true;
+    }
+    // Check for array subscript: name[idx]
+    let base = if let Some(bracket) = name.find('[') {
+        &name[..bracket]
+    } else {
+        name
+    };
+    // Valid variable name: starts with letter/underscore, rest is alnum/underscore
+    let mut chars = base.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
 pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
     // Handle indirect expansion with operators: ${!name+word}, ${!name-word}, etc.
     if expr.name.starts_with('!')
@@ -564,7 +658,7 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
     {
         // For Substring: slice the positional params array
         if let ParamOp::Substring(offset_str, length_str) = &expr.op {
-            let offset: i64 = offset_str.trim().parse().unwrap_or(0);
+            let offset: i64 = parse_arith_offset(offset_str.trim(), &expr.name, ctx);
             // ${@:0} includes $0, ${@:1} starts at $1
             let params = if offset == 0 {
                 ctx.positional
@@ -580,9 +674,19 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                 ((offset - 1) as usize).min(count)
             };
             let end = if let Some(len_str) = length_str {
-                let len: i64 = len_str.trim().parse().unwrap_or(count as i64);
+                let len: i64 = parse_arith_offset(len_str.trim(), &expr.name, ctx);
                 if len < 0 {
-                    (count as i64 + len).max(start as i64) as usize
+                    let prefix = EXPAND_ERROR_PREFIX.with(|p| {
+                        let p = p.borrow();
+                        if p.is_empty() {
+                            "bash".to_string()
+                        } else {
+                            p.clone()
+                        }
+                    });
+                    eprintln!("{}: {}: substring expression < 0", prefix, len_str.trim());
+                    set_arith_error();
+                    return String::new();
                 } else {
                     (start + len as usize).min(count)
                 }
@@ -698,6 +802,18 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
             let target = lookup_var(&expr.name, ctx);
             if target.is_empty() {
                 String::new()
+            } else if !is_valid_var_ref(&target) {
+                let prefix = EXPAND_ERROR_PREFIX.with(|p| {
+                    let p = p.borrow();
+                    if p.is_empty() {
+                        "bash".to_string()
+                    } else {
+                        p.clone()
+                    }
+                });
+                eprintln!("{}: {}: invalid variable name", prefix, target);
+                set_arith_error();
+                String::new()
             } else {
                 lookup_var(&target, ctx)
             }
@@ -753,6 +869,25 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
             let empty = if *colon { val.is_empty() } else { false };
             let unset = !ctx.is_param_set(&expr.name);
             if unset || empty {
+                // Cannot assign to positional or special parameters
+                let is_positional_or_special = expr.name.parse::<usize>().is_ok()
+                    || matches!(
+                        expr.name.as_str(),
+                        "@" | "*" | "#" | "?" | "-" | "$" | "!" | "_"
+                    );
+                if is_positional_or_special {
+                    let prefix = EXPAND_ERROR_PREFIX.with(|p| {
+                        let p = p.borrow();
+                        if p.is_empty() {
+                            "bash".to_string()
+                        } else {
+                            p.clone()
+                        }
+                    });
+                    eprintln!("{}: ${}: cannot assign in this way", prefix, expr.name);
+                    set_arith_error();
+                    return String::new();
+                }
                 expand_word_nosplit_ctx(word, ctx, cmd_sub)
             } else {
                 val
