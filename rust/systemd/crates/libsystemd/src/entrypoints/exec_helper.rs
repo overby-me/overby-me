@@ -1629,7 +1629,12 @@ pub fn run_exec_helper() {
                 config.mount_flags.as_deref(),
                 Some("slave") | Some("private")
             )
-            || config.root_directory.is_some());
+            || config.root_directory.is_some()
+            || matches!(
+                config.protect_proc.as_str(),
+                "noaccess" | "invisible" | "ptraceable"
+            )
+            || config.proc_subset == "pid");
 
     if needs_mount_ns {
         if let Some(ns_pid) = config.join_namespace_pid {
@@ -1849,8 +1854,8 @@ pub fn run_exec_helper() {
     // typically set up by PrivateMounts=, ProtectSystem=, PrivateTmp=, etc.
     if !config.privileged_prefix {
         let hidepid = match config.protect_proc.as_str() {
-            "noaccess" => Some("2"),
-            "invisible" => Some("1"),
+            "noaccess" => Some("noaccess"),
+            "invisible" => Some("invisible"),
             "ptraceable" => Some("ptraceable"),
             _ => None,
         };

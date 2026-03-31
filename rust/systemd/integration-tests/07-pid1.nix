@@ -257,6 +257,29 @@
     systemd-run --wait --pipe -p PrivateUsers=yes \
         bash -xec '[[ "$(cat /proc/self/uid_map | awk "{print \$1}")" == "0" ]]'
 
+    : "ProtectProc= tests"
+    # Check if kernel supports named hidepid= values (post 5.8)
+    PROC_TMP="$(mktemp -d)"
+    if mount -t proc -o "hidepid=off" proc "$PROC_TMP" 2>/dev/null; then
+        umount "$PROC_TMP"
+        systemd-run --wait --pipe -p ProtectProc=noaccess -p User=testuser \
+            bash -xec 'test -e /proc/1; test ! -r /proc/1; test -r /proc/$$/comm'
+        systemd-run --wait --pipe -p ProtectProc=invisible -p User=testuser \
+            bash -xec 'test ! -e /proc/1; test -r /proc/$$/comm'
+        systemd-run --wait --pipe -p ProtectProc=ptraceable -p User=testuser \
+            bash -xec 'test ! -e /proc/1; test -r /proc/$$/comm'
+        systemd-run --wait --pipe -p ProtectProc=default -p User=testuser \
+            bash -xec 'test -r /proc/1; test -r /proc/$$/comm'
+    fi
+    if mount -t proc -o "subset=pid" proc "$PROC_TMP" 2>/dev/null; then
+        umount "$PROC_TMP"
+        systemd-run --wait --pipe -p ProcSubset=pid -p User=testuser \
+            bash -xec 'test -r /proc/1/comm; test ! -e /proc/cpuinfo'
+        systemd-run --wait --pipe -p ProcSubset=all -p User=testuser \
+            bash -xec 'test -r /proc/1/comm; test -r /proc/cpuinfo'
+    fi
+    rm -rf "$PROC_TMP"
+
     : "PrivateNetwork= tests"
     systemd-run --wait --pipe -p PrivateNetwork=yes \
         bash -xec '(! ip link show eth0 2>/dev/null); ip link show lo'
