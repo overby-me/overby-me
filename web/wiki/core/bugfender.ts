@@ -1,6 +1,10 @@
-import StackTrace from "stacktrace-js";
+import { SourceMapConsumer } from "source-map-js";
 
 export let isInitialized = false;
+
+// Cache fetched source maps to avoid re-fetching
+// biome-ignore lint: using any for source map consumer cache since source-map-js types vary
+const sourceMapCache = new Map<string, any>();
 
 export const initBugfender = async () => {
 	if (
@@ -56,6 +60,108 @@ export const initBugfender = async () => {
 	}
 };
 
+interface ParsedFrame {
+	functionName: string | null;
+	fileName: string;
+	lineNumber: number;
+	columnNumber: number;
+}
+
+const STACK_FRAME_RE =
+	/^\s*at\s+(.+?)\s+\((.+?):(\d+):(\d+)\)\s*$|^\s*at\s+(.+?):(\d+):(\d+)\s*$|^(.+?)@(.+?):(\d+):(\d+)\s*$/;
+
+const parseStack = (stack: string): ParsedFrame[] => {
+	const frames: ParsedFrame[] = [];
+	for (const line of stack.split("\n")) {
+		const m = STACK_FRAME_RE.exec(line);
+		if (!m) continue;
+		if (m[1] && m[2]) {
+			// "at functionName (file:line:col)"
+			frames.push({
+				functionName: m[1],
+				fileName: m[2],
+				lineNumber: Number.parseInt(m[3], 10),
+				columnNumber: Number.parseInt(m[4], 10),
+			});
+		} else if (m[5]) {
+			// "at file:line:col"
+			frames.push({
+				functionName: null,
+				fileName: m[5],
+				lineNumber: Number.parseInt(m[6], 10),
+				columnNumber: Number.parseInt(m[7], 10),
+			});
+		} else if (m[8] && m[9]) {
+			// "functionName@file:line:col" (Firefox)
+			frames.push({
+				functionName: m[8],
+				fileName: m[9],
+				lineNumber: Number.parseInt(m[10], 10),
+				columnNumber: Number.parseInt(m[11], 10),
+			});
+		}
+	}
+	return frames;
+};
+
+const fetchSourceMapForUrl = async (jsUrl: string) => {
+	if (sourceMapCache.has(jsUrl)) {
+		return sourceMapCache.get(jsUrl) ?? null;
+	}
+
+	try {
+		// First try the conventional .map URL
+		const mapUrl = `${jsUrl}.map`;
+		const res = await fetch(mapUrl);
+		if (!res.ok) {
+			sourceMapCache.set(jsUrl, null);
+			return null;
+		}
+		const rawMap = await res.text();
+		const consumer = new SourceMapConsumer(JSON.parse(rawMap));
+		sourceMapCache.set(jsUrl, consumer);
+		return consumer;
+	} catch {
+		sourceMapCache.set(jsUrl, null);
+		return null;
+	}
+};
+
+const resolveStack = async (stack: string): Promise<string> => {
+	const frames = parseStack(stack);
+	if (frames.length === 0) return stack;
+
+	const resolvedLines: string[] = [];
+
+	for (const frame of frames) {
+		try {
+			const consumer = await fetchSourceMapForUrl(frame.fileName);
+			if (consumer) {
+				const pos = consumer.originalPositionFor({
+					line: frame.lineNumber,
+					column: frame.columnNumber - 1, // source-map uses 0-based columns
+				});
+				if (pos.source) {
+					const fn = pos.name ?? frame.functionName ?? "<anonymous>";
+					resolvedLines.push(
+						`  at ${fn} (${pos.source}:${pos.line}:${(pos.column ?? 0) + 1})`,
+					);
+					continue;
+				}
+			}
+		} catch {
+			// fall through to raw frame
+		}
+
+		const fn = frame.functionName ?? "<anonymous>";
+		resolvedLines.push(
+			`  at ${fn} (${frame.fileName}:${frame.lineNumber}:${frame.columnNumber})`,
+		);
+	}
+
+	return resolvedLines.join("\n");
+};
+
 const logErrorContext = async ({
 	bugfender,
 	handler,
@@ -75,45 +181,11 @@ const logErrorContext = async ({
 }) => {
 	let resolvedStack: string | undefined;
 
-	if (error) {
+	if (error?.stack) {
 		try {
-			const frames = await StackTrace.fromError(error);
-			const isResolved = frames.some(
-				(frame) =>
-					frame.fileName &&
-					!frame.fileName.startsWith("http") &&
-					!frame.fileName.includes("/static/js/"),
-			);
-			resolvedStack = frames
-				.map(
-					(frame) =>
-						`  at ${frame.functionName ?? "<anonymous>"} (${frame.fileName}:${frame.lineNumber}:${frame.columnNumber})`,
-				)
-				.join("\n");
-			if (!isResolved) {
-				bugfender.warn(
-					"[SourceMapDebug] stacktrace-js did not resolve source maps. Raw frames:",
-					JSON.stringify(
-						frames.map((f) => ({
-							fn: f.functionName,
-							file: f.fileName,
-							line: f.lineNumber,
-							col: f.columnNumber,
-							source: f.source,
-						})),
-						null,
-						2,
-					),
-				);
-			}
-		} catch (resolveError) {
+			resolvedStack = await resolveStack(error.stack);
+		} catch {
 			resolvedStack = error.stack;
-			bugfender.warn(
-				"[SourceMapDebug] stacktrace-js threw an error:",
-				resolveError instanceof Error
-					? `${resolveError.message}\n${resolveError.stack}`
-					: String(resolveError),
-			);
 		}
 	}
 

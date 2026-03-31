@@ -54,7 +54,7 @@
 		"slate-hyperscript": "^0.77.0",
 		"slate-react": "^0.92.0",
 		"utf-8-validate": "^6.0.3",
-		"stacktrace-js": "^2.0.2",
+		"source-map-js": "^1.2.1",
 		"uuid": "^8.3.2",
 		"xlsx": "^0.18.5"
 	},
