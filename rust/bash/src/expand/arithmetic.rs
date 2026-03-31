@@ -6,8 +6,9 @@ pub fn eval_arith_full(
     _arrays: &HashMap<String, Vec<Option<String>>>,
     positional: &[String],
     last_status: i32,
+    opt_flags: &str,
 ) -> i64 {
-    let resolved = resolve_arith_vars(expr, vars, positional, last_status);
+    let resolved = resolve_arith_vars(expr, vars, positional, last_status, opt_flags);
     match eval_arith(&resolved) {
         Ok(val) => val,
         Err(e) => {
@@ -30,6 +31,7 @@ fn resolve_arith_vars(
     vars: &HashMap<String, String>,
     positional: &[String],
     last_status: i32,
+    opt_flags: &str,
 ) -> String {
     let mut result = String::new();
     let chars: Vec<char> = expr.chars().collect();
@@ -42,7 +44,7 @@ fn resolve_arith_vars(
                 let val = match chars[i] {
                     '#' => (positional.len().saturating_sub(1)).to_string(),
                     '?' => last_status.to_string(),
-                    '-' => String::new(),
+                    '-' => opt_flags.to_string(),
                     '!' => "0".to_string(),
                     _ => "0".to_string(),
                 };
@@ -52,17 +54,26 @@ fn resolve_arith_vars(
                 result.push_str(&std::process::id().to_string());
                 i += 1;
             } else if i < chars.len() && chars[i] == '{' {
-                // ${var}, ${var:-default}, ${var:+alt}, ${#var}, etc.
+                // ${var}, ${var:-default}, ${var:+alt}, ${#var}, ${-%%pat}, etc.
                 i += 1; // skip '{'
-                // Check for ${#var} (length)
-                let is_length = i < chars.len() && chars[i] == '#';
+                // Check for ${#var} (length) — but not ${#} (param count)
+                let is_length = i < chars.len()
+                    && chars[i] == '#'
+                    && i + 1 < chars.len()
+                    && chars[i + 1] != '}';
                 if is_length {
                     i += 1;
                 }
                 let mut name = String::new();
-                while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') {
+                // Handle special parameter names: -, ?, #, !, $, @, *
+                if i < chars.len() && matches!(chars[i], '-' | '?' | '#' | '!' | '$' | '@' | '*') {
                     name.push(chars[i]);
                     i += 1;
+                } else {
+                    while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') {
+                        name.push(chars[i]);
+                        i += 1;
+                    }
                 }
                 // Check for subscript [...]
                 if i < chars.len() && chars[i] == '[' {
@@ -88,7 +99,7 @@ fn resolve_arith_vars(
                     last_status,
                     last_bg_pid: 0,
                     top_level_pid: std::process::id(),
-                    opt_flags: "",
+                    opt_flags,
                 };
                 let raw_val = lookup_var(&name, &ctx_dummy);
                 // Handle operator
@@ -105,16 +116,17 @@ fn resolve_arith_vars(
                         result.push_str(&val);
                     }
                 } else if i < chars.len() {
-                    // Parse operator: :-, :+, :=, :?, -, +, =, ?
-                    let has_colon = chars[i] == ':';
-                    if has_colon {
-                        i += 1;
-                    }
-                    let op_char = if i < chars.len() { chars[i] } else { '}' };
-                    if matches!(op_char, '-' | '+' | '=' | '?') {
-                        i += 1; // skip operator char
-                        // Read the word until closing }
-                        let mut word = String::new();
+                    // Check for %%, %, ##, # trim operators first
+                    if i < chars.len() && (chars[i] == '%' || chars[i] == '#') {
+                        let trim_char = chars[i];
+                        let is_greedy = i + 1 < chars.len() && chars[i + 1] == trim_char;
+                        if is_greedy {
+                            i += 2; // skip %% or ##
+                        } else {
+                            i += 1; // skip % or #
+                        }
+                        // Read the pattern until closing }
+                        let mut pattern = String::new();
                         let mut brace_depth = 1i32;
                         while i < chars.len() && brace_depth > 0 {
                             if chars[i] == '{' {
@@ -126,55 +138,119 @@ fn resolve_arith_vars(
                                     break;
                                 }
                             }
-                            word.push(chars[i]);
+                            pattern.push(chars[i]);
                             i += 1;
                         }
-                        let is_set =
-                            !raw_val.is_empty() || (!has_colon && vars.contains_key(&name));
-                        let val = match op_char {
-                            '-' => {
-                                if is_set {
-                                    raw_val.clone()
-                                } else {
-                                    word.clone()
-                                }
+                        // Apply trim operation
+                        let trimmed = if trim_char == '%' {
+                            // Remove suffix
+                            if is_greedy {
+                                crate::expand::pattern::trim_pattern(
+                                    &raw_val,
+                                    &pattern,
+                                    crate::expand::pattern::TrimMode::LargeRight,
+                                )
+                            } else {
+                                crate::expand::pattern::trim_pattern(
+                                    &raw_val,
+                                    &pattern,
+                                    crate::expand::pattern::TrimMode::SmallRight,
+                                )
                             }
-                            '+' => {
-                                if is_set {
-                                    word.clone()
-                                } else {
-                                    String::new()
-                                }
+                        } else {
+                            // Remove prefix
+                            if is_greedy {
+                                crate::expand::pattern::trim_pattern(
+                                    &raw_val,
+                                    &pattern,
+                                    crate::expand::pattern::TrimMode::LargeLeft,
+                                )
+                            } else {
+                                crate::expand::pattern::trim_pattern(
+                                    &raw_val,
+                                    &pattern,
+                                    crate::expand::pattern::TrimMode::SmallLeft,
+                                )
                             }
-                            '=' => {
-                                if is_set {
-                                    raw_val.clone()
-                                } else {
-                                    word.clone()
-                                }
-                            }
-                            '?' => raw_val.clone(),
-                            _ => raw_val.clone(),
                         };
-                        let val = if val.is_empty() { "0".to_string() } else { val };
-                        result.push_str(&val);
-                    } else {
-                        // Unknown operator — skip to closing }
-                        let mut brace_depth = 1i32;
-                        while i < chars.len() && brace_depth > 0 {
-                            if chars[i] == '{' {
-                                brace_depth += 1;
-                            } else if chars[i] == '}' {
-                                brace_depth -= 1;
-                            }
-                            i += 1;
-                        }
-                        let val = if raw_val.is_empty() {
+                        let val = if trimmed.is_empty() {
                             "0".to_string()
                         } else {
-                            raw_val
+                            trimmed
                         };
                         result.push_str(&val);
+                    } else {
+                        // Parse operator: :-, :+, :=, :?, -, +, =, ?
+                        let has_colon = chars[i] == ':';
+                        if has_colon {
+                            i += 1;
+                        }
+                        let op_char = if i < chars.len() { chars[i] } else { '}' };
+                        if matches!(op_char, '-' | '+' | '=' | '?') {
+                            i += 1; // skip operator char
+                            // Read the word until closing }
+                            let mut word = String::new();
+                            let mut brace_depth = 1i32;
+                            while i < chars.len() && brace_depth > 0 {
+                                if chars[i] == '{' {
+                                    brace_depth += 1;
+                                } else if chars[i] == '}' {
+                                    brace_depth -= 1;
+                                    if brace_depth == 0 {
+                                        i += 1;
+                                        break;
+                                    }
+                                }
+                                word.push(chars[i]);
+                                i += 1;
+                            }
+                            let is_set =
+                                !raw_val.is_empty() || (!has_colon && vars.contains_key(&name));
+                            let val = match op_char {
+                                '-' => {
+                                    if is_set {
+                                        raw_val.clone()
+                                    } else {
+                                        word.clone()
+                                    }
+                                }
+                                '+' => {
+                                    if is_set {
+                                        word.clone()
+                                    } else {
+                                        String::new()
+                                    }
+                                }
+                                '=' => {
+                                    if is_set {
+                                        raw_val.clone()
+                                    } else {
+                                        word.clone()
+                                    }
+                                }
+                                '?' => raw_val.clone(),
+                                _ => raw_val.clone(),
+                            };
+                            let val = if val.is_empty() { "0".to_string() } else { val };
+                            result.push_str(&val);
+                        } else {
+                            // Unknown operator — skip to closing }
+                            let mut brace_depth = 1i32;
+                            while i < chars.len() && brace_depth > 0 {
+                                if chars[i] == '{' {
+                                    brace_depth += 1;
+                                } else if chars[i] == '}' {
+                                    brace_depth -= 1;
+                                }
+                                i += 1;
+                            }
+                            let val = if raw_val.is_empty() {
+                                "0".to_string()
+                            } else {
+                                raw_val
+                            };
+                            result.push_str(&val);
+                        }
                     }
                 } else {
                     // Unterminated ${
@@ -200,7 +276,7 @@ fn resolve_arith_vars(
                     last_status,
                     last_bg_pid: 0,
                     top_level_pid: std::process::id(),
-                    opt_flags: "",
+                    opt_flags,
                 };
                 let val = lookup_var(&name, &ctx_dummy);
                 let val = if val.is_empty() { "0".to_string() } else { val };
@@ -212,20 +288,34 @@ fn resolve_arith_vars(
                 name.push(chars[i]);
                 i += 1;
             }
+            // If the name is immediately followed by '$', keep it literal so
+            // that the upcoming '$' expansion concatenates with it to form
+            // a new variable name.  E.g. in `(_$-=0)`, `_` should stay
+            // literal and `$-` expands to `hB`, giving variable name `_hB`.
+            if i < chars.len() && chars[i] == '$' {
+                result.push_str(&name);
+                continue;
+            }
             // Check for assignment operators: =, +=, -=, *=, /=, %=, ++, --
+            // When an assignment is detected, keep the name literal (it's a
+            // target, not a value to resolve).  eval_arith handles the
+            // assignment semantics.
             let rest: String = chars[i..].iter().collect();
-            if rest.starts_with("++") {
-                let val: i64 = vars.get(&name).and_then(|v| v.parse().ok()).unwrap_or(0);
-                result.push_str(&val.to_string());
-                // Note: can't actually modify vars here since we don't have &mut
-                // The interpreter's eval_arith_expr handles this
+            if rest.starts_with("++") || rest.starts_with("--") {
+                // Post-increment/decrement: keep name literal, eval_arith
+                // will handle the side-effect semantics.
+                result.push_str(&name);
+                result.push_str(&rest[..2]);
                 i += 2;
                 continue;
             }
-            if rest.starts_with("--") {
-                let val: i64 = vars.get(&name).and_then(|v| v.parse().ok()).unwrap_or(0);
-                result.push_str(&val.to_string());
-                i += 2;
+            // Simple or compound assignment: var=, var+=, var-=, var*=, var/=, var%=
+            if (rest.starts_with('=') && !rest.starts_with("=="))
+                || (rest.len() >= 2
+                    && matches!(rest.as_bytes()[0], b'+' | b'-' | b'*' | b'/' | b'%')
+                    && rest.as_bytes()[1] == b'=')
+            {
+                result.push_str(&name);
                 continue;
             }
             let val = vars
@@ -259,6 +349,37 @@ fn eval_arith(expr: &str) -> Result<i64, String> {
         let _left = eval_arith(&expr[..pos])?;
         let right = eval_arith(&expr[pos + 1..])?;
         return Ok(right);
+    }
+
+    // Handle variable assignment: var=expr, var+=expr, var-=expr, etc.
+    // Assignments have lower precedence than everything except comma.
+    // We can't actually store the value (no &mut vars), but we evaluate
+    // the RHS and return it so the expression produces the correct result.
+    {
+        let chars: Vec<char> = expr.chars().collect();
+        // Check if expression starts with a valid identifier
+        if !chars.is_empty() && (chars[0].is_alphabetic() || chars[0] == '_') {
+            let name_end = chars
+                .iter()
+                .position(|c| !c.is_alphanumeric() && *c != '_')
+                .unwrap_or(chars.len());
+            if name_end < chars.len() {
+                let after_name: String = chars[name_end..].iter().collect();
+                // Simple assignment: var=expr
+                if after_name.starts_with('=') && !after_name.starts_with("==") {
+                    let rhs = &after_name[1..];
+                    return eval_arith(rhs);
+                }
+                // Compound assignments: var+=, var-=, var*=, var/=, var%=
+                if after_name.len() >= 2
+                    && matches!(after_name.as_bytes()[0], b'+' | b'-' | b'*' | b'/' | b'%')
+                    && after_name.as_bytes()[1] == b'='
+                {
+                    let rhs = &after_name[2..];
+                    return eval_arith(rhs);
+                }
+            }
+        }
     }
 
     // Handle ternary operator
@@ -482,6 +603,16 @@ fn eval_arith(expr: &str) -> Result<i64, String> {
                 )
             })
         }
+    } else if expr.chars().all(|c| c.is_alphanumeric() || c == '_')
+        && expr
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_alphabetic() || c == '_')
+    {
+        // Bare variable name — evaluates to 0 (unset) in arithmetic context.
+        // resolve_arith_vars already expanded $-prefixed references; any
+        // remaining identifier is an unset/unknown variable.
+        Ok(0)
     } else {
         expr.parse::<i64>().map_err(|_| {
             format!(

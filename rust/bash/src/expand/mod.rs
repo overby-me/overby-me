@@ -1326,7 +1326,14 @@ fn expand_pattern_word(word: &Word, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
 }
 
 fn expand_arith(expr: &str, ctx: &ExpCtx) -> String {
-    let result = eval_arith_full(expr, ctx.vars, ctx.arrays, ctx.positional, ctx.last_status);
+    let result = eval_arith_full(
+        expr,
+        ctx.vars,
+        ctx.arrays,
+        ctx.positional,
+        ctx.last_status,
+        ctx.opt_flags,
+    );
     result.to_string()
 }
 

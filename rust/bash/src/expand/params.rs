@@ -278,46 +278,21 @@ pub(super) fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
                                 .cloned()
                                 .unwrap_or_default();
                         }
-                        // Numeric index for indexed arrays (supports negative)
-                        // Expand $var and ${var} references in subscript
-                        let expanded_idx = if idx_str.contains('$') {
-                            let mut expanded = idx_str.to_string();
-                            while let Some(pos) = expanded.find('$') {
-                                let rest = &expanded[pos + 1..];
-                                if rest.starts_with('{') {
-                                    if let Some(close) = rest.find('}') {
-                                        let var_name = &rest[1..close];
-                                        let var_val =
-                                            ctx.vars.get(var_name).cloned().unwrap_or_default();
-                                        expanded = format!(
-                                            "{}{}{}",
-                                            &expanded[..pos],
-                                            var_val,
-                                            &rest[close + 1..]
-                                        );
-                                    } else {
-                                        break;
-                                    }
-                                } else {
-                                    let var_end = rest
-                                        .find(|c: char| !c.is_alphanumeric() && c != '_')
-                                        .unwrap_or(rest.len());
-                                    let var_name = &rest[..var_end];
-                                    let var_val =
-                                        ctx.vars.get(var_name).cloned().unwrap_or_default();
-                                    expanded = format!(
-                                        "{}{}{}",
-                                        &expanded[..pos],
-                                        var_val,
-                                        &rest[var_end..]
-                                    );
-                                }
-                            }
-                            expanded
+                        // Numeric index for indexed arrays — use arithmetic evaluation
+                        let raw_idx: i64 = if idx_str.trim().is_empty() {
+                            0
+                        } else if let Ok(v) = idx_str.trim().parse::<i64>() {
+                            v
                         } else {
-                            idx_str.to_string()
+                            crate::expand::arithmetic::eval_arith_full(
+                                idx_str,
+                                ctx.vars,
+                                &std::collections::HashMap::new(),
+                                ctx.positional,
+                                ctx.last_status,
+                                ctx.opt_flags,
+                            )
                         };
-                        let raw_idx: i64 = expanded_idx.parse().unwrap_or(0);
                         if let Some(arr) = ctx.arrays.get(&resolved) {
                             let idx = if raw_idx < 0 {
                                 let len = arr.len() as i64;
@@ -368,13 +343,57 @@ pub(super) fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
     }
 }
 
+/// Expand backtick command substitutions in a string using cmd_sub.
+/// E.g. "`echo foo`" → "foo"
+fn expand_backticks_in_str(s: &str, cmd_sub: CmdSubFn) -> String {
+    let mut result = String::new();
+    let chars: Vec<char> = s.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '`' {
+            i += 1; // skip opening backtick
+            let mut cmd = String::new();
+            while i < chars.len() && chars[i] != '`' {
+                if chars[i] == '\\' && i + 1 < chars.len() {
+                    let next = chars[i + 1];
+                    if matches!(next, '$' | '`' | '\\') {
+                        cmd.push(next);
+                        i += 2;
+                        continue;
+                    }
+                }
+                cmd.push(chars[i]);
+                i += 1;
+            }
+            if i < chars.len() {
+                i += 1; // skip closing backtick
+            }
+            let output = cmd_sub(&cmd);
+            // Trim trailing newline like shell does
+            result.push_str(output.trim_end_matches('\n'));
+        } else {
+            result.push(chars[i]);
+            i += 1;
+        }
+    }
+    result
+}
+
 /// Parse an arithmetic expression for substring offset/length.
 /// If the string is a simple integer, parse it directly. If it's a variable name,
 /// resolve it. Otherwise, report an arithmetic error.
-fn parse_arith_offset(s: &str, param_name: &str, ctx: &ExpCtx) -> i64 {
+fn parse_arith_offset(s: &str, param_name: &str, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> i64 {
     if s.is_empty() {
         return 0;
     }
+    // Expand backtick command substitutions before arithmetic evaluation
+    let expanded;
+    let s = if s.contains('`') {
+        expanded = expand_backticks_in_str(s, cmd_sub);
+        &expanded
+    } else {
+        s
+    };
     // Handle $((...)) arithmetic expansion: strip outer $(( and )) and evaluate inner
     let trimmed = s.trim();
     if trimmed.starts_with("$((") && trimmed.ends_with("))") {
@@ -385,6 +404,7 @@ fn parse_arith_offset(s: &str, param_name: &str, ctx: &ExpCtx) -> i64 {
             &std::collections::HashMap::new(),
             ctx.positional,
             ctx.last_status,
+            ctx.opt_flags,
         );
     }
     // Try direct integer parse first
@@ -431,6 +451,7 @@ fn parse_arith_offset(s: &str, param_name: &str, ctx: &ExpCtx) -> i64 {
         &std::collections::HashMap::new(),
         ctx.positional,
         ctx.last_status,
+        ctx.opt_flags,
     )
 }
 
@@ -583,7 +604,7 @@ pub(super) fn apply_param_op(
             }
         }
         ParamOp::Substring(offset_str, length_str) => {
-            let offset: i64 = parse_arith_offset(offset_str.trim(), param_name, ctx);
+            let offset: i64 = parse_arith_offset(offset_str.trim(), param_name, ctx, cmd_sub);
             let char_count = val.chars().count();
             let start = if offset < 0 {
                 (char_count as i64 + offset).max(0) as usize
@@ -591,7 +612,7 @@ pub(super) fn apply_param_op(
                 (offset as usize).min(char_count)
             };
             if let Some(len_str) = length_str {
-                let len: i64 = parse_arith_offset(len_str.trim(), param_name, ctx);
+                let len: i64 = parse_arith_offset(len_str.trim(), param_name, ctx, cmd_sub);
                 let end = if len < 0 {
                     (char_count as i64 + len).max(start as i64) as usize
                 } else {
@@ -658,7 +679,7 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
     {
         // For Substring: slice the positional params array
         if let ParamOp::Substring(offset_str, length_str) = &expr.op {
-            let offset: i64 = parse_arith_offset(offset_str.trim(), &expr.name, ctx);
+            let offset: i64 = parse_arith_offset(offset_str.trim(), &expr.name, ctx, cmd_sub);
             // ${@:0} includes $0, ${@:1} starts at $1
             let params = if offset == 0 {
                 ctx.positional
@@ -674,7 +695,7 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                 ((offset - 1) as usize).min(count)
             };
             let end = if let Some(len_str) = length_str {
-                let len: i64 = parse_arith_offset(len_str.trim(), &expr.name, ctx);
+                let len: i64 = parse_arith_offset(len_str.trim(), &expr.name, ctx, cmd_sub);
                 if len < 0 {
                     let prefix = EXPAND_ERROR_PREFIX.with(|p| {
                         let p = p.borrow();
@@ -979,7 +1000,7 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
             }
         }
         ParamOp::Substring(offset_str, length_str) => {
-            let offset: i64 = parse_arith_offset(offset_str.trim(), &expr.name, ctx);
+            let offset: i64 = parse_arith_offset(offset_str.trim(), &expr.name, ctx, cmd_sub);
             let char_count = val.chars().count();
             let start = if offset < 0 {
                 (char_count as i64 + offset).max(0) as usize
@@ -987,7 +1008,7 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                 (offset as usize).min(char_count)
             };
             if let Some(len_str) = length_str {
-                let len: i64 = parse_arith_offset(len_str.trim(), &expr.name, ctx);
+                let len: i64 = parse_arith_offset(len_str.trim(), &expr.name, ctx, cmd_sub);
                 let end = if len < 0 {
                     (char_count as i64 + len).max(start as i64) as usize
                 } else {
