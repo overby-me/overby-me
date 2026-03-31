@@ -1182,6 +1182,11 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                                 nix::unistd::close(r_fd).ok();
                             }
                         }
+                        // Reset SIGPIPE to default so writes to closed pipes
+                        // kill the child silently (matching bash behavior)
+                        unsafe {
+                            libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+                        }
                         // Run command inline if procsub runner is available
                         // (preserves LINENO and script name for error messages)
                         if let Some(status) = run_procsub_inline(cmd) {
@@ -2261,6 +2266,29 @@ fn apply_globignore(results: &mut Vec<String>) {
 fn glob_expand(field: &str) -> Vec<String> {
     // Only glob if there are unescaped (unquoted) glob metacharacters
     if has_glob_chars(field) {
+        // Check if the original field starts with "./" (possibly with \x00 quote
+        // markers).  Bash preserves the "./" prefix in glob results when the user
+        // wrote it, but the `glob` crate normalises it away.
+        let field_starts_dot_slash = field.starts_with("./") || field.starts_with("\x00./") || {
+            let mut fi = field.chars().peekable();
+            let mut prefix = String::new();
+            while let Some(&c) = fi.peek() {
+                if c == '\x00' {
+                    fi.next();
+                    fi.next();
+                    continue;
+                }
+                prefix.push(c);
+                fi.next();
+                if prefix == "./" {
+                    break;
+                }
+                if prefix.len() >= 2 {
+                    break;
+                }
+            }
+            prefix == "./"
+        };
         // Strip the \x00 escape markers before globbing — the quoted chars
         // have already been accounted for by not reaching here if all were quoted.
         // We need to build a glob pattern where quoted metacharacters are escaped
@@ -2472,9 +2500,17 @@ fn glob_expand(field: &str) -> Vec<String> {
                     let mut results: Vec<String> = paths
                         .filter_map(|p| p.ok())
                         .map(|p| p.to_string_lossy().to_string())
-                        // Strip ./ prefix from glob results
+                        // The glob crate normalises "./" away from results.
+                        // When the original pattern started with "./", re-add
+                        // the prefix so output matches bash behaviour.
+                        // When the pattern did NOT start with "./" but the
+                        // glob crate returned "./" (e.g. pattern "*/foo"),
+                        // strip it like before.
                         .map(|s| {
-                            if s.starts_with("./") && s.len() > 2 {
+                            if field_starts_dot_slash && !s.starts_with("./") {
+                                format!("./{}", s)
+                            } else if !field_starts_dot_slash && s.starts_with("./") && s.len() > 2
+                            {
                                 s[2..].to_string()
                             } else {
                                 s

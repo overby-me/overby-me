@@ -586,6 +586,9 @@ pub(super) fn apply_param_op(
                 ParamOp::ReplaceAll(..) => pattern_replace(val, &pat, &rep, true),
                 ParamOp::ReplacePrefix(..) => {
                     for i in 0..=val.len() {
+                        if !val.is_char_boundary(i) {
+                            continue;
+                        }
                         if shell_pattern_match(&val[..i], &pat) {
                             return format!("{}{}", rep, &val[i..]);
                         }
@@ -594,6 +597,9 @@ pub(super) fn apply_param_op(
                 }
                 ParamOp::ReplaceSuffix(..) => {
                     for i in (0..=val.len()).rev() {
+                        if !val.is_char_boundary(i) {
+                            continue;
+                        }
                         if shell_pattern_match(&val[i..], &pat) {
                             return format!("{}{}", &val[..i], rep);
                         }
@@ -816,7 +822,7 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                     }
                 }
             }
-            val.len().to_string()
+            val.chars().count().to_string()
         }
         ParamOp::Indirect => {
             // ${!var} — indirect expansion
@@ -981,6 +987,9 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                 ParamOp::ReplacePrefix(..) => {
                     // Replace only if pattern matches at start
                     for i in 0..=val.len() {
+                        if !val.is_char_boundary(i) {
+                            continue;
+                        }
                         if shell_pattern_match(&val[..i], &pat) {
                             return format!("{}{}", rep, &val[i..]);
                         }
@@ -990,6 +999,9 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                 ParamOp::ReplaceSuffix(..) => {
                     // Replace only if pattern matches at end
                     for i in (0..=val.len()).rev() {
+                        if !val.is_char_boundary(i) {
+                            continue;
+                        }
                         if shell_pattern_match(&val[i..], &pat) {
                             return format!("{}{}", &val[..i], rep);
                         }

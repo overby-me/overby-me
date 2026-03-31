@@ -808,7 +808,18 @@ pub(super) fn builtin_command(shell: &mut Shell, args: &[String]) -> i32 {
     {
         Ok(status) => status.code().unwrap_or(1),
         Err(e) => {
-            eprintln!("{}: {}: {}", shell.error_prefix(), program, e);
+            let msg = match e.kind() {
+                std::io::ErrorKind::NotFound => {
+                    if program.contains('/') {
+                        "No such file or directory"
+                    } else {
+                        "command not found"
+                    }
+                }
+                std::io::ErrorKind::PermissionDenied => "Permission denied",
+                _ => "command not found",
+            };
+            eprintln!("{}: {}: {}", shell.error_prefix(), program, msg);
             127
         }
     }

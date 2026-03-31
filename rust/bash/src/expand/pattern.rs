@@ -9,6 +9,9 @@ pub(super) fn trim_pattern(value: &str, pattern: &str, mode: TrimMode) -> String
     match mode {
         TrimMode::SmallLeft => {
             for i in 0..=value.len() {
+                if !value.is_char_boundary(i) {
+                    continue;
+                }
                 if shell_pattern_match(&value[..i], pattern) {
                     return value[i..].to_string();
                 }
@@ -17,6 +20,9 @@ pub(super) fn trim_pattern(value: &str, pattern: &str, mode: TrimMode) -> String
         }
         TrimMode::LargeLeft => {
             for i in (0..=value.len()).rev() {
+                if !value.is_char_boundary(i) {
+                    continue;
+                }
                 if shell_pattern_match(&value[..i], pattern) {
                     return value[i..].to_string();
                 }
@@ -25,6 +31,9 @@ pub(super) fn trim_pattern(value: &str, pattern: &str, mode: TrimMode) -> String
         }
         TrimMode::SmallRight => {
             for i in (0..=value.len()).rev() {
+                if !value.is_char_boundary(i) {
+                    continue;
+                }
                 if shell_pattern_match(&value[i..], pattern) {
                     return value[..i].to_string();
                 }
@@ -33,6 +42,9 @@ pub(super) fn trim_pattern(value: &str, pattern: &str, mode: TrimMode) -> String
         }
         TrimMode::LargeRight => {
             for i in 0..=value.len() {
+                if !value.is_char_boundary(i) {
+                    continue;
+                }
                 if shell_pattern_match(&value[i..], pattern) {
                     return value[..i].to_string();
                 }
