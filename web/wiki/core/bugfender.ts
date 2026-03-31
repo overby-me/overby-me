@@ -22,6 +22,51 @@ export const initBugfender = async () => {
 			build: process.env.PUBLIC_GIT_COMMIT_SHA ?? "dev",
 		});
 
+		// Enhanced error context: log URL, session state and stack for uncaught errors
+		window.addEventListener("error", (event) => {
+			const context = {
+				url: window.location.href,
+				handler: "Error",
+				message: event.message,
+				filename: event.filename,
+				line: event.lineno,
+				col: event.colno,
+				stack: event.error?.stack,
+				session: safeGetSession(),
+			};
+			Bugfender.error(
+				`[ErrorContext] ${event.message}`,
+				JSON.stringify(context, null, 2),
+			);
+		});
+
+		// Enhanced error context: log URL, session state and stack for unhandled promise rejections
+		window.addEventListener("unhandledrejection", (event) => {
+			const reason = event.reason;
+			const message = reason instanceof Error ? reason.message : String(reason);
+			const stack = reason instanceof Error ? reason.stack : undefined;
+			const context = {
+				url: window.location.href,
+				handler: "UnhandledRejection",
+				message,
+				stack,
+				session: safeGetSession(),
+			};
+			Bugfender.error(
+				`[ErrorContext] ${message}`,
+				JSON.stringify(context, null, 2),
+			);
+		});
+
 		isInitialized = true;
+	}
+};
+
+const safeGetSession = (): unknown => {
+	try {
+		const raw = localStorage.getItem("session");
+		return raw ? JSON.parse(raw) : null;
+	} catch {
+		return null;
 	}
 };

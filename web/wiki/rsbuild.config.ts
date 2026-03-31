@@ -18,5 +18,11 @@ export default defineConfig({
 	},
 	output: {
 		assetPrefix: "/",
+		sourceMap: {
+			js:
+				process.env.NODE_ENV === "production"
+					? "hidden-source-map"
+					: "cheap-module-source-map",
+		},
 	},
 });
