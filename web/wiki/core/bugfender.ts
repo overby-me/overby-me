@@ -1,3 +1,5 @@
+import StackTrace from "stacktrace-js";
+
 export let isInitialized = false;
 
 export const initBugfender = async () => {
@@ -22,44 +24,86 @@ export const initBugfender = async () => {
 			build: process.env.PUBLIC_GIT_COMMIT_SHA ?? "dev",
 		});
 
-		// Enhanced error context: log URL, session state and stack for uncaught errors
+		// Enhanced error context: log URL, session state and resolved stack for uncaught errors
 		window.addEventListener("error", (event) => {
-			const context = {
-				url: window.location.href,
+			const error = event.error;
+			logErrorContext({
+				bugfender: Bugfender,
 				handler: "Error",
 				message: event.message,
+				error,
 				filename: event.filename,
 				line: event.lineno,
 				col: event.colno,
-				stack: event.error?.stack,
-				session: safeGetSession(),
-			};
-			Bugfender.error(
-				`[ErrorContext] ${event.message}`,
-				JSON.stringify(context, null, 2),
-			);
+			});
 		});
 
-		// Enhanced error context: log URL, session state and stack for unhandled promise rejections
+		// Enhanced error context: log URL, session state and resolved stack for unhandled promise rejections
 		window.addEventListener("unhandledrejection", (event) => {
 			const reason = event.reason;
-			const message = reason instanceof Error ? reason.message : String(reason);
-			const stack = reason instanceof Error ? reason.stack : undefined;
-			const context = {
-				url: window.location.href,
+			const message =
+				reason instanceof Error ? reason.message : String(reason);
+			const error = reason instanceof Error ? reason : undefined;
+			logErrorContext({
+				bugfender: Bugfender,
 				handler: "UnhandledRejection",
 				message,
-				stack,
-				session: safeGetSession(),
-			};
-			Bugfender.error(
-				`[ErrorContext] ${message}`,
-				JSON.stringify(context, null, 2),
-			);
+				error,
+			});
 		});
 
 		isInitialized = true;
 	}
+};
+
+const logErrorContext = async ({
+	bugfender,
+	handler,
+	message,
+	error,
+	filename,
+	line,
+	col,
+}: {
+	bugfender: { error: (...args: unknown[]) => void };
+	handler: string;
+	message: string;
+	error?: Error;
+	filename?: string;
+	line?: number;
+	col?: number;
+}) => {
+	let resolvedStack: string | undefined;
+
+	if (error) {
+		try {
+			const frames = await StackTrace.fromError(error);
+			resolvedStack = frames
+				.map(
+					(frame) =>
+						`  at ${frame.functionName ?? "<anonymous>"} (${frame.fileName}:${frame.lineNumber}:${frame.columnNumber})`,
+				)
+				.join("\n");
+		} catch {
+			resolvedStack = error.stack;
+		}
+	}
+
+	const context = {
+		url: window.location.href,
+		handler,
+		message,
+		filename,
+		line,
+		col,
+		stack: resolvedStack ?? error?.stack,
+		session: safeGetSession(),
+	};
+
+	bugfender.error(
+		`[ErrorContext] ${message}`,
+		JSON.stringify(context, null, 2),
+	);
 };
 
 const safeGetSession = (): unknown => {
