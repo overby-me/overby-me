@@ -12,7 +12,7 @@
     "journal-gatewayd" # self-skips but needs binary check
     "journal-remote" # self-skips but needs binary check
     "LogFilterPatterns" # LogFilterPatterns= not yet implemented in rust-systemd PID 1
-    "reload" # needs ExecReload= support + reading C journald files
+    # "reload" — re-enabled: ExecReload= implemented + C journal (LPKSHHRH) reader added
     "SYSTEMD_JOURNAL_COMPRESS" # needs journalctl --verify and compression env var support
   ];
   patchScript = ''

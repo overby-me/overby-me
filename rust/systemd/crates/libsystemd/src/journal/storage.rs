@@ -40,6 +40,7 @@
 //! seeking.  It is the primary read interface used by `journalctl` and
 //! other consumers.
 
+use super::c_journal;
 use super::entry::{FieldMatch, JournalEntry};
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
@@ -531,43 +532,11 @@ impl JournalStorage {
     }
 
     /// Read all entries from all journal files, in chronological order.
+    ///
+    /// Supports both JRNL_RS and C systemd (LPKSHHRH) journal files.
     pub fn read_all(&self) -> io::Result<Vec<JournalEntry>> {
         let journal_dir = self.config.directory.join(&self.machine_id);
-        let mut all_entries = Vec::new();
-
-        let mut files = list_journal_files(&journal_dir)?;
-        files.sort(); // Sorted by name (which includes timestamp)
-
-        for file_path in &files {
-            match JournalFile::open(file_path, false) {
-                Ok(jf) => match jf.read_all() {
-                    Ok(entries) => all_entries.extend(entries),
-                    Err(e) => {
-                        eprintln!(
-                            "journald: Warning: could not read {}: {}",
-                            file_path.display(),
-                            e
-                        );
-                    }
-                },
-                Err(e) => {
-                    eprintln!(
-                        "journald: Warning: could not open {}: {}",
-                        file_path.display(),
-                        e
-                    );
-                }
-            }
-        }
-
-        // Sort by realtime timestamp, then by sequence number for stability
-        all_entries.sort_by(|a, b| {
-            a.realtime_usec
-                .cmp(&b.realtime_usec)
-                .then_with(|| a.seqnum.cmp(&b.seqnum))
-        });
-
-        Ok(all_entries)
+        read_all_from_directory(&journal_dir)
     }
 
     /// Generate a cursor string for an entry.  The cursor encodes enough
@@ -1080,6 +1049,10 @@ impl JournalReader {
 }
 
 /// Read all entries from all journal files in a directory, sorted chronologically.
+///
+/// Supports both the native JRNL_RS format and C systemd's LPKSHHRH format.
+/// Files are tried as JRNL_RS first; on failure, they are retried as C journal
+/// files before being skipped with a warning.
 fn read_all_from_directory(directory: &Path) -> io::Result<Vec<JournalEntry>> {
     let mut all_entries = Vec::new();
     let mut files = list_journal_files(directory)?;
@@ -1097,12 +1070,18 @@ fn read_all_from_directory(directory: &Path) -> io::Result<Vec<JournalEntry>> {
                     );
                 }
             },
-            Err(e) => {
-                eprintln!(
-                    "journald: Warning: could not open {}: {}",
-                    file_path.display(),
-                    e
-                );
+            Err(_) => {
+                // JRNL_RS open failed — try C journal format (LPKSHHRH)
+                match c_journal::read_c_journal(file_path) {
+                    Ok(entries) => all_entries.extend(entries),
+                    Err(e) => {
+                        eprintln!(
+                            "journald: Warning: could not open {}: {}",
+                            file_path.display(),
+                            e
+                        );
+                    }
+                }
             }
         }
     }
