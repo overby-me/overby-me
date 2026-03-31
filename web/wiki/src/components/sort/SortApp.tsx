@@ -21,6 +21,7 @@ const SortApp = ({ node }: { node: Node }) => {
 	const [list, setList] = useState<Partial<nodes>[]>([]);
 
 	useEffect(() => {
+		if (!node.id) return;
 		const fetch = async () => {
 			const children = await resolve(
 				({ query }) =>
@@ -45,7 +46,7 @@ const SortApp = ({ node }: { node: Node }) => {
 		startTransition(() => {
 			fetch();
 		});
-	}, []);
+	}, [node.id]);
 
 	const handleDragEnd: OnDragEndResponder = ({ source, destination }) => {
 		if (destination === undefined || destination === null) return;

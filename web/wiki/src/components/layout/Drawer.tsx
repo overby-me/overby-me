@@ -308,11 +308,11 @@ const MenuList = ({ setOpen }: { setOpen: (open: boolean) => void }) => {
 	const contextId = session?.prefix?.id ?? node?.contextId;
 
 	useEffect(() => {
-		if (session?.prefix === undefined) {
+		if (session?.prefix === undefined && contextId) {
 			Promise.all([
 				fromId(contextId),
 				resolve(({ query }) => {
-					const node = query?.node({ id: session?.prefix?.id ?? "" })?.context;
+					const node = query?.node({ id: contextId })?.context;
 					return {
 						id: node?.id,
 						name: node?.name ?? "",
@@ -331,12 +331,14 @@ const MenuList = ({ setOpen }: { setOpen: (open: boolean) => void }) => {
 				});
 			});
 		}
-	}, [session, setSession]);
+	}, [session, setSession, contextId]);
 
 	const handleCurrent = async () => {
+		const prefixId = session?.prefix?.id;
+		if (!prefixId) return;
 		const resId = await resolve(
 			({ query }) =>
-				query?.node({ id: session?.prefix?.id ?? "" })?.context?.relations({
+				query?.node({ id: prefixId })?.context?.relations({
 					where: { name: { _eq: "active" } },
 				})?.[0]?.nodeId,
 			{ cachePolicy: "no-cache" },

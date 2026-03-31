@@ -144,7 +144,11 @@ const useNode = (param?: { id?: string; where?: nodes_bool_exp }): Node => {
 	const mimeId = node?.mimeId;
 	const nodeContextId = node?.contextId;
 	const key = node?.key;
-	const refetchQueries = [node, node?.data, query?.node({ id: parentId! })];
+	const refetchQueries = [
+		node,
+		node?.data,
+		...(parentId ? [query?.node({ id: parentId })] : []),
+	];
 
 	const getOpts = (param?: Param) => ({
 		refetchQueries:

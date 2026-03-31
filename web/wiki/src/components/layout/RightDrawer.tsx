@@ -34,11 +34,11 @@ const Drawer = ({
 	const contextId = session?.prefix?.id ?? node?.contextId;
 
 	useEffect(() => {
-		if (session?.prefix === undefined && !home) {
+		if (session?.prefix === undefined && !home && id) {
 			Promise.all([
 				fromId(contextId),
 				resolve(({ query }) => {
-					const node = query?.node({ id: id! })?.context;
+					const node = query?.node({ id })?.context;
 					return {
 						id: node?.id,
 						name: node?.name ?? "",
@@ -57,7 +57,7 @@ const Drawer = ({
 				});
 			});
 		}
-	}, [session, setSession]);
+	}, [session, setSession, id]);
 
 	return (
 		<MuiDrawer
@@ -115,7 +115,7 @@ const Drawer = ({
 					}}
 				>
 					<Box sx={{ flexGrow: 1 }} />
-					<MimeAvatarId id={id!} />
+					{id && <MimeAvatarId id={id} />}
 					<Typography sx={{ pl: 1 }} color="#fff">
 						{node?.name}
 					</Typography>

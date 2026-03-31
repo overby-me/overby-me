@@ -245,6 +245,7 @@ const AddContentDialog = ({
 	};
 
 	useEffect(() => {
+		if (!node.id) return;
 		const checkKeys = async () => {
 			const keys = await resolve(({ query }) =>
 				query
@@ -257,7 +258,7 @@ const AddContentDialog = ({
 			}
 		};
 		checkKeys();
-	}, [title]);
+	}, [title, node.id]);
 
 	return (
 		<Dialog maxWidth="xs" fullWidth open={open} onClose={() => setOpen(false)}>
