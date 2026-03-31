@@ -13,12 +13,10 @@
     "journal-remote" # self-skips but needs binary check
     "LogFilterPatterns" # test verifies via journalctl -I (needs invocation ID + syslog sender)
     "reload" # uses systemd-run --wait (oneshot deadlock) + verify_journals with -D
-    "journalctl-varlink" # needs varlinkctl binary not in NixOS VM
+    "journalctl-varlink" # not a real subtest file — skip is harmless
     "SYSTEMD_JOURNAL_COMPRESS" # needs journalctl --verify and compression env var support
   ];
   patchScript = ''
-    # Fix varlinkctl references — not available in NixOS VM
-    sed -i '/varlinkctl /d' TEST-04-JOURNAL.journal.sh
     # Fix systemd-run --user -M testuser@.host — machined not available
     sed -i '/systemd-run --user -M/d' TEST-04-JOURNAL.journal.sh
     sed -i '/journalctl.*--user-unit/d' TEST-04-JOURNAL.journal.sh
