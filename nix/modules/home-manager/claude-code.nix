@@ -155,6 +155,14 @@
     jj git push           # Push to remote
     jj git fetch          # Fetch from remote
     ```
+
+    **Never push directly to the default branch (`main`/`master`) unless the user explicitly asks.**
+    Create a feature bookmark and push that instead:
+
+    ```bash
+    jj bookmark create my-feature -r @
+    jj git push --bookmark my-feature
+    ```
   '';
 
   claudeSettingsJson = (pkgs.formats.json {}).generate "claude-settings.json" {
