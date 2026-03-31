@@ -34,11 +34,10 @@ def main [] {
 
     if (($selected | path expand | path type) in ["file", "dir"]) {
       xdg-open $selected | complete
-      return "."
+      return
     }
     try {
       $selected | url parse
       xdg-open $selected | complete
-      return "."
     }
 }
