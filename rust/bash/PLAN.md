@@ -2,9 +2,35 @@
 
 ## Current State
 
-**64/77 tests passing** (likely **65/77** — builtins should now pass in nix) on bookmark `push-nkqwvorqmnkn`. All changes committed and pushed.
+**64/77 tests passing** (likely **67+/77** — builtins, assoc, shopt, comsub, lastpipe should now pass in nix) on bookmark `push-nkqwvorqmnkn`. All changes committed and pushed.
 
 ### Progress This Session (Latest)
+
+- **assoc**: 0 real diff locally (was 2). Only timing diff remains ✅
+  - Fixed `${#wheat[$unset]}` — empty subscript after expansion now emits "bad array subscript" error for assoc arrays
+  - Fixed duplicate error messages from `lookup_var` called twice in `expand_part`
+  - Added `get_arith_error()` peek function to check error flag without consuming it
+- **new-exp**: 7 diff locally (was 60), ~2 real lines. **Massive improvement — 53 lines reduced**
+  - Fixed `${!v}` indirect expansion with invalid variable name (`bad-var: invalid variable name`)
+  - Fixed `${6="arg6"}` — cannot assign to positional/special params error
+  - Fixed `${var/*/x}` with empty `var` — pattern `*` now matches empty string in `pattern_replace`
+  - Fixed `${@:offset:length}` negative length error — now emits `substring expression < 0`
+  - Fixed `${$(($#-1))}` — `bad substitution` error for `$` followed by `(` in `${...}`
+  - Fixed `parse_arith_offset` to handle `$((...))` arithmetic expansion in substring offsets
+- **posixexp**: 0 diff locally ✅ (was 3)
+- **shopt**: 0 diff locally ✅ (was 68)
+  - Removed 10 readline-only shopt options from listing (`complete_fullquote`, `direxpand`, etc.)
+  - Removed `emacs` and `vi` from `set -o` options (readline-dependent)
+- **comsub**: 0 diff locally ✅ (was 2)
+  - Fixed SIGPIPE handling in process substitution children
+- **lastpipe**: 0 diff locally ✅ (was 2)
+  - Fixed `in_pipeline_child` — all forked pipeline commands are children regardless of lastpipe
+- **procsub**: PID diffs only (was 13, now 12) — should pass in nix ✅
+- **varenv**: 18 diff locally (unchanged = ~chet + PID diffs)
+- **nameref**: 252 diff locally (was 248)
+- **array**: 425 diff locally (was 424)
+
+### Progress Previous Session
 
 - **assoc**: 2 diff locally (was 65). **Massive improvement — 63 lines reduced**
   - Fixed `declare -Ai` arithmetic evaluation for assoc array compound assignments
@@ -35,7 +61,7 @@
 - **heredoc**: 8 diff locally (PID diffs + sub-tests)
 - **comsub-posix**: 0 diff locally ✅
 
-### Progress Previous Session
+### Progress Two Sessions Ago
 
 - **builtins**: 18 diff locally → **all PID diffs** (was 40). Should now pass in nix ✅
   - Fixed `exec -c` (clear env), `exec -l` (login shell argv[0] prefix)
@@ -53,7 +79,7 @@
 - **heredoc**: 8 diff locally (PID diffs + sub-tests)
 - **comsub-posix**: 0 diff locally ✅
 
-### Progress Two Sessions Ago
+### Progress Three Sessions Ago
 
 - **Started at**: 64/77 (arith diff 30, heredoc diff 111, comsub-posix diff 20)
 - **heredoc**: main test 0 real diff locally ✅ (was ~20, only PID diffs remain), nix sub-tests ~85 diff
@@ -64,6 +90,28 @@
 - **printf**: flaky — timing-dependent date format mismatch
 
 ### Fixes Applied This Session (Latest)
+
+47. **Fix `${#wheat[$unset]}` bad array subscript for assoc arrays** (`src/expand/params.rs`) — When an associative array subscript expands to empty (e.g., `$unset` is not set), now emits `[raw_subscript]: bad array subscript` error. Added `$` variable expansion in assoc array subscript keys inside `lookup_var`. Added `get_arith_error()` peek function to avoid duplicate errors when `expand_part` and `expand_param` both call `lookup_var`.
+
+48. **Fix `${!v}` indirect expansion with invalid variable name** (`src/expand/params.rs`) — Added `is_valid_var_ref()` helper that validates variable names (special params, positional, arrays, identifiers). `${!v}` where `v=bad-var` now emits `bad-var: invalid variable name` error instead of silently returning empty.
+
+49. **Fix `${6="arg6"}` assignment to positional/special params** (`src/expand/params.rs`) — `ParamOp::Assign` now checks if `expr.name` is a positional parameter or special parameter and emits `$6: cannot assign in this way` error, matching bash behavior.
+
+50. **Fix `${var/*/x}` with empty `var`** (`src/expand/pattern.rs`) — `pattern_replace` now checks after the main loop if the value is empty and the pattern matches empty string (`shell_pattern_match("", pattern)`), and if so, appends the replacement. This fixes `*` matching empty strings.
+
+51. **Fix `${@:offset:length}` negative length error** (`src/expand/params.rs`) — For `$@`/`$*` substring operations, negative length now emits `{len_str}: substring expression < 0` error instead of silently clamping. Also changed offset/length parsing to use `parse_arith_offset` instead of `.trim().parse().unwrap_or()` for proper arithmetic evaluation.
+
+52. **Fix `parse_arith_offset` to handle `$((...))` expansion** (`src/expand/params.rs`) — Added early detection for `$((expr))` syntax: strips outer delimiters and evaluates via `eval_arith_full`. Previously `$(($# - 2))` would fail integer parse and default to wrong value.
+
+53. **Fix `${$(($#-1))}` bad substitution** (`src/lexer/dollar.rs`) — When `parse_brace_param` encounters param name `$` followed by `(`, scans to closing `}` and returns `WordPart::BadSubstitution`. Previously parsed as `$$` (PID) followed by operator recovery.
+
+54. **Fix SIGPIPE handling in process substitution** (`src/expand/mod.rs`) — Reset `SIGPIPE` to `SIG_DFL` in process substitution child before running inline procsub. Previously `echo` inside `<(echo a)` would get "write error: Broken pipe" instead of being silently killed.
+
+55. **Fix `in_pipeline_child` for forked pipeline commands** (`src/interpreter/pipeline.rs`) — Changed `self.in_pipeline_child = !self.shopt_lastpipe` to `self.in_pipeline_child = true` in the fork child. All forked pipeline commands are children regardless of `lastpipe` setting. Fixed `echo g h i | bar=7` producing spurious "Broken pipe" error.
+
+56. **Remove readline-only shopt options** (`src/builtins/set.rs`) — Removed 10 options from shopt listing: `complete_fullquote`, `direxpand`, `dirspell`, `force_fignore`, `histreedit`, `histverify`, `hostcomplete`, `no_empty_cmd_completion`, `progcomp`, `progcomp_alias`. Also removed `emacs` and `vi` from `set -o` options. These require readline/completion support not present in our build.
+
+### Fixes Applied Two Sessions Ago
 
 31. **Fix `declare -Ai` arithmetic evaluation for assoc arrays** (`src/interpreter/commands.rs`) — Compound assignment to assoc arrays with `-i` flag now evaluates values as arithmetic (e.g., `[zero]=1+4` → `5`). Also handles element-level `+=` for assoc compound assignments.
 
@@ -97,7 +145,7 @@
 
 46. **Fix arithmetic panic on unclosed brackets** (`src/interpreter/arithmetic.rs`) — `eval_arith_expr_inner` no longer panics when `]` is not found (e.g., `[foo` without closing `]`).
 
-### Fixes Applied Two Sessions Ago
+### Fixes Applied Three Sessions Ago
 
 18. **Fix `exec -c` to actually clear environment** (`src/builtins/exec.rs`) — `exec -c` was clearing env vars then re-applying all shell exports, defeating the purpose. Now the else branch only applies exports when `-c` is not set.
 
@@ -125,7 +173,7 @@
 
 30. **Quote associative array keys in `declare -p`** (`src/builtins/mod.rs`, `src/builtins/vars.rs`) — Keys containing non-alphanumeric/underscore characters are now quoted with `"..."` in `declare -p` output (e.g., `["*"]`, `["hello world"]`, `["\$x"]`), matching bash behavior.
 
-### Fixes Applied Previous Session
+### Fixes Applied Four Sessions Ago
 
 1. **Fix heredoc backslash handling for `\"`** (`src/lexer/heredoc.rs`) — In unquoted heredoc body parsing (`parse_double_quoted_content`), `\"` should remain literal (not strip backslash). Only `$`, `` ` ``, `\`, and `\n` are special after backslash in heredocs. Removed `'"'` from the match pattern.
 
@@ -195,116 +243,80 @@ Suggested nix timeout: 30s for most tests, 120s for trap.
 
 ## Failing Tests (sorted by diff size)
 
-*builtins likely now passes in nix (only PID diffs locally)*
+### Locally Passing (28 tests)
 
-### Easiest (< 30 diff lines)
+alias, appendop, arith, braces, case, casemod, comsub, comsub-posix, globstar, lastpipe, mapfile, nquote, nquote2, nquote3, nquote4, nquote5, parser, posix2, posixexp, posixpat, precedence, printf, quote, rhs-exp, set-e, set-x, shopt, tilde
 
-#### 1. posixexp (3 lines local, issues remain in nix)
+### PID-diff only (would pass in nix, ~7 more tests)
 
-Two remaining local diff lines (path-dependent `/var/tmp/sh` errors). Nix issues in posixexp4.sub:
+- **assoc** (4 lines = timing diff only)
+- **builtins** (18 lines = PID diffs)
+- **glob** (12 lines = PID diffs)
+- **heredoc** (8 lines = PID diffs)
+- **procsub** (12 lines = PID diffs)
+- **read** (8 lines = PID diffs)
+- **type** (4 lines = PID diffs)
 
-- **`<12>` vs `<1>\n<2>`**: `recho $a` after `IFS=; a=$@` with `set -- 1 2`. Our shell produces `<12>` (single arg), bash produces `<1><2>` (two args). Relates to how `$@` assignment interacts with null IFS — the assigned value should preserve the field boundaries for later `$a` expansion.
-- **IFS splitting in `${var-$@}`**: With `IFS=:` or unset IFS, `${var-$@}` should join positional params by space (not split them individually). Our shell splits `$@` in the default word into separate fields. Two instances in posixexp4.sub. This requires `$@` in `${var-word}` to produce multiple fields, which needs refactoring of the expansion system to propagate field boundaries.
+### Small Real Diffs
 
-#### 2. comsub-posix (0 lines local, ~35 lines nix)
+#### 1. new-exp (7 lines local, ~2 real)
 
-Main test passes locally. Nix failures are error messages from intentionally-bad syntax in `${THIS_SH} -c '...'` invocations:
+Two remaining real issues:
 
-- `$(case x in x) ;; x) done esac)` — our shell reports wrong unexpected token
-- `$(case x in x) (esac) esac)` — wrong error message format
-- Error line numbers off by 1 in multi-line `-c` scripts
-- Script continues after syntax error instead of stopping in some cases
+- **Backtick in arithmetic error message**: `${HOME:\`echo }\`}` shows unexpanded backtick in error. Needs backtick command substitution expansion before arithmetic evaluation. Architecturally hard — requires shell access from expansion context.
+- **`_ENV[complex_subscript]` arithmetic**: `${_ENV[(_$-=0)+(_=1)-_${-%%*i*}]}` needs full arithmetic evaluation in array subscripts. Currently uses naive `$`-expansion + `parse::<i64>().unwrap_or(0)`. Requires passing arithmetic evaluator through expansion context.
 
-#### 3. arith (0 lines main test, ~100 lines sub-tests)
+#### 2. func (2 lines)
 
-Main `arith.tests` now passes with 0 diff. Sub-test issues in arith10.sub:
+- Missing `compgen: command not found` — our shell has `compgen` as a builtin but bash's non-interactive/non-readline build doesn't. Minor issue.
 
-- **Array subscripts with special chars**: `a[" "]`, `a[\ \]`, `a[\\]` — quoting in array subscript arithmetic not handled correctly.
-- **Empty array subscript `a[]`**: Should be "not a valid identifier" error.
-- **`let` error formatting**: `let '0 - ""'` produces wrong error token.
+#### 3. varenv (18 lines local = ~chet + PID diffs)
+
+- **`~chet` expansion**: Produces `/a/b/c` instead of `/usr/chet`. User-specific, differs by environment.
+- **Nix sub-tests**: varenv3.sub (local scoping), varenv4.sub (assoc array conversion), varenv25.sub (local -p).
 
 ### Medium (30-200 diff lines)
 
-#### 4. heredoc (0 real lines local, ~85 lines nix)
+#### 4. comsub2 (196 lines)
 
-Main `heredoc.tests` now matches perfectly (only PID diffs remain, normalized by nix). Sub-test issues:
+`${ ... }` dollar-brace command substitution (bash 5.3 feature), `local` in current shell context, alias handling in subshells, function definition inside command substitution.
 
-- **heredoc3.sub**: Tab-stripped heredoc delimiter parsing, backslash continuation edge cases, `cat <<x*x` glob in delimiter, `(cat <<EOF\n...\nEOF)` — EOF not on its own line.
-- **heredoc7.sub**: Command substitution interacting with heredocs — `cat << EOF)` unterminated heredoc in comsub.
-- **heredoc9.sub**: `HERE; then` and `HERE; do` — heredoc delimiter followed by `;` and keyword on same line in function body printing.
-
-#### 5. varenv (14 lines local = ~chet + PID diffs, was 18 → was 340)
-
-Improved further (assoc-related fixes helped). Only remaining real issue:
-
-- **`~chet` expansion**: Produces `/a/b/c` instead of `/usr/chet`. User-specific, differs by environment. The nix test also differs here.
-- **Nix sub-tests**: varenv3.sub (local scoping), varenv4.sub (assoc array conversion), varenv25.sub (local -p).
-
-#### 6. assoc (2 lines local, was 65 → was 527) ✅
-
-**Nearly passing.** Only remaining issue:
-
-- `${#wheat[$unset]}` — empty/unset subscript should give "bad array subscript" error for assoc arrays. Currently returns 0.
-- All other issues fixed: `declare -Ai`, `declare -Ar`, `chaff[hello world]`, compound assignment with spaced/quoted keys, `declare +A`, scalar-to-assoc conversion, etc.
-
-#### 7. builtins (18 lines local = PID only, was 93 → was 336) ✅
-
-**Should now pass in nix.** All real issues fixed:
-
-- ✅ `exec -c` (clear env), `exec -l` (login shell)
-- ✅ `declare -p` after pre-command assignments (`foo="" export foo`)
-- ✅ `-printenv` error (was exec -c not clearing env)
-- ✅ source/dot positional params (`set --` in sourced file persists)
-- ✅ POSIX `:` special builtin prefix assignments
-- ✅ `declare -p` value quoting (`\$\$`)
-- Remaining 18 diff lines are all PID differences (normalized in nix)
-
-#### 8. new-exp (60 lines local, was 87 → was ~375)
-
-Improved by 27 lines. Fixed: `echo -e "\c"`, `set -u` nounset for positional params, nounset subshell exit.
-
-Remaining issues:
-
-- `${HOME-'}'}` — single quotes don't protect `}` inside `${:-}` in dquote context.
-- Backtick command substitution not expanded in `${var:offset}` arithmetic.
-- `$((${#RECEIVED}-1))` — works locally but `recho` unavailable (may pass in nix).
-- `bad-var: invalid variable name` error not generated for invalid var names.
-- `${$(($#-1))}: bad substitution` not generated.
-- Substring expression `< 0` error messages missing.
-- Various expansion edge cases.
-- Note: many tests depend on `recho` which isn't available locally — nix diff may be smaller.
-
-#### 9. quotearray (185 lines)
+#### 5. quotearray (212 lines)
 
 Associative array keys with special chars in arithmetic contexts.
 
-#### 10. comsub2 (196 lines)
-
-`local` outside function context, alias handling in subshells, function definition inside command substitution.
-
 ### Hard (200+ diff lines)
 
-#### 11. nameref (248 lines local, was 258 → was 750)
+#### 6. nameref (252 lines local)
 
 `declare -n` improvements but still substantially broken: wrong variable resolution, unset through nameref, nameref chains.
 
-#### 12. array (424 lines local, was 446 → was 1755)
+#### 7. array (425 lines local)
 
-Major improvement. Remaining issues in array32.sub, array33.sub (injection protection, type conversion errors).
+Remaining issues in array32.sub, array33.sub (injection protection, type conversion errors).
 
-#### 13. vredir (734K lines)
+#### 8. vredir (734K lines)
 
 `{var}>file` variable fd redirection is partially implemented but produces massive output differences.
 
+### Not Locally Testable (tests don't exist locally)
+
+array2, dollar, execscript, glob2, return, source, run-intl, runtests — these test files don't exist in `/tmp/bash-5.3/tests/` but may exist in the nix test environment.
+
 ### Flaky
 
-#### trap (0-4 lines)
+#### trap (0-6 lines)
 
 Extra CHLD signals (non-deterministic). Sometimes passes, sometimes fails with 1-2 extra `CHLD` lines.
 
-#### printf (0-3 lines)
+### Other Failing Tests (not in main test list)
 
-Timing-dependent: `%(fmt)T` date format test can mismatch if test crosses a second boundary.
+- **complete** (116 lines) — `complete` builtin not available in non-interactive bash builds
+- **coproc** (12 lines) — fd number differences (61 vs 59)
+- **dstack** (87 lines) — Missing `pushd`, `popd`, `dirs` builtins
+- **histexp** (203 lines) — History expansion not implemented
+- **ifs-posix** (2 lines) — timeout-dependent summary line
+- **intl** (8 lines) — Internationalization/multibyte character issues, panic on non-ASCII
 
 ## Key Source Files
 
@@ -316,40 +328,43 @@ Timing-dependent: `%(fmt)T` date format test can mismatch if test crosses a seco
 | `src/builtins/flow.rs` | `break`, `continue`, `exit`, `return` |
 | `src/builtins/vars.rs` | `declare`, `local` (now with no-args listing), `export` (unset var handling), `let` |
 | `src/builtins/mod.rs` | `parse_array_literal`, function body formatting, `quote_for_declare`, `quote_assoc_key`, `interpret_echo_escapes` (returns `(String, bool)` for `\c` stop) |
-| `src/builtins/set.rs` | `set` (allexport, physical, ignoreeof), `shopt` (update_shellopts call) |
+| `src/builtins/set.rs` | `set` (allexport, physical, ignoreeof), `shopt` (update_shellopts call, readline options removed) |
 | `src/builtins/trap.rs` | `trap`, `kill` (kill -l range check), `enable` (full -n/-s/-a/-d impl) |
 | `src/interpreter/mod.rs` | Shell struct, `declared_unset`, `disabled_builtins`, `source_set_params`, `run_string`, `resolve_nameref`, `set_var` (auto-export), SHELLOPTS/BASHOPTS readonly, BASH_ALIASES/BASH_CMDS init |
 | `src/interpreter/commands.rs` | Command execution (disabled builtin check), `expand_word*`, `get_opt_flags` (allexport `a` flag), `update_shellopts`, `execute_assignment`, `continue N` fix |
 | `src/interpreter/arithmetic.rs` | Arithmetic eval, `expand_comsubs_in_arith` (handles `\$` and backticks), error tokens, short-circuit assignment validation, ternary precedence |
 | `src/interpreter/redirects.rs` | Redirections (vredir `{var}` fds, memfd heredocs, pipe fd leak fix) |
-| `src/interpreter/pipeline.rs` | Pipeline execution, PIPESTATUS |
-| `src/expand/mod.rs` | Word expansion, `ExpCtx`, procsub handling, `SyntaxError` handler, `NOUNSET_ERROR` flag, `$` prefix for positional param nounset errors |
-| `src/expand/params.rs` | Parameter expansion (`${...}` operators), `parse_arith_offset` |
+| `src/interpreter/pipeline.rs` | Pipeline execution, PIPESTATUS, `in_pipeline_child` always true for forked children |
+| `src/expand/mod.rs` | Word expansion, `ExpCtx`, procsub handling (SIGPIPE reset), `SyntaxError` handler, `NOUNSET_ERROR` flag, `$` prefix for positional param nounset errors, `get_arith_error` peek |
+| `src/expand/params.rs` | Parameter expansion (`${...}` operators), `parse_arith_offset` (handles `$(())`), `is_valid_var_ref`, assoc subscript expansion + bad subscript error |
+| `src/expand/pattern.rs` | Pattern matching, `pattern_replace` (handles empty value + `*` match) |
 | `src/expand/arithmetic.rs` | `eval_arith_full`, `resolve_arith_vars` (handles `${var:-default}`) |
 | `src/parser.rs` | Parser, `parse_array_elements` (returns Result), `skip_to_next_command`, heredoc body resolution (full recursive `resolve_heredoc_in_command`) |
 | `src/lexer/mod.rs` | Lexer, thread-locals (`DQUOTE_TOGGLED`) |
-| `src/lexer/dollar.rs` | `${}` parsing, `parse_brace_param`, `$(...)` comsub parser (now handles `<<<` here-strings) |
+| `src/lexer/dollar.rs` | `${}` parsing, `parse_brace_param` (bad substitution for `${$(...)}` ), `$(...)` comsub parser (now handles `<<<` here-strings) |
 | `src/lexer/word.rs` | `read_param_word_impl`, `skip_comsub` (case state machine), `take_heredoc_body` |
 | `src/lexer/heredoc.rs` | `register_heredoc` (line count fix), `read_heredoc_bodies` (backslash-newline), `parse_double_quoted_content` (backslash fix for `\"`) |
 | `rust/bash/testsuite.nix` | Test harness with path/PID normalization |
 
 ## Recommended Next Priorities
 
-1. **Fix new-exp remaining issues** — `${HOME-'}'}` quoting, `bad-var: invalid variable name`, substring expression errors. (~60 diff lines locally, may be less in nix where recho is available)
+1. **Fix new-exp backtick in arithmetic** — `${HOME:\`echo }\`}` needs backtick expansion before arithmetic eval. Architecturally challenging — needs shell access from expansion context. (~2 diff lines)
 
-2. **Fix comsub-posix error messages** — Improve error reporting for intentional syntax errors inside `$(...)` in case patterns. Need parser to detect reserved words like `done` in wrong context. (~35 nix diff lines)
+2. **Fix new-exp array subscript arithmetic** — `_ENV[complex_subscript]` needs full arithmetic evaluation in `lookup_var`. Requires threading arithmetic evaluator through `ExpCtx`. (~2 diff lines)
 
-3. **Fix arith10.sub array subscript quoting** — Handle `a[" "]`, `a[\ \]`, `a[\\]` in arithmetic array subscripts. (~100 nix diff lines)
+3. **Fix comsub-posix nix error messages** — Improve error reporting for intentional syntax errors inside `$(...)` in case patterns. Need parser to detect reserved words like `done` in wrong context. (~35 nix diff lines)
 
-4. **Fix heredoc sub-test issues** — heredoc3.sub (delimiter edge cases), heredoc7.sub (comsub+heredoc interaction), heredoc9.sub (function body printing). (~85 nix diff lines)
+4. **Fix arith10.sub array subscript quoting** — Handle `a[" "]`, `a[\ \]`, `a[\\]` in arithmetic array subscripts. (~100 nix diff lines)
 
-5. **Fix varenv nix sub-tests** — varenv3.sub (local scoping), varenv4.sub (assoc array conversion), varenv25.sub (local -p).
+5. **Fix heredoc sub-test issues** — heredoc3.sub (delimiter edge cases), heredoc7.sub (comsub+heredoc interaction), heredoc9.sub (function body printing). (~85 nix diff lines)
 
-6. **Fix `$@` expansion in `${var-$@}`** — Requires refactoring expansion to propagate field boundaries through `ParamOp::Default`. Architecturally hard but would fix remaining posixexp nix diff lines.
+6. **Fix varenv nix sub-tests** — varenv3.sub (local scoping), varenv4.sub (assoc array conversion), varenv25.sub (local -p).
 
-7. **Fix nameref basic operations** — `declare -n foo=bar; echo $foo` doesn't resolve correctly. Deep refactor needed for nameref resolution. (~248 diff lines)
+7. **Fix nameref basic operations** — `declare -n foo=bar; echo $foo` doesn't resolve correctly. Deep refactor needed for nameref resolution. (~252 diff lines)
 
-8. **Fix quotearray arithmetic assoc key handling** — Assoc array subscripts with special chars in `((...))` context. (~185+ diff lines)
+8. **Fix quotearray arithmetic assoc key handling** — Assoc array subscripts with special chars in `((...))` context. (~212 diff lines)
+
+9. **Implement `${ ... }` dollar-brace command substitution** — Bash 5.3 feature used in comsub2 tests. (~196 diff lines)
 
 ## Approach
 
