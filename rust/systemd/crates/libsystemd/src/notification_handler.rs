@@ -461,6 +461,7 @@ pub fn handle_all_std_out(run_info: ArcMutRuntimeInfo) {
                                         .unwrap_or(6);
                                     let level_prefix =
                                         srvc.conf.exec_config.syslog_level_prefix.unwrap_or(true);
+                                    let svc_pid = mut_state.srvc.pid.map(|p| p.as_raw() as u32);
                                     mut_state.srvc.journal_stream =
                                         crate::services::open_journal_stream(
                                             &name,
@@ -468,6 +469,7 @@ pub fn handle_all_std_out(run_info: ArcMutRuntimeInfo) {
                                             ident,
                                             priority,
                                             level_prefix,
+                                            svc_pid,
                                         );
                                 }
                                 mut_state.srvc.stdout_buffer.extend(&buf[..bytes]);
@@ -610,6 +612,7 @@ pub fn handle_all_std_err(run_info: ArcMutRuntimeInfo) {
                                         .unwrap_or(6);
                                     let level_prefix =
                                         srvc.conf.exec_config.syslog_level_prefix.unwrap_or(true);
+                                    let svc_pid = mut_state.srvc.pid.map(|p| p.as_raw() as u32);
                                     mut_state.srvc.journal_stream =
                                         crate::services::open_journal_stream(
                                             &name,
@@ -617,6 +620,7 @@ pub fn handle_all_std_err(run_info: ArcMutRuntimeInfo) {
                                             ident,
                                             priority,
                                             level_prefix,
+                                            svc_pid,
                                         );
                                 }
                                 mut_state.srvc.stderr_buffer.extend(&buf[..bytes]);

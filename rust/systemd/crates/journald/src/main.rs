@@ -1663,12 +1663,25 @@ fn handle_stdout_connection(stream: UnixStream, state: Arc<JournaldState>) {
     // We peek at the next line and only consume it as invocation ID if it
     // looks like a 32-char hex string (systemd invocation ID format).
     let mut first_log_line: Option<String> = None;
+    let mut service_pid: Option<u32> = None;
     if let Some(Ok(maybe_inv)) = lines.next() {
         if !maybe_inv.is_empty()
             && maybe_inv.len() == 32
             && maybe_inv.chars().all(|c| c.is_ascii_hexdigit())
         {
             invocation_id = maybe_inv;
+
+            // Line 9 (extension): service PID — the actual service process PID
+            // so we can set _PID/_EXE/_COMM from the service rather than PID 1.
+            if let Some(Ok(maybe_pid)) = lines.next() {
+                if let Ok(pid) = maybe_pid.parse::<u32>() {
+                    if pid > 0 {
+                        service_pid = Some(pid);
+                    }
+                } else if !maybe_pid.is_empty() {
+                    first_log_line = Some(maybe_pid);
+                }
+            }
         } else {
             // Not an invocation ID — this is actually the first log line
             first_log_line = Some(maybe_inv);
@@ -1705,7 +1718,11 @@ fn handle_stdout_connection(stream: UnixStream, state: Arc<JournaldState>) {
         }
         entry.set_field("_TRANSPORT", "stdout");
         if let Some(ref cred) = peer_cred {
-            entry.set_trusted_process_fields(cred.pid as u32);
+            // Use service PID for process metadata when available, so
+            // _PID/_EXE/_COMM reflect the actual service process rather
+            // than PID 1 which opened the stream on behalf of the service.
+            let pid_for_fields = service_pid.unwrap_or(cred.pid as u32);
+            entry.set_trusted_process_fields(pid_for_fields);
             entry.set_field("_UID", cred.uid.to_string());
             entry.set_field("_GID", cred.gid.to_string());
         }
