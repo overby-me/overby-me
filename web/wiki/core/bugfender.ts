@@ -17,9 +17,8 @@ export const initBugfender = async () => {
 			overrideConsoleMethods: true,
 			// Print logs to browser console as well (useful for development)
 			printToConsole: process.env.NODE_ENV === "development",
-			// Disable built-in error handler — our custom listeners below provide
-			// source-mapped stacks with richer context instead.
-			registerErrorHandler: false,
+			// Keep built-in error handler for crash reporting
+			registerErrorHandler: true,
 			// Log browser events (page loads, navigation, etc.)
 			logBrowserEvents: true,
 			// Log UI events (clicks, form submissions, etc.)
@@ -55,7 +54,34 @@ export const initBugfender = async () => {
 			});
 		});
 
+		// Also send resolved crash reports via Bugfender.sendCrash
+		window.addEventListener("error", (event) => {
+			if (event.error) {
+				resolveAndSendCrash(Bugfender, event.message, event.error);
+			}
+		});
+		window.addEventListener("unhandledrejection", (event) => {
+			const reason = event.reason;
+			if (reason instanceof Error) {
+				resolveAndSendCrash(Bugfender, reason.message, reason);
+			}
+		});
+
 		isInitialized = true;
+	}
+};
+
+const resolveAndSendCrash = async (
+	bugfender: { sendCrash: (title: string, text: string) => Promise<string> },
+	message: string,
+	error: Error,
+) => {
+	if (!error.stack) return;
+	try {
+		const resolved = await resolveStack(error.stack);
+		bugfender.sendCrash(message, resolved);
+	} catch {
+		bugfender.sendCrash(message, error.stack);
 	}
 };
 
