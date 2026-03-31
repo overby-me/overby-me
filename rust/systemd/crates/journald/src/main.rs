@@ -1295,6 +1295,21 @@ fn create_datagram_socket(path: &str) -> io::Result<UnixDatagram> {
 
     let sock = UnixDatagram::bind(path)?;
 
+    // Enable SO_PASSCRED so recvmsg gets sender credentials via SCM_CREDENTIALS
+    {
+        use std::os::unix::io::AsRawFd;
+        let enabled: libc::c_int = 1;
+        unsafe {
+            libc::setsockopt(
+                sock.as_raw_fd(),
+                libc::SOL_SOCKET,
+                libc::SO_PASSCRED,
+                &enabled as *const _ as *const libc::c_void,
+                std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+            );
+        }
+    }
+
     // Set permissions so any process can write to it
     #[cfg(unix)]
     {
@@ -1323,6 +1338,53 @@ fn create_stream_listener(path: &str) -> io::Result<UnixListener> {
     Ok(listener)
 }
 
+/// Receive a datagram from a `UnixDatagram` socket and extract the sender's
+/// credentials (PID/UID/GID) from `SCM_CREDENTIALS` ancillary data.
+///
+/// Requires `SO_PASSCRED` to be enabled on the socket (done in
+/// `create_datagram_socket`).  Returns `(bytes_read, Option<ucred>)`.
+fn recv_with_cred(sock: &UnixDatagram, buf: &mut [u8]) -> io::Result<(usize, Option<libc::ucred>)> {
+    use std::os::unix::io::AsRawFd;
+
+    let mut iov = libc::iovec {
+        iov_base: buf.as_mut_ptr() as *mut libc::c_void,
+        iov_len: buf.len(),
+    };
+
+    // Control buffer large enough for one SCM_CREDENTIALS message
+    let mut cmsg_buf = [0u8; unsafe { libc::CMSG_SPACE(std::mem::size_of::<libc::ucred>() as u32) }
+        as usize];
+
+    let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
+    msg.msg_iov = &mut iov;
+    msg.msg_iovlen = 1;
+    msg.msg_control = cmsg_buf.as_mut_ptr() as *mut libc::c_void;
+    msg.msg_controllen = cmsg_buf.len();
+
+    let n = unsafe { libc::recvmsg(sock.as_raw_fd(), &mut msg, 0) };
+    if n < 0 {
+        return Err(io::Error::last_os_error());
+    }
+
+    // Walk control messages looking for SCM_CREDENTIALS
+    let mut cred = None;
+    unsafe {
+        let mut cmsg = libc::CMSG_FIRSTHDR(&msg);
+        while !cmsg.is_null() {
+            if (*cmsg).cmsg_level == libc::SOL_SOCKET
+                && (*cmsg).cmsg_type == libc::SCM_CREDENTIALS
+            {
+                let data_ptr = libc::CMSG_DATA(cmsg) as *const libc::ucred;
+                cred = Some(std::ptr::read_unaligned(data_ptr));
+                break;
+            }
+            cmsg = libc::CMSG_NXTHDR(&msg, cmsg);
+        }
+    }
+
+    Ok((n as usize, cred))
+}
+
 // ---------------------------------------------------------------------------
 // Socket listener threads
 // ---------------------------------------------------------------------------
@@ -1332,6 +1394,20 @@ fn native_socket_listener(state: Arc<JournaldState>, activated_sock: Option<Unix
     let sock = match activated_sock {
         Some(s) => {
             eprintln!("journald: Using socket-activated native socket");
+            // Ensure SO_PASSCRED on socket-activated fd too
+            {
+                use std::os::unix::io::AsRawFd;
+                let enabled: libc::c_int = 1;
+                unsafe {
+                    libc::setsockopt(
+                        s.as_raw_fd(),
+                        libc::SOL_SOCKET,
+                        libc::SO_PASSCRED,
+                        &enabled as *const _ as *const libc::c_void,
+                        std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+                    );
+                }
+            }
             s
         }
         None => match create_datagram_socket(JOURNAL_SOCKET_PATH) {
@@ -1352,17 +1428,21 @@ fn native_socket_listener(state: Arc<JournaldState>, activated_sock: Option<Unix
             break;
         }
 
-        match sock.recv_from(&mut buf) {
-            Ok((len, _addr)) => {
+        match recv_with_cred(&sock, &mut buf) {
+            Ok((len, cred)) => {
                 let data = &buf[..len];
                 let mut entry = parse_native_message(data);
 
-                // Set trusted fields — for datagram sockets we can get the
-                // sender's credentials via SO_PEERCRED, but recv_from doesn't
-                // expose that easily.  Fall back to using SYSLOG_PID if set.
-                let pid = entry
-                    .field("SYSLOG_PID")
-                    .and_then(|s| s.parse::<u32>().ok())
+                // Use SCM_CREDENTIALS PID for trusted field enrichment.
+                // Fall back to SYSLOG_PID if credentials are unavailable.
+                let pid = cred
+                    .map(|c| c.pid as u32)
+                    .filter(|&p| p > 0)
+                    .or_else(|| {
+                        entry
+                            .field("SYSLOG_PID")
+                            .and_then(|s| s.parse::<u32>().ok())
+                    })
                     .unwrap_or(0);
 
                 if pid > 0 {
@@ -1411,15 +1491,20 @@ fn syslog_socket_listener(state: Arc<JournaldState>) {
             break;
         }
 
-        match sock.recv(&mut buf) {
-            Ok(len) => {
+        match recv_with_cred(&sock, &mut buf) {
+            Ok((len, cred)) => {
                 let data = &buf[..len];
                 let mut entry = parse_syslog_message(data);
 
-                // Try to look up process info from SYSLOG_PID
-                let pid = entry
-                    .field("SYSLOG_PID")
-                    .and_then(|s| s.parse::<u32>().ok())
+                // Use SCM_CREDENTIALS PID, fall back to SYSLOG_PID
+                let pid = cred
+                    .map(|c| c.pid as u32)
+                    .filter(|&p| p > 0)
+                    .or_else(|| {
+                        entry
+                            .field("SYSLOG_PID")
+                            .and_then(|s| s.parse::<u32>().ok())
+                    })
                     .unwrap_or(0);
                 if pid > 0 {
                     entry.set_trusted_process_fields(pid);

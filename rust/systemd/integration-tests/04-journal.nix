@@ -24,20 +24,16 @@
     sed -i '/journalctl.*--machine .host/d' TEST-04-JOURNAL.journal.sh
     # Add sleep after journald restart to wait for socket re-creation
     sed -i 's|systemctl restart systemd-journald|systemctl restart systemd-journald \&\& sleep 2|' TEST-04-JOURNAL.journal.sh
-    # Remove per-write PID tracking tests (requires SO_PASSCRED + recvmsg)
+    # Remove per-write PID tracking tests (needs per-write SCM_CREDENTIALS on stdout stream socket)
     sed -i '/grep -vq.*_PID=\$PID/d' TEST-04-JOURNAL.journal.sh
     sed -i '/_LINE_BREAK/d' TEST-04-JOURNAL.journal.sh
     sed -i '/sort -u.*grep -c/d' TEST-04-JOURNAL.journal.sh
-    # Remove error test for non-existent unit glob (journalctl doesn't exit non-zero on empty results)
-    sed -i '/this-unit-should-not-exist/d' TEST-04-JOURNAL.journal.sh
     # Remove verbose-success tests (need per-service journal stdout streams)
     sed -i '/verbose-success/d' TEST-04-JOURNAL.journal.sh
     # Remove silent-success tests (need per-service journal stdout streams)
     sed -i '/silent-success/d' TEST-04-JOURNAL.journal.sh
     # Remove script-as-path test (script's bash process has no matching journal entries)
     sed -i '/journalctl -b.*readlink/d' TEST-04-JOURNAL.journal.sh
-    # Remove --follow --file test (glob doesn't expand inside --file= option value)
-    sed -i '/journalctl --follow --file/d' TEST-04-JOURNAL.journal.sh
     # Remove forever-print-hola tests (journald restart resilience)
     sed -i '/forever-print-hola/d' TEST-04-JOURNAL.journal.sh
     sed -i '/i-lose-my-logs/d' TEST-04-JOURNAL.journal.sh

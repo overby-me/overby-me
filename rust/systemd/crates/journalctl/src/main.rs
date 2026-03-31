@@ -1490,10 +1490,30 @@ fn detect_boots(entries: &[JournalEntry]) -> Vec<BootRecord> {
 /// Open journal storage from the appropriate directory.
 fn open_storage(cli: &Cli) -> Result<JournalStorage, String> {
     let root_prefix = cli.root.as_deref().unwrap_or("");
-    let directory = if !cli.file.is_empty() {
+    // Expand globs in --file values (C journalctl does its own glob expansion
+    // because bash can't expand globs inside --file=<pattern>)
+    let expanded_files: Vec<String> = cli
+        .file
+        .iter()
+        .flat_map(|f| {
+            if f.contains('*') || f.contains('?') || f.contains('[') {
+                glob::glob(f)
+                    .ok()
+                    .map(|paths| {
+                        paths
+                            .filter_map(|p| p.ok())
+                            .map(|p| p.to_string_lossy().into_owned())
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_else(|| vec![f.clone()])
+            } else {
+                vec![f.clone()]
+            }
+        })
+        .collect();
+    let directory = if !expanded_files.is_empty() {
         // --file: collect unique parent directories from all specified files
-        let mut dirs: Vec<PathBuf> = cli
-            .file
+        let mut dirs: Vec<PathBuf> = expanded_files
             .iter()
             .filter_map(|f| PathBuf::from(f).parent().map(|p| p.to_path_buf()))
             .collect();
@@ -2344,10 +2364,10 @@ fn main() {
         follow_journal(&cli, output_format, &fmt_opts, &storage);
     }
 
-    // Exit 1 when --grep was used and no entries matched (matches real
-    // journalctl behavior). This is important for scripts that use
-    // `journalctl --grep=X` to check if a message appeared in the log.
-    if filtered.is_empty() && !cli.follow && cli.grep.is_some() {
+    // Exit 1 when --grep or --unit was used and no entries matched (matches
+    // real journalctl behavior). This is important for scripts that use
+    // `journalctl --grep=X` or `journalctl --unit=X` to check for entries.
+    if filtered.is_empty() && !cli.follow && (cli.grep.is_some() || cli.unit.is_some()) {
         process::exit(1);
     }
 }
