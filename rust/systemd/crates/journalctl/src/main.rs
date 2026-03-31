@@ -1671,8 +1671,9 @@ fn main() {
     // Handle special commands that don't need to read entries
     if cli.flush {
         send_signal_to_journald(libc::SIGUSR1);
-        // Wait for journald to complete the flush (no ack mechanism, use a brief sleep)
-        std::thread::sleep(Duration::from_millis(250));
+        // Wait for journald to complete the flush (no ack mechanism, use a brief sleep).
+        // Use 1s to ensure the maintenance loop (500ms period) has processed the request.
+        std::thread::sleep(Duration::from_secs(1));
         return;
     }
 
@@ -1704,8 +1705,10 @@ fn main() {
         if let Some(ref ns) = cli.namespace {
             send_signal_to_journald_namespace(ns, libc::SIGRTMIN() + 1);
         }
-        // Wait for journald to complete the fsync (no ack mechanism, use a brief sleep)
-        std::thread::sleep(Duration::from_millis(250));
+        // Wait for journald to complete the fsync (no ack mechanism, use a brief sleep).
+        // Use 1s to ensure the maintenance loop (500ms period) has processed the request
+        // and all pending socket messages have been dispatched first.
+        std::thread::sleep(Duration::from_secs(1));
         return;
     }
 
@@ -2103,13 +2106,13 @@ fn main() {
         });
     }
 
+    // --dmesg / -k: filter by _TRANSPORT=kernel (matches C systemd behavior)
+    if cli.dmesg {
+        filtered.retain(|e| e.field("_TRANSPORT").is_some_and(|t| t == "kernel"));
+    }
+
     // Identifier filter
-    let effective_identifier = if cli.dmesg {
-        Some("kernel".to_string())
-    } else {
-        cli.identifier.clone()
-    };
-    if let Some(ref ident) = effective_identifier {
+    if let Some(ref ident) = cli.identifier {
         filtered.retain(|e| e.syslog_identifier().is_some_and(|i| i == *ident));
     }
 
@@ -2544,13 +2547,13 @@ fn matches_follow_filters(entry: &JournalEntry, cli: &Cli) -> bool {
         }
     }
 
+    // --dmesg / -k: filter by _TRANSPORT=kernel in follow mode
+    if cli.dmesg && entry.field("_TRANSPORT").is_none_or(|t| t != "kernel") {
+        return false;
+    }
+
     // Identifier filter
-    let effective_identifier = if cli.dmesg {
-        Some("kernel".to_string())
-    } else {
-        cli.identifier.clone()
-    };
-    if let Some(ref ident) = effective_identifier
+    if let Some(ref ident) = cli.identifier
         && entry.syslog_identifier().is_none_or(|i| i != *ident)
     {
         return false;

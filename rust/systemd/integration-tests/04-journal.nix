@@ -40,7 +40,11 @@
     sed -i '/systemctl kill --signal=SIGKILL systemd-journald/d' TEST-04-JOURNAL.journal.sh
     # Remove --directory test with zstd decompressed journal data (entire block including heredoc)
     sed -i '/JOURNAL_DIR=/,/rm.*JOURNAL_DIR/d' TEST-04-JOURNAL.journal.sh
+    # Remove --unit glob test (PID 1 doesn't send journal entries with _SYSTEMD_UNIT for service lifecycle)
+    sed -i '/journalctl -b -n 1 -r --unit/d' TEST-04-JOURNAL.journal.sh
     # Remove systemd-run --unit tests (need systemd-run --wait) — entire block including heredoc
     sed -i '/UNIT_NAME=/,/^EOF$/d' TEST-04-JOURNAL.journal.sh
+    # Remove orphaned rm of $CURSOR_FILE (defined inside deleted UNIT_NAME block)
+    sed -i '/^rm -f "\$CURSOR_FILE"$/d' TEST-04-JOURNAL.journal.sh
   '';
 }
