@@ -3108,6 +3108,8 @@
     [[ "$(cat /tmp/stdout-test-out)" == "hello-stdout" ]]
 
     : "StandardOutput=append: appends to file"
+    # Stop previous oneshot so re-start actually runs again
+    systemctl stop stdout-test.service 2>/dev/null || true
     cat > /run/systemd/system/stdout-test.service << EOF
     [Service]
     Type=oneshot
@@ -3121,6 +3123,7 @@
     grep -q "second-line" /tmp/stdout-test-out
 
     : "StandardOutput=truncate: overwrites file"
+    systemctl stop stdout-test.service 2>/dev/null || true
     cat > /run/systemd/system/stdout-test.service << EOF
     [Service]
     Type=oneshot
