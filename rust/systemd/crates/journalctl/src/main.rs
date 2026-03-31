@@ -2233,14 +2233,19 @@ fn main() {
     }
 
     // Cursor filter (--cursor, --after-cursor, or --cursor-file)
+    // --cursor-file uses after-cursor (>) semantics, matching C systemd behavior
     let effective_cursor = if let Some(ref c) = cli.cursor {
+        Some(c.clone())
+    } else {
+        None
+    };
+    let effective_after_cursor = if let Some(ref c) = cli.after_cursor {
         Some(c.clone())
     } else if let Some(ref file) = cli.cursor_file {
         fs::read_to_string(file).ok().map(|s| s.trim().to_string())
     } else {
         None
     };
-    let effective_after_cursor = cli.after_cursor.clone();
 
     if let Some(ref cursor_str) = effective_cursor
         && effective_after_cursor.is_none()
@@ -2305,6 +2310,9 @@ fn main() {
         filtered.reverse();
     }
 
+    // Save cursor of the last entry before truncation (for -n 0 --cursor-file)
+    let last_entry_before_truncation = filtered.last().cloned();
+
     // Limit number of entries
     if let Some(ref n_str) = cli.lines {
         let from_start = n_str.starts_with('+');
@@ -2313,20 +2321,21 @@ fn main() {
         } else {
             n_str.parse().unwrap_or(0)
         };
-        if n > 0 {
-            if from_start {
-                // +N: show the first N entries from the start
-                filtered.truncate(n);
-            } else if !cli.reverse {
-                // Show the last N entries (tail behavior)
-                if filtered.len() > n {
-                    let skip = filtered.len() - n;
-                    filtered = filtered.into_iter().skip(skip).collect();
-                }
-            } else {
-                // Already reversed, just truncate
-                filtered.truncate(n);
+        if from_start {
+            // +N: show the first N entries from the start
+            filtered.truncate(n);
+        } else if n > 0 && !cli.reverse {
+            // Show the last N entries (tail behavior)
+            if filtered.len() > n {
+                let skip = filtered.len() - n;
+                filtered = filtered.into_iter().skip(skip).collect();
             }
+        } else if n > 0 {
+            // Already reversed, just truncate
+            filtered.truncate(n);
+        } else {
+            // -n 0: show no entries
+            filtered.clear();
         }
     }
 
@@ -2356,7 +2365,9 @@ fn main() {
     }
 
     // Show cursor / write cursor-file after last entry
-    if let Some(last) = filtered.last() {
+    // For cursor-file, use last_entry_before_truncation so -n 0 still saves cursor
+    let cursor_entry = filtered.last().or(last_entry_before_truncation.as_ref());
+    if let Some(last) = cursor_entry {
         let cursor = format!(
             "s=0;i={:x};b={};m={:x};t={:x};x=0",
             last.seqnum,
@@ -2364,7 +2375,7 @@ fn main() {
             last.monotonic_usec,
             last.realtime_usec,
         );
-        if cli.show_cursor {
+        if cli.show_cursor && filtered.last().is_some() {
             let _ = writeln!(writer, "-- cursor: {}", cursor);
         }
         if let Some(ref file) = cli.cursor_file {

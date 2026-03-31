@@ -41,6 +41,5 @@
     sed -i '/JOURNAL_DIR=/,/rm.*JOURNAL_DIR/d' TEST-04-JOURNAL.journal.sh
     # Remove systemd-run --unit tests (need systemd-run --wait) — entire block including heredoc
     sed -i '/UNIT_NAME=/,/^EOF$/d' TEST-04-JOURNAL.journal.sh
-    sed -i '/CURSOR_FILE/d' TEST-04-JOURNAL.journal.sh
   '';
 }
