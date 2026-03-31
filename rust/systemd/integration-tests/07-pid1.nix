@@ -3338,9 +3338,7 @@
          TEST-07-PID1.user-namespace-path.sh \
          TEST-07-PID1.issue-27953.sh \
          TEST-07-PID1.issue-3171.sh \
-         TEST-07-PID1.prefix-shell.sh \
-         TEST-07-PID1.resource-limits.sh \
-         TEST-07-PID1.socket-max-connection.sh
+         TEST-07-PID1.prefix-shell.sh
   '';
   extraPackages = pkgs: [pkgs.e2fsprogs pkgs.socat pkgs.nmap]; # chattr for socket-on-failure, socat for issue-30412, nmap/ncat for issue-3171
   testTimeout = 3600; # 56+ subtests need more than the default 1800s
