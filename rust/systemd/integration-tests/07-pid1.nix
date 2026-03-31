@@ -2455,10 +2455,8 @@
     systemd-run --wait --pipe bash -c 'exit 42' || RC=$?
     [[ "$RC" -eq 42 ]]
 
-    # Skipped: systemd-run --wait with Type=oneshot hangs because
-    # successful oneshot services stay in Started state (not Stopped).
-    # : "systemd-run --wait with -p Type=oneshot"
-    # systemd-run --wait -p Type=oneshot true
+    : "systemd-run --wait with -p Type=oneshot"
+    systemd-run --wait -p Type=oneshot true
     SREOF
     chmod +x TEST-07-PID1.systemd-run-exit-code.sh
 
@@ -3256,7 +3254,6 @@
          TEST-07-PID1.issue-3171.sh \
          TEST-07-PID1.exec-timestamps.sh \
          TEST-07-PID1.startv.sh \
-         TEST-07-PID1.transient.sh \
          TEST-07-PID1.socket-max-connection.sh
   '';
   extraPackages = pkgs: [pkgs.e2fsprogs pkgs.socat pkgs.nmap]; # chattr for socket-on-failure, socat for issue-30412, nmap/ncat for issue-3171
