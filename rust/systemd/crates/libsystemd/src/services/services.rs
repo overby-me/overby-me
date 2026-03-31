@@ -66,8 +66,8 @@ impl LogFilter {
 /// Path to journald's stdout stream socket.
 const JOURNAL_STDOUT_SOCKET: &str = "/run/systemd/journal/stdout";
 
-/// Open a connection to journald's stdout stream socket and send the 7-line
-/// protocol header. Returns the connected stream, or `None` if the socket is
+/// Open a connection to journald's stdout stream socket and send the protocol
+/// header. Returns the connected stream, or `None` if the socket is
 /// unavailable (e.g. journald hasn't started yet).
 ///
 /// Protocol header lines:
@@ -78,10 +78,12 @@ const JOURNAL_STDOUT_SOCKET: &str = "/run/systemd/journal/stdout";
 ///   5. forward_to_syslog (0)
 ///   6. forward_to_kmsg (0)
 ///   7. forward_to_console (0)
-pub fn open_journal_stream(unit_name: &str) -> Option<UnixStream> {
+///   8. _SYSTEMD_INVOCATION_ID (rust-systemd extension, 32 hex chars)
+pub fn open_journal_stream(unit_name: &str, invocation_id: Option<&str>) -> Option<UnixStream> {
     let stream = UnixStream::connect(JOURNAL_STDOUT_SOCKET).ok()?;
     let identifier = unit_name.strip_suffix(".service").unwrap_or(unit_name);
-    let header = format!("{identifier}\n{unit_name}\n6\n1\n0\n0\n0\n",);
+    let inv_id = invocation_id.unwrap_or("");
+    let header = format!("{identifier}\n{unit_name}\n6\n1\n0\n0\n0\n{inv_id}\n");
     use std::io::Write;
     let mut s = stream;
     s.write_all(header.as_bytes()).ok()?;

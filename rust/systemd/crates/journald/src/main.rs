@@ -1615,10 +1615,11 @@ fn handle_stdout_connection(stream: UnixStream, state: Arc<JournaldState>) {
     let reader = BufReader::new(stream);
     let mut lines = reader.lines();
 
-    // Read the 7-line positional header
+    // Read the 7-line positional header (plus optional 8th line for invocation ID)
     let mut identifier = String::from("unknown");
     let mut priority: u8 = 6; // default: info
     let mut unit_name = String::new();
+    let mut invocation_id = String::new();
 
     // Helper to read one header line
     macro_rules! read_header_line {
@@ -1653,20 +1654,27 @@ fn handle_stdout_connection(stream: UnixStream, state: Arc<JournaldState>) {
     let _ = read_header_line!();
     let _ = read_header_line!();
     let _ = read_header_line!();
-
-    // Process log lines
-    for line in lines {
-        if state.shutdown.load(Ordering::Relaxed) {
-            break;
+    // Line 8 (extension): _SYSTEMD_INVOCATION_ID — sent by rust-systemd PID 1.
+    // Only our PID 1 sends this; C systemd sends 7 lines then log data.
+    // We peek at the next line and only consume it as invocation ID if it
+    // looks like a 32-char hex string (systemd invocation ID format).
+    let mut first_log_line: Option<String> = None;
+    if let Some(Ok(maybe_inv)) = lines.next() {
+        if !maybe_inv.is_empty()
+            && maybe_inv.len() == 32
+            && maybe_inv.chars().all(|c| c.is_ascii_hexdigit())
+        {
+            invocation_id = maybe_inv;
+        } else {
+            // Not an invocation ID — this is actually the first log line
+            first_log_line = Some(maybe_inv);
         }
+    }
 
-        let line = match line {
-            Ok(l) => l,
-            Err(_) => break,
-        };
-
+    // Helper to process a single log line into a journal entry
+    let process_line = |line: String| {
         if line.is_empty() {
-            continue;
+            return;
         }
 
         let (effective_priority, message) = if level_prefix {
@@ -1678,7 +1686,7 @@ fn handle_stdout_connection(stream: UnixStream, state: Arc<JournaldState>) {
         // Strip trailing whitespace (matches C journald behavior)
         let message = message.trim_end();
         if message.is_empty() {
-            continue;
+            return;
         }
 
         let mut entry = JournalEntry::new();
@@ -1687,6 +1695,9 @@ fn handle_stdout_connection(stream: UnixStream, state: Arc<JournaldState>) {
         entry.set_field("SYSLOG_IDENTIFIER", &identifier);
         if !unit_name.is_empty() {
             entry.set_field("_SYSTEMD_UNIT", &unit_name);
+        }
+        if !invocation_id.is_empty() {
+            entry.set_field("_SYSTEMD_INVOCATION_ID", &invocation_id);
         }
         entry.set_field("_TRANSPORT", "stdout");
         if let Some(ref cred) = peer_cred {
@@ -1699,6 +1710,25 @@ fn handle_stdout_connection(stream: UnixStream, state: Arc<JournaldState>) {
         entry.set_hostname();
 
         state.dispatch_entry(entry);
+    };
+
+    // Process the first log line if it wasn't consumed as invocation ID
+    if let Some(line) = first_log_line {
+        process_line(line);
+    }
+
+    // Process remaining log lines
+    for line in lines {
+        if state.shutdown.load(Ordering::Relaxed) {
+            break;
+        }
+
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => break,
+        };
+
+        process_line(line);
     }
 }
 

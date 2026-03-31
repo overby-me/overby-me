@@ -5,7 +5,7 @@
     "bsod" # needs systemd-bsod binary not in VM
     "JOURNAL\\.cat\\." # needs journal namespace (systemd-journald@ template socket)
     "corrupted-journals" # journalctl --directory creates subdir structure that rm -f can't remove
-    "JOURNAL\\.invocation\\." # _SYSTEMD_INVOCATION_ID not in journal stream header protocol
+    "JOURNAL\\.invocation\\." # needs systemd-run --wait (oneshot deadlock) + journalctl --list-invocation
 
     "journal-append" # needs test-journal-append test binary
     "journal-corrupt\\." # needs systemd-run --user -M (machined)

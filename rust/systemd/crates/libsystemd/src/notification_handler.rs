@@ -439,7 +439,10 @@ pub fn handle_all_std_out(run_info: ArcMutRuntimeInfo) {
                                 // Lazily open journal stdout stream on first data
                                 if mut_state.srvc.journal_stream.is_none() {
                                     mut_state.srvc.journal_stream =
-                                        crate::services::open_journal_stream(&name);
+                                        crate::services::open_journal_stream(
+                                            &name,
+                                            mut_state.srvc.invocation_id.as_deref(),
+                                        );
                                 }
                                 mut_state.srvc.stdout_buffer.extend(&buf[..bytes]);
                                 let filter = if srvc.conf.exec_config.log_filter_patterns.is_empty()
@@ -562,7 +565,10 @@ pub fn handle_all_std_err(run_info: ArcMutRuntimeInfo) {
                                 // Lazily open journal stdout stream on first data
                                 if mut_state.srvc.journal_stream.is_none() {
                                     mut_state.srvc.journal_stream =
-                                        crate::services::open_journal_stream(&name);
+                                        crate::services::open_journal_stream(
+                                            &name,
+                                            mut_state.srvc.invocation_id.as_deref(),
+                                        );
                                 }
                                 mut_state.srvc.stderr_buffer.extend(&buf[..bytes]);
                                 let filter = if srvc.conf.exec_config.log_filter_patterns.is_empty()
