@@ -2315,27 +2315,32 @@ fn main() {
 
     // Limit number of entries
     if let Some(ref n_str) = cli.lines {
-        let from_start = n_str.starts_with('+');
-        let n: usize = if let Some(stripped) = n_str.strip_prefix('+') {
-            stripped.parse().unwrap_or(0)
+        // -n all: show all entries (no limit)
+        if n_str.eq_ignore_ascii_case("all") {
+            // no-op: show everything
         } else {
-            n_str.parse().unwrap_or(0)
-        };
-        if from_start {
-            // +N: show the first N entries from the start
-            filtered.truncate(n);
-        } else if n > 0 && !cli.reverse {
-            // Show the last N entries (tail behavior)
-            if filtered.len() > n {
-                let skip = filtered.len() - n;
-                filtered = filtered.into_iter().skip(skip).collect();
+            let from_start = n_str.starts_with('+');
+            let n: usize = if let Some(stripped) = n_str.strip_prefix('+') {
+                stripped.parse().unwrap_or(0)
+            } else {
+                n_str.parse().unwrap_or(0)
+            };
+            if from_start {
+                // +N: show the first N entries from the start
+                filtered.truncate(n);
+            } else if n > 0 && !cli.reverse {
+                // Show the last N entries (tail behavior)
+                if filtered.len() > n {
+                    let skip = filtered.len() - n;
+                    filtered = filtered.into_iter().skip(skip).collect();
+                }
+            } else if n > 0 {
+                // Already reversed, just truncate
+                filtered.truncate(n);
+            } else {
+                // -n 0: show no entries
+                filtered.clear();
             }
-        } else if n > 0 {
-            // Already reversed, just truncate
-            filtered.truncate(n);
-        } else {
-            // -n 0: show no entries
-            filtered.clear();
         }
     }
 

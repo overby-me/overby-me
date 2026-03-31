@@ -13,6 +13,7 @@
     "journal-remote" # self-skips but needs binary check
     "LogFilterPatterns" # LogFilterPatterns= not yet implemented in rust-systemd PID 1
     "reload" # uses systemd-run --wait (oneshot deadlock) + verify_journals with -D
+    "journalctl-varlink" # needs varlinkctl binary not in NixOS VM
     "SYSTEMD_JOURNAL_COMPRESS" # needs journalctl --verify and compression env var support
   ];
   patchScript = ''
