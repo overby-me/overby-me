@@ -97,6 +97,28 @@ impl Shell {
         use nix::unistd::{ForkResult, dup2, fork, pipe};
         use std::os::unix::io::IntoRawFd;
 
+        /// Move fd to highest available fd below maxfd, matching bash's
+        /// move_to_high_fd(fd, 1, maxfd). Scans down from maxfd-1 for
+        /// a free fd slot and dup2's to it, closing the original.
+        fn move_to_high_fd(fd: i32, maxfd: i32) -> i32 {
+            let mut nfds = maxfd - 1;
+            while nfds > 3 {
+                let ignore: i32 = 0;
+                if unsafe { libc::fcntl(nfds, libc::F_GETFD, ignore) } == -1 {
+                    break;
+                }
+                nfds -= 1;
+            }
+            if nfds > 3 && fd != nfds {
+                let new_fd = unsafe { libc::dup2(fd, nfds) };
+                if new_fd != -1 {
+                    unsafe { libc::close(fd) };
+                    return new_fd;
+                }
+            }
+            fd
+        }
+
         let coproc_name = name.unwrap_or("COPROC");
 
         // Close ALL previous coproc fds — bash only allows one active coproc
@@ -132,14 +154,14 @@ impl Shell {
             self.vars.remove(&format!("{}_PID", name));
         }
 
-        // Create two pipes: one for parent→child stdin, one for child→parent stdout
-        let (child_read, parent_write) = match pipe() {
-            Ok(p) => (p.0.into_raw_fd(), p.1.into_raw_fd()),
-            Err(e) => {
-                eprintln!("{}: coproc: {}", self.error_prefix(), e);
-                return 1;
-            }
-        };
+        // Create two pipes and move all fds to high numbers BEFORE fork,
+        // matching bash's sh_openpipe() which calls move_to_high_fd(fd, 1, 64).
+        // Bash scans DOWN from (maxfd-1) for the highest free fd and dup2's to it.
+        // Bash creates rpipe first (parent_read/child_write), then wpipe (child_read/parent_write).
+        // This produces: rpipe = [63, 62], wpipe = [61, 60]
+        // After fork, parent closes child ends (62, 61) keeping rfd=63, wfd=60.
+
+        // rpipe: [0]=parent_read, [1]=child_write (child stdout → parent reads)
         let (parent_read, child_write) = match pipe() {
             Ok(p) => (p.0.into_raw_fd(), p.1.into_raw_fd()),
             Err(e) => {
@@ -147,6 +169,27 @@ impl Shell {
                 return 1;
             }
         };
+        // Move both ends of rpipe to high fds
+        let parent_read = move_to_high_fd(parent_read, 64);
+        let child_write = move_to_high_fd(child_write, 64);
+
+        // wpipe: [0]=child_read, [1]=parent_write (parent writes → child stdin)
+        let (child_read, parent_write) = match pipe() {
+            Ok(p) => (p.0.into_raw_fd(), p.1.into_raw_fd()),
+            Err(e) => {
+                eprintln!("{}: coproc: {}", self.error_prefix(), e);
+                return 1;
+            }
+        };
+        // Move both ends of wpipe to high fds
+        let child_read = move_to_high_fd(child_read, 64);
+        let parent_write = move_to_high_fd(parent_write, 64);
+
+        // Set close-on-exec on parent fds so they don't leak to children
+        unsafe {
+            libc::fcntl(parent_read, libc::F_SETFD, libc::FD_CLOEXEC);
+            libc::fcntl(parent_write, libc::F_SETFD, libc::FD_CLOEXEC);
+        }
 
         match unsafe { fork() } {
             Ok(ForkResult::Child) => {
@@ -170,30 +213,13 @@ impl Shell {
                     libc::close(child_write);
                 }
 
-                // Move fds to high numbers (63+) like bash does
-                let high_read = unsafe { libc::fcntl(parent_read, libc::F_DUPFD, 63) };
-                let high_write = unsafe { libc::fcntl(parent_write, libc::F_DUPFD, 60) };
-                if high_read >= 0 {
-                    unsafe { libc::close(parent_read) };
-                }
-                if high_write >= 0 {
-                    unsafe { libc::close(parent_write) };
-                }
-                let read_fd = if high_read >= 0 {
-                    high_read
-                } else {
-                    parent_read
-                };
-                let write_fd = if high_write >= 0 {
-                    high_write
-                } else {
-                    parent_write
-                };
-
                 // Set COPROC array: [0]=read_fd, [1]=write_fd
                 self.arrays.insert(
                     coproc_name.to_string(),
-                    vec![Some(read_fd.to_string()), Some(write_fd.to_string())],
+                    vec![
+                        Some(parent_read.to_string()),
+                        Some(parent_write.to_string()),
+                    ],
                 );
 
                 // Set COPROC_PID
@@ -1527,7 +1553,29 @@ impl Shell {
         };
         let resolved_base = self.resolve_nameref(base_name);
         // Noassign variables: silently ignore assignments
-        if matches!(resolved_base.as_str(), "GROUPS" | "FUNCNAME" | "DIRSTACK") {
+        if matches!(resolved_base.as_str(), "GROUPS" | "FUNCNAME") {
+            return;
+        }
+        // DIRSTACK[N]=value: modify dir_stack accordingly
+        if resolved_base == "DIRSTACK" {
+            if let Some(bracket) = assign.name.find('[')
+                && let Some(end) = assign.name.find(']')
+                && let Ok(idx) = assign.name[bracket + 1..end].parse::<usize>()
+                && let AssignValue::Scalar(w) = &assign.value
+            {
+                let val = self.expand_word_single(w);
+                if idx == 0 {
+                    // DIRSTACK[0] = PWD; assignment doesn't change directory
+                    // (per bash manual), but we update the array
+                } else {
+                    let stack_idx = idx - 1;
+                    if stack_idx < self.dir_stack.len() {
+                        self.dir_stack[stack_idx] = val;
+                    }
+                }
+                // Sync the DIRSTACK array
+                crate::builtins::fs::sync_dirstack(self);
+            }
             return;
         }
         if self.readonly_vars.contains(&resolved_base) {
