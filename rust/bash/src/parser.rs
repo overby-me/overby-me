@@ -1519,6 +1519,7 @@ impl Parser {
                                 pval_parts.extend(parts[pi + 1..].iter().cloned());
                                 part_found = true;
                                 final_append = true;
+                                break;
                             } else if let Some(pos) = lit.find("]=") {
                                 part_name.push_str(&lit[..pos + 1]);
                                 let after = &lit[pos + 2..];
@@ -1527,6 +1528,7 @@ impl Parser {
                                 }
                                 pval_parts.extend(parts[pi + 1..].iter().cloned());
                                 part_found = true;
+                                break;
                             } else {
                                 part_name.push_str(lit);
                             }

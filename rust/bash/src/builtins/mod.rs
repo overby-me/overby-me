@@ -1139,7 +1139,12 @@ fn format_compound_command_indent(cmd: &CompoundCommand, indent: usize) -> Strin
 
 pub use vars::parse_assoc_literal;
 
-pub fn parse_array_literal(s: &str) -> Vec<String> {
+/// Parse an indexed array compound assignment that may contain `[n]=value` subscript syntax.
+/// Returns a sparse `Vec<Option<String>>` where the index corresponds to the array index.
+/// Elements without explicit subscripts are assigned sequentially from the last index + 1.
+/// Example: `([1]="" [2]="bdef" [5]="hello world" "test")` →
+///   [None, Some(""), Some("bdef"), None, None, Some("hello world"), Some("test")]
+pub fn parse_indexed_compound_assignment(s: &str) -> Vec<Option<String>> {
     let trimmed = s.trim();
     let inner = if trimmed.starts_with('(') && trimmed.ends_with(')') {
         &trimmed[1..trimmed.len() - 1]
@@ -1153,47 +1158,124 @@ pub fn parse_array_literal(s: &str) -> Vec<String> {
 
     // Check for \x1F separator (from parser's inline array handling)
     if inner.contains('\x1F') {
-        return inner.split('\x1F').map(|s| s.to_string()).collect();
+        return inner.split('\x1F').map(|s| Some(s.to_string())).collect();
     }
 
-    // Simple word splitting, respecting quotes
-    let mut elements = Vec::new();
-    let mut current = String::new();
+    let mut result: Vec<Option<String>> = Vec::new();
+    let mut next_idx: usize = 0;
+    let chars: Vec<char> = inner.chars().collect();
+    let len = chars.len();
+    let mut pos = 0;
+
+    while pos < len {
+        // Skip whitespace
+        while pos < len && chars[pos].is_whitespace() {
+            pos += 1;
+        }
+        if pos >= len {
+            break;
+        }
+
+        // Check for [subscript]=value
+        if chars[pos] == '[' {
+            let bracket_start = pos + 1;
+            let mut depth = 1;
+            let mut bracket_end = bracket_start;
+            while bracket_end < len && depth > 0 {
+                if chars[bracket_end] == '[' {
+                    depth += 1;
+                } else if chars[bracket_end] == ']' {
+                    depth -= 1;
+                }
+                if depth > 0 {
+                    bracket_end += 1;
+                }
+            }
+            // bracket_end points to the closing ']'
+            if bracket_end < len
+                && chars[bracket_end] == ']'
+                && bracket_end + 1 < len
+                && chars[bracket_end + 1] == '='
+            {
+                let subscript: String = chars[bracket_start..bracket_end].iter().collect();
+                pos = bracket_end + 2; // skip ]=
+
+                // Parse the subscript as arithmetic (simple integer for now)
+                let idx = subscript.trim().parse::<i64>().unwrap_or(0);
+                if idx < 0 {
+                    // Negative indices — skip for now (would need array length context)
+                    let _value = read_compound_value(&chars, &mut pos);
+                    continue;
+                }
+                let idx = idx as usize;
+
+                let value = read_compound_value(&chars, &mut pos);
+                // Extend result to fit
+                while result.len() <= idx {
+                    result.push(None);
+                }
+                result[idx] = Some(value);
+                next_idx = idx + 1;
+                continue;
+            }
+        }
+
+        // No subscript — sequential assignment
+        let value = read_compound_value(&chars, &mut pos);
+        while result.len() <= next_idx {
+            result.push(None);
+        }
+        result[next_idx] = Some(value);
+        next_idx += 1;
+    }
+
+    result
+}
+
+/// Helper: read a single value from a compound assignment, handling quotes.
+/// Advances `pos` past the value.
+fn read_compound_value(chars: &[char], pos: &mut usize) -> String {
+    let len = chars.len();
+    let mut value = String::new();
     let mut in_single_quote = false;
     let mut in_double_quote = false;
     let mut escape_next = false;
 
-    for ch in inner.chars() {
+    while *pos < len {
+        let ch = chars[*pos];
+
         if escape_next {
-            current.push(ch);
+            value.push(ch);
             escape_next = false;
+            *pos += 1;
             continue;
         }
         if ch == '\\' && !in_single_quote {
             escape_next = true;
+            *pos += 1;
             continue;
         }
         if ch == '\'' && !in_double_quote {
             in_single_quote = !in_single_quote;
+            *pos += 1;
             continue;
         }
         if ch == '"' && !in_single_quote {
             in_double_quote = !in_double_quote;
+            *pos += 1;
             continue;
         }
         if ch.is_whitespace() && !in_single_quote && !in_double_quote {
-            if !current.is_empty() {
-                elements.push(current.clone());
-                current.clear();
-            }
-            continue;
+            break;
         }
-        current.push(ch);
+        // Stop at ')' if unquoted — end of compound assignment
+        if ch == ')' && !in_single_quote && !in_double_quote {
+            break;
+        }
+        value.push(ch);
+        *pos += 1;
     }
-    if !current.is_empty() {
-        elements.push(current);
-    }
-    elements
+    value
 }
 
 /// Quote a value for `set` output, matching bash's format.

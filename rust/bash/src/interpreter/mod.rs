@@ -608,7 +608,9 @@ impl Shell {
         let mut seen = HashSet::new();
         let mut depth = 0;
         while let Some(target) = self.namerefs.get(&resolved) {
-            if seen.contains(target) || depth >= MAX_NAMEREF_DEPTH {
+            // Don't follow empty nameref targets — an empty target means
+            // the nameref hasn't been bound yet (e.g. `declare -n ref`).
+            if target.is_empty() || seen.contains(target) || depth >= MAX_NAMEREF_DEPTH {
                 break;
             }
             seen.insert(target.clone());
@@ -636,6 +638,15 @@ impl Shell {
 
     /// Set a variable value, resolving namerefs.
     pub fn set_var(&mut self, name: &str, value: String) {
+        // If name is a nameref with an empty target, rebind the nameref
+        // to point to `value` instead of assigning through it.
+        // This matches bash: `declare -n ref; ref=x` sets ref's target to "x".
+        if let Some(target) = self.namerefs.get(name)
+            && target.is_empty()
+        {
+            self.namerefs.insert(name.to_string(), value);
+            return;
+        }
         let resolved = self.resolve_nameref(name);
         if self.readonly_vars.contains(&resolved) {
             if let Some(fname) = self.func_names.last() {
@@ -734,7 +745,9 @@ impl Shell {
         // Auto-export when set -a (allexport) is active
         if self.opt_allexport && !self.exports.contains_key(&resolved) {
             self.exports.insert(resolved.clone(), value.clone());
-            unsafe { std::env::set_var(&resolved, &value) };
+            if !resolved.is_empty() {
+                unsafe { std::env::set_var(&resolved, &value) };
+            }
         }
         self.declared_unset.remove(&resolved);
         self.vars.insert(resolved, value);

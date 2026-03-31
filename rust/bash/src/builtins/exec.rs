@@ -194,7 +194,9 @@ pub(super) fn builtin_exec(shell: &mut Shell, args: &[String]) -> i32 {
     // Set up environment
     if clear_env {
         for (key, _) in std::env::vars() {
-            unsafe { std::env::remove_var(&key) };
+            if !key.is_empty() {
+                unsafe { std::env::remove_var(&key) };
+            }
         }
     } else {
         for (key, value) in &shell.exports {

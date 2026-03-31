@@ -1267,7 +1267,9 @@ impl Shell {
                     }
                     None => {
                         self.exports.remove(k);
-                        unsafe { std::env::remove_var(k) };
+                        if !k.is_empty() {
+                            unsafe { std::env::remove_var(k) };
+                        }
                     }
                 }
             }
@@ -1341,9 +1343,8 @@ impl Shell {
                                 let map = crate::builtins::parse_assoc_literal(value);
                                 self.assoc_arrays.insert(name.to_string(), map);
                             } else {
-                                let arr = crate::builtins::parse_array_literal(value);
-                                self.arrays
-                                    .insert(name.to_string(), arr.into_iter().map(Some).collect());
+                                let arr = crate::builtins::parse_indexed_compound_assignment(value);
+                                self.arrays.insert(name.to_string(), arr);
                             }
                             new_args.push(name.to_string());
                             modified = true;
@@ -1508,7 +1509,9 @@ impl Shell {
                         }
                         None => {
                             self.exports.remove(&k);
-                            unsafe { std::env::remove_var(&k) };
+                            if !k.is_empty() {
+                                unsafe { std::env::remove_var(&k) };
+                            }
                         }
                     }
                 }
@@ -1665,6 +1668,13 @@ impl Shell {
                             } else {
                                 0
                             };
+                            // If the variable exists as a scalar but not as an array,
+                            // convert scalar to array[0] first (bash behavior)
+                            if !self.arrays.contains_key(&resolved)
+                                && let Some(scalar_val) = self.vars.remove(&resolved)
+                            {
+                                self.arrays.insert(resolved.clone(), vec![Some(scalar_val)]);
+                            }
                             if let Some(arr) = self.arrays.get_mut(&resolved) {
                                 // Handle negative indices
                                 let idx = if raw_idx < 0 {
@@ -1809,6 +1819,14 @@ impl Shell {
                                     );
                                     self.last_status = 1;
                                     return;
+                                }
+                                // If the variable exists as a scalar but not as an array,
+                                // convert scalar to array[0] first (bash behavior:
+                                // a=abcde; a[2]=bdef → a=([0]="abcde" [2]="bdef"))
+                                if !self.arrays.contains_key(&resolved)
+                                    && let Some(scalar_val) = self.vars.remove(&resolved)
+                                {
+                                    self.arrays.insert(resolved.clone(), vec![Some(scalar_val)]);
                                 }
                                 let arr = self.arrays.entry(resolved).or_default();
                                 let idx = if raw_idx < 0 {

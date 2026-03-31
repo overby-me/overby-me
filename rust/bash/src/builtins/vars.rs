@@ -74,7 +74,9 @@ pub(super) fn builtin_export(shell: &mut Shell, args: &[String]) -> i32 {
         if unexport {
             // Remove export attribute but keep the variable
             shell.exports.remove(arg.as_str());
-            unsafe { std::env::remove_var(arg) };
+            if !arg.is_empty() {
+                unsafe { std::env::remove_var(arg) };
+            }
         } else if let Some(eq_pos) = arg.find('=') {
             let (name, value, is_append) = if eq_pos > 0 && arg.as_bytes()[eq_pos - 1] == b'+' {
                 (&arg[..eq_pos - 1], &arg[eq_pos + 1..], true)
@@ -83,11 +85,9 @@ pub(super) fn builtin_export(shell: &mut Shell, args: &[String]) -> i32 {
             };
             if array_mode && value.starts_with('(') && value.ends_with(')') {
                 // -a flag with (value): parse as array
-                let arr = parse_array_literal(value);
-                let export_val = arr.first().cloned().unwrap_or_default();
-                shell
-                    .arrays
-                    .insert(name.to_string(), arr.into_iter().map(Some).collect());
+                let arr = crate::builtins::parse_indexed_compound_assignment(value);
+                let export_val = arr.iter().find_map(|v| v.clone()).unwrap_or_default();
+                shell.arrays.insert(name.to_string(), arr);
                 shell.exports.insert(name.to_string(), export_val.clone());
                 unsafe { std::env::set_var(name, &export_val) };
             } else if shell.arrays.contains_key(name) {
@@ -278,7 +278,9 @@ pub(super) fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
             shell.uppercase_vars.remove(name);
             shell.lowercase_vars.remove(name);
             shell.capitalize_vars.remove(name);
-            unsafe { std::env::remove_var(name) };
+            if !name.is_empty() {
+                unsafe { std::env::remove_var(name) };
+            }
         } else if shell.namerefs.contains_key(name) {
             // unset through nameref: unset the target variable, keep the nameref
             let resolved = shell.resolve_nameref(name);
@@ -300,7 +302,9 @@ pub(super) fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
             shell.lowercase_vars.remove(&resolved);
             shell.capitalize_vars.remove(&resolved);
             // Don't remove the nameref itself — it stays
-            unsafe { std::env::remove_var(&resolved) };
+            if !resolved.is_empty() {
+                unsafe { std::env::remove_var(&resolved) };
+            }
         } else {
             // Regular variable unset
             if shell.readonly_vars.contains(name) {
@@ -321,7 +325,9 @@ pub(super) fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
             shell.uppercase_vars.remove(name);
             shell.lowercase_vars.remove(name);
             shell.capitalize_vars.remove(name);
-            unsafe { std::env::remove_var(name) };
+            if !name.is_empty() {
+                unsafe { std::env::remove_var(name) };
+            }
         }
     }
     status
@@ -360,7 +366,7 @@ pub(super) fn builtin_readonly(shell: &mut Shell, args: &[String]) -> i32 {
     }
 
     let print_all = names.is_empty();
-    if print_all && (args.is_empty() || print_mode || func_mode) {
+    if print_all && (args.is_empty() || print_mode || func_mode || array_mode) {
         if func_mode {
             // Print readonly functions with their bodies
             let mut fnames: Vec<&String> = shell.readonly_funcs.iter().collect();
@@ -377,12 +383,59 @@ pub(super) fn builtin_readonly(shell: &mut Shell, args: &[String]) -> i32 {
                 }
                 println!("declare -fr {}", name);
             }
+        } else if array_mode {
+            // readonly -a: list only readonly arrays
+            let mut sorted: Vec<_> = shell.arrays.keys().collect();
+            sorted.sort();
+            for name in sorted {
+                if !shell.readonly_vars.contains(name.as_str()) {
+                    continue;
+                }
+                if let Some(arr) = shell.arrays.get(name) {
+                    let has_elements = arr.iter().any(|v| v.is_some());
+                    if has_elements {
+                        let elements: Vec<String> = arr
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(i, v)| v.as_ref().map(|s| (i, s)))
+                            .map(|(i, v)| format!("[{}]=\"{}\"", i, v))
+                            .collect();
+                        if shell.opt_posix {
+                            println!("readonly -a {}=({})", name, elements.join(" "));
+                        } else {
+                            println!("declare -ar {}=({})", name, elements.join(" "));
+                        }
+                    } else if shell.opt_posix {
+                        println!("readonly -a {}", name);
+                    } else {
+                        println!("declare -ar {}", name);
+                    }
+                }
+            }
         } else {
             let mut vnames: Vec<&String> = shell.readonly_vars.iter().collect();
             vnames.sort();
             for name in vnames {
-                let val = shell.vars.get(name).cloned().unwrap_or_default();
-                println!("declare -r {}=\"{}\"", name, val);
+                if shell.arrays.contains_key(name) {
+                    // Readonly array: print with -ar flag and array values
+                    if let Some(arr) = shell.arrays.get(name) {
+                        let has_elements = arr.iter().any(|v| v.is_some());
+                        if has_elements {
+                            let elements: Vec<String> = arr
+                                .iter()
+                                .enumerate()
+                                .filter_map(|(i, v)| v.as_ref().map(|s| (i, s)))
+                                .map(|(i, v)| format!("[{}]=\"{}\"", i, v))
+                                .collect();
+                            println!("declare -ar {}=({})", name, elements.join(" "));
+                        } else {
+                            println!("declare -ar {}", name);
+                        }
+                    }
+                } else {
+                    let val = shell.vars.get(name).cloned().unwrap_or_default();
+                    println!("declare -r {}=\"{}\"", name, val);
+                }
             }
         }
         return 0;
@@ -390,6 +443,16 @@ pub(super) fn builtin_readonly(shell: &mut Shell, args: &[String]) -> i32 {
 
     let mut status = 0;
     for name in names {
+        // readonly a[5] is not supported — individual array elements can't be readonly
+        if !func_mode && name.contains('[') && !name.contains('=') {
+            eprintln!(
+                "{}: readonly: `{}': not a valid identifier",
+                shell.error_prefix(),
+                name
+            );
+            status = 1;
+            continue;
+        }
         if func_mode {
             if shell.readonly_funcs.contains(name) {
                 eprintln!(
@@ -447,10 +510,8 @@ pub(super) fn builtin_readonly(shell: &mut Shell, args: &[String]) -> i32 {
                     status = 1;
                 } else if array_mode && value.starts_with('(') && value.ends_with(')') {
                     // -a flag with (value): parse as array
-                    let arr = parse_array_literal(value);
-                    shell
-                        .arrays
-                        .insert(vname.to_string(), arr.into_iter().map(Some).collect());
+                    let arr = crate::builtins::parse_indexed_compound_assignment(value);
+                    shell.arrays.insert(vname.to_string(), arr);
                 } else if shell.arrays.contains_key(vname) {
                     // Existing array: assign to element 0
                     if let Some(arr) = shell.arrays.get_mut(vname) {
@@ -631,10 +692,8 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
                     shell.namerefs.insert(name.to_string(), value.to_string());
                 }
             } else if flag_array {
-                let arr = parse_array_literal(value);
-                shell
-                    .arrays
-                    .insert(name.to_string(), arr.into_iter().map(Some).collect());
+                let arr = crate::builtins::parse_indexed_compound_assignment(value);
+                shell.arrays.insert(name.to_string(), arr);
             } else if flag_integer {
                 let n = shell.eval_arith_expr(value);
                 shell.set_var(name, n.to_string());
@@ -783,7 +842,9 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 }
                 if unset_export {
                     shell.exports.remove(pure);
-                    unsafe { std::env::remove_var(pure) };
+                    if !pure.is_empty() {
+                        unsafe { std::env::remove_var(pure) };
+                    }
                 }
                 if unset_uppercase {
                     shell.uppercase_vars.remove(pure);
@@ -880,11 +941,19 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
         for name in &names {
             let pure_name = name.split('=').next().unwrap_or(name);
             let pure_name = pure_name.strip_suffix('+').unwrap_or(pure_name);
+            // Extract the base name (before any '[') for validation.
+            // Content inside [...] brackets can contain any characters
+            // (arithmetic expressions like `a[7 + 8]`, assoc keys, etc.)
+            let base_for_check = if let Some(bracket_pos) = pure_name.find('[') {
+                &pure_name[..bracket_pos]
+            } else {
+                pure_name
+            };
             if !pure_name.is_empty()
-                && !pure_name
+                && !base_for_check
                     .chars()
-                    .all(|c| c.is_alphanumeric() || c == '_' || c == '[' || c == ']')
-                || pure_name
+                    .all(|c| c.is_alphanumeric() || c == '_')
+                || base_for_check
                     .chars()
                     .next()
                     .is_some_and(|c| c.is_ascii_digit() || c == '-' || c == '/')
@@ -1398,6 +1467,64 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 } else {
                     &name[bracket + 1..]
                 };
+
+                // When -a or -A flag is set, bash strips the subscript from the name
+                // e.g., `declare -a e[10]="(test)"` → treat as `declare -a e="(test)"`
+                if flag_array || flag_assoc {
+                    let stripped_name = base;
+                    let resolved_base = shell.resolve_nameref(stripped_name);
+                    if shell.readonly_vars.contains(&resolved_base) {
+                        eprintln!(
+                            "{}: declare: {}: readonly variable",
+                            shell.error_prefix(),
+                            resolved_base
+                        );
+                        status = 1;
+                        continue;
+                    }
+                    if make_local {
+                        shell.declare_local(stripped_name);
+                    }
+                    if flag_assoc {
+                        let map = parse_assoc_literal(value);
+                        shell.assoc_arrays.insert(resolved_base.clone(), map);
+                    } else if value.starts_with('(') && value.ends_with(')') {
+                        let arr = crate::builtins::parse_indexed_compound_assignment(value);
+                        shell.arrays.insert(resolved_base.clone(), arr);
+                    } else {
+                        // Scalar value: assign to element at the given subscript
+                        let raw_idx = shell.eval_arith_expr(idx_str);
+                        let val = if flag_integer {
+                            shell.eval_arith_expr(value).to_string()
+                        } else {
+                            value.to_string()
+                        };
+                        let arr = shell.arrays.entry(resolved_base.clone()).or_default();
+                        let idx = if raw_idx < 0 {
+                            let len = arr.len() as i64;
+                            (len + raw_idx).max(0) as usize
+                        } else {
+                            raw_idx as usize
+                        };
+                        while arr.len() <= idx {
+                            arr.push(None);
+                        }
+                        arr[idx] = Some(val);
+                    }
+                    if flag_readonly {
+                        shell.readonly_vars.insert(stripped_name.to_string());
+                    }
+                    if flag_export {
+                        let val = shell.get_var(stripped_name).unwrap_or_default();
+                        shell.exports.insert(stripped_name.to_string(), val.clone());
+                        unsafe { std::env::set_var(stripped_name, &val) };
+                    }
+                    if flag_integer {
+                        shell.integer_vars.insert(stripped_name.to_string());
+                    }
+                    continue;
+                }
+
                 let resolved_base = shell.resolve_nameref(base);
 
                 // Check readonly on the base name
@@ -1534,10 +1661,8 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     shell.integer_vars.insert(name.to_string());
                 }
             } else if flag_array {
-                let arr = parse_array_literal(value);
-                shell
-                    .arrays
-                    .insert(name.to_string(), arr.into_iter().map(Some).collect());
+                let arr = crate::builtins::parse_indexed_compound_assignment(value);
+                shell.arrays.insert(name.to_string(), arr);
                 if flag_integer {
                     shell.integer_vars.insert(name.to_string());
                 }
@@ -1604,10 +1729,21 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 }
             }
         } else {
-            // Strip [subscript] from name when -A or -a flag is set
+            // Strip [subscript] from name when -A or -a flag is set,
+            // or when the variable is already an array.
             // e.g., `declare -A chaff[200]` → treat as `declare -A chaff`
-            let name = if (flag_assoc || flag_array) && name_arg.contains('[') {
-                name_arg.split('[').next().unwrap_or(name_arg.as_str())
+            // e.g., `declare -r c[100]` when c is an array → treat as `declare -r c`
+            let name = if name_arg.contains('[') {
+                let base = name_arg.split('[').next().unwrap_or(name_arg.as_str());
+                if flag_assoc
+                    || flag_array
+                    || shell.arrays.contains_key(base)
+                    || shell.assoc_arrays.contains_key(base)
+                {
+                    base
+                } else {
+                    name_arg.as_str()
+                }
             } else {
                 name_arg.as_str()
             };
