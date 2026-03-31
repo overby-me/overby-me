@@ -21,10 +21,11 @@
     # Rewrite exec-context test: keep ProtectSystem, ProtectHome, Limit,
     # directory (Runtime/State/Cache/Logs/Configuration), PrivateTmp,
     # PrivateDevices, ProtectKernel*, ProtectControlGroups, ProtectHostname,
-    # Bind/ReadOnly/Inaccessible paths, TemporaryFileSystem, ReadWritePaths,
-    # UMask, Nice, and OOMScoreAdjust tests.
-    # Remove PrivateMounts/MountAPIVFS, ProtectProc, ProcSubset,
-    # RestrictFileSystems, DynamicUser, env file serialization,
+    # Bind/ReadOnly/Inaccessible paths (incl. spaces), TemporaryFileSystem,
+    # ReadWritePaths, UMask, Nice, OOMScoreAdjust, env whitespace/backslash
+    # quoting, EnvironmentFile with whitespace paths, ProtectKernelLogs
+    # with User=, and RuntimeDirectory error cases.
+    # Remove MountAPIVFS, RestrictFileSystems, DynamicUser,
     # IO/CPU/Device directives, SocketBind, and RestrictNamespaces sections.
     cat > TEST-07-PID1.exec-context.sh << 'TESTEOF'
     #!/usr/bin/env bash
@@ -1149,6 +1150,44 @@
         bash -xec '[[ $FOO == "bar4    " ]]'
     systemd-run --wait --pipe -p Environment="FOO='bar4    ' BAR='\n\n'" \
         bash -xec "[[ \$FOO == 'bar4    ' && \$BAR == \$'\n\n' ]]"
+
+    : "Environment= with backslash quoting"
+    systemd-run --wait --pipe -p 'Environment=FOO="bar4  \\  "' -p "Environment=BAR='\n\t'" \
+        bash -xec "[[ \$FOO == 'bar4  \\  ' && \$BAR == \$'\n\t' ]]"
+
+    : "EnvironmentFile= with whitespace in path and values"
+    TEST_ENV_FILE="/tmp/test-env-file-$$-    "
+    printf 'FOO="env file    "\nBAR="\n    "\n' > "$TEST_ENV_FILE"
+    systemd-run --wait --pipe -p EnvironmentFile="$TEST_ENV_FILE" \
+        bash -xec "[[ \$FOO == 'env file    ' && \$BAR == \$'\n    ' ]]"
+    rm -f "$TEST_ENV_FILE"
+
+    : "BindPaths= with spaces in paths"
+    touch "/tmp/test file with spaces"
+    systemd-run --wait --pipe -p TemporaryFileSystem="/tmp" \
+        -p "BindPaths=/tmp/test\ file\ with\ spaces" \
+        bash -xec 'stat "/tmp/test file with spaces"'
+    rm -f "/tmp/test file with spaces"
+
+    : "ReadOnlyPaths= with path containing spaces"
+    touch "/tmp/ro test file"
+    systemd-run --wait --pipe -p "ReadOnlyPaths=/tmp/ro\ test\ file" \
+        bash -xec '(! rm -f "/tmp/ro test file" 2>/dev/null); test -e "/tmp/ro test file"'
+    rm -f "/tmp/ro test file"
+
+    : "ProtectKernelLogs=yes with User= hides kernel log from non-root"
+    systemd-run --wait --pipe -p ProtectKernelLogs=yes -p User=testuser \
+        bash -xec 'test ! -r /dev/kmsg'
+    systemd-run --wait --pipe -p ProtectKernelLogs=no -p User=testuser \
+        bash -xec 'test -r /dev/kmsg'
+
+    : "RuntimeDirectory= conflicts with existing non-directory"
+    touch /run/not-a-directory
+    (! systemd-run --wait --pipe -p RuntimeDirectory=not-a-directory true)
+    rm -f /run/not-a-directory
+
+    : "Error handling for non-existent commands"
+    (! systemd-run --wait --pipe false)
 
     : "show-environment quoting for values with whitespace"
     systemctl unset-environment FOO_WITH_SPACES 2>/dev/null || true
