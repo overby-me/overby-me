@@ -31,6 +31,11 @@
 
 ## Pushing rules
 
+- **Never push directly to the default branch (`main`/`master`) unless the user explicitly asks for it.** Instead, create a new bookmark for your changes and push that. Only move the `main` bookmark and push to `main` when the user says something like "push to main" or "commit and push". Example workflow:
+  - `jj bookmark create my-feature -r @` — create a bookmark for the current change
+  - `jj git push --bookmark my-feature` — push the feature bookmark
+  - Let the user decide when to merge into `main`.
+
 - **Always `jj git fetch` before pushing to avoid overwriting upstream changes.** Other branches may have been merged into `main` while you were working. Before moving the `main` bookmark and pushing, fetch first, then rebase or merge if needed. Never blindly `jj bookmark set main -r @- && jj git push` — this can silently discard commits merged upstream.
 
 ## Commit message rules
