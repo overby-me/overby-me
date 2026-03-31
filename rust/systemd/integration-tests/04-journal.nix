@@ -8,8 +8,7 @@
 
     "journal-append" # needs test-journal-append test binary
     "journal-corrupt\\." # needs systemd-run --user -M (machined)
-    "journal-gatewayd" # self-skips but needs binary check
-    "journal-remote" # self-skips but needs binary check
+    # journal-gatewayd and journal-remote self-skip when binary is missing
     "LogFilterPatterns" # test verifies via journalctl -I (needs invocation ID + syslog sender)
     "reload" # uses systemd-run --wait (oneshot deadlock) + verify_journals with -D
     "journalctl-varlink" # not a real subtest file — skip is harmless
