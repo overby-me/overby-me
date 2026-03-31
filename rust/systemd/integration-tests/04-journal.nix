@@ -21,7 +21,6 @@
     # Fix systemd-run --user -M testuser@.host — machined not available
     sed -i '/systemd-run --user -M/d' TEST-04-JOURNAL.journal.sh
     sed -i '/journalctl.*--user-unit/d' TEST-04-JOURNAL.journal.sh
-    sed -i '/journalctl.*--machine .host/d' TEST-04-JOURNAL.journal.sh
     # Add sleep after journald restart to wait for socket re-creation
     sed -i 's|systemctl restart systemd-journald|systemctl restart systemd-journald \&\& sleep 2|' TEST-04-JOURNAL.journal.sh
     # Remove per-write PID tracking tests (needs per-write SCM_CREDENTIALS on stdout stream socket)
@@ -43,9 +42,5 @@
     # Remove systemd-run --unit tests (need systemd-run --wait) — entire block including heredoc
     sed -i '/UNIT_NAME=/,/^EOF$/d' TEST-04-JOURNAL.journal.sh
     sed -i '/CURSOR_FILE/d' TEST-04-JOURNAL.journal.sh
-    # Remove seqnum ordering test (intermittent: seqnum can decrease across journal file rotation)
-    sed -i '/SEQNUM1=/d' TEST-04-JOURNAL.journal.sh
-    sed -i '/SEQNUM2=/d' TEST-04-JOURNAL.journal.sh
-    sed -i '/test.*SEQNUM.*-gt/d' TEST-04-JOURNAL.journal.sh
   '';
 }

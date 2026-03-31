@@ -2189,10 +2189,13 @@ fn main() {
 
     // Machine filter
     if let Some(ref machine) = cli.machine {
-        filtered.retain(|e| {
-            e.machine_id().is_some_and(|m| m == *machine)
-                || e.hostname().is_some_and(|h| h == *machine)
-        });
+        // ".host" is a special name meaning "local machine" — no filtering needed
+        if machine != ".host" {
+            filtered.retain(|e| {
+                e.machine_id().is_some_and(|m| m == *machine)
+                    || e.hostname().is_some_and(|h| h == *machine)
+            });
+        }
     }
 
     // Since/Until time filters
@@ -2569,8 +2572,10 @@ fn matches_follow_filters(entry: &JournalEntry, cli: &Cli) -> bool {
         return false;
     }
 
-    // Machine filter
-    if let Some(ref machine) = cli.machine {
+    // Machine filter (".host" = local machine, always matches)
+    if let Some(ref machine) = cli.machine
+        && machine != ".host"
+    {
         let matches = entry.machine_id().is_some_and(|m| m == *machine)
             || entry.hostname().is_some_and(|h| h == *machine);
         if !matches {
