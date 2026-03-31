@@ -31,8 +31,6 @@
     sed -i '/systemd-run --user --wait --pipe -M testuser/d' TEST-74-AUX-UTILS.cgls.sh
     sed -i '/--user-unit/d' TEST-74-AUX-UTILS.cgls.sh
 
-    # Patch id128: remove systemd-run invocation-id test (needs working invocation ID passing)
-    sed -i '/systemd-run --wait --pipe/d' TEST-74-AUX-UTILS.id128.sh
     # Patch id128: remove 65-zeros error test (bash printf expansion differs)
     sed -i "/printf.*%0.s0.*{0..64}/d" TEST-74-AUX-UTILS.id128.sh
 
