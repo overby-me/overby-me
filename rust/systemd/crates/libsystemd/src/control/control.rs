@@ -3808,8 +3808,9 @@ fn create_transient_unit(
 
     // Insert the transient unit into the unit table.
     let mut ri = run_info.write_poisoned();
-    // If a unit with the same name already exists and is stopped/failed,
-    // remove it so the new transient can replace it (matching systemd behavior).
+    // If a unit with the same name already exists and is stopped/failed
+    // (or a completed oneshot still in Started state), remove it so the
+    // new transient can replace it (matching systemd --collect behavior).
     let existing_id = ri
         .unit_table
         .values()
@@ -3817,7 +3818,16 @@ fn create_transient_unit(
         .map(|u| {
             let status = u.common.status.read_poisoned();
             let is_done = matches!(&*status, UnitStatus::NeverStarted | UnitStatus::Stopped(..));
-            (u.id.clone(), is_done)
+            // Also treat a completed oneshot service (Started but main
+            // process exited) as "done" — this happens because oneshot
+            // services stay in Started state to keep deps alive.
+            let is_completed_oneshot = !is_done
+                && matches!(&*status, UnitStatus::Started(_))
+                && matches!(&u.specific, Specific::Service(svc) if {
+                    svc.conf.srcv_type == crate::units::ServiceType::OneShot
+                    && svc.state.try_read().map_or(false, |s| s.srvc.main_exit_pid.is_some())
+                });
+            (u.id.clone(), is_done || is_completed_oneshot)
         });
     match existing_id {
         Some((id, true)) => {
@@ -4481,17 +4491,19 @@ pub fn execute_command(
             }
 
             // --wait mode: poll until the unit reaches a terminal state,
-            // then return the exit code.
-            loop {
+            // then return the exit code.  Implies --collect: the transient
+            // unit is removed after completion (matching C systemd behavior)
+            // so that the same unit name can be reused.
+            let wait_resp = loop {
                 std::thread::sleep(std::time::Duration::from_millis(100));
                 let ri = run_info.read_poisoned();
                 let Some(unit) = ri.unit_table.get(&id) else {
                     // Unit was removed — treat as completed successfully.
-                    return Ok(serde_json::json!({
+                    break serde_json::json!({
                         "started": unit_name,
                         "result": "success",
                         "exit_code": 0
-                    }));
+                    });
                 };
                 let status = unit.common.status.read_poisoned();
                 match &*status {
@@ -4499,11 +4511,8 @@ pub fn execute_command(
                         let (result, exit_code) =
                             if matches!(stop_reason, crate::units::StatusStopped::ConditionSkipped)
                             {
-                                // ExecCondition= failed: service was skipped
                                 ("exec-condition", 1i32)
                             } else if errors.is_empty() {
-                                // Clean stop: if StoppedFinal (explicit stop) always
-                                // return 0.  Otherwise use the process exit status.
                                 let exit_status = if matches!(
                                     stop_reason,
                                     crate::units::StatusStopped::StoppedFinal
@@ -4521,7 +4530,6 @@ pub fn execute_command(
                                 };
                                 ("success", exit_status)
                             } else {
-                                // Failed — extract exit status from service state.
                                 let exit_status =
                                     if let crate::units::Specific::Service(svc) = &unit.specific {
                                         if let Ok(state) = svc.state.try_read() {
@@ -4534,38 +4542,14 @@ pub fn execute_command(
                                     };
                                 ("exit-code", exit_status)
                             };
-                        let mut resp = serde_json::json!({
+                        break serde_json::json!({
                             "started": unit_name,
                             "result": result,
                             "exit_code": exit_code
                         });
-                        // When --pipe was requested, read the captured
-                        // stdout/stderr temp files and include them in the
-                        // response so the client can relay them.
-                        if do_pipe {
-                            let stdout_path =
-                                format!("/run/systemd/transient/{}.stdout", unit_name);
-                            let stderr_path =
-                                format!("/run/systemd/transient/{}.stderr", unit_name);
-                            if let Ok(data) = std::fs::read_to_string(&stdout_path) {
-                                resp["stdout"] = Value::String(data);
-                                let _ = std::fs::remove_file(&stdout_path);
-                            }
-                            if let Ok(data) = std::fs::read_to_string(&stderr_path) {
-                                resp["stderr"] = Value::String(data);
-                                let _ = std::fs::remove_file(&stderr_path);
-                            }
-                        }
-                        return Ok(resp);
                     }
-                    crate::units::UnitStatus::NeverStarted => {
-                        // Not started yet, keep waiting
-                    }
+                    crate::units::UnitStatus::NeverStarted => {}
                     crate::units::UnitStatus::Started(_) => {
-                        // For oneshot services, the unit stays in Started
-                        // state after the process exits (to keep deps alive).
-                        // Detect completion by checking if the main process
-                        // has been reaped (main_exit_pid is set).
                         if let crate::units::Specific::Service(svc) = &unit.specific
                             && svc.conf.srcv_type == crate::units::ServiceType::OneShot
                             && let Ok(state) = svc.state.try_read()
@@ -4577,34 +4561,42 @@ pub fn execute_command(
                             } else {
                                 "exit-code"
                             };
-                            let mut resp = serde_json::json!({
+                            break serde_json::json!({
                                 "started": unit_name,
                                 "result": result,
                                 "exit_code": exit_status
                             });
-                            if do_pipe {
-                                let stdout_path =
-                                    format!("/run/systemd/transient/{}.stdout", unit_name);
-                                let stderr_path =
-                                    format!("/run/systemd/transient/{}.stderr", unit_name);
-                                if let Ok(data) = std::fs::read_to_string(&stdout_path) {
-                                    resp["stdout"] = Value::String(data);
-                                    let _ = std::fs::remove_file(&stdout_path);
-                                }
-                                if let Ok(data) = std::fs::read_to_string(&stderr_path) {
-                                    resp["stderr"] = Value::String(data);
-                                    let _ = std::fs::remove_file(&stderr_path);
-                                }
-                            }
-                            return Ok(resp);
                         }
-                        // Not a completed oneshot — keep waiting
                     }
-                    _ => {
-                        // Still starting, keep waiting
-                    }
+                    _ => {}
+                }
+            };
+
+            // Collect: read --pipe output and remove the transient unit.
+            let mut resp = wait_resp;
+            if do_pipe {
+                let stdout_path = format!("/run/systemd/transient/{}.stdout", unit_name);
+                let stderr_path = format!("/run/systemd/transient/{}.stderr", unit_name);
+                if let Ok(data) = std::fs::read_to_string(&stdout_path) {
+                    resp["stdout"] = Value::String(data);
+                    let _ = std::fs::remove_file(&stdout_path);
+                }
+                if let Ok(data) = std::fs::read_to_string(&stderr_path) {
+                    resp["stderr"] = Value::String(data);
+                    let _ = std::fs::remove_file(&stderr_path);
                 }
             }
+            // Remove the transient unit from the table (--collect behavior)
+            // so that the same unit name can be reused by subsequent
+            // systemd-run invocations.
+            {
+                let mut ri = run_info.write_poisoned();
+                ri.unit_table.remove(&id);
+                // Also remove the transient unit file on disk.
+                let transient_path = format!("/run/systemd/transient/{}", unit_name);
+                let _ = std::fs::remove_file(&transient_path);
+            }
+            return Ok(resp);
         }
         Command::Enable(names) => {
             let is_runtime = names.iter().any(|n| n == "--runtime");
