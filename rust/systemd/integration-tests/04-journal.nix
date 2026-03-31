@@ -9,7 +9,7 @@
     "journal-append" # needs test-journal-append test binary
     "journal-corrupt\\." # needs systemd-run --user -M (machined)
     # journal-gatewayd and journal-remote self-skip when binary is missing
-    "LogFilterPatterns" # test verifies via journalctl -I (needs invocation ID + syslog sender)
+    # LogFilterPatterns: stdout variant enabled; syslog and delegated-cgroup variants patched out
     "reload" # uses systemd-run --wait (oneshot deadlock) + verify_journals with -D
     "journalctl-varlink" # not a real subtest file — skip is harmless
     "SYSTEMD_JOURNAL_COMPRESS" # needs journalctl --verify and compression env var support
@@ -38,5 +38,9 @@
     sed -i '/UNIT_NAME=/,/^EOF$/d' TEST-04-JOURNAL.journal.sh
     # Remove orphaned rm of $CURSOR_FILE (defined inside deleted UNIT_NAME block)
     sed -i '/^rm -f "\$CURSOR_FILE"$/d' TEST-04-JOURNAL.journal.sh
+    # LogFilterPatterns: remove syslog variant (needs journald-level cgroup filtering)
+    # and delegated-cgroup variant (needs cgroup xattr delegation)
+    sed -i '/logs-filtering-syslog/d' TEST-04-JOURNAL.LogFilterPatterns.sh
+    sed -i '/delegated-cgroup-filtering/d' TEST-04-JOURNAL.LogFilterPatterns.sh
   '';
 }
