@@ -271,6 +271,13 @@ fn run(sigpipe_was_ignored: bool) -> i32 {
         );
     }
 
+    // Set BASH_LINENO[0]=0 when running a script file (not -c mode)
+    if script_file.is_some() && command_string.is_none() {
+        shell
+            .arrays
+            .insert("BASH_LINENO".to_string(), vec![Some("0".to_string())]);
+    }
+
     // Execute based on mode
     if let Some(cmd) = command_string {
         shell.dash_c_mode = true;

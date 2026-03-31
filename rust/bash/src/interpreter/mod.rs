@@ -529,6 +529,21 @@ impl Shell {
             }
         }
 
+        // Initialize builtin arrays that bash always has available
+        // BASH_ARGC, BASH_ARGV, BASH_LINENO, DIRSTACK are empty arrays (=())
+        // FUNCNAME is declared-but-unset (bash prints "declare -a FUNCNAME")
+        shell.arrays.entry("BASH_ARGC".to_string()).or_default();
+        shell.arrays.entry("BASH_ARGV".to_string()).or_default();
+        shell.arrays.entry("BASH_LINENO".to_string()).or_default();
+        shell.arrays.entry("DIRSTACK".to_string()).or_default();
+        shell.arrays.entry("FUNCNAME".to_string()).or_default();
+        shell.declared_unset.insert("FUNCNAME".to_string());
+        // PIPESTATUS is set dynamically after each pipeline
+        shell
+            .arrays
+            .entry("PIPESTATUS".to_string())
+            .or_insert_with(|| vec![Some("0".to_string())]);
+
         // Import exported functions from environment (BASH_FUNC_name%% variables)
         let func_vars: Vec<(String, String)> = std::env::vars()
             .filter(|(k, _)| k.starts_with("BASH_FUNC_") && k.ends_with("%%"))

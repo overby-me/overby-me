@@ -974,9 +974,21 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
     }
 
     // declare -p: print variable info
-    if flag_print {
+    // When -p is combined with a type flag (-a, -A, -x, -r, -i, -n) and no
+    // names, fall through to the type-specific listing sections below instead
+    // of printing everything here.
+    let has_type_filter = flag_array
+        || flag_assoc
+        || flag_export
+        || flag_readonly
+        || flag_integer
+        || flag_nameref
+        || flag_uppercase
+        || flag_lowercase
+        || flag_capitalize;
+    if flag_print && !(names.is_empty() && has_type_filter) {
         if names.is_empty() {
-            // Print all variables
+            // Print all variables (no type filter)
             let mut var_names: Vec<&String> = shell.vars.keys().collect();
             var_names.sort();
             for name in var_names {
@@ -1227,7 +1239,7 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
     }
 
     // declare -x with no names: list exports
-    if flag_export && names.is_empty() && !flag_print {
+    if flag_export && names.is_empty() {
         let mut sorted: Vec<_> = shell.exports.iter().collect();
         sorted.sort_by_key(|(k, _)| k.to_string());
         for (name, value) in sorted {
@@ -1243,7 +1255,7 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
     }
 
     // declare -r with no names: list readonly variables
-    if flag_readonly && names.is_empty() && !flag_print {
+    if flag_readonly && names.is_empty() {
         let mut sorted: Vec<_> = shell.readonly_vars.iter().collect();
         sorted.sort();
         for name in sorted {
@@ -1261,7 +1273,7 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
     }
 
     // declare -i with no names: list integer variables
-    if flag_integer && names.is_empty() && !flag_print {
+    if flag_integer && names.is_empty() {
         let mut sorted: Vec<_> = shell.integer_vars.iter().collect();
         sorted.sort();
         for name in sorted {
@@ -1273,11 +1285,22 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
     }
 
     // declare -a with no names: list all indexed arrays
-    if flag_array && names.is_empty() && !flag_print {
+    // (also handles `declare -pa` when flag_print + flag_array are both set)
+    if flag_array && names.is_empty() {
         let mut sorted: Vec<_> = shell.arrays.keys().collect();
         sorted.sort();
         for name in sorted {
             if let Some(arr) = shell.arrays.get(name) {
+                let mut flags = String::from("-a");
+                if shell.integer_vars.contains(name.as_str()) {
+                    flags.push('i');
+                }
+                if shell.readonly_vars.contains(name.as_str()) {
+                    flags.push('r');
+                }
+                if shell.exports.contains_key(name.as_str()) {
+                    flags.push('x');
+                }
                 let has_elements = arr.iter().any(|v| v.is_some());
                 if has_elements {
                     let elements: Vec<String> = arr
@@ -1286,11 +1309,11 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                         .filter_map(|(i, v)| v.as_ref().map(|s| (i, s)))
                         .map(|(i, v)| format!("[{}]=\"{}\"", i, v))
                         .collect();
-                    println!("declare -a {}=({})", name, elements.join(" "));
+                    println!("declare {} {}=({})", flags, name, elements.join(" "));
                 } else if shell.declared_unset.contains(name.as_str()) {
-                    println!("declare -a {}", name);
+                    println!("declare {} {}", flags, name);
                 } else {
-                    println!("declare -a {}=()", name);
+                    println!("declare {} {}=()", flags, name);
                 }
             }
         }
@@ -1298,7 +1321,7 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
     }
 
     // declare -n with no names: list all namerefs
-    if flag_nameref && names.is_empty() && !flag_print {
+    if flag_nameref && names.is_empty() {
         let mut sorted: Vec<_> = shell.namerefs.iter().collect();
         sorted.sort_by_key(|(k, _)| k.to_string());
         for (name, target) in sorted {
@@ -1308,7 +1331,8 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
     }
 
     // declare -A with no names: list all associative arrays
-    if flag_assoc && names.is_empty() && !flag_print {
+    // (also handles `declare -pA` when flag_print + flag_assoc are both set)
+    if flag_assoc && names.is_empty() {
         let mut sorted: Vec<_> = shell.assoc_arrays.keys().collect();
         sorted.sort();
         for name in sorted {
@@ -1597,8 +1621,13 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 }
             } else if flag_array {
                 if !shell.arrays.contains_key(name) {
-                    shell.arrays.entry(name.to_string()).or_default();
-                    shell.declared_unset.insert(name.to_string());
+                    // Convert existing scalar value to array[0]
+                    if let Some(val) = shell.vars.remove(name) {
+                        shell.arrays.insert(name.to_string(), vec![Some(val)]);
+                    } else {
+                        shell.arrays.entry(name.to_string()).or_default();
+                        shell.declared_unset.insert(name.to_string());
+                    }
                 }
             } else if !shell.vars.contains_key(name) {
                 // declare without = marks the variable as declared-but-unset
