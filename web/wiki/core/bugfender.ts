@@ -78,14 +78,42 @@ const logErrorContext = async ({
 	if (error) {
 		try {
 			const frames = await StackTrace.fromError(error);
+			const isResolved = frames.some(
+				(frame) =>
+					frame.fileName &&
+					!frame.fileName.startsWith("http") &&
+					!frame.fileName.includes("/static/js/"),
+			);
 			resolvedStack = frames
 				.map(
 					(frame) =>
 						`  at ${frame.functionName ?? "<anonymous>"} (${frame.fileName}:${frame.lineNumber}:${frame.columnNumber})`,
 				)
 				.join("\n");
-		} catch {
+			if (!isResolved) {
+				bugfender.warn(
+					"[SourceMapDebug] stacktrace-js did not resolve source maps. Raw frames:",
+					JSON.stringify(
+						frames.map((f) => ({
+							fn: f.functionName,
+							file: f.fileName,
+							line: f.lineNumber,
+							col: f.columnNumber,
+							source: f.source,
+						})),
+						null,
+						2,
+					),
+				);
+			}
+		} catch (resolveError) {
 			resolvedStack = error.stack;
+			bugfender.warn(
+				"[SourceMapDebug] stacktrace-js threw an error:",
+				resolveError instanceof Error
+					? `${resolveError.message}\n${resolveError.stack}`
+					: String(resolveError),
+			);
 		}
 	}
 
