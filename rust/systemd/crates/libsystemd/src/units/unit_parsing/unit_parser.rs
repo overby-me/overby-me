@@ -257,6 +257,7 @@ pub fn parse_unit_section(
     let documentation = section.remove("DOCUMENTATION");
     let default_dependencies = section.remove("DEFAULTDEPENDENCIES");
     let condition_path_exists = section.remove("CONDITIONPATHEXISTS");
+    let condition_path_exists_glob = section.remove("CONDITIONPATHEXISTSGLOB");
     let condition_path_is_directory = section.remove("CONDITIONPATHISDIRECTORY");
     let condition_virtualization = section.remove("CONDITIONVIRTUALIZATION");
     let condition_capability = section.remove("CONDITIONCAPABILITY");
@@ -288,6 +289,7 @@ pub fn parse_unit_section(
     // Assert* directives — same semantics as Condition* but cause the unit
     // to FAIL (not silently skip) when the check is false.
     let assert_path_exists = section.remove("ASSERTPATHEXISTS");
+    let assert_path_exists_glob = section.remove("ASSERTPATHEXISTSGLOB");
     let assert_path_is_directory = section.remove("ASSERTPATHISDIRECTORY");
     let assert_virtualization = section.remove("ASSERTVIRTUALIZATION");
     let assert_capability = section.remove("ASSERTCAPABILITY");
@@ -471,6 +473,7 @@ pub fn parse_unit_section(
 
     let conditions = parse_condition_or_assert_entries(
         condition_path_exists,
+        condition_path_exists_glob,
         condition_path_is_directory,
         condition_virtualization,
         condition_capability,
@@ -502,6 +505,7 @@ pub fn parse_unit_section(
 
     let assertions = parse_condition_or_assert_entries(
         assert_path_exists,
+        assert_path_exists_glob,
         assert_path_is_directory,
         assert_virtualization,
         assert_capability,
@@ -810,6 +814,7 @@ pub fn parse_unit_section(
 #[allow(clippy::too_many_arguments)]
 fn parse_condition_or_assert_entries(
     path_exists: Option<Vec<(u32, String)>>,
+    path_exists_glob: Option<Vec<(u32, String)>>,
     path_is_directory: Option<Vec<(u32, String)>>,
     virtualization: Option<Vec<(u32, String)>>,
     capability: Option<Vec<(u32, String)>>,
@@ -847,6 +852,14 @@ fn parse_condition_or_assert_entries(
             (value, false)
         };
         out.push(super::UnitCondition::PathExists { path, negate });
+    }
+    for (_, value) in path_exists_glob.unwrap_or_default() {
+        let (pattern, negate) = if let Some(stripped) = value.strip_prefix('!') {
+            (stripped.to_string(), true)
+        } else {
+            (value, false)
+        };
+        out.push(super::UnitCondition::PathExistsGlob { pattern, negate });
     }
     for (_, value) in path_is_directory.unwrap_or_default() {
         let (path, negate) = if let Some(stripped) = value.strip_prefix('!') {

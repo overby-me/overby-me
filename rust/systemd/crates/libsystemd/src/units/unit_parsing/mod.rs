@@ -262,6 +262,9 @@ pub enum UnitCondition {
     /// ConditionPathExists=/some/path (true if path exists)
     /// ConditionPathExists=!/some/path (true if path does NOT exist)
     PathExists { path: String, negate: bool },
+    /// ConditionPathExistsGlob=/some/glob* (true if any path matches the glob)
+    /// ConditionPathExistsGlob=!/some/glob* (true if NO path matches the glob)
+    PathExistsGlob { pattern: String, negate: bool },
     /// ConditionPathIsDirectory=/some/path
     /// ConditionPathIsDirectory=!/some/path
     PathIsDirectory { path: String, negate: bool },
@@ -721,6 +724,10 @@ impl UnitCondition {
                 let exists = std::path::Path::new(path).exists();
                 if *negate { !exists } else { exists }
             }
+            UnitCondition::PathExistsGlob { pattern, negate } => {
+                let matched = condition_glob_match_any(pattern);
+                if *negate { !matched } else { matched }
+            }
             UnitCondition::PathIsDirectory { path, negate } => {
                 let is_dir = std::path::Path::new(path).is_dir();
                 if *negate { !is_dir } else { is_dir }
@@ -1100,6 +1107,31 @@ impl UnitCondition {
             }
         }
     }
+}
+
+/// Check if any filesystem path matches a glob pattern.
+/// Supports `*` and `?` wildcards in the filename component.
+fn condition_glob_match_any(pattern: &str) -> bool {
+    let path = std::path::Path::new(pattern);
+    let parent = match path.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p,
+        _ => std::path::Path::new("/"),
+    };
+    let file_pattern = match path.file_name() {
+        Some(f) => f.to_string_lossy().to_string(),
+        None => return false,
+    };
+    let entries = match std::fs::read_dir(parent) {
+        Ok(e) => e,
+        Err(_) => return false,
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if crate::link_config::glob_match(&file_pattern, &name) {
+            return true;
+        }
+    }
+    false
 }
 
 /// Check whether the system is currently on AC (mains) power.
