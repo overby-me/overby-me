@@ -108,6 +108,81 @@ pub(super) fn get_array_elements(expr: &ParamExpr, ctx: &ExpCtx) -> Vec<String> 
     if let Some(bracket) = expr.name.find('[') {
         let base = &expr.name[..bracket];
         let resolved = ctx.resolve_nameref(base);
+
+        // For Substring on indexed arrays, use index-based offset matching:
+        // ${arr[@]:offset:length} selects elements starting at array index >= offset,
+        // then takes `length` existing (set) elements from that point.
+        if let ParamOp::Substring(offset_str, length_str) = &expr.op {
+            let offset: i64 = offset_str.trim().parse().unwrap_or(0);
+            if let Some(arr) = ctx.arrays.get(&resolved) {
+                // Collect (index, value) pairs for set elements
+                let set_elements: Vec<(usize, &str)> = arr
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, v)| v.as_ref().map(|s| (i, s.as_str())))
+                    .collect();
+                let count = set_elements.len();
+                // For negative offsets, compute from the array's total length
+                // (highest_index + 1), not from the count of set elements.
+                // e.g., arr=([1]=a [5]=b [7]=c) has length 8, so -2 → index 6.
+                let effective_offset = if offset < 0 {
+                    let arr_len = arr.len() as i64; // highest_index + 1
+                    (arr_len + offset).max(0)
+                } else {
+                    offset
+                };
+                let start = set_elements
+                    .iter()
+                    .position(|(idx, _)| *idx >= effective_offset as usize)
+                    .unwrap_or(count);
+                let end = if let Some(len_str) = length_str {
+                    let len: i64 = len_str.trim().parse().unwrap_or(count as i64);
+                    if len < 0 {
+                        let target = (count as i64 + len).max(0) as usize;
+                        target.max(start)
+                    } else {
+                        (start + len as usize).min(count)
+                    }
+                } else {
+                    count
+                };
+                return set_elements[start..end]
+                    .iter()
+                    .map(|(_, v)| v.to_string())
+                    .collect();
+            }
+            if let Some(assoc) = ctx.assoc_arrays.get(&resolved) {
+                let values: Vec<String> = assoc.values().cloned().collect();
+                let count = values.len();
+                let start = if offset < 0 {
+                    (count as i64 + offset).max(0) as usize
+                } else {
+                    (offset as usize).min(count)
+                };
+                let end = if let Some(len_str) = length_str {
+                    let len: i64 = len_str.trim().parse().unwrap_or(count as i64);
+                    if len < 0 {
+                        let target = (count as i64 + len).max(0) as usize;
+                        target.max(start)
+                    } else {
+                        (start + len as usize).min(count)
+                    }
+                } else {
+                    count
+                };
+                return values[start..end].to_vec();
+            }
+            // Scalar treated as single-element array
+            if let Some(val) = ctx.vars.get(&resolved) {
+                if offset <= 0 {
+                    return vec![val.clone()];
+                } else {
+                    return vec![];
+                }
+            }
+            return vec![];
+        }
+
         if let Some(arr) = ctx.arrays.get(&resolved) {
             return arr.iter().filter_map(|v| v.clone()).collect();
         }
@@ -763,6 +838,81 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
         if (idx_str == "@" || idx_str == "*") && !matches!(expr.op, ParamOp::None | ParamOp::Length)
         {
             let resolved = ctx.resolve_nameref(base);
+
+            // For Substring on arrays, slice the array by index/element position
+            // rather than applying character-level substring to each element.
+            // ${arr[@]:offset:length} selects elements starting at array index >= offset.
+            if let ParamOp::Substring(offset_str, length_str) = &expr.op {
+                let offset: i64 = parse_arith_offset(offset_str.trim(), &expr.name, ctx, cmd_sub);
+                if let Some(arr) = ctx.arrays.get(&resolved) {
+                    // Collect (index, value) pairs for set elements
+                    let set_elements: Vec<(usize, &str)> = arr
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, v)| v.as_ref().map(|s| (i, s.as_str())))
+                        .collect();
+                    let count = set_elements.len();
+                    // For negative offsets, compute from the array's total length
+                    // (highest_index + 1), not from the count of set elements.
+                    let effective_offset = if offset < 0 {
+                        let arr_len = arr.len() as i64;
+                        (arr_len + offset).max(0)
+                    } else {
+                        offset
+                    };
+                    let start = set_elements
+                        .iter()
+                        .position(|(idx, _)| *idx >= effective_offset as usize)
+                        .unwrap_or(count);
+                    let end = if let Some(len_str) = length_str {
+                        let len: i64 = parse_arith_offset(len_str.trim(), &expr.name, ctx, cmd_sub);
+                        if len < 0 {
+                            // Negative length: count from end of set-elements list
+                            let target = (count as i64 + len).max(0) as usize;
+                            target.max(start)
+                        } else {
+                            (start + len as usize).min(count)
+                        }
+                    } else {
+                        count
+                    };
+                    let sliced: Vec<&str> =
+                        set_elements[start..end].iter().map(|(_, v)| *v).collect();
+                    return sliced.join(" ");
+                } else if let Some(assoc) = ctx.assoc_arrays.get(&resolved) {
+                    // For assoc arrays, slice the values list
+                    let values: Vec<&str> = assoc.values().map(|s| s.as_str()).collect();
+                    let count = values.len();
+                    let start = if offset < 0 {
+                        (count as i64 + offset).max(0) as usize
+                    } else {
+                        (offset as usize).min(count)
+                    };
+                    let end = if let Some(len_str) = length_str {
+                        let len: i64 = parse_arith_offset(len_str.trim(), &expr.name, ctx, cmd_sub);
+                        if len < 0 {
+                            let target = (count as i64 + len).max(0) as usize;
+                            target.max(start)
+                        } else {
+                            (start + len as usize).min(count)
+                        }
+                    } else {
+                        count
+                    };
+                    return values[start..end].join(" ");
+                } else if let Some(val) = ctx.vars.get(&resolved) {
+                    // Scalar treated as single-element array
+                    if offset <= 0 {
+                        return val.clone();
+                    } else {
+                        return String::new();
+                    }
+                } else {
+                    return String::new();
+                }
+            }
+
+            // For non-Substring ops on arrays, apply per-element
             let elements: Vec<String> = if let Some(arr) = ctx.arrays.get(&resolved) {
                 arr.iter().filter_map(|v| v.clone()).collect()
             } else if let Some(assoc) = ctx.assoc_arrays.get(&resolved) {

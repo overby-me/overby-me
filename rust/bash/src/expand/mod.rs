@@ -621,31 +621,9 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                     }
                     WordPart::Param(expr) if is_array_at_expansion(expr, ctx) => {
                         // "${arr[@]}" — each element becomes a separate field
-                        let mut elements = get_array_elements(expr, ctx);
-                        // For Substring on arrays (but not @/*): slice the array
-                        if let ParamOp::Substring(offset_str, length_str) = &expr.op {
-                            // @/* slicing is already handled in get_array_elements
-                            if expr.name != "@" && expr.name != "*" {
-                                let offset: i64 = offset_str.trim().parse().unwrap_or(0);
-                                let count = elements.len();
-                                let start = if offset < 0 {
-                                    (count as i64 + offset).max(0) as usize
-                                } else {
-                                    (offset as usize).min(count)
-                                };
-                                let end = if let Some(len_str) = length_str {
-                                    let len: i64 = len_str.trim().parse().unwrap_or(count as i64);
-                                    if len < 0 {
-                                        (count as i64 + len).max(start as i64) as usize
-                                    } else {
-                                        (start + len as usize).min(count)
-                                    }
-                                } else {
-                                    count
-                                };
-                                elements = elements[start..end].to_vec();
-                            }
-                        }
+                        // For Substring, get_array_elements handles index-based slicing
+                        // for all array types (indexed, assoc, and positional @/*)
+                        let elements = get_array_elements(expr, ctx);
                         // Determine if this is $* (join with IFS) or $@ (split)
                         let is_star = if let Some(bracket) = expr.name.find('[') {
                             &expr.name[bracket + 1..expr.name.len() - 1] == "*"
@@ -967,51 +945,100 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                     return;
                 }
                 // Handle ${arr[@]:offset:length} — array slice
-                if (idx == "@" || idx == "*") && matches!(expr.op, ParamOp::Substring(..)) {
-                    let elements: Option<Vec<String>> = if let Some(arr) = ctx.arrays.get(&resolved)
-                    {
-                        Some(arr.iter().filter_map(|v| v.clone()).collect())
-                    } else {
-                        ctx.assoc_arrays
-                            .get(&resolved)
-                            .map(|a| a.values().cloned().collect())
-                    };
-                    if let Some(arr) = elements {
-                        if let ParamOp::Substring(offset_str, length_str) = &expr.op {
-                            let offset: i64 = offset_str.trim().parse().unwrap_or(0);
-                            let count = arr.len();
-                            let start = if offset < 0 {
-                                (count as i64 + offset).max(0) as usize
+                if (idx == "@" || idx == "*")
+                    && let ParamOp::Substring(offset_str, length_str) = &expr.op
+                {
+                    let offset: i64 = offset_str.trim().parse().unwrap_or(0);
+
+                    // For indexed arrays, use index-based offset matching:
+                    // ${arr[@]:N:L} selects set elements with array index >= N,
+                    // then takes L of them. Negative offsets are relative to
+                    // highest_index + 1 (the array Vec length).
+                    if let Some(raw_arr) = ctx.arrays.get(&resolved) {
+                        let set_elements: Vec<(usize, &str)> = raw_arr
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(i, v)| v.as_ref().map(|s| (i, s.as_str())))
+                            .collect();
+                        let count = set_elements.len();
+                        let effective_offset = if offset < 0 {
+                            let arr_len = raw_arr.len() as i64;
+                            (arr_len + offset).max(0)
+                        } else {
+                            offset
+                        };
+                        let start = set_elements
+                            .iter()
+                            .position(|(i, _)| *i >= effective_offset as usize)
+                            .unwrap_or(count);
+                        let end = if let Some(len_str) = length_str {
+                            let len: i64 = len_str.trim().parse().unwrap_or(count as i64);
+                            if len < 0 {
+                                let target = (count as i64 + len).max(0) as usize;
+                                target.max(start)
                             } else {
-                                (offset as usize).min(count)
-                            };
-                            let end = if let Some(len_str) = length_str {
-                                let len: i64 = len_str.trim().parse().unwrap_or(count as i64);
-                                if len < 0 {
-                                    (count as i64 + len).max(start as i64) as usize
-                                } else {
-                                    (start + len as usize).min(count)
-                                }
-                            } else {
-                                count
-                            };
-                            let mut first = true;
-                            for elem in &arr[start..end] {
-                                if !first {
-                                    out.push(if idx == "@" {
-                                        Segment::SplitHere
-                                    } else {
-                                        let ifs_char = ctx
-                                            .vars
-                                            .get("IFS")
-                                            .and_then(|s| s.chars().next())
-                                            .unwrap_or(' ');
-                                        Segment::Unquoted(ifs_char.to_string())
-                                    });
-                                }
-                                first = false;
-                                out.push(Segment::Unquoted(elem.clone()));
+                                (start + len as usize).min(count)
                             }
+                        } else {
+                            count
+                        };
+                        let sliced: Vec<&str> =
+                            set_elements[start..end].iter().map(|(_, v)| *v).collect();
+                        let mut first = true;
+                        for elem in &sliced {
+                            if !first {
+                                out.push(if idx == "@" {
+                                    Segment::SplitHere
+                                } else {
+                                    let ifs_char = ctx
+                                        .vars
+                                        .get("IFS")
+                                        .and_then(|s| s.chars().next())
+                                        .unwrap_or(' ');
+                                    Segment::Unquoted(ifs_char.to_string())
+                                });
+                            }
+                            first = false;
+                            out.push(Segment::Unquoted(elem.to_string()));
+                        }
+                        return;
+                    }
+
+                    // For assoc arrays, use list-position-based offset
+                    if let Some(assoc) = ctx.assoc_arrays.get(&resolved) {
+                        let arr: Vec<String> = assoc.values().cloned().collect();
+                        let count = arr.len();
+                        let start = if offset < 0 {
+                            (count as i64 + offset).max(0) as usize
+                        } else {
+                            (offset as usize).min(count)
+                        };
+                        let end = if let Some(len_str) = length_str {
+                            let len: i64 = len_str.trim().parse().unwrap_or(count as i64);
+                            if len < 0 {
+                                (count as i64 + len).max(start as i64) as usize
+                            } else {
+                                (start + len as usize).min(count)
+                            }
+                        } else {
+                            count
+                        };
+                        let mut first = true;
+                        for elem in &arr[start..end] {
+                            if !first {
+                                out.push(if idx == "@" {
+                                    Segment::SplitHere
+                                } else {
+                                    let ifs_char = ctx
+                                        .vars
+                                        .get("IFS")
+                                        .and_then(|s| s.chars().next())
+                                        .unwrap_or(' ');
+                                    Segment::Unquoted(ifs_char.to_string())
+                                });
+                            }
+                            first = false;
+                            out.push(Segment::Unquoted(elem.clone()));
                         }
                         return;
                     }
