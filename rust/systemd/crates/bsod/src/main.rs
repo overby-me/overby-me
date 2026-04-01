@@ -257,8 +257,13 @@ fn display_message(message: &str, tty_path: Option<&PathBuf>) -> io::Result<()> 
         let qr_col = (winsize.ws_col as u32 * 3) / 4;
         let _ = set_cursor_position(fd, qr_row, qr_col);
         let qr_header = "Scan the error message";
-        let _ =
-            unsafe { libc::write(fd, qr_header.as_ptr() as *const libc::c_void, qr_header.len()) };
+        let _ = unsafe {
+            libc::write(
+                fd,
+                qr_header.as_ptr() as *const libc::c_void,
+                qr_header.len(),
+            )
+        };
     }
 
     // Display "Press any key to exit..." near bottom

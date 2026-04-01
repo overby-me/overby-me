@@ -2,7 +2,6 @@
   name = "04-JOURNAL";
   # Skip subtests needing tools/binaries not available in the NixOS test VM
   testEnv.TEST_SKIP_SUBTESTS = builtins.concatStringsSep " " [
-    "journal-append" # needs test-journal-append test binary
     "journal-corrupt\\." # needs systemd-run --user -M (machined)
     # journal-gatewayd and journal-remote self-skip when binary is missing
     # LogFilterPatterns: stdout variant enabled; syslog and delegated-cgroup variants patched out
@@ -36,7 +35,18 @@
     # bsod: remove systemd-run --user --machine testuser@ (needs machined)
     sed -i '/systemd-run --user --machine testuser/d' TEST-04-JOURNAL.bsod.sh
     # bsod: install systemd-bsod.service (C systemd doesn't build it without qrencode)
-    printf '%s\n' '[Unit]' 'Description=Display Boot-Time Emergency Messages In Full Screen' 'ConditionVirtualization=no' 'DefaultDependencies=no' 'Before=shutdown.target' 'Conflicts=shutdown.target' '' '[Service]' 'RemainAfterExit=yes' 'ExecStart=/usr/lib/systemd/systemd-bsod --continuous' > /run/systemd/system/systemd-bsod.service
+    cat > /run/systemd/system/systemd-bsod.service <<'BSOD_EOF'
+    [Unit]
+    Description=Display Boot-Time Emergency Messages In Full Screen
+    ConditionVirtualization=no
+    DefaultDependencies=no
+    Before=shutdown.target
+    Conflicts=shutdown.target
+
+    [Service]
+    RemainAfterExit=yes
+    ExecStart=/usr/lib/systemd/systemd-bsod --continuous
+    BSOD_EOF
     systemctl daemon-reload
   '';
 }

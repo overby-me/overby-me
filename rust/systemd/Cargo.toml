@@ -78,6 +78,7 @@ members = [
   "crates/pam-systemd",
   "crates/bootctl",
   "crates/bsod",
+  "crates/test-journal-append",
 ]
 exclude = ["crates/sd-boot", "crates/sd-stub"]
 resolver = "2"

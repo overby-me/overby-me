@@ -2587,7 +2587,10 @@ fn main() {
 
     // Write PID file so journalctl --flush / --rotate can find us
     if let Err(e) = fs::write(&pid_file_path, process::id().to_string()) {
-        eprintln!("journald: failed to write PID file {}: {}", pid_file_path, e);
+        eprintln!(
+            "journald: failed to write PID file {}: {}",
+            pid_file_path, e
+        );
     }
 
     // Check for socket activation (LISTEN_FDS from PID 1)

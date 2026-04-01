@@ -205,24 +205,20 @@ fn main() {
         let identifier = cli.identifier.as_deref().unwrap_or(cmd.as_str());
 
         // Open a journal stream early to get JOURNAL_STREAM env var value
-        let journal_stream_env = match open_journal_stream(
-            &journal_socket,
-            identifier,
-            stdout_priority,
-            level_prefix,
-        ) {
-            Ok(ref stream) => {
-                // Get device:inode for JOURNAL_STREAM
-                let fd = stream.as_raw_fd();
-                let mut stat: libc::stat = unsafe { std::mem::zeroed() };
-                if unsafe { libc::fstat(fd, &mut stat) } == 0 {
-                    Some(format!("{}:{}", stat.st_dev, stat.st_ino))
-                } else {
-                    None
+        let journal_stream_env =
+            match open_journal_stream(&journal_socket, identifier, stdout_priority, level_prefix) {
+                Ok(ref stream) => {
+                    // Get device:inode for JOURNAL_STREAM
+                    let fd = stream.as_raw_fd();
+                    let mut stat: libc::stat = unsafe { std::mem::zeroed() };
+                    if unsafe { libc::fstat(fd, &mut stat) } == 0 {
+                        Some(format!("{}:{}", stat.st_dev, stat.st_ino))
+                    } else {
+                        None
+                    }
                 }
-            }
-            Err(_) => None,
-        };
+                Err(_) => None,
+            };
 
         let mut cmd_builder = process::Command::new(cmd);
         cmd_builder
