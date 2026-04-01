@@ -31,6 +31,8 @@ User Commands:
   list-users                   List logged in users
   user-status [USER]           Show user status
   show-user [USER]             Show properties of a user
+  enable-linger [USER]         Enable lingering for a user
+  disable-linger [USER]        Disable lingering for a user
   terminate-user [USER]        Terminate all sessions of a user
   kill-user [USER]             Send signal to user's processes
 
@@ -805,6 +807,67 @@ fn main() {
                 1
             }
         },
+
+        "enable-linger" => {
+            if arg.is_empty() {
+                eprintln!("User argument required");
+                1
+            } else {
+                // Resolve username to UID if needed
+                let uid_str = if arg.parse::<u32>().is_ok() {
+                    arg.to_string()
+                } else {
+                    resolve_username_to_uid(arg)
+                        .map(|uid| uid.to_string())
+                        .unwrap_or_else(|| arg.to_string())
+                };
+                let cmd = format!("enable-linger {}", uid_str);
+                match send_command(&cmd) {
+                    Ok(resp) => {
+                        if resp.starts_with("ERROR") {
+                            eprintln!("{}", resp);
+                            1
+                        } else {
+                            0
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to enable linger: {}", e);
+                        1
+                    }
+                }
+            }
+        }
+
+        "disable-linger" => {
+            if arg.is_empty() {
+                eprintln!("User argument required");
+                1
+            } else {
+                let uid_str = if arg.parse::<u32>().is_ok() {
+                    arg.to_string()
+                } else {
+                    resolve_username_to_uid(arg)
+                        .map(|uid| uid.to_string())
+                        .unwrap_or_else(|| arg.to_string())
+                };
+                let cmd = format!("disable-linger {}", uid_str);
+                match send_command(&cmd) {
+                    Ok(resp) => {
+                        if resp.starts_with("ERROR") {
+                            eprintln!("{}", resp);
+                            1
+                        } else {
+                            0
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to disable linger: {}", e);
+                        1
+                    }
+                }
+            }
+        }
 
         "help" => {
             usage();

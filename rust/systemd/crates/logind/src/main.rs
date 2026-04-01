@@ -4415,6 +4415,71 @@ fn handle_control_command(mgr: &mut LoginManager, cmd: &str) -> String {
             format!("OK (action {} requested)", command)
         }
 
+        "enable-linger" => {
+            // args = UID or username
+            let uid = if let Ok(uid) = args.parse::<u32>() {
+                Some(uid)
+            } else {
+                resolve_username_to_uid(args)
+            };
+            if let Some(uid) = uid {
+                if let Some(user) = mgr.users.get_mut(&uid) {
+                    user.linger = true;
+                } else {
+                    let name = resolve_uid_to_name(uid);
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs();
+                    mgr.users.insert(
+                        uid,
+                        User {
+                            uid,
+                            gid: 0,
+                            name,
+                            state: "lingering".to_string(),
+                            sessions: Vec::new(),
+                            slice: format!("user-{uid}.slice"),
+                            service: format!("user@{uid}.service"),
+                            runtime_path: format!("/run/user/{uid}"),
+                            since: now,
+                            since_monotonic: 0,
+                            linger: true,
+                        },
+                    );
+                }
+                let linger_dir = "/var/lib/systemd/linger";
+                let _ = fs::create_dir_all(linger_dir);
+                let linger_path = format!("{linger_dir}/{uid}");
+                let _ = fs::write(&linger_path, "");
+                mgr.sync_runtime_state();
+                log::info!("Enabled linger for UID {uid}");
+                "OK".to_string()
+            } else {
+                format!("ERROR: Invalid user '{args}'")
+            }
+        }
+
+        "disable-linger" => {
+            let uid = if let Ok(uid) = args.parse::<u32>() {
+                Some(uid)
+            } else {
+                resolve_username_to_uid(args)
+            };
+            if let Some(uid) = uid {
+                if let Some(user) = mgr.users.get_mut(&uid) {
+                    user.linger = false;
+                }
+                let linger_path = format!("/var/lib/systemd/linger/{uid}");
+                let _ = fs::remove_file(&linger_path);
+                mgr.sync_runtime_state();
+                log::info!("Disabled linger for UID {uid}");
+                "OK".to_string()
+            } else {
+                format!("ERROR: Invalid user '{args}'")
+            }
+        }
+
         "attach-device" => {
             // JSON: {"seat": "seat0", "sysfs": "/sys/devices/..."}
             match serde_json::from_str::<serde_json::Value>(args) {

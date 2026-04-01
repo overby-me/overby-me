@@ -716,7 +716,7 @@ fn main() {
             (None, machine_spec.clone())
         };
 
-        if machine != ".host" {
+        if !machine.is_empty() && machine != ".host" {
             eprintln!(
                 "Error: Machine '{machine}' is not supported. Only '.host' (local) is supported."
             );
