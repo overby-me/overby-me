@@ -169,6 +169,13 @@ impl Shell {
                         self.traps.remove("EXIT");
                         self.traps.remove("0");
                         self.in_pipeline_child = true;
+                        // Reset SIGPIPE to default in pipeline children so that
+                        // writes to closed pipes kill the child silently (matching
+                        // bash behavior).  The Rust runtime sets SIGPIPE to SIG_IGN
+                        // which causes write() to return EPIPE instead.
+                        unsafe {
+                            libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+                        }
                         if let Some(fd) = prev_read_fd
                             && fd != 0
                         {
@@ -284,6 +291,11 @@ impl Shell {
                     nix::unistd::close(pipe_r_raw).ok();
                     nix::unistd::dup2(pipe_w_raw, 1).ok();
                     nix::unistd::close(pipe_w_raw).ok();
+                    // Reset SIGPIPE to default so writes to closed pipes
+                    // kill the child silently (matching bash behavior).
+                    unsafe {
+                        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+                    }
                     // Command substitution does not inherit errexit or ERR trap
                     // (unless inherit_errexit/errtrace shopt is set or POSIX mode is on)
                     if !self.shopt_inherit_errexit && !self.opt_posix {

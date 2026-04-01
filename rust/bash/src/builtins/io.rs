@@ -58,11 +58,15 @@ pub(super) fn builtin_echo(shell: &mut Shell, args: &[String]) -> i32 {
         match nix::unistd::write(std::io::stdout(), &bytes) {
             Ok(_) => 0,
             Err(nix::Error::EPIPE) => {
-                // Broken pipe — in pipeline children, suppress the error
-                // and exit silently (bash doesn't report EPIPE in pipelines).
-                // In other contexts (e.g. process substitutions), report
-                // the error like bash does.
-                if shell.in_pipeline_child {
+                // Broken pipe — in any subprocess (pipeline child, command
+                // substitution, or process substitution) suppress the error
+                // and exit silently.  Bash's children have SIGPIPE=SIG_DFL
+                // so they're killed before write() returns; our Rust runtime
+                // keeps SIGPIPE=SIG_IGN so we see EPIPE instead.
+                let is_subprocess = shell.in_pipeline_child
+                    || shell.in_comsub
+                    || (shell.top_level_pid != 0 && std::process::id() != shell.top_level_pid);
+                if is_subprocess {
                     std::process::exit(1);
                 }
                 eprintln!("{}: echo: write error: Broken pipe", shell.error_prefix());
