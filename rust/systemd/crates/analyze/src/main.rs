@@ -218,6 +218,17 @@ enum Command {
         policies: Vec<String>,
     },
 
+    /// Show full contents of configuration files
+    #[command(name = "cat-config")]
+    CatConfig {
+        /// Configuration file name(s) (e.g. "systemd/system.conf")
+        items: Vec<String>,
+
+        /// Show only non-comment, non-empty lines
+        #[arg(long)]
+        tldr: bool,
+    },
+
     /// List unit files from search paths
     #[command(name = "unit-files")]
     UnitFiles {
@@ -1043,6 +1054,7 @@ fn main() {
         Some(Command::ImagePolicy { ref policies }) => cmd_image_policy(policies),
         Some(Command::Pcrs) => cmd_pcrs(),
         Some(Command::Srk) => cmd_srk(),
+        Some(Command::CatConfig { ref items, tldr }) => cmd_cat_config(items, tldr),
         Some(Command::UnitFiles { ref patterns }) => cmd_unit_files(patterns, cli.user),
         Some(Command::ExitStatus { ref statuses }) => cmd_exit_status(statuses),
         Some(Command::Capability {
@@ -1475,6 +1487,99 @@ fn cmd_unit_paths(user_mode: bool) {
 
     for p in &paths {
         println!("{}", p.display());
+    }
+}
+
+fn cmd_cat_config(items: &[String], tldr: bool) {
+    // Config search paths (highest to lowest priority)
+    let search_dirs = ["/etc", "/run", "/usr/local/lib", "/usr/lib"];
+
+    for item in items {
+        // If it's an absolute path, just cat it
+        let paths_to_try: Vec<PathBuf> = if item.starts_with('/') {
+            vec![PathBuf::from(item)]
+        } else {
+            search_dirs
+                .iter()
+                .map(|dir| PathBuf::from(dir).join(item))
+                .collect()
+        };
+
+        let mut found = false;
+        for path in &paths_to_try {
+            if path.is_file() {
+                found = true;
+                // Resolve symlinks for the comment header
+                let resolved = fs::canonicalize(path).unwrap_or_else(|_| path.clone());
+                if resolved != *path {
+                    println!("# {} -> {}", path.display(), resolved.display());
+                } else {
+                    println!("# {}", path.display());
+                }
+                if let Ok(content) = fs::read_to_string(path) {
+                    if tldr {
+                        for line in content.lines() {
+                            let trimmed = line.trim();
+                            if !trimmed.is_empty()
+                                && !trimmed.starts_with('#')
+                                && !trimmed.starts_with(';')
+                            {
+                                println!("{line}");
+                            }
+                        }
+                    } else {
+                        print!("{content}");
+                        if !content.ends_with('\n') {
+                            println!();
+                        }
+                    }
+                }
+            }
+
+            // Also check for .d/ drop-in directory
+            let dropin_dir = PathBuf::from(format!("{}.d", path.display()));
+            if dropin_dir.is_dir()
+                && let Ok(entries) = fs::read_dir(&dropin_dir)
+            {
+                let mut conf_files: Vec<_> = entries
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.path().extension().is_some_and(|ext| ext == "conf"))
+                    .collect();
+                conf_files.sort_by_key(|e| e.file_name());
+                for entry in conf_files {
+                    found = true;
+                    let p = entry.path();
+                    let resolved = fs::canonicalize(&p).unwrap_or_else(|_| p.clone());
+                    if resolved != p {
+                        println!("\n# {} -> {}", p.display(), resolved.display());
+                    } else {
+                        println!("\n# {}", p.display());
+                    }
+                    if let Ok(content) = fs::read_to_string(&p) {
+                        if tldr {
+                            for line in content.lines() {
+                                let trimmed = line.trim();
+                                if !trimmed.is_empty()
+                                    && !trimmed.starts_with('#')
+                                    && !trimmed.starts_with(';')
+                                {
+                                    println!("{line}");
+                                }
+                            }
+                        } else {
+                            print!("{content}");
+                            if !content.ends_with('\n') {
+                                println!();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if !found {
+            // Not an error — C systemd also silently skips missing configs
+        }
     }
 }
 

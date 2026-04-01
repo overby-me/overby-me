@@ -115,6 +115,10 @@
     systemd-analyze condition --unit="$UNIT_NAME"
     rm -f "/run/systemd/system/$UNIT_NAME"
 
+    : "systemd-analyze cat-config"
+    systemd-analyze cat-config systemd/system.conf >/dev/null
+    systemd-analyze cat-config --tldr systemd/system.conf >/dev/null
+
     : "systemd-analyze security"
     systemd-analyze security || :
 
