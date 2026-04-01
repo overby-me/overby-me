@@ -1071,13 +1071,34 @@ impl Shell {
                     } else if let Some(msg) = e.strip_prefix("RUNTIME:") {
                         eprintln!("{}: {}", self.error_prefix(), msg);
                     } else if self.dash_c_mode {
-                        let comsub_suffix = if self.in_comsub && e.contains("syntax error") {
+                        // Strip COMSUB: prefix from errors originating in command
+                        // substitutions parsed at parse time (like C bash's
+                        // parse_comsub/xparse_dolparen).
+                        let (display_err, is_comsub_error) =
+                            if let Some(inner) = e.strip_prefix("COMSUB:") {
+                                (inner.to_string(), true)
+                            } else {
+                                (e.clone(), false)
+                            };
+                        // Add "while looking for matching ')'" suffix for comsub
+                        // errors, but NOT when the unexpected token is already `)`
+                        // — that means the paren WAS found but the content before
+                        // it was bad (e.g. `$( if x; then echo foo )`).
+                        let comsub_suffix = if (self.in_comsub || is_comsub_error)
+                            && display_err.contains("syntax error")
+                            && !display_err.contains("token `)'")
+                        {
                             " while looking for matching `)'"
                         } else {
                             ""
                         };
-                        eprintln!("{}: {}{}", self.syntax_error_prefix(), e, comsub_suffix);
-                        if e.contains("syntax error") {
+                        eprintln!(
+                            "{}: {}{}",
+                            self.syntax_error_prefix(),
+                            display_err,
+                            comsub_suffix
+                        );
+                        if display_err.contains("syntax error") {
                             // Show the line where the error occurred
                             let lineno: usize = self
                                 .vars
@@ -1102,7 +1123,7 @@ impl Shell {
                             };
                             // "syntax error: X" → second line gets "syntax error: `...'"
                             // "syntax error near X" → second line gets just "`...'"
-                            if e.starts_with("syntax error:") {
+                            if display_err.starts_with("syntax error:") {
                                 let display_line = if let Some(pos) = line.find("((") {
                                     &line[pos..]
                                 } else {
@@ -1119,8 +1140,30 @@ impl Shell {
                         }
                         return 2;
                     } else {
-                        eprintln!("{}: {}", self.error_prefix(), e);
-                        if e.contains("syntax error") {
+                        // Strip COMSUB: prefix and add comsub suffix in
+                        // non -c mode too (e.g. script files with comsub
+                        // parse errors).
+                        let (display_err2, is_comsub2) =
+                            if let Some(inner) = e.strip_prefix("COMSUB:") {
+                                (inner.to_string(), true)
+                            } else {
+                                (e.clone(), false)
+                            };
+                        let comsub_suffix2 = if (self.in_comsub || is_comsub2)
+                            && display_err2.contains("syntax error")
+                            && !display_err2.contains("token `)'")
+                        {
+                            " while looking for matching `)'"
+                        } else {
+                            ""
+                        };
+                        eprintln!(
+                            "{}: {}{}",
+                            self.error_prefix(),
+                            display_err2,
+                            comsub_suffix2
+                        );
+                        if display_err2.contains("syntax error") {
                             let lineno: usize = self
                                 .vars
                                 .get("LINENO")

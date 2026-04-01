@@ -2,6 +2,628 @@ use crate::ast::*;
 use crate::lexer::{Lexer, Token};
 use std::collections::HashMap;
 
+/// Result of parsing a command substitution with full recursive parse.
+/// Like C bash's `parse_comsub`/`xparse_dolparen`, this runs the real parser
+/// on the comsub contents so that case/esac, done/while, etc. are handled
+/// correctly instead of relying on a character-level state machine.
+pub struct ComsubParseResult {
+    /// The text of the command substitution (between `$(` and `)`)
+    pub text: String,
+    /// Total characters consumed from the input (including the closing `)`)
+    pub chars_consumed: usize,
+    /// Whether the parse encountered a syntax error inside the comsub
+    pub syntax_error: Option<String>,
+    /// Heredoc EOF warnings from the comsub parse
+    pub heredoc_eof_warnings: Vec<(usize, usize, String)>,
+}
+
+/// Hybrid comsub parser: uses a character-level scan to find the `$(...)` boundary
+/// (handling quotes, case/esac, heredocs, nested constructs), then runs the real
+/// parser on the bounded text to validate it and detect syntax errors — just like
+/// C bash's `parse_comsub`/`xparse_dolparen` which calls `yyparse()`.
+///
+/// `input` is the text starting AFTER the `$(` — i.e. the first char is the
+/// beginning of the command.  `in_dquote` indicates whether the `$(` appeared
+/// inside double quotes (needed for `}` handling inside `${...}`).
+///
+/// `aliases` and flags are forwarded to the validation sub-parser.
+pub fn parse_comsub(
+    input: &str,
+    aliases: HashMap<String, String>,
+    _expand_aliases: bool,
+    _posix_mode: bool,
+    in_dquote: bool,
+    line_offset: usize,
+) -> ComsubParseResult {
+    // Phase 1: character-level scan to find the comsub boundary.
+    // This is the old proven approach that correctly handles quotes, case/esac,
+    // heredocs, nested $(), `}` inside ${...}, etc.
+    let chars: Vec<char> = input.chars().collect();
+    let boundary = find_comsub_boundary(&chars, in_dquote, &aliases, line_offset);
+
+    match boundary {
+        ComsubBoundary::Closed {
+            text,
+            chars_consumed,
+            heredoc_eof_warnings,
+        } => {
+            // Phase 2: validate the bounded text with a full recursive parse.
+            // This catches errors like `done` in case body, `in` at command
+            // position, etc. that the character scanner cannot detect.
+            let syntax_error = validate_comsub_text(&text, &aliases);
+
+            ComsubParseResult {
+                text,
+                chars_consumed,
+                syntax_error,
+                heredoc_eof_warnings,
+            }
+        }
+        ComsubBoundary::Incomplete {
+            heredoc_eof_warnings,
+        } => {
+            let text = input.to_string();
+            ComsubParseResult {
+                text,
+                chars_consumed: chars.len(),
+                syntax_error: None, // incomplete is signalled via INCOMPLETE_COMSUB marker
+                heredoc_eof_warnings,
+            }
+        }
+        ComsubBoundary::SilentClose { chars_scanned } => {
+            // `}` at comsub depth 1 in dquote — the enclosing ${...} closes.
+            // chars_scanned tells the caller how far to advance past the
+            // comsub text (up to but not including the `}`).
+            ComsubParseResult {
+                text: "\x00SILENT_COMSUB".to_string(),
+                chars_consumed: chars_scanned,
+                syntax_error: None,
+                heredoc_eof_warnings: Vec::new(),
+            }
+        }
+    }
+}
+
+enum ComsubBoundary {
+    /// Found closing `)` — comsub text and total chars consumed (including `)`)
+    Closed {
+        text: String,
+        chars_consumed: usize,
+        heredoc_eof_warnings: Vec<(usize, usize, String)>,
+    },
+    /// No closing `)` found — incomplete comsub
+    Incomplete {
+        heredoc_eof_warnings: Vec<(usize, usize, String)>,
+    },
+    /// `}` in dquote at depth 1 — silent close for enclosing `${...}`
+    /// `chars_scanned` is how many chars were consumed before hitting `}`.
+    SilentClose { chars_scanned: usize },
+}
+
+/// Character-level scan to find the comsub boundary.  This is the battle-tested
+/// scanner that handles all the tricky edge cases (quotes, case/esac, heredocs,
+/// `}` inside `${...}`, nested `$()`, backticks, comments, etc.).
+///
+/// `line_offset` is the number of newlines before the `$(` in the original input,
+/// so that heredoc warnings report correct line numbers relative to the script.
+fn find_comsub_boundary(
+    chars: &[char],
+    in_dquote: bool,
+    aliases: &HashMap<String, String>,
+    line_offset: usize,
+) -> ComsubBoundary {
+    let mut i = 0;
+    let mut depth = 1i32;
+    let mut brace_depth = 0i32;
+    let mut cmd = String::new();
+    let mut case_depth = 0i32;
+    let mut case_paren_depth = Vec::<i32>::new();
+    let mut case_action_stack = Vec::<bool>::new();
+    let mut in_case_action = false;
+    let mut compound_depth = 0i32;
+    let mut heredoc_eof_warnings = Vec::new();
+
+    while i < chars.len() && depth > 0 {
+        match chars[i] {
+            '\'' => {
+                cmd.push(chars[i]);
+                i += 1;
+                while i < chars.len() && chars[i] != '\'' {
+                    cmd.push(chars[i]);
+                    i += 1;
+                }
+                if i < chars.len() {
+                    cmd.push(chars[i]);
+                    i += 1;
+                }
+                continue;
+            }
+            '"' => {
+                cmd.push(chars[i]);
+                i += 1;
+                while i < chars.len() && chars[i] != '"' {
+                    if chars[i] == '\\' && i + 1 < chars.len() {
+                        cmd.push(chars[i]);
+                        i += 1;
+                        cmd.push(chars[i]);
+                        i += 1;
+                        continue;
+                    }
+                    if chars[i] == '$' && i + 1 < chars.len() {
+                        if chars[i + 1] == '(' {
+                            cmd.push(chars[i]);
+                            i += 1;
+                            cmd.push(chars[i]);
+                            i += 1;
+                            let mut inner_depth = 1i32;
+                            while i < chars.len() && inner_depth > 0 {
+                                match chars[i] {
+                                    '(' => inner_depth += 1,
+                                    ')' => {
+                                        inner_depth -= 1;
+                                        if inner_depth == 0 {
+                                            cmd.push(chars[i]);
+                                            i += 1;
+                                            break;
+                                        }
+                                    }
+                                    '"' => {
+                                        cmd.push(chars[i]);
+                                        i += 1;
+                                        while i < chars.len() && chars[i] != '"' {
+                                            if chars[i] == '\\' && i + 1 < chars.len() {
+                                                cmd.push(chars[i]);
+                                                i += 1;
+                                            }
+                                            cmd.push(chars[i]);
+                                            i += 1;
+                                        }
+                                        if i < chars.len() {
+                                            cmd.push(chars[i]);
+                                            i += 1;
+                                        }
+                                        continue;
+                                    }
+                                    '\'' => {
+                                        cmd.push(chars[i]);
+                                        i += 1;
+                                        while i < chars.len() && chars[i] != '\'' {
+                                            cmd.push(chars[i]);
+                                            i += 1;
+                                        }
+                                        if i < chars.len() {
+                                            cmd.push(chars[i]);
+                                            i += 1;
+                                        }
+                                        continue;
+                                    }
+                                    _ => {}
+                                }
+                                if i < chars.len() && inner_depth > 0 {
+                                    cmd.push(chars[i]);
+                                    i += 1;
+                                }
+                            }
+                            continue;
+                        } else if chars[i + 1] == '{' {
+                            cmd.push(chars[i]);
+                            i += 1;
+                            cmd.push(chars[i]);
+                            i += 1;
+                            let mut inner_depth = 1i32;
+                            while i < chars.len() && inner_depth > 0 {
+                                match chars[i] {
+                                    '{' => inner_depth += 1,
+                                    '}' => {
+                                        inner_depth -= 1;
+                                        if inner_depth == 0 {
+                                            cmd.push(chars[i]);
+                                            i += 1;
+                                            break;
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                                if i < chars.len() && inner_depth > 0 {
+                                    cmd.push(chars[i]);
+                                    i += 1;
+                                }
+                            }
+                            continue;
+                        }
+                    }
+                    cmd.push(chars[i]);
+                    i += 1;
+                }
+                if i < chars.len() {
+                    cmd.push(chars[i]);
+                    i += 1;
+                }
+                continue;
+            }
+            '`' => {
+                cmd.push(chars[i]);
+                i += 1;
+                while i < chars.len() && chars[i] != '`' {
+                    if chars[i] == '\\' && i + 1 < chars.len() {
+                        cmd.push(chars[i]);
+                        i += 1;
+                    }
+                    cmd.push(chars[i]);
+                    i += 1;
+                }
+                if i < chars.len() {
+                    cmd.push(chars[i]);
+                    i += 1;
+                }
+                continue;
+            }
+            '(' => {
+                let preceded_by_dollar = cmd.ends_with('$') || cmd.ends_with("$(");
+                if case_depth > 0 && !in_case_action && !preceded_by_dollar {
+                    // ( in case pattern context — pattern delimiter, skip
+                } else {
+                    depth += 1;
+                }
+            }
+            ')' => {
+                if case_depth > 0 && !in_case_action {
+                    in_case_action = true;
+                } else if compound_depth > 0 && depth <= 1 {
+                    depth = 0;
+                    break;
+                } else {
+                    depth -= 1;
+                    if depth == 0 {
+                        i += 1;
+                        break;
+                    }
+                }
+            }
+            '}' if brace_depth > 0 => {
+                brace_depth -= 1;
+            }
+            '}' if in_dquote && depth == 1 => {
+                return ComsubBoundary::SilentClose { chars_scanned: i };
+            }
+            '$' if i + 1 < chars.len() && chars[i + 1] == '{' => {
+                cmd.push(chars[i]);
+                i += 1;
+                cmd.push(chars[i]);
+                i += 1;
+                brace_depth += 1;
+                continue;
+            }
+            '#' if cmd.is_empty()
+                || cmd.ends_with('\n')
+                || (cmd.ends_with(";;") || (cmd.ends_with(';') && !cmd.ends_with("\\;"))) =>
+            {
+                while i < chars.len() && chars[i] != '\n' {
+                    i += 1;
+                }
+                continue;
+            }
+            '\\' if i + 1 < chars.len() && chars[i + 1] == '\n' => {
+                i += 2;
+                continue;
+            }
+            '\\' if i + 1 < chars.len() => {
+                cmd.push(chars[i]);
+                i += 1;
+                cmd.push(chars[i]);
+                i += 1;
+                continue;
+            }
+            '<' if i + 2 < chars.len() && chars[i + 1] == '<' && chars[i + 2] == '<' => {
+                cmd.push(chars[i]);
+                i += 1;
+                cmd.push(chars[i]);
+                i += 1;
+                cmd.push(chars[i]);
+                i += 1;
+                continue;
+            }
+            '<' if i + 1 < chars.len()
+                && chars[i + 1] == '<'
+                && (i + 2 >= chars.len() || chars[i + 2] != '<') =>
+            {
+                let hd_start = i;
+                cmd.push(chars[i]);
+                i += 1;
+                cmd.push(chars[i]);
+                i += 1;
+                let strip_tabs = i < chars.len() && chars[i] == '-';
+                if strip_tabs {
+                    cmd.push(chars[i]);
+                    i += 1;
+                }
+                while i < chars.len() && (chars[i] == ' ' || chars[i] == '\t') {
+                    cmd.push(chars[i]);
+                    i += 1;
+                }
+                let mut delim = String::new();
+                let mut _heredoc_quoted = false;
+                while i < chars.len()
+                    && chars[i] != '\n'
+                    && chars[i] != ' '
+                    && chars[i] != '\t'
+                    && chars[i] != ';'
+                    && chars[i] != '&'
+                    && chars[i] != ')'
+                    && chars[i] != '|'
+                {
+                    let ch = chars[i];
+                    if ch == '\'' {
+                        _heredoc_quoted = true;
+                        cmd.push(ch);
+                        i += 1;
+                        while i < chars.len() && chars[i] != '\'' {
+                            delim.push(chars[i]);
+                            cmd.push(chars[i]);
+                            i += 1;
+                        }
+                        if i < chars.len() {
+                            cmd.push(chars[i]);
+                            i += 1;
+                        }
+                    } else if ch == '"' {
+                        _heredoc_quoted = true;
+                        cmd.push(ch);
+                        i += 1;
+                        while i < chars.len() && chars[i] != '"' {
+                            delim.push(chars[i]);
+                            cmd.push(chars[i]);
+                            i += 1;
+                        }
+                        if i < chars.len() {
+                            cmd.push(chars[i]);
+                            i += 1;
+                        }
+                    } else if ch == '\\' {
+                        _heredoc_quoted = true;
+                        cmd.push(ch);
+                        i += 1;
+                        if i < chars.len() && chars[i] == '\n' {
+                            cmd.push(chars[i]);
+                            i += 1;
+                        } else if i < chars.len() {
+                            delim.push(chars[i]);
+                            cmd.push(chars[i]);
+                            i += 1;
+                        }
+                    } else {
+                        delim.push(ch);
+                        cmd.push(ch);
+                        i += 1;
+                    }
+                }
+                while i < chars.len() && chars[i] != '\n' {
+                    cmd.push(chars[i]);
+                    i += 1;
+                }
+                if i < chars.len() {
+                    cmd.push(chars[i]);
+                    i += 1;
+                }
+                if !delim.is_empty() {
+                    loop {
+                        if i >= chars.len() {
+                            let current_line = chars.iter().filter(|&&c| c == '\n').count();
+                            let heredoc_start_line =
+                                chars[..hd_start].iter().filter(|&&c| c == '\n').count() + 1;
+                            heredoc_eof_warnings.push((
+                                current_line,
+                                heredoc_start_line,
+                                delim.clone(),
+                            ));
+                            break;
+                        }
+                        let line_start = i;
+                        while i < chars.len() && chars[i] != '\n' {
+                            i += 1;
+                        }
+                        let line: String = chars[line_start..i].iter().collect();
+                        let check = if strip_tabs {
+                            line.trim_start_matches('\t').to_string()
+                        } else {
+                            line.clone()
+                        };
+                        if check == delim {
+                            cmd.push_str(&line);
+                            if i < chars.len() {
+                                cmd.push('\n');
+                                i += 1;
+                            }
+                            break;
+                        }
+                        if check.starts_with(&delim)
+                            && check[delim.len()..].trim_start().starts_with(')')
+                        {
+                            let current_line =
+                                chars[..i].iter().filter(|&&c| c == '\n').count() + 1;
+                            let heredoc_start_line =
+                                chars[..hd_start].iter().filter(|&&c| c == '\n').count() + 1;
+                            heredoc_eof_warnings.push((
+                                current_line,
+                                heredoc_start_line,
+                                delim.clone(),
+                            ));
+                            cmd.push_str(&delim);
+                            cmd.push('\n');
+                            i = line_start + delim.len();
+                            break;
+                        }
+                        cmd.push_str(&line);
+                        if i < chars.len() {
+                            cmd.push('\n');
+                            i += 1;
+                        }
+                    }
+                }
+                continue;
+            }
+            _ => {}
+        }
+        // Detect ;; to reset case action context
+        if chars[i] == ';' && i + 1 < chars.len() && chars[i + 1] == ';' && case_depth > 0 {
+            in_case_action = false;
+            cmd.push(';');
+            i += 1;
+            cmd.push(';');
+            i += 1;
+            continue;
+        }
+        // Handle # comments
+        if chars[i] == '#' {
+            let prev = if cmd.is_empty() {
+                '\n'
+            } else {
+                cmd.chars().last().unwrap_or('\n')
+            };
+            let prev_escaped = cmd.len() >= 2 && cmd.as_bytes()[cmd.len() - 2] == b'\\';
+            if !prev_escaped && matches!(prev, '\n' | ';' | '&' | '|' | '(' | ' ' | '\t') {
+                while i < chars.len() && chars[i] != '\n' {
+                    i += 1;
+                }
+                continue;
+            }
+        }
+        // Track case/esac keywords (resolve aliases like `switch=case`)
+        if chars[i].is_alphabetic() {
+            let mut word = String::new();
+            while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') {
+                word.push(chars[i]);
+                i += 1;
+            }
+            // Resolve aliases so that e.g. `alias switch=case` is tracked
+            let effective = aliases.get(word.as_str()).map(|v| v.trim().to_string());
+            let kw = effective.as_deref().unwrap_or(word.as_str());
+            if kw == "case" {
+                case_depth += 1;
+                case_paren_depth.push(depth);
+                case_action_stack.push(in_case_action);
+                in_case_action = false;
+            } else if (kw == "esac" || word == "esac") && case_depth > 0 {
+                let case_open_depth = case_paren_depth.last().copied().unwrap_or(depth);
+                if depth == case_open_depth {
+                    let trimmed = cmd.trim_end();
+                    let prev_ch = trimmed.chars().last().unwrap_or('\n');
+                    let after_in = trimmed.ends_with(" in")
+                        || trimmed.ends_with("\tin")
+                        || trimmed.ends_with("\nin");
+                    if in_case_action || prev_ch == ';' || prev_ch == '\n' || after_in {
+                        case_depth -= 1;
+                        case_paren_depth.pop();
+                        in_case_action = case_action_stack.pop().unwrap_or(false);
+                    }
+                }
+            }
+            if matches!(kw, "do" | "then") {
+                compound_depth += 1;
+            } else if (matches!(kw, "done" | "fi") || matches!(word.as_str(), "done" | "fi"))
+                && compound_depth > 0
+            {
+                compound_depth -= 1;
+            }
+            // Count ( and ) in alias expansion to adjust depth — handles
+            // aliases like `alias nest='('` and `alias short='echo ok )'`.
+            if let Some(ref exp) = effective {
+                let mut close_idx = None;
+                for (ci, ch) in exp.chars().enumerate() {
+                    match ch {
+                        '(' => depth += 1,
+                        ')' if case_depth <= 0 => {
+                            depth -= 1;
+                            if depth == 0 {
+                                close_idx = Some(ci);
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                if depth == 0 {
+                    // Alias closes the comsub — add expanded content up to )
+                    if let Some(ci) = close_idx {
+                        let before_close: String = exp.chars().take(ci).collect();
+                        cmd.push_str(&before_close);
+                    }
+                    i += 0; // already past the word
+                    break;
+                }
+            }
+            cmd.push_str(&word);
+            continue;
+        }
+        cmd.push(chars[i]);
+        i += 1;
+    }
+
+    if depth > 0 {
+        ComsubBoundary::Incomplete {
+            heredoc_eof_warnings: heredoc_eof_warnings
+                .into_iter()
+                .map(|(eof_line, start_line, delim)| {
+                    (eof_line + line_offset, start_line + line_offset, delim)
+                })
+                .collect(),
+        }
+    } else {
+        ComsubBoundary::Closed {
+            text: cmd,
+            chars_consumed: i,
+            heredoc_eof_warnings: heredoc_eof_warnings
+                .into_iter()
+                .map(|(eof_line, start_line, delim)| {
+                    (eof_line + line_offset, start_line + line_offset, delim)
+                })
+                .collect(),
+        }
+    }
+}
+
+/// Validate comsub text with a full recursive parse.  Returns `Some(error)` if
+/// the text contains a syntax error (e.g. `done` in a case body, `in` at
+/// command position, incomplete compound commands).  Like C bash's `yyparse()`
+/// call inside `parse_comsub`.
+fn validate_comsub_text(text: &str, aliases: &HashMap<String, String>) -> Option<String> {
+    if text.trim().is_empty() {
+        return None;
+    }
+
+    let mut lexer = Lexer::new(text);
+    lexer.aliases = aliases.clone();
+    // Enable alias expansion if aliases are present — matches C bash's
+    // parse_comsub which expands aliases in posix mode.
+    lexer.shopt_expand_aliases = !aliases.is_empty();
+    lexer.comsub_eof = false; // no special `)` handling — text is already bounded
+
+    let first_token = lexer.next_token();
+    let mut parser = Parser {
+        lexer,
+        current: first_token,
+        compound_cmd_stack: Vec::new(),
+    };
+
+    match parser.parse_program() {
+        Ok(_program) => {
+            // Check if the parser consumed everything
+            if parser.current != Token::Eof {
+                let token = parser.current_token_str();
+                Some(format!("syntax error near unexpected token `{}'", token))
+            } else {
+                None
+            }
+        }
+        Err(e) => {
+            // In comsub context, the "EOF" token is really the closing `)`.
+            // But since we're validating bounded text, EOF means end of the
+            // comsub — replace with `)` for better error messages.
+            Some(e.replace("`EOF'", "`)'"))
+        }
+    }
+}
+
 pub struct Parser {
     lexer: Lexer,
     current: Token,
@@ -151,6 +773,27 @@ impl Parser {
         }
     }
 
+    /// Check if the current word token contains a `SyntaxError` part (e.g. from
+    /// a comsub that failed to parse).  Returns `Some(err)` if found.
+    fn check_word_syntax_error(&self) -> Option<String> {
+        if let Token::Word(parts) = &self.current {
+            for part in parts {
+                if let WordPart::SyntaxError(msg) = part {
+                    return Some(msg.clone());
+                }
+                // Also check inside DoubleQuoted parts
+                if let WordPart::DoubleQuoted(inner) = part {
+                    for p in inner {
+                        if let WordPart::SyntaxError(msg) = p {
+                            return Some(msg.clone());
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
     fn take_word(&mut self) -> Option<Word> {
         if let Token::Word(_) = &self.current {
             if let Token::Word(w) = self.advance() {
@@ -161,6 +804,18 @@ impl Parser {
         } else {
             None
         }
+    }
+
+    /// Like `take_word` but returns `Result` — propagates `SyntaxError` parts
+    /// as parse errors immediately, like C bash's `jump_to_top_level(FORCE_EOF)`
+    /// when `parse_comsub` detects a syntax error.
+    fn take_word_checked(&mut self) -> Result<Option<Word>, String> {
+        if let Some(err) = self.check_word_syntax_error() {
+            // Consume the word so the parser doesn't get stuck
+            self.advance();
+            return Err(err);
+        }
+        Ok(self.take_word())
     }
 
     pub fn is_at_eof(&self) -> bool {
@@ -663,6 +1318,12 @@ impl Parser {
             return Ok(Command::Compound(compound, redirections));
         }
 
+        // Reject `in` at command position — it's a reserved word that can only
+        // appear after `case WORD` or `for VAR`, never as a standalone command.
+        if self.is_keyword("in") {
+            return Err("syntax error near unexpected token `in'".to_string());
+        }
+
         // Simple command
         let cmd = self.parse_simple_command()?;
         Ok(Command::Simple(cmd))
@@ -746,6 +1407,12 @@ impl Parser {
         let body = self.parse_program()?;
         self.compound_cmd_stack.pop();
         if !self.eat(&Token::RParen) {
+            // If the current token is a reserved word, report it as unexpected
+            if let Some(text) = self.word_text()
+                && is_reserved_word(&text)
+            {
+                return Err(format!("syntax error near unexpected token `{}'", text));
+            }
             return Err("expected ')'".to_string());
         }
         Ok(CompoundCommand::Subshell(body))
@@ -951,7 +1618,7 @@ impl Parser {
                 self.advance();
             }
             let mut patterns = Vec::new();
-            while let Some(w) = self.take_word() {
+            while let Some(w) = self.take_word_checked()? {
                 patterns.push(w);
                 if self.current == Token::Pipe {
                     self.advance();
@@ -970,6 +1637,19 @@ impl Parser {
 
             self.skip_newlines();
             let body = self.parse_program()?;
+
+            // Detect misplaced reserved words in case body.
+            // If parse_program stopped on a reserved word like `done`, `fi`,
+            // `then`, `else`, `elif`, or `do` that has no matching opening
+            // construct, it means the token is unexpected here.
+            if let Some(text) = self.word_text()
+                && matches!(
+                    text.as_str(),
+                    "done" | "fi" | "then" | "else" | "elif" | "do"
+                )
+            {
+                return Err(format!("syntax error near unexpected token `{}'", text));
+            }
 
             let terminator = if self.current == Token::DSemi {
                 self.advance();
@@ -1343,7 +2023,7 @@ impl Parser {
                 {
                     break;
                 }
-                if let Some(w) = self.take_word() {
+                if let Some(w) = self.take_word_checked()? {
                     words.push(w);
                 }
             } else {

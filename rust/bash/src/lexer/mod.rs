@@ -95,6 +95,8 @@ pub struct Lexer {
     input: Vec<char>,
     pos: usize,
     pub line: usize,
+    /// Position in the input where the current token started (before whitespace/comments were skipped)
+    pub token_start_pos: usize,
     pending_heredocs: Vec<HereDocPending>,
     heredoc_bodies: Vec<Word>,
     pub heredoc_delimiters: Vec<String>,
@@ -111,6 +113,11 @@ pub struct Lexer {
     redirect_target_next: bool, // next word is a redirect target (not a command)
     pub in_case_pattern: bool, // suppress alias expansion in case patterns
     pub had_whitespace_before_token: bool, // tracks if whitespace preceded the last token
+    /// When true, `)` at the top level returns Token::Eof (for comsub recursive parse)
+    pub comsub_eof: bool,
+    /// Tracks nested `(` depth so that in comsub_eof mode, `)` inside subshells
+    /// and other parenthesized contexts is NOT treated as the comsub closer.
+    pub paren_depth: i32,
 }
 
 impl Lexer {
@@ -123,6 +130,7 @@ impl Lexer {
             input: input.chars().collect(),
             pos: 0,
             line: 1,
+            token_start_pos: 0,
             pending_heredocs: Vec::new(),
             heredoc_bodies: Vec::new(),
             heredoc_delimiters: Vec::new(),
@@ -138,6 +146,8 @@ impl Lexer {
             redirect_target_next: false,
             in_case_pattern: false,
             had_whitespace_before_token: false,
+            comsub_eof: false,
+            paren_depth: 0,
         }
     }
 
@@ -456,6 +466,9 @@ impl Lexer {
 
         self.skip_comment();
 
+        // Record where this token starts (after whitespace/comments)
+        self.token_start_pos = self.pos;
+
         let ch = match self.peek() {
             None => return Token::Eof,
             Some(c) => c,
@@ -518,10 +531,22 @@ impl Lexer {
             }
             '(' => {
                 self.advance();
+                if self.comsub_eof {
+                    self.paren_depth += 1;
+                }
                 Token::LParen
             }
             ')' => {
+                if self.comsub_eof && !self.in_case_pattern && self.paren_depth <= 0 {
+                    // In comsub recursive parse mode, `)` at the top level
+                    // (not inside a subshell or case pattern) acts as EOF.
+                    // Don't consume it.
+                    return Token::Eof;
+                }
                 self.advance();
+                if self.comsub_eof && self.paren_depth > 0 {
+                    self.paren_depth -= 1;
+                }
                 Token::RParen
             }
             '<' => {
