@@ -80,6 +80,8 @@
     systemd-analyze dot >/dev/null
     systemd-analyze dot --order >/dev/null
     systemd-analyze dot --require >/dev/null
+    systemd-analyze dot default.target >/dev/null
+    systemd-analyze dot --from-pattern="*.service" --to-pattern="*.target" >/dev/null
 
     : "systemd-analyze verify"
     systemd-analyze verify /run/systemd/system/default.target 2>&1 || :
