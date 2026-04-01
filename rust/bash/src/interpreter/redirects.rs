@@ -78,10 +78,12 @@ impl Shell {
 
             match &redir.kind {
                 RedirectKind::Output | RedirectKind::Clobber => {
-                    let (fd, var_readonly) = match self.resolve_redir_fd(&redir.fd, 1) {
+                    let (fd, var_fail) = match self.resolve_redir_fd(&redir.fd, 1) {
                         Ok(fd) => (fd, false),
                         Err(fd) => (fd, true),
                     };
+                    let alloc_failed = self.redir_alloc_failed;
+                    self.redir_alloc_failed = false;
                     if !is_var_fd(redir)
                         && let Ok(saved_fd) =
                             nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(10))
@@ -116,7 +118,15 @@ impl Shell {
                             .into_raw_fd()
                     };
                     if raw_fd != fd {
-                        nix::unistd::dup2(raw_fd, fd).map_err(|e| e.to_string())?;
+                        if let Err(e) = nix::unistd::dup2(raw_fd, fd) {
+                            nix::unistd::close(raw_fd).ok();
+                            if alloc_failed {
+                                let io_msg = "Invalid argument";
+                                self.restore_redirections(saved);
+                                return Err(format!("{}: {}", target_str, io_msg));
+                            }
+                            return Err(e.to_string());
+                        }
                         nix::unistd::close(raw_fd).ok();
                     }
                     // Clear CLOEXEC flag so child processes inherit this fd
@@ -125,17 +135,19 @@ impl Shell {
                         nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::empty()),
                     )
                     .ok();
-                    if var_readonly {
+                    if var_fail {
                         self.last_status = 1;
                         self.restore_redirections(saved);
                         return Err(String::new());
                     }
                 }
                 RedirectKind::Append => {
-                    let (fd, var_readonly) = match self.resolve_redir_fd(&redir.fd, 1) {
+                    let (fd, var_fail) = match self.resolve_redir_fd(&redir.fd, 1) {
                         Ok(fd) => (fd, false),
                         Err(fd) => (fd, true),
                     };
+                    let alloc_failed = self.redir_alloc_failed;
+                    self.redir_alloc_failed = false;
                     if !is_var_fd(redir)
                         && let Ok(saved_fd) =
                             nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(10))
@@ -150,7 +162,15 @@ impl Shell {
                         .map_err(|e| format!("{}: {}", target_str, Self::io_error_message(&e)))?;
                     let raw_fd = file.into_raw_fd();
                     if raw_fd != fd {
-                        nix::unistd::dup2(raw_fd, fd).map_err(|e| e.to_string())?;
+                        if let Err(e) = nix::unistd::dup2(raw_fd, fd) {
+                            nix::unistd::close(raw_fd).ok();
+                            if alloc_failed {
+                                let io_msg = "Invalid argument";
+                                self.restore_redirections(saved);
+                                return Err(format!("{}: {}", target_str, io_msg));
+                            }
+                            return Err(e.to_string());
+                        }
                         nix::unistd::close(raw_fd).ok();
                     }
                     nix::fcntl::fcntl(
@@ -158,7 +178,7 @@ impl Shell {
                         nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::empty()),
                     )
                     .ok();
-                    if var_readonly {
+                    if var_fail {
                         self.last_status = 1;
                         self.restore_redirections(saved);
                         return Err(String::new());
@@ -191,10 +211,12 @@ impl Shell {
                     nix::unistd::close(raw_fd).ok();
                 }
                 RedirectKind::Input => {
-                    let (fd, var_readonly) = match self.resolve_redir_fd(&redir.fd, 0) {
+                    let (fd, var_fail) = match self.resolve_redir_fd(&redir.fd, 0) {
                         Ok(fd) => (fd, false),
                         Err(fd) => (fd, true),
                     };
+                    let alloc_failed = self.redir_alloc_failed;
+                    self.redir_alloc_failed = false;
                     if !is_var_fd(redir)
                         && let Ok(saved_fd) =
                             nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(10))
@@ -206,7 +228,17 @@ impl Shell {
                         .map_err(|e| format!("{}: {}", target_str, Self::io_error_message(&e)))?;
                     let raw_fd = file.into_raw_fd();
                     if raw_fd != fd {
-                        nix::unistd::dup2(raw_fd, fd).map_err(|e| e.to_string())?;
+                        if let Err(e) = nix::unistd::dup2(raw_fd, fd) {
+                            nix::unistd::close(raw_fd).ok();
+                            if alloc_failed {
+                                // The root cause is EINVAL from ulimit-limited
+                                // F_DUPFD, so always report "Invalid argument".
+                                let io_msg = "Invalid argument";
+                                self.restore_redirections(saved);
+                                return Err(format!("{}: {}", target_str, io_msg));
+                            }
+                            return Err(e.to_string());
+                        }
                         nix::unistd::close(raw_fd).ok();
                     }
                     // Clear close-on-exec flag so child processes inherit this fd
@@ -215,14 +247,26 @@ impl Shell {
                         nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::empty()),
                     )
                     .ok();
-                    if var_readonly {
+                    if var_fail {
                         self.last_status = 1;
                         self.restore_redirections(saved);
                         return Err(String::new());
                     }
                 }
                 RedirectKind::DupOutput => {
-                    let fd = self.resolve_redir_fd(&redir.fd, 1).unwrap_or_else(|fd| fd);
+                    // For close operations ({v}>&-), read the variable's current
+                    // value instead of allocating a new fd.
+                    let fd = if target_str == "-" && is_var_fd(redir) {
+                        match self.resolve_var_fd_for_close(&redir.fd) {
+                            Ok(fd) => fd,
+                            Err(name) => {
+                                self.restore_redirections(saved);
+                                return Err(format!("{}: ambiguous redirect", name));
+                            }
+                        }
+                    } else {
+                        self.resolve_redir_fd(&redir.fd, 1).unwrap_or_else(|fd| fd)
+                    };
                     // Empty target from expansion is ambiguous redirect
                     if target_str.is_empty() {
                         self.restore_redirections(saved);
@@ -256,6 +300,18 @@ impl Shell {
                             self.restore_redirections(saved);
                             return Err(format!("{}: ambiguous redirect", target_str));
                         }
+                        // Validate the source fd exists BEFORE saving, so that
+                        // the save (F_DUPFD_CLOEXEC) doesn't allocate the same
+                        // fd number as src_fd, which would mask the error.
+                        if nix::fcntl::fcntl(src_fd, nix::fcntl::FcntlArg::F_GETFD).is_err() {
+                            // Print the error BEFORE restoring redirections so
+                            // that it goes through any already-setup redirect
+                            // chain (e.g. 2>&1 piped to grep).
+                            let msg = Self::dup_error_message(&raw_target, &nix::Error::EBADF);
+                            eprintln!("{}: {}", self.error_prefix(), msg);
+                            self.restore_redirections(saved);
+                            return Err(String::new());
+                        }
                         if let Ok(saved_fd) =
                             nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(10))
                         {
@@ -284,7 +340,19 @@ impl Shell {
                     }
                 }
                 RedirectKind::DupInput => {
-                    let fd = self.resolve_redir_fd(&redir.fd, 0).unwrap_or_else(|fd| fd);
+                    // For close operations ({v}<&-), read the variable's current
+                    // value instead of allocating a new fd.
+                    let fd = if target_str == "-" && is_var_fd(redir) {
+                        match self.resolve_var_fd_for_close(&redir.fd) {
+                            Ok(fd) => fd,
+                            Err(name) => {
+                                self.restore_redirections(saved);
+                                return Err(format!("{}: ambiguous redirect", name));
+                            }
+                        }
+                    } else {
+                        self.resolve_redir_fd(&redir.fd, 0).unwrap_or_else(|fd| fd)
+                    };
                     if target_str.is_empty() {
                         self.restore_redirections(saved);
                         return Err(format!("{}: ambiguous redirect", raw_target));
@@ -319,6 +387,14 @@ impl Shell {
                         if src_fd < 0 {
                             self.restore_redirections(saved);
                             return Err(format!("{}: ambiguous redirect", target_str));
+                        }
+                        // Validate the source fd exists BEFORE saving (same
+                        // reasoning as the DupOutput case above).
+                        if nix::fcntl::fcntl(src_fd, nix::fcntl::FcntlArg::F_GETFD).is_err() {
+                            let msg = Self::dup_error_message(&raw_target, &nix::Error::EBADF);
+                            eprintln!("{}: {}", self.error_prefix(), msg);
+                            self.restore_redirections(saved);
+                            return Err(String::new());
                         }
                         if let Ok(saved_fd) =
                             nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(10))
@@ -403,10 +479,12 @@ impl Shell {
                     }
                 }
                 RedirectKind::ReadWrite => {
-                    let (fd, var_readonly) = match self.resolve_redir_fd(&redir.fd, 0) {
+                    let (fd, var_fail) = match self.resolve_redir_fd(&redir.fd, 0) {
                         Ok(fd) => (fd, false),
                         Err(fd) => (fd, true),
                     };
+                    let alloc_failed = self.redir_alloc_failed;
+                    self.redir_alloc_failed = false;
                     if let Ok(saved_fd) =
                         nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(10))
                     {
@@ -422,7 +500,15 @@ impl Shell {
                         .map_err(|e| format!("{}: {}", target_str, Self::io_error_message(&e)))?;
                     let raw_fd = file.into_raw_fd();
                     if raw_fd != fd {
-                        nix::unistd::dup2(raw_fd, fd).map_err(|e| e.to_string())?;
+                        if let Err(e) = nix::unistd::dup2(raw_fd, fd) {
+                            nix::unistd::close(raw_fd).ok();
+                            if alloc_failed {
+                                let io_msg = "Invalid argument";
+                                self.restore_redirections(saved);
+                                return Err(format!("{}: {}", target_str, io_msg));
+                            }
+                            return Err(e.to_string());
+                        }
                         nix::unistd::close(raw_fd).ok();
                     }
                     // Clear CLOEXEC so child processes inherit this fd
@@ -431,7 +517,7 @@ impl Shell {
                         nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::empty()),
                     )
                     .ok();
-                    if var_readonly {
+                    if var_fail {
                         self.last_status = 1;
                         self.restore_redirections(saved);
                         return Err(String::new());
@@ -446,6 +532,44 @@ impl Shell {
         Ok(saved)
     }
 
+    /// Resolve the fd for a close operation (`{v}>&-` or `{v}<&-`).
+    /// Reads the current value of the variable instead of allocating a new fd.
+    /// Returns `Err(varname)` when the variable is unset (for "ambiguous redirect").
+    #[cfg(unix)]
+    fn resolve_var_fd_for_close(&self, fd: &Option<RedirFd>) -> Result<i32, String> {
+        match fd {
+            Some(RedirFd::Number(n)) => Ok(*n),
+            Some(RedirFd::Var(name)) => {
+                // Resolve namerefs first, then read the variable's current value
+                let val = if let Some(bracket) = name.find('[') {
+                    let base = &name[..bracket];
+                    let resolved_base = self.resolve_nameref(base);
+                    let subscript = &name[bracket + 1..name.len() - 1];
+                    if let Ok(idx) = subscript.parse::<usize>() {
+                        self.arrays
+                            .get(&resolved_base)
+                            .and_then(|arr| arr.get(idx))
+                            .and_then(|v| v.as_ref())
+                            .cloned()
+                    } else {
+                        self.assoc_arrays
+                            .get(&resolved_base)
+                            .and_then(|m| m.get(subscript))
+                            .cloned()
+                    }
+                } else {
+                    let resolved = self.resolve_nameref(name);
+                    self.vars.get(&resolved).cloned()
+                };
+                match val.and_then(|s| s.parse::<i32>().ok()) {
+                    Some(fd) => Ok(fd),
+                    None => Err(name.clone()),
+                }
+            }
+            None => Ok(1), // shouldn't happen for {var} close, but fallback
+        }
+    }
+
     /// Resolve the fd for a redirection. Returns `Ok(fd)` on success.
     /// Returns `Err(fd)` when the variable is readonly — the fd is still
     /// allocated (so the file open / dup2 can proceed and create files)
@@ -456,64 +580,110 @@ impl Shell {
         match fd {
             Some(RedirFd::Number(n)) => Ok(*n),
             Some(RedirFd::Var(name)) => {
-                // For array subscripts like fd[0], check readonly on the base name
-                let base_name = if let Some(bracket) = name.find('[') {
-                    &name[..bracket]
+                // Resolve namerefs: if name is a nameref, follow it to the
+                // real variable name so we assign/check-readonly on the target.
+                let resolved_name = if name.contains('[') {
+                    // Array subscripts: resolve the base name through namerefs
+                    let bracket = name.find('[').unwrap();
+                    let base = &name[..bracket];
+                    let resolved_base = self.resolve_nameref(base);
+                    if resolved_base != base {
+                        format!("{}{}", resolved_base, &name[bracket..])
+                    } else {
+                        name.clone()
+                    }
                 } else {
-                    name.as_str()
+                    self.resolve_nameref(name)
+                };
+
+                // For array subscripts like fd[0], check readonly on the base name
+                let base_name = if let Some(bracket) = resolved_name.find('[') {
+                    &resolved_name[..bracket]
+                } else {
+                    resolved_name.as_str()
                 };
                 let is_readonly = self.readonly_vars.contains(base_name);
-                // Auto-allocate fd: find unused fd >= 10
-                for candidate in 10..256i32 {
-                    match nix::unistd::dup(candidate) {
-                        Ok(dup_fd) => {
-                            // fd is in use — close our dup, try next
-                            nix::unistd::close(dup_fd).ok();
+                // Auto-allocate fd >= 10 using F_DUPFD on a known-open fd.
+                // This correctly respects ulimit -n (unlike scanning with dup).
+                match nix::fcntl::fcntl(0, nix::fcntl::FcntlArg::F_DUPFD(10)) {
+                    Ok(candidate) => {
+                        // We got a valid fd >= 10.  Close it immediately — we
+                        // only needed to discover the number.  The actual
+                        // open/dup2 will happen in the caller.
+                        nix::unistd::close(candidate).ok();
+
+                        if is_readonly {
+                            eprintln!("{}: {}: readonly variable", self.error_prefix(), name);
+                            eprintln!(
+                                "{}: {}: cannot assign fd to variable",
+                                self.error_prefix(),
+                                name
+                            );
+                            return Err(candidate);
                         }
-                        Err(_) => {
-                            // fd is free — use it
-                            if is_readonly {
-                                eprintln!("{}: {}: readonly variable", self.error_prefix(), name);
-                                eprintln!(
-                                    "{}: {}: cannot assign fd to variable",
-                                    self.error_prefix(),
-                                    name
-                                );
-                                return Err(candidate);
-                            }
-                            // Handle array subscript: {fd[0]} → set arrays["fd"][0]
-                            if let Some(bracket) = name.find('[') {
-                                let base = &name[..bracket];
-                                let subscript = &name[bracket + 1..name.len() - 1];
-                                if let Ok(idx) = subscript.parse::<usize>() {
-                                    let arr = self.arrays.entry(base.to_string()).or_default();
-                                    while arr.len() <= idx {
-                                        arr.push(None);
-                                    }
-                                    arr[idx] = Some(candidate.to_string());
-                                } else {
-                                    // Non-numeric subscript — treat as assoc array
-                                    let assoc =
-                                        self.assoc_arrays.entry(base.to_string()).or_default();
-                                    assoc.insert(subscript.to_string(), candidate.to_string());
+                        // Handle array subscript: {fd[0]} → set arrays["fd"][0]
+                        if let Some(bracket) = resolved_name.find('[') {
+                            let base = &resolved_name[..bracket];
+                            let subscript = &resolved_name[bracket + 1..resolved_name.len() - 1];
+                            if let Ok(idx) = subscript.parse::<usize>() {
+                                let arr = self.arrays.entry(base.to_string()).or_default();
+                                while arr.len() <= idx {
+                                    arr.push(None);
                                 }
+                                arr[idx] = Some(candidate.to_string());
                             } else {
-                                self.vars.insert(name.clone(), candidate.to_string());
+                                // Non-numeric subscript — treat as assoc array
+                                let assoc = self.assoc_arrays.entry(base.to_string()).or_default();
+                                assoc.insert(subscript.to_string(), candidate.to_string());
                             }
-                            return Ok(candidate);
+                        } else {
+                            self.vars
+                                .insert(resolved_name.clone(), candidate.to_string());
+                        }
+                        // Track this fd for varredir_close: if the shopt is
+                        // enabled, non-exec redirections will close it when
+                        // the command finishes.
+                        if self
+                            .shopt_options
+                            .get("varredir_close")
+                            .copied()
+                            .unwrap_or(false)
+                        {
+                            self.varredir_close_fds.push(candidate);
+                        }
+                        Ok(candidate)
+                    }
+                    Err(e) => {
+                        // F_DUPFD failed — likely ulimit too low for fd >= 10
+                        if is_readonly {
+                            eprintln!("{}: {}: readonly variable", self.error_prefix(), name);
+                            eprintln!(
+                                "{}: {}: cannot assign fd to variable",
+                                self.error_prefix(),
+                                name
+                            );
+                            Err(default)
+                        } else {
+                            let msg = match e {
+                                nix::Error::EINVAL => "cannot duplicate fd: Invalid argument",
+                                nix::Error::EMFILE => "cannot duplicate fd: Too many open files",
+                                _ => "cannot duplicate fd: Bad file descriptor",
+                            };
+                            // Bash prints the "redirection error" without a line
+                            // number, using just the script name prefix.
+                            let script_name = self
+                                .vars
+                                .get("_BASH_SOURCE_FILE")
+                                .or_else(|| self.positional.first())
+                                .cloned()
+                                .unwrap_or_else(|| "bash".to_string());
+                            eprintln!("{}: redirection error: {}", script_name, msg);
+                            // Return -1 so subsequent dup2 fails and produces
+                            // the target-file error that bash emits.
+                            self.redir_alloc_failed = true;
+                            Err(-1)
                         }
                     }
-                }
-                if is_readonly {
-                    eprintln!("{}: {}: readonly variable", self.error_prefix(), name);
-                    eprintln!(
-                        "{}: {}: cannot assign fd to variable",
-                        self.error_prefix(),
-                        name
-                    );
-                    Err(default)
-                } else {
-                    Ok(default)
                 }
             }
             None => Ok(default),
@@ -529,7 +699,13 @@ impl Shell {
     }
 
     #[cfg(unix)]
-    pub(super) fn restore_redirections(&self, saved: Vec<(i32, std::os::unix::io::RawFd)>) {
+    pub(super) fn restore_redirections(&mut self, saved: Vec<(i32, std::os::unix::io::RawFd)>) {
+        // When varredir_close is enabled, close any fds that were allocated
+        // by {var} redirections during this command's setup.
+        let varredir_fds = std::mem::take(&mut self.varredir_close_fds);
+        for fd in varredir_fds {
+            nix::unistd::close(fd).ok();
+        }
         for (fd, saved_fd) in saved.into_iter().rev() {
             nix::unistd::dup2(saved_fd, fd).ok();
             nix::unistd::close(saved_fd).ok();

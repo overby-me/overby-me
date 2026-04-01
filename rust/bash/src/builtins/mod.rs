@@ -642,7 +642,15 @@ fn format_redirection(redir: &Redirection) -> String {
         RedirectKind::Output => s.push_str("> "),
         RedirectKind::Append => s.push_str(">> "),
         RedirectKind::Clobber => s.push_str(">| "),
-        RedirectKind::DupInput => s.push_str("<&"),
+        RedirectKind::DupInput => {
+            // Bash normalizes {var}<&- to {var}>&- when printing function bodies
+            let target_word = format_word(&redir.target);
+            if matches!(&redir.fd, Some(RedirFd::Var(_))) && target_word == "-" {
+                s.push_str(">&");
+            } else {
+                s.push_str("<&");
+            }
+        }
         RedirectKind::DupOutput => s.push_str(">&"),
         RedirectKind::ReadWrite => s.push_str("<> "),
         RedirectKind::HereDoc(strip, ref delim) => {

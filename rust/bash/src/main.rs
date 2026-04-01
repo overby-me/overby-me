@@ -234,15 +234,27 @@ fn run(sigpipe_was_ignored: bool) -> i32 {
         shell.positional = vec![file.clone()];
     }
 
-    // Close inherited fds with CLOEXEC flag (these are internal fds from
-    // the parent shell that shouldn't be visible to child shell processes)
+    // Close inherited fds on startup to prevent leaked fds from the parent
+    // environment (e.g. nix sandbox) from shifting {var} fd-allocation.
+    //
+    // Strategy: close CLOEXEC fds everywhere (3-255), and close non-CLOEXEC
+    // fds only in the range 10-255 (the {var} allocation range).  Fds 3-9
+    // are left alone because they may be explicitly passed by the caller
+    // (e.g. `bash 3<&0`).  This matches bash's behavior of preserving
+    // user-range fds while cleaning up internal ones.
     #[cfg(unix)]
     {
         for fd in 3..256 {
-            if let Ok(flags) = nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_GETFD)
-                && flags & libc::FD_CLOEXEC != 0
-            {
-                nix::unistd::close(fd).ok();
+            if let Ok(flags) = nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_GETFD) {
+                if flags & libc::FD_CLOEXEC != 0 {
+                    // Always close CLOEXEC fds (internal fds from parent)
+                    nix::unistd::close(fd).ok();
+                } else if fd >= 10 {
+                    // Close non-CLOEXEC fds >= 10 to keep the {var}
+                    // allocation range clean.  Fds 3-9 are preserved
+                    // for explicit user redirections.
+                    nix::unistd::close(fd).ok();
+                }
             }
         }
     }

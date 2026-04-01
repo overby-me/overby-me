@@ -317,6 +317,12 @@ pub struct Shell {
     pub shopt_expand_aliases: bool,
     /// Generic shopt options storage for options not yet individually tracked
     pub shopt_options: HashMap<String, bool>,
+    /// Fds allocated by {var} redirections that should be closed when
+    /// `varredir_close` is enabled and the command completes (non-exec).
+    pub varredir_close_fds: Vec<i32>,
+    /// Set to true when {var} fd allocation failed (e.g. ulimit too low).
+    /// The redirect handler checks this to emit a secondary target-file error.
+    pub redir_alloc_failed: bool,
     pub in_pipeline_child: bool,
     pub in_foreground_wait: bool, // suppress SIGCHLD trap during foreground waits
     pub dash_c_mode: bool,
@@ -485,6 +491,8 @@ impl Shell {
             shopt_lastpipe: false,
             shopt_expand_aliases: false,
             shopt_options: HashMap::new(),
+            varredir_close_fds: Vec::new(),
+            redir_alloc_failed: false,
             in_pipeline_child: false,
             in_foreground_wait: false,
             dash_c_mode: false,
