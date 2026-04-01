@@ -2005,11 +2005,11 @@ fn sd_notify(msg: &str) {
 /// Minimal Varlink server for `journalctl --sync`, `--rotate`, `--flush`,
 /// and `--relinquish-var`.  The Varlink protocol is JSON + NUL byte framing
 /// over a Unix stream socket at `/run/systemd/journal/io.systemd.journal`.
-fn varlink_server(state: Arc<JournaldState>) {
+fn varlink_server(state: Arc<JournaldState>, socket_path: String) {
     // Remove stale socket
-    let _ = fs::remove_file(VARLINK_SOCKET_PATH);
+    let _ = fs::remove_file(&socket_path);
 
-    let listener = match UnixListener::bind(VARLINK_SOCKET_PATH) {
+    let listener = match UnixListener::bind(&socket_path) {
         Ok(l) => l,
         Err(e) => {
             eprintln!("journald: Failed to bind Varlink socket: {}", e);
@@ -2019,7 +2019,7 @@ fn varlink_server(state: Arc<JournaldState>) {
 
     // Make the socket world-accessible (journalctl runs as root but the
     // protocol checks credentials via SO_PEERCRED on the server side).
-    let _ = fs::set_permissions(VARLINK_SOCKET_PATH, std::fs::Permissions::from_mode(0o666));
+    let _ = fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o666));
 
     // Set non-blocking so we can check the shutdown flag
     listener
@@ -2532,12 +2532,41 @@ fn main() {
         );
     }
 
-    eprintln!("systemd-journald starting...");
+    // Parse optional namespace argument (systemd-journald <namespace>)
+    let namespace: Option<String> = std::env::args().nth(1).filter(|s| !s.is_empty());
+
+    if let Some(ref ns) = namespace {
+        eprintln!("systemd-journald starting (namespace: {ns})...");
+    } else {
+        eprintln!("systemd-journald starting...");
+    }
+
+    // Compute paths based on namespace
+    let runtime_dir = match &namespace {
+        Some(ns) => format!("/run/systemd/journal.{ns}"),
+        None => RUNTIME_DIR.to_string(),
+    };
+    let pid_file_path = format!("{runtime_dir}/pid");
+    let varlink_socket_path = format!("{runtime_dir}/io.systemd.journal");
 
     // Load configuration
     let config = JournaldConfig::load();
     let persistent = config.use_persistent_storage();
-    let storage_config = config.make_storage_config(persistent);
+    let mut storage_config = config.make_storage_config(persistent);
+
+    // For namespace instances, append .<namespace> to the machine-id subdirectory
+    if let Some(ref ns) = namespace {
+        let machine_id = fs::read_to_string("/etc/machine-id")
+            .map(|s| s.trim().to_string())
+            .unwrap_or_else(|_| "0".repeat(32));
+        let base_dir = if persistent {
+            "/var/log/journal"
+        } else {
+            "/run/log/journal"
+        };
+        storage_config.directory = PathBuf::from(format!("{base_dir}/{machine_id}.{ns}"));
+        storage_config.direct_directory = true;
+    }
 
     let storage = match JournalStorage::new(storage_config) {
         Ok(s) => s,
@@ -2554,14 +2583,11 @@ fn main() {
     setup_signal_handlers(Arc::clone(&state));
 
     // Ensure runtime directory exists
-    let _ = fs::create_dir_all(RUNTIME_DIR);
+    let _ = fs::create_dir_all(&runtime_dir);
 
     // Write PID file so journalctl --flush / --rotate can find us
-    if let Err(e) = fs::write(PID_FILE_PATH, process::id().to_string()) {
-        eprintln!(
-            "journald: failed to write PID file {}: {}",
-            PID_FILE_PATH, e
-        );
+    if let Err(e) = fs::write(&pid_file_path, process::id().to_string()) {
+        eprintln!("journald: failed to write PID file {}: {}", pid_file_path, e);
     }
 
     // Check for socket activation (LISTEN_FDS from PID 1)
@@ -2574,11 +2600,18 @@ fn main() {
         .spawn(move || native_socket_listener(state_native, activated_native))
         .expect("failed to spawn native socket thread");
 
-    let state_syslog = Arc::clone(&state);
-    let _syslog_handle = thread::Builder::new()
-        .name("syslog-socket".into())
-        .spawn(move || syslog_socket_listener(state_syslog))
-        .expect("failed to spawn syslog socket thread");
+    // Syslog and kmsg are only for the default (non-namespace) journald instance
+    let _syslog_handle = if namespace.is_none() {
+        let state_syslog = Arc::clone(&state);
+        Some(
+            thread::Builder::new()
+                .name("syslog-socket".into())
+                .spawn(move || syslog_socket_listener(state_syslog))
+                .expect("failed to spawn syslog socket thread"),
+        )
+    } else {
+        None
+    };
 
     let state_stdout = Arc::clone(&state);
     let activated_stdout = activated.stdout;
@@ -2587,11 +2620,17 @@ fn main() {
         .spawn(move || stdout_socket_listener(state_stdout, activated_stdout))
         .expect("failed to spawn stdout socket thread");
 
-    let state_kmsg = Arc::clone(&state);
-    let _kmsg_handle = thread::Builder::new()
-        .name("kmsg-reader".into())
-        .spawn(move || kmsg_reader(state_kmsg))
-        .expect("failed to spawn kmsg reader thread");
+    let _kmsg_handle = if namespace.is_none() {
+        let state_kmsg = Arc::clone(&state);
+        Some(
+            thread::Builder::new()
+                .name("kmsg-reader".into())
+                .spawn(move || kmsg_reader(state_kmsg))
+                .expect("failed to spawn kmsg reader thread"),
+        )
+    } else {
+        None
+    };
 
     let state_maint = Arc::clone(&state);
     let _maint_handle = thread::Builder::new()
@@ -2599,11 +2638,21 @@ fn main() {
         .spawn(move || maintenance_thread(state_maint))
         .expect("failed to spawn maintenance thread");
 
-    let state_varlink = Arc::clone(&state);
-    let _varlink_handle = thread::Builder::new()
-        .name("varlink".into())
-        .spawn(move || varlink_server(state_varlink))
-        .expect("failed to spawn varlink thread");
+    // Varlink server: for namespace instances, the socket is managed by the
+    // systemd-journald-varlink@.socket unit, so skip creating our own.
+    // For the default instance, we create and manage the socket ourselves.
+    let _varlink_handle = if namespace.is_none() {
+        let state_varlink = Arc::clone(&state);
+        let varlink_path = varlink_socket_path.clone();
+        Some(
+            thread::Builder::new()
+                .name("varlink".into())
+                .spawn(move || varlink_server(state_varlink, varlink_path))
+                .expect("failed to spawn varlink thread"),
+        )
+    } else {
+        None
+    };
 
     // Log a startup message to the journal itself
     {
@@ -2656,9 +2705,11 @@ fn main() {
     // them would break socket activation on restart. If the next start is not
     // socket-activated, create_datagram_socket/create_stream_listener will
     // remove stale files before re-binding.
-    let _ = fs::remove_file(PID_FILE_PATH);
+    let _ = fs::remove_file(&pid_file_path);
     // Syslog socket is never socket-activated — always clean it up
-    let _ = fs::remove_file(SYSLOG_SOCKET_PATH);
+    if namespace.is_none() {
+        let _ = fs::remove_file(SYSLOG_SOCKET_PATH);
+    }
 
     sd_notify("STOPPING=1");
 

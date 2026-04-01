@@ -2,7 +2,6 @@
   name = "04-JOURNAL";
   # Skip subtests needing tools/binaries not available in the NixOS test VM
   testEnv.TEST_SKIP_SUBTESTS = builtins.concatStringsSep " " [
-    "JOURNAL\\.cat\\." # needs journal namespace (systemd-journald@ template socket)
     "journal-append" # needs test-journal-append test binary
     "journal-corrupt\\." # needs systemd-run --user -M (machined)
     # journal-gatewayd and journal-remote self-skip when binary is missing
