@@ -115,6 +115,9 @@
     systemd-analyze condition --unit="$UNIT_NAME"
     rm -f "/run/systemd/system/$UNIT_NAME"
 
+    : "systemd-analyze security"
+    systemd-analyze security || :
+
     : "systemd-analyze exit-status"
     systemd-analyze exit-status
     systemd-analyze exit-status STDOUT BPF
