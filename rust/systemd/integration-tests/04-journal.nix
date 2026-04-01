@@ -13,13 +13,15 @@
     # extracting user and running as that UID (no machined needed for .host)
     # journalctl --user-unit: supported, returns empty set when no user units exist
     # journald now waits for sockets before sending READY=1, no sleep needed
-    # Per-write PID tracking now implemented via SCM_CREDENTIALS on stdout stream
+    # Per-write PID tracking via SCM_CREDENTIALS on stdout stream for _LINE_BREAK=pid-change.
+    # Trusted process fields (_COMM, _EXE) use service_pid from stream header, so stdout
+    # entries reflect the actual service process, not PID 1 which relays the pipe.
     # verbose-success: PID 1 lifecycle logging provides SYSLOG_IDENTIFIER=systemd entries
-    # with UNIT= field; stdout stream uses exec binary name (bash) as identifier.
+    # with UNIT= field; stdout stream uses exec binary name as identifier.
     # silent-success: LogLevelMax=notice suppresses PID 1 lifecycle messages (priority 6/info)
-    # script-as-path test: works because testsuite.nix now exec's the script
-    # directly (not via `bash -x`), so the kernel sets /proc/PID/comm to the
-    # script filename, matching journalctl's Script condition.
+    # script-as-path test: works because testsuite.nix exec's the script directly
+    # (not via `bash -x`), so the kernel sets /proc/PID/comm to the script filename,
+    # and journald uses service_pid for _COMM, matching journalctl's Script condition.
     # forever-print-hola: journald restart resilience tests work because PID 1
     # holds the stdout pipe and reconnects to journald automatically.
     # Restart=always in journald unit ensures journald restarts after SIGKILL.

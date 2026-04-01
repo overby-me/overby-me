@@ -2063,24 +2063,30 @@ fn handle_stdout_connection(stream: UnixStream, state: Arc<JournaldState>) {
         }
         entry.set_field("_TRANSPORT", "stdout");
 
-        // Determine the PID to use for this entry:
-        // 1. Per-write SCM_CREDENTIALS PID (from recvmsg)
-        // 2. Service PID from header extension
-        // 3. Peer credentials PID
+        // Determine PIDs for this entry:
+        // - write_pid: per-write SCM_CREDENTIALS PID (the writer, often PID 1)
+        // - metadata_pid: the actual service process whose _COMM/_EXE we want
+        //   Prefer service_pid (from stream header) so stdout entries reflect
+        //   the service process, not PID 1 which merely relays the pipe.
         let write_pid = line_cred.map(|c| c.pid as u32).filter(|&p| p > 0);
-        let effective_pid = write_pid
+        let metadata_pid = service_pid
+            .or(write_pid)
+            .or(peer_cred.map(|c| c.pid as u32));
+        let tracking_pid = write_pid
             .or(service_pid)
             .or(peer_cred.map(|c| c.pid as u32));
 
-        if let Some(pid) = effective_pid {
-            // Detect PID change between lines
+        if let Some(pid) = tracking_pid {
+            // Detect PID change between lines (using write-side PID)
             if let Some(prev) = last_pid
                 && prev != pid
             {
                 entry.set_field("_LINE_BREAK", "pid-change");
             }
             last_pid = Some(pid);
+        }
 
+        if let Some(pid) = metadata_pid {
             entry.set_trusted_process_fields(pid);
         }
 
