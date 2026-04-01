@@ -223,6 +223,23 @@ enum Command {
 
     /// Show the TPM2 SRK (Storage Root Key)
     Srk,
+
+    /// Map systemd-specific exit statuses to/from their names
+    #[command(name = "exit-status")]
+    ExitStatus {
+        /// Status name(s) or number(s) to look up (omit for full table)
+        statuses: Vec<String>,
+    },
+
+    /// Map Linux capability names to/from their numbers
+    Capability {
+        /// Capability name(s) or number(s) to look up (omit for full table)
+        capabilities: Vec<String>,
+
+        /// Look up capabilities from a hex mask
+        #[arg(short = 'm', long)]
+        mask: Option<String>,
+    },
 }
 
 // ── Boot timing data structures ───────────────────────────────────────────
@@ -1018,6 +1035,11 @@ fn main() {
         Some(Command::ImagePolicy { ref policies }) => cmd_image_policy(policies),
         Some(Command::Pcrs) => cmd_pcrs(),
         Some(Command::Srk) => cmd_srk(),
+        Some(Command::ExitStatus { ref statuses }) => cmd_exit_status(statuses),
+        Some(Command::Capability {
+            ref capabilities,
+            ref mask,
+        }) => cmd_capability(capabilities, mask.as_deref()),
     }
 }
 
@@ -2459,6 +2481,229 @@ fn cmd_srk() {
     println!("  Note: Full SRK display requires tpm2-tools (tpm2_readpublic, tpm2_createprimary).");
     println!("  The SRK is a primary key in the TPM2 owner hierarchy used for sealing");
     println!("  secrets and key wrapping. Its handle is typically 0x81000001.");
+}
+
+// ── Exit status table ─────────────────────────────────────────────────────
+
+/// All known exit statuses, matching C systemd's table exactly.
+const EXIT_STATUS_TABLE: &[(&str, u8, &str)] = &[
+    ("SUCCESS", 0, "libc"),
+    ("FAILURE", 1, "libc"),
+    ("INVALIDARGUMENT", 2, "LSB"),
+    ("NOTIMPLEMENTED", 3, "LSB"),
+    ("NOPERMISSION", 4, "LSB"),
+    ("NOTINSTALLED", 5, "LSB"),
+    ("NOTCONFIGURED", 6, "LSB"),
+    ("NOTRUNNING", 7, "LSB"),
+    ("USAGE", 64, "BSD"),
+    ("DATAERR", 65, "BSD"),
+    ("NOINPUT", 66, "BSD"),
+    ("NOUSER", 67, "BSD"),
+    ("NOHOST", 68, "BSD"),
+    ("UNAVAILABLE", 69, "BSD"),
+    ("SOFTWARE", 70, "BSD"),
+    ("OSERR", 71, "BSD"),
+    ("OSFILE", 72, "BSD"),
+    ("CANTCREAT", 73, "BSD"),
+    ("IOERR", 74, "BSD"),
+    ("TEMPFAIL", 75, "BSD"),
+    ("PROTOCOL", 76, "BSD"),
+    ("NOPERM", 77, "BSD"),
+    ("CONFIG", 78, "BSD"),
+    ("CHDIR", 200, "systemd"),
+    ("NICE", 201, "systemd"),
+    ("FDS", 202, "systemd"),
+    ("EXEC", 203, "systemd"),
+    ("MEMORY", 204, "systemd"),
+    ("LIMITS", 205, "systemd"),
+    ("OOM_ADJUST", 206, "systemd"),
+    ("SIGNAL_MASK", 207, "systemd"),
+    ("STDIN", 208, "systemd"),
+    ("STDOUT", 209, "systemd"),
+    ("CHROOT", 210, "systemd"),
+    ("IOPRIO", 211, "systemd"),
+    ("TIMERSLACK", 212, "systemd"),
+    ("SECUREBITS", 213, "systemd"),
+    ("SETSCHEDULER", 214, "systemd"),
+    ("CPUAFFINITY", 215, "systemd"),
+    ("GROUP", 216, "systemd"),
+    ("USER", 217, "systemd"),
+    ("CAPABILITIES", 218, "systemd"),
+    ("CGROUP", 219, "systemd"),
+    ("SETSID", 220, "systemd"),
+    ("CONFIRM", 221, "systemd"),
+    ("STDERR", 222, "systemd"),
+    ("PAM", 224, "systemd"),
+    ("NETWORK", 225, "systemd"),
+    ("NAMESPACE", 226, "systemd"),
+    ("NO_NEW_PRIVILEGES", 227, "systemd"),
+    ("SECCOMP", 228, "systemd"),
+    ("SELINUX_CONTEXT", 229, "systemd"),
+    ("PERSONALITY", 230, "systemd"),
+    ("APPARMOR", 231, "systemd"),
+    ("ADDRESS_FAMILIES", 232, "systemd"),
+    ("RUNTIME_DIRECTORY", 233, "systemd"),
+    ("CHOWN", 235, "systemd"),
+    ("SMACK_PROCESS_LABEL", 236, "systemd"),
+    ("KEYRING", 237, "systemd"),
+    ("STATE_DIRECTORY", 238, "systemd"),
+    ("CACHE_DIRECTORY", 239, "systemd"),
+    ("LOGS_DIRECTORY", 240, "systemd"),
+    ("CONFIGURATION_DIRECTORY", 241, "systemd"),
+    ("NUMA_POLICY", 242, "systemd"),
+    ("CREDENTIALS", 243, "systemd"),
+    ("BPF", 244, "systemd"),
+    ("KSM", 245, "systemd"),
+    ("EXCEPTION", 255, "systemd"),
+];
+
+fn cmd_exit_status(statuses: &[String]) {
+    println!("{:<24} {:>6} CLASS", "NAME", "STATUS");
+
+    if statuses.is_empty() {
+        for &(name, code, class) in EXIT_STATUS_TABLE {
+            println!("{:<24} {:>6} {}", name, code, class);
+        }
+        return;
+    }
+
+    let mut had_error = false;
+    for s in statuses {
+        if let Ok(num) = s.parse::<u8>() {
+            if let Some(&(name, code, class)) =
+                EXIT_STATUS_TABLE.iter().find(|&&(_, c, _)| c == num)
+            {
+                println!("{:<24} {:>6} {}", name, code, class);
+            } else {
+                println!("{:<24} {:>6} -", "-", num);
+            }
+        } else {
+            let upper = s.to_uppercase();
+            if let Some(&(name, code, class)) =
+                EXIT_STATUS_TABLE.iter().find(|&&(n, _, _)| n == upper)
+            {
+                println!("{:<24} {:>6} {}", name, code, class);
+            } else {
+                eprintln!("Unknown exit status: {s}");
+                had_error = true;
+            }
+        }
+    }
+    if had_error {
+        std::process::exit(1);
+    }
+}
+
+// ── Capability table ──────────────────────────────────────────────────────
+
+/// Linux capabilities, ordered by number (matches /usr/include/linux/capability.h).
+const CAPABILITY_TABLE: &[(&str, u32)] = &[
+    ("cap_chown", 0),
+    ("cap_dac_override", 1),
+    ("cap_dac_read_search", 2),
+    ("cap_fowner", 3),
+    ("cap_fsetid", 4),
+    ("cap_kill", 5),
+    ("cap_setgid", 6),
+    ("cap_setuid", 7),
+    ("cap_setpcap", 8),
+    ("cap_linux_immutable", 9),
+    ("cap_net_bind_service", 10),
+    ("cap_net_broadcast", 11),
+    ("cap_net_admin", 12),
+    ("cap_net_raw", 13),
+    ("cap_ipc_lock", 14),
+    ("cap_ipc_owner", 15),
+    ("cap_sys_module", 16),
+    ("cap_sys_rawio", 17),
+    ("cap_sys_chroot", 18),
+    ("cap_sys_ptrace", 19),
+    ("cap_sys_pacct", 20),
+    ("cap_sys_admin", 21),
+    ("cap_sys_boot", 22),
+    ("cap_sys_nice", 23),
+    ("cap_sys_resource", 24),
+    ("cap_sys_time", 25),
+    ("cap_sys_tty_config", 26),
+    ("cap_mknod", 27),
+    ("cap_lease", 28),
+    ("cap_audit_write", 29),
+    ("cap_audit_control", 30),
+    ("cap_setfcap", 31),
+    ("cap_mac_override", 32),
+    ("cap_mac_admin", 33),
+    ("cap_syslog", 34),
+    ("cap_wake_alarm", 35),
+    ("cap_block_suspend", 36),
+    ("cap_audit_read", 37),
+    ("cap_perfmon", 38),
+    ("cap_bpf", 39),
+    ("cap_checkpoint_restore", 40),
+];
+
+fn cmd_capability(capabilities: &[String], mask: Option<&str>) {
+    if let Some(hex) = mask {
+        let hex = hex.strip_prefix("0x").unwrap_or(hex);
+        let mask_val = match u64::from_str_radix(hex, 16) {
+            Ok(v) => v,
+            Err(_) => {
+                eprintln!("Invalid capability mask: {hex}");
+                std::process::exit(1);
+            }
+        };
+        // Print capabilities matching the mask
+        let mut found = false;
+        for &(name, num) in CAPABILITY_TABLE {
+            if num < 64 && (mask_val & (1u64 << num)) != 0 {
+                if found {
+                    print!(" ");
+                }
+                print!("{name}");
+                found = true;
+            }
+        }
+        if found {
+            println!();
+        }
+        return;
+    }
+
+    println!("{:<28} {:>6}", "NAME", "NUMBER");
+
+    if capabilities.is_empty() {
+        for &(name, num) in CAPABILITY_TABLE {
+            println!("{:<28} {:>6}", name, num);
+        }
+        return;
+    }
+
+    let mut had_error = false;
+    for s in capabilities {
+        if let Ok(num) = s.parse::<u32>() {
+            if let Some(&(name, n)) = CAPABILITY_TABLE.iter().find(|&&(_, n)| n == num) {
+                println!("{:<28} {:>6}", name, n);
+            } else {
+                eprintln!("Unknown capability: {s}");
+                had_error = true;
+            }
+        } else {
+            let lower = s.to_lowercase();
+            let search = if lower.starts_with("cap_") {
+                lower.clone()
+            } else {
+                format!("cap_{lower}")
+            };
+            if let Some(&(name, num)) = CAPABILITY_TABLE.iter().find(|&&(n, _)| n == search) {
+                println!("{:<28} {:>6}", name, num);
+            } else {
+                eprintln!("Unknown capability: {s}");
+                had_error = true;
+            }
+        }
+    }
+    if had_error {
+        std::process::exit(1);
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────

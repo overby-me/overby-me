@@ -88,6 +88,24 @@
     systemd-analyze condition 'ConditionPathExists=/etc/os-release'
     (! systemd-analyze condition 'ConditionPathExists=/nonexistent/path/that/does/not/exist')
 
+    : "systemd-analyze exit-status"
+    systemd-analyze exit-status
+    systemd-analyze exit-status STDOUT BPF
+    systemd-analyze exit-status 0 1 63 64 65
+    (! systemd-analyze exit-status STDOUT BPF "hello*")
+
+    : "systemd-analyze capability"
+    systemd-analyze capability
+    systemd-analyze capability cap_chown CAP_KILL
+    systemd-analyze capability 0 1 30 31 32
+    (! systemd-analyze capability cap_chown CAP_KILL "hello*")
+    systemd-analyze capability -m 0000000000003c00
+    cap="$(systemd-analyze capability -m 0000000000003c00)"
+    [[ $cap == *cap_net_bind_service* ]]
+    [[ $cap == *cap_net_broadcast* ]]
+    [[ $cap == *cap_net_admin* ]]
+    [[ $cap == *cap_net_raw* ]]
+
     touch /testok
     TESTEOF
     chmod +x TEST-65-ANALYZE.sh
