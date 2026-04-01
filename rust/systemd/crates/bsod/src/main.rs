@@ -207,13 +207,22 @@ fn display_message(message: &str, tty_path: Option<&PathBuf>) -> io::Result<()> 
         (raw_fd, 0, 0)
     } else {
         // Open /dev/tty1 to find a free VT
-        let f = fs::OpenOptions::new()
+        let console = fs::OpenOptions::new()
             .read(true)
             .write(true)
             .open("/dev/tty1")?;
-        let raw_fd = f.as_raw_fd();
-        let (free_vt, original_vt) = find_free_vt(raw_fd)?;
-        drop(f);
+        let console_fd = console.as_raw_fd();
+        let (free_vt, original_vt) = find_free_vt(console_fd)?;
+
+        // Activate the free VT via the console fd
+        // VT_ACTIVATE = 0x5606, VT_WAITACTIVE = 0x5607
+        if free_vt > 0 {
+            unsafe {
+                libc::ioctl(console_fd, 0x5606, free_vt);
+                libc::ioctl(console_fd, 0x5607, free_vt);
+            }
+        }
+        drop(console);
 
         let tty_name = format!("/dev/tty{free_vt}");
         let f = fs::OpenOptions::new()
@@ -222,13 +231,6 @@ fn display_message(message: &str, tty_path: Option<&PathBuf>) -> io::Result<()> 
             .open(&tty_name)?;
         let raw_fd = f.as_raw_fd();
         std::mem::forget(f);
-
-        // Activate the free VT: VT_ACTIVATE = 0x5606
-        if free_vt > 0 {
-            unsafe {
-                libc::ioctl(raw_fd, 0x5606, free_vt);
-            }
-        }
 
         (raw_fd, free_vt, original_vt)
     };

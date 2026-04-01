@@ -379,13 +379,13 @@ in
       # Skip testcases that require D-Bus (busctl) or features not yet implemented.
       # Apply per-test patches to the test script (if any).
       # Test scripts are in the Nix store (read-only), so we copy to a writable dir first.
+      # Always copy to writable dir: scripts need +x for direct exec and
+      # the Nix store source is read-only.
+      machine.succeed("mkdir -p /tmp/test-units && cp -a /etc/systemd-tests/units/* /tmp/test-units/")
       patch_cmd = """${patchScript}"""
       if patch_cmd:
-          machine.succeed("mkdir -p /tmp/test-units && cp -a /etc/systemd-tests/units/* /tmp/test-units/")
           machine.succeed(f"cd /tmp/test-units && {patch_cmd}")
-          units_dir = "/tmp/test-units"
-      else:
-          units_dir = "/etc/systemd-tests/units"
+      units_dir = "/tmp/test-units"
 
       env_exports = "${builtins.concatStringsSep "; " (builtins.attrValues (builtins.mapAttrs (k: v: "export ${k}='${v}'") testEnv))}"
       env_prefix = f"{env_exports}; " if env_exports else ""

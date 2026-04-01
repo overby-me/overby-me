@@ -395,6 +395,15 @@ fn deserialize_entry<R: Read>(reader: &mut R) -> io::Result<JournalEntry> {
         ));
     }
 
+    // Sanity cap: no single journal entry should exceed 64 MiB
+    const MAX_FRAME_LEN: usize = 64 * 1024 * 1024;
+    if frame_len > MAX_FRAME_LEN {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("frame too large: {} bytes", frame_len),
+        ));
+    }
+
     // Read the entire frame body
     let mut body = vec![0u8; frame_len];
     reader.read_exact(&mut body)?;

@@ -189,6 +189,7 @@
 
                 # Install systemd-bsod.service — C systemd doesn't build it without qrencode,
                 # but our Rust implementation doesn't need qrencode.
+                mkdir -p "$out/lib/systemd/system"
                 cat > "$out/lib/systemd/system/systemd-bsod.service" <<BSOD_UNIT
         [Unit]
         Description=Display Boot-Time Emergency Messages In Full Screen

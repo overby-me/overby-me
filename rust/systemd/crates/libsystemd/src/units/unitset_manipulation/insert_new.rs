@@ -47,6 +47,21 @@ fn find_new_unit_path(unit_dirs: &[PathBuf], find_name: &str) -> Result<Option<P
         }
     }
 
+    // For template instances (e.g. foo@bar.socket), fall back to the template
+    // file (e.g. foo@.socket) so that on-demand loading works.
+    if let Some(at_pos) = find_name.find('@')
+        && let Some(dot_pos) = find_name[at_pos..].find('.')
+    {
+        let template_name = format!(
+            "{}@{}",
+            &find_name[..at_pos],
+            &find_name[at_pos + dot_pos..]
+        );
+        if template_name != find_name {
+            return find_new_unit_path(unit_dirs, &template_name);
+        }
+    }
+
     Ok(None)
 }
 
@@ -279,49 +294,68 @@ pub fn load_new_unit(unit_dirs: &[PathBuf], find_name: &str) -> Result<units::Un
             }
         };
 
+        // Extract instance name for template instances (e.g. "cat-test" from
+        // "systemd-journald@cat-test.socket") so %i/%I resolve correctly.
+        let instance = if let Some(at_pos) = find_name.find('@')
+            && let Some(dot_pos) = find_name[at_pos..].find('.')
+        {
+            &find_name[at_pos + 1..at_pos + dot_pos]
+        } else {
+            ""
+        };
         // Resolve specifiers (%n, %i, %p, etc.) before parsing
         let final_content = crate::units::loading::directory_deps::resolve_specifiers(
             &final_content,
             find_name,
-            "",
+            instance,
         );
 
         let parsed = units::parse_file(&final_content)
             .map_err(|e| format!("{}", units::ParsingError::new(e, unit_path.clone())))?;
+        // For template instances, use a synthetic path with the instance name
+        // so the parser derives the correct unit ID.
+        let parse_path = if !instance.is_empty() {
+            unit_path
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new("."))
+                .join(find_name)
+        } else {
+            unit_path.clone()
+        };
         let mut unit: units::Unit = if find_name.ends_with(".service") {
-            units::parse_service(parsed, &unit_path)
+            units::parse_service(parsed, &parse_path)
                 .map_err(|e| format!("{}", units::ParsingError::new(e, unit_path.clone())))?
                 .try_into()?
         } else if find_name.ends_with(".socket") {
-            units::parse_socket(parsed, &unit_path)
+            units::parse_socket(parsed, &parse_path)
                 .map_err(|e| format!("{}", units::ParsingError::new(e, unit_path.clone())))?
                 .try_into()?
         } else if find_name.ends_with(".target") {
-            units::parse_target(parsed, &unit_path)
+            units::parse_target(parsed, &parse_path)
                 .map_err(|e| format!("{}", units::ParsingError::new(e, unit_path.clone())))?
                 .try_into()?
         } else if find_name.ends_with(".slice") {
-            units::parse_slice(parsed, &unit_path)
+            units::parse_slice(parsed, &parse_path)
                 .map_err(|e| format!("{}", units::ParsingError::new(e, unit_path.clone())))?
                 .try_into()?
         } else if find_name.ends_with(".timer") {
-            units::parse_timer(parsed, &unit_path)
+            units::parse_timer(parsed, &parse_path)
                 .map_err(|e| format!("{}", units::ParsingError::new(e, unit_path.clone())))?
                 .try_into()?
         } else if find_name.ends_with(".path") {
-            units::parse_path(parsed, &unit_path)
+            units::parse_path(parsed, &parse_path)
                 .map_err(|e| format!("{}", units::ParsingError::new(e, unit_path.clone())))?
                 .try_into()?
         } else if find_name.ends_with(".mount") {
-            units::parse_mount(parsed, &unit_path)
+            units::parse_mount(parsed, &parse_path)
                 .map_err(|e| format!("{}", units::ParsingError::new(e, unit_path.clone())))?
                 .try_into()?
         } else if find_name.ends_with(".swap") {
-            units::parse_swap(parsed, &unit_path)
+            units::parse_swap(parsed, &parse_path)
                 .map_err(|e| format!("{}", units::ParsingError::new(e, unit_path.clone())))?
                 .try_into()?
         } else if find_name.ends_with(".device") {
-            units::parse_device(parsed, &unit_path)
+            units::parse_device(parsed, &parse_path)
                 .map_err(|e| format!("{}", units::ParsingError::new(e, unit_path.clone())))?
                 .try_into()?
         } else {
