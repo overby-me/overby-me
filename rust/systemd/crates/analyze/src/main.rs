@@ -1018,8 +1018,9 @@ fn main() {
         Some(Command::Timestamp { ref expressions }) => cmd_timestamp(expressions),
         Some(Command::Verify { ref files, .. }) => cmd_verify(files),
         Some(Command::Condition {
-            ref expressions, ..
-        }) => cmd_condition(expressions),
+            ref expressions,
+            ref unit,
+        }) => cmd_condition(expressions, unit.as_deref()),
         Some(Command::UnitPaths) => cmd_unit_paths(cli.user),
         Some(Command::LogLevel { ref level }) => cmd_log_level(level),
         Some(Command::LogTarget { ref target }) => cmd_log_target(target),
@@ -1370,14 +1371,27 @@ fn cmd_verify(files: &[String]) {
     }
 }
 
-fn cmd_condition(expressions: &[String]) {
-    if expressions.is_empty() {
+fn cmd_condition(expressions: &[String], unit: Option<&str>) {
+    let mut all_exprs: Vec<String> = Vec::new();
+
+    if let Some(unit_name) = unit {
+        // Read conditions and asserts from the unit file
+        let unit_exprs = read_unit_conditions(unit_name);
+        if unit_exprs.is_empty() {
+            eprintln!("No conditions or asserts found in unit {unit_name}");
+            process::exit(1);
+        }
+        all_exprs.extend(unit_exprs);
+    }
+    all_exprs.extend(expressions.iter().cloned());
+
+    if all_exprs.is_empty() {
         eprintln!("No condition expressions specified.");
         process::exit(1);
     }
 
     let mut all_met = true;
-    for expr in expressions {
+    for expr in &all_exprs {
         let (met, reason) = evaluate_condition(expr);
         let status = if met { "met" } else { "not met" };
         println!("{expr}: {status} ({reason})");
@@ -1389,6 +1403,59 @@ fn cmd_condition(expressions: &[String]) {
     if !all_met {
         process::exit(1);
     }
+}
+
+/// Read Condition*= and Assert*= lines from a unit file, searching unit paths.
+fn read_unit_conditions(unit_name: &str) -> Vec<String> {
+    let paths = system_unit_paths();
+    let mut conditions = Vec::new();
+
+    let is_condition_line = |line: &str| {
+        (line.starts_with("Condition") || line.starts_with("Assert")) && line.contains('=')
+    };
+
+    // Find the unit file
+    for dir in &paths {
+        let unit_path = dir.join(unit_name);
+        if unit_path.is_file() {
+            if let Ok(content) = fs::read_to_string(&unit_path) {
+                for line in content.lines() {
+                    let line = line.trim();
+                    if is_condition_line(line) {
+                        conditions.push(line.to_string());
+                    }
+                }
+            }
+            break;
+        }
+    }
+
+    // Also check drop-in directories
+    let dropin_dir_name = format!("{unit_name}.d");
+    for dir in &paths {
+        let dropin_dir = dir.join(&dropin_dir_name);
+        if dropin_dir.is_dir()
+            && let Ok(entries) = fs::read_dir(&dropin_dir)
+        {
+            let mut conf_files: Vec<_> = entries
+                .filter_map(|e| e.ok())
+                .filter(|e| e.path().extension().is_some_and(|ext| ext == "conf"))
+                .collect();
+            conf_files.sort_by_key(|e| e.file_name());
+            for entry in conf_files {
+                if let Ok(content) = fs::read_to_string(entry.path()) {
+                    for line in content.lines() {
+                        let line = line.trim();
+                        if is_condition_line(line) {
+                            conditions.push(line.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    conditions
 }
 
 fn cmd_unit_paths(user_mode: bool) {

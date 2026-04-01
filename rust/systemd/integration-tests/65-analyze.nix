@@ -87,6 +87,26 @@
     : "systemd-analyze condition"
     systemd-analyze condition 'ConditionPathExists=/etc/os-release'
     (! systemd-analyze condition 'ConditionPathExists=/nonexistent/path/that/does/not/exist')
+    systemd-analyze condition 'ConditionKernelVersion = ! <4.0' \
+                              'ConditionKernelVersion = >=3.1' \
+                              'AssertPathExists=/etc/os-release'
+    (! systemd-analyze condition 'ConditionKernelVersion=<1.0')
+    (! systemd-analyze condition 'AssertKernelVersion=<1.0')
+
+    : "systemd-analyze condition --unit"
+    UNIT_NAME="analyze-condition-$RANDOM.service"
+    cat >"/run/systemd/system/$UNIT_NAME" <<EOF
+    [Unit]
+    AssertPathExists=/etc/os-release
+    ConditionKernelVersion=>1.0
+    ConditionPathExists=/etc/os-release
+
+    [Service]
+    ExecStart=true
+    EOF
+    systemctl daemon-reload
+    systemd-analyze condition --unit="$UNIT_NAME"
+    rm -f "/run/systemd/system/$UNIT_NAME"
 
     : "systemd-analyze exit-status"
     systemd-analyze exit-status
