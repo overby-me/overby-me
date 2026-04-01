@@ -2,7 +2,7 @@
   name = "04-JOURNAL";
   # Skip subtests needing tools/binaries not available in the NixOS test VM
   testEnv.TEST_SKIP_SUBTESTS = builtins.concatStringsSep " " [
-    "journal-corrupt\\." # needs systemd-run --user -M (machined)
+    # journal-corrupt: machined-dependent user session lines patched out below
     # journal-gatewayd and journal-remote self-skip when binary is missing
     # LogFilterPatterns: stdout variant enabled; syslog and delegated-cgroup variants patched out
     "journalctl-varlink" # not a real subtest file — skip is harmless
@@ -32,6 +32,11 @@
     # and delegated-cgroup variant (needs cgroup xattr delegation)
     sed -i '/logs-filtering-syslog/d' TEST-04-JOURNAL.LogFilterPatterns.sh
     sed -i '/delegated-cgroup-filtering/d' TEST-04-JOURNAL.LogFilterPatterns.sh
+    # journal-corrupt: remove machined-dependent user session lines
+    sed -i '/loginctl enable-linger/d' TEST-04-JOURNAL.journal-corrupt.sh
+    sed -i '/systemd-run.*--user -M/d' TEST-04-JOURNAL.journal-corrupt.sh
+    sed -i '/systemctl stop --user -M/d' TEST-04-JOURNAL.journal-corrupt.sh
+    sed -i '/loginctl disable-linger/d' TEST-04-JOURNAL.journal-corrupt.sh
     # bsod: remove systemd-run --user --machine testuser@ (needs machined)
     sed -i '/systemd-run --user --machine testuser/d' TEST-04-JOURNAL.bsod.sh
     # bsod: install systemd-bsod.service (C systemd doesn't build it without qrencode)
