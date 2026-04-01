@@ -158,4 +158,6 @@ pub struct Socket {
     pub accept_counter: u64,
     /// Number of currently active Accept=yes connections.
     pub active_accept_connections: u64,
+    /// Timestamps of recent trigger events for TriggerLimitIntervalSec/TriggerLimitBurst enforcement.
+    pub trigger_timestamps: Vec<std::time::Instant>,
 }

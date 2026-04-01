@@ -3319,7 +3319,6 @@
          TEST-07-PID1.DeferReactivation.sh \
          TEST-07-PID1.delegate-namespaces.sh \
          TEST-07-PID1.exec-deserialization.sh \
-         TEST-07-PID1.issue-2467.sh \
          TEST-07-PID1.issue-34104.sh \
          TEST-07-PID1.issue-35882.sh \
          TEST-07-PID1.issue-38320.sh \

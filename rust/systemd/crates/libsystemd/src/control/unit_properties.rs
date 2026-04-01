@@ -478,6 +478,16 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
         Specific::Socket(sock) => {
             insert_socket_config(&mut props, &sock.conf);
             insert_exec_config(&mut props, &sock.conf.exec_config);
+            // Result — "success" normally, "trigger-limit-hit" on rate limit
+            let state = sock.state.read_poisoned();
+            insert(
+                &mut props,
+                "Result",
+                match state.result {
+                    crate::units::SocketResult::Success => "success",
+                    crate::units::SocketResult::TriggerLimitHit => "trigger-limit-hit",
+                },
+            );
         }
         Specific::Target(_) => {
             // Targets have no type-specific properties beyond [Unit].
@@ -1702,6 +1712,22 @@ fn insert_socket_config(props: &mut PropertyMap, conf: &SocketConfig) {
         props,
         "PassFileDescriptorsToExec",
         conf.pass_file_descriptors_to_exec,
+    );
+    // TriggerLimit properties
+    insert(
+        props,
+        "TriggerLimitIntervalUSec",
+        &format!(
+            "{}us",
+            conf.trigger_limit_interval_sec
+                .unwrap_or(2)
+                .saturating_mul(1_000_000)
+        ),
+    );
+    insert(
+        props,
+        "TriggerLimitBurst",
+        &conf.trigger_limit_burst.unwrap_or(200).to_string(),
     );
 }
 

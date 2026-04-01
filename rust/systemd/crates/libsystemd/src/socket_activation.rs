@@ -6,10 +6,12 @@ use log::warn;
 use crate::lock_ext::RwLockExt;
 use crate::runtime_info::ArcMutRuntimeInfo;
 use crate::units::{
-    ActivationSource, Specific, StatusStarted, UnitId, UnitIdKind, UnitOperationErrorReason,
-    UnitStatus,
+    ActivationSource, SocketResult, Specific, StatusStarted, StatusStopped, UnitId, UnitIdKind,
+    UnitOperationErrorReason, UnitStatus,
 };
+use log::info;
 use std::os::unix::io::{BorrowedFd, RawFd};
+use std::time::Instant;
 
 /// Helper to create a BorrowedFd from a raw fd.
 ///
@@ -33,6 +35,10 @@ struct SocketActivationInfo {
     max_connections: u64,
     /// Max connections per source (Accept=yes).
     max_connections_per_source: u64,
+    /// TriggerLimitIntervalSec — rate limit window (default 2s).
+    trigger_limit_interval_sec: std::time::Duration,
+    /// TriggerLimitBurst — max activations within the window (default 200).
+    trigger_limit_burst: u32,
 }
 
 pub fn start_socketactivation_thread(run_info: ArcMutRuntimeInfo) {
@@ -103,6 +109,11 @@ fn gather_socket_info(
     let max_connections = specific.conf.max_connections;
     let max_connections_per_source = specific.conf.max_connections_per_source;
 
+    // Trigger limit defaults: 2 seconds interval, 200 burst (matching C systemd)
+    let trigger_limit_interval_sec =
+        std::time::Duration::from_secs(specific.conf.trigger_limit_interval_sec.unwrap_or(2));
+    let trigger_limit_burst = specific.conf.trigger_limit_burst.unwrap_or(200);
+
     // Get the listening fd from the fd store
     let listen_fd = run_info
         .fd_store
@@ -169,11 +180,74 @@ fn gather_socket_info(
         service_id,
         max_connections,
         max_connections_per_source,
+        trigger_limit_interval_sec,
+        trigger_limit_burst,
     })
+}
+
+/// Check whether the socket has hit its trigger rate limit.
+/// Records the current trigger timestamp and returns `true` if the limit is exceeded.
+fn check_trigger_rate_limit(run_info: &ArcMutRuntimeInfo, info: &SocketActivationInfo) -> bool {
+    let burst = info.trigger_limit_burst;
+    let interval = info.trigger_limit_interval_sec;
+
+    // A burst of 0 or zero interval disables rate limiting
+    if burst == 0 || interval.is_zero() {
+        return false;
+    }
+
+    let now = Instant::now();
+    let run_info_locked = run_info.read_poisoned();
+    if let Some(sock_unit) = run_info_locked.unit_table.get(&info.socket_id)
+        && let Specific::Socket(specific) = &sock_unit.specific
+    {
+        let rate_limited = {
+            let mut guard = specific.state.write_poisoned();
+            let timestamps = &mut guard.sock.trigger_timestamps;
+
+            // Prune timestamps outside the rate limit window
+            timestamps.retain(|t| now.duration_since(*t) < interval);
+
+            if timestamps.len() >= burst as usize {
+                // Rate limit hit — mark socket as failed
+                info!(
+                    "Socket unit {} hit trigger rate limit ({} triggers in {:?}), transitioning to failed",
+                    info.socket_id.name, burst, interval
+                );
+                guard.result = SocketResult::TriggerLimitHit;
+                guard.sock.activated = true; // prevent further select() triggering
+                true
+            } else {
+                // Record this trigger
+                timestamps.push(now);
+                false
+            }
+        }; // guard dropped here
+
+        if rate_limited {
+            // Transition unit status to failed (non-empty errors = ActiveState=failed)
+            if let Some(sock_unit) = run_info_locked.unit_table.get(&info.socket_id) {
+                let mut status = sock_unit.common.status.write_poisoned();
+                *status = UnitStatus::Stopped(
+                    StatusStopped::StoppedFinal,
+                    vec![UnitOperationErrorReason::GenericStartError(
+                        "trigger-limit-hit".to_string(),
+                    )],
+                );
+            }
+            return true;
+        }
+    }
+    false
 }
 
 /// Handle socket activation for Accept=no sockets (traditional mode).
 fn handle_accept_no(run_info: &ArcMutRuntimeInfo, info: &SocketActivationInfo) {
+    // Check trigger rate limit before activating
+    if check_trigger_rate_limit(run_info, info) {
+        return;
+    }
+
     let run_info_locked = run_info.read_poisoned();
     let unit_table = &run_info_locked.unit_table;
 
@@ -243,6 +317,11 @@ fn handle_accept_no(run_info: &ArcMutRuntimeInfo, info: &SocketActivationInfo) {
 
 /// Handle socket activation for Accept=yes sockets (per-connection mode).
 fn handle_accept_yes(run_info: &ArcMutRuntimeInfo, info: &SocketActivationInfo) {
+    // Check trigger rate limit before activating
+    if check_trigger_rate_limit(run_info, info) {
+        return;
+    }
+
     let Some(listen_fd) = info.listen_fd else {
         error!("Accept=yes socket {:?} has no listening fd", info.socket_id);
         return;
@@ -476,10 +555,14 @@ pub fn wait_for_socket(run_info: ArcMutRuntimeInfo) -> Result<Vec<UnitId>, Strin
             for (fd, id) in &fd_to_sock_id {
                 let unit = unit_table_locked.get(id).unwrap();
                 if let Specific::Socket(specific) = &unit.specific {
-                    let mut_state = &*specific.state.read_poisoned();
+                    let state = &*specific.state.read_poisoned();
+                    // Skip sockets that hit their trigger rate limit
+                    if state.result == SocketResult::TriggerLimitHit {
+                        continue;
+                    }
                     // For Accept=yes sockets, always keep listening (never mark activated)
                     // For Accept=no sockets, skip if already activated
-                    if !mut_state.sock.activated || specific.conf.accept {
+                    if !state.sock.activated || specific.conf.accept {
                         fdset.insert(unsafe { borrow_fd(*fd) });
                     }
                 }

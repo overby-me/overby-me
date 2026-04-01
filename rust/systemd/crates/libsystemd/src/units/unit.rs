@@ -369,14 +369,17 @@ impl ServiceState {
                     if let Some(unit) = run_info.unit_table.get(socket_id)
                         && let Specific::Socket(sock) = &unit.specific
                     {
+                        // Don't re-arm sockets that hit their trigger rate limit
+                        if sock.state.read_poisoned().result == SocketResult::TriggerLimitHit {
+                            continue;
+                        }
                         // FlushPending=yes: drain queued connections/data before
                         // re-arming, so that stale traffic doesn't immediately
                         // re-trigger socket activation.
                         if sock.conf.flush_pending {
                             flush_socket_fds(socket_id, run_info);
                         }
-                        let mut_state = &mut *sock.state.write_poisoned();
-                        mut_state.sock.activated = false;
+                        sock.state.write_poisoned().sock.activated = false;
                     }
                 }
                 run_info.notify_eventfds();
@@ -432,11 +435,14 @@ impl ServiceState {
                 if let Some(unit) = run_info.unit_table.get(socket_id)
                     && let Specific::Socket(sock) = &unit.specific
                 {
+                    // Don't re-arm sockets that hit their trigger rate limit
+                    if sock.state.read_poisoned().result == SocketResult::TriggerLimitHit {
+                        continue;
+                    }
                     if sock.conf.flush_pending {
                         flush_socket_fds(socket_id, run_info);
                     }
-                    let mut_state = &mut *sock.state.write_poisoned();
-                    mut_state.sock.activated = false;
+                    sock.state.write_poisoned().sock.activated = false;
                 }
             }
             run_info.notify_eventfds();
@@ -554,11 +560,14 @@ impl ServiceState {
                     if let Some(unit) = run_info.unit_table.get(socket_id)
                         && let Specific::Socket(sock) = &unit.specific
                     {
+                        // Don't re-arm sockets that hit their trigger rate limit
+                        if sock.state.read_poisoned().result == SocketResult::TriggerLimitHit {
+                            continue;
+                        }
                         if sock.conf.flush_pending {
                             flush_socket_fds(socket_id, run_info);
                         }
-                        let mut_state = &mut *sock.state.write_poisoned();
-                        mut_state.sock.activated = false;
+                        sock.state.write_poisoned().sock.activated = false;
                     }
                 }
                 run_info.notify_eventfds();
@@ -834,6 +843,17 @@ pub struct ServiceState {
 pub struct SocketState {
     pub common: CommonState,
     pub sock: Socket,
+    /// Result of the socket unit — "success" normally, "trigger-limit-hit" when
+    /// the unit has been triggered too many times within the rate limit window.
+    pub result: SocketResult,
+}
+
+/// The result state of a socket unit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SocketResult {
+    #[default]
+    Success,
+    TriggerLimitHit,
 }
 pub struct TargetState {
     pub common: CommonState,

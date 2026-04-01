@@ -8,9 +8,9 @@ use crate::units::{
     ParsedSwapConfig, ParsedTargetConfig, ParsedTimerConfig, ParsedUnitSection, PathCondition,
     PathConfig, PathSpecific, PathState, PlatformSpecificServiceFields, ServiceConfig,
     ServiceSpecific, ServiceState, SingleSocketConfig, SliceConfig, SliceSpecific, SliceState,
-    SocketConfig, SocketSpecific, SocketState, Specific, SwapConfig, SwapSpecific, SwapState,
-    TargetSpecific, TargetState, TimerConfig, TimerSpecific, TimerState, Unit, UnitConfig, UnitId,
-    UnitIdKind, UnitStatus, UnitTimestamps,
+    SocketConfig, SocketResult, SocketSpecific, SocketState, Specific, SwapConfig, SwapSpecific,
+    SwapState, TargetSpecific, TargetState, TimerConfig, TimerSpecific, TimerState, Unit,
+    UnitConfig, UnitId, UnitIdKind, UnitStatus, UnitTimestamps,
 };
 
 use log::trace;
@@ -326,7 +326,9 @@ pub fn unit_from_parsed_socket(conf: ParsedSocketConfig) -> Result<Unit, String>
                     activated: false,
                     accept_counter: 0,
                     active_accept_connections: 0,
+                    trigger_timestamps: Vec::new(),
                 },
+                result: SocketResult::Success,
             }),
         }),
     })
