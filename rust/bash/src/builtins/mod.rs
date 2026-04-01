@@ -1240,6 +1240,7 @@ fn read_compound_value(chars: &[char], pos: &mut usize) -> String {
     let mut in_single_quote = false;
     let mut in_double_quote = false;
     let mut escape_next = false;
+    let mut paren_depth: i32 = 0;
 
     while *pos < len {
         let ch = chars[*pos];
@@ -1265,12 +1266,20 @@ fn read_compound_value(chars: &[char], pos: &mut usize) -> String {
             *pos += 1;
             continue;
         }
-        if ch.is_whitespace() && !in_single_quote && !in_double_quote {
+        if ch.is_whitespace() && !in_single_quote && !in_double_quote && paren_depth == 0 {
             break;
         }
-        // Stop at ')' if unquoted — end of compound assignment
+        // Track parenthesis depth for $(cmd), (subshell), etc.
+        if ch == '(' && !in_single_quote && !in_double_quote {
+            paren_depth += 1;
+        }
         if ch == ')' && !in_single_quote && !in_double_quote {
-            break;
+            if paren_depth > 0 {
+                paren_depth -= 1;
+            } else {
+                // Unmatched ')' at depth 0 — end of compound assignment
+                break;
+            }
         }
         value.push(ch);
         *pos += 1;

@@ -896,7 +896,6 @@ impl Shell {
             let name = self.expand_word_single(w);
             matches!(name.as_str(), "export" | "declare" | "typeset" | "local")
         });
-
         // Expand words, applying assignment-context tilde expansion where appropriate
         let mut expanded_words: Vec<String> = Vec::new();
         for (idx, word) in cmd.words.iter().enumerate() {
@@ -1300,12 +1299,64 @@ impl Shell {
                 for (arg_idx, arg) in args.iter().enumerate() {
                     // Check for name=(value) pattern from inline array parsing
                     // Only if the original word had unquoted array syntax (not from 'name=(val)')
+                    // and NOT from variable/command expansion (e.g., declare e=$y where y="(abc)")
                     let word_idx = arg_idx + 1; // skip command name
                     let is_quoted_arg = word_idx < cmd.words.len()
                         && cmd.words[word_idx].iter().any(|p| {
                             matches!(p, WordPart::SingleQuoted(_) | WordPart::DoubleQuoted(_))
                         });
-                    if !is_quoted_arg && let Some(eq_pos) = arg.find('=') {
+                    // Check if the '(' after '=' was literally in the source code (not from expansion).
+                    // When the parser handles `e=(one two three)`, it embeds the '(' into a Literal
+                    // word part. When it handles `e=$y`, the value comes from Variable expansion
+                    // and '(' is NOT in the literal parts.
+                    let has_literal_paren = word_idx < cmd.words.len() && {
+                        let word = &cmd.words[word_idx];
+                        // Walk through literal parts to find '=' then check if '(' follows
+                        let mut found_eq = false;
+                        let mut eq_at_end = false; // '=' was at end of literal, need to check next part
+                        let mut result = false;
+                        for part in word.iter() {
+                            if let WordPart::Literal(s) = part {
+                                if !found_eq {
+                                    if let Some(eq_idx) = s.find('=') {
+                                        found_eq = true;
+                                        // Check what's after '=' in this same literal
+                                        let after_eq = &s[eq_idx + 1..];
+                                        let after_eq =
+                                            after_eq.strip_prefix('+').unwrap_or(after_eq);
+                                        if after_eq.starts_with('(') {
+                                            result = true;
+                                        } else if after_eq.is_empty() {
+                                            // '=' at end of this literal — check next part
+                                            eq_at_end = true;
+                                            continue;
+                                        }
+                                    }
+                                } else if eq_at_end && s.starts_with('(') {
+                                    // Literal '(' immediately after '=' from previous part
+                                    result = true;
+                                }
+                            }
+                            // If we found '=' and haven't yet confirmed a literal '(',
+                            // and this isn't the part where we just found '=' at the end,
+                            // then the '(' came from expansion — stop looking
+                            if found_eq && !result && !eq_at_end {
+                                break;
+                            }
+                            // After checking the part following eq_at_end, stop
+                            if found_eq && eq_at_end && !result {
+                                break;
+                            }
+                            if result {
+                                break;
+                            }
+                        }
+                        result
+                    };
+                    if !is_quoted_arg
+                        && has_literal_paren
+                        && let Some(eq_pos) = arg.find('=')
+                    {
                         let name = &arg[..eq_pos];
                         let value = &arg[eq_pos + 1..];
                         if value.starts_with('(')
@@ -1820,6 +1871,13 @@ impl Shell {
                                     self.last_status = 1;
                                     return;
                                 }
+                                // Integer arrays: evaluate value as arithmetic
+                                // (must be done before taking mutable borrow of arrays)
+                                let final_value = if self.integer_vars.contains(&resolved) {
+                                    self.eval_arith_expr(&value).to_string()
+                                } else {
+                                    value
+                                };
                                 // If the variable exists as a scalar but not as an array,
                                 // convert scalar to array[0] first (bash behavior:
                                 // a=abcde; a[2]=bdef → a=([0]="abcde" [2]="bdef"))
@@ -1849,7 +1907,7 @@ impl Shell {
                                 while arr.len() <= idx {
                                     arr.push(None);
                                 }
-                                arr[idx] = Some(value);
+                                arr[idx] = Some(final_value);
                             }
                         }
                     } else {
@@ -1889,15 +1947,7 @@ impl Shell {
                 }
                 let resolved = self.resolve_nameref(&assign.name);
                 // Check if this is an associative array
-                if self.assoc_arrays.contains_key(&resolved)
-                    || (!assign.append
-                        && elements.iter().any(|e| {
-                            e.index.as_ref().is_some_and(|idx| {
-                                let s = crate::ast::word_to_string(idx);
-                                !s.chars().all(|c| c.is_ascii_digit())
-                            })
-                        }))
-                {
+                if self.assoc_arrays.contains_key(&resolved) {
                     let map = if assign.append {
                         self.assoc_arrays
                             .get(&resolved)
@@ -1961,16 +2011,62 @@ impl Shell {
                     };
                     let is_integer = self.integer_vars.contains(&resolved);
                     let mut next_idx = arr.len();
+                    let ifs = self
+                        .vars
+                        .get("IFS")
+                        .cloned()
+                        .unwrap_or_else(|| " \t\n".to_string());
                     for elem in elements {
-                        let raw = self.expand_word_single(&elem.value);
-                        let value = if is_integer {
-                            self.eval_arith_expr(&raw).to_string()
-                        } else {
-                            raw
-                        };
                         if let Some(idx_word) = &elem.index {
+                            // Subscripted element: [n]=value — no word splitting
                             let idx_str = self.expand_word_single(idx_word);
-                            let idx = self.eval_arith_expr(&idx_str).max(0) as usize;
+
+                            // Validate subscript for indexed arrays
+                            if idx_str.is_empty() {
+                                // []=value → bad array subscript
+                                eprintln!(
+                                    "{}: []={}: bad array subscript",
+                                    self.error_prefix(),
+                                    self.expand_word_single(&elem.value)
+                                );
+                                self.last_status = 1;
+                                // Bash keeps valid elements assigned before the error
+                                self.arrays.insert(resolved, arr);
+                                return;
+                            }
+                            if idx_str == "*" || idx_str == "@" {
+                                // [*]=value or [@]=value → cannot assign to non-numeric index
+                                eprintln!(
+                                    "{}: [{}]={}: cannot assign to non-numeric index",
+                                    self.error_prefix(),
+                                    idx_str,
+                                    self.expand_word_single(&elem.value)
+                                );
+                                self.last_status = 1;
+                                self.arrays.insert(resolved, arr);
+                                return;
+                            }
+                            let raw_idx = self.eval_arith_expr(&idx_str);
+                            if raw_idx < 0 {
+                                // Negative index in compound assignment → bad array subscript
+                                eprintln!(
+                                    "{}: [{}]={}: bad array subscript",
+                                    self.error_prefix(),
+                                    idx_str,
+                                    self.expand_word_single(&elem.value)
+                                );
+                                self.last_status = 1;
+                                self.arrays.insert(resolved, arr);
+                                return;
+                            }
+
+                            let raw = self.expand_word_single(&elem.value);
+                            let value = if is_integer {
+                                self.eval_arith_expr(&raw).to_string()
+                            } else {
+                                raw
+                            };
+                            let idx = raw_idx as usize;
                             while arr.len() <= idx {
                                 arr.push(None);
                             }
@@ -1993,11 +2089,21 @@ impl Shell {
                             }
                             next_idx = idx + 1;
                         } else {
-                            while arr.len() <= next_idx {
-                                arr.push(None);
+                            // Bare element (no subscript): word-split to allow
+                            // `arr=( $x )` where $x="a b c" to produce 3 elements
+                            let fields = self.expand_word_fields(&elem.value, &ifs);
+                            for field in fields {
+                                let value = if is_integer {
+                                    self.eval_arith_expr(&field).to_string()
+                                } else {
+                                    field
+                                };
+                                while arr.len() <= next_idx {
+                                    arr.push(None);
+                                }
+                                arr[next_idx] = Some(value);
+                                next_idx += 1;
                             }
-                            arr[next_idx] = Some(value);
-                            next_idx += 1;
                         }
                     }
                     self.arrays.insert(resolved, arr);
