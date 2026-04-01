@@ -17,8 +17,9 @@
     # verbose-success: PID 1 lifecycle logging provides SYSLOG_IDENTIFIER=systemd entries
     # with UNIT= field; stdout stream uses exec binary name (bash) as identifier.
     # silent-success: LogLevelMax=notice suppresses PID 1 lifecycle messages (priority 6/info)
-    # Remove script-as-path test (script's bash process has no matching journal entries)
-    sed -i '/journalctl -b.*readlink/d' TEST-04-JOURNAL.journal.sh
+    # script-as-path test: works because testsuite.nix now exec's the script
+    # directly (not via `bash -x`), so the kernel sets /proc/PID/comm to the
+    # script filename, matching journalctl's Script condition.
     # forever-print-hola: journald restart resilience tests work because PID 1
     # holds the stdout pipe and reconnects to journald automatically.
     # Restart=always in journald unit ensures journald restarts after SIGKILL.

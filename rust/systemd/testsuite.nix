@@ -389,7 +389,12 @@ in
 
       env_exports = "${builtins.concatStringsSep "; " (builtins.attrValues (builtins.mapAttrs (k: v: "export ${k}='${v}'") testEnv))}"
       env_prefix = f"{env_exports}; " if env_exports else ""
-      test_cmd = f"cd {units_dir} && {env_prefix}bash -x ./${testName}.sh 2>&1"
+      # Exec the script directly (not via `bash -x`) so the kernel sets
+      # /proc/PID/comm to the script filename.  This is needed for
+      # `journalctl -b "$(readlink -f "$0")"` (script-as-path matching)
+      # which checks _COMM against the script basename.  The upstream test
+      # scripts already set `set -eux` internally.
+      test_cmd = f"cd {units_dir} && {env_prefix}chmod +x ./${testName}.sh && ./${testName}.sh 2>&1"
 
       try:
           (rc, output) = machine.execute(test_cmd, timeout=${toString testTimeout})
