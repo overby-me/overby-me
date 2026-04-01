@@ -49,6 +49,11 @@
     systemd-analyze unit-paths | grep -q /etc/systemd/system
     systemd-analyze unit-paths | grep -q /run/systemd/system
 
+    : "systemd-analyze unit-files"
+    systemd-analyze unit-files >/dev/null
+    systemd-analyze unit-files "*.target" >/dev/null
+    systemd-analyze unit-files "*" >/dev/null
+
     : "systemd-analyze calendar"
     systemd-analyze calendar '*-2-29 0:0:0'
     systemd-analyze calendar --iterations=5 '*-2-29 0:0:0'

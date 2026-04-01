@@ -218,6 +218,13 @@ enum Command {
         policies: Vec<String>,
     },
 
+    /// List unit files from search paths
+    #[command(name = "unit-files")]
+    UnitFiles {
+        /// Pattern(s) to filter unit files (glob)
+        patterns: Vec<String>,
+    },
+
     /// Show TPM2 PCR (Platform Configuration Register) values
     Pcrs,
 
@@ -1036,6 +1043,7 @@ fn main() {
         Some(Command::ImagePolicy { ref policies }) => cmd_image_policy(policies),
         Some(Command::Pcrs) => cmd_pcrs(),
         Some(Command::Srk) => cmd_srk(),
+        Some(Command::UnitFiles { ref patterns }) => cmd_unit_files(patterns, cli.user),
         Some(Command::ExitStatus { ref statuses }) => cmd_exit_status(statuses),
         Some(Command::Capability {
             ref capabilities,
@@ -1467,6 +1475,81 @@ fn cmd_unit_paths(user_mode: bool) {
 
     for p in &paths {
         println!("{}", p.display());
+    }
+}
+
+fn cmd_unit_files(patterns: &[String], user_mode: bool) {
+    let paths = if user_mode {
+        user_unit_paths()
+    } else {
+        system_unit_paths()
+    };
+
+    let unit_suffixes = [
+        ".service",
+        ".socket",
+        ".target",
+        ".mount",
+        ".automount",
+        ".swap",
+        ".timer",
+        ".path",
+        ".slice",
+        ".scope",
+        ".device",
+    ];
+
+    let matches_pattern = |name: &str, patterns: &[String]| -> bool {
+        if patterns.is_empty() {
+            return true;
+        }
+        for pat in patterns {
+            if pat == "*" || simple_glob_match(pat, name) {
+                return true;
+            }
+        }
+        false
+    };
+
+    for dir in &paths {
+        if let Ok(entries) = fs::read_dir(dir) {
+            for entry in entries.filter_map(|e| e.ok()) {
+                let name = entry.file_name();
+                let name_str = name.to_string_lossy();
+                if !unit_suffixes.iter().any(|s| name_str.ends_with(s)) {
+                    continue;
+                }
+                if matches_pattern(&name_str, patterns) {
+                    println!("ids: {} \u{2192} {}", name_str, entry.path().display());
+                }
+            }
+        }
+    }
+}
+
+/// Simple glob matching supporting * and ? wildcards.
+fn simple_glob_match(pattern: &str, text: &str) -> bool {
+    let pat: Vec<char> = pattern.chars().collect();
+    let txt: Vec<char> = text.chars().collect();
+    glob_match_inner(&pat, &txt)
+}
+
+fn glob_match_inner(pat: &[char], txt: &[char]) -> bool {
+    if pat.is_empty() {
+        return txt.is_empty();
+    }
+    match pat[0] {
+        '*' => {
+            // Try matching * with 0..n characters
+            for i in 0..=txt.len() {
+                if glob_match_inner(&pat[1..], &txt[i..]) {
+                    return true;
+                }
+            }
+            false
+        }
+        '?' => !txt.is_empty() && glob_match_inner(&pat[1..], &txt[1..]),
+        c => !txt.is_empty() && txt[0] == c && glob_match_inner(&pat[1..], &txt[1..]),
     }
 }
 
