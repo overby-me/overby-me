@@ -307,12 +307,13 @@ fn handle_accept_no(run_info: &ArcMutRuntimeInfo, info: &SocketActivationInfo) {
     let run_info_locked = run_info.read_poisoned();
     let unit_table = &run_info_locked.unit_table;
 
-    // Mark socket as activated
+    // Mark socket as activated and increment NAccepted counter
     if let Some(sock_unit) = unit_table.get(&info.socket_id)
         && let Specific::Socket(specific) = &sock_unit.specific
     {
         let mut_state = &mut *specific.state.write_poisoned();
         mut_state.sock.activated = true;
+        mut_state.sock.accept_counter += 1;
     }
 
     let Some(ref service_id) = info.service_id else {
