@@ -5,7 +5,6 @@
   # Patch subtests that partially depend on unimplemented features.
   patchScript = ''
     # Remove subtests that require busctl (D-Bus not implemented)
-    rm -f TEST-23-UNIT-FILE.exec-command-ex.sh
     rm -f TEST-23-UNIT-FILE.ExtraFileDescriptors.sh
     rm -f TEST-23-UNIT-FILE.runtime-bind-paths.sh
 
