@@ -5,7 +5,7 @@
     # journal-corrupt: machined-dependent user session lines patched out below
     # journal-gatewayd and journal-remote self-skip when binary is missing
     # LogFilterPatterns: stdout variant enabled; syslog and delegated-cgroup variants patched out
-    "journalctl-varlink" # not a real subtest file — skip is harmless
+    # journalctl-varlink: now enabled (JournalAccess varlink interface implemented)
     "SYSTEMD_JOURNAL_COMPRESS" # needs journalctl --verify and compression env var support
   ];
   patchScript = ''

@@ -2193,6 +2193,291 @@ fn varlink_write_error(writer: &mut dyn Write, error_id: &str) -> io::Result<()>
 }
 
 // ---------------------------------------------------------------------------
+// JournalAccess varlink server — provides journal query API
+// ---------------------------------------------------------------------------
+
+/// The JournalAccess varlink interface definition for introspection.
+const JOURNAL_ACCESS_INTERFACE: &str = "\
+interface io.systemd.JournalAccess
+
+method GetEntries(limit: ?int, units: ?[]string, priority: ?int) -> (entry: object)
+
+error NoEntries()
+error InvalidParameter()
+";
+
+/// JournalAccess Varlink server at `/run/systemd/io.systemd.JournalAccess`.
+/// Provides a query interface for reading journal entries via Varlink.
+fn journal_access_server(state: Arc<JournaldState>, socket_path: String) {
+    let _ = fs::remove_file(&socket_path);
+
+    let listener = match UnixListener::bind(&socket_path) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!(
+                "journald: Failed to bind JournalAccess socket {}: {}",
+                socket_path, e
+            );
+            return;
+        }
+    };
+
+    let _ = fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o666));
+
+    listener
+        .set_nonblocking(true)
+        .expect("journal-access: set_nonblocking");
+
+    while !state.shutdown.load(Ordering::Relaxed) {
+        match listener.accept() {
+            Ok((stream, _)) => {
+                let state = Arc::clone(&state);
+                thread::Builder::new()
+                    .name("journal-access-conn".into())
+                    .spawn(move || journal_access_handle_connection(state, stream))
+                    .ok();
+            }
+            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(100));
+            }
+            Err(e) => {
+                eprintln!("journald: JournalAccess accept error: {}", e);
+                thread::sleep(Duration::from_millis(100));
+            }
+        }
+    }
+}
+
+/// Handle a JournalAccess Varlink connection.
+fn journal_access_handle_connection(state: Arc<JournaldState>, stream: UnixStream) {
+    let _ = stream.set_nonblocking(false);
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(30)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(30)));
+
+    let mut reader = BufReader::new(&stream);
+    let mut writer = &stream;
+
+    loop {
+        let mut buf = Vec::new();
+        match reader.read_until(0, &mut buf) {
+            Ok(0) => break,
+            Err(_) => break,
+            Ok(_) => {}
+        }
+
+        if buf.last() == Some(&0) {
+            buf.pop();
+        }
+        if buf.is_empty() {
+            continue;
+        }
+
+        let request: serde_json::Value = match serde_json::from_slice(&buf) {
+            Ok(v) => v,
+            Err(_) => {
+                let _ = varlink_write_error(&mut writer, "org.varlink.service.InvalidParameter");
+                break;
+            }
+        };
+
+        let method = match request.get("method").and_then(|v| v.as_str()) {
+            Some(m) => m,
+            None => {
+                let _ = varlink_write_error(&mut writer, "org.varlink.service.InvalidParameter");
+                break;
+            }
+        };
+
+        let oneway = request
+            .get("oneway")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let more = request
+            .get("more")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let params = request.get("parameters").cloned().unwrap_or(serde_json::json!({}));
+
+        match method {
+            "org.varlink.service.GetInfo" => {
+                if !oneway {
+                    let reply = serde_json::json!({
+                        "parameters": {
+                            "vendor": "rust-systemd",
+                            "product": "systemd-journald",
+                            "version": "0.1.0",
+                            "url": "https://tangled.org/overby.me/overby.me",
+                            "interfaces": [
+                                "org.varlink.service",
+                                "io.systemd.JournalAccess"
+                            ]
+                        }
+                    });
+                    let msg = format!("{}\0", reply);
+                    if writer.write_all(msg.as_bytes()).is_err() {
+                        break;
+                    }
+                }
+            }
+            "org.varlink.service.GetInterfaceDescription" => {
+                if !oneway {
+                    let iface = params.get("interface").and_then(|v| v.as_str()).unwrap_or("");
+                    if iface == "io.systemd.JournalAccess" {
+                        let reply = serde_json::json!({
+                            "parameters": {
+                                "description": JOURNAL_ACCESS_INTERFACE
+                            }
+                        });
+                        let msg = format!("{}\0", reply);
+                        if writer.write_all(msg.as_bytes()).is_err() {
+                            break;
+                        }
+                    } else {
+                        let _ = varlink_write_error(
+                            &mut writer,
+                            "org.varlink.service.InterfaceNotFound",
+                        );
+                    }
+                }
+            }
+            "io.systemd.JournalAccess.GetEntries" => {
+                if oneway {
+                    continue;
+                }
+                if let Err(_) =
+                    journal_access_get_entries(&state, &params, &mut writer, more)
+                {
+                    break;
+                }
+            }
+            _ => {
+                if !oneway {
+                    let _ =
+                        varlink_write_error(&mut writer, "org.varlink.service.MethodNotFound");
+                }
+            }
+        }
+    }
+}
+
+/// Handle a GetEntries call on the JournalAccess interface.
+fn journal_access_get_entries(
+    state: &Arc<JournaldState>,
+    params: &serde_json::Value,
+    writer: &mut dyn Write,
+    more: bool,
+) -> io::Result<()> {
+    // Parse limit (default 100, max 10000)
+    let limit = params
+        .get("limit")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(100);
+    if limit > 10000 {
+        return varlink_write_error(writer, "io.systemd.JournalAccess.InvalidParameter");
+    }
+
+    // Parse priority filter (0-7)
+    let priority_filter = params.get("priority").and_then(|v| v.as_u64());
+    if let Some(p) = priority_filter {
+        if p > 7 {
+            return varlink_write_error(writer, "io.systemd.JournalAccess.InvalidParameter");
+        }
+    }
+
+    // Parse unit filter
+    let unit_filter: Vec<String> = params
+        .get("units")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Read entries from storage
+    let entries = {
+        let storage = state.storage.lock().unwrap();
+        storage.read_all().unwrap_or_default()
+    };
+
+    // Filter and collect entries
+    let mut results = Vec::new();
+    for entry in entries.iter().rev() {
+        // Priority filter: include entries at or below the given priority level
+        if let Some(max_prio) = priority_filter {
+            if let Some(entry_prio) = entry.priority() {
+                if entry_prio as u64 > max_prio {
+                    continue;
+                }
+            }
+        }
+
+        // Unit filter
+        if !unit_filter.is_empty() {
+            let entry_unit = entry.systemd_unit().unwrap_or_default();
+            if !unit_filter.iter().any(|u| u == &entry_unit) {
+                continue;
+            }
+        }
+
+        results.push(entry);
+        if results.len() >= limit as usize {
+            break;
+        }
+    }
+
+    if results.is_empty() {
+        return varlink_write_error(writer, "io.systemd.JournalAccess.NoEntries");
+    }
+
+    // Send entries
+    let total = results.len();
+    for (i, entry) in results.into_iter().enumerate() {
+        let is_last = i == total - 1;
+
+        // Build entry object with all fields
+        let mut entry_obj = serde_json::Map::new();
+        for (key, value) in &entry.fields {
+            let str_val = String::from_utf8_lossy(value);
+            entry_obj.insert(key.clone(), serde_json::Value::String(str_val.into_owned()));
+        }
+        // Add timestamp fields
+        entry_obj.insert(
+            "__REALTIME_TIMESTAMP".to_string(),
+            serde_json::Value::String(entry.realtime_usec.to_string()),
+        );
+        entry_obj.insert(
+            "__MONOTONIC_TIMESTAMP".to_string(),
+            serde_json::Value::String(entry.monotonic_usec.to_string()),
+        );
+
+        let reply = if more && !is_last {
+            // "continues" flag tells varlinkctl there are more replies
+            serde_json::json!({
+                "continues": true,
+                "parameters": {
+                    "entry": entry_obj
+                }
+            })
+        } else {
+            serde_json::json!({
+                "parameters": {
+                    "entry": entry_obj
+                }
+            })
+        };
+
+        let msg = format!("{}\0", reply);
+        writer.write_all(msg.as_bytes())?;
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Maintenance thread
 // ---------------------------------------------------------------------------
 
@@ -2657,6 +2942,25 @@ fn main() {
         None
     };
 
+    // JournalAccess varlink server: provides journal query API at
+    // /run/systemd/io.systemd.JournalAccess (only for default instance)
+    let _journal_access_handle = if namespace.is_none() {
+        let state_access = Arc::clone(&state);
+        Some(
+            thread::Builder::new()
+                .name("journal-access".into())
+                .spawn(move || {
+                    journal_access_server(
+                        state_access,
+                        "/run/systemd/io.systemd.JournalAccess".to_string(),
+                    )
+                })
+                .expect("failed to spawn journal-access thread"),
+        )
+    } else {
+        None
+    };
+
     // Log a startup message to the journal itself
     {
         let mut entry = JournalEntry::new();
@@ -2712,6 +3016,7 @@ fn main() {
     // Syslog socket is never socket-activated — always clean it up
     if namespace.is_none() {
         let _ = fs::remove_file(SYSLOG_SOCKET_PATH);
+        let _ = fs::remove_file("/run/systemd/io.systemd.JournalAccess");
     }
 
     sd_notify("STOPPING=1");
