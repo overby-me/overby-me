@@ -1173,6 +1173,13 @@ fn reset_failed_unit(unit: &Unit) {
         let mut state = path_specific.state.write_poisoned();
         state.result = crate::units::PathResult::Success;
     }
+    // Reset socket-specific result and poll limit state.
+    if let Specific::Socket(socket_specific) = &unit.specific {
+        let mut state = socket_specific.state.write_poisoned();
+        state.result = crate::units::SocketResult::Success;
+        state.sock.poll_limit_paused_until = None;
+        state.sock.poll_timestamps.clear();
+    }
 }
 
 /// Check if a string contains glob characters.
