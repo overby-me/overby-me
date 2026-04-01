@@ -9,9 +9,9 @@
   # - SYSTEMD_JOURNAL_COMPRESS: compression type recorded in file header, reported by --verify
   testEnv.TEST_SKIP_SUBTESTS = "";
   patchScript = ''
-    # Fix systemd-run --user -M testuser@.host — machined not available
-    sed -i '/systemd-run --user -M/d' TEST-04-JOURNAL.journal.sh
-    sed -i '/journalctl.*--user-unit/d' TEST-04-JOURNAL.journal.sh
+    # systemd-run --user -M testuser@.host: -M user@.host now handled by
+    # extracting user and running as that UID (no machined needed for .host)
+    # journalctl --user-unit: supported, returns empty set when no user units exist
     # journald now waits for sockets before sending READY=1, no sleep needed
     # Per-write PID tracking now implemented via SCM_CREDENTIALS on stdout stream
     # verbose-success: PID 1 lifecycle logging provides SYSLOG_IDENTIFIER=systemd entries

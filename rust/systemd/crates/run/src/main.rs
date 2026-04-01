@@ -702,6 +702,35 @@ fn main() {
         }
     }
 
+    // Handle -M/--machine: parse "user@machine" format.
+    // Only ".host" (local machine) is supported — translate to --uid for
+    // the user part, allowing `systemd-run --user -M testuser@.host cmd`
+    // to work without machined.
+    if let Some(ref machine_spec) = cli.machine {
+        let (user, machine) = if let Some(at_pos) = machine_spec.find('@') {
+            (
+                Some(machine_spec[..at_pos].to_string()),
+                machine_spec[at_pos + 1..].to_string(),
+            )
+        } else {
+            (None, machine_spec.clone())
+        };
+
+        if machine != ".host" {
+            eprintln!(
+                "Error: Machine '{machine}' is not supported. Only '.host' (local) is supported."
+            );
+            process::exit(1);
+        }
+
+        if let Some(user) = user
+            && !user.is_empty()
+            && cli.uid.is_none()
+        {
+            cli.uid = Some(user);
+        }
+    }
+
     // Determine the command to run
     let command = if cli.command.is_empty() && cli.shell {
         vec![default_shell()]
