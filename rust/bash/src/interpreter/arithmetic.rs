@@ -1433,7 +1433,7 @@ impl Shell {
     }
 
     /// Expand command substitutions $(...) and $var within an arithmetic expression string.
-    fn expand_comsubs_in_arith(&mut self, expr: &str) -> String {
+    pub(super) fn expand_comsubs_in_arith(&mut self, expr: &str) -> String {
         // When arith_is_let is true, the expression came from `let` with a
         // literal $ (e.g. let 'jv += $iv').  Don't expand $var references —
         // the $ should be passed through so the arithmetic evaluator produces

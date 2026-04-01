@@ -2787,7 +2787,12 @@ impl Shell {
     fn run_arith_for_inner(&mut self, clause: &ArithForClause) -> i32 {
         if !clause.init.is_empty() {
             if self.opt_xtrace {
-                self.xtrace_write(&format!("+ (( {} ))", clause.init));
+                let trace_expr = if clause.init.contains('$') || clause.init.contains('`') {
+                    self.expand_comsubs_in_arith(&clause.init)
+                } else {
+                    clause.init.clone()
+                };
+                self.xtrace_write(&format!("+ (( {} ))", trace_expr));
             }
             self.eval_arith_expr(&clause.init);
             if crate::expand::take_arith_error() {
@@ -2804,7 +2809,12 @@ impl Shell {
 
             if !clause.cond.is_empty() {
                 if self.opt_xtrace {
-                    self.xtrace_write(&format!("+ (( {} ))", clause.cond));
+                    let trace_expr = if clause.cond.contains('$') || clause.cond.contains('`') {
+                        self.expand_comsubs_in_arith(&clause.cond)
+                    } else {
+                        clause.cond.clone()
+                    };
+                    self.xtrace_write(&format!("+ (( {} ))", trace_expr));
                 }
                 let cond_val = self.eval_arith_expr(&clause.cond);
                 if crate::expand::take_arith_error() {
@@ -2835,7 +2845,12 @@ impl Shell {
 
             if !clause.step.is_empty() {
                 if self.opt_xtrace {
-                    self.xtrace_write(&format!("+ (( {} ))", clause.step));
+                    let trace_expr = if clause.step.contains('$') || clause.step.contains('`') {
+                        self.expand_comsubs_in_arith(&clause.step)
+                    } else {
+                        clause.step.clone()
+                    };
+                    self.xtrace_write(&format!("+ (( {} ))", trace_expr));
                 }
                 self.eval_arith_expr(&clause.step);
                 // Break if step expression had an error (e.g., 7++)
@@ -3673,7 +3688,15 @@ impl Shell {
     /// Execute `(( arithmetic expression ))` — exit status 0 if result != 0.
     fn run_arithmetic(&mut self, expr: &str) -> i32 {
         if self.opt_xtrace {
-            self.xtrace_write(&format!("+ (( {} ))", expr));
+            // Expand $var references for the trace (bash shows expanded values).
+            // The expression preserves its original leading whitespace from the
+            // parser, so the trace naturally matches bash's format.
+            let trace_expr = if expr.contains('$') || expr.contains('`') {
+                self.expand_comsubs_in_arith(expr)
+            } else {
+                expr.to_string()
+            };
+            self.xtrace_write(&format!("+ (( {} ))", trace_expr));
         }
         self.arith_is_command = true;
         let result = self.eval_arith_expr(expr);
