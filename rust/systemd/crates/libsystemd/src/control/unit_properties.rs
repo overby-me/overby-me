@@ -478,7 +478,7 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
         Specific::Socket(sock) => {
             insert_socket_config(&mut props, &sock.conf);
             insert_exec_config(&mut props, &sock.conf.exec_config);
-            // Result — "success" normally, "trigger-limit-hit" on rate limit
+            // Runtime state properties
             let state = sock.state.read_poisoned();
             insert(
                 &mut props,
@@ -487,6 +487,16 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
                     crate::units::SocketResult::Success => "success",
                     crate::units::SocketResult::TriggerLimitHit => "trigger-limit-hit",
                 },
+            );
+            insert(
+                &mut props,
+                "NAccepted",
+                &state.sock.accept_counter.to_string(),
+            );
+            insert(
+                &mut props,
+                "NConnections",
+                &state.sock.active_accept_connections.to_string(),
             );
         }
         Specific::Target(_) => {
@@ -1728,6 +1738,22 @@ fn insert_socket_config(props: &mut PropertyMap, conf: &SocketConfig) {
         props,
         "TriggerLimitBurst",
         &conf.trigger_limit_burst.unwrap_or(200).to_string(),
+    );
+    // PollLimit properties
+    insert(
+        props,
+        "PollLimitIntervalUSec",
+        &format!(
+            "{}us",
+            conf.poll_limit_interval_sec
+                .unwrap_or(0)
+                .saturating_mul(1_000_000)
+        ),
+    );
+    insert(
+        props,
+        "PollLimitBurst",
+        &conf.poll_limit_burst.unwrap_or(0).to_string(),
     );
 }
 

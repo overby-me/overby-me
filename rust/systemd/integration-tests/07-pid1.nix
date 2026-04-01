@@ -3326,7 +3326,6 @@
          TEST-07-PID1.mount-invalid-chars.sh \
          TEST-07-PID1.mqueue-ownership.sh \
          TEST-07-PID1.nft.sh \
-         TEST-07-PID1.poll-limit.sh \
          TEST-07-PID1.private-bpf.sh \
          TEST-07-PID1.protect-control-groups.sh \
          TEST-07-PID1.quota.sh \

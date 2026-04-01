@@ -2176,6 +2176,14 @@ pub struct ParsedSocketSection {
     /// Defaults to false. See systemd.socket(5). (systemd 257+)
     pub pass_file_descriptors_to_exec: bool,
 
+    /// PollLimitIntervalSec= — rate-limiting interval for poll/select
+    /// wakeups. Defaults to 0 (disabled). See systemd.socket(5).
+    pub poll_limit_interval_sec: Option<u64>,
+
+    /// PollLimitBurst= — maximum poll/select wakeups within the interval.
+    /// Defaults to 0 (disabled). See systemd.socket(5).
+    pub poll_limit_burst: Option<u32>,
+
     pub exec_section: ParsedExecSection,
 }
 

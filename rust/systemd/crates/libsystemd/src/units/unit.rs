@@ -3872,5 +3872,16 @@ pub struct SocketConfig {
     /// Defaults to false. See systemd.socket(5). (systemd 257+)
     pub pass_file_descriptors_to_exec: bool,
 
+    /// PollLimitIntervalSec= — rate-limiting interval for poll/select
+    /// wakeups. If more than PollLimitBurst= wakeups occur within this
+    /// interval, the socket is temporarily removed from poll. Defaults
+    /// to 0 (disabled). See systemd.socket(5).
+    pub poll_limit_interval_sec: Option<u64>,
+
+    /// PollLimitBurst= — maximum poll/select wakeups within
+    /// PollLimitIntervalSec= before the socket is temporarily paused.
+    /// Defaults to 0 (disabled). See systemd.socket(5).
+    pub poll_limit_burst: Option<u32>,
+
     pub exec_config: ExecConfig,
 }

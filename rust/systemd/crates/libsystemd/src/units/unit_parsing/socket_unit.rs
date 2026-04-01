@@ -161,6 +161,8 @@ fn parse_socket_section(
     let flush_pending = section.remove("FLUSHPENDING");
     let trigger_limit_interval_sec = section.remove("TRIGGERLIMITINTERVALSEC");
     let trigger_limit_burst = section.remove("TRIGGERLIMITBURST");
+    let poll_limit_interval_sec = section.remove("POLLLIMITINTERVALSEC");
+    let poll_limit_burst = section.remove("POLLLIMITBURST");
     let socket_protocol = section.remove("SOCKETPROTOCOL");
     let selinux_context_from_net = section.remove("SELINUXCONTEXTFROMNET");
     let smack_label = section.remove("SMACKLABEL");
@@ -1061,6 +1063,52 @@ fn parse_socket_section(
         None => None,
     };
 
+    let poll_limit_interval_sec: Option<u64> = match poll_limit_interval_sec {
+        Some(vec) => {
+            if vec.len() == 1 {
+                let val = vec[0].1.trim();
+                if val.is_empty() {
+                    None
+                } else {
+                    let dur = super::service_unit::parse_timeout(val);
+                    match dur {
+                        super::Timeout::Duration(d) => Some(d.as_secs()),
+                        super::Timeout::Infinity => None,
+                    }
+                }
+            } else {
+                return Err(ParsingErrorReason::SettingTooManyValues(
+                    "PollLimitIntervalSec".to_owned(),
+                    super::map_tuples_to_second(vec),
+                ));
+            }
+        }
+        None => None,
+    };
+
+    let poll_limit_burst: Option<u32> = match poll_limit_burst {
+        Some(vec) => {
+            if vec.len() == 1 {
+                let val = vec[0].1.trim();
+                if val.is_empty() {
+                    None
+                } else {
+                    Some(val.parse::<u32>().map_err(|_| {
+                        ParsingErrorReason::Generic(format!(
+                            "PollLimitBurst is not a valid unsigned integer: {val}"
+                        ))
+                    })?)
+                }
+            } else {
+                return Err(ParsingErrorReason::SettingTooManyValues(
+                    "PollLimitBurst".to_owned(),
+                    super::map_tuples_to_second(vec),
+                ));
+            }
+        }
+        None => None,
+    };
+
     let socket_protocol: Option<String> = match socket_protocol {
         Some(vec) => {
             if vec.len() == 1 {
@@ -1287,6 +1335,8 @@ fn parse_socket_section(
         flush_pending,
         trigger_limit_interval_sec,
         trigger_limit_burst,
+        poll_limit_interval_sec,
+        poll_limit_burst,
         socket_protocol,
         selinux_context_from_net,
         smack_label,

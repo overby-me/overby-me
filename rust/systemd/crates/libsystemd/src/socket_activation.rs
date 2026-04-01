@@ -39,6 +39,10 @@ struct SocketActivationInfo {
     trigger_limit_interval_sec: std::time::Duration,
     /// TriggerLimitBurst — max activations within the window (default 200).
     trigger_limit_burst: u32,
+    /// PollLimitIntervalSec — poll rate limit window (default 0 = disabled).
+    poll_limit_interval_sec: std::time::Duration,
+    /// PollLimitBurst — max poll wakeups within the window (default 0 = disabled).
+    poll_limit_burst: u32,
 }
 
 pub fn start_socketactivation_thread(run_info: ArcMutRuntimeInfo) {
@@ -114,6 +118,11 @@ fn gather_socket_info(
         std::time::Duration::from_secs(specific.conf.trigger_limit_interval_sec.unwrap_or(2));
     let trigger_limit_burst = specific.conf.trigger_limit_burst.unwrap_or(200);
 
+    // Poll limit defaults: 0 = disabled (matching C systemd)
+    let poll_limit_interval_sec =
+        std::time::Duration::from_secs(specific.conf.poll_limit_interval_sec.unwrap_or(0));
+    let poll_limit_burst = specific.conf.poll_limit_burst.unwrap_or(0);
+
     // Get the listening fd from the fd store
     let listen_fd = run_info
         .fd_store
@@ -182,6 +191,8 @@ fn gather_socket_info(
         max_connections_per_source,
         trigger_limit_interval_sec,
         trigger_limit_burst,
+        poll_limit_interval_sec,
+        poll_limit_burst,
     })
 }
 
@@ -241,8 +252,53 @@ fn check_trigger_rate_limit(run_info: &ArcMutRuntimeInfo, info: &SocketActivatio
     false
 }
 
+/// Check whether the socket has hit its poll rate limit.
+/// Records the current poll timestamp and returns `true` if the limit is exceeded,
+/// in which case the socket will be temporarily paused.
+fn check_poll_rate_limit(run_info: &ArcMutRuntimeInfo, info: &SocketActivationInfo) -> bool {
+    let burst = info.poll_limit_burst;
+    let interval = info.poll_limit_interval_sec;
+
+    // A burst of 0 or zero interval disables poll rate limiting
+    if burst == 0 || interval.is_zero() {
+        return false;
+    }
+
+    let now = Instant::now();
+    let run_info_locked = run_info.read_poisoned();
+    if let Some(sock_unit) = run_info_locked.unit_table.get(&info.socket_id)
+        && let Specific::Socket(specific) = &sock_unit.specific
+    {
+        let mut guard = specific.state.write_poisoned();
+        let timestamps = &mut guard.sock.poll_timestamps;
+
+        // Prune timestamps outside the rate limit window
+        timestamps.retain(|t| now.duration_since(*t) < interval);
+
+        if timestamps.len() >= burst as usize {
+            // Rate limit hit — pause the socket until end of interval
+            let oldest = timestamps.first().copied().unwrap_or(now);
+            let resume_at = oldest + interval;
+            info!(
+                "Socket unit {} hit poll rate limit ({} wakeups in {:?}), pausing until {:?}",
+                info.socket_id.name, burst, interval, resume_at
+            );
+            guard.sock.poll_limit_paused_until = Some(resume_at);
+            return true;
+        }
+
+        // Record this wakeup
+        timestamps.push(now);
+    }
+    false
+}
+
 /// Handle socket activation for Accept=no sockets (traditional mode).
 fn handle_accept_no(run_info: &ArcMutRuntimeInfo, info: &SocketActivationInfo) {
+    // Check poll rate limit before processing
+    if check_poll_rate_limit(run_info, info) {
+        return;
+    }
     // Check trigger rate limit before activating
     if check_trigger_rate_limit(run_info, info) {
         return;
@@ -317,6 +373,10 @@ fn handle_accept_no(run_info: &ArcMutRuntimeInfo, info: &SocketActivationInfo) {
 
 /// Handle socket activation for Accept=yes sockets (per-connection mode).
 fn handle_accept_yes(run_info: &ArcMutRuntimeInfo, info: &SocketActivationInfo) {
+    // Check poll rate limit before processing
+    if check_poll_rate_limit(run_info, info) {
+        return;
+    }
     // Check trigger rate limit before activating
     if check_trigger_rate_limit(run_info, info) {
         return;
@@ -545,20 +605,37 @@ fn count_connections_per_source(run_info: &ArcMutRuntimeInfo, socket_name: &str,
 
 pub fn wait_for_socket(run_info: ArcMutRuntimeInfo) -> Result<Vec<UnitId>, String> {
     let eventfd = { run_info.read_poisoned().socket_activation_eventfd };
-    let (mut fdset, fd_to_sock_id) = {
+    let (mut fdset, fd_to_sock_id, mut select_timeout) = {
         let run_info_locked = &*run_info.read_poisoned();
+        let now = Instant::now();
 
         let fd_to_sock_id = run_info_locked.fd_store.read_poisoned().global_fds_to_ids();
         let mut fdset = nix::sys::select::FdSet::new();
+        let mut earliest_resume: Option<Instant> = None;
         {
             let unit_table_locked = &run_info_locked.unit_table;
             for (fd, id) in &fd_to_sock_id {
                 let unit = unit_table_locked.get(id).unwrap();
                 if let Specific::Socket(specific) = &unit.specific {
-                    let state = &*specific.state.read_poisoned();
+                    let mut state = specific.state.write_poisoned();
                     // Skip sockets that hit their trigger rate limit
                     if state.result == SocketResult::TriggerLimitHit {
                         continue;
+                    }
+                    // Check poll limit pause
+                    if let Some(resume_at) = state.sock.poll_limit_paused_until {
+                        if now < resume_at {
+                            // Still paused — track earliest resume time
+                            earliest_resume = Some(match earliest_resume {
+                                Some(e) => e.min(resume_at),
+                                None => resume_at,
+                            });
+                            continue;
+                        } else {
+                            // Pause expired — clear it and resume
+                            state.sock.poll_limit_paused_until = None;
+                            state.sock.poll_timestamps.clear();
+                        }
                     }
                     // For Accept=yes sockets, always keep listening (never mark activated)
                     // For Accept=no sockets, skip if already activated
@@ -569,10 +646,26 @@ pub fn wait_for_socket(run_info: ArcMutRuntimeInfo) -> Result<Vec<UnitId>, Strin
             }
             fdset.insert(unsafe { borrow_fd(eventfd.read_end()) });
         }
-        (fdset, fd_to_sock_id)
+
+        // If any sockets are paused, use a timeout so we resume them on time
+        let timeout = earliest_resume.map(|resume_at| {
+            let remaining = resume_at.saturating_duration_since(now);
+            let mut tv = nix::sys::time::TimeVal::new(
+                remaining.as_secs() as i64,
+                remaining.subsec_micros() as i64,
+            );
+            // Ensure at least 1ms timeout to avoid busy-spinning
+            if tv.tv_sec() == 0 && tv.tv_usec() == 0 {
+                tv = nix::sys::time::TimeVal::new(0, 1000);
+            }
+            tv
+        });
+
+        (fdset, fd_to_sock_id, timeout)
     };
 
-    let result = nix::sys::select::select(None, Some(&mut fdset), None, None, None);
+    let result =
+        nix::sys::select::select(None, Some(&mut fdset), None, None, select_timeout.as_mut());
     match result {
         Ok(_) => {
             let mut activated_ids = Vec::new();

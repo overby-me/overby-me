@@ -160,4 +160,8 @@ pub struct Socket {
     pub active_accept_connections: u64,
     /// Timestamps of recent trigger events for TriggerLimitIntervalSec/TriggerLimitBurst enforcement.
     pub trigger_timestamps: Vec<std::time::Instant>,
+    /// Timestamps of recent poll/select wakeups for PollLimitIntervalSec/PollLimitBurst enforcement.
+    pub poll_timestamps: Vec<std::time::Instant>,
+    /// When set, the socket is paused due to poll rate limiting until this instant.
+    pub poll_limit_paused_until: Option<std::time::Instant>,
 }
