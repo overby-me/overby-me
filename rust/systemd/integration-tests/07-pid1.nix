@@ -3314,27 +3314,21 @@
     # Reduce parallelism in type-exec-parallel to avoid fd exhaustion
     sed -i 's/seq 25 | xargs -n 1 -P 0/seq 5 | xargs -n 1 -P 3/' TEST-07-PID1.type-exec-parallel.sh
 
-    rm -f TEST-07-PID1.attach_processes.sh \
-         TEST-07-PID1.concurrency.sh \
-         TEST-07-PID1.DeferReactivation.sh \
-         TEST-07-PID1.delegate-namespaces.sh \
-         TEST-07-PID1.exec-deserialization.sh \
+    # Remove subtests requiring unimplemented features:
+    # exec-deserialization: daemon-reload exec state serialization
+    # issue-34104: D-Bus (busctl GetUnitByPID)
+    # main-PID-change: DynamicUser=1, user sessions
+    # mount-invalid-chars: UnitFileState property, fstab mount generation
+    # mqueue-ownership: ListenMessageQueue= socket type
+    # protect-control-groups: ProtectControlGroupsEx= with cgroup namespaces
+    # socket-pass-fds: PassFileDescriptorsToExec= runtime support
+    rm -f TEST-07-PID1.exec-deserialization.sh \
          TEST-07-PID1.issue-34104.sh \
-         TEST-07-PID1.issue-35882.sh \
-         TEST-07-PID1.issue-38320.sh \
          TEST-07-PID1.main-PID-change.sh \
          TEST-07-PID1.mount-invalid-chars.sh \
          TEST-07-PID1.mqueue-ownership.sh \
-         TEST-07-PID1.nft.sh \
-         TEST-07-PID1.private-bpf.sh \
          TEST-07-PID1.protect-control-groups.sh \
-         TEST-07-PID1.quota.sh \
-         TEST-07-PID1.socket-defer.sh \
-         TEST-07-PID1.socket-pass-fds.sh \
-         TEST-07-PID1.subgroup-kill.sh \
-         TEST-07-PID1.transient-unit-container.sh \
-         TEST-07-PID1.user-namespace-path.sh \
-         TEST-07-PID1.prefix-shell.sh
+         TEST-07-PID1.socket-pass-fds.sh
   '';
   extraPackages = pkgs: [pkgs.e2fsprogs pkgs.socat pkgs.nmap]; # chattr for socket-on-failure, socat for issue-30412, nmap/ncat for issue-3171
   testTimeout = 3600; # 56+ subtests need more than the default 1800s
