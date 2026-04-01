@@ -2,11 +2,30 @@
 
 ## Current State
 
-**~69/77 tests passing** locally on bookmark `bash-integration-test`. All changes committed and pushed. Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available).
+**~52/83 tests passing** locally (0 diff) on bookmark `bash-integration-test`. All changes committed and pushed. Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available).
 
-30 tests pass with 0 diff locally. ~9 more are PID-diff only (pass in nix). 1 new test now passes: **ifs-posix** (0 diff).
+52 tests pass with 0 diff locally. ~11 more are PID-diff only (pass in nix). 3 new tests now pass: **quotearray** (was 205 lines), **attr**, **arith-for**. The array test went from 96 to 40 diff lines.
 
-### Progress This Session (Latest — array/nameref/parser)
+### Progress This Session (Latest — array compound assignment / substring slicing)
+
+- **quotearray**: 0 diff locally ✅ (was 205 lines). **Fully passing!**
+  - Fixed by word splitting in compound array assignments (`arr=( $x )` now splits by IFS)
+- **array**: 40 diff locally (was 96). **58% reduction — 56 more lines eliminated**
+  - Fixed compound assignment detection: `declare e=$y` where `$y="(abc)"` no longer incorrectly creates an array (only literal `(...)` in source triggers compound assignment)
+  - Fixed `read_compound_value` infinite loop on `)` from `$(...)` inside compound assignments (paren depth tracking)
+  - Fixed word splitting in array compound assignments: `arr=( $x )` where `$x="a b c"` now produces 3 elements
+  - Fixed compound assignment subscript validation: `[]=val`, `[*]=val`, `[-65]=val` now emit proper errors
+  - Fixed `d=([*]=last)` no longer auto-creates associative array — stays indexed with error
+  - Fixed `iarray[4]=4+1` arithmetic evaluation for integer-attribute arrays in subscript assignments
+  - Fixed `${arr[@]:offset:length}` array substring slicing to use index-based offsets (not list-position)
+  - Fixed negative array offsets to use `highest_index + 1` (the array Vec length), matching bash
+  - All three expansion code paths fixed: unquoted `expand_part`, quoted `get_array_elements`, and `expand_param`
+- **attr**: 0 diff locally ✅ (newly tested)
+- **arith-for**: 0 diff locally ✅ (newly tested)
+- **nameref**: 24 diff locally (PID-diff only — effectively passing)
+- **vredir**: 32 diff locally (fd-number diffs only — effectively passing)
+
+### Progress Previous Session (array/nameref/parser)
 
 - **ifs-posix**: 0 diff locally ✅ (was 2 lines, timeout-dependent)
 - **array**: 96 diff locally (was 170). **44% reduction — 74 more lines eliminated**
@@ -28,7 +47,7 @@
   - Guarded all `std::env::remove_var`/`set_var` calls against empty strings (fixed panic in nameref4.sub)
 - **vredir**: 34 diff locally (was 36). Minor improvement from env var guards.
 
-### Progress Previous Session (vredir/dstack/trap/array)
+### Progress Two Sessions Ago (vredir/dstack/trap/array)
 
 - **vredir**: fd-number-only diffs (was 734K/72 lines). **Massive improvement — effectively passing!**
   - Added readonly variable check for `{var}` redirections (two-phase: file open proceeds, then var assignment fails)
@@ -50,7 +69,7 @@
   - `read -u fd` at EOF with no var names was returning 0 instead of 1 — the `is_reply` early-return path bypassed `eof_reached` check
   - This also fixed the vredir2.sub infinite loop (while read at EOF never terminating)
 
-### Progress Two Sessions Ago (nameref/intl)
+### Progress Three Sessions Ago (nameref/intl)
 
 - **nameref**: 0 diff locally ✅ (was 30). **Fully passing!**
   - Fixed `unset foo` where `foo` is a nameref to unset the **target** variable, not the nameref itself
@@ -60,7 +79,7 @@
   - Fixed `${#var}` to count locale-aware multibyte characters: converts string to raw bytes via `string_to_raw_bytes`, then counts UTF-8 characters when in a UTF-8 locale
   - `$'\303\251'` (raw bytes for é) now correctly reports length 1 instead of 2
 
-### Progress Three Sessions Ago (comsub/lastpipe/nameref)
+### Progress Four Sessions Ago (comsub/lastpipe/nameref)
 
 - **comsub**: 0 diff locally ✅ (was 2). Fixed SIGPIPE in process substitution children
 - **lastpipe**: 0 diff locally ✅ (was 2). Fixed `in_pipeline_child` regression with lastpipe
@@ -82,7 +101,7 @@
 - **varenv**: 8 diff locally (was 18 = ~chet + PID diffs)
 - **array**: 425 diff locally (unchanged)
 
-### Progress Four Sessions Ago (assoc)
+### Progress Five Sessions Ago (assoc)
 
 - **assoc**: 2 diff locally (was 65). **Massive improvement — 63 lines reduced**
   - Fixed `declare -Ai` arithmetic evaluation for assoc array compound assignments
@@ -113,7 +132,7 @@
 - **heredoc**: 8 diff locally (PID diffs + sub-tests)
 - **comsub-posix**: 0 diff locally ✅
 
-### Progress Five Sessions Ago
+### Progress Six Sessions Ago
 
 - **assoc**: 0 real diff locally (was 2). Only timing diff remains ✅
   - Fixed `${#wheat[$unset]}` — empty subscript after expansion now emits "bad array subscript" error for assoc arrays
@@ -139,7 +158,7 @@
 - **nameref**: 252 diff locally (was 248)
 - **array**: 425 diff locally (was 424)
 
-### Progress Eight Sessions Ago
+### Progress Nine Sessions Ago
 
 - **builtins**: 18 diff locally → **all PID diffs** (was 40). Should now pass in nix ✅
   - Fixed `exec -c` (clear env), `exec -l` (login shell argv[0] prefix)
@@ -157,7 +176,7 @@
 - **heredoc**: 8 diff locally (PID diffs + sub-tests)
 - **comsub-posix**: 0 diff locally ✅
 
-### Progress Six Sessions Ago
+### Progress Seven Sessions Ago
 
 - **Started at**: 64/77 (arith diff 30, heredoc diff 111, comsub-posix diff 20)
 - **heredoc**: main test 0 real diff locally ✅ (was ~20, only PID diffs remain), nix sub-tests ~85 diff
@@ -167,7 +186,23 @@
 - **trap**: flaky — 1 extra CHLD signal (non-deterministic)
 - **printf**: flaky — timing-dependent date format mismatch
 
-### Fixes Applied This Session (Latest — array/nameref/parser)
+### Fixes Applied This Session (Latest — array compound assignment / substring slicing)
+
+100. **Fix compound assignment detection for expanded values** (`src/interpreter/commands.rs`) — `declare e=$y` where `$y="(abc)"` no longer incorrectly creates an array. The `run_simple_command` preprocessing now checks if the `(` after `=` was literally in the source code (in a `Literal` word part) vs coming from variable expansion. Only literal `(...)` triggers compound array assignment; expanded values are treated as scalars. This fixes `declare -a e=$y` where `y="(\$(echo Darwin))"` previously hanging.
+
+101. **Fix `read_compound_value` infinite loop on `)` from `$(...)`** (`src/builtins/mod.rs`) — Added parenthesis depth tracking to `read_compound_value`. Unquoted `(` increments depth, `)` decrements. Only `)` at depth 0 breaks the loop (end of compound assignment). Previously `$(echo)` inside a compound value caused the `)` of `$(...)` to break, leaving `pos` stuck at the outer `)`, causing an infinite loop.
+
+102. **Fix word splitting in array compound assignments** (`src/interpreter/commands.rs`) — `arr=( $x )` where `$x="a b c"` now produces 3 array elements instead of 1. Bare elements (no `[n]=` subscript) in indexed array compound assignments now use `expand_word_fields` for IFS-based word splitting. Subscripted elements still use `expand_word_single` (no splitting).
+
+103. **Fix compound assignment subscript validation** (`src/interpreter/commands.rs`) — Added validation for indexed array compound assignment subscripts: `[]=val` emits "bad array subscript", `[*]=val` / `[@]=val` emits "cannot assign to non-numeric index", `[-65]=val` emits "bad array subscript". On error, valid elements assigned before the error are kept (matching bash behavior). The array is inserted with partial results before returning.
+
+104. **Remove auto-assoc-array heuristic for compound assignments** (`src/interpreter/commands.rs`) — Previously `d=([*]=last)` would auto-create an associative array because `*` is non-numeric. Now only variables already declared as assoc arrays (`declare -A`) get assoc treatment. Invalid subscripts like `[*]`, `[@]`, `[]`, and negative indices produce errors in indexed array mode.
+
+105. **Fix integer array element assignment** (`src/interpreter/commands.rs`) — `iarray[4]=4+1` on an integer-attribute array now evaluates `4+1` as arithmetic (→ `5`). The arithmetic evaluation is performed before taking a mutable borrow of the arrays map to avoid borrow conflicts.
+
+106. **Fix `${arr[@]:offset:length}` array substring slicing** (`src/expand/mod.rs`, `src/expand/params.rs`) — Array substring slicing now uses **index-based offset matching**: `${arr[@]:N:L}` selects set elements whose array index ≥ N, then takes L of them. Previously used list-position-based offsets which was wrong for sparse arrays. Fixed in three code paths: unquoted expansion in `expand_part`, quoted expansion in `get_array_elements`, and `expand_param`. Negative offsets use `highest_index + 1` (the array Vec length) as the base, matching bash.
+
+### Fixes Applied Previous Session (array/nameref/parser)
 
 87. **Fix empty nameref rebinding** (`src/interpreter/mod.rs`) — `declare -n ref; ref=x` now rebinds the nameref to point to `x` instead of assigning `""=x`. `set_var` checks for namerefs with empty targets and rebinds them. `resolve_nameref` no longer follows empty nameref targets.
 
@@ -195,7 +230,7 @@
 
 99. **Add missing token string representations** (`src/parser.rs`) — `token_to_str` now handles `Less`(`<`), `Great`(`>`), `DGreat`(`>>`), `LessAnd`(`<&`), `GreatAnd`(`>&`), `LessGreat`(`<>`), `Clobber`(`>|`), `DLess`(`<<`), `DLessDash`(`<<-`), `TripleLess`(`<<<`).
 
-### Fixes Applied Previous Session (vredir/dstack/trap/array)
+### Fixes Applied Two Sessions Ago (vredir/dstack/trap/array)
 
 78. **Add readonly variable check for `{var}` redirections** (`src/interpreter/redirects.rs`) — `exec {v}>>file` when `v` is readonly now emits two errors: `v: readonly variable` and `v: cannot assign fd to variable`. The check is done in `resolve_redir_fd` which returns `Result<i32, i32>` — `Err(fd)` for readonly vars. The fd is still allocated and the file open proceeds (bash creates the file even when the variable is readonly), but the redirection is treated as failed after I/O completes.
 
@@ -215,13 +250,13 @@
 
 86. **Add bad array subscript validation** (`src/interpreter/commands.rs`) — `b[]=val` (empty subscript) and `b[*]=val` / `b[@]=val` now emit `bad array subscript` errors for indexed arrays. Negative indices on non-existent arrays also error. `d[7]=(...)` now errors with `cannot assign list to array member`.
 
-### Fixes Applied Three Sessions Ago (nameref/intl)
+### Fixes Applied Four Sessions Ago (nameref/intl)
 
 76. **Fix `unset` through namerefs** (`src/builtins/vars.rs`) — `unset foo` where `foo` is a nameref now unsets the **target** variable (e.g., `bar`) while keeping the nameref itself intact, matching bash behavior. Previously it removed the nameref and left the target untouched. Also implemented `unset -n foo` to remove just the nameref attribute without touching the target. The `_unset_nameref` flag is now properly wired up. Three-way dispatch: `unset -n` removes the nameref, `unset` on a nameref unsets through to the target, plain `unset` on a regular variable removes it directly.
 
 77. **Fix `${#var}` locale-aware multibyte character counting** (`src/expand/params.rs`) — Added `mbstrlen()` helper that checks the current locale (`LC_ALL`/`LC_CTYPE`/`LANG`). In UTF-8 locales, converts the bash-style string (raw bytes stored as Latin-1 chars) to raw bytes via `string_to_raw_bytes`, then counts UTF-8 characters with `String::from_utf8_lossy`. In non-UTF-8 locales, falls back to `chars().count()` (byte counting). Fixes `${#x}` returning 2 instead of 1 for `x=$'\303\251'` (UTF-8 é).
 
-### Fixes Applied Five Sessions Ago
+### Fixes Applied Six Sessions Ago
 
 65. **Fix `in_pipeline_child` regression with lastpipe** (`src/interpreter/pipeline.rs`) — `self.in_pipeline_child = !self.shopt_lastpipe` was wrong: when lastpipe is enabled, non-last forked pipeline children had `in_pipeline_child = false`, causing `echo` to print "Broken pipe" errors instead of silently exiting. Changed to `self.in_pipeline_child = true` unconditionally for all forked children.
 
@@ -245,7 +280,7 @@
 
 75. **Fix prefix assignment nameref resolution** (`src/interpreter/commands.rs`) — `foo=two eval 'echo $foo'` where `foo` is a nameref to `bar` now correctly resolves `foo` through the nameref for both function and builtin prefix assignments. The resolved name is used for save/restore and env export. Added empty-name guards to prevent panics when nameref targets are empty strings.
 
-### Fixes Applied Four Sessions Ago
+### Fixes Applied Five Sessions Ago
 
 47. **Fix `${#wheat[$unset]}` bad array subscript for assoc arrays** (`src/expand/params.rs`) — When an associative array subscript expands to empty (e.g., `$unset` is not set), now emits `[raw_subscript]: bad array subscript` error. Added `$` variable expansion in assoc array subscript keys inside `lookup_var`. Added `get_arith_error()` peek function to avoid duplicate errors when `expand_part` and `expand_param` both call `lookup_var`.
 
@@ -267,7 +302,7 @@
 
 56. **Remove readline-only shopt options** (`src/builtins/set.rs`) — Removed 10 options from shopt listing: `complete_fullquote`, `direxpand`, `dirspell`, `force_fignore`, `histreedit`, `histverify`, `hostcomplete`, `no_empty_cmd_completion`, `progcomp`, `progcomp_alias`. Also removed `emacs` and `vi` from `set -o` options. These require readline/completion support not present in our build.
 
-### Fixes Applied Eight Sessions Ago
+### Fixes Applied Nine Sessions Ago
 
 31. **Fix `declare -Ai` arithmetic evaluation for assoc arrays** (`src/interpreter/commands.rs`) — Compound assignment to assoc arrays with `-i` flag now evaluates values as arithmetic (e.g., `[zero]=1+4` → `5`). Also handles element-level `+=` for assoc compound assignments.
 
@@ -301,7 +336,7 @@
 
 46. **Fix arithmetic panic on unclosed brackets** (`src/interpreter/arithmetic.rs`) — `eval_arith_expr_inner` no longer panics when `]` is not found (e.g., `[foo` without closing `]`).
 
-### Fixes Applied Seven Sessions Ago
+### Fixes Applied Eight Sessions Ago
 
 18. **Fix `exec -c` to actually clear environment** (`src/builtins/exec.rs`) — `exec -c` was clearing env vars then re-applying all shell exports, defeating the purpose. Now the else branch only applies exports when `-c` is not set.
 
@@ -329,7 +364,7 @@
 
 30. **Quote associative array keys in `declare -p`** (`src/builtins/mod.rs`, `src/builtins/vars.rs`) — Keys containing non-alphanumeric/underscore characters are now quoted with `"..."` in `declare -p` output (e.g., `["*"]`, `["hello world"]`, `["\$x"]`), matching bash behavior.
 
-### Fixes Applied Ten Sessions Ago
+### Fixes Applied Eleven Sessions Ago
 
 1. **Fix heredoc backslash handling for `\"`** (`src/lexer/heredoc.rs`) — In unquoted heredoc body parsing (`parse_double_quoted_content`), `\"` should remain literal (not strip backslash). Only `$`, `` ` ``, `\`, and `\n` are special after backslash in heredocs. Removed `'"'` from the match pattern.
 
@@ -399,28 +434,29 @@ Suggested nix timeout: 30s for most tests, 120s for trap.
 
 ## Failing Tests (sorted by diff size)
 
-### Locally Passing (30 tests)
+### Locally Passing (52 tests)
 
-alias, appendop, arith, assoc, braces, case, casemod, comsub, comsub-posix, dstack, ifs-posix, intl, lastpipe, mapfile, nquote, nquote2, nquote3, nquote4, nquote5, parser, posix2, posixpat, precedence, printf, quote, rhs-exp, set-e, set-x, tilde, trap
+alias, appendop, arith, arith-for, assoc, attr, braces, case, casemod, comsub, comsub-eof, comsub-posix, cond, cprint, dstack, dynvar, errors, exp, exportfunc, extglob2, extglob3, getopts, glob-bracket, ifs, ifs-posix, intl, invert, iquote, jobs, lastpipe, mapfile, more-exp, new-exp, nquote, nquote1, nquote2, nquote3, nquote4, nquote5, parser, posix2, posixexp2, posixpat, precedence, printf, quote, quotearray, rhs-exp, set-e, set-x, strip, tilde, tilde2
 
 Note: func/shopt/complete have small diffs against local non-readline bash but pass against full bash in nix. globstar/posixexp must be tested sequentially (parallel runs share TMPDIR).
 
 ### PID-diff only (would pass in nix, ~11 more tests)
 
-- **new-exp** (14 lines = PID diffs only) ✅
 - **builtins** (18 lines = PID diffs) ✅
 - **coproc** (12 lines = fd-number diffs, consistent +1 offset) ✅
+- **extglob** (12 lines = PID diffs) ✅
 - **glob** (12 lines = PID diffs) ✅
 - **heredoc** (8 lines = PID diffs) ✅
 - **procsub** (12 lines = PID diffs) ✅
 - **read** (8 lines = PID diffs) ✅
 - **type** (4 lines = PID diffs) ✅
 - **nameref** (24 lines = PID + fd-number diffs only) ✅
+- **invocation** (14 lines = PID diffs + error message format) ✅
 
 ### fd-number / env diffs only (would pass in nix)
 
-- **vredir** (34 lines = fd-number diffs only, all +1-2 offset) ✅
-- **varenv** (18 lines = ~chet expansion + PID + env diffs) ✅
+- **vredir** (32 lines = fd-number diffs only, all +1-2 offset) ✅
+- **varenv** (30 lines = ~chet expansion + PID + env diffs) ✅
 
 ### Small Real Diffs
 
@@ -428,41 +464,71 @@ Note: func/shopt/complete have small diffs against local non-readline bash but p
 
 - Extra `compgen: command not found` in reference non-readline bash. Our shell has `compgen` as a builtin (correct for drop-in replacement). Passes in nix against full bash.
 
-#### 2. posixexp (3 lines)
+#### 2. herestr (2 lines)
+
+- Extra `compgen: command not found` in reference non-readline bash. Passes in nix.
+
+#### 3. posixexp (6 lines)
 
 - Parallel test execution artifact sharing `/var/tmp/sh`. Passes sequentially.
 
-#### 3. shopt (68 lines)
+#### 4. shopt (68 lines)
 
 - Readline-only shopt options removed from listing. Passes in nix against full bash.
 
-#### 4. redir (8 lines)
+#### 5. redir (7 lines)
 
 - Test contamination from shared `/tmp/redir-test`. Passes with clean `/tmp`. Effectively 0 real diff.
 
-#### 5. globstar (84-340 lines, varies)
+#### 6. globstar (84 lines, varies)
 
 - Parallel test execution artifact sharing `/var/tmp`. Passes sequentially.
 
+#### 7. test (12 lines)
+
+- `test -ef` / hardlink issues in `/tmp`. Environment-dependent.
+
+#### 8. posixpipe (54 lines)
+
+- Locale-dependent decimal separator (`.` vs `,` in `time` output). Passes in nix.
+
 ### Medium (30-200 diff lines)
 
-#### 6. array (96 lines local, was 170)
+#### 9. array (40 lines local, was 96)
 
-Remaining issues: compound assignment subscript validation (`[]=`, `[*]=`, `[-65]=` in compound `d=(...)` assignments), `"$@"` expansion inside compound array assignments `ARGV=( "$@" )`, `${xpath[@]##*/}` per-element pattern operations, `declare -a f='("${d[@]}")'` variable expansion in quoted compound assignments, `c[-2]` negative index on readonly empty array.
+Remaining issues: `declare -a f='("${d[@]}")'` variable expansion in quoted compound assignments, `c[-2]` on readonly empty array error message, `unset ps1[2]` "not an array variable" error, `declare +a c` on readonly array, `${#xx}` length counting, brace expansion in array compound assignment `{2..6}`.
 
-#### 7. comsub2 (196 lines)
+#### 10. comsub2 (196 lines)
 
 `${ ... }` dollar-brace command substitution (bash 5.3 feature), `local` in current shell context, alias handling in subshells, function definition inside command substitution.
 
-#### 8. quotearray (205 lines)
+#### 11. complete (116 lines)
 
-Associative array keys with special chars in arithmetic contexts.
+Readline-specific completion diffs. Passes in nix against full bash.
+
+#### 12. trap (37 lines)
+
+Flaky — timing-dependent signal delivery differences.
 
 ### Hard (200+ diff lines)
 
-#### 9. histexp (203 lines)
+#### 13. histexp (203 lines)
 
 History expansion not implemented. Would require `!`, `^` history substitution.
+
+#### 14. history (179 lines)
+
+History builtin not fully implemented.
+
+#### 15. dbg-support (375 lines)
+
+DEBUG trap, `caller` builtin, BASH_SOURCE/FUNCNAME/BASH_LINENO tracking in trap context.
+
+### Other failing tests
+
+- **dbg-support2** (15 lines) — DEBUG trap line number tracking
+- **dstack2** (26 lines) — `~0`, `~1`, `~-1` tilde expansion for directory stack
+- **rsh** (26 lines) — Restricted shell mode (`-r` flag) not implemented
 
 ### Not Locally Testable (tests don't exist locally)
 
@@ -498,23 +564,23 @@ array2, dollar, execscript, glob2, return, source, run-intl, runtests — these 
 
 ## Recommended Next Priorities
 
-1. **Fix `${arr[@]##pattern}` per-element pattern operations** — `${xpath[@]##*/}` should apply `##*/` to each element separately. Currently only applies to last element. Affects array test (~8 diff lines) and likely other tests.
+1. **Fix `declare -a f='("${d[@]}")'` variable expansion** — Compound assignment values passed as single-quoted strings should re-parse and expand variable references. (~6 array diff lines)
 
-2. **Fix compound assignment subscript validation** — `d=([]=abcde [*]=last [-65]=negative)` should emit `bad array subscript` / `cannot assign to non-numeric index` errors during compound assignment parsing. (~20 array diff lines)
+2. **Fix `c[-2]` on readonly empty array** — Should emit "bad array subscript" not "readonly variable". (~4 array diff lines)
 
-3. **Fix `"$@"` expansion inside compound array assignments** — `ARGV=( [0]=$0 "$@" )` should expand `"$@"` to separate array elements. Currently joins into one. (~10 array diff lines)
+3. **Fix `unset ps1[2]` "not an array variable" error** — `unset` on non-array variable with subscript should emit proper error. (~2 array diff lines)
 
-4. **Fix `declare -a f='("${d[@]}")'` variable expansion** — Compound assignment values passed as single-quoted strings should re-parse and expand variable references. (~6 array diff lines)
+4. **Fix brace expansion in array compound assignment** — `a=( {2..6} )` should expand braces. (~2 array diff lines)
 
-5. **Implement `shopt -s varredir_close`** — Auto-close `{fd}` redirections on non-exec commands when this shopt is enabled. Needed for vredir8.sub. (~20 lines of code)
+5. **Implement `${ ... }` dollar-brace command substitution** — Bash 5.3 feature used in comsub2 tests. (~196 diff lines)
 
-6. **Fix quotearray arithmetic assoc key handling** — Assoc array subscripts with special chars in `((...))` context. (~205 diff lines)
+6. **Implement `caller` builtin and fix DEBUG trap context** — Needed for dbg-support tests. (~375+15 diff lines)
 
-7. **Implement `${ ... }` dollar-brace command substitution** — Bash 5.3 feature used in comsub2 tests. (~196 diff lines)
+7. **Implement restricted shell mode (`-r` flag)** — Needed for rsh tests. (~26 diff lines)
 
-8. **Fix arith10.sub array subscript quoting** — Handle `a[" "]`, `a[\ \]`, `a[\\]` in arithmetic array subscripts. (~100 nix diff lines)
+8. **Fix `~0`, `~1`, `~-1` tilde expansion for directory stack** — Needed for dstack2 tests. (~26 diff lines)
 
-9. **Fix heredoc sub-test issues** — heredoc3.sub (delimiter edge cases), heredoc7.sub (comsub+heredoc interaction), heredoc9.sub (function body printing). (~85 nix diff lines)
+9. **Implement `shopt -s varredir_close`** — Auto-close `{fd}` redirections on non-exec commands when this shopt is enabled. Needed for vredir8.sub. (~20 lines of code)
 
 ## Approach
 
