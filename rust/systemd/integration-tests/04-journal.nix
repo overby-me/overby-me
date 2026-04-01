@@ -13,10 +13,7 @@
     sed -i '/systemd-run --user -M/d' TEST-04-JOURNAL.journal.sh
     sed -i '/journalctl.*--user-unit/d' TEST-04-JOURNAL.journal.sh
     # journald now waits for sockets before sending READY=1, no sleep needed
-    # Remove per-write PID tracking tests (needs per-write SCM_CREDENTIALS on stdout stream socket)
-    sed -i '/grep -vq.*_PID=\$PID/d' TEST-04-JOURNAL.journal.sh
-    sed -i '/_LINE_BREAK/d' TEST-04-JOURNAL.journal.sh
-    sed -i '/sort -u.*grep -c/d' TEST-04-JOURNAL.journal.sh
+    # Per-write PID tracking now implemented via SCM_CREDENTIALS on stdout stream
     # verbose-success: PID 1 lifecycle logging provides SYSLOG_IDENTIFIER=systemd entries
     # with UNIT= field; stdout stream uses exec binary name (bash) as identifier.
     # silent-success: LogLevelMax=notice suppresses PID 1 lifecycle messages (priority 6/info)

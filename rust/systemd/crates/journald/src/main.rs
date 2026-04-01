@@ -1733,12 +1733,148 @@ fn get_peer_cred(stream: &UnixStream) -> Option<libc::ucred> {
     }
 }
 
+/// Enable SO_PASSCRED on a stream socket so recvmsg delivers per-write
+/// SCM_CREDENTIALS ancillary messages.
+fn enable_passcred(stream: &UnixStream) {
+    use std::os::unix::io::AsRawFd;
+    let enabled: libc::c_int = 1;
+    unsafe {
+        libc::setsockopt(
+            stream.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_PASSCRED,
+            &enabled as *const _ as *const libc::c_void,
+            std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+        );
+    }
+}
+
+/// Read data from a stream socket with SCM_CREDENTIALS. Returns
+/// (bytes_read, optional credentials).
+fn stream_recv_with_cred(
+    stream: &UnixStream,
+    buf: &mut [u8],
+) -> io::Result<(usize, Option<libc::ucred>)> {
+    use std::os::unix::io::AsRawFd;
+
+    let mut iov = libc::iovec {
+        iov_base: buf.as_mut_ptr() as *mut libc::c_void,
+        iov_len: buf.len(),
+    };
+
+    // Control message buffer for SCM_CREDENTIALS
+    let mut cmsg_buf = [0u8; 64];
+
+    let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
+    msg.msg_iov = &mut iov;
+    msg.msg_iovlen = 1;
+    msg.msg_control = cmsg_buf.as_mut_ptr() as *mut libc::c_void;
+    msg.msg_controllen = cmsg_buf.len();
+
+    let n = unsafe { libc::recvmsg(stream.as_raw_fd(), &mut msg, 0) };
+    if n < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if n == 0 {
+        return Ok((0, None));
+    }
+
+    // Extract credentials from ancillary data
+    let mut cred: Option<libc::ucred> = None;
+    unsafe {
+        let mut cmsg = libc::CMSG_FIRSTHDR(&msg);
+        while !cmsg.is_null() {
+            if (*cmsg).cmsg_level == libc::SOL_SOCKET
+                && (*cmsg).cmsg_type == libc::SCM_CREDENTIALS
+            {
+                let data = libc::CMSG_DATA(cmsg);
+                let mut c: libc::ucred = std::mem::zeroed();
+                std::ptr::copy_nonoverlapping(
+                    data,
+                    &mut c as *mut _ as *mut u8,
+                    std::mem::size_of::<libc::ucred>(),
+                );
+                if c.pid > 0 {
+                    cred = Some(c);
+                }
+            }
+            cmsg = libc::CMSG_NXTHDR(&msg, cmsg);
+        }
+    }
+
+    Ok((n as usize, cred))
+}
+
+/// Line reader that uses recvmsg to get per-write SCM_CREDENTIALS.
+/// Buffers data and yields complete lines with the credentials of the
+/// write that delivered them.
+struct CredLineReader {
+    stream: UnixStream,
+    buf: Vec<u8>,
+    /// Buffered data not yet consumed as lines.
+    pending: Vec<u8>,
+    /// Credentials from the last recvmsg that delivered data.
+    last_cred: Option<libc::ucred>,
+}
+
+impl CredLineReader {
+    fn new(stream: UnixStream) -> Self {
+        CredLineReader {
+            stream,
+            buf: vec![0u8; 64 * 1024],
+            pending: Vec::new(),
+            last_cred: None,
+        }
+    }
+
+    /// Read the next line. Returns None on EOF.
+    /// Each line is returned with the credentials from the recv that
+    /// delivered data for that line (may span multiple recvs; the last
+    /// recv's creds win).
+    fn next_line(&mut self) -> Option<(String, Option<libc::ucred>)> {
+        loop {
+            // Check if we already have a complete line in pending
+            if let Some(pos) = self.pending.iter().position(|&b| b == b'\n') {
+                let line_bytes: Vec<u8> = self.pending.drain(..=pos).collect();
+                let line = String::from_utf8_lossy(
+                    &line_bytes[..line_bytes.len() - 1], // strip \n
+                )
+                .into_owned();
+                return Some((line, self.last_cred));
+            }
+
+            // Need more data
+            match stream_recv_with_cred(&self.stream, &mut self.buf) {
+                Ok((0, _)) => {
+                    // EOF — return remaining data as last line
+                    if !self.pending.is_empty() {
+                        let line =
+                            String::from_utf8_lossy(&self.pending).into_owned();
+                        self.pending.clear();
+                        return Some((line, self.last_cred));
+                    }
+                    return None;
+                }
+                Ok((n, cred)) => {
+                    if cred.is_some() {
+                        self.last_cred = cred;
+                    }
+                    self.pending.extend_from_slice(&self.buf[..n]);
+                }
+                Err(_) => return None,
+            }
+        }
+    }
+}
+
 fn handle_stdout_connection(stream: UnixStream, state: Arc<JournaldState>) {
-    // Get peer credentials for trusted _PID/_UID/_GID fields
+    // Get peer credentials for initial trusted fields
     let peer_cred = get_peer_cred(&stream);
 
-    let reader = BufReader::new(stream);
-    let mut lines = reader.lines();
+    // Enable per-write SCM_CREDENTIALS so we can track PID changes
+    enable_passcred(&stream);
+
+    let mut reader = CredLineReader::new(stream);
 
     // Read the 7-line positional header (plus optional 8th line for invocation ID)
     let mut identifier = String::from("unknown");
@@ -1749,9 +1885,9 @@ fn handle_stdout_connection(stream: UnixStream, state: Arc<JournaldState>) {
     // Helper to read one header line
     macro_rules! read_header_line {
         () => {
-            match lines.next() {
-                Some(Ok(line)) => line,
-                _ => return,
+            match reader.next_line() {
+                Some((line, _cred)) => line,
+                None => return,
             }
         };
     }
@@ -1783,9 +1919,9 @@ fn handle_stdout_connection(stream: UnixStream, state: Arc<JournaldState>) {
     // Only our PID 1 sends this; C systemd sends 7 lines then log data.
     // We peek at the next line and only consume it as invocation ID if it
     // looks like a 32-char hex string (systemd invocation ID format).
-    let mut first_log_line: Option<String> = None;
+    let mut first_log_line: Option<(String, Option<libc::ucred>)> = None;
     let mut service_pid: Option<u32> = None;
-    if let Some(Ok(maybe_inv)) = lines.next() {
+    if let Some((maybe_inv, cred)) = reader.next_line() {
         if !maybe_inv.is_empty()
             && maybe_inv.len() == 32
             && maybe_inv.chars().all(|c| c.is_ascii_hexdigit())
@@ -1794,23 +1930,26 @@ fn handle_stdout_connection(stream: UnixStream, state: Arc<JournaldState>) {
 
             // Line 9 (extension): service PID — the actual service process PID
             // so we can set _PID/_EXE/_COMM from the service rather than PID 1.
-            if let Some(Ok(maybe_pid)) = lines.next() {
+            if let Some((maybe_pid, cred2)) = reader.next_line() {
                 if let Ok(pid) = maybe_pid.parse::<u32>() {
                     if pid > 0 {
                         service_pid = Some(pid);
                     }
                 } else if !maybe_pid.is_empty() {
-                    first_log_line = Some(maybe_pid);
+                    first_log_line = Some((maybe_pid, cred2));
                 }
             }
         } else {
             // Not an invocation ID — this is actually the first log line
-            first_log_line = Some(maybe_inv);
+            first_log_line = Some((maybe_inv, cred));
         }
     }
 
-    // Helper to process a single log line into a journal entry
-    let process_line = |line: String| {
+    // Track PID for _LINE_BREAK=pid-change detection
+    let mut last_pid: Option<u32> = None;
+
+    // Helper to process a single log line with credentials
+    let mut process_line = |line: String, line_cred: Option<libc::ucred>| {
         if line.is_empty() {
             return;
         }
@@ -1838,15 +1977,44 @@ fn handle_stdout_connection(stream: UnixStream, state: Arc<JournaldState>) {
             entry.set_field("_SYSTEMD_INVOCATION_ID", &invocation_id);
         }
         entry.set_field("_TRANSPORT", "stdout");
-        if let Some(ref cred) = peer_cred {
-            // Use service PID for process metadata when available, so
-            // _PID/_EXE/_COMM reflect the actual service process rather
-            // than PID 1 which opened the stream on behalf of the service.
-            let pid_for_fields = service_pid.unwrap_or(cred.pid as u32);
-            entry.set_trusted_process_fields(pid_for_fields);
-            entry.set_field("_UID", cred.uid.to_string());
-            entry.set_field("_GID", cred.gid.to_string());
+
+        // Determine the PID to use for this entry:
+        // 1. Per-write SCM_CREDENTIALS PID (from recvmsg)
+        // 2. Service PID from header extension
+        // 3. Peer credentials PID
+        let write_pid = line_cred
+            .map(|c| c.pid as u32)
+            .filter(|&p| p > 0);
+        let effective_pid = write_pid
+            .or(service_pid)
+            .or(peer_cred.map(|c| c.pid as u32));
+
+        if let Some(pid) = effective_pid {
+            // Detect PID change between lines
+            if let Some(prev) = last_pid {
+                if prev != pid {
+                    entry.set_field("_LINE_BREAK", "pid-change");
+                }
+            }
+            last_pid = Some(pid);
+
+            entry.set_trusted_process_fields(pid);
         }
+
+        // UID/GID from per-write creds or fallback to peer creds
+        let uid = line_cred
+            .map(|c| c.uid)
+            .or(peer_cred.map(|c| c.uid));
+        let gid = line_cred
+            .map(|c| c.gid)
+            .or(peer_cred.map(|c| c.gid));
+        if let Some(uid) = uid {
+            entry.set_field("_UID", uid.to_string());
+        }
+        if let Some(gid) = gid {
+            entry.set_field("_GID", gid.to_string());
+        }
+
         entry.set_boot_id();
         entry.set_machine_id();
         entry.set_hostname();
@@ -1855,22 +2023,19 @@ fn handle_stdout_connection(stream: UnixStream, state: Arc<JournaldState>) {
     };
 
     // Process the first log line if it wasn't consumed as invocation ID
-    if let Some(line) = first_log_line {
-        process_line(line);
+    if let Some((line, cred)) = first_log_line {
+        process_line(line, cred);
     }
 
     // Process remaining log lines
-    for line in lines {
+    loop {
         if state.shutdown.load(Ordering::Relaxed) {
             break;
         }
-
-        let line = match line {
-            Ok(l) => l,
-            Err(_) => break,
-        };
-
-        process_line(line);
+        match reader.next_line() {
+            Some((line, cred)) => process_line(line, cred),
+            None => break,
+        }
     }
 }
 
