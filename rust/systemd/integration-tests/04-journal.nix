@@ -4,7 +4,7 @@
   # All subtests enabled:
   # - journal-corrupt: machined-dependent user session lines patched out below
   # - journal-gatewayd and journal-remote self-skip when binary is missing
-  # - LogFilterPatterns: stdout variant enabled; syslog and delegated-cgroup variants patched out
+  # - LogFilterPatterns: stdout via PID 1; syslog via journald cgroup-based filtering; delegated-cgroup patched out
   # - journalctl-varlink: JournalAccess varlink interface implemented
   # - SYSTEMD_JOURNAL_COMPRESS: compression type recorded in file header, reported by --verify
   testEnv.TEST_SKIP_SUBTESTS = "";
@@ -24,9 +24,9 @@
     # Restart=always in journald unit ensures journald restarts after SIGKILL.
     # --directory test with zstd decompressed journal data uses C journalctl
     # directly against test journal files — doesn't require our journald.
-    # LogFilterPatterns: remove syslog variant (needs journald-level cgroup filtering)
-    # and delegated-cgroup variant (needs cgroup xattr delegation)
-    sed -i '/logs-filtering-syslog/d' TEST-04-JOURNAL.LogFilterPatterns.sh
+    # LogFilterPatterns: syslog variant now works via journald cgroup→unit resolution
+    # and direct LogFilterPatterns= drop-in file reading.
+    # Remove delegated-cgroup variant (needs cgroup xattr delegation for sub-cgroup filtering)
     sed -i '/delegated-cgroup-filtering/d' TEST-04-JOURNAL.LogFilterPatterns.sh
     # journal-corrupt: remove machined-dependent user session lines
     sed -i '/loginctl enable-linger/d' TEST-04-JOURNAL.journal-corrupt.sh
@@ -35,19 +35,7 @@
     sed -i '/loginctl disable-linger/d' TEST-04-JOURNAL.journal-corrupt.sh
     # bsod: remove systemd-run --user --machine testuser@ (needs machined)
     sed -i '/systemd-run --user --machine testuser/d' TEST-04-JOURNAL.bsod.sh
-    # bsod: install systemd-bsod.service (C systemd doesn't build it without qrencode)
-    cat > /run/systemd/system/systemd-bsod.service <<'BSOD_EOF'
-    [Unit]
-    Description=Display Boot-Time Emergency Messages In Full Screen
-    ConditionVirtualization=no
-    DefaultDependencies=no
-    Before=shutdown.target
-    Conflicts=shutdown.target
-
-    [Service]
-    RemainAfterExit=yes
-    ExecStart=/usr/lib/systemd/systemd-bsod --continuous
-    BSOD_EOF
-    systemctl daemon-reload
+    # bsod: systemd-bsod.service is installed by default.nix overlay (C systemd
+    # doesn't build it without qrencode, but our Rust implementation has no such dep)
   '';
 }

@@ -25,6 +25,7 @@ mod journal;
 
 use journal::entry::JournalEntry;
 use journal::storage::{JournalCompress, JournalStorage, StorageConfig};
+use libsystemd::services::LogFilter;
 
 use std::collections::HashMap;
 use std::fs;
@@ -54,9 +55,9 @@ const KMSG_PATH: &str = "/proc/kmsg";
 /// Runtime directory for sockets and PID file.
 const RUNTIME_DIR: &str = "/run/systemd/journal";
 /// PID file path — used by `journalctl --flush` / `--rotate` to signal us.
-const PID_FILE_PATH: &str = "/run/systemd/journal/pid";
+const _PID_FILE_PATH: &str = "/run/systemd/journal/pid";
 /// Varlink socket for `journalctl --sync` / `--rotate` / `--flush` (systemd v259+).
-const VARLINK_SOCKET_PATH: &str = "/run/systemd/journal/io.systemd.journal";
+const _VARLINK_SOCKET_PATH: &str = "/run/systemd/journal/io.systemd.journal";
 
 // ---------------------------------------------------------------------------
 // Rate limiting
@@ -723,6 +724,21 @@ impl JournaldState {
             && priority > config.max_level_store
         {
             return;
+        }
+
+        // Apply LogFilterPatterns= from the entry's unit configuration.
+        // This filters syslog and native journal messages using the same
+        // regex patterns that PID 1 applies to service stdout/stderr.
+        if let Some(unit) = entry.systemd_unit() {
+            let patterns = read_unit_log_filter_patterns(&unit);
+            if !patterns.is_empty() {
+                let filter = LogFilter::compile(&patterns);
+                if let Some(msg) = entry.message()
+                    && !filter.should_log(&msg)
+                {
+                    return;
+                }
+            }
         }
 
         // Rate limiting
@@ -1456,6 +1472,77 @@ fn recv_with_cred(sock: &UnixDatagram, buf: &mut [u8]) -> io::Result<(usize, Opt
 }
 
 // ---------------------------------------------------------------------------
+// LogFilterPatterns lookup
+// ---------------------------------------------------------------------------
+
+/// Read `LogFilterPatterns=` values from a unit's configuration files.
+///
+/// Searches the main unit file and drop-in directories across the standard
+/// systemd search paths.  Drop-in `.conf` files are processed in lexical
+/// filename order.  An empty `LogFilterPatterns=` value resets previously
+/// collected patterns (matching systemd's config parsing semantics).
+fn read_unit_log_filter_patterns(unit: &str) -> Vec<String> {
+    const SEARCH_DIRS: &[&str] = &[
+        "/run/systemd/system",
+        "/run/systemd/generator",
+        "/etc/systemd/system",
+        "/usr/lib/systemd/system",
+    ];
+
+    let mut patterns = Vec::new();
+
+    // Main unit file — first found wins across search dirs.
+    for dir in SEARCH_DIRS {
+        let path = format!("{dir}/{unit}");
+        if let Ok(content) = fs::read_to_string(&path) {
+            collect_log_filter_patterns(&content, &mut patterns);
+            break;
+        }
+    }
+
+    // Collect drop-in .conf files from all search dirs, then sort globally
+    // by filename so that e.g. `00-reset.conf` always precedes `01-allow.conf`
+    // regardless of which directory it lives in.
+    let mut dropins: Vec<(String, PathBuf)> = Vec::new();
+    for dir in SEARCH_DIRS {
+        let dropin_dir = format!("{dir}/{unit}.d");
+        if let Ok(entries) = fs::read_dir(&dropin_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().is_some_and(|e| e == "conf")
+                    && let Some(name) = path.file_name().and_then(|n| n.to_str())
+                {
+                    dropins.push((name.to_string(), path));
+                }
+            }
+        }
+    }
+    dropins.sort_by(|a, b| a.0.cmp(&b.0));
+
+    for (_, path) in &dropins {
+        if let Ok(content) = fs::read_to_string(path) {
+            collect_log_filter_patterns(&content, &mut patterns);
+        }
+    }
+
+    patterns
+}
+
+/// Parse `LogFilterPatterns=` lines from unit file content.
+fn collect_log_filter_patterns(content: &str, patterns: &mut Vec<String>) {
+    for line in content.lines() {
+        let line = line.trim();
+        if let Some(value) = line.strip_prefix("LogFilterPatterns=") {
+            if value.is_empty() {
+                patterns.clear();
+            } else {
+                patterns.push(value.to_string());
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Socket listener threads
 // ---------------------------------------------------------------------------
 
@@ -1784,8 +1871,7 @@ fn stream_recv_with_cred(
     unsafe {
         let mut cmsg = libc::CMSG_FIRSTHDR(&msg);
         while !cmsg.is_null() {
-            if (*cmsg).cmsg_level == libc::SOL_SOCKET
-                && (*cmsg).cmsg_type == libc::SCM_CREDENTIALS
+            if (*cmsg).cmsg_level == libc::SOL_SOCKET && (*cmsg).cmsg_type == libc::SCM_CREDENTIALS
             {
                 let data = libc::CMSG_DATA(cmsg);
                 let mut c: libc::ucred = std::mem::zeroed();
@@ -1848,8 +1934,7 @@ impl CredLineReader {
                 Ok((0, _)) => {
                     // EOF — return remaining data as last line
                     if !self.pending.is_empty() {
-                        let line =
-                            String::from_utf8_lossy(&self.pending).into_owned();
+                        let line = String::from_utf8_lossy(&self.pending).into_owned();
                         self.pending.clear();
                         return Some((line, self.last_cred));
                     }
@@ -1982,19 +2067,17 @@ fn handle_stdout_connection(stream: UnixStream, state: Arc<JournaldState>) {
         // 1. Per-write SCM_CREDENTIALS PID (from recvmsg)
         // 2. Service PID from header extension
         // 3. Peer credentials PID
-        let write_pid = line_cred
-            .map(|c| c.pid as u32)
-            .filter(|&p| p > 0);
+        let write_pid = line_cred.map(|c| c.pid as u32).filter(|&p| p > 0);
         let effective_pid = write_pid
             .or(service_pid)
             .or(peer_cred.map(|c| c.pid as u32));
 
         if let Some(pid) = effective_pid {
             // Detect PID change between lines
-            if let Some(prev) = last_pid {
-                if prev != pid {
-                    entry.set_field("_LINE_BREAK", "pid-change");
-                }
+            if let Some(prev) = last_pid
+                && prev != pid
+            {
+                entry.set_field("_LINE_BREAK", "pid-change");
             }
             last_pid = Some(pid);
 
@@ -2002,12 +2085,8 @@ fn handle_stdout_connection(stream: UnixStream, state: Arc<JournaldState>) {
         }
 
         // UID/GID from per-write creds or fallback to peer creds
-        let uid = line_cred
-            .map(|c| c.uid)
-            .or(peer_cred.map(|c| c.uid));
-        let gid = line_cred
-            .map(|c| c.gid)
-            .or(peer_cred.map(|c| c.gid));
+        let uid = line_cred.map(|c| c.uid).or(peer_cred.map(|c| c.uid));
+        let gid = line_cred.map(|c| c.gid).or(peer_cred.map(|c| c.gid));
         if let Some(uid) = uid {
             entry.set_field("_UID", uid.to_string());
         }
@@ -2521,7 +2600,10 @@ fn journal_access_handle_connection(state: Arc<JournaldState>, stream: UnixStrea
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        let params = request.get("parameters").cloned().unwrap_or(serde_json::json!({}));
+        let params = request
+            .get("parameters")
+            .cloned()
+            .unwrap_or(serde_json::json!({}));
 
         match method {
             "org.varlink.service.GetInfo" => {
@@ -2546,7 +2628,10 @@ fn journal_access_handle_connection(state: Arc<JournaldState>, stream: UnixStrea
             }
             "org.varlink.service.GetInterfaceDescription" => {
                 if !oneway {
-                    let iface = params.get("interface").and_then(|v| v.as_str()).unwrap_or("");
+                    let iface = params
+                        .get("interface")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
                     if iface == "io.systemd.JournalAccess" {
                         let reply = serde_json::json!({
                             "parameters": {
@@ -2569,16 +2654,13 @@ fn journal_access_handle_connection(state: Arc<JournaldState>, stream: UnixStrea
                 if oneway {
                     continue;
                 }
-                if let Err(_) =
-                    journal_access_get_entries(&state, &params, &mut writer, more)
-                {
+                if journal_access_get_entries(&state, &params, &mut writer, more).is_err() {
                     break;
                 }
             }
             _ => {
                 if !oneway {
-                    let _ =
-                        varlink_write_error(&mut writer, "org.varlink.service.MethodNotFound");
+                    let _ = varlink_write_error(&mut writer, "org.varlink.service.MethodNotFound");
                 }
             }
         }
@@ -2593,20 +2675,17 @@ fn journal_access_get_entries(
     more: bool,
 ) -> io::Result<()> {
     // Parse limit (default 100, max 10000)
-    let limit = params
-        .get("limit")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(100);
+    let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(100);
     if limit > 10000 {
         return varlink_write_error(writer, "io.systemd.JournalAccess.InvalidParameter");
     }
 
     // Parse priority filter (0-7)
     let priority_filter = params.get("priority").and_then(|v| v.as_u64());
-    if let Some(p) = priority_filter {
-        if p > 7 {
-            return varlink_write_error(writer, "io.systemd.JournalAccess.InvalidParameter");
-        }
+    if let Some(p) = priority_filter
+        && p > 7
+    {
+        return varlink_write_error(writer, "io.systemd.JournalAccess.InvalidParameter");
     }
 
     // Parse unit filter
@@ -2630,12 +2709,11 @@ fn journal_access_get_entries(
     let mut results = Vec::new();
     for entry in entries.iter().rev() {
         // Priority filter: include entries at or below the given priority level
-        if let Some(max_prio) = priority_filter {
-            if let Some(entry_prio) = entry.priority() {
-                if entry_prio as u64 > max_prio {
-                    continue;
-                }
-            }
+        if let Some(max_prio) = priority_filter
+            && let Some(entry_prio) = entry.priority()
+            && entry_prio as u64 > max_prio
+        {
+            continue;
         }
 
         // Unit filter

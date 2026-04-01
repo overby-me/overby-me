@@ -1803,21 +1803,11 @@ fn main() {
         for jf_path in &journal_files {
             match read_file_compress(jf_path) {
                 Ok(compress) => {
-                    eprintln!(
-                        "File path: {}",
-                        jf_path.display()
-                    );
-                    eprintln!(
-                        "compress={}",
-                        compress.as_str()
-                    );
+                    eprintln!("File path: {}", jf_path.display());
+                    eprintln!("compress={}", compress.as_str());
                 }
                 Err(e) => {
-                    eprintln!(
-                        "FAIL: {} ({})",
-                        jf_path.display(),
-                        e
-                    );
+                    eprintln!("FAIL: {} ({})", jf_path.display(), e);
                     all_pass = false;
                 }
             }

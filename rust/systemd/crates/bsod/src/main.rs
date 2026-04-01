@@ -199,7 +199,7 @@ fn set_cursor_position(fd: i32, row: u32, col: u32) -> io::Result<()> {
 
 /// Display the emergency message on a virtual terminal.
 fn display_message(message: &str, tty_path: Option<&PathBuf>) -> io::Result<()> {
-    let (fd, free_vt, original_vt) = if let Some(tty) = tty_path {
+    let (fd, _free_vt, original_vt) = if let Some(tty) = tty_path {
         let f = fs::OpenOptions::new().read(true).write(true).open(tty)?;
         let raw_fd = f.as_raw_fd();
         // Leak the file to keep fd open
