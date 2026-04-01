@@ -35,7 +35,7 @@ use std::os::unix::io::FromRawFd;
 use std::os::unix::net::{UnixDatagram, UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Condvar, Mutex, RwLock};
 use std::time::{Duration, Instant};
 use std::{process, thread};
 
@@ -1459,8 +1459,53 @@ fn recv_with_cred(sock: &UnixDatagram, buf: &mut [u8]) -> io::Result<(usize, Opt
 // Socket listener threads
 // ---------------------------------------------------------------------------
 
+/// Coordination primitive: socket threads call `signal()` once their socket
+/// is bound; the main thread calls `wait(n)` to block until `n` sockets are
+/// ready, then sends READY=1.
+#[derive(Clone)]
+struct SocketReadyNotifier {
+    inner: Arc<(Mutex<u32>, Condvar)>,
+}
+
+impl SocketReadyNotifier {
+    fn new() -> Self {
+        SocketReadyNotifier {
+            inner: Arc::new((Mutex::new(0), Condvar::new())),
+        }
+    }
+
+    /// Called by a listener thread after its socket is successfully bound.
+    fn signal(&self) {
+        let (lock, cvar) = &*self.inner;
+        let mut count = lock.lock().unwrap();
+        *count += 1;
+        cvar.notify_all();
+    }
+
+    /// Block until at least `n` sockets have signalled readiness, or
+    /// `timeout` elapses. Returns true if all sockets reported ready.
+    fn wait(&self, n: u32, timeout: Duration) -> bool {
+        let (lock, cvar) = &*self.inner;
+        let mut count = lock.lock().unwrap();
+        let deadline = Instant::now() + timeout;
+        while *count < n {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return false;
+            }
+            let (new_count, _timeout_result) = cvar.wait_timeout(count, remaining).unwrap();
+            count = new_count;
+        }
+        true
+    }
+}
+
 /// Listen on the native journal socket for datagram messages.
-fn native_socket_listener(state: Arc<JournaldState>, activated_sock: Option<UnixDatagram>) {
+fn native_socket_listener(
+    state: Arc<JournaldState>,
+    activated_sock: Option<UnixDatagram>,
+    ready: SocketReadyNotifier,
+) {
     let sock = match activated_sock {
         Some(s) => {
             eprintln!("journald: Using socket-activated native socket");
@@ -1490,6 +1535,7 @@ fn native_socket_listener(state: Arc<JournaldState>, activated_sock: Option<Unix
     };
 
     eprintln!("journald: Listening on {}", JOURNAL_SOCKET_PATH);
+    ready.signal();
 
     let mut buf = vec![0u8; 256 * 1024]; // 256 KiB receive buffer
 
@@ -1540,7 +1586,7 @@ fn native_socket_listener(state: Arc<JournaldState>, activated_sock: Option<Unix
 }
 
 /// Listen on the syslog socket (/dev/log) for datagram messages.
-fn syslog_socket_listener(state: Arc<JournaldState>) {
+fn syslog_socket_listener(state: Arc<JournaldState>, ready: SocketReadyNotifier) {
     let sock = match create_datagram_socket(SYSLOG_SOCKET_PATH) {
         Ok(s) => s,
         Err(e) => {
@@ -1548,11 +1594,13 @@ fn syslog_socket_listener(state: Arc<JournaldState>) {
                 "journald: Failed to create syslog socket {}: {}",
                 SYSLOG_SOCKET_PATH, e
             );
+            ready.signal(); // signal even on failure so main doesn't hang
             return;
         }
     };
 
     eprintln!("journald: Listening on {}", SYSLOG_SOCKET_PATH);
+    ready.signal();
 
     let mut buf = vec![0u8; 64 * 1024]; // 64 KiB
 
@@ -1604,7 +1652,11 @@ fn syslog_socket_listener(state: Arc<JournaldState>) {
 ///
 /// Services connected here send one log line per line, optionally prefixed
 /// with a header that specifies the syslog identifier, priority, etc.
-fn stdout_socket_listener(state: Arc<JournaldState>, activated_listener: Option<UnixListener>) {
+fn stdout_socket_listener(
+    state: Arc<JournaldState>,
+    activated_listener: Option<UnixListener>,
+    ready: SocketReadyNotifier,
+) {
     let listener = match activated_listener {
         Some(l) => {
             eprintln!("journald: Using socket-activated stdout socket");
@@ -1617,12 +1669,14 @@ fn stdout_socket_listener(state: Arc<JournaldState>, activated_listener: Option<
                     "journald: Failed to create stdout socket {}: {}",
                     STDOUT_SOCKET_PATH, e
                 );
+                ready.signal(); // signal even on failure
                 return;
             }
         },
     };
 
     eprintln!("journald: Listening on {}", STDOUT_SOCKET_PATH);
+    ready.signal();
 
     for stream in listener.incoming() {
         if state.shutdown.load(Ordering::Relaxed) {
@@ -2884,21 +2938,30 @@ fn main() {
 
     // Check for socket activation (LISTEN_FDS from PID 1)
     let activated = receive_socket_activation_fds();
+
+    // Socket readiness coordination: listener threads signal after binding,
+    // main waits for all to be ready before sending READY=1.
+    let socket_ready = SocketReadyNotifier::new();
+    // Count: native + stdout + syslog (if no namespace)
+    let expected_sockets: u32 = if namespace.is_none() { 3 } else { 2 };
+
     // Start listener threads
     let state_native = Arc::clone(&state);
     let activated_native = activated.native;
+    let ready_native = socket_ready.clone();
     let _native_handle = thread::Builder::new()
         .name("native-socket".into())
-        .spawn(move || native_socket_listener(state_native, activated_native))
+        .spawn(move || native_socket_listener(state_native, activated_native, ready_native))
         .expect("failed to spawn native socket thread");
 
     // Syslog and kmsg are only for the default (non-namespace) journald instance
     let _syslog_handle = if namespace.is_none() {
         let state_syslog = Arc::clone(&state);
+        let ready_syslog = socket_ready.clone();
         Some(
             thread::Builder::new()
                 .name("syslog-socket".into())
-                .spawn(move || syslog_socket_listener(state_syslog))
+                .spawn(move || syslog_socket_listener(state_syslog, ready_syslog))
                 .expect("failed to spawn syslog socket thread"),
         )
     } else {
@@ -2907,9 +2970,10 @@ fn main() {
 
     let state_stdout = Arc::clone(&state);
     let activated_stdout = activated.stdout;
+    let ready_stdout = socket_ready.clone();
     let _stdout_handle = thread::Builder::new()
         .name("stdout-socket".into())
-        .spawn(move || stdout_socket_listener(state_stdout, activated_stdout))
+        .spawn(move || stdout_socket_listener(state_stdout, activated_stdout, ready_stdout))
         .expect("failed to spawn stdout socket thread");
 
     let _kmsg_handle = if namespace.is_none() {
@@ -2977,6 +3041,13 @@ fn main() {
         entry.set_machine_id();
         entry.set_hostname();
         state.dispatch_entry(entry);
+    }
+
+    // Wait for all core sockets to be bound before telling systemd we're ready
+    if socket_ready.wait(expected_sockets, Duration::from_secs(10)) {
+        eprintln!("journald: All {expected_sockets} sockets ready");
+    } else {
+        eprintln!("journald: Warning: timed out waiting for sockets to bind");
     }
 
     // Notify the service manager that we're ready

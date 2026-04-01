@@ -12,8 +12,7 @@
     # Fix systemd-run --user -M testuser@.host — machined not available
     sed -i '/systemd-run --user -M/d' TEST-04-JOURNAL.journal.sh
     sed -i '/journalctl.*--user-unit/d' TEST-04-JOURNAL.journal.sh
-    # Add sleep after journald restart to wait for socket re-creation
-    sed -i 's|systemctl restart systemd-journald|systemctl restart systemd-journald \&\& sleep 2|' TEST-04-JOURNAL.journal.sh
+    # journald now waits for sockets before sending READY=1, no sleep needed
     # Remove per-write PID tracking tests (needs per-write SCM_CREDENTIALS on stdout stream socket)
     sed -i '/grep -vq.*_PID=\$PID/d' TEST-04-JOURNAL.journal.sh
     sed -i '/_LINE_BREAK/d' TEST-04-JOURNAL.journal.sh
