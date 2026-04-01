@@ -41,7 +41,7 @@
 
 use clap::Parser;
 use libsystemd::journal::entry::{JournalEntry, format_realtime_iso, format_realtime_utc};
-use libsystemd::journal::storage::{JournalStorage, StorageConfig};
+use libsystemd::journal::storage::{JournalStorage, StorageConfig, read_file_compress};
 use regex::Regex;
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
@@ -1584,6 +1584,7 @@ fn open_storage(cli: &Cli) -> Result<JournalStorage, String> {
         persistent: false,
         keep_free: 0,
         direct_directory,
+        ..Default::default()
     };
 
     JournalStorage::open_read_only(config).map_err(|e| format!("Failed to open journal: {}", e))
@@ -1766,7 +1767,67 @@ fn main() {
 
     // Handle verify
     if cli.verify {
-        eprintln!("PASS");
+        // Find journal files to verify
+        let journal_dir = storage.directory();
+        let mut journal_files: Vec<PathBuf> = Vec::new();
+
+        if !cli.file.is_empty() {
+            // --file specified: verify those specific files
+            for f in &cli.file {
+                let path = PathBuf::from(f);
+                if path.exists() {
+                    journal_files.push(path);
+                } else {
+                    // Try glob expansion
+                    if let Ok(paths) = glob::glob(f) {
+                        for p in paths.flatten() {
+                            journal_files.push(p);
+                        }
+                    }
+                }
+            }
+        } else {
+            // Verify all journal files in the storage directory
+            if let Ok(entries) = fs::read_dir(&journal_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().is_some_and(|e| e == "journal") {
+                        journal_files.push(path);
+                    }
+                }
+            }
+        }
+        journal_files.sort();
+
+        let mut all_pass = true;
+        for jf_path in &journal_files {
+            match read_file_compress(jf_path) {
+                Ok(compress) => {
+                    eprintln!(
+                        "File path: {}",
+                        jf_path.display()
+                    );
+                    eprintln!(
+                        "compress={}",
+                        compress.as_str()
+                    );
+                }
+                Err(e) => {
+                    eprintln!(
+                        "FAIL: {} ({})",
+                        jf_path.display(),
+                        e
+                    );
+                    all_pass = false;
+                }
+            }
+        }
+
+        if all_pass {
+            eprintln!("PASS");
+        } else {
+            process::exit(1);
+        }
         return;
     }
 

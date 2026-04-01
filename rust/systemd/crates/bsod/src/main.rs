@@ -56,6 +56,7 @@ fn find_emergency_message(continuous: bool) -> Option<String> {
         persistent: false,
         keep_free: 0,
         direct_directory: false,
+        ..Default::default()
     };
 
     let storage = match JournalStorage::open_read_only(config) {
@@ -109,6 +110,7 @@ fn find_emergency_message(continuous: bool) -> Option<String> {
                 persistent: false,
                 keep_free: 0,
                 direct_directory: false,
+                ..Default::default()
             };
             let storage2 = match JournalStorage::open_read_only(config2) {
                 Ok(s) => s,

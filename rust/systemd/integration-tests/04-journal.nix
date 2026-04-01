@@ -1,13 +1,13 @@
 {
   name = "04-JOURNAL";
   # Skip subtests needing tools/binaries not available in the NixOS test VM
-  testEnv.TEST_SKIP_SUBTESTS = builtins.concatStringsSep " " [
-    # journal-corrupt: machined-dependent user session lines patched out below
-    # journal-gatewayd and journal-remote self-skip when binary is missing
-    # LogFilterPatterns: stdout variant enabled; syslog and delegated-cgroup variants patched out
-    # journalctl-varlink: now enabled (JournalAccess varlink interface implemented)
-    "SYSTEMD_JOURNAL_COMPRESS" # needs journalctl --verify and compression env var support
-  ];
+  # All subtests enabled:
+  # - journal-corrupt: machined-dependent user session lines patched out below
+  # - journal-gatewayd and journal-remote self-skip when binary is missing
+  # - LogFilterPatterns: stdout variant enabled; syslog and delegated-cgroup variants patched out
+  # - journalctl-varlink: JournalAccess varlink interface implemented
+  # - SYSTEMD_JOURNAL_COMPRESS: compression type recorded in file header, reported by --verify
+  testEnv.TEST_SKIP_SUBTESTS = "";
   patchScript = ''
     # Fix systemd-run --user -M testuser@.host — machined not available
     sed -i '/systemd-run --user -M/d' TEST-04-JOURNAL.journal.sh

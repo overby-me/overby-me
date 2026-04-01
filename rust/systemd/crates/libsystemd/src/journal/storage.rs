@@ -74,6 +74,52 @@ const DEFAULT_MAX_FILES: usize = 100;
 // File header
 // ---------------------------------------------------------------------------
 
+/// Compression algorithm stored in the journal file header.
+///
+/// The value is stored as a single byte at offset 60 in the header.
+/// Data is currently always stored uncompressed; this field records
+/// the *requested* algorithm so `journalctl --verify` can report it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum JournalCompress {
+    None = 0,
+    Xz = 1,
+    Lz4 = 2,
+    Zstd = 3,
+}
+
+impl JournalCompress {
+    /// Parse from the `SYSTEMD_JOURNAL_COMPRESS` env var or config string.
+    pub fn from_env_str(s: &str) -> Self {
+        match s.to_uppercase().as_str() {
+            "NONE" | "NO" | "0" | "FALSE" => JournalCompress::None,
+            "XZ" => JournalCompress::Xz,
+            "LZ4" => JournalCompress::Lz4,
+            "ZSTD" | "YES" | "1" | "TRUE" | "" => JournalCompress::Zstd,
+            _ => JournalCompress::Zstd, // default
+        }
+    }
+
+    fn from_u8(b: u8) -> Self {
+        match b {
+            0 => JournalCompress::None,
+            1 => JournalCompress::Xz,
+            2 => JournalCompress::Lz4,
+            _ => JournalCompress::Zstd,
+        }
+    }
+
+    /// Return the name as used by C systemd in `journalctl --verify` output.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            JournalCompress::None => "NONE",
+            JournalCompress::Xz => "XZ",
+            JournalCompress::Lz4 => "LZ4",
+            JournalCompress::Zstd => "ZSTD",
+        }
+    }
+}
+
 /// On-disk file header (64 bytes).
 #[derive(Debug, Clone)]
 struct FileHeader {
@@ -91,10 +137,12 @@ struct FileHeader {
     entry_count: u64,
     /// Total file size in bytes (updated after each append).
     file_size: u64,
+    /// Compression algorithm (byte 60).
+    compress: JournalCompress,
 }
 
 impl FileHeader {
-    fn new() -> Self {
+    fn new(compress: JournalCompress) -> Self {
         // Generate a random file ID from /dev/urandom or fallback
         let file_id = generate_random_u128();
         FileHeader {
@@ -105,6 +153,7 @@ impl FileHeader {
             tail_seqnum: 0,
             entry_count: 0,
             file_size: HEADER_SIZE,
+            compress,
         }
     }
 
@@ -117,7 +166,8 @@ impl FileHeader {
         buf[36..44].copy_from_slice(&self.tail_seqnum.to_le_bytes());
         buf[44..52].copy_from_slice(&self.entry_count.to_le_bytes());
         buf[52..60].copy_from_slice(&self.file_size.to_le_bytes());
-        // bytes 60..64 reserved (zeros)
+        buf[60] = self.compress as u8;
+        // bytes 61..64 reserved (zeros)
         buf
     }
 
@@ -150,6 +200,7 @@ impl FileHeader {
             tail_seqnum: u64::from_le_bytes(buf[36..44].try_into().unwrap()),
             entry_count: u64::from_le_bytes(buf[44..52].try_into().unwrap()),
             file_size: u64::from_le_bytes(buf[52..60].try_into().unwrap()),
+            compress: JournalCompress::from_u8(buf[60]),
         })
     }
 }
@@ -171,8 +222,8 @@ struct JournalFile {
 
 impl JournalFile {
     /// Create a new journal file at `path`.
-    fn create(path: &Path) -> io::Result<Self> {
-        let header = FileHeader::new();
+    fn create(path: &Path, compress: JournalCompress) -> io::Result<Self> {
+        let header = FileHeader::new(compress);
 
         let file = OpenOptions::new()
             .create(true)
@@ -445,6 +496,11 @@ pub struct StorageConfig {
     /// This is used when `--directory` is passed explicitly by the user (the
     /// path already points to the journal directory).
     pub direct_directory: bool,
+
+    /// Compression algorithm to record in new journal file headers.
+    /// Defaults to `Zstd`.  Read from the `SYSTEMD_JOURNAL_COMPRESS`
+    /// environment variable by journald.
+    pub compress: JournalCompress,
 }
 
 /// Default keep-free value: 4 GiB (capped at 15% of filesystem in vacuum()).
@@ -460,6 +516,7 @@ impl Default for StorageConfig {
             persistent: false,
             keep_free: DEFAULT_KEEP_FREE,
             direct_directory: false,
+            compress: JournalCompress::Zstd,
         }
     }
 }
@@ -627,6 +684,15 @@ impl JournalStorage {
         self.journal_dir()
     }
 
+    /// Get the compression algorithm of the active (newest) journal file,
+    /// or the configured default if no file is open.
+    pub fn compress(&self) -> JournalCompress {
+        self.active_file
+            .as_ref()
+            .map(|f| f.header.compress)
+            .unwrap_or(self.config.compress)
+    }
+
     /// Resolve the actual journal directory, respecting `direct_directory`.
     fn journal_dir(&self) -> PathBuf {
         if self.config.direct_directory {
@@ -744,7 +810,7 @@ impl JournalStorage {
         let filename = format!("system@{:016x}-{:08x}.journal", timestamp, random_part);
         let path = journal_dir.join(filename);
 
-        let jf = JournalFile::create(&path)?;
+        let jf = JournalFile::create(&path, self.config.compress)?;
         self.active_file = Some(jf);
         Ok(())
     }
@@ -1133,6 +1199,15 @@ fn parse_cursor_seqnum(cursor: &str) -> Option<u64> {
         }
     }
     None
+}
+
+/// Read the compression algorithm from a journal file's header.
+pub fn read_file_compress(path: &Path) -> io::Result<JournalCompress> {
+    let mut file = File::open(path)?;
+    let mut header_buf = [0u8; 64];
+    file.read_exact(&mut header_buf)?;
+    let header = FileHeader::deserialize(&header_buf)?;
+    Ok(header.compress)
 }
 
 /// Parse the realtime timestamp (`t=HEX`) from a cursor string.

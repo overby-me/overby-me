@@ -110,6 +110,7 @@ fn journal_corrupt_and_append(
         persistent: false,
         keep_free: 0,
         direct_directory: true,
+        ..Default::default()
     };
 
     // Create journal and write 10 initial messages
@@ -193,6 +194,7 @@ fn journal_corrupt_and_append(
             persistent: false,
             keep_free: 0,
             direct_directory: true,
+            ..Default::default()
         };
 
         match JournalStorage::new(config) {

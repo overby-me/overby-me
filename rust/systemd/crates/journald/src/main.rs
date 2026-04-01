@@ -24,7 +24,7 @@
 mod journal;
 
 use journal::entry::JournalEntry;
-use journal::storage::{JournalStorage, StorageConfig};
+use journal::storage::{JournalCompress, JournalStorage, StorageConfig};
 
 use std::collections::HashMap;
 use std::fs;
@@ -425,6 +425,9 @@ impl JournaldConfig {
         } else {
             PathBuf::from("/run/log/journal")
         };
+        let compress = std::env::var("SYSTEMD_JOURNAL_COMPRESS")
+            .map(|s| JournalCompress::from_env_str(&s))
+            .unwrap_or(JournalCompress::Zstd);
         StorageConfig {
             directory: storage_dir,
             max_file_size: self.max_file_size,
@@ -445,6 +448,7 @@ impl JournaldConfig {
                 self.runtime_keep_free
             },
             direct_directory: false,
+            compress,
         }
     }
 }
