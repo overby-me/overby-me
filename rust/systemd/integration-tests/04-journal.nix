@@ -4,7 +4,7 @@
   # All subtests enabled:
   # - journal-corrupt: machined-dependent user session lines patched out below
   # - journal-gatewayd and journal-remote self-skip when binary is missing
-  # - LogFilterPatterns: stdout via PID 1; syslog via journald cgroup-based filtering; delegated-cgroup patched out
+  # - LogFilterPatterns: stdout/delegated-cgroup via PID 1; syslog via journald cgroup-based filtering
   # - journalctl-varlink: JournalAccess varlink interface implemented
   # - SYSTEMD_JOURNAL_COMPRESS: compression type recorded in file header, reported by --verify
   testEnv.TEST_SKIP_SUBTESTS = "";
@@ -24,10 +24,11 @@
     # Restart=always in journald unit ensures journald restarts after SIGKILL.
     # --directory test with zstd decompressed journal data uses C journalctl
     # directly against test journal files — doesn't require our journald.
-    # LogFilterPatterns: syslog variant now works via journald cgroup→unit resolution
+    # LogFilterPatterns: syslog variant works via journald cgroup→unit resolution
     # and direct LogFilterPatterns= drop-in file reading.
-    # Remove delegated-cgroup variant (needs cgroup xattr delegation for sub-cgroup filtering)
-    sed -i '/delegated-cgroup-filtering/d' TEST-04-JOURNAL.LogFilterPatterns.sh
+    # Delegated-cgroup variant works because: PID 1 applies LogFilterPatterns to
+    # stdout for both parent and child (same pipe), and our derive_unit_from_cgroup
+    # walks up the cgroup hierarchy to find the service unit for sub-cgroup processes.
     # journal-corrupt: remove machined-dependent user session lines
     sed -i '/loginctl enable-linger/d' TEST-04-JOURNAL.journal-corrupt.sh
     sed -i '/systemd-run.*--user -M/d' TEST-04-JOURNAL.journal-corrupt.sh
