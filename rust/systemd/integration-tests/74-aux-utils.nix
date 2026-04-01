@@ -12,12 +12,7 @@
     rm -f TEST-74-AUX-UTILS.vpick.sh
     rm -f TEST-74-AUX-UTILS.varlinkctl.sh
     rm -f TEST-74-AUX-UTILS.networkctl.sh
-    rm -f TEST-74-AUX-UTILS.socket-activate.sh
     rm -f TEST-74-AUX-UTILS.network-generator.sh
-    rm -f TEST-74-AUX-UTILS.pty-forward.sh
-    rm -f TEST-74-AUX-UTILS.mute-console.sh
-    rm -f TEST-74-AUX-UTILS.ask-password.sh
-    rm -f TEST-74-AUX-UTILS.userdbctl.sh
     rm -f TEST-74-AUX-UTILS.mount.sh
     rm -f TEST-74-AUX-UTILS.sysusers.sh
     # Remove subtests needing tools without Rust reimplementations
