@@ -2,11 +2,38 @@
 
 ## Current State
 
-**52/83 tests passing** locally (0 diff) on bookmark `bash-integration-test`. Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available).
+**61/77 nix tests passing**, 52/83 local tests passing (0 diff) on bookmark `bash-integration-test`. Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available).
 
-52 tests pass with 0 diff locally against 83 total `.tests` files. ~11 more are PID/fd-number-diff only (would pass in nix). See `CHANGELOG.md` for full fix history (106 fixes across 10 phases).
+See `CHANGELOG.md` for full fix history (106 fixes across 10 phases).
 
-Note: the previous "69/77" figure mixed local zero-diff, PID-diff-only, nix-passing, and assumed-passing-but-untested results across a smaller 51-test subset. The 83-test count is the full set of `.tests` files in `/tmp/bash-5.3/tests/`. Of the original 51 tracked tests, 30 are zero-diff locally and 11 more are PID/fd-only (41 "effectively passing").
+### Nix test results (61/77 passing)
+
+Passing (61): alias, appendop, arith-for, array2, attr, braces, case, casemod, comsub-eof, cond, coproc, cprint, dirstack, dollars, dynvar, errors, execscript, exp-tests, exportfunc, extglob, extglob2, extglob3, func, getopts, glob-bracket, glob-test, globstar, herestr, ifs, ifs-posix, input-test, invert, iquote, mapfile, more-exp, nquote, nquote1, nquote2, nquote3, nquote4, nquote5, parser, posix2, posixexp2, posixpat, posixpipe, precedence, printf, procsub, quote, read, redir, rhs-exp, set-e, set-x, shopt, strip, test, tilde, tilde2, type
+
+Failing (16):
+
+| Test | Nix diff lines | Notes |
+|------|---------------|-------|
+| trap | 1 | Flaky — timing-dependent signal delivery |
+| comsub | 1 | Spurious `echo: write error: Broken pipe` |
+| lastpipe | 1 | Spurious `echo: write error: Broken pipe` |
+| posixexp | 11 | Comsub error messages in sub-tests |
+| comsub-posix | 20 | Case/comsub error messages in sub-tests |
+| vredir | 32 | fd-number offsets in sub-tests |
+| arith | 57 | arith10.sub: array subscript quoting (`a[]`, `a[" "]`, `a[\\]`) |
+| heredoc | 66 | Sub-tests: delimiter edge cases, comsub+heredoc, function body printing |
+| comsub2 | 184 | `${ ... }` dollar-brace comsub (bash 5.3 feature) |
+| quotearray | 179 | Assoc array keys with special chars in `((...))` context |
+| builtins | 275 | pushd/popd sub-tests, dir stack edge cases |
+| new-exp | 310 | Sub-tests: various edge cases |
+| varenv | 320 | Sub-tests: env/export edge cases |
+| assoc | 462 | Sub-tests: tilde expansion in assoc values, bracket keys |
+| array | 647 | Sub-tests: array32/33 (injection guards, assoc↔indexed conversion) |
+| nameref | 678 | Sub-tests: complex nameref resolution chains |
+
+### Local test results (52/83 passing, 0 diff)
+
+83 total `.tests` files in `/tmp/bash-5.3/tests/` (superset of the 77 nix tests — includes dbg-support, dbg-support2, dstack2, histexp, history, rsh, invocation, jobs, posixpipe, and others not in the nix harness).
 
 ## How to Run Tests
 
@@ -46,107 +73,48 @@ done
 
 Suggested nix timeout: 30s for most tests, 120s for trap.
 
-## Failing Tests (sorted by diff size)
+## Failing Nix Tests (16/77)
 
-### Locally Passing (52 tests)
+### Near-passing (1-line diffs, likely flaky)
 
-alias, appendop, arith, arith-for, assoc, attr, braces, case, casemod, comsub, comsub-eof, comsub-posix, cond, cprint, dstack, dynvar, errors, exp, exportfunc, extglob2, extglob3, getopts, glob-bracket, ifs, ifs-posix, intl, invert, iquote, jobs, lastpipe, mapfile, more-exp, new-exp, nquote, nquote1, nquote2, nquote3, nquote4, nquote5, parser, posix2, posixexp2, posixpat, precedence, printf, quote, quotearray, rhs-exp, set-e, set-x, strip, tilde, tilde2
+- **trap** (1 line) — Timing-dependent signal delivery
+- **comsub** (1 line) — Spurious `echo: write error: Broken pipe`
+- **lastpipe** (1 line) — Spurious `echo: write error: Broken pipe`
 
-Note: func/shopt/complete have small diffs against local non-readline bash but pass against full bash in nix. globstar/posixexp must be tested sequentially (parallel runs share TMPDIR).
+### Small diffs (sub-test issues)
 
-### PID-diff only (would pass in nix, ~11 more tests)
+- **posixexp** (11 lines) — Comsub error messages in sub-tests
+- **comsub-posix** (20 lines) — Case/comsub error message differences in sub-tests
+- **vredir** (32 lines) — fd-number offsets in sub-tests (+1-2 consistently)
 
-- **builtins** (18 lines = PID diffs) ✅
-- **coproc** (12 lines = fd-number diffs, consistent +1 offset) ✅
-- **extglob** (12 lines = PID diffs) ✅
-- **glob** (12 lines = PID diffs) ✅
-- **heredoc** (8 lines = PID diffs) ✅
-- **procsub** (12 lines = PID diffs) ✅
-- **read** (8 lines = PID diffs) ✅
-- **type** (4 lines = PID diffs) ✅
-- **nameref** (24 lines = PID + fd-number diffs only) ✅
-- **invocation** (14 lines = PID diffs + error message format) ✅
+### Medium diffs
 
-### fd-number / env diffs only (would pass in nix)
+- **arith** (57 lines) — arith10.sub: array subscript quoting (`a[]`, `a[" "]`, `a[\\]`)
+- **heredoc** (66 lines) — Sub-tests: delimiter edge cases, comsub+heredoc, function body printing
+- **comsub2** (184 lines) — `${ ... }` dollar-brace comsub (bash 5.3 feature)
+- **quotearray** (179 lines) — Assoc array keys with special chars in `((...))` context
 
-- **vredir** (32 lines = fd-number diffs only, all +1-2 offset) ✅
-- **varenv** (30 lines = ~chet expansion + PID + env diffs) ✅
+### Large diffs (sub-tests with many edge cases)
 
-### Small Real Diffs
+- **builtins** (275 lines) — pushd/popd sub-tests, dir stack edge cases
+- **new-exp** (310 lines) — Sub-tests: various expansion edge cases
+- **varenv** (320 lines) — Sub-tests: env/export edge cases
+- **assoc** (462 lines) — Sub-tests: tilde expansion in assoc values, bracket keys
+- **array** (647 lines) — Sub-tests: array32/33 (injection guards, assoc↔indexed conversion)
+- **nameref** (678 lines) — Sub-tests: complex nameref resolution chains
 
-#### 1. func (2 lines)
+### Local-only failing tests (not in nix harness)
 
-- Extra `compgen: command not found` in reference non-readline bash. Our shell has `compgen` as a builtin (correct for drop-in replacement). Passes in nix against full bash.
+These exist in `/tmp/bash-5.3/tests/` but not in the nix test list:
 
-#### 2. herestr (2 lines)
-
-- Extra `compgen: command not found` in reference non-readline bash. Passes in nix.
-
-#### 3. posixexp (6 lines)
-
-- Parallel test execution artifact sharing `/var/tmp/sh`. Passes sequentially.
-
-#### 4. shopt (68 lines)
-
-- Readline-only shopt options removed from listing. Passes in nix against full bash.
-
-#### 5. redir (7 lines)
-
-- Test contamination from shared `/tmp/redir-test`. Passes with clean `/tmp`. Effectively 0 real diff.
-
-#### 6. globstar (84 lines, varies)
-
-- Parallel test execution artifact sharing `/var/tmp`. Passes sequentially.
-
-#### 7. test (12 lines)
-
-- `test -ef` / hardlink issues in `/tmp`. Environment-dependent.
-
-#### 8. posixpipe (54 lines)
-
-- Locale-dependent decimal separator (`.` vs `,` in `time` output). Passes in nix.
-
-### Medium (30-200 diff lines)
-
-#### 9. array (40 lines local, was 96)
-
-Remaining issues: `declare -a f='("${d[@]}")'` variable expansion in quoted compound assignments, `c[-2]` on readonly empty array error message, `unset ps1[2]` "not an array variable" error, `declare +a c` on readonly array, `${#xx}` length counting, brace expansion in array compound assignment `{2..6}`.
-
-#### 10. comsub2 (196 lines)
-
-`${ ... }` dollar-brace command substitution (bash 5.3 feature), `local` in current shell context, alias handling in subshells, function definition inside command substitution.
-
-#### 11. complete (116 lines)
-
-Readline-specific completion diffs. Passes in nix against full bash.
-
-#### 12. trap (37 lines)
-
-Flaky — timing-dependent signal delivery differences.
-
-### Hard (200+ diff lines)
-
-#### 13. histexp (203 lines)
-
-History expansion not implemented. Would require `!`, `^` history substitution.
-
-#### 14. history (179 lines)
-
-History builtin not fully implemented.
-
-#### 15. dbg-support (375 lines)
-
-DEBUG trap, `caller` builtin, BASH_SOURCE/FUNCNAME/BASH_LINENO tracking in trap context.
-
-### Other failing tests
-
+- **dbg-support** (375 lines) — DEBUG trap, `caller` builtin, BASH_SOURCE/FUNCNAME tracking
 - **dbg-support2** (15 lines) — DEBUG trap line number tracking
 - **dstack2** (26 lines) — `~0`, `~1`, `~-1` tilde expansion for directory stack
+- **histexp** (203 lines) — History expansion not implemented
+- **history** (179 lines) — History builtin not fully implemented
 - **rsh** (26 lines) — Restricted shell mode (`-r` flag) not implemented
-
-### Not Locally Testable (tests don't exist locally)
-
-array2, dollar, execscript, glob2, return, source, run-intl, runtests — these test files don't exist in `/tmp/bash-5.3/tests/` but may exist in the nix test environment.
+- **invocation** (14 lines) — PID diffs + error message format
+- **complete** (116 lines) — Readline-specific completion diffs (local non-readline bash lacks compgen)
 
 ## Key Source Files
 
@@ -178,23 +146,35 @@ array2, dollar, execscript, glob2, return, source, run-intl, runtests — these 
 
 ## Recommended Next Priorities
 
-1. **Fix `declare -a f='("${d[@]}")'` variable expansion** — Compound assignment values passed as single-quoted strings should re-parse and expand variable references. (~6 array diff lines)
+### Low-hanging fruit (could flip nix tests to passing)
 
-2. **Fix `c[-2]` on readonly empty array** — Should emit "bad array subscript" not "readonly variable". (~4 array diff lines)
+1. **Fix SIGPIPE in comsub/lastpipe** — 1-line diff each. Spurious `echo: write error: Broken pipe` in pipeline/comsub children. Likely a missed SIGPIPE reset path.
 
-3. **Fix `unset ps1[2]` "not an array variable" error** — `unset` on non-array variable with subscript should emit proper error. (~2 array diff lines)
+2. **Fix comsub-posix sub-test error messages** — 20 lines. Case statement parsing inside `$(...)` produces wrong error tokens.
 
-4. **Fix brace expansion in array compound assignment** — `a=( {2..6} )` should expand braces. (~2 array diff lines)
+3. **Fix posixexp sub-test comsub errors** — 11 lines. Similar comsub error message issues.
 
-5. **Implement `${ ... }` dollar-brace command substitution** — Bash 5.3 feature used in comsub2 tests. (~196 diff lines)
+### Array/assoc improvements (largest nix diff contributors)
 
-6. **Implement `caller` builtin and fix DEBUG trap context** — Needed for dbg-support tests. (~375+15 diff lines)
+4. **Fix arith10.sub array subscript quoting** — Handle `a[]`, `a[" "]`, `a[\ \]`, `a[\\]` in arithmetic array subscripts. (~57 nix diff lines)
 
-7. **Implement restricted shell mode (`-r` flag)** — Needed for rsh tests. (~26 diff lines)
+5. **Fix assoc sub-tests** — Tilde expansion in assoc array values (`declare -A aa=([key]="~/Desktop")`), bracket key handling. (~462 nix diff lines)
 
-8. **Fix `~0`, `~1`, `~-1` tilde expansion for directory stack** — Needed for dstack2 tests. (~26 diff lines)
+6. **Fix array32/33 sub-tests** — Command injection guards in array subscripts, assoc↔indexed conversion errors. (~647 nix diff lines — large but many are the same root cause)
 
-9. **Implement `shopt -s varredir_close`** — Auto-close `{fd}` redirections on non-exec commands when this shopt is enabled. Needed for vredir8.sub. (~20 lines of code)
+7. **Fix nameref sub-tests** — Complex nameref resolution chains in sub-tests. (~678 nix diff lines)
+
+### Feature work
+
+8. **Implement `${ ... }` dollar-brace command substitution** — Bash 5.3 feature used in comsub2 tests. (~184 nix diff lines)
+
+9. **Fix heredoc sub-tests** — delimiter edge cases, comsub+heredoc interaction, function body printing. (~66 nix diff lines)
+
+10. **Fix builtins sub-tests** — pushd/popd edge cases, dir stack numeric args. (~275 nix diff lines)
+
+11. **Implement `caller` builtin and fix DEBUG trap context** — Needed for dbg-support tests (local-only). (~375+15 diff lines)
+
+12. **Implement restricted shell mode (`-r` flag)** — Needed for rsh tests (local-only). (~26 diff lines)
 
 ## Approach
 
