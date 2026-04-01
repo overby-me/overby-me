@@ -2,9 +2,11 @@
 
 ## Current State
 
-**~52/83 tests passing** locally (0 diff) on bookmark `bash-integration-test`. All changes committed and pushed. Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available).
+**52/83 tests passing** locally (0 diff) on bookmark `bash-integration-test`. All changes committed and pushed. Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available).
 
-52 tests pass with 0 diff locally. ~11 more are PID-diff only (pass in nix). 3 new tests now pass: **quotearray** (was 205 lines), **attr**, **arith-for**. The array test went from 96 to 40 diff lines.
+52 tests pass with 0 diff locally against 83 total `.tests` files. ~11 more are PID/fd-number-diff only (would pass in nix). 3 new tests now pass: **quotearray** (was 205 lines), **attr**, **arith-for**. The array test went from 96 to 40 diff lines.
+
+Note: the previous "69/77" figure mixed local zero-diff, PID-diff-only, nix-passing, and assumed-passing-but-untested results across a smaller 51-test subset. The 83-test count is the full set of `.tests` files in `/tmp/bash-5.3/tests/`. Of the original 51 tracked tests, 30 are zero-diff locally and 11 more are PID/fd-only (41 "effectively passing"), unchanged from before this session.
 
 ### Progress This Session (Latest — array compound assignment / substring slicing)
 
