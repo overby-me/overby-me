@@ -261,6 +261,11 @@ pub enum Segment {
     Literal(String),
     /// A field separator — forces a word split here (for "$@" and "${arr[@]}")
     SplitHere,
+    /// Like SplitHere but from $* with null IFS.  In word-splitting contexts
+    /// this forces a field break (like SplitHere).  In non-splitting contexts
+    /// (assignments, double-quotes) this joins with IFS[0] — i.e. empty string
+    /// when IFS is null — instead of space.
+    SplitHereStar,
 }
 
 /// Expand a word into a list of strings (after word splitting and globbing).
@@ -365,11 +370,19 @@ pub fn expand_word_nosplit(
             _ => {}
         }
     }
+    // SplitHereStar uses IFS[0] as separator (empty when IFS is null).
+    // SplitHere (from $@) always uses space.
+    let star_sep = match vars.get("IFS") {
+        None => " ",
+        Some(s) if s.is_empty() => "",
+        Some(s) => &s[..s.chars().next().unwrap().len_utf8()],
+    };
     let result: String = segments
         .iter()
         .map(|s| match s {
             Segment::Quoted(t) | Segment::Unquoted(t) | Segment::Literal(t) => t.as_str(),
             Segment::SplitHere => " ",
+            Segment::SplitHereStar => star_sep,
         })
         .collect();
     result.replace('\x00', "")
@@ -408,7 +421,7 @@ pub fn expand_word_pattern(
         .map(|s| match s {
             Segment::Quoted(t) => quote_glob_chars(t),
             Segment::Unquoted(t) | Segment::Literal(t) => t.clone(),
-            Segment::SplitHere => " ".to_string(),
+            Segment::SplitHere | Segment::SplitHereStar => " ".to_string(),
         })
         .collect()
 }
@@ -719,9 +732,9 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                                         Segment::Quoted(t)
                                         | Segment::Unquoted(t)
                                         | Segment::Literal(t) => s.push_str(&t),
-                                        Segment::SplitHere => {
+                                        Segment::SplitHere | Segment::SplitHereStar => {
                                             out.push(Segment::Quoted(std::mem::take(&mut s)));
-                                            out.push(Segment::SplitHere);
+                                            out.push(seg.clone());
                                         }
                                     }
                                 }
@@ -766,9 +779,9 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                                 Segment::Quoted(t) | Segment::Unquoted(t) | Segment::Literal(t) => {
                                     s.push_str(&t)
                                 }
-                                Segment::SplitHere => {
+                                Segment::SplitHere | Segment::SplitHereStar => {
                                     out.push(Segment::Quoted(std::mem::take(&mut s)));
-                                    out.push(Segment::SplitHere);
+                                    out.push(seg.clone());
                                 }
                             }
                         }
@@ -862,11 +875,29 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
             }
             // Unquoted $@ produces separate words even with null IFS
             // (the splitting is inherent to $@, not dependent on IFS)
-            // $* is handled differently — it uses IFS for both joining and splitting
+            // In bash 5.3, unquoted $* also produces separate words when IFS
+            // is null (empty string) — the positional parameters are not
+            // concatenated into a single word.  We use SplitHere so that
+            // word_split honours the boundaries.  expand_word_nosplit_ctx
+            // maps SplitHere to IFS[0] (empty when IFS is null) so that
+            // assignment contexts like ${c=$*} still get "12" not "1 2".
             if name == "@" && ctx.positional.len() > 1 {
                 for (i, arg) in ctx.positional[1..].iter().enumerate() {
                     if i > 0 {
                         out.push(Segment::SplitHere);
+                    }
+                    out.push(Segment::Unquoted(arg.clone()));
+                }
+            } else if name == "*"
+                && ctx.positional.len() > 1
+                && ctx.vars.get("IFS").map(|s| s.is_empty()).unwrap_or(false)
+            {
+                // IFS is set but empty: $* produces separate words (bash 5.3).
+                // Use SplitHereStar so non-splitting contexts (assignments)
+                // join with IFS[0] (empty) instead of space.
+                for (i, arg) in ctx.positional[1..].iter().enumerate() {
+                    if i > 0 {
+                        out.push(Segment::SplitHereStar);
                     }
                     out.push(Segment::Unquoted(arg.clone()));
                 }
@@ -1073,18 +1104,32 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
             };
             // Check if word needs per-part expansion:
             // - mixed quoting (both literal and quoted parts)
-            // - contains $@ which needs to produce separate fields
+            // - contains "$@" (quoted) which always needs separate fields
+            // - contains $@ (unquoted) but only when IFS is null — with
+            //   non-null IFS, unquoted $@ is space-joined then IFS-split
             let needs_per_part = if let ParamOp::Default(_, word) | ParamOp::Alt(_, word) = &expr.op
             {
                 let has_literal = word.iter().any(|p| matches!(p, WordPart::Literal(_)));
                 let has_quoted = word
                     .iter()
                     .any(|p| matches!(p, WordPart::SingleQuoted(_) | WordPart::DoubleQuoted(_)));
-                let has_at = word.iter().any(|p| {
-                        matches!(p, WordPart::Variable(n) if n == "@")
-                            || matches!(p, WordPart::DoubleQuoted(parts) if parts.iter().any(|ip| matches!(ip, WordPart::Variable(n) if n == "@")))
+                let has_quoted_at = word.iter().any(|p| {
+                        matches!(p, WordPart::DoubleQuoted(parts) if parts.iter().any(|ip| matches!(ip, WordPart::Variable(n) if n == "@")))
                     });
-                (has_literal && has_quoted) || has_at
+                let has_unquoted_at_or_star = word
+                    .iter()
+                    .any(|p| matches!(p, WordPart::Variable(n) if n == "@" || n == "*"));
+                let ifs_is_null = ctx.vars.get("IFS").map(|s| s.is_empty()).unwrap_or(false);
+                // Per-part expansion is needed when:
+                // - mixed literal + quoted content (e.g. ${IFS+foo 'bar' baz})
+                // - "$@" (quoted) in the word — always produces separate fields
+                // - $@ or $* (unquoted) in the word AND IFS is null — with null
+                //   IFS the positional params keep their word boundaries (bash 5.3)
+                // With non-null IFS, unquoted $@ in ${var-$@} is space-joined
+                // then IFS-split, so per-part expansion would be wrong.
+                (has_literal && has_quoted)
+                    || has_quoted_at
+                    || (has_unquoted_at_or_star && ifs_is_null)
             } else {
                 false
             };
@@ -1322,11 +1367,19 @@ fn expand_word_nosplit_ctx(word: &Word, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> Stri
             _ => {}
         }
     }
+    // SplitHereStar uses IFS[0] as separator (empty when IFS is null).
+    // SplitHere (from $@) always uses space.
+    let star_sep = match ctx.vars.get("IFS") {
+        None => " ",
+        Some(s) if s.is_empty() => "",
+        Some(s) => &s[..s.chars().next().unwrap().len_utf8()],
+    };
     let result: String = segments
         .iter()
         .map(|s| match s {
             Segment::Quoted(t) | Segment::Unquoted(t) | Segment::Literal(t) => t.as_str(),
             Segment::SplitHere => " ",
+            Segment::SplitHereStar => star_sep,
         })
         .collect();
     // Strip any \x00 escape markers from backtick results
@@ -1351,7 +1404,7 @@ fn expand_pattern_word(word: &Word, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
                 // (e.g., backtick result \\ means "match one literal \")
                 result.push_str(&t.replace('\x00', ""));
             }
-            Segment::SplitHere => result.push(' '),
+            Segment::SplitHere | Segment::SplitHereStar => result.push(' '),
         }
     }
     result
@@ -1451,7 +1504,9 @@ fn word_split(segments: &[Segment], ifs: &str) -> Vec<String> {
     }
 
     // Check if there are any SplitHere markers or unquoted segments
-    let has_split = segments.iter().any(|s| matches!(s, Segment::SplitHere));
+    let has_split = segments
+        .iter()
+        .any(|s| matches!(s, Segment::SplitHere | Segment::SplitHereStar));
     let all_nosplit = segments
         .iter()
         .all(|s| matches!(s, Segment::Quoted(_) | Segment::Literal(_)));
@@ -1462,7 +1517,7 @@ fn word_split(segments: &[Segment], ifs: &str) -> Vec<String> {
                 Segment::Quoted(t) => quote_glob_chars(t),
                 Segment::Literal(t) => t.clone(),
                 Segment::Unquoted(t) => t.clone(),
-                Segment::SplitHere => String::new(),
+                Segment::SplitHere | Segment::SplitHereStar => String::new(),
             })
             .collect();
         return vec![s];
@@ -1474,8 +1529,8 @@ fn word_split(segments: &[Segment], ifs: &str) -> Vec<String> {
 
     for segment in segments {
         match segment {
-            Segment::SplitHere => {
-                // Force a field break here (for "$@" and "${arr[@]}")
+            Segment::SplitHere | Segment::SplitHereStar => {
+                // Force a field break here (for "$@", "${arr[@]}", $* with null IFS)
                 fields.push(std::mem::take(&mut current));
                 has_quoted_since_split = false;
             }
