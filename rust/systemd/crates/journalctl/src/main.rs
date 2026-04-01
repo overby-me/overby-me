@@ -368,7 +368,7 @@ struct Cli {
 
     /// Ask journald to stop logging to /var/log/journal and use only
     /// /run/log/journal (volatile). This is used during shutdown.
-    #[arg(long = "relinquish-var")]
+    #[arg(long = "relinquish-var", alias = "relinquish")]
     relinquish_var: bool,
 
     /// Like --relinquish-var but is a NOP if /var/log/journal is on the

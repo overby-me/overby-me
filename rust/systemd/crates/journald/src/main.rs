@@ -428,7 +428,13 @@ impl JournaldConfig {
         };
         let compress = std::env::var("SYSTEMD_JOURNAL_COMPRESS")
             .map(|s| JournalCompress::from_env_str(&s))
-            .unwrap_or(JournalCompress::Zstd);
+            .unwrap_or_else(|_| {
+                if self.compress {
+                    JournalCompress::Zstd
+                } else {
+                    JournalCompress::None
+                }
+            });
         StorageConfig {
             directory: storage_dir,
             max_file_size: self.max_file_size,
@@ -741,14 +747,18 @@ impl JournaldState {
             }
         }
 
-        // Rate limiting
+        // Rate limiting — skip for stdout transport entries.
+        // C journald does not rate-limit stdout streams at the journal level;
+        // rate limiting for services is handled by PID 1 (RateLimitIntervalSec=
+        // / RateLimitBurst= in the unit file).
+        let is_stdout = entry.field("_TRANSPORT").is_some_and(|t| t == "stdout");
         let source = entry
             .systemd_unit()
             .or_else(|| entry.syslog_identifier())
             .or_else(|| entry.pid().map(|p| p.to_string()))
             .unwrap_or_else(|| "unknown".to_string());
 
-        {
+        if !is_stdout {
             let mut rl = self.rate_limiter.lock().unwrap();
             let interval = Duration::from_micros(config.rate_limit_interval_usec);
             match rl.check(&source, config.rate_limit_burst, interval) {
@@ -819,17 +829,8 @@ impl JournaldState {
 
         // Store the entry
         let mut storage = self.storage.lock().unwrap();
-        match storage.append(&entry) {
-            Ok(seqnum) => {
-                if let Some(id) = entry.syslog_identifier()
-                    && !id.starts_with("systemd")
-                {
-                    eprintln!("journald: stored entry seqnum={} id={}", seqnum, id);
-                }
-            }
-            Err(e) => {
-                eprintln!("journald: Failed to store entry: {}", e);
-            }
+        if let Err(e) = storage.append(&entry) {
+            eprintln!("journald: Failed to store entry: {}", e);
         }
     }
 }
@@ -1621,6 +1622,11 @@ fn native_socket_listener(
         },
     };
 
+    // Set a read timeout so the listener can periodically check the
+    // shutdown flag. Without this, recv_with_cred blocks forever and
+    // the process can't exit promptly on SIGTERM.
+    let _ = sock.set_read_timeout(Some(Duration::from_secs(1)));
+
     eprintln!("journald: Listening on {}", JOURNAL_SOCKET_PATH);
     ready.signal();
 
@@ -1685,6 +1691,8 @@ fn syslog_socket_listener(state: Arc<JournaldState>, ready: SocketReadyNotifier)
             return;
         }
     };
+
+    let _ = sock.set_read_timeout(Some(Duration::from_secs(1)));
 
     eprintln!("journald: Listening on {}", SYSLOG_SOCKET_PATH);
     ready.signal();
@@ -2245,8 +2253,11 @@ static GLOBAL_FLUSH: AtomicU64 = AtomicU64::new(0);
 static GLOBAL_SYNC: AtomicU64 = AtomicU64::new(0);
 static GLOBAL_ROTATE: AtomicU64 = AtomicU64::new(0);
 static GLOBAL_RELOAD: AtomicU64 = AtomicU64::new(0);
-
+// Early shutdown flag — always available, even before JournaldState is created.
+// Used to detect SIGTERM during flock() wait so the blocked instance can exit.
+static EARLY_SHUTDOWN: AtomicBool = AtomicBool::new(false);
 extern "C" fn signal_handler_shutdown(_sig: libc::c_int) {
+    EARLY_SHUTDOWN.store(true, Ordering::Release);
     let ptr = GLOBAL_SHUTDOWN.load(Ordering::Acquire);
     if ptr != 0 {
         let flag = unsafe { &*(ptr as *const AtomicBool) };
@@ -2438,6 +2449,7 @@ fn varlink_handle_connection(state: Arc<JournaldState>, stream: UnixStream) {
             }
             "io.systemd.Journal.FlushToVar" => {
                 state.flush_requested.store(true, Ordering::Release);
+                // Wait for the maintenance thread to process the flush
                 let start = Instant::now();
                 while state.flush_requested.load(Ordering::Acquire)
                     && start.elapsed() < Duration::from_secs(10)
@@ -2448,6 +2460,7 @@ fn varlink_handle_connection(state: Arc<JournaldState>, stream: UnixStream) {
             }
             "io.systemd.Journal.RelinquishVar" => {
                 state.relinquish_requested.store(true, Ordering::Release);
+                // Wait for the maintenance thread to process the relinquish
                 let start = Instant::now();
                 while state.relinquish_requested.load(Ordering::Acquire)
                     && start.elapsed() < Duration::from_secs(10)
@@ -2807,17 +2820,27 @@ fn maintenance_thread(state: Arc<JournaldState>) {
         // Handle flush request (SIGUSR1 or Varlink FlushToVar)
         // In C systemd, flush moves journal files from /run to /var and
         // switches the active storage to persistent.
-        if state
-            .flush_requested
-            .compare_exchange(true, false, Ordering::AcqRel, Ordering::Relaxed)
-            .is_ok()
-        {
+        // NOTE: The flag is cleared AFTER work completes so that varlink
+        // callers polling on the flag know the operation is done.
+        if state.flush_requested.load(Ordering::Acquire) {
+            let is_relinq = state.relinquished.load(Ordering::Acquire);
+            eprintln!("journald: flush_requested=true, relinquished={}", is_relinq);
             let config = state.config.read().unwrap();
             let wants_persistent = config.use_persistent_storage();
             drop(config);
 
-            if state.relinquished.load(Ordering::Acquire) && wants_persistent {
-                eprintln!("journald: Flushing runtime journal to persistent storage");
+            // Check if we're currently writing to runtime storage
+            let in_runtime = {
+                let storage = state.storage.lock().unwrap();
+                let dir = storage.directory();
+                dir.starts_with("/run/")
+            };
+
+            if in_runtime && wants_persistent {
+                eprintln!(
+                    "journald: Flushing runtime journal to persistent storage (in_runtime={}, wants_persistent={})",
+                    in_runtime, wants_persistent
+                );
                 // Move journal files from /run to /var, then switch storage
                 let machine_id = read_machine_id();
                 let src_dir = PathBuf::from("/run/log/journal").join(&machine_id);
@@ -2866,7 +2889,7 @@ fn maintenance_thread(state: Arc<JournaldState>) {
                         *state.storage.lock().unwrap() = new_storage;
                         state.relinquished.store(false, Ordering::Release);
                         *state.active_file_opened.lock().unwrap() = Instant::now();
-                        eprintln!("journald: Switched to persistent storage");
+                        eprintln!("journald: Switched to persistent storage (flush)");
                     }
                     Err(e) => {
                         eprintln!(
@@ -2880,94 +2903,69 @@ fn maintenance_thread(state: Arc<JournaldState>) {
                 let mut storage = state.storage.lock().unwrap();
                 let _ = storage.flush();
             }
+            state.flush_requested.store(false, Ordering::Release);
         }
 
         // Handle relinquish-var request (Varlink RelinquishVar)
         // Switch from persistent to runtime-only storage.
-        if state
-            .relinquish_requested
-            .compare_exchange(true, false, Ordering::AcqRel, Ordering::Relaxed)
-            .is_ok()
-            && !state.relinquished.load(Ordering::Acquire)
-        {
-            eprintln!("journald: Relinquishing persistent storage, switching to runtime");
-            // Flush and close current persistent storage
-            {
-                let mut storage = state.storage.lock().unwrap();
-                let _ = storage.flush();
-            }
+        // NOTE: The flag is cleared AFTER work completes so that varlink
+        // callers polling on the flag know the operation is done.
+        if state.relinquish_requested.load(Ordering::Acquire) {
+            let already = state.relinquished.load(Ordering::Acquire);
+            if !already {
+                eprintln!("journald: Relinquishing persistent storage, switching to runtime");
+                // Flush and close current persistent storage
+                {
+                    let mut storage = state.storage.lock().unwrap();
+                    let _ = storage.flush();
+                }
 
-            // Open new runtime storage
-            let config = state.config.read().unwrap();
-            let sc = config.make_storage_config(false);
-            drop(config);
-            match JournalStorage::new(sc) {
-                Ok(new_storage) => {
-                    *state.storage.lock().unwrap() = new_storage;
-                    state.relinquished.store(true, Ordering::Release);
-                    *state.active_file_opened.lock().unwrap() = Instant::now();
-                    eprintln!("journald: Now writing to runtime storage only");
-                }
-                Err(e) => {
-                    eprintln!(
-                        "journald: Failed to open runtime storage: {}; keeping persistent",
-                        e
-                    );
+                // Open new runtime storage
+                let config = state.config.read().unwrap();
+                let sc = config.make_storage_config(false);
+                drop(config);
+                match JournalStorage::new(sc) {
+                    Ok(new_storage) => {
+                        *state.storage.lock().unwrap() = new_storage;
+                        state.relinquished.store(true, Ordering::Release);
+                        *state.active_file_opened.lock().unwrap() = Instant::now();
+                        eprintln!("journald: Now writing to runtime storage only");
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "journald: Failed to open runtime storage: {}; keeping persistent",
+                            e
+                        );
+                    }
                 }
             }
+            state.relinquish_requested.store(false, Ordering::Release);
         }
 
-        // Handle reload request (SIGHUP / `systemctl reload`)
-        if state
-            .reload_requested
-            .compare_exchange(true, false, Ordering::AcqRel, Ordering::Relaxed)
-            .is_ok()
-        {
-            eprintln!("journald: Reloading configuration");
-            let new_config = JournaldConfig::load();
-            let is_relinquished = state.relinquished.load(Ordering::Acquire);
-            let persistent = if is_relinquished {
-                false
-            } else {
-                new_config.use_persistent_storage()
-            };
-
-            // Update storage limits (max_disk_usage, max_files, max_file_size)
-            let sc = new_config.make_storage_config(persistent);
-            {
-                let mut storage = state.storage.lock().unwrap();
-                storage.update_config(sc);
-                // Vacuum with new limits
-                if let Err(e) = storage.vacuum() {
-                    eprintln!("journald: Vacuum after reload failed: {}", e);
-                }
-            }
-
-            *state.config.write().unwrap() = new_config;
-            eprintln!("journald: Configuration reloaded");
-        }
+        // NOTE: Reload handling (SIGHUP / `systemctl reload`) is done
+        // exclusively in the main event loop for faster response (100ms vs 1s).
 
         // Handle sync request (SIGRTMIN+1, from `journalctl --sync`)
-        if state
-            .sync_requested
-            .compare_exchange(true, false, Ordering::AcqRel, Ordering::Relaxed)
-            .is_ok()
-        {
+        if state.sync_requested.load(Ordering::Acquire) {
             eprintln!("journald: Syncing journal to disk");
+            // Brief pause to let stdout stream handler threads finish
+            // appending any pending entries before we flush. Without this,
+            // a `journalctl --sync` immediately after writing to stdout may
+            // race with the stream handler that processes the write.
+            thread::sleep(Duration::from_millis(10));
             let mut storage = state.storage.lock().unwrap();
             let _ = storage.flush();
+            drop(storage);
+            state.sync_requested.store(false, Ordering::Release);
         }
 
         // Handle rotate request (SIGUSR2)
-        if state
-            .rotate_requested
-            .compare_exchange(true, false, Ordering::AcqRel, Ordering::Relaxed)
-            .is_ok()
-        {
+        if state.rotate_requested.load(Ordering::Acquire) {
             eprintln!("journald: Rotating journal files");
             let mut storage = state.storage.lock().unwrap();
             let _ = storage.rotate();
             *state.active_file_opened.lock().unwrap() = Instant::now();
+            state.rotate_requested.store(false, Ordering::Release);
         }
 
         // Time-based rotation (MaxFileSec=)
@@ -3141,9 +3139,67 @@ fn main() {
     let pid_file_path = format!("{runtime_dir}/pid");
     let varlink_socket_path = format!("{runtime_dir}/io.systemd.journal");
 
-    // Load configuration
+    // Ensure runtime directory exists (needed for lock file)
+    let _ = fs::create_dir_all(&runtime_dir);
+
+    // Acquire an exclusive lock to serialise instance starts BEFORE opening
+    // journal storage.  During `systemctl restart` or boot, socket activation
+    // may spawn a second instance alongside the one systemd starts.  The lock
+    // ensures only one instance touches the journal files at a time.
+    //
+    // We use non-blocking flock in a poll loop so that SIGTERM (which sets
+    // EARLY_SHUTDOWN) causes the blocked instance to exit cleanly instead of
+    // hanging forever.  With Type=simple the blocked instance keeps systemd
+    // happy while the lock holder does the real work.
+    let lock_path = format!("{runtime_dir}/lock");
+    let lock_file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(&lock_path)
+        .unwrap_or_else(|e| {
+            eprintln!("journald: cannot open lock file {lock_path}: {e}");
+            process::exit(1);
+        });
+    let lock_fd = {
+        use std::os::unix::io::AsRawFd;
+        lock_file.as_raw_fd()
+    };
+    loop {
+        let result = unsafe { libc::flock(lock_fd, libc::LOCK_EX | libc::LOCK_NB) };
+        if result == 0 {
+            break;
+        }
+        if EARLY_SHUTDOWN.load(Ordering::Relaxed) {
+            eprintln!("journald: shutdown requested while waiting for lock, exiting");
+            process::exit(0);
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    // Keep lock_file alive for the process lifetime (lock released on drop/exit).
+
+    // Write PID file so journalctl --flush / --rotate can find us
+    if let Err(e) = fs::write(&pid_file_path, process::id().to_string()) {
+        eprintln!(
+            "journald: failed to write PID file {}: {}",
+            pid_file_path, e
+        );
+    }
+
+    // Load configuration (after flock to avoid two instances reading config
+    // and opening storage simultaneously)
     let config = JournaldConfig::load();
     let persistent = config.use_persistent_storage();
+    eprintln!(
+        "journald: Storage={} persistent={} dir={}",
+        config.storage,
+        persistent,
+        if persistent {
+            "/var/log/journal"
+        } else {
+            "/run/log/journal"
+        }
+    );
     let mut storage_config = config.make_storage_config(persistent);
 
     // For namespace instances, append .<namespace> to the machine-id subdirectory
@@ -3173,17 +3229,6 @@ fn main() {
     // Store the global atomic pointers so the signal handlers (registered at
     // the top of main) can actually set the shutdown/flush/rotate flags.
     setup_signal_handlers(Arc::clone(&state));
-
-    // Ensure runtime directory exists
-    let _ = fs::create_dir_all(&runtime_dir);
-
-    // Write PID file so journalctl --flush / --rotate can find us
-    if let Err(e) = fs::write(&pid_file_path, process::id().to_string()) {
-        eprintln!(
-            "journald: failed to write PID file {}: {}",
-            pid_file_path, e
-        );
-    }
 
     // Check for socket activation (LISTEN_FDS from PID 1)
     let activated = receive_socket_activation_fds();
@@ -3304,9 +3349,86 @@ fn main() {
 
     eprintln!("journald: Ready and processing requests");
 
-    // Wait for shutdown
+    // Main event loop — handles shutdown and reload requests.
+    // (Flush, rotate, relinquish, sync, and other periodic tasks are
+    // handled by the maintenance thread.)
     while !state.shutdown.load(Ordering::Relaxed) {
-        thread::sleep(Duration::from_millis(500));
+        // Handle reload request (SIGHUP / `systemctl reload`).
+        // Check here in addition to the maintenance thread so we
+        // respond promptly — the maintenance thread sleeps 1 s between
+        // iterations and may be blocked on storage operations.
+        if state
+            .reload_requested
+            .compare_exchange(true, false, Ordering::AcqRel, Ordering::Relaxed)
+            .is_ok()
+        {
+            sd_notify("RELOADING=1");
+            eprintln!("journald: Reloading configuration");
+            let new_config = JournaldConfig::load();
+            let is_relinquished = state.relinquished.load(Ordering::Acquire);
+            let persistent = if is_relinquished {
+                false
+            } else {
+                new_config.use_persistent_storage()
+            };
+
+            // C journald behavior on reload:
+            // - persistent→volatile: switch to runtime immediately
+            // - volatile→persistent: DON'T switch; entries stay in runtime
+            //   until explicit flush (SIGUSR1 / journalctl --flush)
+            // - same directory: just update limits/compress and vacuum
+            let sc = new_config.make_storage_config(persistent);
+            {
+                let mut storage = state.storage.lock().unwrap();
+                let old_dir = storage.directory();
+                let new_dir = sc.directory.join(old_dir.file_name().unwrap_or_default());
+                if old_dir != new_dir && !persistent {
+                    // Switching TO volatile/runtime — switch immediately.
+                    let _ = storage.flush();
+                    drop(storage);
+                    match JournalStorage::new(sc) {
+                        Ok(new_storage) => {
+                            *state.storage.lock().unwrap() = new_storage;
+                            *state.active_file_opened.lock().unwrap() = Instant::now();
+                            eprintln!(
+                                "journald: Storage switched from {} to {}",
+                                old_dir.display(),
+                                new_dir.display()
+                            );
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "journald: Failed to switch storage to {}: {}; keeping old",
+                                new_dir.display(),
+                                e
+                            );
+                        }
+                    }
+                } else {
+                    // Same directory or switching to persistent — just update
+                    // config (limits, compress). Persistent switch happens on flush.
+                    // Use config for the CURRENT storage location, not the desired
+                    // one, so that directory and limits match the active journal.
+                    let current_is_runtime = old_dir.starts_with("/run/");
+                    let current_sc = new_config.make_storage_config(!current_is_runtime);
+                    storage.update_config(current_sc);
+                    if let Err(e) = storage.vacuum() {
+                        eprintln!("journald: vacuum failed: {}", e);
+                    }
+                }
+            }
+
+            *state.config.write().unwrap() = new_config;
+            sd_notify("READY=1");
+            // Token-based reload handshake: read the token from reload-request
+            // and write it to reload-done so ExecReload can verify that THIS
+            // specific reload completed (not a spurious one from stale SIGHUPs).
+            let token =
+                fs::read_to_string(format!("{runtime_dir}/reload-request")).unwrap_or_default();
+            let _ = fs::write(format!("{runtime_dir}/reload-done"), token.trim());
+        }
+
+        thread::sleep(Duration::from_millis(100));
     }
 
     eprintln!("journald: Shutting down...");
@@ -3333,9 +3455,7 @@ fn main() {
 
     // Clean up PID file. Never remove the journal/stdout socket files — they
     // may be managed by a socket unit (systemd-journald.socket) and removing
-    // them would break socket activation on restart. If the next start is not
-    // socket-activated, create_datagram_socket/create_stream_listener will
-    // remove stale files before re-binding.
+    // them would break socket activation on restart.
     let _ = fs::remove_file(&pid_file_path);
     // Syslog socket is never socket-activated — always clean it up
     if namespace.is_none() {

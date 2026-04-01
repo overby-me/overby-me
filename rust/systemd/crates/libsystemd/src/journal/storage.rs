@@ -637,6 +637,20 @@ impl JournalStorage {
     /// Rotate the active journal file: close the current file and start
     /// a new one.
     pub fn rotate(&mut self) -> io::Result<()> {
+        // Rename the active file from system.journal to system@<seqid>.journal
+        // before closing it, matching C journald's archive naming convention.
+        if let Some(ref file) = self.active_file {
+            let journal_dir = self.journal_dir();
+            let timestamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_micros();
+            let random_part = generate_random_u128() & 0xFFFF_FFFF;
+            let archived_name = format!("system@{:016x}-{:08x}.journal", timestamp, random_part);
+            let archived_path = journal_dir.join(archived_name);
+            let _ = fs::rename(&file.path, &archived_path);
+        }
+
         // Drop the current active file (closes the writer)
         self.active_file = None;
 
@@ -782,16 +796,32 @@ impl JournalStorage {
             }
         }
 
-        if let Some(newest) = files.last() {
-            // Try to open the newest file for appending
-            match JournalFile::open(newest, true) {
+        // Try to open system.journal (C journald active file convention)
+        let active_path = journal_dir.join("system.journal");
+        if active_path.exists() {
+            match JournalFile::open(&active_path, true) {
                 Ok(jf) => {
-                    // Only reuse if it's under the size limit
                     if jf.size() < self.config.max_file_size {
                         self.active_file = Some(jf);
                         return Ok(());
                     }
-                    // Otherwise fall through to create a new file
+                }
+                Err(e) => {
+                    eprintln!(
+                        "journald: Could not reopen {}: {}; creating new file",
+                        active_path.display(),
+                        e
+                    );
+                }
+            }
+        } else if let Some(newest) = files.last() {
+            // Fallback: try the newest existing file (e.g. from an older version)
+            match JournalFile::open(newest, true) {
+                Ok(jf) => {
+                    if jf.size() < self.config.max_file_size {
+                        self.active_file = Some(jf);
+                        return Ok(());
+                    }
                 }
                 Err(e) => {
                     eprintln!(
@@ -808,16 +838,18 @@ impl JournalStorage {
 
     fn create_new_active_file(&mut self) -> io::Result<()> {
         let journal_dir = self.journal_dir();
+        let path = journal_dir.join("system.journal");
 
-        // File name format: system@<timestamp>-<hex-random>.journal
-        // Timestamp comes first so alphabetical sort matches creation order.
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_micros();
-        let random_part = generate_random_u128() & 0xFFFF_FFFF;
-        let filename = format!("system@{:016x}-{:08x}.journal", timestamp, random_part);
-        let path = journal_dir.join(filename);
+        // If system.journal already exists (e.g. unclean shutdown), archive it first
+        if path.exists() {
+            let timestamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_micros();
+            let random_part = generate_random_u128() & 0xFFFF_FFFF;
+            let archived_name = format!("system@{:016x}-{:08x}.journal", timestamp, random_part);
+            let _ = fs::rename(&path, journal_dir.join(archived_name));
+        }
 
         let jf = JournalFile::create(&path, self.config.compress)?;
         self.active_file = Some(jf);
@@ -833,8 +865,16 @@ impl JournalStorage {
         let mut files = list_journal_files(&journal_dir)?;
         files.sort();
 
-        // Remove files until we're under the file count limit
-        while files.len() > self.config.max_files {
+        // Never vacuum the active journal file — it's currently being written to.
+        let active_path = self.active_file.as_ref().map(|f| f.path.clone());
+        if let Some(ref active) = active_path {
+            files.retain(|f| f != active);
+        }
+
+        // Remove files until we're under the file count limit.
+        // Always reserve one slot for the active file — even if it doesn't
+        // currently exist, the daemon will create one when writing.
+        while files.len() + 1 > self.config.max_files {
             if let Some(oldest) = files.first() {
                 eprintln!(
                     "journald: Vacuuming {} (file count limit)",
@@ -847,13 +887,18 @@ impl JournalStorage {
             }
         }
 
-        // Check total disk usage
+        // Check total disk usage (include active file in the total)
         loop {
             let mut total: u64 = 0;
             for f in &files {
                 if let Ok(meta) = fs::metadata(f) {
                     total += meta.len();
                 }
+            }
+            if let Some(ref active) = active_path
+                && let Ok(meta) = fs::metadata(active)
+            {
+                total += meta.len();
             }
             if total <= self.config.max_disk_usage || files.is_empty() {
                 break;
@@ -873,14 +918,19 @@ impl JournalStorage {
         }
 
         // Enforce keep-free: ensure the filesystem has at least `keep_free`
-        // bytes available. Vacuum oldest files while free space is too low.
+        // bytes available. Cap keep_free at 15% of total filesystem size
+        // to prevent vacuuming everything on small disks.
         if self.config.keep_free > 0 {
+            let effective_keep_free = match total_disk_space(&journal_dir) {
+                Some(total) => self.config.keep_free.min(total * 15 / 100),
+                None => self.config.keep_free,
+            };
             loop {
                 if files.is_empty() {
                     break;
                 }
                 let free = available_disk_space(&journal_dir).unwrap_or(u64::MAX);
-                if free >= self.config.keep_free {
+                if free >= effective_keep_free {
                     break;
                 }
                 if let Some(oldest) = files.first() {
@@ -888,7 +938,7 @@ impl JournalStorage {
                         "journald: Vacuuming {} (keep free limit: {} free < {} required)",
                         oldest.display(),
                         free,
-                        self.config.keep_free
+                        effective_keep_free
                     );
                     let _ = fs::remove_file(oldest);
                     files.remove(0);
@@ -918,6 +968,21 @@ fn available_disk_space(path: &Path) -> Option<u64> {
         let mut stat: libc::statvfs = std::mem::zeroed();
         if libc::statvfs(c_path.as_ptr(), &mut stat) == 0 {
             Some(stat.f_bavail * stat.f_frsize)
+        } else {
+            None
+        }
+    }
+}
+
+fn total_disk_space(path: &Path) -> Option<u64> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    let c_path = CString::new(path.as_os_str().as_bytes()).ok()?;
+    unsafe {
+        let mut stat: libc::statvfs = std::mem::zeroed();
+        if libc::statvfs(c_path.as_ptr(), &mut stat) == 0 {
+            Some(stat.f_blocks * stat.f_frsize)
         } else {
             None
         }

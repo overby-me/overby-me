@@ -468,6 +468,14 @@ fn start_service_with_filedescriptors(
         ),
         stdout_is_socket: matches!(conf.exec_config.stdout_path, Some(StdIoOption::Socket)),
         stderr_is_socket: matches!(conf.exec_config.stderr_path, Some(StdIoOption::Socket)),
+        stdout_is_journal: matches!(
+            conf.exec_config.stdout_path,
+            None | Some(StdIoOption::Journal) | Some(StdIoOption::Kmsg)
+        ),
+        stderr_is_journal: matches!(
+            conf.exec_config.stderr_path,
+            Some(StdIoOption::Journal) | Some(StdIoOption::Kmsg)
+        ),
         ambient_capabilities: conf.exec_config.ambient_capabilities.clone(),
 
         // Security & sandboxing directives

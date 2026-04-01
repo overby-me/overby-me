@@ -323,6 +323,12 @@ pub struct ExecHelperConfig {
     /// When true, stderr (fd 2) is dup'd from the first LISTEN_FD (fd 3).
     #[serde(default)]
     pub stderr_is_socket: bool,
+    /// Whether StandardOutput should be connected to the journal stream socket.
+    #[serde(default)]
+    pub stdout_is_journal: bool,
+    /// Whether StandardError should be connected to the journal stream socket.
+    #[serde(default)]
+    pub stderr_is_journal: bool,
     /// Whether StandardOutput is explicitly set to tty.
     /// When true AND stdin is NOT a TTY, the TTY is opened independently for stdout.
     #[serde(default)]
@@ -1008,6 +1014,129 @@ fn setup_tty_output(config: &ExecHelperConfig) {
     }
 }
 
+/// Connect stdout/stderr directly to journald's stream socket.
+fn setup_journal_stream_output(config: &ExecHelperConfig) {
+    if !config.stdout_is_journal && !config.stderr_is_journal {
+        return;
+    }
+
+    const SOCKET_PATH: &str = "/run/systemd/journal/stdout";
+
+    if config.stdout_is_journal
+        && let Some(fd) = open_journal_stream_nonblock(SOCKET_PATH, &config.name)
+    {
+        unsafe {
+            libc::dup2(fd, libc::STDOUT_FILENO);
+        }
+        if config.stderr_is_journal {
+            unsafe {
+                libc::dup2(fd, libc::STDERR_FILENO);
+            }
+        }
+        if fd != libc::STDOUT_FILENO && fd != libc::STDERR_FILENO {
+            unsafe {
+                libc::close(fd);
+            }
+        }
+        return;
+    }
+
+    if config.stderr_is_journal
+        && let Some(fd) = open_journal_stream_nonblock(SOCKET_PATH, &config.name)
+    {
+        unsafe {
+            libc::dup2(fd, libc::STDERR_FILENO);
+            if fd != libc::STDERR_FILENO {
+                libc::close(fd);
+            }
+        }
+    }
+}
+
+/// Non-blocking connect to journald's stdout stream socket.
+/// Returns None if the socket doesn't exist or can't connect within 100ms.
+fn open_journal_stream_nonblock(socket_path: &str, unit_name: &str) -> Option<i32> {
+    unsafe {
+        let fd = libc::socket(libc::AF_UNIX, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0);
+        if fd < 0 {
+            return None;
+        }
+
+        // Build sockaddr_un
+        let mut addr: libc::sockaddr_un = std::mem::zeroed();
+        addr.sun_family = libc::AF_UNIX as libc::sa_family_t;
+        let path_bytes = socket_path.as_bytes();
+        if path_bytes.len() >= addr.sun_path.len() {
+            libc::close(fd);
+            return None;
+        }
+        std::ptr::copy_nonoverlapping(
+            path_bytes.as_ptr(),
+            addr.sun_path.as_mut_ptr() as *mut u8,
+            path_bytes.len(),
+        );
+
+        // Set non-blocking for connect
+        let flags = libc::fcntl(fd, libc::F_GETFL);
+        libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+
+        let ret = libc::connect(
+            fd,
+            &addr as *const libc::sockaddr_un as *const libc::sockaddr,
+            std::mem::size_of::<libc::sockaddr_un>() as libc::socklen_t,
+        );
+
+        if ret < 0 {
+            let err = *libc::__errno_location();
+            if err != libc::EINPROGRESS {
+                libc::close(fd);
+                return None;
+            }
+            // Wait for connect with 100ms timeout
+            let mut pfd = libc::pollfd {
+                fd,
+                events: libc::POLLOUT,
+                revents: 0,
+            };
+            let poll_ret = libc::poll(&mut pfd, 1, 100);
+            if poll_ret <= 0 || (pfd.revents & libc::POLLOUT) == 0 {
+                libc::close(fd);
+                return None;
+            }
+            // Check for connect error
+            let mut err_val: libc::c_int = 0;
+            let mut err_len = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
+            libc::getsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_ERROR,
+                &mut err_val as *mut _ as *mut libc::c_void,
+                &mut err_len,
+            );
+            if err_val != 0 {
+                libc::close(fd);
+                return None;
+            }
+        }
+
+        // Restore blocking mode for the actual I/O
+        libc::fcntl(fd, libc::F_SETFL, flags);
+
+        // Clear CLOEXEC so the fd survives exec
+        libc::fcntl(fd, libc::F_SETFD, 0);
+
+        // Send the 7-line protocol header
+        let header = format!("{name}\n{name}\n6\n0\n0\n0\n0\n", name = unit_name,);
+        let written = libc::write(fd, header.as_ptr() as *const libc::c_void, header.len());
+        if written < 0 || written as usize != header.len() {
+            libc::close(fd);
+            return None;
+        }
+
+        Some(fd)
+    }
+}
+
 fn setup_stdin(config: &ExecHelperConfig) {
     match config.stdin_option {
         StandardInput::Null => {
@@ -1288,6 +1417,11 @@ pub fn run_exec_helper() {
             }
         }
     }
+
+    // StandardOutput=journal / StandardError=journal: connect directly to
+    // journald's stream socket. This bypasses PID 1's pipe forwarding and
+    // ensures journalctl --sync works correctly inside the service.
+    setup_journal_stream_output(&config);
 
     // NOTE: Resource limits (LimitXXX=) are applied later, just before
     // execv(), so that restrictive limits like LimitNOFILE=7 don't prevent

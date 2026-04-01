@@ -114,6 +114,40 @@ in
         services = {
           systemd-resolved.serviceConfig.PrivateDevices = lib.mkForce false;
           systemd-timesyncd.serviceConfig.PrivateDevices = lib.mkForce false;
+          # Use Type=simple so the service is immediately active.
+          # ExecReload uses a token-based handshake: it writes a unique
+          # token to reload-request, sends SIGHUP to both the PID file
+          # daemon and $MAINPID, then waits for reload-done to contain
+          # the same token.  This avoids races where spurious SIGHUPs
+          # create a stale reload-done before the intended reload runs.
+          systemd-journald.serviceConfig = {
+            Type = lib.mkForce "simple";
+            ExecReload = let
+              reloadScript = pkgs.writeShellScript "journald-reload" ''
+                REQ_FILE=/run/systemd/journal/reload-request
+                DONE_FILE=/run/systemd/journal/reload-done
+                PID_FILE=/run/systemd/journal/pid
+                TOKEN="$$-$(date +%s%N)"
+                echo "$TOKEN" > "$REQ_FILE"
+                FILE_PID=""
+                [ -f "$PID_FILE" ] && FILE_PID="$(cat "$PID_FILE" 2>/dev/null)"
+                [ -n "$FILE_PID" ] && kill -HUP "$FILE_PID" 2>/dev/null || true
+                if [ -n "''${MAINPID:-}" ] && [ "''${MAINPID:-}" != "$FILE_PID" ]; then
+                  kill -HUP "''${MAINPID}" 2>/dev/null || true
+                fi
+                [ -z "$FILE_PID" ] && [ -z "''${MAINPID:-}" ] && exit 0
+                i=0
+                while [ "$i" -lt 100 ]; do
+                  [ "$(cat "$DONE_FILE" 2>/dev/null)" = "$TOKEN" ] && exit 0
+                  sleep 0.05
+                  i=$((i + 1))
+                done
+                echo "journald: reload timed out waiting for token $TOKEN" >&2
+                exit 1
+              '';
+            in
+              lib.mkForce ["${reloadScript}"];
+          };
           systemd-networkd-wait-online.enable = lib.mkForce false;
           lvm-devices-import.enable = lib.mkForce false;
           uuidd.enable = lib.mkForce false;
