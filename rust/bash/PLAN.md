@@ -2,24 +2,23 @@
 
 ## Current State
 
-**62/77 nix tests passing**, 52/83 local tests passing (0 diff) on bookmark `bash-integration-test`. Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available).
+**63/77 nix tests passing**, 52/83 local tests passing (0 diff) on bookmark `bash-integration-test`. Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available).
 
-See `CHANGELOG.md` for full fix history (108 fixes across 11 phases).
+See `CHANGELOG.md` for full fix history (108+ fixes across 12 phases).
 
-### Nix test results (62/77 passing)
+### Nix test results (63/77 passing)
 
-Passing (62): alias, appendop, arith-for, array2, attr, braces, case, casemod, comsub-eof, cond, coproc, cprint, dirstack, dollars, dynvar, errors, execscript, exp-tests, exportfunc, extglob, extglob2, extglob3, func, getopts, glob-bracket, glob-test, globstar, herestr, ifs, ifs-posix, input-test, invert, iquote, mapfile, more-exp, nquote, nquote1, nquote2, nquote3, nquote4, nquote5, parser, posix2, posixexp, posixexp2, posixpat, posixpipe, precedence, printf, procsub, quote, read, redir, rhs-exp, set-e, set-x, shopt, strip, test, tilde, tilde2, type
+Passing (63): alias, appendop, arith-for, array2, attr, braces, case, casemod, comsub-eof, cond, coproc, cprint, dirstack, dollars, dynvar, errors, execscript, exp-tests, exportfunc, extglob, extglob2, extglob3, func, getopts, glob-bracket, glob-test, globstar, herestr, ifs, ifs-posix, input-test, invert, iquote, mapfile, more-exp, nquote, nquote1, nquote2, nquote3, nquote4, nquote5, parser, posix2, posixexp, posixexp2, posixpat, posixpipe, precedence, printf, procsub, quote, read, redir, rhs-exp, set-e, set-x, shopt, strip, test, tilde, tilde2, type, vredir
 
-Failing (15):
+Failing (14):
 
 | Test | Nix diff lines | Notes |
 |------|---------------|-------|
-| trap | 1 | Flaky — timing-dependent signal delivery |
+| trap | 1 | Flaky — timing-dependent signal delivery (extra CHLD) |
 | comsub | 1 | Spurious `echo: write error: Broken pipe` (flaky timing) |
 | lastpipe | 1 | Spurious `echo: write error: Broken pipe` (flaky timing) |
 | comsub-posix | 20 | Case/comsub error messages in sub-tests |
-| vredir | 32 | fd-number offsets in sub-tests |
-| arith | 57 | arith10.sub: array subscript quoting (`a[]`, `a[" "]`, `a[\\]`) |
+| arith | ~90 | arith10.sub: array subscript quoting (`a[]`, `a[" "]`, `a[\\]`), xtrace spacing |
 | heredoc | 66 | Sub-tests: delimiter edge cases, comsub+heredoc, function body printing |
 | comsub2 | 184 | `${ ... }` dollar-brace comsub (bash 5.3 feature) |
 | quotearray | 179 | Assoc array keys with special chars in `((...))` context |
@@ -72,22 +71,21 @@ done
 
 Suggested nix timeout: 30s for most tests, 120s for trap.
 
-## Failing Nix Tests (16/77)
+## Failing Nix Tests (14/77)
 
 ### Near-passing (1-line diffs, likely flaky)
 
-- **trap** (1 line) — Timing-dependent signal delivery
+- **trap** (1 line) — Timing-dependent signal delivery (extra CHLD)
 - **comsub** (1 line) — Spurious `echo: write error: Broken pipe` (SIGPIPE timing race in nix sandbox)
 - **lastpipe** (1 line) — Spurious `echo: write error: Broken pipe` (SIGPIPE timing race in nix sandbox)
 
 ### Small diffs (sub-test issues)
 
-- **comsub-posix** (20 lines) — Case/comsub error message differences in sub-tests
-- **vredir** (32 lines) — fd-number offsets in sub-tests (+1-2 consistently)
+- **comsub-posix** (20 lines) — Case/comsub error message differences in sub-tests (reserved word detection in case bodies inside `$(...)`)
 
 ### Medium diffs
 
-- **arith** (57 lines) — arith10.sub: array subscript quoting (`a[]`, `a[" "]`, `a[\\]`)
+- **arith** (~90 lines) — arith10.sub: array subscript quoting (`a[]`, `a[" "]`, `a[\\]`), xtrace spacing for expanded vars
 - **heredoc** (66 lines) — Sub-tests: delimiter edge cases, comsub+heredoc, function body printing
 - **comsub2** (184 lines) — `${ ... }` dollar-brace comsub (bash 5.3 feature)
 - **quotearray** (179 lines) — Assoc array keys with special chars in `((...))` context
@@ -129,7 +127,7 @@ These exist in `/tmp/bash-5.3/tests/` but not in the nix test list:
 | `src/interpreter/mod.rs` | Shell struct, `declared_unset`, `disabled_builtins`, `source_set_params`, `run_string`, `resolve_nameref`, `set_var` (auto-export), SHELLOPTS/BASHOPTS readonly, BASH_ALIASES/BASH_CMDS init |
 | `src/interpreter/commands.rs` | Command execution (disabled builtin check), `expand_word*`, `get_opt_flags` (allexport `a` flag), `update_shellopts`, `execute_assignment`, `continue N` fix |
 | `src/interpreter/arithmetic.rs` | Arithmetic eval, `expand_comsubs_in_arith` (handles `\$` and backticks), error tokens, short-circuit assignment validation, ternary precedence |
-| `src/interpreter/redirects.rs` | Redirections (vredir `{var}` fds, memfd heredocs, pipe fd leak fix) |
+| `src/interpreter/redirects.rs` | Redirections (vredir `{var}` fds with nameref support, varredir_close, fd validation, memfd heredocs, pipe fd leak fix) |
 | `src/interpreter/pipeline.rs` | Pipeline execution, PIPESTATUS, `in_pipeline_child` always true for forked children, SIGPIPE reset to SIG_DFL in pipeline/comsub children |
 | `src/expand/mod.rs` | Word expansion, `ExpCtx`, procsub handling (SIGPIPE reset), `SyntaxError` handler, `NOUNSET_ERROR` flag, `$` prefix for positional param nounset errors, `get_arith_error` peek, `SplitHereStar` segment for `$*` null-IFS splitting |
 | `src/expand/params.rs` | Parameter expansion (`${...}` operators), `parse_arith_offset` (handles `$(())`), `is_valid_var_ref`, assoc subscript expansion + bad subscript error |
@@ -146,13 +144,13 @@ These exist in `/tmp/bash-5.3/tests/` but not in the nix test list:
 
 ### Low-hanging fruit (could flip nix tests to passing)
 
-1. **Fix comsub-posix sub-test error messages** — 20 lines. Case statement parsing inside `$(...)` produces wrong error tokens.
+1. **Fix SIGPIPE flaky tests (comsub/lastpipe/trap)** — 1-line diff each, timing race in nix sandbox. SIGPIPE is reset to SIG_DFL in pipeline/comsub children and EPIPE is suppressed in echo builtin for all subprocess contexts, but the nix sandbox timing still occasionally triggers the race. trap has an extra CHLD signal delivery.
 
-2. **Fix SIGPIPE flaky tests (comsub/lastpipe)** — 1-line diff each, timing race in nix sandbox. SIGPIPE is reset to SIG_DFL in pipeline/comsub children and EPIPE is suppressed in echo builtin for all subprocess contexts, but the nix sandbox timing still occasionally triggers the race.
+2. **Fix comsub-posix sub-test error messages** — 20 lines. Case statement parsing inside `$(...)` needs reserved word detection (`done`, `fi`, etc.) in case bodies to produce proper error messages. Also needs comsub syntax error to halt script execution.
 
 ### Array/assoc improvements (largest nix diff contributors)
 
-3. **Fix arith10.sub array subscript quoting** — Handle `a[]`, `a[" "]`, `a[\ \]`, `a[\\]` in arithmetic array subscripts. (~57 nix diff lines)
+3. **Fix arith10.sub array subscript quoting** — Handle `a[]`, `a[" "]`, `a[\ \]`, `a[\\]` in arithmetic array subscripts. (~90 nix diff lines)
 
 4. **Fix assoc sub-tests** — Tilde expansion in assoc array values (`declare -A aa=([key]="~/Desktop")`), bracket key handling. (~462 nix diff lines)
 
@@ -171,6 +169,21 @@ These exist in `/tmp/bash-5.3/tests/` but not in the nix test list:
 10. **Implement `caller` builtin and fix DEBUG trap context** — Needed for dbg-support tests (local-only). (~375+15 diff lines)
 
 11. **Implement restricted shell mode (`-r` flag)** — Needed for rsh tests (local-only). (~26 diff lines)
+
+## Recent Fixes (Phase 12)
+
+- **vredir: 32 → 0 diff lines (now passing)**
+  - Fix `{v}>&-` / `{v}<&-` close operations to read variable value instead of allocating new fd
+  - Resolve namerefs in `{var}` redirect fd allocation
+  - Validate source fd exists before saving in DupOutput/DupInput (prevents F_DUPFD_CLOEXEC from masking invalid redirect targets)
+  - Print dup error before restoring redirections so errors flow through already-setup redirect chains
+  - Close inherited non-CLOEXEC fds >= 10 on startup to prevent leaked parent fds from shifting `{var}` allocation base
+  - Implement `varredir_close` shopt (close `{var}` fds when command finishes)
+  - Fix `{var}<&-` to print as `{var}>&-` in function body display
+  - Handle fd allocation failure (ulimit) with proper error chain
+  - Use `F_DUPFD(10)` instead of scanning with `dup()` for fd allocation
+- **arith xtrace: expand $var in ((...)) trace output** — shows expanded values instead of literal `$var`, matching bash
+- **redir: no regressions** — fd validation fix also resolved redir11.sub grep tests
 
 ## Approach
 
