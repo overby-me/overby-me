@@ -179,6 +179,14 @@
           fi
         done
 
+        # Install rust-only binaries that don't exist in the C systemd package.
+        # These are new binaries implemented in rust-systemd without a C counterpart.
+        for name in systemd-bsod; do
+          if [ -e "${rust-systemd}/bin/$name" ] && [ ! -e "$out/lib/systemd/$name" ]; then
+            cp -a "${rust-systemd}/bin/$name" "$out/lib/systemd/$name"
+          fi
+        done
+
         # Replace all references to the real systemd store path with
         # the rust-systemd-systemd output path so NixOS module substitutions work.
         #

@@ -1519,6 +1519,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "systemd-bsod"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "libc",
+ "libsystemd",
+]
+
+[[package]]
 name = "systemd-cat"
 version = "0.1.0"
 dependencies = [
