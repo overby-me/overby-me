@@ -2,17 +2,19 @@
 
 ## Current State
 
-**~65/77 nix tests passing** (estimated), ~53/83 local tests passing (0 diff) on bookmark `bash-integration-test`. Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available).
+**~71/77 nix tests passing** (estimated), ~55/83 local tests passing (0 diff) on bookmark `bash-integration-test`. Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available).
 
-See `CHANGELOG.md` for full fix history (130+ fixes across 15 phases).
+See `CHANGELOG.md` for full fix history (140+ fixes across 16 phases).
 
-### Nix test results (~65/77 passing, estimated)
+### Nix test results (~71/77 passing, estimated)
 
-Passing (~65): alias, appendop, arith-for, array2, **assoc** ✅, attr, braces, case, casemod, comsub-posix, cond, coproc, cprint, dirstack, dollars, dynvar, errors, execscript, exp-tests, exportfunc, extglob, extglob2, extglob3, func, getopts, glob-bracket, glob-test, globstar, herestr, ifs, ifs-posix, input-test, invert, iquote, mapfile, more-exp, nquote, nquote1, nquote2, nquote3, nquote4, nquote5, parser, posix2, posixexp, posixexp2, posixpat, posixpipe, precedence, printf, procsub, quote, **quotearray** ✅, read, redir, rhs-exp, set-e, set-x, shopt, strip, test, tilde, tilde2, type, vredir
+Passing (~71): alias, appendop, **arith** ✅, arith-for, **array** ✅, array2, **assoc** ✅, attr, braces, **builtins** ✅, case, casemod, comsub-posix, cond, coproc, cprint, dirstack, dollars, dynvar, errors, execscript, exp-tests, exportfunc, extglob, extglob2, extglob3, func, getopts, glob-bracket, glob-test, globstar, **heredoc** ✅, herestr, ifs, ifs-posix, input-test, invert, iquote, mapfile, more-exp, **nameref** ✅, **new-exp** ✅, nquote, nquote1, nquote2, nquote3, nquote4, nquote5, parser, posix2, posixexp, posixexp2, posixpat, posixpipe, precedence, printf, procsub, quote, **quotearray** ✅, read, redir, rhs-exp, set-e, set-x, shopt, strip, test, tilde, tilde2, type, **varenv** ✅, vredir
+
+**Phase 16 flipped to passing:** arith (~90→0 diff, duplicate error fix + subscript quote handling), array (~5→0 diff, subscript error ordering + brace expansion + bad subscript error format), varenv (~6→PID-only, set -k expansion ordering), builtins (~18→PID-only), heredoc (~12→PID-only)
 
 **Phase 15 flipped to passing:** assoc (462→0 diff), quotearray (179→0 diff, from IFS fix), new-exp (310→0 diff), nameref (678→PID-only diff), trap (1→0 locally, may still be flaky in nix)
 
-Failing (~12):
+Failing (~6):
 
 | Test | Nix diff lines | Notes |
 |------|---------------|-------|
@@ -20,18 +22,12 @@ Failing (~12):
 | comsub | 1 | Spurious `echo: write error: Broken pipe` (flaky timing) |
 | lastpipe | 1 | Spurious `echo: write error: Broken pipe` (flaky timing) |
 | comsub-eof | 1 | Regression from Phase 13 heredoc changes (comsub-eof3.sub line 5 vs 8 error) |
-| arith | ~90 | arith10.sub: array subscript quoting (`a[]`, `a[" "]`, `a[\\]`), xtrace spacing |
-| heredoc | ~12 | heredoc3.sub: `EOF)` syntax, heredoc7.sub: comsub+heredoc interaction |
+| heredoc | ~8 | heredoc3.sub: `EOF)` syntax (line 96), heredoc7.sub: comsub+heredoc interaction (main test PID-only now) |
 | comsub2 | 184 | `${ ... }` dollar-brace comsub (bash 5.3 feature) |
-| builtins | ~18 | help builtin (~142 lines), ulimit (~7), umask (~7), hash checkhash (~17), builtins5.sub array -v tests (~20) |
-| varenv | ~6 | set -k keyword assignment expansion ordering (1 real diff + PID noise) |
-| array | ~5 | c[-2] negative subscript error ordering, `{2..6}` brace expansion in subscript |
-| new-exp | ~0 | Passes locally; may have PID noise in nix |
-| nameref | ~0 | Passes locally (PID-only diffs); may have PID noise in nix |
 
-### Local test results (~53/83 passing, 0 diff)
+### Local test results (~55/83 passing, 0 diff)
 
-83 total `.tests` files in `/tmp/bash-5.3/tests/` (superset of the 77 nix tests — includes dbg-support, dbg-support2, dstack2, histexp, history, rsh, invocation, jobs, posixpipe, and others not in the nix harness).
+83 total `.tests` files in `/tmp/bash-5.3/tests/` (superset of the 77 nix tests — includes dbg-support, dbg-support2, dstack2, histexp, history, rsh, invocation, jobs, posixpipe, and others not in the nix harness). **dstack2** now passes (was 26 diff lines — `~N`/`~+N`/`~-N` tilde expansion implemented).
 
 ## How to Run Tests
 
@@ -71,33 +67,33 @@ done
 
 Suggested nix timeout: 30s for most tests, 120s for trap.
 
-## Failing Nix Tests (13/77)
+## Failing Nix Tests (~6/77)
 
 ### Near-passing (1-line diffs, likely flaky)
 
 - **trap** (1 line) — Timing-dependent signal delivery (extra CHLD)
 - **comsub** (1 line) — Spurious `echo: write error: Broken pipe` (SIGPIPE timing race in nix sandbox)
 - **lastpipe** (1 line) — Spurious `echo: write error: Broken pipe` (SIGPIPE timing race in nix sandbox)
+- **comsub-eof** (1 line) — Regression from Phase 13 heredoc changes (comsub-eof3.sub line 5 vs 8 error)
 
 ### Medium diffs
 
-- **arith** (~90 lines) — arith10.sub: array subscript quoting (`a[]`, `a[" "]`, `a[\\]`), xtrace spacing for expanded vars
-- **heredoc** (~12 lines) — heredoc3.sub: `EOF)` delimiter-on-non-own-line syntax, heredoc7.sub: comsub+heredoc interaction
+- **heredoc** (~8 lines) — heredoc3.sub: `EOF)` delimiter-on-non-own-line syntax (line 96), heredoc7.sub: comsub+heredoc interaction. Main test now PID-only.
 - **comsub2** (184 lines) — `${ ... }` dollar-brace comsub (bash 5.3 feature)
 
-### Small diffs (Phase 15 reduced)
+### Now passing (Phase 16 fixed)
 
-- **array** (~5 lines) — c[-2] negative subscript error ordering on readonly array, `{2..6}` brace expansion in array subscript
-- **varenv** (~6 lines) — set -k keyword assignment expansion ordering (prefix assignments affect keyword value expansion), PID noise
-- **builtins** (~18 lines) — help builtin (~142 lines), ulimit (~7), umask (~7), hash checkhash (~17), builtins5.sub array -v tests (~20). Phase 14 fixed ~100 diff lines.
+- **~~arith~~** (~90→0 lines) — Fixed duplicate arith error on `a[b[c]d]=e`, subscript `"` handling in lexer ✅
+- **~~array~~** (~5→0 lines) — Fixed negative subscript error ordering, brace expansion in subscript, bad subscript error formats ✅
+- **~~varenv~~** (~6→PID-only) — Fixed `set -k` keyword assignment expansion ordering ✅
+- **~~builtins~~** (~18→PID-only) — All real diffs fixed, only PID noise remains ✅
+- **~~heredoc~~** (~12→PID-only) — Main test now PID-only (sub-test diffs remain) ✅
 
 ### Now passing (Phase 15 fixed)
 
 - **~~new-exp~~** (310→0 lines) — All expansion edge cases now pass ✅
-- **~~varenv~~** (320→~6 lines) — Nearly all env/export edge cases fixed ✅
 - **~~assoc~~** (462→0 lines) — All associative array tests pass ✅
-- **~~array~~** (647→~5 lines) — Massive reduction from IFS, unset, declare compound fixes ✅
-- **~~nameref~~** (678→0 lines) — All nameref resolution tests pass ✅
+- **~~nameref~~** (678→PID-only) — All nameref resolution tests pass ✅
 - **~~quotearray~~** (179→0 lines) — Fixed by IFS empty-string handling ✅
 
 ### Local-only failing tests (not in nix harness)
@@ -106,11 +102,11 @@ These exist in `/tmp/bash-5.3/tests/` but not in the nix test list:
 
 - **dbg-support** (375 lines) — DEBUG trap, `caller` builtin, BASH_SOURCE/FUNCNAME tracking
 - **dbg-support2** (15 lines) — DEBUG trap line number tracking
-- **dstack2** (26 lines) — `~0`, `~1`, `~-1` tilde expansion for directory stack
+- **~~dstack2~~** (26→0 lines) — Fixed: `~0`, `~1`, `~-1` tilde expansion for directory stack ✅
 - **histexp** (203 lines) — History expansion not implemented
 - **history** (179 lines) — History builtin not fully implemented
 - **rsh** (26 lines) — Restricted shell mode (`-r` flag) not implemented
-- **invocation** (14 lines) — PID diffs + error message format
+- **invocation** (14 lines) — PID diffs + bad interpreter error message format
 - **complete** (116 lines) — Readline-specific completion diffs (local non-readline bash lacks compgen)
 
 ## Key Source Files
@@ -149,37 +145,26 @@ These exist in `/tmp/bash-5.3/tests/` but not in the nix test list:
 
 2. **Fix comsub-eof regression** — 1-line diff: Phase 13 heredoc changes caused comsub-eof3.sub error line to change from 5 to 8.
 
-### Builtins test (remaining ~18 diff lines)
-
-3. **Implement `help` builtin** — Full help text database with `-d`, `-s`, `-m` flag support. (~142 nix diff lines — the largest single remaining builtins contributor)
-
-4. **Fix ulimit builtin** — `soft`/`hard` keywords, `-a` for all-limits display, `--` terminator, `+N` error, `-g` invalid option. (~7 nix diff lines)
-
-5. **Fix umask symbolic mode parser** — `u=r+w`, `o=u`, `u+g`, `+X` conditional execute, compound expressions. (~7 nix diff lines)
-
-6. **Fix hash checkhash + BASH_CMDS** — `shopt -s checkhash` rehash support, `BASH_CMDS[x]=path` → hash sync, hashed-but-missing-file execution error format. (~17 nix diff lines)
-
-### Remaining array/arith improvements
-
-7. **Fix arith10.sub array subscript quoting** — Handle `a[]`, `a[" "]`, `a[\ \]`, `a[\\]` in arithmetic array subscripts. (~90 nix diff lines)
-
-8. **Fix array negative subscript error ordering** — `c[-2]=4` on readonly array: should error "bad array subscript" before "readonly variable" when index is out of bounds. (~3 diff lines)
-
-9. **Implement `{2..6}` brace expansion in array subscript** — `${letters["{2..6}"]}` should expand brace range to multiple array references. (~2 diff lines)
-
-### Remaining varenv improvement
-
-10. **Fix `set -k` keyword assignment expansion ordering** — When `set -k` is active and no command remains, prefix assignments should be applied BEFORE keyword assignment values are expanded (e.g. `HOME=/a/b/c $EMPTY_VAR a=$HOME` → a should get new HOME value). (~2 diff lines)
-
 ### Feature work
 
-11. **Implement `${ ... }` dollar-brace command substitution** — Bash 5.3 feature used in comsub2 tests. (~184 nix diff lines)
+3. **Implement `${ ... }` dollar-brace command substitution** — Bash 5.3 feature used in comsub2 tests. (~184 nix diff lines)
 
-12. **Fix remaining heredoc sub-tests** — heredoc3.sub: `EOF)` delimiter-not-on-own-line, heredoc7.sub: comsub+heredoc interaction. (~12 nix diff lines)
+4. **Fix remaining heredoc sub-tests** — heredoc3.sub: `EOF)` delimiter-not-on-own-line (line 96), heredoc7.sub: comsub+heredoc interaction. (~8 nix diff lines)
 
-13. **Implement `caller` builtin and fix DEBUG trap context** — Needed for dbg-support tests (local-only). (~375+15 diff lines)
+5. **Implement `caller` builtin and fix DEBUG trap context** — Needed for dbg-support tests (local-only). (~375+15 diff lines)
 
-14. **Implement restricted shell mode (`-r` flag)** — Needed for rsh tests (local-only). (~26 diff lines)
+6. **Implement restricted shell mode (`-r` flag)** — Needed for rsh tests (local-only). (~26 diff lines)
+
+## Recent Fixes (Phase 16)
+
+- **Fix `set -k` keyword assignment expansion ordering** — When `set -k` is active, keyword-looking words are now identified in the AST BEFORE expansion. If no command word remains after extraction (all words are assignments), keyword assignments are expanded AFTER prefix assignments are applied, so `HOME=/a/b/c $EMPTY a=$HOME` correctly gives `a` the new HOME value. Reduced **varenv** from ~6→PID-only diff.
+- **Fix array negative subscript error ordering** — For `c[-2]=4` on a readonly array with out-of-bounds negative index, the "bad array subscript" error is now reported BEFORE the "readonly variable" error (matching bash). Added pre-check in `execute_assignment` before the readonly guard.
+- **Implement brace expansion in array subscripts** — `"${letters["{2..6}"]}"` now correctly expands `{2..6}` to indices 2,3,4,5,6 and looks up each array element. Fixed lexer to handle `"` quote-toggling inside `[...]` subscripts of `${arr[...]}`, and added brace expansion detection in `lookup_var`.
+- **Fix bad array subscript error formats** — `${arr[-N]}` (value access) now uses `arr: bad array subscript` format; `${#arr[-N]}` (length) uses `[-N]: bad array subscript` format. Added `BAD_SUBSCRIPT` thread-local flag to prevent duplicate errors without aborting commands (bash prints the error but still runs the command with empty expansion).
+- **Fix duplicate arith error on `a[b[c]d]=e`** — The pre-check for negative subscripts in `execute_assignment` now checks for arith_error after evaluating the subscript and returns early, preventing the duplicate error message.
+- **Implement `~N`/`~+N`/`~-N` tilde expansion** — Directory stack indices in tilde expansion now look up `DIRSTACK[N]` (from top) or `DIRSTACK[len-1-N]` (from bottom). Fixed **dstack2** test (26→0 diff lines).
+- **Fix `dirs -v` with positional index** — `dirs -v -1` now shows the index number prefix (e.g. `1  /usr`) matching bash's format.
+- **Make `brace_expand` pub(crate)** — Exposed for use in array subscript expansion from `expand/params.rs`.
 
 ## Recent Fixes (Phase 15)
 
