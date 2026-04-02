@@ -750,16 +750,37 @@ fn read_param_name_with_subscript(chars: &[char], i: &mut usize) -> String {
         name.push('[');
         *i += 1;
         let mut depth = 1;
+        // Inside [...], double-quote characters toggle quoting but are
+        // stripped from the subscript text.  This matches bash behaviour
+        // where `"${arr["{2..6}"]}"` produces subscript `{2..6}` (the
+        // quotes are consumed as delimiters, not literal content).
+        let mut in_subscript_dquote = false;
         while *i < chars.len() && depth > 0 {
-            if chars[*i] == '[' {
-                depth += 1;
-            } else if chars[*i] == ']' {
-                depth -= 1;
-                if depth == 0 {
-                    name.push(']');
-                    *i += 1;
-                    break;
+            if chars[*i] == '"' {
+                // Toggle subscript-level quoting; skip the quote char
+                in_subscript_dquote = !in_subscript_dquote;
+                *i += 1;
+                continue;
+            }
+            if !in_subscript_dquote {
+                if chars[*i] == '[' {
+                    depth += 1;
+                } else if chars[*i] == ']' {
+                    depth -= 1;
+                    if depth == 0 {
+                        name.push(']');
+                        *i += 1;
+                        break;
+                    }
                 }
+            }
+            // Backslash escapes inside subscript (e.g. a[\ ])
+            if chars[*i] == '\\' && *i + 1 < chars.len() && depth > 0 {
+                name.push(chars[*i]);
+                *i += 1;
+                name.push(chars[*i]);
+                *i += 1;
+                continue;
             }
             name.push(chars[*i]);
             *i += 1;

@@ -34,6 +34,11 @@ thread_local! {
     static ARITH_ERROR: RefCell<bool> = const { RefCell::new(false) };
     /// Flag set when a nounset (set -u) error occurs — should exit the shell/subshell.
     static NOUNSET_ERROR: RefCell<bool> = const { RefCell::new(false) };
+    /// Flag set when a bad array subscript error was already printed during
+    /// lookup_var.  This prevents duplicate errors from expand_param calling
+    /// lookup_var again, but unlike ARITH_ERROR it does NOT abort the command
+    /// (bash prints the error and still runs the command with empty expansion).
+    static BAD_SUBSCRIPT: RefCell<bool> = const { RefCell::new(false) };
     /// RANDOM PRNG state (bash-compatible linear congruential generator)
     static RANDOM_STATE: RefCell<u32> = const { RefCell::new(0) };
     static RANDOM_SEEDED: RefCell<bool> = const { RefCell::new(false) };
@@ -210,6 +215,14 @@ pub fn set_arith_error() {
 /// Peek at the arithmetic error flag without clearing it.
 pub fn get_arith_error() -> bool {
     ARITH_ERROR.with(|f| *f.borrow())
+}
+
+pub fn set_bad_subscript() {
+    BAD_SUBSCRIPT.with(|f| *f.borrow_mut() = true);
+}
+
+pub fn take_bad_subscript() -> bool {
+    BAD_SUBSCRIPT.with(|f| std::mem::replace(&mut *f.borrow_mut(), false))
 }
 
 /// Check and clear the nounset error flag.
@@ -1078,17 +1091,67 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                     }
                 }
             }
+            // For ${#arr[-N]} (Length op with negative out-of-bounds subscript),
+            // check BEFORE calling lookup_var so we use the bash-specific
+            // `[-N]: bad array subscript` error format (not `arr: bad ...`).
+            if matches!(&expr.op, crate::ast::ParamOp::Length)
+                && let Some(bracket) = expr.name.find('[')
+            {
+                let base = &expr.name[..bracket];
+                let idx_str = &expr.name[bracket + 1..expr.name.len() - 1];
+                let resolved = ctx.resolve_nameref(base);
+                if idx_str != "@" && idx_str != "*" && !ctx.assoc_arrays.contains_key(&resolved) {
+                    let raw_idx: i64 = if idx_str.trim().is_empty() {
+                        0
+                    } else if let Ok(v) = idx_str.trim().parse::<i64>() {
+                        v
+                    } else {
+                        crate::expand::arithmetic::eval_arith_full(
+                            idx_str,
+                            ctx.vars,
+                            &std::collections::HashMap::new(),
+                            ctx.positional,
+                            ctx.last_status,
+                            ctx.opt_flags,
+                        )
+                    };
+                    if raw_idx < 0 {
+                        let arr_len = ctx
+                            .arrays
+                            .get(&resolved)
+                            .map(|a| a.len() as i64)
+                            .unwrap_or(0);
+                        if arr_len + raw_idx < 0 {
+                            let prefix = EXPAND_ERROR_PREFIX.with(|p| {
+                                let p = p.borrow();
+                                if p.is_empty() {
+                                    "bash".to_string()
+                                } else {
+                                    p.clone()
+                                }
+                            });
+                            eprintln!("{}: [{}]: bad array subscript", prefix, raw_idx);
+                            set_arith_error();
+                            return;
+                        }
+                    }
+                }
+            }
             // For Default/Alt words in unquoted context, check if we should
             // expand per-part for mixed quoting (e.g., ${IFS+foo 'bar' baz})
             // Clear any pre-existing arith error so we only detect errors
             // from this specific lookup_var call.
             let had_prior_error = take_arith_error();
             let orig_val = lookup_var(&expr.name, ctx);
-            // If lookup_var triggered an error (e.g., bad array subscript),
-            // bail out early to avoid duplicate errors from expand_param.
+            // If lookup_var triggered a fatal arith error, bail out.
             if get_arith_error() {
                 return;
             }
+            // If lookup_var printed a bad-subscript warning (non-fatal),
+            // consume the flag and skip calling expand_param again
+            // (which would call lookup_var a second time, duplicating
+            // the error message).  The expansion continues with empty val.
+            let had_bad_sub = take_bad_subscript();
             // Restore prior error flag if there was one
             if had_prior_error {
                 set_arith_error();
@@ -1146,6 +1209,11 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                         }
                     }
                 }
+            } else if had_bad_sub {
+                // Bad subscript already reported — use the empty orig_val
+                // without calling expand_param (which would re-trigger the
+                // lookup and print the error a second time).
+                out.push(Segment::Unquoted(orig_val));
             } else {
                 let mut val = expand_param(expr, ctx, cmd_sub);
                 // Apply tilde expansion for default/assign values
@@ -1824,7 +1892,7 @@ fn word_level_brace_expand(word: &Word) -> Vec<Word> {
         .collect()
 }
 
-fn brace_expand(s: &str) -> Vec<String> {
+pub(crate) fn brace_expand(s: &str) -> Vec<String> {
     // Bash algorithm: find the first '{', then its matching '}' (tracking depth),
     // check if the content has commas or '..' at depth 0.
     let chars: Vec<char> = s.chars().collect();

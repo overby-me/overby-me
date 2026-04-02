@@ -891,14 +891,48 @@ impl Shell {
             .cloned()
             .unwrap_or_else(|| " \t\n".to_string());
 
+        // set -k: identify keyword-looking words in the AST BEFORE expansion.
+        // We hold these back so that if no command remains after expansion,
+        // we can expand them AFTER prefix assignments are applied (bash semantics:
+        // `HOME=/a/b/c $EMPTY a=$HOME` → a gets the NEW HOME value).
+        let mut keyword_ast_words: Vec<&crate::ast::Word> = Vec::new();
+        let mut non_keyword_ast_indices: Vec<usize> = Vec::new();
+        if self.opt_keyword {
+            for (idx, word) in cmd.words.iter().enumerate() {
+                let raw = crate::ast::word_to_string(word);
+                if let Some(eq) = raw.find('=')
+                    && eq > 0
+                    && raw[..eq]
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '_')
+                    && raw
+                        .chars()
+                        .next()
+                        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                {
+                    keyword_ast_words.push(word);
+                } else {
+                    non_keyword_ast_indices.push(idx);
+                }
+            }
+        }
+
         // Check if first word is an assignment builtin (for tilde expansion)
-        let is_assignment_builtin = cmd.words.first().is_some_and(|w| {
+        let words_to_expand: Vec<(usize, &crate::ast::Word)> = if self.opt_keyword {
+            non_keyword_ast_indices
+                .iter()
+                .map(|&i| (i, &cmd.words[i]))
+                .collect()
+        } else {
+            cmd.words.iter().enumerate().collect()
+        };
+        let is_assignment_builtin = words_to_expand.first().is_some_and(|&(_, w)| {
             let name = self.expand_word_single(w);
             matches!(name.as_str(), "export" | "declare" | "typeset" | "local")
         });
         // Expand words, applying assignment-context tilde expansion where appropriate
         let mut expanded_words: Vec<String> = Vec::new();
-        for (idx, word) in cmd.words.iter().enumerate() {
+        for (idx, word) in words_to_expand {
             // For assignment builtins, arguments with = should not be split
             let is_assign_arg = is_assignment_builtin && idx > 0 && {
                 let raw = crate::ast::word_to_string(word);
@@ -1025,32 +1059,14 @@ impl Shell {
         // Handle assignments
         let saved_last_status = self.last_status;
 
-        // set -k: extract assignment-looking words from expanded_words BEFORE
-        // deciding whether to permanently execute assignments.  We need to know
-        // if a real command remains after keyword extraction.
+        // set -k: we already separated keyword-looking words from the AST
+        // before expansion.  Now we know whether a real command remains.
+        // If no command remains, expand keyword words AFTER prefix assignments
+        // so that e.g. `HOME=/a/b/c $EMPTY a=$HOME` expands $HOME to the new
+        // value.  If a command remains, expand them now (before the command runs)
+        // as temporary env.
         let mut keyword_assigns: Vec<(String, String)> = Vec::new();
-        if self.opt_keyword {
-            let mut new_words = Vec::new();
-            for word in expanded_words.iter() {
-                if let Some(eq) = word.find('=')
-                    && eq > 0
-                    && word[..eq]
-                        .chars()
-                        .all(|c| c.is_ascii_alphanumeric() || c == '_')
-                    && word
-                        .chars()
-                        .next()
-                        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
-                {
-                    let name = &word[..eq];
-                    let value = &word[eq + 1..];
-                    keyword_assigns.push((name.to_string(), value.to_string()));
-                    continue;
-                }
-                new_words.push(word.clone());
-            }
-            expanded_words = new_words;
-        }
+        // We defer keyword expansion for the no-command case below.
 
         // Now we know whether there is a real command.  Permanently execute
         // prefix assignments only when there is NO command word left.
@@ -1106,9 +1122,18 @@ impl Shell {
         }
 
         if expanded_words.is_empty() {
-            // No command — keyword assignments persist in the shell
-            for (name, value) in &keyword_assigns {
-                self.set_var(name, value.clone());
+            // No command — expand keyword AST words NOW, after prefix
+            // assignments have been applied, so their values reflect the
+            // new environment (e.g. a=$HOME sees the prefix HOME=/a/b/c).
+            if self.opt_keyword {
+                for kw_word in &keyword_ast_words {
+                    let expanded = self.expand_word_single(kw_word);
+                    if let Some(eq) = expanded.find('=') {
+                        let name = &expanded[..eq];
+                        let value = &expanded[eq + 1..];
+                        self.set_var(name, value.to_string());
+                    }
+                }
             }
             // No command words — apply redirections for null commands (e.g., `> file`)
             if !cmd.redirections.is_empty() {
@@ -1205,7 +1230,27 @@ impl Shell {
                     | "trap"
                     | "unset"
             );
-        // set -k: temporarily apply keyword assignments (save/restore around command)
+        // set -k: expand keyword AST words now (with command context) and
+        // temporarily apply them (save/restore around command execution).
+        if self.opt_keyword {
+            for kw_word in &keyword_ast_words {
+                let expanded = self.expand_word_single(kw_word);
+                if let Some(eq) = expanded.find('=')
+                    && eq > 0
+                    && expanded[..eq]
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '_')
+                    && expanded
+                        .chars()
+                        .next()
+                        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                {
+                    let name = &expanded[..eq];
+                    let value = &expanded[eq + 1..];
+                    keyword_assigns.push((name.to_string(), value.to_string()));
+                }
+            }
+        }
         let keyword_saves: Vec<(String, Option<String>, Option<String>)> = keyword_assigns
             .iter()
             .map(|(name, value)| {
@@ -1727,6 +1772,45 @@ impl Shell {
                 crate::builtins::fs::sync_dirstack(self);
             }
             return;
+        }
+        // For array assignments with negative subscripts, check bounds BEFORE
+        // the readonly check — bash reports "bad array subscript" first.
+        if let Some(bracket) = assign.name.find('[') {
+            let idx_str = &assign.name[bracket + 1..assign.name.len() - 1];
+            // Only check indexed (non-assoc) arrays with numeric subscripts
+            if !self.assoc_arrays.contains_key(&resolved_base)
+                && idx_str != "*"
+                && idx_str != "@"
+                && !idx_str.is_empty()
+            {
+                let raw_idx = self.eval_arith_expr(idx_str);
+                // If the subscript itself was a syntax error (e.g. b[c]d),
+                // the error was already printed — bail out to avoid duplicates.
+                if crate::expand::take_arith_error() {
+                    return;
+                }
+                if raw_idx < 0 {
+                    let arr_len = self
+                        .arrays
+                        .get(&resolved_base)
+                        .map(|a| a.len() as i64)
+                        .unwrap_or(0);
+                    if arr_len + raw_idx < 0 {
+                        let name = self
+                            .vars
+                            .get("_BASH_SOURCE_FILE")
+                            .or_else(|| self.positional.first())
+                            .map(|s| s.as_str())
+                            .unwrap_or("bash");
+                        let lineno = self.vars.get("LINENO").map(|s| s.as_str()).unwrap_or("0");
+                        eprintln!(
+                            "{}: line {}: {}[{}]: bad array subscript",
+                            name, lineno, base_name, idx_str
+                        );
+                        return;
+                    }
+                }
+            }
         }
         if self.readonly_vars.contains(&resolved_base) {
             let name = self

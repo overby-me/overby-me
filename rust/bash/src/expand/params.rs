@@ -391,6 +391,25 @@ pub(super) fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
                                 .cloned()
                                 .unwrap_or_default();
                         }
+                        // Check for brace expansion pattern in subscript
+                        // (e.g. `${arr[{2..6}]}` → expand braces, look up each index)
+                        if idx_str.contains('{')
+                            && (idx_str.contains("..") || idx_str.contains(','))
+                            && ctx.arrays.contains_key(&resolved)
+                        {
+                            let expanded = crate::expand::brace_expand(idx_str);
+                            if expanded.len() > 1 {
+                                let arr = ctx.arrays.get(&resolved).unwrap();
+                                let results: Vec<String> = expanded
+                                    .iter()
+                                    .filter_map(|s| {
+                                        let idx: usize = s.trim().parse().ok()?;
+                                        arr.get(idx).and_then(|v| v.clone())
+                                    })
+                                    .collect();
+                                return results.join(" ");
+                            }
+                        }
                         // Numeric index for indexed arrays — use arithmetic evaluation
                         let raw_idx: i64 = if idx_str.trim().is_empty() {
                             0
@@ -419,8 +438,13 @@ pub(super) fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
                                             p.clone()
                                         }
                                     });
-                                    eprintln!("{}: [{}]: bad array subscript", prefix, raw_idx);
-                                    crate::expand::set_arith_error();
+                                    eprintln!("{}: {}: bad array subscript", prefix, resolved);
+                                    // Signal that a bad subscript was reported
+                                    // so expand_part skips the duplicate
+                                    // lookup_var call, but do NOT set
+                                    // arith_error — bash still runs the command
+                                    // with an empty expansion.
+                                    crate::expand::set_bad_subscript();
                                     return String::new();
                                 }
                                 computed as usize
@@ -1038,6 +1062,43 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                     }
                     if let Some(assoc) = ctx.assoc_arrays.get(&resolved) {
                         return assoc.len().to_string();
+                    }
+                }
+                // ${#arr[N]} with negative N — check bounds and use [-N] error format
+                if !ctx.assoc_arrays.contains_key(&resolved) && idx_str != "@" && idx_str != "*" {
+                    let raw_idx: i64 = if idx_str.trim().is_empty() {
+                        0
+                    } else if let Ok(v) = idx_str.trim().parse::<i64>() {
+                        v
+                    } else {
+                        crate::expand::arithmetic::eval_arith_full(
+                            idx_str,
+                            ctx.vars,
+                            &std::collections::HashMap::new(),
+                            ctx.positional,
+                            ctx.last_status,
+                            ctx.opt_flags,
+                        )
+                    };
+                    if raw_idx < 0 {
+                        let arr_len = ctx
+                            .arrays
+                            .get(&resolved)
+                            .map(|a| a.len() as i64)
+                            .unwrap_or(0);
+                        if arr_len + raw_idx < 0 {
+                            let prefix = EXPAND_ERROR_PREFIX.with(|p| {
+                                let p = p.borrow();
+                                if p.is_empty() {
+                                    "bash".to_string()
+                                } else {
+                                    p.clone()
+                                }
+                            });
+                            eprintln!("{}: [{}]: bad array subscript", prefix, raw_idx);
+                            crate::expand::set_arith_error();
+                            return String::new();
+                        }
                     }
                 }
             }
