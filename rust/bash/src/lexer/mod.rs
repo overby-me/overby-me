@@ -103,6 +103,10 @@ pub struct Lexer {
     heredoc_index: usize,
     pub heredoc_overflow_line: Option<usize>,
     pub heredoc_eof_warnings: Vec<(usize, usize, String)>, // (eof_line, start_line, delimiter)
+    /// When heredoc bodies were force-read ahead of the newline (due to `&`
+    /// on the same line), this stores the (pos, line) to resume from after
+    /// the heredoc bodies, so the newline handler can skip over them.
+    heredoc_resume: Option<(usize, usize)>,
     // Alias expansion
     pub aliases: HashMap<String, String>,
     pub shopt_expand_aliases: bool,
@@ -137,6 +141,7 @@ impl Lexer {
             heredoc_index: 0,
             heredoc_overflow_line: None,
             heredoc_eof_warnings: Vec::new(),
+            heredoc_resume: None,
             aliases: HashMap::new(),
             shopt_expand_aliases: false,
             posix_mode: false,
@@ -197,6 +202,56 @@ impl Lexer {
         self.heredoc_eof_warnings
             .truncate(saved.heredoc_eof_warnings_len);
         self.line = saved.line;
+    }
+
+    /// Check if the lexer has pending heredocs that haven't been read yet.
+    /// When a command with `<<` is terminated by `&` before the newline,
+    /// the heredoc bodies haven't been consumed.  This method temporarily
+    /// advances the raw input scanner past the newline to read the heredoc
+    /// bodies, then restores the lexer position so that subsequent tokens
+    /// on the same line (e.g. the foreground command after `&`) are not
+    /// lost.
+    pub fn force_read_pending_heredocs(&mut self) {
+        if self.pending_heredocs.is_empty() {
+            return;
+        }
+        // Save current position — we'll restore it after reading bodies
+        // so the token stream for the rest of the line is preserved.
+        let saved_pos = self.pos;
+        let saved_line = self.line;
+
+        // Skip forward in the raw input to the next newline (the heredoc
+        // bodies always start on the line after the command line).
+        while self.pos < self.input.len() && self.input[self.pos] != '\n' {
+            self.pos += 1;
+        }
+        // Consume the newline itself
+        if self.pos < self.input.len() && self.input[self.pos] == '\n' {
+            self.line += 1;
+            self.pos += 1;
+        }
+        self.read_heredoc_bodies();
+
+        // The heredoc bodies are now stored in self.heredoc_bodies.
+        // Remember where the input is AFTER the heredoc bodies so we
+        // can resume there once the rest-of-line tokens are consumed.
+        let resume_pos = self.pos;
+        let resume_line = self.line;
+
+        // Restore the lexer to its original position so the tokenizer
+        // can continue reading the remaining tokens on the original
+        // command line (e.g. `echo foreground` after `&`).
+        self.pos = saved_pos;
+        self.line = saved_line;
+
+        // Store the resume point — the next_token method will jump here
+        // when it encounters the newline that ends the current line.
+        self.heredoc_resume = Some((resume_pos, resume_line));
+    }
+
+    /// Returns true if the lexer has pending (unread) heredocs.
+    pub fn has_pending_heredocs(&self) -> bool {
+        !self.pending_heredocs.is_empty()
     }
 
     fn skip_whitespace(&mut self) {
@@ -477,7 +532,12 @@ impl Lexer {
         let token = match ch {
             '\n' => {
                 self.advance();
-                if !self.pending_heredocs.is_empty() {
+                if let Some((resume_pos, resume_line)) = self.heredoc_resume.take() {
+                    // Heredoc bodies were already force-read by
+                    // force_read_pending_heredocs — jump past them.
+                    self.pos = resume_pos;
+                    self.line = resume_line;
+                } else if !self.pending_heredocs.is_empty() {
                     self.read_heredoc_bodies();
                 }
                 Token::Newline

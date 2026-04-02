@@ -1019,6 +1019,31 @@ impl Shell {
                     }
                 }
                 Err(e) => {
+                    // Extract accurate line number from COMSUB_LINE:N: prefix
+                    // (set by take_word_checked before advance() moves the
+                    // lexer past the error token's line).  Only COMSUB errors
+                    // update LINENO — for other parse errors the pre-parse
+                    // LINENO (set at the top of the loop) is already correct.
+                    let (e, comsub_error_line) = if let Some(rest) = e.strip_prefix("COMSUB_LINE:")
+                    {
+                        if let Some(colon) = rest.find(':') {
+                            let line: usize =
+                                rest[..colon].parse().unwrap_or(parser.current_line());
+                            // Re-add the COMSUB: prefix that downstream
+                            // code expects for comsub error handling.
+                            (format!("COMSUB:{}", &rest[colon + 1..]), Some(line))
+                        } else {
+                            (e, None)
+                        }
+                    } else {
+                        (e, None)
+                    };
+                    if let Some(line) = comsub_error_line
+                        && !self.in_debug_trap
+                        && self.in_trap_handler == 0
+                    {
+                        self.vars.insert("LINENO".to_string(), line.to_string());
+                    }
                     // Check for recoverable syntax errors (e.g. bad array compound assignment)
                     // These are marked by the parser with a \x01RECOVERABLE\x01 prefix
                     let (recoverable, e) = if let Some(msg) = e.strip_prefix("\x01RECOVERABLE\x01")

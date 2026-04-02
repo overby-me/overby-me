@@ -1023,7 +1023,16 @@ fn format_compound_command_indent(cmd: &CompoundCommand, indent: usize) -> Strin
             let cond = format_program(&clause.condition, 0);
             let cond = cond.trim().trim_end_matches(';');
             s.push_str(cond);
-            s.push_str("; then\n");
+            // When the condition contains a heredoc (has embedded newlines),
+            // put `then` on its own indented line after the heredoc delimiter,
+            // matching bash's `declare -pf` output.
+            if cond.contains('\n') {
+                s.push('\n');
+                s.push_str(&iprefix);
+                s.push_str("then\n");
+            } else {
+                s.push_str("; then\n");
+            }
             s.push_str(&format_program(&clause.then_body, indent + 1));
             // Bash expands elif to nested else { if ... fi }
             let mut remaining_elifs = clause.elif_parts.iter().peekable();
@@ -1100,18 +1109,25 @@ fn format_compound_command_indent(cmd: &CompoundCommand, indent: usize) -> Strin
             s.push_str(&format!("\n{iprefix}done"));
             s
         }
-        CompoundCommand::While(clause) => {
+        CompoundCommand::While(clause) | CompoundCommand::Until(clause) => {
+            let keyword = if matches!(cmd, CompoundCommand::Until(_)) {
+                "until"
+            } else {
+                "while"
+            };
             let cond = format_program(&clause.condition, 0);
             let cond = cond.trim().trim_end_matches(';');
-            let mut s = format!("while {}; do\n", cond);
-            s.push_str(&format_program(&clause.body, indent + 1));
-            s.push_str(&format!("\n{iprefix}done"));
-            s
-        }
-        CompoundCommand::Until(clause) => {
-            let cond = format_program(&clause.condition, 0);
-            let cond = cond.trim().trim_end_matches(';');
-            let mut s = format!("until {}; do\n", cond);
+            let mut s = format!("{} {}", keyword, cond);
+            // When the condition contains a heredoc (has embedded newlines),
+            // put `do` on its own indented line after the heredoc delimiter,
+            // matching bash's `declare -pf` output.
+            if cond.contains('\n') {
+                s.push('\n');
+                s.push_str(&iprefix);
+                s.push_str("do\n");
+            } else {
+                s.push_str("; do\n");
+            }
             s.push_str(&format_program(&clause.body, indent + 1));
             s.push_str(&format!("\n{iprefix}done"));
             s

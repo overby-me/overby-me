@@ -126,7 +126,16 @@ impl Lexer {
                 } else {
                     line.clone()
                 };
-                if check_line == hd.delimiter {
+                // When strip_tabs is set (<<-), also strip leading tabs
+                // from the delimiter for matching.  Bash allows the
+                // delimiter word itself to contain leading tabs (e.g.
+                // `<<-'\tEND'`) and still matches after stripping.
+                let check_delim = if hd.strip_tabs {
+                    hd.delimiter.trim_start_matches('\t')
+                } else {
+                    &hd.delimiter
+                };
+                if check_line == check_delim {
                     break;
                 }
                 if !body.is_empty() {

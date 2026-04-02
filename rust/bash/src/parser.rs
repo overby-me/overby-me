@@ -428,7 +428,15 @@ fn find_comsub_boundary(
                         } else {
                             line.clone()
                         };
-                        if check == delim {
+                        // When strip_tabs is set (<<-), also strip leading
+                        // tabs from the delimiter for matching, matching
+                        // bash's behavior with tab-indented delimiters.
+                        let check_delim = if strip_tabs {
+                            delim.trim_start_matches('\t')
+                        } else {
+                            &delim
+                        };
+                        if check == check_delim {
                             cmd.push_str(&line);
                             if i < chars.len() {
                                 cmd.push('\n');
@@ -436,8 +444,8 @@ fn find_comsub_boundary(
                             }
                             break;
                         }
-                        if check.starts_with(&delim)
-                            && check[delim.len()..].trim_start().starts_with(')')
+                        if check.starts_with(check_delim)
+                            && check[check_delim.len()..].trim_start().starts_with(')')
                         {
                             let current_line =
                                 chars[..i].iter().filter(|&&c| c == '\n').count() + 1;
@@ -811,8 +819,18 @@ impl Parser {
     /// when `parse_comsub` detects a syntax error.
     fn take_word_checked(&mut self) -> Result<Option<Word>, String> {
         if let Some(err) = self.check_word_syntax_error() {
+            // Capture the lexer line BEFORE advance(), because advance()
+            // reads the next token which may cross a newline boundary,
+            // giving a wrong line number for the error.
+            let error_line = self.lexer.line;
             // Consume the word so the parser doesn't get stuck
             self.advance();
+            // For COMSUB errors, embed the accurate line number so that
+            // run_string can use it instead of the (possibly advanced)
+            // parser.current_line().
+            if let Some(inner) = err.strip_prefix("COMSUB:") {
+                return Err(format!("COMSUB_LINE:{}:{}", error_line, inner));
+            }
             return Err(err);
         }
         Ok(self.take_word())
@@ -990,6 +1008,14 @@ impl Parser {
                 false
             }
         };
+
+        // If the command was terminated by `&` before the newline, the lexer
+        // hasn't reached the newline yet and pending heredoc bodies haven't
+        // been read.  Force-read them now so resolve_heredoc_bodies can
+        // fill them into the AST.
+        if self.lexer.has_pending_heredocs() {
+            self.lexer.force_read_pending_heredocs();
+        }
 
         // Resolve any deferred heredoc bodies (for pipeline heredocs like cmd <<EOF | cmd2)
         self.resolve_heredoc_bodies(&mut list);
