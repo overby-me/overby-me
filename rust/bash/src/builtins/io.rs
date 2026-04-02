@@ -1481,7 +1481,16 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
     }
 
     if !prompt.is_empty() {
-        eprint!("{}", prompt);
+        // Only print the prompt when the input fd is a terminal (like bash).
+        // When reading from a heredoc, pipe, or file, suppress the prompt.
+        let input_fd = fd.unwrap_or(0);
+        #[cfg(unix)]
+        let should_prompt = nix::unistd::isatty(input_fd).unwrap_or(false);
+        #[cfg(not(unix))]
+        let should_prompt = true;
+        if should_prompt {
+            eprint!("{}", prompt);
+        }
     }
 
     // Validate fd if specified

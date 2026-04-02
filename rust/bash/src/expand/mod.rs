@@ -9,6 +9,18 @@ use crate::ast::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
+/// Get the first character of IFS, distinguishing unset from empty.
+/// - IFS unset → `Some(' ')` (default separator is space)
+/// - IFS set to empty string → `None` (no separator)
+/// - IFS set to non-empty → `Some(first_char)`
+fn ifs_first_char(vars: &HashMap<String, String>) -> Option<char> {
+    match vars.get("IFS") {
+        None => Some(' '),               // IFS unset → default space
+        Some(s) if s.is_empty() => None, // IFS="" → no separator
+        Some(s) => s.chars().next(),     // IFS="x..." → first char
+    }
+}
+
 /// Function type for evaluating command substitutions.
 pub type CmdSubFn<'a> = &'a mut dyn FnMut(&str) -> String;
 
@@ -610,12 +622,7 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                         let sep = if expr.name == "@" {
                             None // SplitHere
                         } else {
-                            Some(
-                                ctx.vars
-                                    .get("IFS")
-                                    .and_then(|s| s.chars().next())
-                                    .unwrap_or(' '),
-                            )
+                            ifs_first_char(ctx.vars)
                         };
                         for (i, elem) in ctx.positional[1..].iter().enumerate() {
                             if i > 0 {
@@ -645,14 +652,12 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                         };
                         if is_star {
                             // "${*:...}" or "${arr[*]:...}" — join with IFS[0]
-                            let ifs_char = ctx
-                                .vars
-                                .get("IFS")
-                                .and_then(|s| s.chars().next())
-                                .unwrap_or(' ');
+                            let ifs_sep = ifs_first_char(ctx.vars);
                             for (i, elem) in elements.iter().enumerate() {
-                                if i > 0 {
-                                    s.push(ifs_char);
+                                if i > 0
+                                    && let Some(c) = ifs_sep
+                                {
+                                    s.push(c);
                                 }
                                 let modified = if matches!(&expr.op, ParamOp::Substring(..)) {
                                     elem.clone()
@@ -921,12 +926,10 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                         out.push(if expr.name == "@" {
                             Segment::SplitHere
                         } else {
-                            let ifs_char = ctx
-                                .vars
-                                .get("IFS")
-                                .and_then(|s| s.chars().next())
-                                .unwrap_or(' ');
-                            Segment::Unquoted(ifs_char.to_string())
+                            match ifs_first_char(ctx.vars) {
+                                Some(c) => Segment::Unquoted(c.to_string()),
+                                None => Segment::Unquoted(String::new()),
+                            }
                         });
                     }
                     first = false;
@@ -950,19 +953,6 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                     // Apply operation to each element separately
                     let mut first = true;
                     for elem in arr.iter().filter_map(|v| v.as_ref()) {
-                        if !first {
-                            out.push(if idx == "@" {
-                                Segment::SplitHere
-                            } else {
-                                let ifs_char = ctx
-                                    .vars
-                                    .get("IFS")
-                                    .and_then(|s| s.chars().next())
-                                    .unwrap_or(' ');
-                                Segment::Unquoted(ifs_char.to_string())
-                            });
-                        }
-                        first = false;
                         // Create a temporary param expr for this single element
                         let single_expr = ParamExpr {
                             name: elem.clone(),
@@ -971,6 +961,23 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                         // Apply the operation using the element value directly
                         let result =
                             apply_param_op(elem, &single_expr.op, ctx, cmd_sub, &single_expr.name);
+                        // In unquoted context, skip empty results so they don't
+                        // produce empty fields (e.g. ${arr[@]%%pattern} where
+                        // an element is fully removed).
+                        if result.is_empty() {
+                            continue;
+                        }
+                        if !first {
+                            out.push(if idx == "@" {
+                                Segment::SplitHere
+                            } else {
+                                match ifs_first_char(ctx.vars) {
+                                    Some(c) => Segment::Unquoted(c.to_string()),
+                                    None => Segment::Unquoted(String::new()),
+                                }
+                            });
+                        }
+                        first = false;
                         out.push(Segment::Unquoted(result));
                     }
                     return;
@@ -1021,12 +1028,10 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                                 out.push(if idx == "@" {
                                     Segment::SplitHere
                                 } else {
-                                    let ifs_char = ctx
-                                        .vars
-                                        .get("IFS")
-                                        .and_then(|s| s.chars().next())
-                                        .unwrap_or(' ');
-                                    Segment::Unquoted(ifs_char.to_string())
+                                    match ifs_first_char(ctx.vars) {
+                                        Some(c) => Segment::Unquoted(c.to_string()),
+                                        None => Segment::Unquoted(String::new()),
+                                    }
                                 });
                             }
                             first = false;
@@ -1060,12 +1065,10 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                                 out.push(if idx == "@" {
                                     Segment::SplitHere
                                 } else {
-                                    let ifs_char = ctx
-                                        .vars
-                                        .get("IFS")
-                                        .and_then(|s| s.chars().next())
-                                        .unwrap_or(' ');
-                                    Segment::Unquoted(ifs_char.to_string())
+                                    match ifs_first_char(ctx.vars) {
+                                        Some(c) => Segment::Unquoted(c.to_string()),
+                                        None => Segment::Unquoted(String::new()),
+                                    }
                                 });
                             }
                             first = false;

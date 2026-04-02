@@ -225,10 +225,18 @@ pub(super) fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
             let idx_str = &name[bracket + 1..name.len() - 1];
             let resolved = shell.resolve_nameref(base);
             if idx_str == "@" || idx_str == "*" {
-                // unset arr[@] — remove entire array
-                shell.arrays.remove(&resolved);
-                shell.assoc_arrays.remove(&resolved);
-                shell.vars.remove(&resolved);
+                // unset arr[@] / arr[*] — clear all elements but keep the
+                // array variable (bash keeps it as an empty array).
+                if let Some(arr) = shell.arrays.get_mut(&resolved) {
+                    arr.clear();
+                } else if let std::collections::hash_map::Entry::Occupied(mut entry) =
+                    shell.assoc_arrays.entry(resolved.clone())
+                {
+                    *entry.get_mut() = crate::interpreter::AssocArray::default();
+                } else {
+                    // Not an array — remove scalar
+                    shell.vars.remove(&resolved);
+                }
             } else if shell.assoc_arrays.contains_key(&resolved) {
                 shell
                     .assoc_arrays
@@ -236,6 +244,45 @@ pub(super) fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
                     .map(|a| a.remove(idx_str));
             } else {
                 let raw_idx = shell.eval_arith_expr(idx_str);
+                // Check if base is a scalar (not an array) — unset scalar[n] where n!=0
+                // should error with "not an array variable", but only if the variable
+                // actually exists as a scalar.  Unsetting a subscript on a completely
+                // unset variable is silently ignored (like bash).
+                let is_indexed_array = shell.arrays.contains_key(&resolved);
+                let is_assoc_array = shell.assoc_arrays.contains_key(&resolved);
+                let is_scalar = shell.vars.contains_key(&resolved);
+                if !is_indexed_array && !is_assoc_array && is_scalar {
+                    // Scalar variable: unset var[0] unsets the scalar,
+                    // but unset var[n] (n!=0) errors
+                    if raw_idx == 0 {
+                        if shell.readonly_vars.contains(&resolved) {
+                            eprintln!(
+                                "{}: unset: {}: cannot unset: readonly variable",
+                                shell.error_prefix(),
+                                resolved
+                            );
+                            status = 1;
+                            continue;
+                        }
+                        shell.vars.remove(&resolved);
+                        shell.exports.remove(&resolved);
+                        if !resolved.is_empty() {
+                            unsafe { std::env::remove_var(&resolved) };
+                        }
+                    } else {
+                        eprintln!(
+                            "{}: unset: {}: not an array variable",
+                            shell.error_prefix(),
+                            base
+                        );
+                        status = 1;
+                    }
+                    continue;
+                }
+                // Completely unset variable with subscript — silently ignore
+                if !is_indexed_array && !is_assoc_array {
+                    continue;
+                }
                 if raw_idx < 0
                     && let Some(arr) = shell.arrays.get(&resolved)
                     && raw_idx.abs() > arr.len() as i64
@@ -844,11 +891,20 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 for rname in &remaining_names {
                     let pure = rname.split('=').next().unwrap_or(rname);
                     if shell.assoc_arrays.contains_key(pure) || shell.arrays.contains_key(pure) {
-                        eprintln!(
-                            "{}: declare: {}: cannot destroy array variables in this way",
-                            shell.error_prefix(),
-                            pure
-                        );
+                        // Readonly check takes precedence over "cannot destroy"
+                        if shell.readonly_vars.contains(pure) {
+                            eprintln!(
+                                "{}: declare: {}: readonly variable",
+                                shell.error_prefix(),
+                                pure
+                            );
+                        } else {
+                            eprintln!(
+                                "{}: declare: {}: cannot destroy array variables in this way",
+                                shell.error_prefix(),
+                                pure
+                            );
+                        }
                         return 1;
                     }
                 }

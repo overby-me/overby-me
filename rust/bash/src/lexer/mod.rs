@@ -5,6 +5,139 @@ mod word;
 pub use dollar::{parse_dollar, parse_dollar_with_warnings, warn_incomplete_comsub_in_pattern};
 pub use heredoc::parse_word_string;
 
+/// Parse compound array content (the text between `(` and `)`) with full
+/// shell quoting — double quotes, single quotes, `$`-expansions and
+/// backslash escapes are all honoured.  Returns a single `Word` whose
+/// parts can be fed to `expand_word_fields` for proper word splitting.
+///
+/// This is needed so that `declare -a f='("${d[@]}")'` re-expands the
+/// inner `"${d[@]}"` correctly (the single-quotes were already removed
+/// by the outer shell lexer, leaving literal `"`, `$`, etc.).
+pub fn lex_compound_array_content(s: &str) -> Word {
+    let chars: Vec<char> = s.chars().collect();
+    let len = chars.len();
+    let mut parts: Word = Vec::new();
+    let mut i = 0;
+    let mut lit = String::new();
+
+    while i < len {
+        match chars[i] {
+            // Double-quoted string — collect inner parts
+            '"' => {
+                if !lit.is_empty() {
+                    parts.push(WordPart::Literal(std::mem::take(&mut lit)));
+                }
+                i += 1; // skip opening "
+                let mut dq_parts: Vec<WordPart> = Vec::new();
+                let mut dq_lit = String::new();
+                while i < len && chars[i] != '"' {
+                    if chars[i] == '\\' && i + 1 < len {
+                        let next = chars[i + 1];
+                        if matches!(next, '$' | '`' | '"' | '\\' | '\n') {
+                            dq_lit.push(next);
+                            i += 2;
+                            continue;
+                        }
+                        dq_lit.push('\\');
+                        i += 1;
+                    } else if chars[i] == '$' {
+                        if !dq_lit.is_empty() {
+                            dq_parts.push(WordPart::Literal(std::mem::take(&mut dq_lit)));
+                        }
+                        i += 1;
+                        dq_parts.push(parse_dollar(&chars, &mut i, true));
+                    } else if chars[i] == '`' {
+                        if !dq_lit.is_empty() {
+                            dq_parts.push(WordPart::Literal(std::mem::take(&mut dq_lit)));
+                        }
+                        // backtick command substitution
+                        let start = i + 1;
+                        i += 1;
+                        while i < len && chars[i] != '`' {
+                            if chars[i] == '\\' {
+                                i += 1;
+                            }
+                            i += 1;
+                        }
+                        let cmd: String = chars[start..i.min(len)].iter().collect();
+                        if i < len {
+                            i += 1;
+                        } // skip closing `
+                        dq_parts.push(WordPart::BacktickSub(cmd));
+                    } else {
+                        dq_lit.push(chars[i]);
+                        i += 1;
+                    }
+                }
+                if !dq_lit.is_empty() {
+                    dq_parts.push(WordPart::Literal(dq_lit));
+                }
+                if i < len {
+                    i += 1;
+                } // skip closing "
+                parts.push(WordPart::DoubleQuoted(dq_parts));
+            }
+            // Single-quoted string — literal content
+            '\'' => {
+                if !lit.is_empty() {
+                    parts.push(WordPart::Literal(std::mem::take(&mut lit)));
+                }
+                i += 1; // skip opening '
+                let mut sq = String::new();
+                while i < len && chars[i] != '\'' {
+                    sq.push(chars[i]);
+                    i += 1;
+                }
+                if i < len {
+                    i += 1;
+                } // skip closing '
+                parts.push(WordPart::SingleQuoted(sq));
+            }
+            // Dollar expansion (unquoted)
+            '$' => {
+                if !lit.is_empty() {
+                    parts.push(WordPart::Literal(std::mem::take(&mut lit)));
+                }
+                i += 1;
+                parts.push(parse_dollar(&chars, &mut i, false));
+            }
+            // Backtick command substitution (unquoted)
+            '`' => {
+                if !lit.is_empty() {
+                    parts.push(WordPart::Literal(std::mem::take(&mut lit)));
+                }
+                let start = i + 1;
+                i += 1;
+                while i < len && chars[i] != '`' {
+                    if chars[i] == '\\' {
+                        i += 1;
+                    }
+                    i += 1;
+                }
+                let cmd: String = chars[start..i.min(len)].iter().collect();
+                if i < len {
+                    i += 1;
+                }
+                parts.push(WordPart::BacktickSub(cmd));
+            }
+            // Backslash escape (unquoted)
+            '\\' if i + 1 < len => {
+                lit.push(chars[i + 1]);
+                i += 2;
+            }
+            // Regular character
+            c => {
+                lit.push(c);
+                i += 1;
+            }
+        }
+    }
+    if !lit.is_empty() {
+        parts.push(WordPart::Literal(lit));
+    }
+    parts
+}
+
 use word::read_param_word_impl;
 
 use crate::ast::*;

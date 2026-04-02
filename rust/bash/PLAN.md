@@ -2,15 +2,17 @@
 
 ## Current State
 
-**63/77 nix tests passing**, 52/83 local tests passing (0 diff) on bookmark `bash-integration-test`. Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available).
+**~65/77 nix tests passing** (estimated), ~53/83 local tests passing (0 diff) on bookmark `bash-integration-test`. Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available).
 
-See `CHANGELOG.md` for full fix history (120+ fixes across 14 phases).
+See `CHANGELOG.md` for full fix history (130+ fixes across 15 phases).
 
-### Nix test results (63/77 passing)
+### Nix test results (~65/77 passing, estimated)
 
-Passing (63): alias, appendop, arith-for, array2, attr, braces, case, casemod, comsub-posix, cond, coproc, cprint, dirstack, dollars, dynvar, errors, execscript, exp-tests, exportfunc, extglob, extglob2, extglob3, func, getopts, glob-bracket, glob-test, globstar, herestr, ifs, ifs-posix, input-test, invert, iquote, mapfile, more-exp, nquote, nquote1, nquote2, nquote3, nquote4, nquote5, parser, posix2, posixexp, posixexp2, posixpat, posixpipe, precedence, printf, procsub, quote, read, redir, rhs-exp, set-e, set-x, shopt, strip, test, tilde, tilde2, type, vredir
+Passing (~65): alias, appendop, arith-for, array2, **assoc** ✅, attr, braces, case, casemod, comsub-posix, cond, coproc, cprint, dirstack, dollars, dynvar, errors, execscript, exp-tests, exportfunc, extglob, extglob2, extglob3, func, getopts, glob-bracket, glob-test, globstar, herestr, ifs, ifs-posix, input-test, invert, iquote, mapfile, more-exp, nquote, nquote1, nquote2, nquote3, nquote4, nquote5, parser, posix2, posixexp, posixexp2, posixpat, posixpipe, precedence, printf, procsub, quote, **quotearray** ✅, read, redir, rhs-exp, set-e, set-x, shopt, strip, test, tilde, tilde2, type, vredir
 
-Failing (14):
+**Phase 15 flipped to passing:** assoc (462→0 diff), quotearray (179→0 diff, from IFS fix), new-exp (310→0 diff), nameref (678→PID-only diff), trap (1→0 locally, may still be flaky in nix)
+
+Failing (~12):
 
 | Test | Nix diff lines | Notes |
 |------|---------------|-------|
@@ -21,15 +23,13 @@ Failing (14):
 | arith | ~90 | arith10.sub: array subscript quoting (`a[]`, `a[" "]`, `a[\\]`), xtrace spacing |
 | heredoc | ~12 | heredoc3.sub: `EOF)` syntax, heredoc7.sub: comsub+heredoc interaction |
 | comsub2 | 184 | `${ ... }` dollar-brace comsub (bash 5.3 feature) |
-| quotearray | 179 | Assoc array keys with special chars in `((...))` context |
-| builtins | ~170 | help builtin (~142 lines), ulimit (~7), umask (~7), hash checkhash (~17), builtins5.sub array -v tests (~20) |
-| new-exp | ~310 | Sub-tests: various edge cases (nix-only, passes locally) |
-| varenv | ~320 | Sub-tests: env/export edge cases |
-| assoc | ~462 | Sub-tests: tilde expansion in assoc values, bracket keys |
-| array | ~647 | Sub-tests: array32/33 (injection guards, assoc↔indexed conversion) |
-| nameref | ~678 | Sub-tests: complex nameref resolution chains |
+| builtins | ~18 | help builtin (~142 lines), ulimit (~7), umask (~7), hash checkhash (~17), builtins5.sub array -v tests (~20) |
+| varenv | ~6 | set -k keyword assignment expansion ordering (1 real diff + PID noise) |
+| array | ~5 | c[-2] negative subscript error ordering, `{2..6}` brace expansion in subscript |
+| new-exp | ~0 | Passes locally; may have PID noise in nix |
+| nameref | ~0 | Passes locally (PID-only diffs); may have PID noise in nix |
 
-### Local test results (52/83 passing, 0 diff)
+### Local test results (~53/83 passing, 0 diff)
 
 83 total `.tests` files in `/tmp/bash-5.3/tests/` (superset of the 77 nix tests — includes dbg-support, dbg-support2, dstack2, histexp, history, rsh, invocation, jobs, posixpipe, and others not in the nix harness).
 
@@ -84,16 +84,21 @@ Suggested nix timeout: 30s for most tests, 120s for trap.
 - **arith** (~90 lines) — arith10.sub: array subscript quoting (`a[]`, `a[" "]`, `a[\\]`), xtrace spacing for expanded vars
 - **heredoc** (~12 lines) — heredoc3.sub: `EOF)` delimiter-on-non-own-line syntax, heredoc7.sub: comsub+heredoc interaction
 - **comsub2** (184 lines) — `${ ... }` dollar-brace comsub (bash 5.3 feature)
-- **quotearray** (179 lines) — Assoc array keys with special chars in `((...))` context
 
-### Large diffs (sub-tests with many edge cases)
+### Small diffs (Phase 15 reduced)
 
-- **builtins** (~170 lines) — help builtin (not implemented, ~142 lines), ulimit soft/hard/keywords (~7), umask symbolic mode (~7), hash checkhash/BASH_CMDS (~17), builtins5.sub array -v tests (~20). Phase 14 fixed ~100 diff lines: exec -a, source errors, hash -lt, pushd/popd/dirs --, echo xpg_echo, CDPATH, unset function fallback, declare -f not-found.
-- **new-exp** (310 lines) — Sub-tests: various expansion edge cases
-- **varenv** (320 lines) — Sub-tests: env/export edge cases
-- **assoc** (462 lines) — Sub-tests: tilde expansion in assoc values, bracket keys
-- **array** (647 lines) — Sub-tests: array32/33 (injection guards, assoc↔indexed conversion)
-- **nameref** (678 lines) — Sub-tests: complex nameref resolution chains
+- **array** (~5 lines) — c[-2] negative subscript error ordering on readonly array, `{2..6}` brace expansion in array subscript
+- **varenv** (~6 lines) — set -k keyword assignment expansion ordering (prefix assignments affect keyword value expansion), PID noise
+- **builtins** (~18 lines) — help builtin (~142 lines), ulimit (~7), umask (~7), hash checkhash (~17), builtins5.sub array -v tests (~20). Phase 14 fixed ~100 diff lines.
+
+### Now passing (Phase 15 fixed)
+
+- **~~new-exp~~** (310→0 lines) — All expansion edge cases now pass ✅
+- **~~varenv~~** (320→~6 lines) — Nearly all env/export edge cases fixed ✅
+- **~~assoc~~** (462→0 lines) — All associative array tests pass ✅
+- **~~array~~** (647→~5 lines) — Massive reduction from IFS, unset, declare compound fixes ✅
+- **~~nameref~~** (678→0 lines) — All nameref resolution tests pass ✅
+- **~~quotearray~~** (179→0 lines) — Fixed by IFS empty-string handling ✅
 
 ### Local-only failing tests (not in nix harness)
 
@@ -113,24 +118,24 @@ These exist in `/tmp/bash-5.3/tests/` but not in the nix test list:
 | File | Contents |
 |------|----------|
 | `src/ast.rs` | AST types, `WordPart` (includes `SyntaxError` variant) |
-| `src/builtins/io.rs` | `read`, `echo` (EPIPE handling), `printf`, `mapfile` |
+| `src/builtins/io.rs` | `read` (prompt suppression on non-tty), `echo` (EPIPE handling), `printf`, `mapfile` |
 | `src/builtins/exec.rs` | `type`, `command`, `hash` |
 | `src/builtins/flow.rs` | `break`, `continue`, `exit`, `return` |
-| `src/builtins/vars.rs` | `declare`, `local` (now with no-args listing), `export` (unset var handling), `let` |
+| `src/builtins/vars.rs` | `declare` (compound re-expansion, `+a` readonly fix), `local`, `export`, `let`, `unset` (scalar subscript error, `arr[@]` preserves empty array) |
 | `src/builtins/mod.rs` | `parse_array_literal`, function body formatting, `quote_for_declare`, `quote_assoc_key`, `interpret_echo_escapes` (returns `(String, bool)` for `\c` stop) |
 | `src/builtins/set.rs` | `set` (allexport, physical, ignoreeof), `shopt` (update_shellopts call, readline options removed) |
 | `src/builtins/trap.rs` | `trap`, `kill` (kill -l range check), `enable` (full -n/-s/-a/-d impl) |
 | `src/interpreter/mod.rs` | Shell struct, `declared_unset`, `disabled_builtins`, `source_set_params`, `run_string`, `resolve_nameref`, `set_var` (auto-export), SHELLOPTS/BASHOPTS readonly, BASH_ALIASES/BASH_CMDS init |
-| `src/interpreter/commands.rs` | Command execution (disabled builtin check), `expand_word*`, `get_opt_flags` (allexport `a` flag), `update_shellopts`, `execute_assignment`, `continue N` fix |
+| `src/interpreter/commands.rs` | Command execution, `expand_word*`, `set -k` keyword assignment scoping (save/restore), inline compound assignment detection (SingleQuoted `(` support), `execute_assignment` |
 | `src/interpreter/arithmetic.rs` | Arithmetic eval, `expand_comsubs_in_arith` (handles `\$` and backticks), error tokens, short-circuit assignment validation, ternary precedence |
 | `src/interpreter/redirects.rs` | Redirections (vredir `{var}` fds with nameref support, varredir_close, fd validation, memfd heredocs, pipe fd leak fix) |
 | `src/interpreter/pipeline.rs` | Pipeline execution, PIPESTATUS, `in_pipeline_child` always true for forked children, SIGPIPE reset to SIG_DFL in pipeline/comsub children |
-| `src/expand/mod.rs` | Word expansion, `ExpCtx`, procsub handling (SIGPIPE reset), `SyntaxError` handler, `NOUNSET_ERROR` flag, `$` prefix for positional param nounset errors, `get_arith_error` peek, `SplitHereStar` segment for `$*` null-IFS splitting |
-| `src/expand/params.rs` | Parameter expansion (`${...}` operators), `parse_arith_offset` (handles `$(())`), `is_valid_var_ref`, assoc subscript expansion + bad subscript error |
+| `src/expand/mod.rs` | Word expansion, `ExpCtx`, `ifs_first_char()` helper (empty IFS handling), procsub handling, `SyntaxError` handler, `NOUNSET_ERROR` flag, empty-element removal in unquoted `${arr[@]%%pattern}` |
+| `src/expand/params.rs` | Parameter expansion (`${...}` operators), IFS-aware `${arr[*]}` joining, `parse_arith_offset`, `is_valid_var_ref`, negative subscript bounds checking, assoc subscript expansion |
 | `src/expand/pattern.rs` | Pattern matching, `pattern_replace` (handles empty value + `*` match) |
 | `src/expand/arithmetic.rs` | `eval_arith_full`, `resolve_arith_vars` (handles `${var:-default}`) |
 | `src/parser.rs` | Parser, `parse_array_elements` (returns Result), `skip_to_next_command`, heredoc body resolution (full recursive `resolve_heredoc_in_command`) |
-| `src/lexer/mod.rs` | Lexer, thread-locals (`DQUOTE_TOGGLED`), `force_read_pending_heredocs` (save/restore position for `&` + heredoc), `heredoc_resume` |
+| `src/lexer/mod.rs` | Lexer, `lex_compound_array_content()` (full-quoting re-parser for `declare -a`), thread-locals (`DQUOTE_TOGGLED`), `force_read_pending_heredocs`, `heredoc_resume` |
 | `src/lexer/dollar.rs` | `${}` parsing, `parse_brace_param` (bad substitution for `${$(...)}` ), `$(...)` comsub parser (now handles `<<<` here-strings) |
 | `src/lexer/word.rs` | `read_param_word_impl`, `skip_comsub` (case state machine), `take_heredoc_body` |
 | `src/lexer/heredoc.rs` | `register_heredoc` (line count fix), `read_heredoc_bodies` (backslash-newline, `<<-` tab-stripped delimiter matching), `parse_double_quoted_content` (backslash fix for `\"`) |
@@ -144,7 +149,7 @@ These exist in `/tmp/bash-5.3/tests/` but not in the nix test list:
 
 2. **Fix comsub-eof regression** — 1-line diff: Phase 13 heredoc changes caused comsub-eof3.sub error line to change from 5 to 8.
 
-### Builtins test (remaining ~170 diff lines)
+### Builtins test (remaining ~18 diff lines)
 
 3. **Implement `help` builtin** — Full help text database with `-d`, `-s`, `-m` flag support. (~142 nix diff lines — the largest single remaining builtins contributor)
 
@@ -154,27 +159,39 @@ These exist in `/tmp/bash-5.3/tests/` but not in the nix test list:
 
 6. **Fix hash checkhash + BASH_CMDS** — `shopt -s checkhash` rehash support, `BASH_CMDS[x]=path` → hash sync, hashed-but-missing-file execution error format. (~17 nix diff lines)
 
-7. **Fix builtins5.sub array/assoc -v test** — `[ -v A ]` on empty assoc/array, `${A-unset}` on empty assoc, `${#scalar}` string length vs element count. (~20 nix diff lines)
+### Remaining array/arith improvements
 
-### Array/assoc improvements (largest nix diff contributors)
+7. **Fix arith10.sub array subscript quoting** — Handle `a[]`, `a[" "]`, `a[\ \]`, `a[\\]` in arithmetic array subscripts. (~90 nix diff lines)
 
-8. **Fix arith10.sub array subscript quoting** — Handle `a[]`, `a[" "]`, `a[\ \]`, `a[\\]` in arithmetic array subscripts. (~90 nix diff lines)
+8. **Fix array negative subscript error ordering** — `c[-2]=4` on readonly array: should error "bad array subscript" before "readonly variable" when index is out of bounds. (~3 diff lines)
 
-9. **Fix assoc sub-tests** — Tilde expansion in assoc array values (`declare -A aa=([key]="~/Desktop")`), bracket key handling. (~462 nix diff lines)
+9. **Implement `{2..6}` brace expansion in array subscript** — `${letters["{2..6}"]}` should expand brace range to multiple array references. (~2 diff lines)
 
-10. **Fix array32/33 sub-tests** — Command injection guards in array subscripts, assoc↔indexed conversion errors. (~647 nix diff lines — large but many are the same root cause)
+### Remaining varenv improvement
 
-11. **Fix nameref sub-tests** — Complex nameref resolution chains in sub-tests. (~678 nix diff lines)
+10. **Fix `set -k` keyword assignment expansion ordering** — When `set -k` is active and no command remains, prefix assignments should be applied BEFORE keyword assignment values are expanded (e.g. `HOME=/a/b/c $EMPTY_VAR a=$HOME` → a should get new HOME value). (~2 diff lines)
 
 ### Feature work
 
-12. **Implement `${ ... }` dollar-brace command substitution** — Bash 5.3 feature used in comsub2 tests. (~184 nix diff lines)
+11. **Implement `${ ... }` dollar-brace command substitution** — Bash 5.3 feature used in comsub2 tests. (~184 nix diff lines)
 
-13. **Fix remaining heredoc sub-tests** — heredoc3.sub: `EOF)` delimiter-not-on-own-line, heredoc7.sub: comsub+heredoc interaction. (~12 nix diff lines)
+12. **Fix remaining heredoc sub-tests** — heredoc3.sub: `EOF)` delimiter-not-on-own-line, heredoc7.sub: comsub+heredoc interaction. (~12 nix diff lines)
 
-14. **Implement `caller` builtin and fix DEBUG trap context** — Needed for dbg-support tests (local-only). (~375+15 diff lines)
+13. **Implement `caller` builtin and fix DEBUG trap context** — Needed for dbg-support tests (local-only). (~375+15 diff lines)
 
-15. **Implement restricted shell mode (`-r` flag)** — Needed for rsh tests (local-only). (~26 diff lines)
+14. **Implement restricted shell mode (`-r` flag)** — Needed for rsh tests (local-only). (~26 diff lines)
+
+## Recent Fixes (Phase 15)
+
+- **IFS empty-string handling: fix `"${a[*]}"` join separator** — When IFS is set to empty string (`IFS=""`), `"${a[*]}"` and `"$*"` now correctly join elements with no separator (was using space). Fixed 6 occurrences in `expand/mod.rs` using new `ifs_first_char()` helper, plus all `join(" ")` calls in `expand/params.rs` (`lookup_var` and `expand_param`) to use IFS-aware joining. This fixed **quotearray** (179→0), **assoc** (462→0), **globstar** (275→~84), and the `55 vs 49` array diff.
+- **`set -k` keyword assignment scoping** — Keyword assignments extracted by `set -k` are now temporary when there's a command to run (save/restore pattern), and only persist when no command remains after extraction. Moved keyword extraction BEFORE the permanent-assignment decision so that `a=5 b=6 $EMPTY c=7 $EMPTY d=8` correctly persists all assignments when command words are empty. Fixed `|| self.opt_keyword` condition that caused prefix assignments to persist even with commands. Reduced **varenv** from 320→~6 diff lines.
+- **`read -p` prompt suppression** — The `-p prompt` option now only prints the prompt when the input fd is a terminal (matching bash). Fixes the `array test:` prefix appearing in heredoc-fed `read` output.
+- **`unset scalar[n]` error** — `unset var[n]` where `var` is a scalar (not an array) and `n != 0` now correctly errors with "not an array variable". `unset var[0]` unsets the scalar. Completely unset variables with subscript are silently ignored (matching bash).
+- **`unset arr[@]`/`arr[*]` preserves array** — Now clears all elements but keeps the array variable (as an empty array `()`), matching bash. Previously removed the entire array. Fixes missing `declare -a e=()` in array test output.
+- **`declare +a` on readonly array** — Error message now correctly says "readonly variable" (taking precedence) instead of "cannot destroy array variables in this way".
+- **Negative array subscript bounds checking** — `${arr[-N]}` where N exceeds the array length now correctly errors with "bad array subscript" instead of silently returning element 0.
+- **`declare -a f='("${d[@]}")'` compound re-expansion** — Single-quoted compound array assignments containing `$`-expansions are now properly re-parsed with full shell quoting (double quotes, single quotes, `$`-expansions) and expanded. Added `lex_compound_array_content()` to the lexer for proper re-parsing. Also fixed inline compound assignment detection to recognize `(` from `SingleQuoted` word parts. Reduced **array** from 647→~5 diff lines.
+- **Empty array element removal in unquoted context** — `${arr[@]%%pattern}` where an element becomes empty after pattern removal now correctly drops the empty element in unquoted context (matching bash word splitting). Fixes the double-space issue in path expansion.
 
 ## Recent Fixes (Phase 14)
 

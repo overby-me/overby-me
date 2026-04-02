@@ -1024,9 +1024,39 @@ impl Shell {
 
         // Handle assignments
         let saved_last_status = self.last_status;
+
+        // set -k: extract assignment-looking words from expanded_words BEFORE
+        // deciding whether to permanently execute assignments.  We need to know
+        // if a real command remains after keyword extraction.
+        let mut keyword_assigns: Vec<(String, String)> = Vec::new();
+        if self.opt_keyword {
+            let mut new_words = Vec::new();
+            for word in expanded_words.iter() {
+                if let Some(eq) = word.find('=')
+                    && eq > 0
+                    && word[..eq]
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '_')
+                    && word
+                        .chars()
+                        .next()
+                        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                {
+                    let name = &word[..eq];
+                    let value = &word[eq + 1..];
+                    keyword_assigns.push((name.to_string(), value.to_string()));
+                    continue;
+                }
+                new_words.push(word.clone());
+            }
+            expanded_words = new_words;
+        }
+
+        // Now we know whether there is a real command.  Permanently execute
+        // prefix assignments only when there is NO command word left.
         if !cmd.assignments.is_empty() {
             for assign in &cmd.assignments {
-                if expanded_words.is_empty() || self.opt_keyword {
+                if expanded_words.is_empty() {
                     // Trace assignment
                     if self.opt_xtrace {
                         match &assign.value {
@@ -1075,31 +1105,11 @@ impl Shell {
             }
         }
 
-        // set -k: extract assignment-looking words from expanded_words
-        if self.opt_keyword {
-            let mut new_words = Vec::new();
-            for word in expanded_words.iter() {
-                if let Some(eq) = word.find('=')
-                    && eq > 0
-                    && word[..eq]
-                        .chars()
-                        .all(|c| c.is_ascii_alphanumeric() || c == '_')
-                    && word
-                        .chars()
-                        .next()
-                        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
-                {
-                    let name = &word[..eq];
-                    let value = &word[eq + 1..];
-                    self.set_var(name, value.to_string());
-                    continue;
-                }
-                new_words.push(word.clone());
-            }
-            expanded_words = new_words;
-        }
-
         if expanded_words.is_empty() {
+            // No command — keyword assignments persist in the shell
+            for (name, value) in &keyword_assigns {
+                self.set_var(name, value.clone());
+            }
             // No command words — apply redirections for null commands (e.g., `> file`)
             if !cmd.redirections.is_empty() {
                 match self.setup_redirections(&cmd.redirections) {
@@ -1195,6 +1205,20 @@ impl Shell {
                     | "trap"
                     | "unset"
             );
+        // set -k: temporarily apply keyword assignments (save/restore around command)
+        let keyword_saves: Vec<(String, Option<String>, Option<String>)> = keyword_assigns
+            .iter()
+            .map(|(name, value)| {
+                let resolved = self.resolve_nameref(name);
+                let old_var = self.vars.get(&resolved).cloned();
+                let old_export = self.exports.get(&resolved).cloned();
+                self.vars.insert(resolved.clone(), value.clone());
+                self.exports.insert(resolved.clone(), value.clone());
+                unsafe { std::env::set_var(&resolved, value) };
+                (resolved, old_var, old_export)
+            })
+            .collect();
+
         let status = if !is_posix_special_builtin
             && let Some(func_body) = self.functions.get(command_name).cloned()
         {
@@ -1309,6 +1333,7 @@ impl Shell {
                     // When the parser handles `e=(one two three)`, it embeds the '(' into a Literal
                     // word part. When it handles `e=$y`, the value comes from Variable expansion
                     // and '(' is NOT in the literal parts.
+                    let mut paren_from_single_quote = false;
                     let has_literal_paren = word_idx < cmd.words.len() && {
                         let word = &cmd.words[word_idx];
                         // Walk through literal parts to find '=' then check if '(' follows
@@ -1337,6 +1362,16 @@ impl Shell {
                                     result = true;
                                 }
                             }
+                            // Also check SingleQuoted content starting with '(' after '='
+                            // This handles `declare -a f='("${d[@]}")'` where the '(' is
+                            // inside a single-quoted string that follows '='.
+                            if let WordPart::SingleQuoted(s) = part
+                                && eq_at_end
+                                && s.starts_with('(')
+                            {
+                                result = true;
+                                paren_from_single_quote = true;
+                            }
                             // If we found '=' and haven't yet confirmed a literal '(',
                             // and this isn't the part where we just found '=' at the end,
                             // then the '(' came from expansion — stop looking
@@ -1353,7 +1388,10 @@ impl Shell {
                         }
                         result
                     };
-                    if !is_quoted_arg
+                    // Allow compound assignment when the '(' came from a
+                    // single-quoted part (e.g. declare -a f='("${d[@]}")').
+                    // The is_quoted_arg guard only blocks expansion-derived parens.
+                    if (!is_quoted_arg || paren_from_single_quote)
                         && has_literal_paren
                         && let Some(eq_pos) = arg.find('=')
                     {
@@ -1394,8 +1432,39 @@ impl Shell {
                                 let map = crate::builtins::parse_assoc_literal(value);
                                 self.assoc_arrays.insert(name.to_string(), map);
                             } else {
-                                let arr = crate::builtins::parse_indexed_compound_assignment(value);
-                                self.arrays.insert(name.to_string(), arr);
+                                // Check if the compound value came from a
+                                // single-quoted word part AND contains shell
+                                // expansions ($, `).  In that case the content
+                                // was never expanded by the outer lexer, so we
+                                // re-parse with full shell quoting and expand.
+                                // e.g. declare -a f='("${d[@]}")'
+                                //
+                                // If the single-quoted value does NOT contain
+                                // expansions (e.g. d='([1]="" [2]="bdef"...)'),
+                                // use the normal compound parser which already
+                                // handles [subscript]=value syntax correctly.
+                                let needs_reexpand = paren_from_single_quote
+                                    && value.len() > 2
+                                    && value.starts_with('(')
+                                    && value.ends_with(')')
+                                    && (value.contains('$') || value.contains('`'));
+                                if needs_reexpand {
+                                    let inner = &value[1..value.len() - 1];
+                                    let ifs = self
+                                        .vars
+                                        .get("IFS")
+                                        .cloned()
+                                        .unwrap_or_else(|| " \t\n".to_string());
+                                    let word = crate::lexer::lex_compound_array_content(inner);
+                                    let expanded = self.expand_word_fields(&word, &ifs);
+                                    let arr: Vec<Option<String>> =
+                                        expanded.into_iter().map(Some).collect();
+                                    self.arrays.insert(name.to_string(), arr);
+                                } else {
+                                    let arr =
+                                        crate::builtins::parse_indexed_compound_assignment(value);
+                                    self.arrays.insert(name.to_string(), arr);
+                                }
                             }
                             new_args.push(name.to_string());
                             modified = true;
@@ -1572,6 +1641,33 @@ impl Shell {
         } else {
             self.run_external(command_name, &expanded_words, &cmd.assignments)
         };
+
+        // Restore keyword assignments from set -k
+        for (k, old_var, old_export) in keyword_saves {
+            if k.is_empty() {
+                continue;
+            }
+            match old_var {
+                Some(v) => {
+                    self.vars.insert(k.clone(), v);
+                }
+                None => {
+                    self.vars.remove(&k);
+                }
+            }
+            match old_export {
+                Some(v) => {
+                    self.exports.insert(k.clone(), v.clone());
+                    unsafe { std::env::set_var(&k, &v) };
+                }
+                None => {
+                    self.exports.remove(&k);
+                    if !k.is_empty() {
+                        unsafe { std::env::remove_var(&k) };
+                    }
+                }
+            }
+        }
 
         // For `exec` with no command args, don't restore redirections
         // (they should persist in the current shell).

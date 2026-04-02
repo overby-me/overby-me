@@ -295,14 +295,26 @@ pub(super) fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
 
                 return match idx_str {
                     "@" | "*" => {
+                        // For [*], join with IFS[0] (space if unset, empty if IFS="")
+                        // For [@], join with space (field splitting handled by callers)
+                        let sep = if idx_str == "*" {
+                            let ifs = ctx.vars.get("IFS");
+                            match ifs {
+                                None => " ".to_string(),
+                                Some(s) if s.is_empty() => String::new(),
+                                Some(s) => s.chars().next().unwrap_or(' ').to_string(),
+                            }
+                        } else {
+                            " ".to_string()
+                        };
                         if let Some(arr) = ctx.arrays.get(&resolved) {
                             arr.iter()
                                 .filter_map(|v| v.as_ref())
                                 .cloned()
                                 .collect::<Vec<_>>()
-                                .join(" ")
+                                .join(&sep)
                         } else if let Some(assoc) = ctx.assoc_arrays.get(&resolved) {
-                            assoc.values().cloned().collect::<Vec<_>>().join(" ")
+                            assoc.values().cloned().collect::<Vec<_>>().join(&sep)
                         } else if let Some(val) = ctx.vars.get(&resolved) {
                             val.clone()
                         } else {
@@ -397,7 +409,21 @@ pub(super) fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
                         if let Some(arr) = ctx.arrays.get(&resolved) {
                             let idx = if raw_idx < 0 {
                                 let len = arr.len() as i64;
-                                (len + raw_idx).max(0) as usize
+                                let computed = len + raw_idx;
+                                if computed < 0 {
+                                    let prefix = EXPAND_ERROR_PREFIX.with(|p| {
+                                        let p = p.borrow();
+                                        if p.is_empty() {
+                                            "bash".to_string()
+                                        } else {
+                                            p.clone()
+                                        }
+                                    });
+                                    eprintln!("{}: [{}]: bad array subscript", prefix, raw_idx);
+                                    crate::expand::set_arith_error();
+                                    return String::new();
+                                }
+                                computed as usize
                             } else {
                                 raw_idx as usize
                             };
@@ -779,11 +805,27 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
         return expand_param(&indirect_expr, ctx, cmd_sub);
     }
 
+    // Helper: get the join separator based on whether this is a * or @ expansion.
+    // For *, join with IFS[0] (space if IFS unset, empty if IFS="").
+    // For @, always join with space (field splitting handled by callers).
+    let ifs_join_sep = |is_star: bool| -> String {
+        if is_star {
+            match ctx.vars.get("IFS") {
+                None => " ".to_string(),
+                Some(s) if s.is_empty() => String::new(),
+                Some(s) => s.chars().next().unwrap_or(' ').to_string(),
+            }
+        } else {
+            " ".to_string()
+        }
+    };
+
     // For $@ and $* with operations, apply per-element
     if (expr.name == "@" || expr.name == "*")
         && !matches!(expr.op, ParamOp::None | ParamOp::Length)
         && ctx.positional.len() > 1
     {
+        let sep = ifs_join_sep(expr.name == "*");
         // For Substring: slice the positional params array
         if let ParamOp::Substring(offset_str, length_str) = &expr.op {
             let offset: i64 = parse_arith_offset(offset_str.trim(), &expr.name, ctx, cmd_sub);
@@ -822,13 +864,13 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                 count
             };
             let sliced: Vec<&str> = params[start..end].iter().map(|s| s.as_str()).collect();
-            return sliced.join(" ");
+            return sliced.join(&sep);
         }
         let elements: Vec<String> = ctx.positional[1..]
             .iter()
             .map(|elem| apply_param_op(elem, &expr.op, ctx, cmd_sub, &expr.name))
             .collect();
-        return elements.join(" ");
+        return elements.join(&sep);
     }
 
     // For array[@] or array[*] with operations, apply per-element
@@ -838,6 +880,7 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
         if (idx_str == "@" || idx_str == "*") && !matches!(expr.op, ParamOp::None | ParamOp::Length)
         {
             let resolved = ctx.resolve_nameref(base);
+            let sep = ifs_join_sep(idx_str == "*");
 
             // For Substring on arrays, slice the array by index/element position
             // rather than applying character-level substring to each element.
@@ -878,7 +921,7 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                     };
                     let sliced: Vec<&str> =
                         set_elements[start..end].iter().map(|(_, v)| *v).collect();
-                    return sliced.join(" ");
+                    return sliced.join(&sep);
                 } else if let Some(assoc) = ctx.assoc_arrays.get(&resolved) {
                     // For assoc arrays, slice the values list
                     let values: Vec<&str> = assoc.values().map(|s| s.as_str()).collect();
@@ -899,7 +942,7 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                     } else {
                         count
                     };
-                    return values[start..end].join(" ");
+                    return values[start..end].join(&sep);
                 } else if let Some(val) = ctx.vars.get(&resolved) {
                     // Scalar treated as single-element array
                     if offset <= 0 {
@@ -926,7 +969,7 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                 .iter()
                 .map(|elem| apply_param_op(elem, &expr.op, ctx, cmd_sub, &expr.name))
                 .collect();
-            return modified.join(" ");
+            return modified.join(&sep);
         }
     }
 
