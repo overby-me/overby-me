@@ -834,6 +834,9 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                     .get("OLDPWD")
                     .cloned()
                     .unwrap_or_else(|| "~-".to_string())
+            } else if let Some(dir) = expand_tilde_dirstack(user, ctx) {
+                // ~N, ~+N, ~-N — directory stack indices
+                dir
             } else {
                 #[cfg(unix)]
                 {
@@ -1425,6 +1428,47 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
             out.push(Segment::Unquoted(String::new()));
         }
     }
+}
+
+/// Expand `~N`, `~+N`, `~-N` tilde prefixes using the DIRSTACK array.
+///
+/// - `~N` / `~+N` → `DIRSTACK[N]` (0 = current dir, counting from top)
+/// - `~-N` → `DIRSTACK[len - 1 - N]` (counting from bottom)
+///
+/// Returns `None` if the pattern doesn't match or the index is out of range.
+fn expand_tilde_dirstack(user: &str, ctx: &ExpCtx) -> Option<String> {
+    let dirstack = ctx.arrays.get("DIRSTACK")?;
+    let stack_len = dirstack.iter().filter(|v| v.is_some()).count();
+    if stack_len == 0 {
+        return None;
+    }
+
+    // Parse the index from the user string
+    let (negative, num_str) = if let Some(rest) = user.strip_prefix('-') {
+        // ~-N — count from the bottom of the stack
+        (true, rest)
+    } else if let Some(rest) = user.strip_prefix('+') {
+        // ~+N — same as ~N, count from the top
+        (false, rest)
+    } else {
+        // ~N — count from the top
+        (false, user)
+    };
+
+    let idx: usize = num_str.parse().ok()?;
+
+    let actual_idx = if negative {
+        // ~-0 = last entry, ~-1 = second-to-last, etc.
+        if idx >= stack_len {
+            return None;
+        }
+        stack_len - 1 - idx
+    } else {
+        // ~0 = first entry (current dir), ~1 = second, etc.
+        idx
+    };
+
+    dirstack.get(actual_idx).and_then(|v| v.as_ref()).cloned()
 }
 
 fn expand_word_nosplit_ctx(word: &Word, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {

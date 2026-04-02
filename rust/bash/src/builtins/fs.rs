@@ -354,7 +354,11 @@ pub(super) fn builtin_dirs(shell: &mut Shell, args: &[String]) -> i32 {
                 } else {
                     tilde_contract(&stack[idx], home.as_deref())
                 };
-                println!("{}", display);
+                if verbose {
+                    println!("{:2}  {}", idx, display);
+                } else {
+                    println!("{}", display);
+                }
                 0
             }
             Err(()) => {
