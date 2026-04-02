@@ -230,6 +230,10 @@ fn run(sigpipe_was_ignored: bool) -> i32 {
             ];
             shell.positional.extend(args[start..].to_vec());
         }
+    } else if command_string.is_some() {
+        // For -c without explicit arg0: use argv[0] (the program name)
+        // This matters for `exec -a specialname bash -c 'echo $0'`
+        shell.positional = vec![args.first().cloned().unwrap_or_else(|| "bash".to_string())];
     } else if let Some(ref file) = script_file {
         shell.positional = vec![file.clone()];
     }

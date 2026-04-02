@@ -2,31 +2,32 @@
 
 ## Current State
 
-**64/77 nix tests passing**, 52/83 local tests passing (0 diff) on bookmark `bash-integration-test`. Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available).
+**63/77 nix tests passing**, 52/83 local tests passing (0 diff) on bookmark `bash-integration-test`. Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available).
 
-See `CHANGELOG.md` for full fix history (108+ fixes across 13 phases).
+See `CHANGELOG.md` for full fix history (120+ fixes across 14 phases).
 
-### Nix test results (64/77 passing)
+### Nix test results (63/77 passing)
 
-Passing (64): alias, appendop, arith-for, array2, attr, braces, case, casemod, comsub-eof, comsub-posix, cond, coproc, cprint, dirstack, dollars, dynvar, errors, execscript, exp-tests, exportfunc, extglob, extglob2, extglob3, func, getopts, glob-bracket, glob-test, globstar, herestr, ifs, ifs-posix, input-test, invert, iquote, mapfile, more-exp, nquote, nquote1, nquote2, nquote3, nquote4, nquote5, parser, posix2, posixexp, posixexp2, posixpat, posixpipe, precedence, printf, procsub, quote, read, redir, rhs-exp, set-e, set-x, shopt, strip, test, tilde, tilde2, type, vredir
+Passing (63): alias, appendop, arith-for, array2, attr, braces, case, casemod, comsub-posix, cond, coproc, cprint, dirstack, dollars, dynvar, errors, execscript, exp-tests, exportfunc, extglob, extglob2, extglob3, func, getopts, glob-bracket, glob-test, globstar, herestr, ifs, ifs-posix, input-test, invert, iquote, mapfile, more-exp, nquote, nquote1, nquote2, nquote3, nquote4, nquote5, parser, posix2, posixexp, posixexp2, posixpat, posixpipe, precedence, printf, procsub, quote, read, redir, rhs-exp, set-e, set-x, shopt, strip, test, tilde, tilde2, type, vredir
 
-Failing (13):
+Failing (14):
 
 | Test | Nix diff lines | Notes |
 |------|---------------|-------|
 | trap | 1 | Flaky — timing-dependent signal delivery (extra CHLD) |
 | comsub | 1 | Spurious `echo: write error: Broken pipe` (flaky timing) |
 | lastpipe | 1 | Spurious `echo: write error: Broken pipe` (flaky timing) |
+| comsub-eof | 1 | Regression from Phase 13 heredoc changes (comsub-eof3.sub line 5 vs 8 error) |
 | arith | ~90 | arith10.sub: array subscript quoting (`a[]`, `a[" "]`, `a[\\]`), xtrace spacing |
 | heredoc | ~12 | heredoc3.sub: `EOF)` syntax, heredoc7.sub: comsub+heredoc interaction |
 | comsub2 | 184 | `${ ... }` dollar-brace comsub (bash 5.3 feature) |
 | quotearray | 179 | Assoc array keys with special chars in `((...))` context |
-| builtins | 275 | pushd/popd sub-tests, dir stack edge cases |
-| new-exp | 310 | Sub-tests: various edge cases |
-| varenv | 320 | Sub-tests: env/export edge cases |
-| assoc | 462 | Sub-tests: tilde expansion in assoc values, bracket keys |
-| array | 647 | Sub-tests: array32/33 (injection guards, assoc↔indexed conversion) |
-| nameref | 678 | Sub-tests: complex nameref resolution chains |
+| builtins | ~170 | help builtin (~142 lines), ulimit (~7), umask (~7), hash checkhash (~17), builtins5.sub array -v tests (~20) |
+| new-exp | ~310 | Sub-tests: various edge cases (nix-only, passes locally) |
+| varenv | ~320 | Sub-tests: env/export edge cases |
+| assoc | ~462 | Sub-tests: tilde expansion in assoc values, bracket keys |
+| array | ~647 | Sub-tests: array32/33 (injection guards, assoc↔indexed conversion) |
+| nameref | ~678 | Sub-tests: complex nameref resolution chains |
 
 ### Local test results (52/83 passing, 0 diff)
 
@@ -87,7 +88,7 @@ Suggested nix timeout: 30s for most tests, 120s for trap.
 
 ### Large diffs (sub-tests with many edge cases)
 
-- **builtins** (275 lines) — pushd/popd sub-tests, dir stack edge cases
+- **builtins** (~170 lines) — help builtin (not implemented, ~142 lines), ulimit soft/hard/keywords (~7), umask symbolic mode (~7), hash checkhash/BASH_CMDS (~17), builtins5.sub array -v tests (~20). Phase 14 fixed ~100 diff lines: exec -a, source errors, hash -lt, pushd/popd/dirs --, echo xpg_echo, CDPATH, unset function fallback, declare -f not-found.
 - **new-exp** (310 lines) — Sub-tests: various expansion edge cases
 - **varenv** (320 lines) — Sub-tests: env/export edge cases
 - **assoc** (462 lines) — Sub-tests: tilde expansion in assoc values, bracket keys
@@ -141,27 +142,53 @@ These exist in `/tmp/bash-5.3/tests/` but not in the nix test list:
 
 1. **Fix SIGPIPE flaky tests (comsub/lastpipe/trap)** — 1-line diff each, timing race in nix sandbox. SIGPIPE is reset to SIG_DFL in pipeline/comsub children and EPIPE is suppressed in echo builtin for all subprocess contexts, but the nix sandbox timing still occasionally triggers the race. trap has an extra CHLD signal delivery.
 
+2. **Fix comsub-eof regression** — 1-line diff: Phase 13 heredoc changes caused comsub-eof3.sub error line to change from 5 to 8.
+
+### Builtins test (remaining ~170 diff lines)
+
+3. **Implement `help` builtin** — Full help text database with `-d`, `-s`, `-m` flag support. (~142 nix diff lines — the largest single remaining builtins contributor)
+
+4. **Fix ulimit builtin** — `soft`/`hard` keywords, `-a` for all-limits display, `--` terminator, `+N` error, `-g` invalid option. (~7 nix diff lines)
+
+5. **Fix umask symbolic mode parser** — `u=r+w`, `o=u`, `u+g`, `+X` conditional execute, compound expressions. (~7 nix diff lines)
+
+6. **Fix hash checkhash + BASH_CMDS** — `shopt -s checkhash` rehash support, `BASH_CMDS[x]=path` → hash sync, hashed-but-missing-file execution error format. (~17 nix diff lines)
+
+7. **Fix builtins5.sub array/assoc -v test** — `[ -v A ]` on empty assoc/array, `${A-unset}` on empty assoc, `${#scalar}` string length vs element count. (~20 nix diff lines)
+
 ### Array/assoc improvements (largest nix diff contributors)
 
-2. **Fix arith10.sub array subscript quoting** — Handle `a[]`, `a[" "]`, `a[\ \]`, `a[\\]` in arithmetic array subscripts. (~90 nix diff lines)
+8. **Fix arith10.sub array subscript quoting** — Handle `a[]`, `a[" "]`, `a[\ \]`, `a[\\]` in arithmetic array subscripts. (~90 nix diff lines)
 
-3. **Fix assoc sub-tests** — Tilde expansion in assoc array values (`declare -A aa=([key]="~/Desktop")`), bracket key handling. (~462 nix diff lines)
+9. **Fix assoc sub-tests** — Tilde expansion in assoc array values (`declare -A aa=([key]="~/Desktop")`), bracket key handling. (~462 nix diff lines)
 
-4. **Fix array32/33 sub-tests** — Command injection guards in array subscripts, assoc↔indexed conversion errors. (~647 nix diff lines — large but many are the same root cause)
+10. **Fix array32/33 sub-tests** — Command injection guards in array subscripts, assoc↔indexed conversion errors. (~647 nix diff lines — large but many are the same root cause)
 
-5. **Fix nameref sub-tests** — Complex nameref resolution chains in sub-tests. (~678 nix diff lines)
+11. **Fix nameref sub-tests** — Complex nameref resolution chains in sub-tests. (~678 nix diff lines)
 
 ### Feature work
 
-6. **Implement `${ ... }` dollar-brace command substitution** — Bash 5.3 feature used in comsub2 tests. (~184 nix diff lines)
+12. **Implement `${ ... }` dollar-brace command substitution** — Bash 5.3 feature used in comsub2 tests. (~184 nix diff lines)
 
-7. **Fix remaining heredoc sub-tests** — heredoc3.sub: `EOF)` delimiter-not-on-own-line, heredoc7.sub: comsub+heredoc interaction. (~12 nix diff lines)
+13. **Fix remaining heredoc sub-tests** — heredoc3.sub: `EOF)` delimiter-not-on-own-line, heredoc7.sub: comsub+heredoc interaction. (~12 nix diff lines)
 
-8. **Fix builtins sub-tests** — pushd/popd edge cases, dir stack numeric args. (~275 nix diff lines)
+14. **Implement `caller` builtin and fix DEBUG trap context** — Needed for dbg-support tests (local-only). (~375+15 diff lines)
 
-9. **Implement `caller` builtin and fix DEBUG trap context** — Needed for dbg-support tests (local-only). (~375+15 diff lines)
+15. **Implement restricted shell mode (`-r` flag)** — Needed for rsh tests (local-only). (~26 diff lines)
 
-10. **Implement restricted shell mode (`-r` flag)** — Needed for rsh tests (local-only). (~26 diff lines)
+## Recent Fixes (Phase 14)
+
+- **builtins: 275 → ~170 diff lines** (~100 lines fixed)
+  - Fix `exec -a specialname`: resolve executable path BEFORE clearing env with `-c`, and fix `$0` to use `argv[0]` when `-c` is used without explicit arg0 (e.g. `exec -a specialname bash -c 'echo $0'` now correctly outputs `specialname`)
+  - Fix `source`/`.` error message format: in POSIX mode with bare names (no `/`), use `. notthere: file not found` format; for paths or non-POSIX mode, use `notthere: No such file or directory` format
+  - Fix `hash -lt` combined flags: rewrite hash option parsing to handle combined flags like `-lt` (was rejected as invalid option); also fix `-d` to report "not found" for non-existent entries, `-p /dir` to report "Is a directory"
+  - Fix `pushd`/`popd`/`dirs` `--` handling: all three builtins now correctly handle `--` to terminate option processing; `popd --` ignores subsequent args (matching bash); `popd dir` now reports "invalid argument"
+  - Fix `echo` with `xpg_echo` shopt: when `shopt -s xpg_echo` or POSIX mode is active, `echo` interprets escape sequences by default; only `-n` is recognized as a flag (not `-e`/`-E`)
+  - Fix `cd` with CDPATH: implement CDPATH search for relative directory names (not starting with `/`, `./`, `../`); prints new directory when found via non-current-dir CDPATH entry
+  - Fix `unset name` (without `-f`/`-v`): now falls through to unset functions when no variable by that name exists; with explicit `-v`, only variables are targeted (no function fallback)
+  - Fix `declare -f name` vs `declare -f -p name`: only print "not found" error when `-p` flag is present; plain `declare -f name` silently returns 1 for missing functions
+- **comsub-eof: regression from Phase 13** — 1-line diff in comsub-eof3.sub heredoc error line (line 5 vs 8), caused by Phase 13 heredoc changes
+- **No other regressions** — all 63 previously-passing nix tests still pass (excluding comsub-eof which regressed in Phase 13)
 
 ## Recent Fixes (Phase 13)
 

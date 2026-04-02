@@ -306,7 +306,9 @@ pub(super) fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
                 unsafe { std::env::remove_var(&resolved) };
             }
         } else {
-            // Regular variable unset
+            // Regular variable unset (no -f or -v flag)
+            // Bash behavior: try to unset variable first; if no variable
+            // by that name exists, try to unset the function instead.
             if shell.readonly_vars.contains(name) {
                 eprintln!(
                     "{}: unset: {}: cannot unset: readonly variable",
@@ -316,6 +318,10 @@ pub(super) fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
                 status = 1;
                 continue;
             }
+            let had_var = shell.vars.contains_key(name)
+                || shell.arrays.contains_key(name)
+                || shell.assoc_arrays.contains_key(name)
+                || shell.namerefs.contains_key(name);
             shell.vars.remove(name);
             shell.exports.remove(name);
             shell.arrays.remove(name);
@@ -327,6 +333,24 @@ pub(super) fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
             shell.capitalize_vars.remove(name);
             if !name.is_empty() {
                 unsafe { std::env::remove_var(name) };
+            }
+            // If no variable existed AND -v was not explicitly given,
+            // fall through to unset the function (bash default behavior).
+            // With explicit -v, only variables are targeted.
+            if !had_var && !unset_variables {
+                if shell.readonly_funcs.contains(name) {
+                    eprintln!(
+                        "{}: unset: {}: cannot unset: readonly function",
+                        shell.error_prefix(),
+                        name
+                    );
+                    status = 1;
+                    continue;
+                }
+                shell.functions.remove(name);
+                shell.func_names.retain(|n| n != name);
+                let env_key = format!("BASH_FUNC_{}%%", name);
+                unsafe { std::env::remove_var(&env_key) };
             }
         }
     }
@@ -1008,16 +1032,18 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 }
             }
         } else {
-            let mut found = false;
+            let mut status = 0;
             for name in &names {
                 if let Some(body) = shell.functions.get(name.as_str()) {
                     print_func(name, body, shell);
-                    found = true;
+                } else {
+                    if flag_print {
+                        eprintln!("{}: declare: {}: not found", shell.error_prefix(), name);
+                    }
+                    status = 1;
                 }
             }
-            if !found {
-                return 1;
-            }
+            return status;
         }
         return 0;
     }

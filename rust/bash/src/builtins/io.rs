@@ -2,34 +2,57 @@ use super::*;
 
 pub(super) fn builtin_echo(shell: &mut Shell, args: &[String]) -> i32 {
     let mut newline = true;
-    let mut interpret_escapes = false;
     let mut start = 0;
 
-    for (i, arg) in args.iter().enumerate() {
-        match arg.as_str() {
-            "-n" => {
-                newline = false;
-                start = i + 1;
+    let xpg_echo = shell
+        .shopt_options
+        .get("xpg_echo")
+        .copied()
+        .unwrap_or(false);
+    let xpg_mode = xpg_echo || shell.opt_posix;
+
+    let mut interpret_escapes = xpg_mode;
+
+    if xpg_mode {
+        // In xpg_echo / POSIX mode, only `-n` is recognized as an option.
+        // `-e`, `-E`, and combined flags like `-ne` are printed literally.
+        for (i, arg) in args.iter().enumerate() {
+            match arg.as_str() {
+                "-n" => {
+                    newline = false;
+                    start = i + 1;
+                }
+                _ => break,
             }
-            "-e" => {
-                interpret_escapes = true;
-                start = i + 1;
+        }
+    } else {
+        // Default mode: recognise `-n`, `-e`, `-E`, and their combinations.
+        for (i, arg) in args.iter().enumerate() {
+            match arg.as_str() {
+                "-n" => {
+                    newline = false;
+                    start = i + 1;
+                }
+                "-e" => {
+                    interpret_escapes = true;
+                    start = i + 1;
+                }
+                "-E" => {
+                    interpret_escapes = false;
+                    start = i + 1;
+                }
+                "-ne" | "-en" => {
+                    newline = false;
+                    interpret_escapes = true;
+                    start = i + 1;
+                }
+                "-nE" | "-En" => {
+                    newline = false;
+                    interpret_escapes = false;
+                    start = i + 1;
+                }
+                _ => break,
             }
-            "-E" => {
-                interpret_escapes = false;
-                start = i + 1;
-            }
-            "-ne" | "-en" => {
-                newline = false;
-                interpret_escapes = true;
-                start = i + 1;
-            }
-            "-nE" | "-En" => {
-                newline = false;
-                interpret_escapes = false;
-                start = i + 1;
-            }
-            _ => break,
         }
     }
 

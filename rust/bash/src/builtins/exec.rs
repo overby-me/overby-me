@@ -191,6 +191,11 @@ pub(super) fn builtin_exec(shell: &mut Shell, args: &[String]) -> i32 {
         cmd_args[0] = format!("-{}", cmd_args[0]);
     }
 
+    // Resolve the executable path BEFORE clearing the environment,
+    // so that PATH is still available for lookup (important in Nix sandboxes).
+    #[cfg(unix)]
+    let resolved_path = find_executable(program);
+
     // Set up environment
     if clear_env {
         for (key, _) in std::env::vars() {
@@ -208,7 +213,7 @@ pub(super) fn builtin_exec(shell: &mut Shell, args: &[String]) -> i32 {
     {
         use std::ffi::CString;
 
-        let path = find_executable(program);
+        let path = resolved_path;
         let c_prog = CString::new(path.as_bytes()).unwrap();
         let c_args: Vec<CString> = cmd_args
             .iter()
@@ -245,7 +250,11 @@ pub(super) fn builtin_exec(shell: &mut Shell, args: &[String]) -> i32 {
 }
 
 pub(super) fn builtin_source(shell: &mut Shell, args: &[String]) -> i32 {
-    let cmd = shell.current_builtin.as_deref().unwrap_or(".");
+    // Use "." or "source" as the command name (never "command")
+    let cmd = match shell.current_builtin.as_deref() {
+        Some("source") => "source",
+        _ => ".",
+    };
     // Handle options
     let mut file_start = 0;
     if let Some((i, arg)) = args.iter().enumerate().next() {
@@ -327,8 +336,20 @@ pub(super) fn builtin_source(shell: &mut Shell, args: &[String]) -> i32 {
             result
         }
         Err(e) => {
-            let msg = io_error_message(&e);
-            eprintln!("{}: {}: {}", shell.error_prefix(), filename, msg);
+            if shell.opt_posix && !filename.contains('/') {
+                // POSIX mode with bare name (PATH search): include command name
+                // and use "file not found".  Paths with '/' use the regular format.
+                let msg = if e.kind() == std::io::ErrorKind::NotFound {
+                    "file not found"
+                } else {
+                    io_error_message(&e)
+                };
+                eprintln!("{}: {}: {}: {}", shell.error_prefix(), cmd, filename, msg);
+            } else {
+                // Non-POSIX or path-based: no command name prefix, use OS error message
+                let msg = io_error_message(&e);
+                eprintln!("{}: {}: {}", shell.error_prefix(), filename, msg);
+            }
             shell.source_file_error = true;
             1
         }
@@ -841,8 +862,76 @@ pub(super) fn builtin_which(_shell: &mut Shell, args: &[String]) -> i32 {
 }
 
 pub(super) fn builtin_hash(shell: &mut Shell, args: &[String]) -> i32 {
-    if args.is_empty() {
-        // Print hash table (currently empty since we don't cache)
+    // First pass: parse all flags and collect positional args.
+    // Flags can be combined (e.g. `-lt` means `-l` + `-t`).
+    let mut flag_r = false;
+    let mut flag_l = false;
+    let mut flag_t = false;
+    let mut flag_d = false;
+    let mut flag_p = false;
+    let mut p_path: Option<String> = None;
+    let mut positional: Vec<String> = Vec::new();
+
+    let mut i = 0;
+    while i < args.len() {
+        let arg = &args[i];
+        if arg == "--" {
+            // Everything after `--` is positional
+            i += 1;
+            while i < args.len() {
+                positional.push(args[i].clone());
+                i += 1;
+            }
+            break;
+        }
+        if arg.starts_with('-') && arg.len() > 1 {
+            // Parse each character in the flag group
+            let chars: Vec<char> = arg[1..].chars().collect();
+            let mut j = 0;
+            while j < chars.len() {
+                match chars[j] {
+                    'r' => flag_r = true,
+                    'l' => flag_l = true,
+                    't' => flag_t = true,
+                    'd' => flag_d = true,
+                    'p' => {
+                        flag_p = true;
+                    }
+                    ch => {
+                        eprintln!("{}: hash: -{}: invalid option", shell.error_prefix(), ch);
+                        eprintln!("hash: usage: hash [-lr] [-p pathname] [-dt] [name ...]");
+                        return 2;
+                    }
+                }
+                j += 1;
+            }
+        } else {
+            // Not a flag — this and everything after are positional args
+            while i < args.len() {
+                positional.push(args[i].clone());
+                i += 1;
+            }
+            break;
+        }
+        i += 1;
+    }
+
+    // If -p is set, consume the first two positional args as path and name
+    if flag_p {
+        // -p requires a pathname and a name
+        if positional.len() < 2 {
+            eprintln!(
+                "{}: hash: -p: option requires an argument",
+                shell.error_prefix()
+            );
+            return 1;
+        }
+        p_path = Some(positional.remove(0));
+        // The rest of positional starts with the name(s)
+    }
+
+    // No args and no action flags: print the hash table
+    if !flag_r && !flag_l && !flag_t && !flag_d && !flag_p && positional.is_empty() {
         if shell.hash_table.is_empty() {
             eprintln!("hash: hash table empty");
         } else {
@@ -856,82 +945,100 @@ pub(super) fn builtin_hash(shell: &mut Shell, args: &[String]) -> i32 {
         return 0;
     }
 
-    let mut i = 0;
     let mut status = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "-r" => {
-                shell.hash_table.clear();
-                shell.hash_order.clear();
+
+    // -r: clear hash table
+    if flag_r {
+        shell.hash_table.clear();
+        shell.hash_order.clear();
+    }
+
+    // -p path name: set hash entry
+    if flag_p && let Some(ref path) = p_path {
+        if !shell.opt_hashall {
+            eprintln!("{}: hash: hashing disabled", shell.error_prefix());
+            return 1;
+        }
+        // Check if path is a directory
+        // Consume the name argument regardless of whether the path is valid
+        let name = if !positional.is_empty() {
+            Some(positional.remove(0))
+        } else {
+            None
+        };
+        let p = std::path::Path::new(path.as_str());
+        if p.is_dir() {
+            eprintln!("{}: hash: {}: Is a directory", shell.error_prefix(), path);
+            status = 1;
+        } else if let Some(name) = name {
+            if !shell.hash_table.contains_key(&name) {
+                shell.hash_order.push(name.clone());
             }
-            "-l" => {
-                for name in &shell.hash_order {
-                    let Some((path, _)) = shell.hash_table.get(name) else {
-                        continue;
-                    };
-                    println!("builtin hash -p {} {}", path, name);
-                }
-            }
-            "-t" => {
-                i += 1;
-                while i < args.len() && !args[i].starts_with('-') {
-                    if let Some((path, _)) = shell.hash_table.get(&args[i]) {
-                        println!("{}", path);
-                    } else {
-                        eprintln!("{}: hash: {}: not found", shell.error_prefix(), args[i]);
-                        status = 1;
-                    }
-                    i += 1;
-                }
-                continue;
-            }
-            "-d" => {
-                i += 1;
-                if i >= args.len() {
-                    eprintln!(
-                        "{}: hash: -d: option requires an argument",
-                        shell.error_prefix()
-                    );
-                    return 1;
-                }
-                shell.hash_table.remove(&args[i]);
-                shell.hash_order.retain(|n| n != &args[i]);
-            }
-            "-p" => {
-                if !shell.opt_hashall {
-                    eprintln!("{}: hash: hashing disabled", shell.error_prefix());
-                    return 1;
-                }
-                i += 1;
-                if i + 1 < args.len() {
-                    let path = args[i].clone();
-                    i += 1;
-                    let name = args[i].clone();
-                    if !shell.hash_table.contains_key(&name) {
-                        shell.hash_order.push(name.clone());
-                    }
-                    shell.hash_table.insert(name, (path, 0));
-                }
-            }
-            opt if opt.starts_with('-') => {
-                eprintln!("{}: hash: {}: invalid option", shell.error_prefix(), opt);
-                eprintln!("hash: usage: hash [-lr] [-p pathname] [-dt] [name ...]");
-                return 1;
-            }
-            name => {
-                // Look up command and add to hash table
-                if let Some(path) = find_command_path(name) {
-                    if !shell.hash_table.contains_key(name) {
-                        shell.hash_order.push(name.to_string());
-                    }
-                    shell.hash_table.insert(name.to_string(), (path, 0));
-                } else {
-                    eprintln!("{}: hash: {}: not found", shell.error_prefix(), name);
-                    status = 1;
-                }
+            shell.hash_table.insert(name, (path.clone(), 0));
+        }
+    }
+
+    // -d: delete entries
+    if flag_d {
+        if positional.is_empty() {
+            eprintln!(
+                "{}: hash: -d: option requires an argument",
+                shell.error_prefix()
+            );
+            return 1;
+        }
+        for name in &positional {
+            if shell.hash_table.remove(name).is_some() {
+                shell.hash_order.retain(|n| n != name);
+            } else {
+                eprintln!("{}: hash: {}: not found", shell.error_prefix(), name);
+                status = 1;
             }
         }
-        i += 1;
+        return status;
     }
+
+    // -t: print hash paths for names
+    if flag_t {
+        for name in &positional {
+            if let Some((path, _)) = shell.hash_table.get(name) {
+                if flag_l {
+                    // Long format: builtin hash -p <path> <name>
+                    println!("builtin hash -p {} {}", path, name);
+                } else {
+                    println!("{}", path);
+                }
+            } else {
+                eprintln!("{}: hash: {}: not found", shell.error_prefix(), name);
+                status = 1;
+            }
+        }
+        return status;
+    }
+
+    // -l alone (without -t): print all entries in long format
+    if flag_l && !flag_t && positional.is_empty() {
+        for name in &shell.hash_order {
+            let Some((path, _)) = shell.hash_table.get(name) else {
+                continue;
+            };
+            println!("builtin hash -p {} {}", path, name);
+        }
+        return status;
+    }
+
+    // Bare names: look up command and add to hash table
+    for name in &positional {
+        if let Some(path) = find_command_path(name) {
+            if !shell.hash_table.contains_key(name) {
+                shell.hash_order.push(name.to_string());
+            }
+            shell.hash_table.insert(name.to_string(), (path, 0));
+        } else {
+            eprintln!("{}: hash: {}: not found", shell.error_prefix(), name);
+            status = 1;
+        }
+    }
+
     status
 }
