@@ -15,6 +15,8 @@ pub struct ComsubParseResult {
     pub syntax_error: Option<String>,
     /// Heredoc EOF warnings from the comsub parse
     pub heredoc_eof_warnings: Vec<(usize, usize, String)>,
+    /// Whether the comsub was incomplete (no closing `)` found)
+    pub incomplete: bool,
 }
 
 /// Hybrid comsub parser: uses a character-level scan to find the `$(...)` boundary
@@ -57,6 +59,7 @@ pub fn parse_comsub(
                 chars_consumed,
                 syntax_error,
                 heredoc_eof_warnings,
+                incomplete: false,
             }
         }
         ComsubBoundary::Incomplete {
@@ -68,6 +71,7 @@ pub fn parse_comsub(
                 chars_consumed: chars.len(),
                 syntax_error: None, // incomplete is signalled via INCOMPLETE_COMSUB marker
                 heredoc_eof_warnings,
+                incomplete: true,
             }
         }
         ComsubBoundary::SilentClose { chars_scanned } => {
@@ -79,6 +83,7 @@ pub fn parse_comsub(
                 chars_consumed: chars_scanned,
                 syntax_error: None,
                 heredoc_eof_warnings: Vec::new(),
+                incomplete: false,
             }
         }
     }
@@ -1431,8 +1436,16 @@ impl Parser {
         assert!(self.eat(&Token::LParen));
         self.skip_newlines();
         let body = self.parse_program()?;
-        self.compound_cmd_stack.pop();
         if !self.eat(&Token::RParen) {
+            // If at EOF, report "unexpected end of file" with compound command context
+            if matches!(self.current, Token::Eof) {
+                // Don't pop the stack — leave context for heredoc EOF warning emission
+                return Err(format!(
+                    "syntax error: unexpected end of file from `(' command on line {}",
+                    start_line
+                ));
+            }
+            self.compound_cmd_stack.pop();
             // If the current token is a reserved word, report it as unexpected
             if let Some(text) = self.word_text()
                 && is_reserved_word(&text)
@@ -1441,6 +1454,7 @@ impl Parser {
             }
             return Err("expected ')'".to_string());
         }
+        self.compound_cmd_stack.pop();
         Ok(CompoundCommand::Subshell(body))
     }
 

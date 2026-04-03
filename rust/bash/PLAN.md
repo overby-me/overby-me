@@ -2,27 +2,28 @@
 
 ## Current State
 
-**~71/77 nix tests passing** (estimated), ~55/83 local tests passing (0 diff) on bookmark `bash-integration-test`. Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available).
+**~73/77 nix tests passing** (estimated), ~55/83 local tests passing (0 diff) on bookmark `bash-integration-test`. Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available).
 
-See `CHANGELOG.md` for full fix history (140+ fixes across 16 phases).
+See `CHANGELOG.md` for full fix history (140+ fixes across 17 phases).
 
-### Nix test results (~71/77 passing, estimated)
+### Nix test results (~73/77 passing, estimated)
 
-Passing (~71): alias, appendop, **arith** ✅, arith-for, **array** ✅, array2, **assoc** ✅, attr, braces, **builtins** ✅, case, casemod, comsub-posix, cond, coproc, cprint, dirstack, dollars, dynvar, errors, execscript, exp-tests, exportfunc, extglob, extglob2, extglob3, func, getopts, glob-bracket, glob-test, globstar, **heredoc** ✅, herestr, ifs, ifs-posix, input-test, invert, iquote, mapfile, more-exp, **nameref** ✅, **new-exp** ✅, nquote, nquote1, nquote2, nquote3, nquote4, nquote5, parser, posix2, posixexp, posixexp2, posixpat, posixpipe, precedence, printf, procsub, quote, **quotearray** ✅, read, redir, rhs-exp, set-e, set-x, shopt, strip, test, tilde, tilde2, type, **varenv** ✅, vredir
+Passing (~73): alias, appendop, **arith** ✅, arith-for, **array** ✅, array2, **assoc** ✅, attr, braces, **builtins** ✅, case, casemod, **comsub-eof** ✅, comsub-posix, cond, coproc, cprint, dirstack, dollars, dynvar, errors, execscript, exp-tests, exportfunc, extglob, extglob2, extglob3, func, getopts, glob-bracket, glob-test, globstar, **heredoc** ✅, herestr, ifs, ifs-posix, input-test, invert, iquote, mapfile, more-exp, **nameref** ✅, **new-exp** ✅, nquote, nquote1, nquote2, nquote3, nquote4, nquote5, parser, posix2, posixexp, posixexp2, posixpat, posixpipe, precedence, printf, procsub, quote, **quotearray** ✅, read, redir, rhs-exp, set-e, set-x, shopt, strip, test, tilde, tilde2, type, **varenv** ✅, vredir
+
+**Phase 17 flipped to passing:** comsub-eof (1→0 diff, incomplete comsub detection fix + heredoc EOF warning on parse errors), heredoc3.sub (1→0 diff, subshell EOF error reporting)
 
 **Phase 16 flipped to passing:** arith (~90→0 diff, duplicate error fix + subscript quote handling), array (~5→0 diff, subscript error ordering + brace expansion + bad subscript error format), varenv (~6→PID-only, set -k expansion ordering), builtins (~18→PID-only), heredoc (~12→PID-only)
 
 **Phase 15 flipped to passing:** assoc (462→0 diff), quotearray (179→0 diff, from IFS fix), new-exp (310→0 diff), nameref (678→PID-only diff), trap (1→0 locally, may still be flaky in nix)
 
-Failing (~6):
+Failing (~4):
 
 | Test | Nix diff lines | Notes |
 |------|---------------|-------|
 | trap | 1 | Flaky — timing-dependent signal delivery (extra CHLD) |
 | comsub | 1 | Spurious `echo: write error: Broken pipe` (flaky timing) |
 | lastpipe | 1 | Spurious `echo: write error: Broken pipe` (flaky timing) |
-| comsub-eof | 1 | Regression from Phase 13 heredoc changes (comsub-eof3.sub line 5 vs 8 error) |
-| heredoc | ~8 | heredoc3.sub: `EOF)` syntax (line 96), heredoc7.sub: comsub+heredoc interaction (main test PID-only now) |
+| heredoc | ~7 | heredoc7.sub: comsub+heredoc interaction (main test PID-only now, heredoc3.sub fixed) |
 | comsub2 | 184 | `${ ... }` dollar-brace comsub (bash 5.3 feature) |
 
 ### Local test results (~55/83 passing, 0 diff)
@@ -67,19 +68,23 @@ done
 
 Suggested nix timeout: 30s for most tests, 120s for trap.
 
-## Failing Nix Tests (~6/77)
+## Failing Nix Tests (~4/77)
 
 ### Near-passing (1-line diffs, likely flaky)
 
 - **trap** (1 line) — Timing-dependent signal delivery (extra CHLD)
 - **comsub** (1 line) — Spurious `echo: write error: Broken pipe` (SIGPIPE timing race in nix sandbox)
 - **lastpipe** (1 line) — Spurious `echo: write error: Broken pipe` (SIGPIPE timing race in nix sandbox)
-- **comsub-eof** (1 line) — Regression from Phase 13 heredoc changes (comsub-eof3.sub line 5 vs 8 error)
 
 ### Medium diffs
 
-- **heredoc** (~8 lines) — heredoc3.sub: `EOF)` delimiter-on-non-own-line syntax (line 96), heredoc7.sub: comsub+heredoc interaction. Main test now PID-only.
+- **heredoc** (~7 lines) — heredoc7.sub: comsub+heredoc interaction (heredoc inside comsub with external delimiter). Main test PID-only.
 - **comsub2** (184 lines) — `${ ... }` dollar-brace comsub (bash 5.3 feature)
+
+### Now passing (Phase 17 fixed)
+
+- **~~comsub-eof~~** (1→0 lines) — Fixed incomplete comsub detection: use `result.incomplete` flag instead of `!remaining.contains(')')` heuristic (heredoc body containing `)` caused false positive). Also emit heredoc EOF warnings before syntax error messages. ✅
+- **~~heredoc3.sub~~** (1→0 lines) — Fixed `(cat <<EOF ... EOF)` subshell EOF error reporting: emit "unexpected end of file from `(' command on line N" with proper line number when subshell hits EOF. ✅
 
 ### Now passing (Phase 16 fixed)
 
@@ -95,6 +100,10 @@ Suggested nix timeout: 30s for most tests, 120s for trap.
 - **~~assoc~~** (462→0 lines) — All associative array tests pass ✅
 - **~~nameref~~** (678→PID-only) — All nameref resolution tests pass ✅
 - **~~quotearray~~** (179→0 lines) — Fixed by IFS empty-string handling ✅
+
+### Now passing (Phase 17 fixed, from above)
+
+- **~~comsub-eof~~** — See above ✅
 
 ### Local-only failing tests (not in nix harness)
 
@@ -141,19 +150,24 @@ These exist in `/tmp/bash-5.3/tests/` but not in the nix test list:
 
 ### Low-hanging fruit (could flip nix tests to passing)
 
-1. **Fix SIGPIPE flaky tests (comsub/lastpipe/trap)** — 1-line diff each, timing race in nix sandbox. SIGPIPE is reset to SIG_DFL in pipeline/comsub children and EPIPE is suppressed in echo builtin for all subprocess contexts, but the nix sandbox timing still occasionally triggers the race. trap has an extra CHLD signal delivery.
-
-2. **Fix comsub-eof regression** — 1-line diff: Phase 13 heredoc changes caused comsub-eof3.sub error line to change from 5 to 8.
+1. **Fix SIGPIPE flaky tests (comsub/lastpipe/trap)** — 1-line diff each, timing race in nix sandbox. SIGPIPE is reset to SIG_DFL in pipeline/comsub children and EPIPE is suppressed in echo builtin for all subprocess contexts, but the nix sandbox timing still occasionally triggers the race. trap has an extra CHLD signal delivery. printf also has a flaky SIGPIPE race (printf6.sub line 40).
 
 ### Feature work
 
+2. **Fix remaining heredoc sub-test** — heredoc7.sub: comsub+heredoc interaction (heredoc inside `$(...)` where delimiter appears outside comsub, and heredoc outside comsub where delimiter appears inside). (~7 nix diff lines)
+
 3. **Implement `${ ... }` dollar-brace command substitution** — Bash 5.3 feature used in comsub2 tests. (~184 nix diff lines)
 
-4. **Fix remaining heredoc sub-tests** — heredoc3.sub: `EOF)` delimiter-not-on-own-line (line 96), heredoc7.sub: comsub+heredoc interaction. (~8 nix diff lines)
+4. **Implement `caller` builtin and fix DEBUG trap context** — Needed for dbg-support tests (local-only). (~375+15 diff lines)
 
-5. **Implement `caller` builtin and fix DEBUG trap context** — Needed for dbg-support tests (local-only). (~375+15 diff lines)
+5. **Implement restricted shell mode (`-r` flag)** — Needed for rsh tests (local-only). (~26 diff lines)
 
-6. **Implement restricted shell mode (`-r` flag)** — Needed for rsh tests (local-only). (~26 diff lines)
+## Recent Fixes (Phase 17)
+
+- **Fix incomplete comsub detection for heredoc-containing command substitutions** — When `$(cat <<EOF ... EOF)` had a heredoc that consumed the `)` character as body text (because EOF wasn't found), `parse_comsub` correctly returned `Incomplete` but `parse_dollar` failed to detect it. The heuristic `!remaining.contains(')')` was wrong when `)` existed inside the heredoc body. Added `incomplete` field to `ComsubParseResult` and use it directly instead of the heuristic. Fixed **comsub-eof** nix test (1→0 diff).
+- **Emit heredoc EOF warnings before syntax error messages** — When a parse error occurs (e.g. unmatched `(`), any accumulated heredoc EOF warnings are now printed before the error message, matching bash's output ordering.
+- **Fix subshell EOF error reporting** — `(cat <<EOF\nbody\nEOF)` where `EOF)` is not the delimiter now correctly reports: (1) heredoc-terminated-by-EOF warning, (2) `syntax error: unexpected end of file from '(' command on line N` with proper line number. Previously reported only `expected ')'` without warnings. Fixed **heredoc3.sub** (1→0 diff).
+- **Handle "unexpected end of file" errors with line numbers** — EOF errors from unclosed compound commands now include `line N:` in the prefix even in non-script non-dash_c mode, matching bash.
 
 ## Recent Fixes (Phase 16)
 

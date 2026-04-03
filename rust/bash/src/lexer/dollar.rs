@@ -129,8 +129,7 @@ fn parse_dollar_inner(
                 // Prefix with "COMSUB:" so the error handler adds
                 // "while looking for matching ')'" suffix.
                 WordPart::SyntaxError(format!("COMSUB:{}", err))
-            } else if result.chars_consumed == remaining.chars().count() && !remaining.contains(')')
-            {
+            } else if result.incomplete {
                 // No closing ) found — incomplete comsub
                 let eof_line = chars.iter().filter(|&&c| c == '\n').count() + 1;
                 WordPart::CommandSub(format!("\x00INCOMPLETE_COMSUB:{}", eof_line))

@@ -1019,6 +1019,19 @@ impl Shell {
                     }
                 }
                 Err(e) => {
+                    // Emit heredoc EOF warnings before the error message
+                    // (bash prints heredoc warnings before syntax errors)
+                    for (eof_line, start_line, delim) in parser.take_heredoc_eof_warnings() {
+                        let name = self
+                            .positional
+                            .first()
+                            .map(|s| s.as_str())
+                            .unwrap_or("bash");
+                        eprintln!(
+                            "{}: line {}: warning: here-document at line {} delimited by end-of-file (wanted `{}')",
+                            name, eof_line, start_line, delim
+                        );
+                    }
                     // Extract accurate line number from COMSUB_LINE:N: prefix
                     // (set by take_word_checked before advance() moves the
                     // lexer past the error token's line).  Only COMSUB errors
@@ -1174,31 +1187,44 @@ impl Shell {
                             } else {
                                 (e.clone(), false)
                             };
-                        let comsub_suffix2 = if (self.in_comsub || is_comsub2)
-                            && display_err2.contains("syntax error")
-                            && !display_err2.contains("token `)'")
-                        {
-                            " while looking for matching `)'"
+                        // "unexpected end of file" errors get special treatment:
+                        // include line number in prefix and skip source line display
+                        // (bash prints "name: line N: syntax error: unexpected end of file ...")
+                        if display_err2.contains("unexpected end of file") {
+                            let name = self
+                                .positional
+                                .first()
+                                .map(|s| s.as_str())
+                                .unwrap_or("bash");
+                            let eof_line = parser.current_line();
+                            eprintln!("{}: line {}: {}", name, eof_line, display_err2);
                         } else {
-                            ""
-                        };
-                        eprintln!(
-                            "{}: {}{}",
-                            self.error_prefix(),
-                            display_err2,
-                            comsub_suffix2
-                        );
-                        if display_err2.contains("syntax error") {
-                            let lineno: usize = self
-                                .vars
-                                .get("LINENO")
-                                .and_then(|s| s.parse().ok())
-                                .unwrap_or(1);
-                            let line = input
-                                .lines()
-                                .nth(lineno.saturating_sub(1))
-                                .unwrap_or(input.lines().next().unwrap_or(input));
-                            eprintln!("{}: `{}'", self.error_prefix(), line.trim_end());
+                            let comsub_suffix2 = if (self.in_comsub || is_comsub2)
+                                && display_err2.contains("syntax error")
+                                && !display_err2.contains("token `)'")
+                            {
+                                " while looking for matching `)'"
+                            } else {
+                                ""
+                            };
+                            eprintln!(
+                                "{}: {}{}",
+                                self.error_prefix(),
+                                display_err2,
+                                comsub_suffix2
+                            );
+                            if display_err2.contains("syntax error") {
+                                let lineno: usize = self
+                                    .vars
+                                    .get("LINENO")
+                                    .and_then(|s| s.parse().ok())
+                                    .unwrap_or(1);
+                                let line = input
+                                    .lines()
+                                    .nth(lineno.saturating_sub(1))
+                                    .unwrap_or(input.lines().next().unwrap_or(input));
+                                eprintln!("{}: `{}'", self.error_prefix(), line.trim_end());
+                            }
                         }
                     }
                     status = if recoverable { 1 } else { 2 };
