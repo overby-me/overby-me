@@ -163,6 +163,7 @@ impl Shell {
 
                 // Flush before fork to prevent buffer duplication
                 std::io::Write::flush(&mut std::io::stdout()).ok();
+                std::io::Write::flush(&mut std::io::stderr()).ok();
                 match unsafe { nix::unistd::fork() } {
                     Ok(nix::unistd::ForkResult::Child) => {
                         // Clear EXIT trap in subshell (pipeline children are subshells)
@@ -385,8 +386,21 @@ impl Shell {
                 .unwrap_or(1);
             self.comsub_line_offset = lineno.saturating_sub(1);
 
+            // In non-posix mode, bash disables `set -e` inside funsubs
+            // (just like regular command substitutions).  In posix mode,
+            // `set -e` propagates into funsubs.
+            let saved_errexit = self.opt_errexit;
+            if !self.opt_posix {
+                self.opt_errexit = false;
+            }
+
             let status = self.run_string(cmd_str);
             self.last_status = status;
+
+            // Restore errexit (unless the funsub explicitly changed it).
+            if !self.opt_posix {
+                self.opt_errexit = saved_errexit;
+            }
 
             // Tear down the scope (clears returning, restores locals).
             self.teardown_funsub_scope();
@@ -449,8 +463,21 @@ impl Shell {
             .unwrap_or(1);
         self.comsub_line_offset = lineno.saturating_sub(1);
 
+        // In non-posix mode, bash disables `set -e` inside valuesubs
+        // (just like funsubs and regular command substitutions).
+        // In posix mode, `set -e` propagates into valuesubs.
+        let saved_errexit = self.opt_errexit;
+        if !self.opt_posix {
+            self.opt_errexit = false;
+        }
+
         let status = self.run_string(cmd_str);
         self.last_status = status;
+
+        // Restore errexit (unless the valuesub explicitly changed it).
+        if !self.opt_posix {
+            self.opt_errexit = saved_errexit;
+        }
 
         // Tear down the scope (clears returning, restores locals).
         self.teardown_funsub_scope();

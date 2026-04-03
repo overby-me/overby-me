@@ -663,28 +663,33 @@ impl Shell {
         } else {
             msg.to_string()
         };
-        let msg = &output;
         let fd = self
             .vars
             .get("BASH_XTRACEFD")
             .and_then(|v| v.parse::<i32>().ok())
             .unwrap_or(2);
+        // Use a single write_all call with the newline pre-appended so that
+        // the entire xtrace line is emitted in one atomic write(2) syscall.
+        // writeln! may split into multiple write calls (message + '\n'),
+        // which lets concurrent pipeline children interleave on shared stderr.
+        let mut buf = output;
+        buf.push('\n');
         #[cfg(unix)]
         {
             use std::io::Write;
             if fd == 2 {
-                let _ = writeln!(std::io::stderr(), "{}", msg);
+                let _ = std::io::stderr().write_all(buf.as_bytes());
             } else {
                 use std::os::unix::io::FromRawFd;
                 // Use ManuallyDrop to avoid closing the fd
                 let mut f = std::mem::ManuallyDrop::new(unsafe { std::fs::File::from_raw_fd(fd) });
-                let _ = writeln!(f, "{}", msg);
+                let _ = f.write_all(buf.as_bytes());
             }
         }
         #[cfg(not(unix))]
         {
             let _ = fd;
-            eprintln!("{}", msg);
+            let _ = std::io::Write::write_all(&mut std::io::stderr(), buf.as_bytes());
         }
     }
 
