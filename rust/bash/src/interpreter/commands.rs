@@ -2690,12 +2690,45 @@ impl Shell {
                             let msg = match e {
                                 nix::errno::Errno::ENOENT => {
                                     // For commands without path separator, report "command not found"
-                                    // For explicit paths, report the OS error
-                                    if name.contains('/') {
-                                        "No such file or directory"
-                                    } else {
-                                        "command not found"
+                                    if !name.contains('/') {
+                                        eprintln!(
+                                            "{}: {}: command not found",
+                                            self.error_prefix(),
+                                            name
+                                        );
+                                        std::process::exit(127);
                                     }
+                                    // For explicit paths, check if the file exists but has a
+                                    // bad interpreter (shebang pointing to nonexistent file).
+                                    // Bash reports: "cmd: interp: bad interpreter: ..."
+                                    if let Ok(mut f) = std::fs::File::open(name) {
+                                        use std::io::Read;
+                                        let mut header = [0u8; 256];
+                                        let n = f.read(&mut header).unwrap_or(0);
+                                        if n >= 2 && header[0] == b'#' && header[1] == b'!' {
+                                            let line_end = header[2..n]
+                                                .iter()
+                                                .position(|&b| b == b'\n')
+                                                .unwrap_or(n - 2);
+                                            let interp_line =
+                                                String::from_utf8_lossy(&header[2..2 + line_end])
+                                                    .trim()
+                                                    .to_string();
+                                            // Extract just the interpreter path (before any args)
+                                            let interp = interp_line
+                                                .split_whitespace()
+                                                .next()
+                                                .unwrap_or(&interp_line);
+                                            eprintln!(
+                                                "{}: {}: {}: bad interpreter: No such file or directory",
+                                                self.error_prefix(),
+                                                name,
+                                                interp
+                                            );
+                                            std::process::exit(127);
+                                        }
+                                    }
+                                    "No such file or directory"
                                 }
                                 nix::errno::Errno::EACCES => "Permission denied",
                                 nix::errno::Errno::ENOEXEC => {
