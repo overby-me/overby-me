@@ -1022,8 +1022,18 @@ fn setup_journal_stream_output(config: &ExecHelperConfig) {
 
     const SOCKET_PATH: &str = "/run/systemd/journal/stdout";
 
+    // Use SyslogIdentifier= if set, otherwise derive from the binary name
+    // in the exec command path. This matches C systemd's behavior where
+    // SYSLOG_IDENTIFIER is set to the process name, not the unit name.
+    let cmd_basename = config
+        .cmd
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(&config.name);
+    let identifier = config.syslog_identifier.as_deref().unwrap_or(cmd_basename);
+
     if config.stdout_is_journal
-        && let Some(fd) = open_journal_stream_nonblock(SOCKET_PATH, &config.name)
+        && let Some(fd) = open_journal_stream_nonblock(SOCKET_PATH, identifier, &config.name)
     {
         unsafe {
             libc::dup2(fd, libc::STDOUT_FILENO);
@@ -1042,7 +1052,7 @@ fn setup_journal_stream_output(config: &ExecHelperConfig) {
     }
 
     if config.stderr_is_journal
-        && let Some(fd) = open_journal_stream_nonblock(SOCKET_PATH, &config.name)
+        && let Some(fd) = open_journal_stream_nonblock(SOCKET_PATH, identifier, &config.name)
     {
         unsafe {
             libc::dup2(fd, libc::STDERR_FILENO);
@@ -1055,7 +1065,11 @@ fn setup_journal_stream_output(config: &ExecHelperConfig) {
 
 /// Non-blocking connect to journald's stdout stream socket.
 /// Returns None if the socket doesn't exist or can't connect within 100ms.
-fn open_journal_stream_nonblock(socket_path: &str, unit_name: &str) -> Option<i32> {
+fn open_journal_stream_nonblock(
+    socket_path: &str,
+    identifier: &str,
+    unit_name: &str,
+) -> Option<i32> {
     unsafe {
         let fd = libc::socket(libc::AF_UNIX, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0);
         if fd < 0 {
@@ -1125,8 +1139,15 @@ fn open_journal_stream_nonblock(socket_path: &str, unit_name: &str) -> Option<i3
         // Clear CLOEXEC so the fd survives exec
         libc::fcntl(fd, libc::F_SETFD, 0);
 
-        // Send the 7-line protocol header
-        let header = format!("{name}\n{name}\n6\n0\n0\n0\n0\n", name = unit_name,);
+        // Send the 7-line protocol header:
+        // 1. identifier (SYSLOG_IDENTIFIER)
+        // 2. unit name (_SYSTEMD_UNIT)
+        // 3. priority
+        // 4. level_prefix flag
+        // 5. forward_to_syslog flag
+        // 6. forward_to_kmsg flag
+        // 7. forward_to_console flag
+        let header = format!("{identifier}\n{unit_name}\n6\n0\n0\n0\n0\n");
         let written = libc::write(fd, header.as_ptr() as *const libc::c_void, header.len());
         if written < 0 || written as usize != header.len() {
             libc::close(fd);
