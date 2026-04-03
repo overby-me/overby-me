@@ -1489,7 +1489,7 @@ impl Shell {
                     j += 1;
                 }
                 let cmd: String = chars[i + 2..j].iter().collect();
-                let output = self.capture_output(&cmd);
+                let output = self.capture_output_nofork(&cmd);
                 result.push_str(output.trim());
                 i = j + 1;
                 continue;

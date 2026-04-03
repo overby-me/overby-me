@@ -54,6 +54,7 @@ fn parse_dollar_inner(
                 *i += 1;
                 let mut depth = 1; // nested $(( )) depth
                 let mut paren_depth = 0i32; // inner () depth
+                let mut brace_depth = 0i32; // track {} for funsubs
                 let mut expr = String::new();
                 let mut has_semicolon_at_top = false;
                 while *i < chars.len() && depth > 0 {
@@ -61,6 +62,7 @@ fn parse_dollar_inner(
                         && chars[*i] == ')'
                         && chars[*i + 1] == ')'
                         && paren_depth <= 0
+                        && brace_depth <= 0
                     {
                         depth -= 1;
                         if depth == 0 {
@@ -76,13 +78,58 @@ fn parse_dollar_inner(
                         }
                         expr.push(chars[*i]);
                         *i += 1;
+                    } else if chars[*i] == '$'
+                        && *i + 1 < chars.len()
+                        && chars[*i + 1] == '{'
+                        && *i + 2 < chars.len()
+                        && matches!(chars[*i + 2], ' ' | '\t' | '\n' | '|')
+                    {
+                        // Start of funsub ${ cmd; } or valuesub ${| cmd; }
+                        // Push '$' and advance; '{' will be handled by the
+                        // brace_depth tracking on the next iteration.
+                        expr.push(chars[*i]);
+                        *i += 1;
                     } else {
-                        if chars[*i] == '(' {
+                        if chars[*i] == '{' {
+                            brace_depth += 1;
+                        } else if chars[*i] == '}' && brace_depth > 0 {
+                            brace_depth -= 1;
+                        } else if chars[*i] == '(' {
                             paren_depth += 1;
                         } else if chars[*i] == ')' {
                             paren_depth -= 1;
-                        } else if chars[*i] == ';' && paren_depth <= 0 {
+                        } else if chars[*i] == ';' && paren_depth <= 0 && brace_depth <= 0 {
                             has_semicolon_at_top = true;
+                        } else if chars[*i] == '\'' && brace_depth > 0 {
+                            // Skip single-quoted string inside funsub
+                            expr.push(chars[*i]);
+                            *i += 1;
+                            while *i < chars.len() && chars[*i] != '\'' {
+                                expr.push(chars[*i]);
+                                *i += 1;
+                            }
+                            if *i < chars.len() {
+                                expr.push(chars[*i]);
+                                *i += 1;
+                            }
+                            continue;
+                        } else if chars[*i] == '"' && brace_depth > 0 {
+                            // Skip double-quoted string inside funsub
+                            expr.push(chars[*i]);
+                            *i += 1;
+                            while *i < chars.len() && chars[*i] != '"' {
+                                if chars[*i] == '\\' && *i + 1 < chars.len() {
+                                    expr.push(chars[*i]);
+                                    *i += 1;
+                                }
+                                expr.push(chars[*i]);
+                                *i += 1;
+                            }
+                            if *i < chars.len() {
+                                expr.push(chars[*i]);
+                                *i += 1;
+                            }
+                            continue;
                         }
                         expr.push(chars[*i]);
                         *i += 1;
@@ -168,13 +215,39 @@ fn parse_dollar_inner(
                 }
                 // Parse as command substitution delimited by }
                 // Funsub requires that } is preceded by a command terminator (;/\n/&)
+                // or a closing compound command delimiter ()/`done`/`fi`/etc.)
                 // at the SAME depth level (not from nested blocks)
                 let mut depth = 1;
+                let mut paren_depth = 0i32; // track () for subshells
                 let mut cmd = String::new();
                 let mut has_terminator_at_depth1 = false;
                 let mut has_nonws_at_depth1 = false;
                 while *i < chars.len() && depth > 0 {
                     match chars[*i] {
+                        '(' => {
+                            cmd.push(chars[*i]);
+                            if depth == 1 {
+                                paren_depth += 1;
+                                has_nonws_at_depth1 = true;
+                                has_terminator_at_depth1 = false;
+                            }
+                        }
+                        ')' => {
+                            cmd.push(chars[*i]);
+                            if depth == 1 && paren_depth > 0 {
+                                paren_depth -= 1;
+                                // Closing a subshell/group at brace depth 1
+                                // constitutes a complete command, so } can
+                                // follow without a ; terminator.
+                                if paren_depth == 0 {
+                                    has_terminator_at_depth1 = true;
+                                }
+                                has_nonws_at_depth1 = true;
+                            } else if depth == 1 {
+                                has_nonws_at_depth1 = true;
+                                has_terminator_at_depth1 = false;
+                            }
+                        }
                         '{' => {
                             depth += 1;
                             cmd.push(chars[*i]);

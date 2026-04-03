@@ -797,7 +797,7 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                         s.push_str(&cmd_sub(cmd));
                     }
                     WordPart::ArithSub(expr) => {
-                        s.push_str(&expand_arith(expr, ctx));
+                        s.push_str(&expand_arith(expr, ctx, cmd_sub));
                     }
                     _ => {
                         let mut inner = Vec::new();
@@ -1312,7 +1312,7 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
             out.push(Segment::Unquoted(val));
         }
         WordPart::ArithSub(expr) => {
-            let val = expand_arith(expr, ctx);
+            let val = expand_arith(expr, ctx, cmd_sub);
             out.push(Segment::Unquoted(val));
         }
         WordPart::ProcessSub(kind, cmd) => {
@@ -1549,7 +1549,21 @@ fn expand_pattern_word(word: &Word, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
     result
 }
 
-fn expand_arith(expr: &str, ctx: &ExpCtx) -> String {
+fn expand_arith(expr: &str, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
+    // Pre-expand command substitutions ($(...) and ${ ...; }) in the
+    // arithmetic expression before evaluating it.  eval_arith_full only
+    // handles variable references, not command/funsub substitutions.
+    let expanded;
+    let expr = if expr.contains("$(")
+        || expr.contains("${ ")
+        || expr.contains("${|")
+        || expr.contains('`')
+    {
+        expanded = expand_comsubs_in_arith_expr(expr, cmd_sub);
+        &expanded
+    } else {
+        expr
+    };
     let result = eval_arith_full(
         expr,
         ctx.vars,
@@ -1559,6 +1573,130 @@ fn expand_arith(expr: &str, ctx: &ExpCtx) -> String {
         ctx.opt_flags,
     );
     result.to_string()
+}
+
+/// Expand command substitutions and funsubs within an arithmetic expression string.
+/// This is used by the expand layer (which doesn't have Shell access) to pre-process
+/// $(...), ${ ...; }, and ${| ...; } before passing to eval_arith_full.
+fn expand_comsubs_in_arith_expr(expr: &str, cmd_sub: CmdSubFn) -> String {
+    let chars: Vec<char> = expr.chars().collect();
+    let mut result = String::new();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '\\' && i + 1 < chars.len() && chars[i + 1] == '$' {
+            // Escaped $ — keep as-is
+            result.push('\\');
+            result.push('$');
+            i += 2;
+            continue;
+        }
+        if chars[i] == '$' && i + 1 < chars.len() {
+            // ${ cmd; } funsub or ${| cmd; } valuesub
+            if chars[i + 1] == '{'
+                && i + 2 < chars.len()
+                && matches!(chars[i + 2], ' ' | '\t' | '\n' | '|')
+            {
+                let is_valuesub = chars[i + 2] == '|';
+                let start = if is_valuesub { i + 3 } else { i + 2 };
+                let mut depth = 1i32;
+                let mut j = start;
+                while j < chars.len() && depth > 0 {
+                    match chars[j] {
+                        '{' => depth += 1,
+                        '}' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                break;
+                            }
+                        }
+                        '\'' => {
+                            j += 1;
+                            while j < chars.len() && chars[j] != '\'' {
+                                j += 1;
+                            }
+                        }
+                        '"' => {
+                            j += 1;
+                            while j < chars.len() && chars[j] != '"' {
+                                if chars[j] == '\\' && j + 1 < chars.len() {
+                                    j += 1;
+                                }
+                                j += 1;
+                            }
+                        }
+                        _ => {}
+                    }
+                    j += 1;
+                }
+                let cmd: String = chars[start..j].iter().collect();
+                let prefix = if is_valuesub {
+                    "\x01VALUESUB:"
+                } else {
+                    "\x01FUNSUB:"
+                };
+                let output = cmd_sub(&format!("{}{}", prefix, cmd));
+                result.push_str(output.trim());
+                i = j + 1; // skip past '}'
+                continue;
+            }
+            // $(...) regular comsub
+            if chars[i + 1] == '(' && !(i + 2 < chars.len() && chars[i + 2] == '(') {
+                let mut depth = 1i32;
+                let mut j = i + 2;
+                while j < chars.len() && depth > 0 {
+                    match chars[j] {
+                        '(' => depth += 1,
+                        ')' => depth -= 1,
+                        '\'' => {
+                            j += 1;
+                            while j < chars.len() && chars[j] != '\'' {
+                                j += 1;
+                            }
+                        }
+                        '"' => {
+                            j += 1;
+                            while j < chars.len() && chars[j] != '"' {
+                                if chars[j] == '\\' && j + 1 < chars.len() {
+                                    j += 1;
+                                }
+                                j += 1;
+                            }
+                        }
+                        _ => {}
+                    }
+                    j += 1;
+                }
+                let cmd: String = chars[i + 2..j - 1].iter().collect();
+                let output = cmd_sub(&cmd);
+                result.push_str(output.trim());
+                i = j;
+                continue;
+            }
+            // `backtick`
+        }
+        if chars[i] == '`' {
+            i += 1;
+            let mut cmd = String::new();
+            while i < chars.len() && chars[i] != '`' {
+                if chars[i] == '\\' && i + 1 < chars.len() {
+                    cmd.push(chars[i + 1]);
+                    i += 2;
+                } else {
+                    cmd.push(chars[i]);
+                    i += 1;
+                }
+            }
+            if i < chars.len() {
+                i += 1;
+            } // skip closing `
+            let output = cmd_sub(&cmd);
+            result.push_str(output.trim());
+            continue;
+        }
+        result.push(chars[i]);
+        i += 1;
+    }
+    result
 }
 
 pub use arithmetic::eval_arith_full;
