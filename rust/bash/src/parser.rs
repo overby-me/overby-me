@@ -17,6 +17,8 @@ pub struct ComsubParseResult {
     pub heredoc_eof_warnings: Vec<(usize, usize, String)>,
     /// Whether the comsub was incomplete (no closing `)` found)
     pub incomplete: bool,
+    /// Number of unterminated here-documents inside the comsub (for warning)
+    pub unterminated_heredoc_count: usize,
 }
 
 /// Hybrid comsub parser: uses a character-level scan to find the `$(...)` boundary
@@ -48,6 +50,7 @@ pub fn parse_comsub(
             text,
             chars_consumed,
             heredoc_eof_warnings,
+            unterminated_heredoc_count,
         } => {
             // Phase 2: validate the bounded text with a full recursive parse.
             // This catches errors like `done` in case body, `in` at command
@@ -60,6 +63,7 @@ pub fn parse_comsub(
                 syntax_error,
                 heredoc_eof_warnings,
                 incomplete: false,
+                unterminated_heredoc_count,
             }
         }
         ComsubBoundary::Incomplete {
@@ -72,6 +76,7 @@ pub fn parse_comsub(
                 syntax_error: None, // incomplete is signalled via INCOMPLETE_COMSUB marker
                 heredoc_eof_warnings,
                 incomplete: true,
+                unterminated_heredoc_count: 0,
             }
         }
         ComsubBoundary::SilentClose { chars_scanned } => {
@@ -84,6 +89,7 @@ pub fn parse_comsub(
                 syntax_error: None,
                 heredoc_eof_warnings: Vec::new(),
                 incomplete: false,
+                unterminated_heredoc_count: 0,
             }
         }
     }
@@ -95,6 +101,8 @@ enum ComsubBoundary {
         text: String,
         chars_consumed: usize,
         heredoc_eof_warnings: Vec<(usize, usize, String)>,
+        /// How many unterminated here-documents were in the comsub
+        unterminated_heredoc_count: usize,
     },
     /// No closing `)` found — incomplete comsub
     Incomplete {
@@ -127,6 +135,7 @@ fn find_comsub_boundary(
     let mut in_case_action = false;
     let mut compound_depth = 0i32;
     let mut heredoc_eof_warnings = Vec::new();
+    let mut pending_heredocs: Vec<(String, bool, bool, usize)> = Vec::new();
 
     while i < chars.len() && depth > 0 {
         match chars[i] {
@@ -402,9 +411,104 @@ fn find_comsub_boundary(
                         i += 1;
                     }
                 }
+                // Read remaining tokens on the same line after the heredoc
+                // delimiter, but watch for `)` that closes the comsub.
+                let mut comsub_closed_by_paren = false;
                 while i < chars.len() && chars[i] != '\n' {
+                    if chars[i] == ')' {
+                        // Check if this `)` closes the comsub (depth 1)
+                        if depth == 1 && case_depth == 0 {
+                            // The `)` closes the comsub — but the heredoc
+                            // body follows on subsequent lines in the outer
+                            // input.  Read the body and embed it in the
+                            // comsub text so the inner parser sees a
+                            // complete `cat << EOF\nbody\nEOF`.
+                            //
+                            // Record unterminated-heredoc warning (bash
+                            // warns about this even though it works).
+                            pending_heredocs.push((
+                                delim.clone(),
+                                strip_tabs,
+                                _heredoc_quoted,
+                                0, // unused
+                            ));
+
+                            // Consume the `)` — it closes the comsub
+                            i += 1;
+                            depth = 0;
+
+                            // Skip the rest of the line after `)` in the
+                            // outer input (consumed but NOT part of comsub)
+                            while i < chars.len() && chars[i] != '\n' {
+                                i += 1;
+                            }
+                            // Skip the newline
+                            if i < chars.len() && chars[i] == '\n' {
+                                i += 1;
+                            }
+
+                            // Now read the heredoc body from the outer
+                            // input and append it to the comsub text.
+                            cmd.push('\n');
+                            if !delim.is_empty() {
+                                loop {
+                                    if i >= chars.len() {
+                                        // EOF before delimiter found
+                                        let current_line =
+                                            chars[..i].iter().filter(|&&c| c == '\n').count();
+                                        let heredoc_start_line = chars[..hd_start]
+                                            .iter()
+                                            .filter(|&&c| c == '\n')
+                                            .count()
+                                            + 1;
+                                        heredoc_eof_warnings.push((
+                                            current_line,
+                                            heredoc_start_line,
+                                            delim.clone(),
+                                        ));
+                                        break;
+                                    }
+                                    let line_start = i;
+                                    while i < chars.len() && chars[i] != '\n' {
+                                        i += 1;
+                                    }
+                                    let line: String = chars[line_start..i].iter().collect();
+                                    let check = if strip_tabs {
+                                        line.trim_start_matches('\t').to_string()
+                                    } else {
+                                        line.clone()
+                                    };
+                                    let check_delim = if strip_tabs {
+                                        delim.trim_start_matches('\t')
+                                    } else {
+                                        &delim
+                                    };
+                                    if check == check_delim {
+                                        cmd.push_str(&line);
+                                        // Do NOT consume the \n after the
+                                        // delimiter — it belongs to the outer
+                                        // context and the lexer needs it to
+                                        // properly separate tokens.
+                                        break;
+                                    }
+                                    cmd.push_str(&line);
+                                    cmd.push('\n');
+                                    if i < chars.len() {
+                                        i += 1; // skip \n
+                                    }
+                                }
+                            }
+                            comsub_closed_by_paren = true;
+                            break;
+                        }
+                    }
                     cmd.push(chars[i]);
                     i += 1;
+                }
+                if comsub_closed_by_paren {
+                    // Comsub is closed and heredoc body is embedded in cmd.
+                    // Break out of the main while loop.
+                    break;
                 }
                 if i < chars.len() {
                     cmd.push(chars[i]);
@@ -591,6 +695,7 @@ fn find_comsub_boundary(
                     (eof_line + line_offset, start_line + line_offset, delim)
                 })
                 .collect(),
+            unterminated_heredoc_count: pending_heredocs.len(),
         }
     }
 }

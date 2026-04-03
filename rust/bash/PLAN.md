@@ -4,7 +4,7 @@
 
 **~73/77 nix tests passing** (estimated), ~55/83 local tests passing (0 diff) on bookmark `bash-integration-test`. Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available).
 
-See `CHANGELOG.md` for full fix history (140+ fixes across 17 phases).
+See `CHANGELOG.md` for full fix history (145+ fixes across 17 phases).
 
 ### Nix test results (~73/77 passing, estimated)
 
@@ -78,13 +78,14 @@ Suggested nix timeout: 30s for most tests, 120s for trap.
 
 ### Medium diffs
 
-- **heredoc** (~7 lines) — heredoc7.sub: comsub+heredoc interaction (heredoc inside comsub with external delimiter). Main test PID-only.
+- **heredoc** (~4 lines) — heredoc7.sub case 2: heredoc started outside comsub where delimiter overlaps comsub body (complex parser interaction). Case 1 (`$(cat << EOF)`) now fixed. Main test PID-only.
 - **comsub2** (184 lines) — `${ ... }` dollar-brace comsub (bash 5.3 feature)
 
 ### Now passing (Phase 17 fixed)
 
 - **~~comsub-eof~~** (1→0 lines) — Fixed incomplete comsub detection: use `result.incomplete` flag instead of `!remaining.contains(')')` heuristic (heredoc body containing `)` caused false positive). Also emit heredoc EOF warnings before syntax error messages. ✅
 - **~~heredoc3.sub~~** (1→0 lines) — Fixed `(cat <<EOF ... EOF)` subshell EOF error reporting: emit "unexpected end of file from `(' command on line N" with proper line number when subshell hits EOF. ✅
+- **~~heredoc7.sub case 1~~** (~3→0 lines) — Fixed `echo $(cat << EOF)` where heredoc inside comsub has body in outer context: `find_comsub_boundary` now reads the heredoc body from chars after `)` and embeds it in the comsub text. Emits "command substitution: N unterminated here-document" warning. ✅
 
 ### Now passing (Phase 16 fixed)
 
@@ -154,7 +155,7 @@ These exist in `/tmp/bash-5.3/tests/` but not in the nix test list:
 
 ### Feature work
 
-2. **Fix remaining heredoc sub-test** — heredoc7.sub: comsub+heredoc interaction (heredoc inside `$(...)` where delimiter appears outside comsub, and heredoc outside comsub where delimiter appears inside). (~7 nix diff lines)
+2. **Fix remaining heredoc7.sub case 2** — heredoc started outside comsub (`cat <<EOF && grep $(`) where the heredoc delimiter `EOF` appears on a line consumed by the comsub body. Requires restructuring how heredoc body reading interacts with comsub boundary scanning when the `<<` is in the OUTER context. (~4 nix diff lines)
 
 3. **Implement `${ ... }` dollar-brace command substitution** — Bash 5.3 feature used in comsub2 tests. (~184 nix diff lines)
 
@@ -168,6 +169,7 @@ These exist in `/tmp/bash-5.3/tests/` but not in the nix test list:
 - **Emit heredoc EOF warnings before syntax error messages** — When a parse error occurs (e.g. unmatched `(`), any accumulated heredoc EOF warnings are now printed before the error message, matching bash's output ordering.
 - **Fix subshell EOF error reporting** — `(cat <<EOF\nbody\nEOF)` where `EOF)` is not the delimiter now correctly reports: (1) heredoc-terminated-by-EOF warning, (2) `syntax error: unexpected end of file from '(' command on line N` with proper line number. Previously reported only `expected ')'` without warnings. Fixed **heredoc3.sub** (1→0 diff).
 - **Handle "unexpected end of file" errors with line numbers** — EOF errors from unclosed compound commands now include `line N:` in the prefix even in non-script non-dash_c mode, matching bash.
+- **Handle heredoc inside command substitution — read body from outer context** — `echo $(cat << EOF)` where `<<EOF` is inside the comsub but the heredoc body follows in the outer script now works correctly. In `find_comsub_boundary`, when `)` closes the comsub at depth 1 with a pending `<<DELIM`, the heredoc body is read from the remaining chars after `)` and embedded in the comsub text. The "command substitution: N unterminated here-document" warning is emitted via a `\x00COMSUB_UNTERMINATED:N` sentinel in `heredoc_eof_warnings`. Fixed **heredoc7.sub case 1** (~3→0 diff). Reduced **heredoc** nix diff from ~7→~4 lines.
 
 ## Recent Fixes (Phase 16)
 

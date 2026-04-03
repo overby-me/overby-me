@@ -116,6 +116,24 @@ fn parse_dollar_inner(
                 heredoc_eof_warnings.push(w.clone());
             }
 
+            // Forward unterminated-heredoc-in-comsub warnings to the
+            // heredoc_eof_warnings vec so the interpreter can emit the
+            // "command substitution: N unterminated here-document" warning.
+            if result.unterminated_heredoc_count > 0 {
+                // Use the line where `$(` appears, not where the heredoc body ends.
+                // `line_offset` counts newlines before `*i` (before the comsub content),
+                // so `line_offset + 1` is the 1-based line of the `$(`.
+                let warn_line = line_offset + 1;
+                heredoc_eof_warnings.push((
+                    warn_line,
+                    0, // sentinel: start_line=0 means comsub-unterminated warning
+                    format!(
+                        "\x00COMSUB_UNTERMINATED:{}",
+                        result.unterminated_heredoc_count
+                    ),
+                ));
+            }
+
             if result.text == "\x00SILENT_COMSUB" {
                 // `}` at comsub depth 1 in dquote — the enclosing ${...} closes.
                 // Don't advance *i — the `}` hasn't been consumed.

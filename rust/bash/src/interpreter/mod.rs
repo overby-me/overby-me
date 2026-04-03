@@ -943,10 +943,22 @@ impl Shell {
                             .first()
                             .map(|s| s.as_str())
                             .unwrap_or("bash");
-                        eprintln!(
-                            "{}: line {}: warning: here-document at line {} delimited by end-of-file (wanted `{}')",
-                            name, eof_line, start_line, delim
-                        );
+                        if let Some(count_str) = delim.strip_prefix("\x00COMSUB_UNTERMINATED:") {
+                            // Special sentinel: unterminated here-document(s) inside comsub
+                            let count: usize = count_str.parse().unwrap_or(1);
+                            eprintln!(
+                                "{}: line {}: warning: command substitution: {} unterminated here-document{}",
+                                name,
+                                eof_line,
+                                count,
+                                if count != 1 { "s" } else { "" }
+                            );
+                        } else {
+                            eprintln!(
+                                "{}: line {}: warning: here-document at line {} delimited by end-of-file (wanted `{}')",
+                                name, eof_line, start_line, delim
+                            );
+                        }
                     }
                     if let Some(line_num) = parser.heredoc_overflow_line() {
                         let name = self
@@ -1027,10 +1039,21 @@ impl Shell {
                             .first()
                             .map(|s| s.as_str())
                             .unwrap_or("bash");
-                        eprintln!(
-                            "{}: line {}: warning: here-document at line {} delimited by end-of-file (wanted `{}')",
-                            name, eof_line, start_line, delim
-                        );
+                        if let Some(count_str) = delim.strip_prefix("\x00COMSUB_UNTERMINATED:") {
+                            let count: usize = count_str.parse().unwrap_or(1);
+                            eprintln!(
+                                "{}: line {}: warning: command substitution: {} unterminated here-document{}",
+                                name,
+                                eof_line,
+                                count,
+                                if count != 1 { "s" } else { "" }
+                            );
+                        } else {
+                            eprintln!(
+                                "{}: line {}: warning: here-document at line {} delimited by end-of-file (wanted `{}')",
+                                name, eof_line, start_line, delim
+                            );
+                        }
                     }
                     // Extract accurate line number from COMSUB_LINE:N: prefix
                     // (set by take_word_checked before advance() moves the
