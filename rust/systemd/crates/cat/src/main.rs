@@ -4,6 +4,10 @@
 //! stdout and stderr of a command (or stdin if no command is given)
 //! to the systemd journal using the journal stdout stream protocol.
 //!
+//! When a command is given, systemd-cat execs it directly with
+//! stdout/stderr connected to the journal socket, so the kernel
+//! attaches each writer's real PID via SCM_CREDENTIALS.
+//!
 //! Supported options:
 //!
 //! - `-t`, `--identifier=ID`  — Set the syslog identifier (default: "unknown")
@@ -107,6 +111,20 @@ fn open_journal_stream(
 ) -> Result<UnixStream, std::io::Error> {
     let mut stream = UnixStream::connect(socket_path)?;
 
+    // Enable SO_PASSCRED on the sender socket so the kernel attaches
+    // per-write credentials (PID/UID/GID) to every message.  This avoids
+    // a race where the receiver hasn't set SO_PASSCRED yet at write time.
+    let enabled: libc::c_int = 1;
+    unsafe {
+        libc::setsockopt(
+            stream.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_PASSCRED,
+            &enabled as *const _ as *const libc::c_void,
+            std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+        );
+    }
+
     let header = format!(
         "{}\n\n{}\n{}\n0\n0\n0\n",
         identifier,
@@ -180,6 +198,7 @@ fn main() {
     };
 
     if cli.command.is_empty() {
+        // No command — read from stdin and relay to journal
         let identifier = cli.identifier.as_deref().unwrap_or("unknown");
         let mut stream =
             match open_journal_stream(&journal_socket, identifier, stdout_priority, level_prefix) {
@@ -200,98 +219,102 @@ fn main() {
             level_prefix,
         );
     } else {
+        // Command given — exec it with stdout/stderr connected directly to
+        // the journal socket.  This way the kernel's SCM_CREDENTIALS
+        // reflects the real writer PID, not systemd-cat's.
         let cmd = &cli.command[0];
-        let args = &cli.command[1..];
         let identifier = cli.identifier.as_deref().unwrap_or(cmd.as_str());
 
-        // Open a journal stream early to get JOURNAL_STREAM env var value
-        let journal_stream_env =
+        let stdout_stream =
             match open_journal_stream(&journal_socket, identifier, stdout_priority, level_prefix) {
-                Ok(ref stream) => {
-                    // Get device:inode for JOURNAL_STREAM
-                    let fd = stream.as_raw_fd();
-                    let mut stat: libc::stat = unsafe { std::mem::zeroed() };
-                    if unsafe { libc::fstat(fd, &mut stat) } == 0 {
-                        Some(format!("{}:{}", stat.st_dev, stat.st_ino))
-                    } else {
-                        None
-                    }
-                }
-                Err(_) => None,
-            };
-
-        let mut cmd_builder = process::Command::new(cmd);
-        cmd_builder
-            .args(args)
-            .stdout(process::Stdio::piped())
-            .stderr(process::Stdio::piped());
-        if let Some(ref val) = journal_stream_env {
-            cmd_builder.env("JOURNAL_STREAM", val);
-        }
-        let mut child = match cmd_builder.spawn() {
-            Ok(child) => child,
-            Err(e) => {
-                eprintln!("systemd-cat: failed to execute {cmd}: {e}");
-                process::exit(1);
-            }
-        };
-
-        let child_stdout = child.stdout.take();
-        let child_stderr = child.stderr.take();
-        let identifier_owned = identifier.to_string();
-        let journal_socket_clone = journal_socket.clone();
-
-        let stderr_handle = if let Some(stderr) = child_stderr {
-            let id = identifier_owned.clone();
-            Some(std::thread::spawn(move || {
-                match open_journal_stream(&journal_socket_clone, &id, stderr_priority, level_prefix)
-                {
-                    Ok(mut stream) => {
-                        process_lines(stderr, &mut stream, &id, stderr_priority, level_prefix);
-                    }
-                    Err(e) => {
-                        eprintln!("systemd-cat: failed to open stderr stream: {e}");
-                    }
-                }
-            }))
-        } else {
-            None
-        };
-
-        if let Some(stdout) = child_stdout {
-            match open_journal_stream(
-                &journal_socket,
-                &identifier_owned,
-                stdout_priority,
-                level_prefix,
-            ) {
-                Ok(mut stream) => {
-                    process_lines(
-                        stdout,
-                        &mut stream,
-                        &identifier_owned,
-                        stdout_priority,
-                        level_prefix,
-                    );
-                }
+                Ok(s) => s,
                 Err(e) => {
-                    eprintln!("systemd-cat: failed to open stdout stream: {e}");
+                    eprintln!("systemd-cat: failed to connect to journal stream: {e}");
+                    process::exit(1);
                 }
-            }
-        }
+            };
+        let stdout_fd = stdout_stream.as_raw_fd();
 
-        if let Some(handle) = stderr_handle {
-            let _ = handle.join();
-        }
-
-        match child.wait() {
-            Ok(status) => {
-                process::exit(status.code().unwrap_or(1));
+        // Get JOURNAL_STREAM env var (device:inode)
+        let journal_stream_env = {
+            let mut stat: libc::stat = unsafe { std::mem::zeroed() };
+            if unsafe { libc::fstat(stdout_fd, &mut stat) } == 0 {
+                Some(format!("{}:{}", stat.st_dev, stat.st_ino))
+            } else {
+                None
             }
-            Err(e) => {
-                eprintln!("systemd-cat: failed to wait for {cmd}: {e}");
+        };
+
+        // Open separate stderr stream if priority differs, otherwise share stdout's
+        let stderr_fd = if cli.stderr_priority.is_some() {
+            match open_journal_stream(&journal_socket, identifier, stderr_priority, level_prefix) {
+                Ok(s) => {
+                    let fd = s.as_raw_fd();
+                    // Prevent drop from closing the fd — we'll manage it manually
+                    std::mem::forget(s);
+                    fd
+                }
+                Err(_) => stdout_fd,
+            }
+        } else {
+            stdout_fd
+        };
+
+        unsafe {
+            // Wire up stdout → journal socket
+            if stdout_fd != libc::STDOUT_FILENO && libc::dup2(stdout_fd, libc::STDOUT_FILENO) < 0 {
+                eprintln!("systemd-cat: dup2 stdout failed");
                 process::exit(1);
             }
+
+            // Wire up stderr → journal socket (same or different fd)
+            if stderr_fd != libc::STDERR_FILENO && libc::dup2(stderr_fd, libc::STDERR_FILENO) < 0 {
+                // Can't eprintln here safely, but try anyway
+                libc::_exit(1);
+            }
+
+            // Close originals if they're not stdio fds
+            if stdout_fd > libc::STDERR_FILENO {
+                libc::close(stdout_fd);
+            }
+            if stderr_fd > libc::STDERR_FILENO && stderr_fd != stdout_fd {
+                libc::close(stderr_fd);
+            }
+        }
+
+        // Prevent Rust from closing the fd via Drop
+        std::mem::forget(stdout_stream);
+
+        // Build argv for exec
+        let c_cmd =
+            std::ffi::CString::new(cli.command[0].as_str()).expect("command contains null byte");
+        let c_args: Vec<std::ffi::CString> = cli
+            .command
+            .iter()
+            .map(|a| std::ffi::CString::new(a.as_str()).expect("arg contains null byte"))
+            .collect();
+        let c_argv: Vec<*const libc::c_char> = c_args
+            .iter()
+            .map(|a| a.as_ptr())
+            .chain(std::iter::once(std::ptr::null()))
+            .collect();
+
+        // Set JOURNAL_STREAM env
+        if let Some(val) = journal_stream_env {
+            // Safety: we are about to exec, no other threads are running
+            unsafe { std::env::set_var("JOURNAL_STREAM", val) };
+        }
+
+        unsafe {
+            libc::execvp(c_cmd.as_ptr(), c_argv.as_ptr());
+            // exec failed
+            let err = *libc::__errno_location();
+            eprintln!(
+                "systemd-cat: failed to exec {}: {}",
+                cli.command[0],
+                std::io::Error::from_raw_os_error(err)
+            );
+            libc::_exit(1);
         }
     }
 }

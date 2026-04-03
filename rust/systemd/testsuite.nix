@@ -137,8 +137,9 @@ in
                 fi
                 [ -z "$FILE_PID" ] && [ -z "''${MAINPID:-}" ] && exit 0
                 i=0
-                while [ "$i" -lt 100 ]; do
-                  [ "$(cat "$DONE_FILE" 2>/dev/null)" = "$TOKEN" ] && exit 0
+                while [ "$i" -lt 600 ]; do
+                  DONE_CONTENT="$(cat "$DONE_FILE" 2>/dev/null)"
+                  [ "$DONE_CONTENT" = "$TOKEN" ] && exit 0
                   sleep 0.05
                   i=$((i + 1))
                 done

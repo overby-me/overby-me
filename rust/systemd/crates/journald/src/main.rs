@@ -1410,12 +1410,20 @@ fn create_datagram_socket(path: &str) -> io::Result<UnixDatagram> {
 
 /// Create a stream (connection-oriented) listener socket.
 fn create_stream_listener(path: &str) -> io::Result<UnixListener> {
+    use std::os::unix::io::AsRawFd;
+
     if let Some(parent) = Path::new(path).parent() {
         fs::create_dir_all(parent)?;
     }
     let _ = fs::remove_file(path);
 
     let listener = UnixListener::bind(path)?;
+
+    // Enable SO_PASSCRED on the listening socket so accepted connections
+    // inherit it.  This ensures credentials are attached to skbs from the
+    // very first write, avoiding a race where the sender writes before the
+    // handler thread calls enable_passcred on the accepted socket.
+    enable_passcred_raw(listener.as_raw_fd());
 
     #[cfg(unix)]
     {
@@ -1596,21 +1604,9 @@ fn native_socket_listener(
 ) {
     let sock = match activated_sock {
         Some(s) => {
+            use std::os::unix::io::AsRawFd;
             eprintln!("journald: Using socket-activated native socket");
-            // Ensure SO_PASSCRED on socket-activated fd too
-            {
-                use std::os::unix::io::AsRawFd;
-                let enabled: libc::c_int = 1;
-                unsafe {
-                    libc::setsockopt(
-                        s.as_raw_fd(),
-                        libc::SOL_SOCKET,
-                        libc::SO_PASSCRED,
-                        &enabled as *const _ as *const libc::c_void,
-                        std::mem::size_of::<libc::c_int>() as libc::socklen_t,
-                    );
-                }
-            }
+            enable_passcred_raw(s.as_raw_fd());
             s
         }
         None => match create_datagram_socket(JOURNAL_SOCKET_PATH) {
@@ -1754,7 +1750,9 @@ fn stdout_socket_listener(
 ) {
     let listener = match activated_listener {
         Some(l) => {
+            use std::os::unix::io::AsRawFd;
             eprintln!("journald: Using socket-activated stdout socket");
+            enable_passcred_raw(l.as_raw_fd());
             l
         }
         None => match create_stream_listener(STDOUT_SOCKET_PATH) {
@@ -1780,6 +1778,10 @@ fn stdout_socket_listener(
 
         match stream {
             Ok(stream) => {
+                // Enable SO_PASSCRED immediately after accept, before
+                // spawning the handler thread, to minimize the race
+                // window where the sender might write without credentials.
+                enable_passcred(&stream);
                 let state = Arc::clone(&state);
                 thread::spawn(move || {
                     handle_stdout_connection(stream, state);
@@ -1828,20 +1830,25 @@ fn get_peer_cred(stream: &UnixStream) -> Option<libc::ucred> {
     }
 }
 
-/// Enable SO_PASSCRED on a stream socket so recvmsg delivers per-write
-/// SCM_CREDENTIALS ancillary messages.
-fn enable_passcred(stream: &UnixStream) {
-    use std::os::unix::io::AsRawFd;
+/// Enable SO_PASSCRED on a raw file descriptor.
+fn enable_passcred_raw(fd: i32) {
     let enabled: libc::c_int = 1;
     unsafe {
         libc::setsockopt(
-            stream.as_raw_fd(),
+            fd,
             libc::SOL_SOCKET,
             libc::SO_PASSCRED,
             &enabled as *const _ as *const libc::c_void,
             std::mem::size_of::<libc::c_int>() as libc::socklen_t,
         );
     }
+}
+
+/// Enable SO_PASSCRED on a stream socket so recvmsg delivers per-write
+/// SCM_CREDENTIALS ancillary messages.
+fn enable_passcred(stream: &UnixStream) {
+    use std::os::unix::io::AsRawFd;
+    enable_passcred_raw(stream.as_raw_fd());
 }
 
 /// Read data from a stream socket with SCM_CREDENTIALS. Returns
@@ -1899,60 +1906,130 @@ fn stream_recv_with_cred(
     Ok((n as usize, cred))
 }
 
+/// A line produced by the CredLineReader, with metadata about how it
+/// was terminated.
+struct CredLine {
+    text: String,
+    cred: Option<libc::ucred>,
+    /// True if this line was force-flushed because the sender PID changed
+    /// (matching C journald's LINE_BREAK_PID_CHANGE behavior).
+    pid_change: bool,
+}
+
 /// Line reader that uses recvmsg to get per-write SCM_CREDENTIALS.
-/// Buffers data and yields complete lines with the credentials of the
-/// write that delivered them.
+///
+/// Matches C journald's behavior: when the credential PID changes between
+/// recv calls, any buffered partial line is force-flushed as a complete
+/// line with `pid_change=true` before processing the new data.  This
+/// ensures each line is attributed to the correct writer PID.
 struct CredLineReader {
     stream: UnixStream,
-    buf: Vec<u8>,
-    /// Buffered data not yet consumed as lines.
-    pending: Vec<u8>,
-    /// Credentials from the last recvmsg that delivered data.
-    last_cred: Option<libc::ucred>,
+    recv_buf: Vec<u8>,
+    /// Accumulated partial line data (no newline yet).
+    line_buf: Vec<u8>,
+    /// Current credentials (from the most recent recv).
+    current_cred: Option<libc::ucred>,
+    /// Queue of completed lines ready to return.
+    ready: std::collections::VecDeque<CredLine>,
 }
 
 impl CredLineReader {
     fn new(stream: UnixStream) -> Self {
         CredLineReader {
             stream,
-            buf: vec![0u8; 64 * 1024],
-            pending: Vec::new(),
-            last_cred: None,
+            recv_buf: vec![0u8; 4096],
+            line_buf: Vec::new(),
+            current_cred: None,
+            ready: std::collections::VecDeque::new(),
+        }
+    }
+
+    /// Process received data: extract newline-terminated lines into `ready`.
+    fn scan_data(&mut self, data: &[u8], pid_change: bool) {
+        let mut start = 0;
+        let mut first_line = true;
+        for (i, &b) in data.iter().enumerate() {
+            if b == b'\n' {
+                // Complete line: line_buf + data[start..i]
+                self.line_buf.extend_from_slice(&data[start..i]);
+                let text = String::from_utf8_lossy(&self.line_buf).into_owned();
+                self.ready.push_back(CredLine {
+                    text,
+                    cred: self.current_cred,
+                    // Only the first line in this recv batch can carry pid_change
+                    // from a force-flush that already happened.  Lines completed
+                    // within the same recv have consistent credentials.
+                    pid_change: pid_change && first_line,
+                });
+                self.line_buf.clear();
+                start = i + 1;
+                first_line = false;
+            }
+        }
+        // Remaining data without newline goes to line_buf
+        if start < data.len() {
+            self.line_buf.extend_from_slice(&data[start..]);
         }
     }
 
     /// Read the next line. Returns None on EOF.
-    /// Each line is returned with the credentials from the recv that
-    /// delivered data for that line (may span multiple recvs; the last
-    /// recv's creds win).
-    fn next_line(&mut self) -> Option<(String, Option<libc::ucred>)> {
+    fn next_line(&mut self) -> Option<CredLine> {
         loop {
-            // Check if we already have a complete line in pending
-            if let Some(pos) = self.pending.iter().position(|&b| b == b'\n') {
-                let line_bytes: Vec<u8> = self.pending.drain(..=pos).collect();
-                let line = String::from_utf8_lossy(
-                    &line_bytes[..line_bytes.len() - 1], // strip \n
-                )
-                .into_owned();
-                return Some((line, self.last_cred));
+            // Return any ready lines first
+            if let Some(line) = self.ready.pop_front() {
+                return Some(line);
             }
 
-            // Need more data
-            match stream_recv_with_cred(&self.stream, &mut self.buf) {
+            // Need more data from socket
+            match stream_recv_with_cred(&self.stream, &mut self.recv_buf) {
                 Ok((0, _)) => {
                     // EOF — return remaining data as last line
-                    if !self.pending.is_empty() {
-                        let line = String::from_utf8_lossy(&self.pending).into_owned();
-                        self.pending.clear();
-                        return Some((line, self.last_cred));
+                    if !self.line_buf.is_empty() {
+                        let text = String::from_utf8_lossy(&self.line_buf).into_owned();
+                        self.line_buf.clear();
+                        return Some(CredLine {
+                            text,
+                            cred: self.current_cred,
+                            pid_change: false,
+                        });
                     }
                     return None;
                 }
                 Ok((n, cred)) => {
-                    if cred.is_some() {
-                        self.last_cred = cred;
+                    let data = self.recv_buf[..n].to_vec();
+
+                    // Check for PID change: if the new recv has a different
+                    // PID than the current, force-flush any buffered data
+                    // as a pid-change line (matching C journald).
+                    let mut pid_change = false;
+                    let new_pid = cred.map(|c| c.pid);
+                    let old_pid = self.current_cred.map(|c| c.pid);
+
+                    if new_pid.is_some()
+                        && old_pid.is_some()
+                        && new_pid != old_pid
+                        && !self.line_buf.is_empty()
+                    {
+                        // Force-flush buffered data with OLD credentials
+                        let text = String::from_utf8_lossy(&self.line_buf).into_owned();
+                        self.line_buf.clear();
+                        self.ready.push_back(CredLine {
+                            text,
+                            cred: self.current_cred,
+                            pid_change: true,
+                        });
+                    } else if new_pid.is_some() && old_pid.is_some() && new_pid != old_pid {
+                        // PID changed but no buffered data — mark next line
+                        pid_change = true;
                     }
-                    self.pending.extend_from_slice(&self.buf[..n]);
+
+                    // Update current credentials
+                    if cred.is_some() {
+                        self.current_cred = cred;
+                    }
+
+                    // Process the new data
+                    self.scan_data(&data, pid_change);
                 }
                 Err(_) => return None,
             }
@@ -1979,7 +2056,7 @@ fn handle_stdout_connection(stream: UnixStream, state: Arc<JournaldState>) {
     macro_rules! read_header_line {
         () => {
             match reader.next_line() {
-                Some((line, _cred)) => line,
+                Some(cl) => cl.text,
                 None => return,
             }
         };
@@ -2012,45 +2089,42 @@ fn handle_stdout_connection(stream: UnixStream, state: Arc<JournaldState>) {
     // Only our PID 1 sends this; C systemd sends 7 lines then log data.
     // We peek at the next line and only consume it as invocation ID if it
     // looks like a 32-char hex string (systemd invocation ID format).
-    let mut first_log_line: Option<(String, Option<libc::ucred>)> = None;
+    let mut first_log_line: Option<CredLine> = None;
     let mut service_pid: Option<u32> = None;
-    if let Some((maybe_inv, cred)) = reader.next_line() {
-        if !maybe_inv.is_empty()
-            && maybe_inv.len() == 32
-            && maybe_inv.chars().all(|c| c.is_ascii_hexdigit())
+    if let Some(cl) = reader.next_line() {
+        if !cl.text.is_empty()
+            && cl.text.len() == 32
+            && cl.text.chars().all(|c| c.is_ascii_hexdigit())
         {
-            invocation_id = maybe_inv;
+            invocation_id = cl.text;
 
             // Line 9 (extension): service PID — the actual service process PID
             // so we can set _PID/_EXE/_COMM from the service rather than PID 1.
-            if let Some((maybe_pid, cred2)) = reader.next_line() {
-                if let Ok(pid) = maybe_pid.parse::<u32>() {
+            if let Some(cl2) = reader.next_line() {
+                if let Ok(pid) = cl2.text.parse::<u32>() {
                     if pid > 0 {
                         service_pid = Some(pid);
                     }
-                } else if !maybe_pid.is_empty() {
-                    first_log_line = Some((maybe_pid, cred2));
+                } else if !cl2.text.is_empty() {
+                    first_log_line = Some(cl2);
                 }
             }
         } else {
             // Not an invocation ID — this is actually the first log line
-            first_log_line = Some((maybe_inv, cred));
+            first_log_line = Some(cl);
         }
     }
 
-    // Track PID for _LINE_BREAK=pid-change detection
-    let mut last_pid: Option<u32> = None;
-
     // Helper to process a single log line with credentials
-    let mut process_line = |line: String, line_cred: Option<libc::ucred>| {
-        if line.is_empty() {
+    let process_line = |cl: CredLine| {
+        if cl.text.is_empty() {
             return;
         }
 
         let (effective_priority, message) = if level_prefix {
-            parse_level_prefix_line(&line, priority)
+            parse_level_prefix_line(&cl.text, priority)
         } else {
-            (priority, line.as_str())
+            (priority, cl.text.as_str())
         };
 
         // Strip trailing whitespace (matches C journald behavior)
@@ -2072,26 +2146,20 @@ fn handle_stdout_connection(stream: UnixStream, state: Arc<JournaldState>) {
         entry.set_field("_TRANSPORT", "stdout");
 
         // Determine PIDs for this entry:
-        // - write_pid: per-write SCM_CREDENTIALS PID (the writer, often PID 1)
+        // - write_pid: per-write SCM_CREDENTIALS PID (the writer)
         // - metadata_pid: the actual service process whose _COMM/_EXE we want
         //   Prefer service_pid (from stream header) so stdout entries reflect
         //   the service process, not PID 1 which merely relays the pipe.
-        let write_pid = line_cred.map(|c| c.pid as u32).filter(|&p| p > 0);
+        let write_pid = cl.cred.map(|c| c.pid as u32).filter(|&p| p > 0);
+
         let metadata_pid = service_pid
             .or(write_pid)
             .or(peer_cred.map(|c| c.pid as u32));
-        let tracking_pid = write_pid
-            .or(service_pid)
-            .or(peer_cred.map(|c| c.pid as u32));
 
-        if let Some(pid) = tracking_pid {
-            // Detect PID change between lines (using write-side PID)
-            if let Some(prev) = last_pid
-                && prev != pid
-            {
-                entry.set_field("_LINE_BREAK", "pid-change");
-            }
-            last_pid = Some(pid);
+        // Set _LINE_BREAK=pid-change when the CredLineReader detected a
+        // credential PID change (matching C journald's behavior).
+        if cl.pid_change {
+            entry.set_field("_LINE_BREAK", "pid-change");
         }
 
         if let Some(pid) = metadata_pid {
@@ -2099,8 +2167,8 @@ fn handle_stdout_connection(stream: UnixStream, state: Arc<JournaldState>) {
         }
 
         // UID/GID from per-write creds or fallback to peer creds
-        let uid = line_cred.map(|c| c.uid).or(peer_cred.map(|c| c.uid));
-        let gid = line_cred.map(|c| c.gid).or(peer_cred.map(|c| c.gid));
+        let uid = cl.cred.map(|c| c.uid).or(peer_cred.map(|c| c.uid));
+        let gid = cl.cred.map(|c| c.gid).or(peer_cred.map(|c| c.gid));
         if let Some(uid) = uid {
             entry.set_field("_UID", uid.to_string());
         }
@@ -2116,8 +2184,8 @@ fn handle_stdout_connection(stream: UnixStream, state: Arc<JournaldState>) {
     };
 
     // Process the first log line if it wasn't consumed as invocation ID
-    if let Some((line, cred)) = first_log_line {
-        process_line(line, cred);
+    if let Some(cl) = first_log_line {
+        process_line(cl);
     }
 
     // Process remaining log lines
@@ -2126,7 +2194,7 @@ fn handle_stdout_connection(stream: UnixStream, state: Arc<JournaldState>) {
             break;
         }
         match reader.next_line() {
-            Some((line, cred)) => process_line(line, cred),
+            Some(cl) => process_line(cl),
             None => break,
         }
     }
@@ -2204,8 +2272,23 @@ fn setup_signal_handlers(state: Arc<JournaldState>) {
     let _state_usr2 = Arc::clone(&state);
 
     // SIGTERM / SIGINT → graceful shutdown
-    let _ = unsafe { libc::signal(libc::SIGTERM, signal_handler_shutdown as libc::sighandler_t) };
-    let _ = unsafe { libc::signal(libc::SIGINT, signal_handler_shutdown as libc::sighandler_t) };
+    // Use sigaction instead of signal for reliable, non-one-shot semantics.
+    // SA_RESTART ensures interrupted syscalls (like sleep/read) restart
+    // automatically. Without SA_RESETHAND, the handler persists across
+    // deliveries (signal() may reset to SIG_DFL on some libc implementations).
+    unsafe fn install_signal_handler(sig: libc::c_int, handler: extern "C" fn(libc::c_int)) {
+        unsafe {
+            let mut sa: libc::sigaction = std::mem::zeroed();
+            sa.sa_sigaction = handler as libc::sighandler_t;
+            sa.sa_flags = libc::SA_RESTART;
+            libc::sigemptyset(&mut sa.sa_mask);
+            libc::sigaction(sig, &sa, std::ptr::null_mut());
+        }
+    }
+    unsafe {
+        install_signal_handler(libc::SIGTERM, signal_handler_shutdown);
+        install_signal_handler(libc::SIGINT, signal_handler_shutdown);
+    }
 
     // We use a dedicated thread to watch for signals since we can't easily
     // pass Arc state to a C signal handler.  Instead, we use a self-pipe or
@@ -2234,17 +2317,14 @@ fn setup_signal_handlers(state: Arc<JournaldState>) {
         Ordering::Release,
     );
 
-    let _ = unsafe { libc::signal(libc::SIGUSR1, signal_handler_flush as libc::sighandler_t) };
-    let _ = unsafe { libc::signal(libc::SIGUSR2, signal_handler_rotate as libc::sighandler_t) };
-    // SIGHUP → reload configuration
-    let _ = unsafe { libc::signal(libc::SIGHUP, signal_handler_reload as libc::sighandler_t) };
-    // SIGRTMIN+1 is used by `journalctl --sync` to request a sync to disk
-    let _ = unsafe {
-        libc::signal(
-            libc::SIGRTMIN() + 1,
-            signal_handler_sync as libc::sighandler_t,
-        )
-    };
+    unsafe {
+        install_signal_handler(libc::SIGUSR1, signal_handler_flush);
+        install_signal_handler(libc::SIGUSR2, signal_handler_rotate);
+        // SIGHUP → reload configuration
+        install_signal_handler(libc::SIGHUP, signal_handler_reload);
+        // SIGRTMIN+1 is used by `journalctl --sync` to request a sync to disk
+        install_signal_handler(libc::SIGRTMIN() + 1, signal_handler_sync);
+    }
 }
 
 // Global atomic pointers for signal handlers (they can't capture state)
@@ -2312,6 +2392,8 @@ fn sd_notify(msg: &str) {
         };
 
         if let Ok(sock) = UnixDatagram::unbound() {
+            // Set non-blocking to prevent hanging if the socket buffer is full
+            let _ = sock.set_nonblocking(true);
             let _ = sock.send_to(msg.as_bytes(), &path);
         }
     }
@@ -2797,6 +2879,17 @@ fn journal_access_get_entries(
     Ok(())
 }
 
+/// Move a file across filesystem boundaries.
+/// Tries rename first (same-fs fast path), falls back to copy+delete.
+fn move_file_cross_fs(src: &Path, dest: &Path) {
+    if fs::rename(src, dest).is_err()
+        && let Ok(data) = fs::read(src)
+        && fs::write(dest, &data).is_ok()
+    {
+        let _ = fs::remove_file(src);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Maintenance thread
 // ---------------------------------------------------------------------------
@@ -2823,75 +2916,78 @@ fn maintenance_thread(state: Arc<JournaldState>) {
         // NOTE: The flag is cleared AFTER work completes so that varlink
         // callers polling on the flag know the operation is done.
         if state.flush_requested.load(Ordering::Acquire) {
-            let is_relinq = state.relinquished.load(Ordering::Acquire);
-            eprintln!("journald: flush_requested=true, relinquished={}", is_relinq);
+            let _is_relinq = state.relinquished.load(Ordering::Acquire);
             let config = state.config.read().unwrap();
             let wants_persistent = config.use_persistent_storage();
             drop(config);
 
-            // Check if we're currently writing to runtime storage
-            let in_runtime = {
-                let storage = state.storage.lock().unwrap();
-                let dir = storage.directory();
-                dir.starts_with("/run/")
-            };
+            // Lock storage for the ENTIRE flush operation to prevent
+            // concurrent writes from creating new files in /run while we're
+            // moving files to /var.
+            let mut storage = state.storage.lock().unwrap();
+            let in_runtime = storage.directory().starts_with("/run/");
 
             if in_runtime && wants_persistent {
-                eprintln!(
-                    "journald: Flushing runtime journal to persistent storage (in_runtime={}, wants_persistent={})",
-                    in_runtime, wants_persistent
-                );
-                // Move journal files from /run to /var, then switch storage
+                eprintln!("journald: Flushing runtime journal to persistent storage");
+                let _ = storage.flush();
+
+                // Drop the old storage to close file handles before moving
                 let machine_id = read_machine_id();
                 let src_dir = PathBuf::from("/run/log/journal").join(&machine_id);
                 let dst_dir = PathBuf::from("/var/log/journal").join(&machine_id);
                 let _ = fs::create_dir_all(&dst_dir);
 
-                // Close the current (runtime) storage to release file handles
-                let mut storage = state.storage.lock().unwrap();
-                let _ = storage.flush();
-                drop(storage);
-
-                // Move archived journal files from runtime to persistent
-                if let Ok(entries) = fs::read_dir(&src_dir) {
-                    for entry in entries.flatten() {
-                        let path = entry.path();
-                        if path
-                            .extension()
-                            .is_some_and(|e| e == "journal" || e == "journal~")
-                        {
-                            let dest = dst_dir.join(entry.file_name());
-                            if let Err(e) = fs::rename(&path, &dest) {
-                                // rename may fail across filesystems, fall back to copy+delete
-                                if let Ok(data) = fs::read(&path) {
-                                    if fs::write(&dest, &data).is_ok() {
-                                        let _ = fs::remove_file(&path);
-                                    } else {
-                                        eprintln!(
-                                            "journald: Failed to copy {} to {}: {}",
-                                            path.display(),
-                                            dest.display(),
-                                            e
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Open new persistent storage
+                // Replace storage with a temporary "null" storage pointing to
+                // the persistent directory FIRST, so any concurrent writes that
+                // manage to get the lock (after we release it during file I/O)
+                // go to /var, not /run.
                 let config = state.config.read().unwrap();
                 let sc = config.make_storage_config(true);
                 drop(config);
                 match JournalStorage::new(sc) {
                     Ok(new_storage) => {
-                        *state.storage.lock().unwrap() = new_storage;
+                        // Swap in the new persistent storage BEFORE moving files.
+                        // This ensures any concurrent writes go to /var.
+                        let old_storage = std::mem::replace(&mut *storage, new_storage);
+                        // Now drop old_storage (closes runtime file handles)
+                        drop(old_storage);
+                        // Release the lock while doing file I/O
+                        drop(storage);
+
+                        // Move journal files from /run to /var
+                        if let Ok(entries) = fs::read_dir(&src_dir) {
+                            for entry in entries.flatten() {
+                                let path = entry.path();
+                                if path
+                                    .extension()
+                                    .is_some_and(|e| e == "journal" || e == "journal~")
+                                {
+                                    let fname = entry.file_name();
+                                    let dest = dst_dir.join(&fname);
+                                    // Don't overwrite the new active journal
+                                    if fname == "system.journal" {
+                                        // Rename old runtime active to an archive name in /var
+                                        let ts = std::time::SystemTime::now()
+                                            .duration_since(std::time::UNIX_EPOCH)
+                                            .unwrap_or_default()
+                                            .as_micros();
+                                        let archive_name =
+                                            format!("system@{:016x}-flush.journal", ts);
+                                        let archive_dest = dst_dir.join(archive_name);
+                                        move_file_cross_fs(&path, &archive_dest);
+                                    } else {
+                                        move_file_cross_fs(&path, &dest);
+                                    }
+                                }
+                            }
+                        }
+
                         state.relinquished.store(false, Ordering::Release);
                         *state.active_file_opened.lock().unwrap() = Instant::now();
                         eprintln!("journald: Switched to persistent storage (flush)");
                     }
                     Err(e) => {
+                        drop(storage);
                         eprintln!(
                             "journald: Failed to open persistent storage: {}; staying in runtime mode",
                             e
@@ -2900,8 +2996,8 @@ fn maintenance_thread(state: Arc<JournaldState>) {
                 }
             } else {
                 // Already in persistent mode (or volatile config) — just sync to disk
-                let mut storage = state.storage.lock().unwrap();
                 let _ = storage.flush();
+                drop(storage);
             }
             state.flush_requested.store(false, Ordering::Release);
         }
@@ -3110,16 +3206,23 @@ fn main() {
     // when they are still zero, so registering them early is safe — signals
     // that arrive before `setup_signal_handlers()` stores the real pointers
     // are simply swallowed instead of being fatal.
-    unsafe {
-        libc::signal(libc::SIGTERM, signal_handler_shutdown as libc::sighandler_t);
-        libc::signal(libc::SIGINT, signal_handler_shutdown as libc::sighandler_t);
-        libc::signal(libc::SIGUSR1, signal_handler_flush as libc::sighandler_t);
-        libc::signal(libc::SIGUSR2, signal_handler_rotate as libc::sighandler_t);
-        libc::signal(libc::SIGHUP, signal_handler_reload as libc::sighandler_t);
-        libc::signal(
-            libc::SIGRTMIN() + 1,
-            signal_handler_sync as libc::sighandler_t,
-        );
+    {
+        // Use sigaction for reliable non-one-shot handler registration.
+        fn early_install(sig: libc::c_int, handler: extern "C" fn(libc::c_int)) {
+            unsafe {
+                let mut sa: libc::sigaction = std::mem::zeroed();
+                sa.sa_sigaction = handler as libc::sighandler_t;
+                sa.sa_flags = libc::SA_RESTART;
+                libc::sigemptyset(&mut sa.sa_mask);
+                libc::sigaction(sig, &sa, std::ptr::null_mut());
+            }
+        }
+        early_install(libc::SIGTERM, signal_handler_shutdown);
+        early_install(libc::SIGINT, signal_handler_shutdown);
+        early_install(libc::SIGUSR1, signal_handler_flush);
+        early_install(libc::SIGUSR2, signal_handler_rotate);
+        early_install(libc::SIGHUP, signal_handler_reload);
+        early_install(libc::SIGRTMIN() + 1, signal_handler_sync);
     }
 
     // Parse optional namespace argument (systemd-journald <namespace>)
@@ -3239,6 +3342,16 @@ fn main() {
     // Count: native + stdout + syslog (if no namespace)
     let expected_sockets: u32 = if namespace.is_none() { 3 } else { 2 };
 
+    // Block all signals before spawning threads.  Child threads inherit the
+    // blocked mask, so signals are only delivered to the main thread where the
+    // handlers set atomic flags that the main event loop polls.
+    let mut old_sigset: libc::sigset_t = unsafe { std::mem::zeroed() };
+    unsafe {
+        let mut all_signals: libc::sigset_t = std::mem::zeroed();
+        libc::sigfillset(&mut all_signals);
+        libc::pthread_sigmask(libc::SIG_BLOCK, &all_signals, &mut old_sigset);
+    }
+
     // Start listener threads
     let state_native = Arc::clone(&state);
     let activated_native = activated.native;
@@ -3349,14 +3462,17 @@ fn main() {
 
     eprintln!("journald: Ready and processing requests");
 
+    // Restore the signal mask in the main thread now that all child
+    // threads have been spawned with signals blocked.
+    unsafe {
+        libc::pthread_sigmask(libc::SIG_SETMASK, &old_sigset, std::ptr::null_mut());
+    }
+
     // Main event loop — handles shutdown and reload requests.
     // (Flush, rotate, relinquish, sync, and other periodic tasks are
     // handled by the maintenance thread.)
     while !state.shutdown.load(Ordering::Relaxed) {
         // Handle reload request (SIGHUP / `systemctl reload`).
-        // Check here in addition to the maintenance thread so we
-        // respond promptly — the maintenance thread sleeps 1 s between
-        // iterations and may be blocked on storage operations.
         if state
             .reload_requested
             .compare_exchange(true, false, Ordering::AcqRel, Ordering::Relaxed)
@@ -3365,6 +3481,20 @@ fn main() {
             sd_notify("RELOADING=1");
             eprintln!("journald: Reloading configuration");
             let new_config = JournaldConfig::load();
+            // Store config immediately so the flush handler (maintenance thread)
+            // sees the updated settings. This is critical for volatile→persistent
+            // reload followed by flush — the flush must know we want persistent.
+            *state.config.write().unwrap() = new_config.clone();
+
+            // Write reload-done token AFTER config is stored but BEFORE slow
+            // storage operations. This ensures ExecReload returns quickly AND
+            // the config is already visible to the flush handler.
+            {
+                let token =
+                    fs::read_to_string(format!("{runtime_dir}/reload-request")).unwrap_or_default();
+                let _ = fs::write(format!("{runtime_dir}/reload-done"), token.trim());
+            }
+
             let is_relinquished = state.relinquished.load(Ordering::Acquire);
             let persistent = if is_relinquished {
                 false
@@ -3379,7 +3509,13 @@ fn main() {
             // - same directory: just update limits/compress and vacuum
             let sc = new_config.make_storage_config(persistent);
             {
-                let mut storage = state.storage.lock().unwrap();
+                let mut storage = match state.storage.lock() {
+                    Ok(s) => s,
+                    Err(poisoned) => {
+                        eprintln!("journald: reload: storage mutex was poisoned, recovering");
+                        poisoned.into_inner()
+                    }
+                };
                 let old_dir = storage.directory();
                 let new_dir = sc.directory.join(old_dir.file_name().unwrap_or_default());
                 if old_dir != new_dir && !persistent {
@@ -3388,13 +3524,17 @@ fn main() {
                     drop(storage);
                     match JournalStorage::new(sc) {
                         Ok(new_storage) => {
-                            *state.storage.lock().unwrap() = new_storage;
+                            let mut storage = match state.storage.lock() {
+                                Ok(s) => s,
+                                Err(poisoned) => poisoned.into_inner(),
+                            };
                             *state.active_file_opened.lock().unwrap() = Instant::now();
                             eprintln!(
                                 "journald: Storage switched from {} to {}",
                                 old_dir.display(),
                                 new_dir.display()
                             );
+                            *storage = new_storage;
                         }
                         Err(e) => {
                             eprintln!(
@@ -3418,14 +3558,7 @@ fn main() {
                 }
             }
 
-            *state.config.write().unwrap() = new_config;
             sd_notify("READY=1");
-            // Token-based reload handshake: read the token from reload-request
-            // and write it to reload-done so ExecReload can verify that THIS
-            // specific reload completed (not a spurious one from stale SIGHUPs).
-            let token =
-                fs::read_to_string(format!("{runtime_dir}/reload-request")).unwrap_or_default();
-            let _ = fs::write(format!("{runtime_dir}/reload-done"), token.trim());
         }
 
         thread::sleep(Duration::from_millis(100));

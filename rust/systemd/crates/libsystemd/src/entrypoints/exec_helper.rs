@@ -1090,6 +1090,18 @@ fn open_journal_stream_nonblock(
             path_bytes.len(),
         );
 
+        // Enable SO_PASSCRED on the sender socket so the kernel attaches
+        // per-write credentials (PID/UID/GID) to every message, avoiding a
+        // race where the receiver hasn't set SO_PASSCRED yet at write time.
+        let enabled: libc::c_int = 1;
+        libc::setsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_PASSCRED,
+            &enabled as *const _ as *const libc::c_void,
+            std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+        );
+
         // Set non-blocking for connect
         let flags = libc::fcntl(fd, libc::F_GETFL);
         libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
