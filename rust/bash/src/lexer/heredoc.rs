@@ -96,9 +96,40 @@ impl Lexer {
 
     pub(super) fn read_heredoc_bodies(&mut self) {
         let heredocs: Vec<HereDocPending> = self.pending_heredocs.drain(..).collect();
+        // Capture the current line at the start of body reading.  Bash uses
+        // `line_number` at `gather_here_documents` time — which is the line
+        // the parser is on when it starts reading bodies (i.e. the line the
+        // command ended on), NOT the line where `<<` appeared.  Since
+        // `read_heredoc_bodies` is called right after the newline token is
+        // consumed, `self.line` has already been incremented, so subtract 1.
+        let body_start_line = if self.line > 1 {
+            self.line - 1
+        } else {
+            self.line
+        };
         for hd in heredocs {
             let mut body = String::new();
+            // Track whether we read at least one content line (even if the
+            // line itself was empty).  This lets us distinguish "no body at
+            // all" (delimiter on first line, or immediate EOF) from "body
+            // with one empty line" — both produce body=="" but only the
+            // latter should get a trailing newline when written to the
+            // heredoc fd.
+            let mut had_content_line = false;
             loop {
+                // If input is already exhausted before reading any line,
+                // emit the EOF warning immediately without adding an empty
+                // body line.  This prevents an empty heredoc from gaining a
+                // spurious newline (bash produces 0-byte content here).
+                if self.pos >= self.input.len() {
+                    let eof_line = body_start_line;
+                    self.heredoc_eof_warnings.push((
+                        eof_line,
+                        body_start_line,
+                        hd.delimiter.clone(),
+                    ));
+                    break;
+                }
                 let mut line = String::new();
                 loop {
                     match self.advance() {
@@ -138,9 +169,10 @@ impl Lexer {
                 if check_line == check_delim {
                     break;
                 }
-                if !body.is_empty() {
+                if had_content_line {
                     body.push('\n');
                 }
+                had_content_line = true;
                 if hd.strip_tabs {
                     body.push_str(line.trim_start_matches('\t'));
                 } else {
@@ -150,21 +182,38 @@ impl Lexer {
                     // EOF terminated here-document — emit warning
                     // Use line - 1 since the newline after the last content
                     // incremented the line counter past the actual content
-                    let eof_line = if self.line > hd.start_line {
+                    let eof_line = if self.line > body_start_line {
                         self.line - 1
                     } else {
                         self.line
                     };
-                    self.heredoc_eof_warnings
-                        .push((eof_line, hd.start_line, hd.delimiter.clone()));
+                    self.heredoc_eof_warnings.push((
+                        eof_line,
+                        body_start_line,
+                        hd.delimiter.clone(),
+                    ));
                     break;
                 }
             }
 
-            let mut word = if hd.quoted {
+            // When no content lines were read (delimiter matched on the very
+            // first line, or immediate EOF), produce an empty word `[]`.
+            // This lets the redirect code distinguish "no body at all"
+            // (should produce 0-byte content) from "body with content lines"
+            // (needs a trailing newline).
+            let mut word = if !had_content_line {
+                vec![]
+            } else if hd.quoted {
                 vec![WordPart::SingleQuoted(body)]
             } else {
-                parse_double_quoted_content(&body)
+                let mut w = parse_double_quoted_content(&body);
+                // parse_double_quoted_content("") returns [] for an empty
+                // string.  Push an empty Literal so the word is non-empty,
+                // signalling to the redirect code that there WAS content.
+                if w.is_empty() {
+                    w.push(WordPart::Literal(String::new()));
+                }
+                w
             };
             // Fix up INCOMPLETE_COMSUB line numbers: offset by heredoc start line
             // (since parse_dollar only sees body-relative chars without file context)

@@ -446,7 +446,19 @@ impl Shell {
                     // Use raw byte conversion for heredoc/herestring content
                     // so that chars like U+00CD (from $'\315') produce single bytes
                     let mut content_bytes = crate::builtins::string_to_raw_bytes(&target_str);
-                    content_bytes.push(b'\n');
+                    // For here-strings, always append a trailing newline.
+                    // For here-documents, append a trailing newline only when
+                    // the heredoc had at least one content line.  We detect
+                    // this by checking if the redirect target word has any
+                    // parts: an empty word (`[]`) means no body at all
+                    // (delimiter on the first line or immediate EOF → 0-byte
+                    // content), while a non-empty word (even `[Literal("")]`)
+                    // means there was at least one content line and a trailing
+                    // newline is needed.
+                    let heredoc_had_body = !redir.target.is_empty();
+                    if matches!(redir.kind, RedirectKind::HereString) || heredoc_had_body {
+                        content_bytes.push(b'\n');
+                    }
 
                     // Use an anonymous file (memfd) instead of a pipe to avoid
                     // blocking when heredoc content exceeds the pipe buffer

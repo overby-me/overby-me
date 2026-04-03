@@ -81,18 +81,31 @@ pub(super) fn builtin_echo(shell: &mut Shell, args: &[String]) -> i32 {
         match nix::unistd::write(std::io::stdout(), &bytes) {
             Ok(_) => 0,
             Err(nix::Error::EPIPE) => {
-                // Broken pipe — in any subprocess (pipeline child, command
-                // substitution, or process substitution) suppress the error
-                // and exit silently.  Bash's children have SIGPIPE=SIG_DFL
-                // so they're killed before write() returns; our Rust runtime
-                // keeps SIGPIPE=SIG_IGN so we see EPIPE instead.
+                // Broken pipe — suppress the error and exit in subprocess
+                // contexts.  Bash's children have SIGPIPE=SIG_DFL so they're
+                // killed before write() returns; our Rust runtime keeps
+                // SIGPIPE=SIG_IGN so we see EPIPE instead.
+                //
+                // In the main shell, only print the error when the user has
+                // explicitly set `trap '...' PIPE` (non-empty handler) or
+                // SIGPIPE was inherited as ignored from the parent.  Without
+                // a trap, bash would be killed by SIGPIPE here — we can't
+                // replicate that (Rust needs SIG_IGN), so just return 1.
                 let is_subprocess = shell.in_pipeline_child
                     || shell.in_comsub
                     || (shell.top_level_pid != 0 && std::process::id() != shell.top_level_pid);
                 if is_subprocess {
                     std::process::exit(1);
                 }
-                eprintln!("{}: echo: write error: Broken pipe", shell.error_prefix());
+                // Only print the error when SIGPIPE is explicitly trapped
+                // (empty string = ignored, non-empty = handler).  If there's
+                // no PIPE trap at all, bash would die from the signal — we
+                // silently return 1 instead.
+                let has_pipe_trap =
+                    shell.traps.contains_key("PIPE") || shell.traps.contains_key("SIGPIPE");
+                if has_pipe_trap {
+                    eprintln!("{}: echo: write error: Broken pipe", shell.error_prefix());
+                }
                 1
             }
             Err(e) => {
