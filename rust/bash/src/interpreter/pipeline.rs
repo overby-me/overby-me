@@ -274,6 +274,203 @@ impl Shell {
         }
     }
 
+    /// Set up a function-like scope for funsub/valuesub execution.
+    /// Pushes a local scope and a FUNCNAME entry so that `return` and
+    /// `local` work inside the nofork substitution.  Returns state
+    /// needed by `teardown_funsub_scope`.
+    fn setup_funsub_scope(&mut self) {
+        // Push an empty local scope so `local` declarations are scoped
+        // to this funsub and `return` (which checks local_scopes) works.
+        self.local_scopes.push(std::collections::HashMap::new());
+        // Push saved_opts_stack entry (for `local -`)
+        self.saved_opts_stack.push(None);
+    }
+
+    /// Tear down the function-like scope after funsub/valuesub execution.
+    fn teardown_funsub_scope(&mut self) {
+        // Clear the returning flag so it doesn't propagate out.
+        self.returning = false;
+        self.return_explicit_arg = false;
+
+        // Restore shell options if `local -` was used.
+        if let Some(Some((errexit, nounset, xtrace, noclobber, noglob, pipefail))) =
+            self.saved_opts_stack.pop()
+        {
+            self.opt_errexit = errexit;
+            self.opt_nounset = nounset;
+            self.opt_xtrace = xtrace;
+            self.opt_noclobber = noclobber;
+            self.opt_noglob = noglob;
+            self.opt_pipefail = pipefail;
+        }
+
+        // Restore local variables from the scope we pushed.
+        if let Some(scope) = self.local_scopes.pop() {
+            for (var_name, saved) in scope {
+                match saved.scalar {
+                    Some(val) => {
+                        self.vars.insert(var_name.clone(), val);
+                    }
+                    None => {
+                        self.vars.remove(&var_name);
+                    }
+                }
+                match saved.array {
+                    Some(arr) => {
+                        self.arrays.insert(var_name.clone(), arr);
+                    }
+                    None => {
+                        self.arrays.remove(&var_name);
+                    }
+                }
+                match saved.assoc {
+                    Some(assoc) => {
+                        self.assoc_arrays.insert(var_name.clone(), assoc);
+                    }
+                    None => {
+                        self.assoc_arrays.remove(&var_name);
+                    }
+                }
+                if saved.was_integer {
+                    self.integer_vars.insert(var_name.clone());
+                } else {
+                    self.integer_vars.remove(&var_name);
+                }
+                if saved.was_readonly {
+                    self.readonly_vars.insert(var_name);
+                } else {
+                    self.readonly_vars.remove(&var_name);
+                }
+            }
+        }
+    }
+
+    /// Nofork command substitution `${ cmd; }` — runs in the current shell
+    /// context with stdout redirected to a pipe.  The captured stdout
+    /// (trailing newlines stripped) is returned.
+    pub fn capture_output_nofork(&mut self, cmd_str: &str) -> String {
+        #[cfg(unix)]
+        {
+            // Flush stdout so buffered data doesn't end up in the capture pipe.
+            std::io::Write::flush(&mut std::io::stdout()).ok();
+
+            let (pipe_r, pipe_w) = match safe_pipe() {
+                Ok(p) => p,
+                Err(_) => return String::new(),
+            };
+
+            // Save current stdout and redirect to the pipe write end.
+            let saved_stdout =
+                nix::fcntl::fcntl(1, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(10)).unwrap_or(-1);
+            nix::unistd::dup2(pipe_w, 1).ok();
+            nix::unistd::close(pipe_w).ok();
+
+            // Make the read end non-blocking so we can drain it after the
+            // command finishes (both ends are in the same process).
+            nix::fcntl::fcntl(
+                pipe_r,
+                nix::fcntl::FcntlArg::F_SETFL(nix::fcntl::OFlag::O_NONBLOCK),
+            )
+            .ok();
+
+            // Set up function-like scope so `return` and `local` work.
+            self.setup_funsub_scope();
+
+            // Set comsub_line_offset so LINENO inside the funsub reflects
+            // the script line where the substitution appeared, not line 1.
+            let lineno: usize = self
+                .vars
+                .get("LINENO")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(1);
+            self.comsub_line_offset = lineno.saturating_sub(1);
+
+            let status = self.run_string(cmd_str);
+            self.last_status = status;
+
+            // Tear down the scope (clears returning, restores locals).
+            self.teardown_funsub_scope();
+
+            // Flush any buffered stdout so all data lands in the pipe.
+            std::io::Write::flush(&mut std::io::stdout()).ok();
+
+            // Restore stdout.
+            if saved_stdout >= 0 {
+                nix::unistd::dup2(saved_stdout, 1).ok();
+                nix::unistd::close(saved_stdout).ok();
+            }
+
+            // Drain the pipe read end.
+            let mut output = Vec::new();
+            let mut buf = [0u8; 4096];
+            loop {
+                match nix::unistd::read(pipe_r, &mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => output.extend_from_slice(&buf[..n]),
+                    Err(nix::Error::EAGAIN) => break, // non-blocking: no more data
+                    Err(_) => break,
+                }
+            }
+            nix::unistd::close(pipe_r).ok();
+
+            let mut s = String::from_utf8_lossy(&output).to_string();
+            // Strip trailing newlines (same as regular comsub).
+            while s.ends_with('\n') {
+                s.pop();
+            }
+            s
+        }
+        #[cfg(not(unix))]
+        {
+            // Fallback: run as regular comsub (forked).
+            self.capture_output(cmd_str)
+        }
+    }
+
+    /// Value substitution `${| cmd; }` — runs in the current shell context.
+    /// The value of REPLY after the command finishes is returned (trailing
+    /// newlines are NOT stripped — that is the whole point of valuesub).
+    pub fn capture_valuesub(&mut self, cmd_str: &str) -> String {
+        // Save the current REPLY value.
+        let saved_reply = self.vars.get("REPLY").cloned();
+
+        // Clear REPLY so commands start fresh.
+        self.vars.remove("REPLY");
+
+        // Set up function-like scope so `return` and `local` work.
+        self.setup_funsub_scope();
+
+        // Set comsub_line_offset so LINENO inside the valuesub reflects
+        // the script line where the substitution appeared, not line 1.
+        let lineno: usize = self
+            .vars
+            .get("LINENO")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(1);
+        self.comsub_line_offset = lineno.saturating_sub(1);
+
+        let status = self.run_string(cmd_str);
+        self.last_status = status;
+
+        // Tear down the scope (clears returning, restores locals).
+        self.teardown_funsub_scope();
+
+        // Read REPLY.
+        let result = self.vars.get("REPLY").cloned().unwrap_or_default();
+
+        // Restore previous REPLY.
+        match saved_reply {
+            Some(v) => {
+                self.vars.insert("REPLY".to_string(), v);
+            }
+            None => {
+                self.vars.remove("REPLY");
+            }
+        }
+
+        result
+    }
+
     pub fn capture_output(&mut self, cmd_str: &str) -> String {
         #[cfg(unix)]
         {

@@ -196,6 +196,12 @@ pub enum WordPart {
     CommandSub(String),
     BacktickSub(String),
     ArithSub(String),
+    /// `${ cmd; }` — nofork command substitution (funsub).
+    /// Runs in the current shell context; stdout is captured as the value.
+    FunSub(String),
+    /// `${| cmd; }` — value substitution.
+    /// Runs in the current shell context; REPLY is read as the value.
+    ValueSub(String),
     /// `<(cmd)` or `>(cmd)` — process substitution
     ProcessSub(ProcessSubKind, String),
     /// Bad substitution — produces an error at expansion time
@@ -207,16 +213,17 @@ pub enum WordPart {
 
 /// Check if a word contains an incomplete funsub marker
 pub fn word_has_incomplete_funsub(word: &Word) -> bool {
-    word.iter().any(|p| {
-        if let WordPart::CommandSub(cmd) = p {
+    word.iter().any(|p| match p {
+        WordPart::CommandSub(cmd) | WordPart::FunSub(cmd) | WordPart::ValueSub(cmd) => {
             cmd.starts_with("\x00INCOMPLETE_FUNSUB")
-        } else if let WordPart::DoubleQuoted(parts) = p {
-            parts.iter().any(|ip| {
-                matches!(ip, WordPart::CommandSub(cmd) if cmd.starts_with("\x00INCOMPLETE_FUNSUB"))
-            })
-        } else {
-            false
         }
+        WordPart::DoubleQuoted(parts) => parts.iter().any(|ip| match ip {
+            WordPart::CommandSub(cmd) | WordPart::FunSub(cmd) | WordPart::ValueSub(cmd) => {
+                cmd.starts_with("\x00INCOMPLETE_FUNSUB")
+            }
+            _ => false,
+        }),
+        _ => false,
     })
 }
 
@@ -423,6 +430,16 @@ pub fn word_to_string(word: &Word) -> String {
                 s.push_str("$(");
                 s.push_str(cmd);
                 s.push(')');
+            }
+            WordPart::FunSub(cmd) => {
+                s.push_str("${");
+                s.push_str(cmd);
+                s.push('}');
+            }
+            WordPart::ValueSub(cmd) => {
+                s.push_str("${|");
+                s.push_str(cmd);
+                s.push('}');
             }
             WordPart::BacktickSub(cmd) => {
                 s.push('`');

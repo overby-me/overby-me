@@ -761,7 +761,13 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                             s.push_str(&expand_param(expr, ctx, cmd_sub));
                         }
                     }
-                    WordPart::CommandSub(cmd) => {
+                    WordPart::CommandSub(cmd) | WordPart::FunSub(cmd) | WordPart::ValueSub(cmd) => {
+                        // Determine nofork prefix for funsub/valuesub dispatch
+                        let nofork_prefix = match p {
+                            WordPart::FunSub(_) => "\x01FUNSUB:",
+                            WordPart::ValueSub(_) => "\x01VALUESUB:",
+                            _ => "",
+                        };
                         if cmd.starts_with('\x00') {
                             // Incomplete comsub — mark for suppression
                             if !s.is_empty() {
@@ -771,16 +777,20 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                             continue;
                         }
                         let trimmed = cmd.trim();
-                        if let Some(file) = trimmed
-                            .strip_prefix("< ")
-                            .or_else(|| trimmed.strip_prefix("<\t"))
-                        {
-                            let file = file.trim();
-                            if let Ok(content) = std::fs::read_to_string(file) {
-                                s.push_str(content.trim_end_matches('\n'));
+                        if nofork_prefix.is_empty() {
+                            if let Some(file) = trimmed
+                                .strip_prefix("< ")
+                                .or_else(|| trimmed.strip_prefix("<\t"))
+                            {
+                                let file = file.trim();
+                                if let Ok(content) = std::fs::read_to_string(file) {
+                                    s.push_str(content.trim_end_matches('\n'));
+                                }
+                            } else {
+                                s.push_str(&cmd_sub(cmd));
                             }
                         } else {
-                            s.push_str(&cmd_sub(cmd));
+                            s.push_str(&cmd_sub(&format!("{}{}", nofork_prefix, cmd)));
                         }
                     }
                     WordPart::BacktickSub(cmd) => {
@@ -1248,19 +1258,31 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                 }
             }
         }
-        WordPart::CommandSub(cmd) => {
-            // Check for incomplete comsub marker
+        WordPart::CommandSub(cmd) | WordPart::FunSub(cmd) | WordPart::ValueSub(cmd) => {
+            // Check for incomplete comsub/funsub marker
             if cmd.starts_with('\x00') {
                 out.push(Segment::Unquoted(cmd.clone()));
                 return;
             }
-            // Optimize $(< file) — read file content directly
+            // Determine nofork prefix for funsub/valuesub dispatch
+            let nofork_prefix = match part {
+                WordPart::FunSub(_) => "\x01FUNSUB:",
+                WordPart::ValueSub(_) => "\x01VALUESUB:",
+                _ => "",
+            };
+            // Optimize $(< file) — read file content directly (only for regular comsub)
             let trimmed = cmd.trim();
-            let val = if let Some(file) = trimmed
-                .strip_prefix("< ")
-                .or_else(|| trimmed.strip_prefix("<\t"))
+            let val = if nofork_prefix.is_empty()
+                && trimmed
+                    .strip_prefix("< ")
+                    .or_else(|| trimmed.strip_prefix("<\t"))
+                    .is_some()
             {
-                let file = file.trim();
+                let file = trimmed
+                    .strip_prefix("< ")
+                    .or_else(|| trimmed.strip_prefix("<\t"))
+                    .unwrap()
+                    .trim();
                 // Expand the filename
                 let expanded = expand_word_nosplit_ctx(
                     &vec![WordPart::Literal(file.to_string())],
@@ -1274,8 +1296,10 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                     }
                     Err(_) => String::new(),
                 }
-            } else {
+            } else if nofork_prefix.is_empty() {
                 cmd_sub(cmd)
+            } else {
+                cmd_sub(&format!("{}{}", nofork_prefix, cmd))
             };
             // Protect backslashes from quote removal with \x00 markers
             let val = val.replace('\\', "\x00\\");
@@ -1806,6 +1830,16 @@ fn word_level_brace_expand(word: &Word) -> Vec<Word> {
                             raw.push_str(cmd);
                             raw.push(')');
                         }
+                        WordPart::FunSub(cmd) => {
+                            raw.push_str("${");
+                            raw.push_str(cmd);
+                            raw.push('}');
+                        }
+                        WordPart::ValueSub(cmd) => {
+                            raw.push_str("${|");
+                            raw.push_str(cmd);
+                            raw.push('}');
+                        }
                         _ => {}
                     }
                 }
@@ -1828,6 +1862,16 @@ fn word_level_brace_expand(word: &Word) -> Vec<Word> {
                 raw.push_str("$(");
                 raw.push_str(cmd);
                 raw.push(')');
+            }
+            WordPart::FunSub(cmd) => {
+                raw.push_str("${");
+                raw.push_str(cmd);
+                raw.push('}');
+            }
+            WordPart::ValueSub(cmd) => {
+                raw.push_str("${|");
+                raw.push_str(cmd);
+                raw.push('}');
             }
             WordPart::BacktickSub(cmd) => {
                 raw.push('`');

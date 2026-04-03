@@ -46,7 +46,13 @@ pub(super) fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
                         "keyword" => shell.opt_keyword = enable,
                         "noglob" => shell.opt_noglob = enable,
                         "noexec" => shell.opt_noexec = enable,
-                        "posix" => shell.opt_posix = enable,
+                        "posix" => {
+                            shell.opt_posix = enable;
+                            // POSIX mode enables alias expansion (bash behavior)
+                            if enable {
+                                shell.shopt_expand_aliases = true;
+                            }
+                        }
                         "hashall" => shell.opt_hashall = enable,
                         "braceexpand"
                         | "emacs"

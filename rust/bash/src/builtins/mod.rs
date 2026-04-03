@@ -478,6 +478,16 @@ fn format_word(word: &Word) -> String {
                             s.push_str(cmd);
                             s.push(')');
                         }
+                        WordPart::FunSub(cmd) => {
+                            s.push_str("${");
+                            s.push_str(cmd);
+                            s.push('}');
+                        }
+                        WordPart::ValueSub(cmd) => {
+                            s.push_str("${|");
+                            s.push_str(cmd);
+                            s.push('}');
+                        }
                         WordPart::BacktickSub(cmd) => {
                             s.push('`');
                             s.push_str(cmd);
@@ -527,6 +537,14 @@ fn format_word_part(part: &WordPart) -> String {
                 return format!("$(< {})", rest.trim_start());
             }
             format!("$({})", trimmed)
+        }
+        WordPart::FunSub(cmd) => {
+            let trimmed = cmd.trim();
+            format!("${{ {} }}", trimmed)
+        }
+        WordPart::ValueSub(cmd) => {
+            let trimmed = cmd.trim();
+            format!("${{| {} }}", trimmed)
         }
         WordPart::BacktickSub(cmd) => format!("`{}`", cmd),
         WordPart::ArithSub(expr) => format!("$(({}))", expr),

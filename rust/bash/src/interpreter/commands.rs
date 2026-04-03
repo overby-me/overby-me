@@ -348,7 +348,15 @@ impl Shell {
         };
         crate::expand::set_procsub_runner(&mut procsub_runner as *mut dyn FnMut(&str) -> i32);
         let arrays = self.arrays.clone();
-        let mut cmd_sub = |cmd: &str| -> String { self.capture_output(cmd) };
+        let mut cmd_sub = |cmd: &str| -> String {
+            if let Some(rest) = cmd.strip_prefix("\x01FUNSUB:") {
+                self.capture_output_nofork(rest)
+            } else if let Some(rest) = cmd.strip_prefix("\x01VALUESUB:") {
+                self.capture_valuesub(rest)
+            } else {
+                self.capture_output(cmd)
+            }
+        };
         let result = expand::expand_word(
             &word,
             &vars,
@@ -465,7 +473,15 @@ impl Shell {
         };
         crate::expand::set_procsub_runner(&mut procsub_runner as *mut dyn FnMut(&str) -> i32);
         let arrays = self.arrays.clone();
-        let mut cmd_sub = |cmd: &str| -> String { self.capture_output(cmd) };
+        let mut cmd_sub = |cmd: &str| -> String {
+            if let Some(rest) = cmd.strip_prefix("\x01FUNSUB:") {
+                self.capture_output_nofork(rest)
+            } else if let Some(rest) = cmd.strip_prefix("\x01VALUESUB:") {
+                self.capture_valuesub(rest)
+            } else {
+                self.capture_output(cmd)
+            }
+        };
         let result = expand::expand_word_nosplit(
             &word,
             &vars,
@@ -496,7 +512,15 @@ impl Shell {
         let top_pid = self.top_level_pid;
         let opt_flags = self.get_opt_flags();
         let arrays = self.arrays.clone();
-        let mut cmd_sub = |cmd: &str| -> String { self.capture_output(cmd) };
+        let mut cmd_sub = |cmd: &str| -> String {
+            if let Some(rest) = cmd.strip_prefix("\x01FUNSUB:") {
+                self.capture_output_nofork(rest)
+            } else if let Some(rest) = cmd.strip_prefix("\x01VALUESUB:") {
+                self.capture_valuesub(rest)
+            } else {
+                self.capture_output(cmd)
+            }
+        };
         expand::expand_word_pattern(
             &word,
             &vars,
@@ -1031,13 +1055,14 @@ impl Shell {
         // Check for incomplete comsub in assignment values
         for assign in &cmd.assignments {
             let incomplete_line = match &assign.value {
-                AssignValue::Scalar(w) => w.iter().find_map(|p| {
-                    if let crate::ast::WordPart::CommandSub(s) = p {
-                        s.strip_prefix("\x00INCOMPLETE_COMSUB:")
-                            .and_then(|n| n.parse::<usize>().ok())
-                    } else {
-                        None
+                AssignValue::Scalar(w) => w.iter().find_map(|p| match p {
+                    crate::ast::WordPart::CommandSub(s) => s
+                        .strip_prefix("\x00INCOMPLETE_COMSUB:")
+                        .and_then(|n| n.parse::<usize>().ok()),
+                    crate::ast::WordPart::FunSub(s) | crate::ast::WordPart::ValueSub(s) => {
+                        s.strip_prefix("\x00INCOMPLETE_FUNSUB").map(|_| 0)
                     }
+                    _ => None,
                 }),
                 _ => None,
             };
@@ -1048,10 +1073,28 @@ impl Shell {
                     .or_else(|| self.positional.first())
                     .map(|s| s.as_str())
                     .unwrap_or("bash");
-                eprintln!(
-                    "{}: line {}: unexpected EOF while looking for matching `)'",
-                    name, eof_line
-                );
+                // Determine whether the incomplete marker was a funsub or comsub
+                let is_funsub = match &assign.value {
+                    AssignValue::Scalar(w) => w.iter().any(|p| {
+                        matches!(
+                            p,
+                            crate::ast::WordPart::FunSub(s) | crate::ast::WordPart::ValueSub(s)
+                            if s.starts_with("\x00INCOMPLETE_FUNSUB")
+                        )
+                    }),
+                    _ => false,
+                };
+                if is_funsub {
+                    eprintln!(
+                        "{}: unexpected EOF while looking for matching `}}'",
+                        self.error_prefix()
+                    );
+                } else {
+                    eprintln!(
+                        "{}: line {}: unexpected EOF while looking for matching `)'",
+                        name, eof_line
+                    );
+                }
                 return 2;
             }
         }

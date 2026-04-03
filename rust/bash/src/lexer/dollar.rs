@@ -157,8 +157,15 @@ fn parse_dollar_inner(
         }
         '{' => {
             *i += 1;
-            // Check for funsub: ${ cmd; } — space/tab/newline/| after {
+            // Check for funsub: ${ cmd; } — space/tab/newline after {
+            // or valuesub: ${| cmd; } — pipe after {
             if *i < chars.len() && matches!(chars[*i], ' ' | '\t' | '\n' | '|') {
+                // Detect value substitution: ${| ... }
+                let is_valuesub = chars[*i] == '|';
+                if is_valuesub {
+                    // Skip the '|' — it's not part of the command
+                    *i += 1;
+                }
                 // Parse as command substitution delimited by }
                 // Funsub requires that } is preceded by a command terminator (;/\n/&)
                 // at the SAME depth level (not from nested blocks)
@@ -242,9 +249,15 @@ fn parse_dollar_inner(
                 }
                 if depth > 0 {
                     // Unclosed funsub — return as incomplete
-                    WordPart::CommandSub(format!("\x00INCOMPLETE_FUNSUB{}", cmd))
+                    if is_valuesub {
+                        WordPart::ValueSub(format!("\x00INCOMPLETE_FUNSUB{}", cmd))
+                    } else {
+                        WordPart::FunSub(format!("\x00INCOMPLETE_FUNSUB{}", cmd))
+                    }
+                } else if is_valuesub {
+                    WordPart::ValueSub(cmd)
                 } else {
-                    WordPart::CommandSub(cmd)
+                    WordPart::FunSub(cmd)
                 }
             } else {
                 parse_brace_param(chars, i, in_dquote)
