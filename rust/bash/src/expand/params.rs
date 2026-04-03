@@ -172,13 +172,32 @@ pub(super) fn get_array_elements(expr: &ParamExpr, ctx: &ExpCtx) -> Vec<String> 
                 };
                 return values[start..end].to_vec();
             }
-            // Scalar treated as single-element array
+            // Scalar treated as single-element array — apply character-level
+            // substring (same as ${var:offset:length}).
             if let Some(val) = ctx.vars.get(&resolved) {
-                if offset <= 0 {
-                    return vec![val.clone()];
+                let chars: Vec<char> = val.chars().collect();
+                let count = chars.len() as i64;
+                let start = if offset < 0 {
+                    (count + offset).max(0) as usize
                 } else {
+                    (offset as usize).min(chars.len())
+                };
+                let end = if let Some(len_str) = length_str {
+                    let len: i64 = len_str.trim().parse().unwrap_or(count);
+                    if len < 0 {
+                        let target = (count + len).max(0) as usize;
+                        target.max(start)
+                    } else {
+                        (start + len as usize).min(chars.len())
+                    }
+                } else {
+                    chars.len()
+                };
+                let substr: String = chars[start..end].iter().collect();
+                if substr.is_empty() {
                     return vec![];
                 }
+                return vec![substr];
             }
             return vec![];
         }
@@ -968,12 +987,27 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                     };
                     return values[start..end].join(&sep);
                 } else if let Some(val) = ctx.vars.get(&resolved) {
-                    // Scalar treated as single-element array
-                    if offset <= 0 {
-                        return val.clone();
+                    // Scalar treated as single-element array — apply character-level
+                    // substring (same as ${var:offset:length}).
+                    let chars: Vec<char> = val.chars().collect();
+                    let count = chars.len() as i64;
+                    let start = if offset < 0 {
+                        (count + offset).max(0) as usize
                     } else {
-                        return String::new();
-                    }
+                        (offset as usize).min(chars.len())
+                    };
+                    let end = if let Some(len_str) = length_str {
+                        let len: i64 = parse_arith_offset(len_str.trim(), &expr.name, ctx, cmd_sub);
+                        if len < 0 {
+                            let target = (count + len).max(0) as usize;
+                            target.max(start)
+                        } else {
+                            (start + len as usize).min(chars.len())
+                        }
+                    } else {
+                        chars.len()
+                    };
+                    return chars[start..end].iter().collect();
                 } else {
                     return String::new();
                 }
