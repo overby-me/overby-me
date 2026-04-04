@@ -2090,25 +2090,12 @@ fn handle_stdout_connection(stream: UnixStream, state: Arc<JournaldState>) {
     // We peek at the next line and only consume it as invocation ID if it
     // looks like a 32-char hex string (systemd invocation ID format).
     let mut first_log_line: Option<CredLine> = None;
-    let mut service_pid: Option<u32> = None;
     if let Some(cl) = reader.next_line() {
         if !cl.text.is_empty()
             && cl.text.len() == 32
             && cl.text.chars().all(|c| c.is_ascii_hexdigit())
         {
             invocation_id = cl.text;
-
-            // Line 9 (extension): service PID — the actual service process PID
-            // so we can set _PID/_EXE/_COMM from the service rather than PID 1.
-            if let Some(cl2) = reader.next_line() {
-                if let Ok(pid) = cl2.text.parse::<u32>() {
-                    if pid > 0 {
-                        service_pid = Some(pid);
-                    }
-                } else if !cl2.text.is_empty() {
-                    first_log_line = Some(cl2);
-                }
-            }
         } else {
             // Not an invocation ID — this is actually the first log line
             first_log_line = Some(cl);
@@ -2148,13 +2135,9 @@ fn handle_stdout_connection(stream: UnixStream, state: Arc<JournaldState>) {
         // Determine PIDs for this entry:
         // - write_pid: per-write SCM_CREDENTIALS PID (the writer)
         // - metadata_pid: the actual service process whose _COMM/_EXE we want
-        //   Prefer service_pid (from stream header) so stdout entries reflect
-        //   the service process, not PID 1 which merely relays the pipe.
         let write_pid = cl.cred.map(|c| c.pid as u32).filter(|&p| p > 0);
 
-        let metadata_pid = service_pid
-            .or(write_pid)
-            .or(peer_cred.map(|c| c.pid as u32));
+        let metadata_pid = write_pid.or(peer_cred.map(|c| c.pid as u32));
 
         // Set _LINE_BREAK=pid-change when the CredLineReader detected a
         // credential PID change (matching C journald's behavior).

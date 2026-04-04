@@ -616,7 +616,11 @@ pub fn wait_for_socket(run_info: ArcMutRuntimeInfo) -> Result<Vec<UnitId>, Strin
         {
             let unit_table_locked = &run_info_locked.unit_table;
             for (fd, id) in &fd_to_sock_id {
-                let unit = unit_table_locked.get(id).unwrap();
+                let Some(unit) = unit_table_locked.get(id) else {
+                    // Unit was removed (e.g. during daemon-reload) but its
+                    // FDs are still in the fd_store — skip it.
+                    continue;
+                };
                 if let Specific::Socket(specific) = &unit.specific {
                     let mut state = specific.state.write_poisoned();
                     // Skip sockets that hit their trigger rate limit
@@ -674,11 +678,12 @@ pub fn wait_for_socket(run_info: ArcMutRuntimeInfo) -> Result<Vec<UnitId>, Strin
                 trace!("Interrupted socketactivation select because the eventfd fired");
                 crate::platform::reset_event_fd(eventfd);
                 trace!("Reset eventfd value");
-            } else {
-                for (fd, id) in &fd_to_sock_id {
-                    if fdset.contains(unsafe { borrow_fd(*fd) }) {
-                        activated_ids.push(id.clone());
-                    }
+            }
+            // Always check socket FDs — even when the eventfd fired,
+            // a socket FD may also be ready and should not be missed.
+            for (fd, id) in &fd_to_sock_id {
+                if fdset.contains(unsafe { borrow_fd(*fd) }) {
+                    activated_ids.push(id.clone());
                 }
             }
             Ok(activated_ids)
@@ -686,11 +691,20 @@ pub fn wait_for_socket(run_info: ArcMutRuntimeInfo) -> Result<Vec<UnitId>, Strin
         Err(e) => {
             if e == nix::Error::EINTR {
                 Ok(Vec::new())
-            } else if e == nix::Error::EBADF && crate::shutdown::is_shutting_down() {
-                // During shutdown, socket fds are closed before this thread
-                // exits, causing EBADF from select().  Return an empty vec
-                // so the caller can check the shutdown flag and exit cleanly.
-                Ok(Vec::new())
+            } else if e == nix::Error::EBADF {
+                if crate::shutdown::is_shutting_down() {
+                    // During shutdown, socket fds are closed before this thread
+                    // exits, causing EBADF from select().  Return an empty vec
+                    // so the caller can check the shutdown flag and exit cleanly.
+                    Ok(Vec::new())
+                } else {
+                    // An FD became invalid during normal operation (e.g. a
+                    // socket unit was restarted or its FDs were replaced).
+                    // Return empty so the caller rebuilds the FD set from
+                    // the current fd_store on the next iteration.
+                    trace!("select() returned EBADF, will rebuild FD set");
+                    Ok(Vec::new())
+                }
             } else {
                 Err(format!("Error while selecting: {e}"))
             }

@@ -697,6 +697,17 @@ pub struct ExecHelperConfig {
     /// SyslogIdentifier= — the process name ("tag") to prefix log messages with.
     #[serde(default)]
     pub syslog_identifier: Option<String>,
+    /// SyslogLevel= — the default syslog priority for stdout messages.
+    /// Stored as syslog name (e.g. "notice", "info") or numeric string.
+    #[serde(default)]
+    pub syslog_level: Option<String>,
+    /// SyslogLevelPrefix= — if true (default), strip kernel-style `<N>` priority prefixes.
+    #[serde(default)]
+    pub syslog_level_prefix: Option<bool>,
+    /// The service's invocation ID (32-char hex UUID), sent to journald so it
+    /// can tag entries with `_SYSTEMD_INVOCATION_ID`.
+    #[serde(default)]
+    pub invocation_id: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -1032,8 +1043,20 @@ fn setup_journal_stream_output(config: &ExecHelperConfig) {
         .unwrap_or(&config.name);
     let identifier = config.syslog_identifier.as_deref().unwrap_or(cmd_basename);
 
+    // Parse SyslogLevel= to a numeric priority (default: 6 = info)
+    let priority = parse_syslog_priority(config.syslog_level.as_deref());
+    let level_prefix = config.syslog_level_prefix.unwrap_or(true);
+    let inv_id = config.invocation_id.as_deref();
+
     if config.stdout_is_journal
-        && let Some(fd) = open_journal_stream_nonblock(SOCKET_PATH, identifier, &config.name)
+        && let Some(fd) = open_journal_stream_nonblock(
+            SOCKET_PATH,
+            identifier,
+            &config.name,
+            priority,
+            level_prefix,
+            inv_id,
+        )
     {
         unsafe {
             libc::dup2(fd, libc::STDOUT_FILENO);
@@ -1052,7 +1075,14 @@ fn setup_journal_stream_output(config: &ExecHelperConfig) {
     }
 
     if config.stderr_is_journal
-        && let Some(fd) = open_journal_stream_nonblock(SOCKET_PATH, identifier, &config.name)
+        && let Some(fd) = open_journal_stream_nonblock(
+            SOCKET_PATH,
+            identifier,
+            &config.name,
+            priority,
+            level_prefix,
+            inv_id,
+        )
     {
         unsafe {
             libc::dup2(fd, libc::STDERR_FILENO);
@@ -1065,10 +1095,32 @@ fn setup_journal_stream_output(config: &ExecHelperConfig) {
 
 /// Non-blocking connect to journald's stdout stream socket.
 /// Returns None if the socket doesn't exist or can't connect within 100ms.
+/// Parse a SyslogLevel= value to a numeric syslog priority (0-7).
+/// Defaults to 6 (info) if unset or unrecognized.
+fn parse_syslog_priority(level: Option<&str>) -> u8 {
+    match level {
+        Some(s) => match s.to_lowercase().as_str() {
+            "emerg" | "emergency" | "0" => 0,
+            "alert" | "1" => 1,
+            "crit" | "critical" | "2" => 2,
+            "err" | "error" | "3" => 3,
+            "warning" | "warn" | "4" => 4,
+            "notice" | "5" => 5,
+            "info" | "6" => 6,
+            "debug" | "7" => 7,
+            _ => 6,
+        },
+        None => 6,
+    }
+}
+
 fn open_journal_stream_nonblock(
     socket_path: &str,
     identifier: &str,
     unit_name: &str,
+    priority: u8,
+    level_prefix: bool,
+    invocation_id: Option<&str>,
 ) -> Option<i32> {
     unsafe {
         let fd = libc::socket(libc::AF_UNIX, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0);
@@ -1151,15 +1203,15 @@ fn open_journal_stream_nonblock(
         // Clear CLOEXEC so the fd survives exec
         libc::fcntl(fd, libc::F_SETFD, 0);
 
-        // Send the 7-line protocol header:
-        // 1. identifier (SYSLOG_IDENTIFIER)
-        // 2. unit name (_SYSTEMD_UNIT)
-        // 3. priority
-        // 4. level_prefix flag
-        // 5. forward_to_syslog flag
-        // 6. forward_to_kmsg flag
-        // 7. forward_to_console flag
-        let header = format!("{identifier}\n{unit_name}\n6\n0\n0\n0\n0\n");
+        // Send the protocol header:
+        // Lines 1-7: standard journal stdout stream protocol
+        // Line 8 (extension): invocation ID for _SYSTEMD_INVOCATION_ID tagging
+        let lp = if level_prefix { 1 } else { 0 };
+        let mut header = format!("{identifier}\n{unit_name}\n{priority}\n{lp}\n0\n0\n0\n");
+        if let Some(inv_id) = invocation_id {
+            header.push_str(inv_id);
+            header.push('\n');
+        }
         let written = libc::write(fd, header.as_ptr() as *const libc::c_void, header.len());
         if written < 0 || written as usize != header.len() {
             libc::close(fd);

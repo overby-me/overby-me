@@ -598,6 +598,9 @@ fn start_service_with_filedescriptors(
 
         // Logging directives
         syslog_identifier: conf.exec_config.syslog_identifier.clone(),
+        syslog_level: conf.exec_config.syslog_level.clone(),
+        syslog_level_prefix: conf.exec_config.syslog_level_prefix,
+        invocation_id: srvc.invocation_id.clone(),
     };
 
     let marshalled_config = serde_json::to_string(&exec_helper_conf).unwrap();

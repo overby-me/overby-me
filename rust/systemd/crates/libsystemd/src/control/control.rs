@@ -7260,6 +7260,25 @@ pub fn execute_command(
                             }
                         }
                     }
+                    // Completed oneshot services stay in Started status
+                    // (to avoid boot activation graph races).  When an
+                    // explicit `systemctl start` targets such a unit,
+                    // reset it to NeverStarted so it can be re-executed.
+                    //
+                    // NOTE: we do NOT read svc.state here because
+                    // acquiring that lock while holding `ri` can
+                    // deadlock with the exit handler (which holds
+                    // svc.state write and waits for ri).  Instead we
+                    // only check conf.srcv_type which is immutable.
+                    if let Some(u) = ri.unit_table.get(&id)
+                        && let Specific::Service(svc) = &u.specific
+                        && svc.conf.srcv_type == crate::units::ServiceType::OneShot
+                    {
+                        let mut status = u.common.status.write_poisoned();
+                        if matches!(&*status, crate::units::UnitStatus::Started(_)) {
+                            *status = crate::units::UnitStatus::NeverStarted;
+                        }
+                    }
                 }
                 let errs = if ignore_deps {
                     // Activate only this unit, not its dependencies

@@ -475,6 +475,11 @@ pub(crate) fn service_exit_handler(
                 mut_state
                     .srvc
                     .kill_all_remaining_processes(&srvc.conf, &unit.id.name);
+                // Clear the old PID and process group — the main process is
+                // dead, so a subsequent `systemctl start` must be able to
+                // spawn a new one without hitting AlreadyHasPID.
+                mut_state.srvc.pid = None;
+                mut_state.srvc.process_group = None;
             }
 
             // RemainAfterExit=yes: keep the unit in Started status after a
@@ -693,23 +698,15 @@ pub(crate) fn service_exit_handler(
 
             let is_success = success_exit_status.is_success(&code);
             if is_success {
-                // Clean oneshot exit: do NOT deactivate.  In real
-                // systemd, Requires= is a start-time dependency — the
-                // service's start job completed, so reverse deps
-                // (targets) stay active.  Calling deactivate_unit_recursive
-                // here would try to stop them (and fail because the
-                // target's own deps are still running, which just logs
-                // an error), but the attempt also prevents THIS service
-                // from being marked Stopped in time for concurrent
-                // activation of later units that depend on it.  By
-                // leaving the service in its Started state we match
-                // real systemd's effective behavior.
+                // Clean oneshot exit: leave status as Started.
                 //
-                // NOTE: ideally we would set StoppedFinal here so that
-                // `systemctl is-active` reports "inactive" (issue #27953),
-                // but doing so breaks boot — fast-exiting oneshot services
-                // race with the activation graph walker, causing deps to
-                // see StoppedFinal before their before-chain is dispatched.
+                // We do NOT set Stopped here because that races with
+                // the boot activation graph walker — fast-exiting
+                // oneshot services would be seen as Stopped before
+                // their dependents have been dispatched.
+                //
+                // The pid/process_group have already been cleared
+                // above so that any future restart can proceed.
             } else {
                 // Failed exit: full recursive deactivation including
                 // required_by to propagate the failure.

@@ -1591,6 +1591,50 @@ fn open_storage(cli: &Cli) -> Result<JournalStorage, String> {
 }
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// PID 1 control socket query
+// ---------------------------------------------------------------------------
+
+/// Query PID 1 for a unit's InvocationID via the control socket.
+/// Returns None on any error (socket not available, timeout, parse failure).
+fn query_unit_invocation_id(unit: &str) -> Option<String> {
+    use std::io::{Read, Write};
+    use std::os::unix::net::UnixStream;
+
+    const SOCKET_PATH: &str = "/run/systemd/rust-systemd-notify/control.socket";
+
+    let mut stream = UnixStream::connect(SOCKET_PATH).ok()?;
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+        .ok()?;
+    stream
+        .set_write_timeout(Some(std::time::Duration::from_secs(2)))
+        .ok()?;
+
+    // JSON-RPC 2.0 call: show unit with InvocationID property filter
+    let payload = format!(
+        r#"{{"jsonrpc":"2.0","method":"show","params":["{unit}","InvocationID"],"id":1}}"#,
+    );
+    stream.write_all(payload.as_bytes()).ok()?;
+    stream.shutdown(std::net::Shutdown::Write).ok()?;
+
+    let mut buf = Vec::new();
+    stream.read_to_end(&mut buf).ok()?;
+    let resp: serde_json::Value = serde_json::from_slice(&buf).ok()?;
+
+    // Response: {"result":{"show":"InvocationID=<hex>\n"}}
+    let text = resp.get("result")?.get("show")?.as_str()?;
+    for line in text.lines() {
+        if let Some(val) = line.strip_prefix("InvocationID=") {
+            let val = val.trim();
+            if val.len() == 32 && val.chars().all(|c| c.is_ascii_hexdigit()) {
+                return Some(val.to_string());
+            }
+        }
+    }
+    None
+}
+
 // Main
 // ---------------------------------------------------------------------------
 
@@ -2126,11 +2170,26 @@ fn main() {
                 Some(id.clone())
             }
         } else {
-            // -I: find the latest _SYSTEMD_INVOCATION_ID among the already-filtered entries
-            filtered
-                .iter()
-                .rev()
-                .find_map(|e| e.field("_SYSTEMD_INVOCATION_ID").map(|s| s.to_string()))
+            // -I: query the systemd manager for the unit's current invocation ID.
+            // This matches C systemd's behavior where -I gets the InvocationID
+            // property via D-Bus, not from journal entries. This is critical when
+            // LogFilterPatterns= discards all entries for an invocation — the
+            // journal-based fallback would find a stale invocation ID instead.
+            let inv_from_manager = cli.unit.as_ref().and_then(|unit_name| {
+                let unit = if unit_name.contains('.') {
+                    unit_name.clone()
+                } else {
+                    format!("{unit_name}.service")
+                };
+                query_unit_invocation_id(&unit)
+            });
+            inv_from_manager.or_else(|| {
+                // Fallback: find the latest invocation ID from journal entries
+                filtered
+                    .iter()
+                    .rev()
+                    .find_map(|e| e.field("_SYSTEMD_INVOCATION_ID").map(|s| s.to_string()))
+            })
         };
         if let Some(ref id) = invocation_id {
             filtered.retain(|e| e.field("_SYSTEMD_INVOCATION_ID").is_some_and(|v| v == *id));
