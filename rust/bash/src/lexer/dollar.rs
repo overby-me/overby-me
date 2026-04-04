@@ -310,6 +310,137 @@ fn parse_dollar_inner(
                             cmd.push(chars[*i]);
                             // Whitespace doesn't affect terminator or nonws state
                         }
+                        '$' => {
+                            cmd.push(chars[*i]);
+                            // Check for $(...), $((...)), ${ ... }, $'...', $"..."
+                            // These nested constructs should be skipped without
+                            // affecting paren_depth or has_terminator_at_depth1.
+                            // In particular, $() closing paren must NOT set the
+                            // terminator flag (bash: `${ $() }` is invalid without `;`).
+                            if *i + 1 < chars.len() && chars[*i + 1] == '(' {
+                                *i += 1;
+                                cmd.push(chars[*i]); // '('
+                                // Check for $(( — arithmetic
+                                if *i + 1 < chars.len() && chars[*i + 1] == '(' {
+                                    *i += 1;
+                                    cmd.push(chars[*i]); // second '('
+                                    let mut arith_depth = 1i32;
+                                    while *i + 1 < chars.len() && arith_depth > 0 {
+                                        *i += 1;
+                                        cmd.push(chars[*i]);
+                                        if chars[*i] == '('
+                                            && *i + 1 < chars.len()
+                                            && chars[*i + 1] == '('
+                                        {
+                                            // nested $((
+                                        } else if chars[*i] == ')'
+                                            && *i + 1 < chars.len()
+                                            && chars[*i + 1] == ')'
+                                        {
+                                            arith_depth -= 1;
+                                            if arith_depth == 0 {
+                                                *i += 1;
+                                                cmd.push(chars[*i]); // second ')'
+                                                break;
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    // $(...) — command substitution
+                                    let mut comsub_depth = 1i32;
+                                    while *i + 1 < chars.len() && comsub_depth > 0 {
+                                        *i += 1;
+                                        if chars[*i] == '(' {
+                                            comsub_depth += 1;
+                                        } else if chars[*i] == ')' {
+                                            comsub_depth -= 1;
+                                            if comsub_depth == 0 {
+                                                cmd.push(chars[*i]);
+                                                break;
+                                            }
+                                        } else if chars[*i] == '\'' {
+                                            cmd.push(chars[*i]);
+                                            *i += 1;
+                                            while *i < chars.len() && chars[*i] != '\'' {
+                                                cmd.push(chars[*i]);
+                                                *i += 1;
+                                            }
+                                            if *i < chars.len() {
+                                                cmd.push(chars[*i]);
+                                            }
+                                            continue;
+                                        } else if chars[*i] == '"' {
+                                            cmd.push(chars[*i]);
+                                            *i += 1;
+                                            while *i < chars.len() && chars[*i] != '"' {
+                                                if chars[*i] == '\\' && *i + 1 < chars.len() {
+                                                    cmd.push(chars[*i]);
+                                                    *i += 1;
+                                                }
+                                                cmd.push(chars[*i]);
+                                                *i += 1;
+                                            }
+                                            if *i < chars.len() {
+                                                cmd.push(chars[*i]);
+                                            }
+                                            continue;
+                                        }
+                                        cmd.push(chars[*i]);
+                                    }
+                                }
+                                if depth == 1 {
+                                    has_terminator_at_depth1 = false;
+                                    has_nonws_at_depth1 = true;
+                                }
+                            } else if *i + 1 < chars.len() && chars[*i + 1] == '{' {
+                                *i += 1;
+                                cmd.push(chars[*i]); // '{'
+                                // Check if this is a nested funsub ${ ... } or ${param}
+                                // Either way, skip matching braces
+                                let mut nested_depth = 1i32;
+                                while *i + 1 < chars.len() && nested_depth > 0 {
+                                    *i += 1;
+                                    cmd.push(chars[*i]);
+                                    if chars[*i] == '{' {
+                                        nested_depth += 1;
+                                    } else if chars[*i] == '}' {
+                                        nested_depth -= 1;
+                                    } else if chars[*i] == '\'' {
+                                        *i += 1;
+                                        while *i < chars.len() && chars[*i] != '\'' {
+                                            cmd.push(chars[*i]);
+                                            *i += 1;
+                                        }
+                                        if *i < chars.len() {
+                                            cmd.push(chars[*i]);
+                                        }
+                                    } else if chars[*i] == '"' {
+                                        *i += 1;
+                                        while *i < chars.len() && chars[*i] != '"' {
+                                            if chars[*i] == '\\' && *i + 1 < chars.len() {
+                                                cmd.push(chars[*i]);
+                                                *i += 1;
+                                            }
+                                            cmd.push(chars[*i]);
+                                            *i += 1;
+                                        }
+                                        if *i < chars.len() {
+                                            cmd.push(chars[*i]);
+                                        }
+                                    }
+                                }
+                                if depth == 1 {
+                                    has_terminator_at_depth1 = false;
+                                    has_nonws_at_depth1 = true;
+                                }
+                            } else {
+                                // $var, $$, $!, etc — just a regular char
+                                if depth == 1 {
+                                    has_terminator_at_depth1 = false;
+                                    has_nonws_at_depth1 = true;
+                                }
+                            }
+                        }
                         _ => {
                             cmd.push(chars[*i]);
                             if depth == 1 {

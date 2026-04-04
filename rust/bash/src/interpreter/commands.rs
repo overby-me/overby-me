@@ -1484,7 +1484,11 @@ impl Shell {
                     // Allow compound assignment when the '(' came from a
                     // single-quoted part (e.g. declare -a f='("${d[@]}")').
                     // The is_quoted_arg guard only blocks expansion-derived parens.
-                    if (!is_quoted_arg || paren_from_single_quote)
+                    // When '(' comes from single quotes, only treat as compound
+                    // assignment if -a or -A flag is present (bash behavior:
+                    // `export r='(5)'` without -a is scalar assignment).
+                    if (!is_quoted_arg
+                        || (paren_from_single_quote && (has_array_flag || has_assoc_flag)))
                         && has_literal_paren
                         && let Some(eq_pos) = arg.find('=')
                     {
@@ -1498,7 +1502,18 @@ impl Shell {
                         {
                             // Perform the array assignment
                             if self.readonly_vars.contains(name) {
-                                if has_array_flag {
+                                if paren_from_single_quote && has_array_flag {
+                                    // Quoted compound like `readonly -a r='(7)'`
+                                    // uses builtin name as error context (bash behavior)
+                                    eprintln!(
+                                        "{}: {}: {}: readonly variable",
+                                        self.error_prefix(),
+                                        command_name,
+                                        name
+                                    );
+                                } else if !paren_from_single_quote && has_array_flag {
+                                    // Unquoted compound assignment like `readonly -a r=(6)`
+                                    // uses function name as error context (bash behavior)
                                     if let Some(fname) = self.func_names.last() {
                                         eprintln!(
                                             "{}: {}: {}: readonly variable",
@@ -1514,6 +1529,7 @@ impl Shell {
                                         );
                                     }
                                 } else {
+                                    // No -a flag: just `name: readonly variable`
                                     eprintln!(
                                         "{}: {}: readonly variable",
                                         self.error_prefix(),
