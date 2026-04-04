@@ -1535,18 +1535,41 @@ impl Shell {
         let mut result = String::new();
         let chars: Vec<char> = expr.chars().collect();
         let mut i = 0;
-        // Track bracket depth so we can skip $var expansion inside [...]
-        // subscripts.  For associative arrays the raw $var text must reach
-        // the arithmetic evaluator's `arith_subscript_key` which does its
-        // own context-aware expansion.
-        let mut bracket_depth: i32 = 0;
+        // Track whether we are inside an associative array subscript `[...]`
+        // so we can skip $var expansion there.  For associative arrays the
+        // raw $var text must reach the arithmetic evaluator's
+        // `arith_subscript_key` which does its own context-aware expansion.
+        // For indexed arrays we MUST still expand $var (the subscript is an
+        // arithmetic expression).
+        let mut assoc_bracket_depth: i32 = 0;
         while i < chars.len() {
-            // Track [ ] depth (but not inside $(...) / ${...} / quotes which
-            // have their own scanning loops below).
+            // Detect `name[` where `name` is an associative array.
+            // When we see `[` preceded by a valid identifier, check if that
+            // identifier is an associative array.  Only then do we enter the
+            // "skip expansion" mode.
             if chars[i] == '[' && (i == 0 || chars[i - 1] != '$') {
-                bracket_depth += 1;
-            } else if chars[i] == ']' && bracket_depth > 0 {
-                bracket_depth -= 1;
+                if assoc_bracket_depth > 0 {
+                    // Already inside an assoc subscript — nested bracket
+                    assoc_bracket_depth += 1;
+                } else {
+                    // Check if the identifier before `[` is an associative array
+                    let name_end = i;
+                    let mut name_start = name_end;
+                    while name_start > 0
+                        && (chars[name_start - 1].is_alphanumeric() || chars[name_start - 1] == '_')
+                    {
+                        name_start -= 1;
+                    }
+                    if name_start < name_end {
+                        let arr_name: String = chars[name_start..name_end].iter().collect();
+                        let resolved = self.resolve_nameref(&arr_name);
+                        if self.is_assoc_array(&resolved) {
+                            assoc_bracket_depth = 1;
+                        }
+                    }
+                }
+            } else if chars[i] == ']' && assoc_bracket_depth > 0 {
+                assoc_bracket_depth -= 1;
                 result.push(chars[i]);
                 i += 1;
                 continue;
@@ -1704,9 +1727,9 @@ impl Shell {
                 && (i + 2 >= chars.len() || chars[i + 2] != ' ')
             {
                 // ${...} parameter expansion — find matching } and expand
-                // BUT: if we're inside [...] brackets, leave unexpanded for
-                // associative array subscript handling.
-                if bracket_depth > 0 {
+                // BUT: if we're inside associative array [...] brackets,
+                // leave unexpanded for arith_subscript_key to handle.
+                if assoc_bracket_depth > 0 {
                     result.push(chars[i]);
                     i += 1;
                     continue;
@@ -1762,11 +1785,11 @@ impl Shell {
                 && !(i > 0 && chars[i - 1] == '\\')
             {
                 // Simple variable: $var — expand using word expansion (skip if preceded by \)
-                // BUT: if we're inside [...] brackets, leave the $var unexpanded
-                // so the arithmetic evaluator's arith_subscript_key can handle
-                // it properly for associative arrays (the expanded value may
-                // contain ] characters that would break bracket matching).
-                if bracket_depth > 0 {
+                // BUT: if we're inside associative array [...] brackets,
+                // leave the $var unexpanded so arith_subscript_key can
+                // handle it properly (the expanded value may contain ]
+                // characters that would break bracket matching).
+                if assoc_bracket_depth > 0 {
                     result.push(chars[i]);
                     i += 1;
                     continue;
