@@ -1,6 +1,134 @@
 use super::*;
 
+/// Represents a resolved array subscript — either an associative string key
+/// or an indexed numeric position.
+enum ArithSubscript {
+    Assoc(String, String),
+    Indexed(String, usize),
+}
+
 impl Shell {
+    // ── Associative-array-aware helpers for arithmetic evaluation ──────
+
+    /// Check if `name` is declared as an associative array.
+    fn is_assoc_array(&self, name: &str) -> bool {
+        self.assoc_arrays.contains_key(name)
+    }
+
+    /// Expand the subscript for arithmetic array access.
+    /// For associative arrays the subscript is used as a string key
+    /// (with variable expansion but no arithmetic evaluation).
+    /// For indexed arrays the subscript is evaluated as an arithmetic
+    /// expression and converted to `usize`.
+    fn arith_subscript_key(&mut self, base: &str, idx_str: &str) -> ArithSubscript {
+        let resolved = self.resolve_nameref(base);
+        if self.is_assoc_array(&resolved) {
+            // Expand $var references in the key but don't evaluate as arith
+            let key = self.expand_arith_subscript_key(idx_str);
+            ArithSubscript::Assoc(resolved, key)
+        } else {
+            let idx = self.eval_arith_expr_impl(idx_str) as usize;
+            ArithSubscript::Indexed(resolved, idx)
+        }
+    }
+
+    /// Expand variable references in an associative array subscript key
+    /// without evaluating it as arithmetic.  Handles `$var`, `${var}`,
+    /// and strips outer single/double quotes from the key.
+    fn expand_arith_subscript_key(&self, key: &str) -> String {
+        let trimmed = key.trim();
+        // Strip matching outer single quotes (literal)
+        if trimmed.len() >= 2 && trimmed.starts_with('\'') && trimmed.ends_with('\'') {
+            return trimmed[1..trimmed.len() - 1].to_string();
+        }
+        // Strip matching outer double quotes (expand $vars inside)
+        let inner = if trimmed.len() >= 2 && trimmed.starts_with('"') && trimmed.ends_with('"') {
+            &trimmed[1..trimmed.len() - 1]
+        } else {
+            trimmed
+        };
+        // Simple variable expansion: $name and ${name}
+        let mut result = String::new();
+        let chars: Vec<char> = inner.chars().collect();
+        let mut i = 0;
+        while i < chars.len() {
+            if chars[i] == '\\' && i + 1 < chars.len() {
+                // Escaped char — keep the next char literally
+                result.push(chars[i + 1]);
+                i += 2;
+                continue;
+            }
+            if chars[i] == '$' && i + 1 < chars.len() {
+                if chars[i + 1] == '{' {
+                    // ${name} form
+                    if let Some(close) = chars[i + 2..].iter().position(|&c| c == '}') {
+                        let var_name: String = chars[i + 2..i + 2 + close].iter().collect();
+                        result.push_str(
+                            self.vars
+                                .get(var_name.trim())
+                                .map(|s| s.as_str())
+                                .unwrap_or(""),
+                        );
+                        i += 2 + close + 1;
+                        continue;
+                    }
+                } else if chars[i + 1].is_alphabetic() || chars[i + 1] == '_' {
+                    // $name form
+                    let start = i + 1;
+                    let mut end = start;
+                    while end < chars.len() && (chars[end].is_alphanumeric() || chars[end] == '_') {
+                        end += 1;
+                    }
+                    let var_name: String = chars[start..end].iter().collect();
+                    result.push_str(self.vars.get(&var_name).map(|s| s.as_str()).unwrap_or(""));
+                    i = end;
+                    continue;
+                }
+            }
+            result.push(chars[i]);
+            i += 1;
+        }
+        result
+    }
+
+    /// Read the current integer value of an array element.
+    fn arith_array_get(&self, sub: &ArithSubscript) -> i64 {
+        match sub {
+            ArithSubscript::Assoc(resolved, key) => self
+                .assoc_arrays
+                .get(resolved)
+                .and_then(|m| m.get(key))
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0),
+            ArithSubscript::Indexed(resolved, idx) => self
+                .arrays
+                .get(resolved)
+                .and_then(|a| a.get(*idx))
+                .and_then(|v| v.as_deref())
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0),
+        }
+    }
+
+    /// Write an integer value to an array element.
+    fn arith_array_set(&mut self, sub: &ArithSubscript, val: i64) {
+        match sub {
+            ArithSubscript::Assoc(resolved, key) => {
+                self.assoc_arrays
+                    .entry(resolved.clone())
+                    .or_default()
+                    .insert(key.clone(), val.to_string());
+            }
+            ArithSubscript::Indexed(resolved, idx) => {
+                let arr = self.arrays.entry(resolved.clone()).or_default();
+                while arr.len() <= *idx {
+                    arr.push(None);
+                }
+                arr[*idx] = Some(val.to_string());
+            }
+        }
+    }
+
     /// Evaluate an arithmetic expression and return the integer result.
     ///
     /// Find an operator in the expression at top-level (outside parentheses).
@@ -292,18 +420,10 @@ impl Shell {
                     if let Some(bracket) = name.find('[') {
                         let base = &name[..bracket];
                         let idx_str = &name[bracket + 1..name.len() - 1];
-                        let resolved = self.resolve_nameref(base);
-                        let idx = self.eval_arith_expr_impl(idx_str) as usize;
-                        let arr = self.arrays.entry(resolved).or_default();
-                        while arr.len() <= idx {
-                            arr.push(None);
-                        }
-                        let lhs: i64 = arr[idx]
-                            .as_deref()
-                            .and_then(|v| v.parse().ok())
-                            .unwrap_or(0);
+                        let sub = self.arith_subscript_key(base, idx_str);
+                        let lhs: i64 = self.arith_array_get(&sub);
                         let result = func(lhs, rhs);
-                        arr[idx] = Some(result.to_string());
+                        self.arith_array_set(&sub, result);
                         return result;
                     }
                     let lhs: i64 = self
@@ -382,13 +502,8 @@ impl Shell {
                 if let Some(bracket) = name.find('[') {
                     let base = &name[..bracket];
                     let idx_str = &name[bracket + 1..name.len() - 1];
-                    let resolved = self.resolve_nameref(base);
-                    let idx = self.eval_arith_expr_impl(idx_str) as usize;
-                    let arr = self.arrays.entry(resolved).or_default();
-                    while arr.len() <= idx {
-                        arr.push(None);
-                    }
-                    arr[idx] = Some(val.to_string());
+                    let sub = self.arith_subscript_key(base, idx_str);
+                    self.arith_array_set(&sub, val);
                 } else {
                     self.set_var(name, val.to_string());
                 }
@@ -444,17 +559,9 @@ impl Shell {
                 {
                     let base = &name[..bracket];
                     let idx_str = &name[bracket + 1..name.len() - 1];
-                    let resolved = self.resolve_nameref(base);
-                    let idx = self.eval_arith_expr(idx_str) as usize;
-                    let arr = self.arrays.entry(resolved).or_default();
-                    while arr.len() <= idx {
-                        arr.push(None);
-                    }
-                    let val: i64 = arr[idx]
-                        .as_deref()
-                        .and_then(|v| v.parse().ok())
-                        .unwrap_or(0);
-                    arr[idx] = Some((val + delta).to_string());
+                    let sub = self.arith_subscript_key(base, idx_str);
+                    let val: i64 = self.arith_array_get(&sub);
+                    self.arith_array_set(&sub, val + delta);
                     return val;
                 }
                 if name.chars().all(|c| c.is_alphanumeric() || c == '_') {
@@ -527,20 +634,10 @@ impl Shell {
                     let bracket = name.find('[').unwrap();
                     let base = &name[..bracket];
                     let idx_expr = &name[bracket + 1..name.len() - 1];
-                    let idx = self.eval_arith_expr(idx_expr) as usize;
-                    let val: i64 = self
-                        .arrays
-                        .get(base)
-                        .and_then(|a| a.get(idx))
-                        .and_then(|v| v.as_deref())
-                        .and_then(|v| v.parse().ok())
-                        .unwrap_or(0);
+                    let sub = self.arith_subscript_key(base, idx_expr);
+                    let val: i64 = self.arith_array_get(&sub);
                     let new_val = val + 1;
-                    let arr = self.arrays.entry(base.to_string()).or_default();
-                    while arr.len() <= idx {
-                        arr.push(None);
-                    }
-                    arr[idx] = Some(new_val.to_string());
+                    self.arith_array_set(&sub, new_val);
                     return new_val;
                 } else {
                     let val: i64 = self
@@ -597,20 +694,10 @@ impl Shell {
                     let bracket = name.find('[').unwrap();
                     let base = &name[..bracket];
                     let idx_expr = &name[bracket + 1..name.len() - 1];
-                    let idx = self.eval_arith_expr(idx_expr) as usize;
-                    let val: i64 = self
-                        .arrays
-                        .get(base)
-                        .and_then(|a| a.get(idx))
-                        .and_then(|v| v.as_deref())
-                        .and_then(|v| v.parse().ok())
-                        .unwrap_or(0);
+                    let sub = self.arith_subscript_key(base, idx_expr);
+                    let val: i64 = self.arith_array_get(&sub);
                     let new_val = val - 1;
-                    let arr = self.arrays.entry(base.to_string()).or_default();
-                    while arr.len() <= idx {
-                        arr.push(None);
-                    }
-                    arr[idx] = Some(new_val.to_string());
+                    self.arith_array_set(&sub, new_val);
                     return new_val;
                 } else {
                     let val: i64 = self
@@ -1329,32 +1416,36 @@ impl Shell {
             }
             let name = &expr[..bracket];
             let idx_str = &expr[bracket + 1..close];
-            let resolved = self.resolve_nameref(name);
-            let idx = self.eval_arith_expr_impl(idx_str) as usize;
-            if let Some(arr) = self.arrays.get(&resolved) {
-                return arr
-                    .get(idx)
-                    .and_then(|v| v.as_deref())
-                    .and_then(|v| v.parse().ok())
-                    .unwrap_or(0);
+            let sub = self.arith_subscript_key(name, idx_str);
+            let val = self.arith_array_get(&sub);
+            // Check nounset for unset array elements (value == 0 and no entry)
+            if val == 0 && self.opt_nounset {
+                let resolved = match &sub {
+                    ArithSubscript::Assoc(r, _) | ArithSubscript::Indexed(r, _) => r.as_str(),
+                };
+                if !self.arrays.contains_key(resolved)
+                    && !self.assoc_arrays.contains_key(resolved)
+                    && !self.vars.contains_key(resolved)
+                {
+                    let src_name = self
+                        .vars
+                        .get("_BASH_SOURCE_FILE")
+                        .or_else(|| self.positional.first())
+                        .map(|s| s.as_str())
+                        .unwrap_or("bash");
+                    let lineno = self
+                        .vars
+                        .get("LINENO")
+                        .and_then(|s| s.parse::<i64>().ok())
+                        .unwrap_or(0);
+                    eprintln!(
+                        "{}: line {}: {}: unbound variable",
+                        src_name, lineno, resolved
+                    );
+                    std::process::exit(1);
+                }
             }
-            // Check nounset for unset array
-            if self.opt_nounset && !self.vars.contains_key(&resolved) {
-                let name = self
-                    .vars
-                    .get("_BASH_SOURCE_FILE")
-                    .or_else(|| self.positional.first())
-                    .map(|s| s.as_str())
-                    .unwrap_or("bash");
-                let lineno = self
-                    .vars
-                    .get("LINENO")
-                    .and_then(|s| s.parse::<i64>().ok())
-                    .unwrap_or(0);
-                eprintln!("{}: line {}: {}: unbound variable", name, lineno, resolved);
-                std::process::exit(1);
-            }
-            return 0;
+            return val;
         }
 
         // Fall back to reporting error
@@ -1444,7 +1535,22 @@ impl Shell {
         let mut result = String::new();
         let chars: Vec<char> = expr.chars().collect();
         let mut i = 0;
+        // Track bracket depth so we can skip $var expansion inside [...]
+        // subscripts.  For associative arrays the raw $var text must reach
+        // the arithmetic evaluator's `arith_subscript_key` which does its
+        // own context-aware expansion.
+        let mut bracket_depth: i32 = 0;
         while i < chars.len() {
+            // Track [ ] depth (but not inside $(...) / ${...} / quotes which
+            // have their own scanning loops below).
+            if chars[i] == '[' && (i == 0 || chars[i - 1] != '$') {
+                bracket_depth += 1;
+            } else if chars[i] == ']' && bracket_depth > 0 {
+                bracket_depth -= 1;
+                result.push(chars[i]);
+                i += 1;
+                continue;
+            }
             // \$ → keep as literal \$ (skip expansion). The arithmetic
             // evaluator will strip the backslash later for display but
             // will NOT treat $ as a variable prefix.
@@ -1598,6 +1704,13 @@ impl Shell {
                 && (i + 2 >= chars.len() || chars[i + 2] != ' ')
             {
                 // ${...} parameter expansion — find matching } and expand
+                // BUT: if we're inside [...] brackets, leave unexpanded for
+                // associative array subscript handling.
+                if bracket_depth > 0 {
+                    result.push(chars[i]);
+                    i += 1;
+                    continue;
+                }
                 let start = i;
                 i += 2; // skip ${
                 let mut depth = 1;
@@ -1649,6 +1762,15 @@ impl Shell {
                 && !(i > 0 && chars[i - 1] == '\\')
             {
                 // Simple variable: $var — expand using word expansion (skip if preceded by \)
+                // BUT: if we're inside [...] brackets, leave the $var unexpanded
+                // so the arithmetic evaluator's arith_subscript_key can handle
+                // it properly for associative arrays (the expanded value may
+                // contain ] characters that would break bracket matching).
+                if bracket_depth > 0 {
+                    result.push(chars[i]);
+                    i += 1;
+                    continue;
+                }
                 let start = i;
                 i += 1;
                 let mut name = String::new();
