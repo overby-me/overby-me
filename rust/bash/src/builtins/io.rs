@@ -1539,10 +1539,10 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
     if let Some(secs) = timeout_secs {
         use nix::poll::{PollFd, PollFlags, PollTimeout};
         use std::os::unix::io::BorrowedFd;
-        let poll_fd = PollFd::new(
+        let mut poll_fds = [PollFd::new(
             unsafe { BorrowedFd::borrow_raw(read_fd) },
             PollFlags::POLLIN,
-        );
+        )];
         // -t 0 (exactly zero) is a polling check (returns 0 if data ready, 1 otherwise).
         // Very small positive values (e.g. 0.00001) are real timeouts that should
         // return 142 on expiry, so clamp them to at least 1ms.
@@ -1553,7 +1553,7 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
             let ms = (secs * 1000.0).ceil().max(1.0) as i32;
             PollTimeout::from(ms.min(i32::from(u16::MAX)) as u16)
         };
-        match nix::poll::poll(&mut [poll_fd], timeout) {
+        match nix::poll::poll(&mut poll_fds, timeout) {
             Ok(0) => {
                 if is_poll {
                     return 1; // polling: no data available
@@ -1562,13 +1562,20 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
             }
             Err(_) => return if is_poll { 1 } else { 142 },
             _ => {
+                let revents = poll_fds[0].revents().unwrap_or(PollFlags::empty());
                 if is_poll {
                     // Check for POLLNVAL (closed/invalid fd) or POLLERR
-                    let revents = poll_fd.revents().unwrap_or(PollFlags::empty());
                     if revents.intersects(PollFlags::POLLNVAL | PollFlags::POLLERR) {
                         return 1; // invalid fd
                     }
                     return 0; // data available
+                }
+                // Non-poll timeout: if poll returned > 0 but POLLIN is not set
+                // (e.g. only POLLHUP/POLLERR — fd closed/no terminal), treat
+                // as timeout rather than falling through to a read that would
+                // immediately return EOF.  Bash returns > 128 in this case.
+                if !revents.intersects(PollFlags::POLLIN) {
+                    return 142; // timeout — no readable data
                 }
             }
         }

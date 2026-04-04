@@ -32,6 +32,26 @@ impl Shell {
         }
     }
 
+    /// Check whether an arithmetic subscript is empty after quote removal.
+    /// Returns true if the subscript is empty (e.g. `a[""]=N` or `a[]=N`),
+    /// which bash rejects as "not a valid identifier".
+    fn is_empty_arith_subscript(idx_str: &str) -> bool {
+        // Strip matching outer double quotes, then check if empty
+        let s = idx_str.trim();
+        if s.is_empty() {
+            return true;
+        }
+        // Handle "" (just a pair of double quotes)
+        if s == "\"\"" {
+            return true;
+        }
+        // Handle '' (just a pair of single quotes)
+        if s == "''" {
+            return true;
+        }
+        false
+    }
+
     /// Expand variable references in an associative array subscript key
     /// without evaluating it as arithmetic.  Handles `$var`, `${var}`,
     /// and strips outer single/double quotes from the key.
@@ -420,6 +440,16 @@ impl Shell {
                     if let Some(bracket) = name.find('[') {
                         let base = &name[..bracket];
                         let idx_str = &name[bracket + 1..name.len() - 1];
+                        if Self::is_empty_arith_subscript(idx_str) {
+                            eprintln!(
+                                "{}: {}`{}[]': not a valid identifier",
+                                self.arith_error_prefix(),
+                                self.arith_cmd_prefix(),
+                                base
+                            );
+                            crate::expand::set_arith_error();
+                            return 0;
+                        }
                         let sub = self.arith_subscript_key(base, idx_str);
                         let lhs: i64 = self.arith_array_get(&sub);
                         let result = func(lhs, rhs);
@@ -502,6 +532,17 @@ impl Shell {
                 if let Some(bracket) = name.find('[') {
                     let base = &name[..bracket];
                     let idx_str = &name[bracket + 1..name.len() - 1];
+                    // Empty subscript after quote removal: a[""]=N → error
+                    if Self::is_empty_arith_subscript(idx_str) {
+                        eprintln!(
+                            "{}: {}`{}[]': not a valid identifier",
+                            self.arith_error_prefix(),
+                            self.arith_cmd_prefix(),
+                            base
+                        );
+                        crate::expand::set_arith_error();
+                        return 0;
+                    }
                     let sub = self.arith_subscript_key(base, idx_str);
                     self.arith_array_set(&sub, val);
                 } else {
@@ -559,6 +600,16 @@ impl Shell {
                 {
                     let base = &name[..bracket];
                     let idx_str = &name[bracket + 1..name.len() - 1];
+                    if Self::is_empty_arith_subscript(idx_str) {
+                        eprintln!(
+                            "{}: {}`{}[]': not a valid identifier",
+                            self.arith_error_prefix(),
+                            self.arith_cmd_prefix(),
+                            base
+                        );
+                        crate::expand::set_arith_error();
+                        return 0;
+                    }
                     let sub = self.arith_subscript_key(base, idx_str);
                     let val: i64 = self.arith_array_get(&sub);
                     self.arith_array_set(&sub, val + delta);
@@ -634,6 +685,16 @@ impl Shell {
                     let bracket = name.find('[').unwrap();
                     let base = &name[..bracket];
                     let idx_expr = &name[bracket + 1..name.len() - 1];
+                    if Self::is_empty_arith_subscript(idx_expr) {
+                        eprintln!(
+                            "{}: {}`{}[]': not a valid identifier",
+                            self.arith_error_prefix(),
+                            self.arith_cmd_prefix(),
+                            base
+                        );
+                        crate::expand::set_arith_error();
+                        return 0;
+                    }
                     let sub = self.arith_subscript_key(base, idx_expr);
                     let val: i64 = self.arith_array_get(&sub);
                     let new_val = val + 1;
@@ -694,6 +755,16 @@ impl Shell {
                     let bracket = name.find('[').unwrap();
                     let base = &name[..bracket];
                     let idx_expr = &name[bracket + 1..name.len() - 1];
+                    if Self::is_empty_arith_subscript(idx_expr) {
+                        eprintln!(
+                            "{}: {}`{}[]': not a valid identifier",
+                            self.arith_error_prefix(),
+                            self.arith_cmd_prefix(),
+                            base
+                        );
+                        crate::expand::set_arith_error();
+                        return 0;
+                    }
                     let sub = self.arith_subscript_key(base, idx_expr);
                     let val: i64 = self.arith_array_get(&sub);
                     let new_val = val - 1;
