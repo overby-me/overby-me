@@ -57,26 +57,254 @@ pub(super) fn trim_pattern(value: &str, pattern: &str, mode: TrimMode) -> String
 /// Preprocess backtick command substitution content.
 /// The lexer already handles \\→\, \`→`, \$→$ during backtick scanning.
 /// This function only handles \<newline> → removed (line continuation).
+/// Check if a pattern is a literal string (no glob metacharacters).
+fn is_literal_pattern(pattern: &str) -> bool {
+    !pattern.contains(['*', '?', '[', '\\', '!', '@', '+'])
+}
+
+/// Check if a pattern matches exactly one character at a time (e.g. `?`, `[abc]`, `[^;]`).
+/// Returns true if the pattern can only ever match a single character.
+fn is_single_char_pattern(pattern: &str) -> bool {
+    if pattern == "?" {
+        return true;
+    }
+    // Bracket expression: [...]  or [^...] or [!...]
+    let chars: Vec<char> = pattern.chars().collect();
+    if chars.len() >= 3 && chars[0] == '[' && chars[chars.len() - 1] == ']' {
+        // Make sure there's no nested `*` or `?` or other bracket inside
+        // and no extglob patterns — just a simple bracket expression
+        let inner = &chars[1..chars.len() - 1];
+        // Skip leading ^ or ! (negation)
+        let inner = if !inner.is_empty() && (inner[0] == '^' || inner[0] == '!') {
+            &inner[1..]
+        } else {
+            inner
+        };
+        // Allow `]` as first char in bracket (literal `]`)
+        let start = if !inner.is_empty() && inner[0] == ']' {
+            1
+        } else {
+            0
+        };
+        // Check no nested brackets or glob chars in the rest,
+        // but allow POSIX character classes like [:alnum:], [:digit:], etc.
+        let mut j = start;
+        while j < inner.len() {
+            let c = inner[j];
+            if c == '[' && j + 1 < inner.len() && inner[j + 1] == ':' {
+                // POSIX character class [:name:] — skip to closing `:]`
+                if let Some(close) = inner[j + 2..]
+                    .iter()
+                    .enumerate()
+                    .position(|(k, &ch)| ch == ']' && k > 0 && inner[j + 2 + k - 1] == ':')
+                {
+                    j = j + 2 + close + 1;
+                    continue;
+                }
+                // Malformed — treat as non-single-char pattern
+                return false;
+            }
+            if matches!(c, '[' | '*' | '?') {
+                return false;
+            }
+            j += 1;
+        }
+        return true;
+    }
+    false
+}
+
 pub(super) fn pattern_replace(value: &str, pattern: &str, replacement: &str, all: bool) -> String {
     if pattern.is_empty() {
         return value.to_string();
     }
 
+    // Fast path: literal patterns use simple string matching — O(n) instead of O(n³)
+    if is_literal_pattern(pattern) {
+        if all {
+            return value.replace(pattern, replacement);
+        } else if let Some(pos) = value.find(pattern) {
+            let mut result = String::with_capacity(value.len());
+            result.push_str(&value[..pos]);
+            result.push_str(replacement);
+            result.push_str(&value[pos + pattern.len()..]);
+            return result;
+        } else {
+            return value.to_string();
+        }
+    }
+
+    // Fast path: single-char-matching patterns (`?`, `[abc]`, `[^;]`, etc.)
+    // These match exactly one character at a time, so we can do O(n) replacement.
+    if is_single_char_pattern(pattern) {
+        let chars: Vec<char> = value.chars().collect();
+        if chars.is_empty() {
+            return value.to_string();
+        }
+        if all {
+            let mut result = String::with_capacity(value.len());
+            for &c in &chars {
+                let s = c.to_string();
+                if shell_pattern_match(&s, pattern) {
+                    result.push_str(replacement);
+                } else {
+                    result.push(c);
+                }
+            }
+            return result;
+        } else {
+            // Replace only the first matching character
+            let mut result = String::with_capacity(value.len());
+            let mut replaced = false;
+            for &c in &chars {
+                if !replaced {
+                    let s = c.to_string();
+                    if shell_pattern_match(&s, pattern) {
+                        result.push_str(replacement);
+                        replaced = true;
+                        continue;
+                    }
+                }
+                result.push(c);
+            }
+            return result;
+        }
+    }
+
+    // Fast path: `*` matches the whole string (longest match from any position)
+    if pattern == "*" {
+        return replacement.to_string();
+    }
+
     let mut result = String::new();
     let mut i = 0;
     let chars: Vec<char> = value.chars().collect();
+    let pat_chars: Vec<char> = pattern.chars().collect();
+
+    // Compute the minimum and maximum number of characters the pattern can match.
+    // Walk the pattern tokens: `*` matches 0+ chars (unbounded max), `?` matches 1,
+    // `[...]` matches 1, literal char matches 1.
+    // Extglob patterns: `*(...)` and `?(...)` can match 0 chars, `+(...)` matches 1+,
+    // `@(...)` matches exactly 1 alternative, `!(...)` matches 1+ chars.
+    // When min == max (no `*` or variable-length construct), the match length is fixed,
+    // so we only need to check one substring length per position — O(n) instead of O(n²).
+    let mut has_variable_length = false;
+    let min_match_len: usize = {
+        let mut count = 0usize;
+        let mut pi = 0;
+        while pi < pat_chars.len() {
+            // Check for extglob prefixes: *(...), ?(...), +(...), @(...), !(...)
+            if pi + 1 < pat_chars.len()
+                && pat_chars[pi + 1] == '('
+                && matches!(pat_chars[pi], '*' | '?' | '+' | '@' | '!')
+            {
+                let prefix = pat_chars[pi];
+                // Skip to matching closing `)`
+                pi += 2; // skip prefix and `(`
+                let mut depth = 1;
+                while pi < pat_chars.len() && depth > 0 {
+                    if pat_chars[pi] == '('
+                        && pi > 0
+                        && matches!(pat_chars[pi - 1], '*' | '?' | '+' | '@' | '!')
+                    {
+                        depth += 1;
+                    } else if pat_chars[pi] == ')' {
+                        depth -= 1;
+                    }
+                    pi += 1;
+                }
+                match prefix {
+                    '*' | '?' => {
+                        // *(...) matches 0+ repetitions, ?(...) matches 0 or 1
+                        has_variable_length = true;
+                        // min contribution: 0
+                    }
+                    '+' => {
+                        // +(...) matches 1+ repetitions — min 1 char
+                        has_variable_length = true;
+                        count += 1;
+                    }
+                    '@' => {
+                        // @(...) matches exactly one alternative — min 1 char
+                        // (could be 0 if an alternative is empty, but conservatively 0)
+                        has_variable_length = true;
+                    }
+                    '!' => {
+                        // !(...) matches anything NOT matching — variable length
+                        has_variable_length = true;
+                    }
+                    _ => unreachable!(),
+                }
+                continue;
+            }
+            match pat_chars[pi] {
+                '*' => {
+                    // `*` can match zero characters — contributes 0
+                    has_variable_length = true;
+                    pi += 1;
+                }
+                '?' => {
+                    count += 1;
+                    pi += 1;
+                }
+                '[' => {
+                    // Bracket expression `[...]` matches exactly 1 character.
+                    // Skip to the closing `]`.
+                    pi += 1;
+                    // `]` as first char (or after `!`/`^`) is literal
+                    if pi < pat_chars.len() && (pat_chars[pi] == '!' || pat_chars[pi] == '^') {
+                        pi += 1;
+                    }
+                    if pi < pat_chars.len() && pat_chars[pi] == ']' {
+                        pi += 1;
+                    }
+                    while pi < pat_chars.len() && pat_chars[pi] != ']' {
+                        pi += 1;
+                    }
+                    if pi < pat_chars.len() {
+                        pi += 1; // skip closing `]`
+                    }
+                    count += 1;
+                }
+                '\\' => {
+                    // Escaped character matches 1 character
+                    count += 1;
+                    pi += 2;
+                }
+                _ => {
+                    count += 1;
+                    pi += 1;
+                }
+            }
+        }
+        count
+    };
+    // When there are no variable-length constructs (`*`, extglob), min == max:
+    // the pattern matches a fixed number of chars.
+    let fixed_len = if !has_variable_length {
+        Some(min_match_len)
+    } else {
+        None
+    };
 
     while i < chars.len() {
         let mut found = false;
-        for j in (i + 1..=chars.len()).rev() {
-            let substr: String = chars[i..j].iter().collect();
-            if shell_pattern_match(&substr, pattern) {
+        let lo = (i + min_match_len.max(1)).min(chars.len() + 1);
+        // When the match length is fixed, only try the one possible length.
+        let hi = if let Some(fl) = fixed_len {
+            (i + fl).min(chars.len())
+        } else {
+            chars.len()
+        };
+        for j in (lo..=hi).rev() {
+            if pattern_match_impl(&chars[i..j], 0, &pat_chars, 0) {
                 result.push_str(replacement);
                 i = j;
                 found = true;
                 if !all {
-                    let rest: String = chars[i..].iter().collect();
-                    result.push_str(&rest);
+                    for &c in &chars[i..] {
+                        result.push(c);
+                    }
                     return result;
                 }
                 break;
@@ -88,7 +316,7 @@ pub(super) fn pattern_replace(value: &str, pattern: &str, replacement: &str, all
         }
     }
     // Handle empty value: if pattern matches empty string, replace
-    if chars.is_empty() && shell_pattern_match("", pattern) {
+    if chars.is_empty() && pattern_match_impl(&[], 0, &pat_chars, 0) {
         result.push_str(replacement);
     }
     result

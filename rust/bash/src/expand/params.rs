@@ -766,7 +766,8 @@ pub(super) fn apply_param_op(
             match op {
                 ParamOp::ReplaceAll(..) => pattern_replace(val, &pat, &rep, true),
                 ParamOp::ReplacePrefix(..) => {
-                    for i in 0..=val.len() {
+                    // Iterate longest-first so `#*` matches the entire string
+                    for i in (0..=val.len()).rev() {
                         if !val.is_char_boundary(i) {
                             continue;
                         }
@@ -777,7 +778,9 @@ pub(super) fn apply_param_op(
                     val.to_string()
                 }
                 ParamOp::ReplaceSuffix(..) => {
-                    for i in (0..=val.len()).rev() {
+                    // Iterate shortest-position-first so `%*` matches the entire string
+                    // (longest suffix match wins)
+                    for i in 0..=val.len() {
                         if !val.is_char_boundary(i) {
                             continue;
                         }
@@ -1312,8 +1315,8 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
             match &expr.op {
                 ParamOp::ReplaceAll(..) => pattern_replace(&val, &pat, &rep, true),
                 ParamOp::ReplacePrefix(..) => {
-                    // Replace only if pattern matches at start
-                    for i in 0..=val.len() {
+                    // Replace only if pattern matches at start (longest match first)
+                    for i in (0..=val.len()).rev() {
                         if !val.is_char_boundary(i) {
                             continue;
                         }
@@ -1324,8 +1327,8 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                     val
                 }
                 ParamOp::ReplaceSuffix(..) => {
-                    // Replace only if pattern matches at end
-                    for i in (0..=val.len()).rev() {
+                    // Replace only if pattern matches at end (longest match first)
+                    for i in 0..=val.len() {
                         if !val.is_char_boundary(i) {
                             continue;
                         }
