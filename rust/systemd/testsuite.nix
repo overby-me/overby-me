@@ -282,6 +282,13 @@ in
           fi
         done
 
+        # Symlink manual test binaries (e.g. test-journal-append)
+        if [ -d "${config.systemd.package}/lib/systemd/tests/unit-tests/manual" ]; then
+          mkdir -p /usr/lib/systemd/tests/unit-tests
+          ln -sfn "${config.systemd.package}/lib/systemd/tests/unit-tests/manual" \
+            /usr/lib/systemd/tests/unit-tests/manual
+        fi
+
         # Create standard systemd testdata path so unit files referencing
         # /usr/lib/systemd/tests/testdata/ can find helper scripts.
         # We create a real directory instead of a plain symlink so we can
