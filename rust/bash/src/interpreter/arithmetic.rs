@@ -36,17 +36,19 @@ impl Shell {
     /// Returns true if the subscript is empty (e.g. `a[""]=N` or `a[]=N`),
     /// which bash rejects as "not a valid identifier".
     fn is_empty_arith_subscript(idx_str: &str) -> bool {
-        // Strip matching outer double quotes, then check if empty
-        let s = idx_str.trim();
-        if s.is_empty() {
+        // Only reject subscripts that are literally empty (no characters)
+        // or consist solely of a pair of quotes with nothing inside.
+        // Whitespace-only subscripts like `a[" "]` are valid — the space
+        // evaluates to 0 in arithmetic, so `a[ ]=N` sets a[0].
+        if idx_str.is_empty() {
             return true;
         }
         // Handle "" (just a pair of double quotes)
-        if s == "\"\"" {
+        if idx_str.trim() == "\"\"" {
             return true;
         }
         // Handle '' (just a pair of single quotes)
-        if s == "''" {
+        if idx_str.trim() == "''" {
             return true;
         }
         false
@@ -111,23 +113,38 @@ impl Shell {
         result
     }
 
-    /// Read the current integer value of an array element.
-    fn arith_array_get(&self, sub: &ArithSubscript) -> i64 {
+    /// Read the raw string value of an array element (empty string if unset).
+    fn arith_array_get_str(&self, sub: &ArithSubscript) -> String {
         match sub {
             ArithSubscript::Assoc(resolved, key) => self
                 .assoc_arrays
                 .get(resolved)
                 .and_then(|m| m.get(key))
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(0),
+                .cloned()
+                .unwrap_or_default(),
             ArithSubscript::Indexed(resolved, idx) => self
                 .arrays
                 .get(resolved)
                 .and_then(|a| a.get(*idx))
                 .and_then(|v| v.as_deref())
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(0),
+                .map(|s| s.to_string())
+                .unwrap_or_default(),
         }
+    }
+
+    /// Read the current integer value of an array element.
+    /// Non-numeric values are recursively evaluated as arithmetic expressions
+    /// (matching bash behavior where `a[0]="1+2"; echo $((a[0]))` yields 3).
+    fn arith_array_get(&mut self, sub: &ArithSubscript) -> i64 {
+        let val = self.arith_array_get_str(sub);
+        if val.is_empty() {
+            return 0;
+        }
+        if let Ok(n) = val.parse::<i64>() {
+            return n;
+        }
+        // Recursively evaluate non-numeric values as arithmetic expressions
+        self.eval_arith_expr_impl(&val)
     }
 
     /// Write an integer value to an array element.
@@ -833,8 +850,8 @@ impl Shell {
             while i > 1 {
                 i -= 1;
                 match bytes[i] {
-                    b')' => depth += 1,
-                    b'(' => depth -= 1,
+                    b')' | b']' => depth += 1,
+                    b'(' | b'[' => depth -= 1,
                     b'|' if depth == 0 && i > 0 && bytes[i - 1] == b'|' => {
                         let left = self.eval_arith_expr_impl(&expr[..i - 1]);
                         if left != 0 {
@@ -856,8 +873,8 @@ impl Shell {
             while i > 1 {
                 i -= 1;
                 match bytes[i] {
-                    b')' => depth += 1,
-                    b'(' => depth -= 1,
+                    b')' | b']' => depth += 1,
+                    b'(' | b'[' => depth -= 1,
                     b'&' if depth == 0 && i > 0 && bytes[i - 1] == b'&' => {
                         let left = self.eval_arith_expr_impl(&expr[..i - 1]);
                         if left == 0 {
@@ -879,8 +896,8 @@ impl Shell {
             while i > 0 {
                 i -= 1;
                 match bytes[i] {
-                    b')' => depth += 1,
-                    b'(' => depth -= 1,
+                    b')' | b']' => depth += 1,
+                    b'(' | b'[' => depth -= 1,
                     b'|' if depth == 0
                         && !(i > 0 && bytes[i - 1] == b'|')
                         && (i + 1 >= bytes.len() || bytes[i + 1] != b'|')
@@ -903,8 +920,8 @@ impl Shell {
             while i > 0 {
                 i -= 1;
                 match bytes[i] {
-                    b')' => depth += 1,
-                    b'(' => depth -= 1,
+                    b')' | b']' => depth += 1,
+                    b'(' | b'[' => depth -= 1,
                     b'^' if depth == 0 && !(i > 0 && bytes[i - 1] == b'=') => {
                         let left = self.eval_arith_expr_impl(&expr[..i]);
                         let right = self.eval_arith_expr_impl(&expr[i + 1..]);
@@ -923,8 +940,8 @@ impl Shell {
             while i > 0 {
                 i -= 1;
                 match bytes[i] {
-                    b')' => depth += 1,
-                    b'(' => depth -= 1,
+                    b')' | b']' => depth += 1,
+                    b'(' | b'[' => depth -= 1,
                     b'&' if depth == 0
                         && !(i > 0 && bytes[i - 1] == b'&')
                         && (i + 1 >= bytes.len() || bytes[i + 1] != b'&')
@@ -971,8 +988,8 @@ impl Shell {
             while i > 0 {
                 i -= 1;
                 match bytes[i] {
-                    b')' => depth += 1,
-                    b'(' => depth -= 1,
+                    b')' | b']' => depth += 1,
+                    b'(' | b'[' => depth -= 1,
                     b'=' if depth == 0 && i > 0 && bytes[i - 1] == b'<' => {
                         let left = self.eval_arith_expr_impl(&expr[..i - 1]);
                         let right = self.eval_arith_expr_impl(&expr[i + 1..]);
@@ -1028,8 +1045,8 @@ impl Shell {
             while i > 1 {
                 i -= 1;
                 match bytes[i] {
-                    b')' => depth += 1,
-                    b'(' => depth -= 1,
+                    b')' | b']' => depth += 1,
+                    b'(' | b'[' => depth -= 1,
                     b'<' if depth == 0
                         && i > 0
                         && bytes[i - 1] == b'<'
@@ -1061,8 +1078,8 @@ impl Shell {
             while i > 0 {
                 i -= 1;
                 match bytes[i] {
-                    b')' => depth += 1,
-                    b'(' => depth -= 1,
+                    b')' | b']' => depth += 1,
+                    b'(' | b'[' => depth -= 1,
                     b'+' | b'-' if depth == 0 && i > 0 => {
                         // Look past whitespace to find the real previous character
                         let effective_prev = {
@@ -1113,6 +1130,7 @@ impl Shell {
                                 | b'>'
                                 | b'='
                                 | b'!'
+                                | b'~'
                                 | b'&'
                                 | b'|'
                         ) || is_after_postop)
@@ -1156,8 +1174,8 @@ impl Shell {
             while i > 0 {
                 i -= 1;
                 match bytes[i] {
-                    b')' => depth += 1,
-                    b'(' => depth -= 1,
+                    b')' | b']' => depth += 1,
+                    b'(' | b'[' => depth -= 1,
                     b'*' | b'/' | b'%' if depth == 0 && i > 0 => {
                         if bytes[i] == b'*' && i + 1 < bytes.len() && bytes[i + 1] == b'*' {
                             continue;
@@ -1294,7 +1312,14 @@ impl Shell {
                     .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
                 && name.chars().all(|c| c.is_alphanumeric() || c == '_')
             {
-                let val = self.vars.get(name).cloned().unwrap_or_default();
+                let val = self.vars.get(name).cloned().unwrap_or_else(|| {
+                    // For array variables, bare name resolves to element [0]
+                    self.arrays
+                        .get(name)
+                        .and_then(|a| a.first())
+                        .and_then(|v| v.clone())
+                        .unwrap_or_default()
+                });
                 if val.is_empty() {
                     return 0;
                 }
@@ -1333,7 +1358,14 @@ impl Shell {
                 // nounset errors cause the shell/subshell to exit
                 std::process::exit(1);
             }
-            let val = self.vars.get(expr).cloned().unwrap_or_default();
+            let val = self.vars.get(expr).cloned().unwrap_or_else(|| {
+                // For array variables, bare name resolves to element [0]
+                self.arrays
+                    .get(expr)
+                    .and_then(|a| a.first())
+                    .and_then(|v| v.clone())
+                    .unwrap_or_default()
+            });
             if val.is_empty() {
                 return 0;
             }

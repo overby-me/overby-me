@@ -328,8 +328,38 @@ fn quote_for_declare(s: &str) -> String {
 /// Keys containing non-alphanumeric/underscore characters are wrapped in `"..."`,
 /// with `$`, `\`, `"`, and `` ` `` escaped. Plain identifier keys are unquoted.
 fn quote_assoc_key(key: &str) -> String {
-    let needs_quoting =
-        key.is_empty() || !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    // Match bash's quoting rules: only quote keys containing characters that
+    // would be misinterpreted in an unquoted shell context.  Safe punctuation
+    // like %, -, ., /, :, =, @, ^, ,, + are left unquoted.
+    let needs_quoting = key.is_empty()
+        || key.chars().any(|c| {
+            matches!(
+                c,
+                ' ' | '\t'
+                    | '\n'
+                    | '$'
+                    | '!'
+                    | '`'
+                    | '"'
+                    | '\\'
+                    | '\''
+                    | '('
+                    | ')'
+                    | '{'
+                    | '}'
+                    | '<'
+                    | '>'
+                    | '|'
+                    | '&'
+                    | ';'
+                    | '*'
+                    | '?'
+                    | '['
+                    | ']'
+                    | '~'
+                    | '#'
+            )
+        });
     if needs_quoting {
         let mut out = String::from("\"");
         for ch in key.chars() {

@@ -1119,10 +1119,12 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                     } else if let Ok(v) = idx_str.trim().parse::<i64>() {
                         v
                     } else {
-                        crate::expand::arithmetic::eval_arith_full(
+                        crate::expand::arithmetic::eval_arith_full_with_assoc(
                             idx_str,
                             ctx.vars,
-                            &std::collections::HashMap::new(),
+                            ctx.arrays,
+                            ctx.assoc_arrays,
+                            ctx.namerefs,
                             ctx.positional,
                             ctx.last_status,
                             ctx.opt_flags,
@@ -1564,10 +1566,12 @@ fn expand_arith(expr: &str, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
     } else {
         expr
     };
-    let result = eval_arith_full(
+    let result = crate::expand::arithmetic::eval_arith_full_with_assoc(
         expr,
         ctx.vars,
         ctx.arrays,
+        ctx.assoc_arrays,
+        ctx.namerefs,
         ctx.positional,
         ctx.last_status,
         ctx.opt_flags,
@@ -1698,8 +1702,6 @@ fn expand_comsubs_in_arith_expr(expr: &str, cmd_sub: CmdSubFn) -> String {
     }
     result
 }
-
-pub use arithmetic::eval_arith_full;
 
 /// Escape glob metacharacters in quoted text so they are treated literally.
 /// Uses \x00 as escape prefix (cannot appear in normal shell text).

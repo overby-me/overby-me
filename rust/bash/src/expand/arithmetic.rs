@@ -1,14 +1,47 @@
 use super::*;
 
+#[allow(dead_code)]
 pub fn eval_arith_full(
     expr: &str,
     vars: &HashMap<String, String>,
-    _arrays: &HashMap<String, Vec<Option<String>>>,
+    arrays: &HashMap<String, Vec<Option<String>>>,
     positional: &[String],
     last_status: i32,
     opt_flags: &str,
 ) -> i64 {
-    let resolved = resolve_arith_vars(expr, vars, positional, last_status, opt_flags);
+    eval_arith_full_with_assoc(
+        expr,
+        vars,
+        arrays,
+        &HashMap::new(),
+        &HashMap::new(),
+        positional,
+        last_status,
+        opt_flags,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn eval_arith_full_with_assoc(
+    expr: &str,
+    vars: &HashMap<String, String>,
+    arrays: &HashMap<String, Vec<Option<String>>>,
+    assoc_arrays: &HashMap<String, crate::interpreter::AssocArray>,
+    namerefs: &HashMap<String, String>,
+    positional: &[String],
+    last_status: i32,
+    opt_flags: &str,
+) -> i64 {
+    let resolved = resolve_arith_vars(
+        expr,
+        vars,
+        arrays,
+        assoc_arrays,
+        namerefs,
+        positional,
+        last_status,
+        opt_flags,
+    );
     match eval_arith(&resolved) {
         Ok(val) => val,
         Err(e) => {
@@ -26,9 +59,13 @@ pub fn eval_arith_full(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn resolve_arith_vars(
     expr: &str,
     vars: &HashMap<String, String>,
+    arrays: &HashMap<String, Vec<Option<String>>>,
+    assoc_arrays: &HashMap<String, crate::interpreter::AssocArray>,
+    namerefs: &HashMap<String, String>,
     positional: &[String],
     last_status: i32,
     opt_flags: &str,
@@ -90,18 +127,18 @@ fn resolve_arith_vars(
                         i += 1;
                     }
                 }
-                let ctx_dummy = ExpCtx {
+                let ctx_real = ExpCtx {
                     vars,
-                    arrays: &HashMap::new(),
-                    assoc_arrays: &HashMap::new(),
-                    namerefs: &HashMap::new(),
+                    arrays,
+                    assoc_arrays,
+                    namerefs,
                     positional,
                     last_status,
                     last_bg_pid: 0,
                     top_level_pid: std::process::id(),
                     opt_flags,
                 };
-                let raw_val = lookup_var(&name, &ctx_dummy);
+                let raw_val = lookup_var(&name, &ctx_real);
                 // Handle operator
                 if i < chars.len() && chars[i] == '}' {
                     i += 1; // simple ${var}
@@ -267,18 +304,18 @@ fn resolve_arith_vars(
                     name.push(chars[i]);
                     i += 1;
                 }
-                let ctx_dummy = ExpCtx {
+                let ctx_real = ExpCtx {
                     vars,
-                    arrays: &HashMap::new(),
-                    assoc_arrays: &HashMap::new(),
-                    namerefs: &HashMap::new(),
+                    arrays,
+                    assoc_arrays,
+                    namerefs,
                     positional,
                     last_status,
                     last_bg_pid: 0,
                     top_level_pid: std::process::id(),
                     opt_flags,
                 };
-                let val = lookup_var(&name, &ctx_dummy);
+                let val = lookup_var(&name, &ctx_real);
                 let val = if val.is_empty() { "0".to_string() } else { val };
                 result.push_str(&val);
             }
@@ -318,11 +355,60 @@ fn resolve_arith_vars(
                 result.push_str(&name);
                 continue;
             }
-            let val = vars
-                .get(&name)
-                .cloned()
-                .or_else(|| std::env::var(&name).ok())
-                .unwrap_or_else(|| "0".to_string());
+            // Check if followed by [...] subscript (array element access)
+            let val = if i < chars.len() && chars[i] == '[' {
+                // Collect the subscript including brackets
+                let mut subscript = String::new();
+                subscript.push('[');
+                i += 1;
+                let mut bracket_depth = 1i32;
+                while i < chars.len() && bracket_depth > 0 {
+                    if chars[i] == '[' {
+                        bracket_depth += 1;
+                    } else if chars[i] == ']' {
+                        bracket_depth -= 1;
+                    }
+                    subscript.push(chars[i]);
+                    i += 1;
+                }
+                // subscript is now e.g. "[%]" or "[$k1]"
+                let full_name = format!("{}{}", name, subscript);
+                // Check for assignment operators after the subscript —
+                // if so, keep the name literal for eval_arith to handle
+                let rest: String = chars[i..].iter().collect();
+                if rest.starts_with("++")
+                    || rest.starts_with("--")
+                    || (rest.starts_with('=') && !rest.starts_with("=="))
+                    || (rest.len() >= 2
+                        && matches!(rest.as_bytes()[0], b'+' | b'-' | b'*' | b'/' | b'%')
+                        && rest.as_bytes()[1] == b'=')
+                {
+                    result.push_str(&full_name);
+                    continue;
+                }
+                let ctx_real = ExpCtx {
+                    vars,
+                    arrays,
+                    assoc_arrays,
+                    namerefs,
+                    positional,
+                    last_status,
+                    last_bg_pid: 0,
+                    top_level_pid: std::process::id(),
+                    opt_flags,
+                };
+                let looked_up = lookup_var(&full_name, &ctx_real);
+                if looked_up.is_empty() {
+                    "0".to_string()
+                } else {
+                    looked_up
+                }
+            } else {
+                vars.get(&name)
+                    .cloned()
+                    .or_else(|| std::env::var(&name).ok())
+                    .unwrap_or_else(|| "0".to_string())
+            };
             // If val is not a number, try to resolve it again (for variable indirection in arith)
             let val = if val.parse::<i64>().is_err() && !val.is_empty() {
                 val.parse::<i64>().map(|n| n.to_string()).unwrap_or(val)

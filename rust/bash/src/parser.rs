@@ -2260,14 +2260,30 @@ impl Parser {
                                     }
                                 }
                                 WordPart::SingleQuoted(sq) => {
+                                    // Preserve single-quote markers so that
+                                    // expand_assoc_subscript can detect literal
+                                    // subscripts (e.g. A['$(echo %)']=val).
+                                    name_text.push('\'');
                                     name_text.push_str(sq);
+                                    name_text.push('\'');
                                 }
                                 WordPart::DoubleQuoted(dq) => {
+                                    // Preserve double-quote markers so that
+                                    // expand_assoc_subscript sees them.
+                                    name_text.push('"');
                                     for dp in dq {
-                                        if let WordPart::Literal(l) = dp {
-                                            name_text.push_str(l);
+                                        match dp {
+                                            WordPart::Literal(l) => {
+                                                name_text.push_str(l);
+                                            }
+                                            other => {
+                                                name_text.push_str(&crate::ast::word_to_string(
+                                                    &vec![other.clone()],
+                                                ));
+                                            }
                                         }
                                     }
+                                    name_text.push('"');
                                 }
                                 other => {
                                     // Include raw text of variable expansions ($i, ${i}, etc.)

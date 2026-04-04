@@ -376,6 +376,11 @@ pub(super) fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
                                         let var_end = rest
                                             .find(|c: char| !c.is_alphanumeric() && c != '_')
                                             .unwrap_or(rest.len());
+                                        if var_end == 0 {
+                                            // $ followed by non-identifier char (e.g. $(, $!, etc.)
+                                            // — leave the $ as-is and skip past it
+                                            break;
+                                        }
                                         let var_name = &rest[..var_end];
                                         let var_val =
                                             ctx.vars.get(var_name).cloned().unwrap_or_default();
@@ -435,10 +440,12 @@ pub(super) fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
                         } else if let Ok(v) = idx_str.trim().parse::<i64>() {
                             v
                         } else {
-                            crate::expand::arithmetic::eval_arith_full(
+                            crate::expand::arithmetic::eval_arith_full_with_assoc(
                                 idx_str,
                                 ctx.vars,
-                                &std::collections::HashMap::new(),
+                                ctx.arrays,
+                                ctx.assoc_arrays,
+                                ctx.namerefs,
                                 ctx.positional,
                                 ctx.last_status,
                                 ctx.opt_flags,
@@ -568,10 +575,12 @@ fn parse_arith_offset(s: &str, param_name: &str, ctx: &ExpCtx, cmd_sub: CmdSubFn
     let trimmed = s.trim();
     if trimmed.starts_with("$((") && trimmed.ends_with("))") {
         let inner = &trimmed[3..trimmed.len() - 2];
-        return crate::expand::arithmetic::eval_arith_full(
+        return crate::expand::arithmetic::eval_arith_full_with_assoc(
             inner,
             ctx.vars,
-            &std::collections::HashMap::new(),
+            ctx.arrays,
+            ctx.assoc_arrays,
+            ctx.namerefs,
             ctx.positional,
             ctx.last_status,
             ctx.opt_flags,
@@ -615,10 +624,12 @@ fn parse_arith_offset(s: &str, param_name: &str, ctx: &ExpCtx, cmd_sub: CmdSubFn
         return 0;
     }
     // Use full arithmetic evaluation for complex expressions (ternary, operators, etc.)
-    crate::expand::arithmetic::eval_arith_full(
+    crate::expand::arithmetic::eval_arith_full_with_assoc(
         s,
         ctx.vars,
-        &std::collections::HashMap::new(),
+        ctx.arrays,
+        ctx.assoc_arrays,
+        ctx.namerefs,
         ctx.positional,
         ctx.last_status,
         ctx.opt_flags,
@@ -1105,10 +1116,12 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                     } else if let Ok(v) = idx_str.trim().parse::<i64>() {
                         v
                     } else {
-                        crate::expand::arithmetic::eval_arith_full(
+                        crate::expand::arithmetic::eval_arith_full_with_assoc(
                             idx_str,
                             ctx.vars,
-                            &std::collections::HashMap::new(),
+                            ctx.arrays,
+                            ctx.assoc_arrays,
+                            ctx.namerefs,
                             ctx.positional,
                             ctx.last_status,
                             ctx.opt_flags,

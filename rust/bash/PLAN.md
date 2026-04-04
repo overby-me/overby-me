@@ -2,15 +2,19 @@
 
 ## Current State
 
-**~64/77 nix tests verified passing** (Phase 19), ~60/83 local tests passing (0 diff, sequential) on bookmark `bash-integration-test`. Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available).
+**~64/77 nix tests verified passing** (Phase 20), ~62/83 local tests passing (0 diff, sequential) on bookmark `bash-integration-test`. Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available).
 
-See `CHANGELOG.md` for full fix history (150+ fixes across 19 phases).
+See `CHANGELOG.md` for full fix history (160+ fixes across 20 phases).
 
 ### Nix test results (64/77 verified passing)
 
 Verified passing (64/77): alias, appendop, arith-for, **array2** ✅, **attr** ✅, braces, case, casemod, **comsub-eof** ✅, comsub-posix, cond, coproc, cprint, **dirstack** ✅, dollars, dynvar, errors, execscript, exp-tests, **exportfunc** ✅, extglob, extglob2, extglob3, func, getopts, glob-bracket, glob-test, globstar, herestr, ifs, ifs-posix, **input-test** ✅, invert, iquote, mapfile, more-exp, nquote, nquote1, nquote2, nquote3, nquote4, nquote5, parser, posix2, posixexp, posixexp2, posixpat, posixpipe, precedence, printf, **procsub** ✅, quote, **read** ✅, redir, rhs-exp, **set-e** ✅, set-x, shopt, strip, **test** ✅, tilde, tilde2, type, vredir
 
-Verified failing (13/77): arith (~10, arith10.sub error format diffs), array (~20, array32/33.sub new tests), assoc (~20, tilde expansion in subscripts), builtins (~130, help output + ulimit flags), comsub (1, flaky SIGPIPE), comsub2 (~20, funsub line numbers + jobs + `$*`), heredoc (~4, heredoc7.sub case 2 line off-by-1), lastpipe (1, flaky SIGPIPE), nameref (~20, nameref24.sub edge cases), new-exp (~50, pattern replacement + nounset), quotearray (~68, single-quoted keys + tilde), trap (1, flaky extra CHLD), varenv (~100, local scope + declare -p format)
+Verified failing (13/77): arith (~49, arith10.sub error format diffs + `let` empty subscript handling), array (~20, array32/33.sub new tests), assoc (~20, tilde expansion in subscripts), builtins (~130, help output + ulimit flags), comsub (1, flaky SIGPIPE), comsub2 (~20, funsub line numbers + jobs + `$*`), heredoc (~4, heredoc7.sub case 2 line off-by-1), lastpipe (1, flaky SIGPIPE), nameref (~20, nameref24.sub edge cases), new-exp (~50, pattern replacement + nounset), quotearray (~36, nested subscripts + single-quoted `(( ))` error format), trap (1, flaky extra CHLD), varenv (~100, local scope + declare -p format)
+
+**Phase 20 fixes:** Associative array subscript expansion in assignments (`A[$key]=val` now expands `$key`), proper quote handling in subscripts (single-quoted content is literal, double-quoted expands), arithmetic bracket depth tracking (operators inside `[...]` subscripts no longer split expressions), bare array variable names in arithmetic resolve to element [0] (`$((x))` where `x` is an array), `~-N` bitwise NOT with negative operand, `declare -p` assoc key quoting matches bash (only shell-special chars are quoted), `eval_arith_full` now receives real arrays/assoc_arrays for proper `${string:A[%]:A[$k1]}` offset evaluation, space-only subscripts like `a[" "]` now correctly evaluate to index 0 instead of erroring.
+
+**Phase 20 reduced diffs:** quotearray (~68→~36 locally, improved in nix too), arith (fixed `456 123` reorder bug and `$((a[0]))` non-numeric value recursion, but arith10.sub `let` empty subscript handling now shows more diffs ~10→~49 in nix).
 
 **Phase 19 flipped to passing:** attr (~4→0 diff, readonly error prefix fix + single-quoted compound assignment scalar treatment), exportfunc (~2→0 diff, funsub `$()` terminator detection in redirect targets), read (1→0 diff, poll revents fix). Also newly verified passing: array2, dirstack, input-test, procsub, set-e, test.
 
@@ -33,20 +37,20 @@ Failing (~13):
 | lastpipe | 1 | Spurious `echo: write error: Broken pipe` (flaky timing) |
 | heredoc | ~4 | heredoc7.sub case 2: line number off-by-1 in comsub+heredoc interaction |
 | comsub2 | ~20 | Line number off-by-1 in funsubs + missing `jobs` output + funsub `$*` ordering |
-| arith | ~10 | arith10.sub: error format diffs (`\\` vs `""`, `((:`/`let:` prefix, error token quoting) |
+| arith | ~49 | arith10.sub: `let` empty subscript handling (`let "a[\"\"]"=22` succeeds in nix bash but we error), error format diffs (`\\` vs `""`, `((:`/`let:` prefix, error token quoting), `a[\" \"]` backslash-escaped space subscripts |
 | array | ~20 | array32/33.sub: `$()` injection protection + assoc-to-indexed conversion (nix-only tests) |
 | assoc | ~20 | assoc subscript tilde expansion (`~/key` → `/homes/user/key`) |
 | nameref | ~20 | nameref24.sub: invalid nameref name validation + nounset edge cases |
 | new-exp | ~50 | Pattern replacement with arrays + nounset parameter error format |
 | builtins | ~130 | help output formatting + ulimit `-g` flag + ulimit number validation |
 | varenv | ~100 | varenv25.sub: local scope + `declare -p` format in function context |
-| quotearray | ~68 | Remaining: single-quoted keys in arithmetic (`(( assoc['key']++ ))`), tilde in subscripts |
+| quotearray | ~36 | Remaining: nested subscripts `${A[${a[i]}]}`, `assoc[']]` parsing in `(( ))`, single-quoted `(( ))` error format, `uname` leakage from `$()` in subscript keys |
 
-**Phase 18 improved quotearray** from ~200→~68 diff lines by adding associative array subscript support in arithmetic evaluation. The basic case `(( assoc[$key]++ ))` now works correctly. Remaining issues: single-quoted subscripts in `(( ))`, `~` tilde expansion in subscripts, and some error format differences.
+**Phase 20 improved quotearray** from ~68→~36 diff lines locally by fixing assoc subscript expansion, arithmetic bracket depth tracking, and `declare -p` key quoting. The main remaining issues are: `${A[${a[i]}]}` nested subscript parsing (lexer issue with `]` inside `${}`), `((assoc[']']++))` single-quote-in-brackets parsing, and error format differences for single-quoted `(( ))` expressions.
 
-### Local test results (~57/83 passing, 0 diff sequential)
+### Local test results (~62/83 passing, 0 diff sequential)
 
-83 total `.tests` files in `/tmp/bash-5.3/tests/` (superset of the 77 nix tests — includes dbg-support, dbg-support2, dstack2, histexp, history, rsh, invocation, jobs, posixpipe, and others not in the nix harness). **dstack2** now passes (was 26 diff lines — `~N`/`~+N`/`~-N` tilde expansion implemented).
+83 total `.tests` files in `/tmp/bash-5.3/tests/` (superset of the 77 nix tests — includes dbg-support, dbg-support2, dstack2, histexp, history, rsh, invocation, jobs, posixpipe, and others not in the nix harness). **dstack2** now passes (was 26 diff lines — `~N`/`~+N`/`~-N` tilde expansion implemented). **arith** and **array** now pass locally (0 diff).
 
 **Important:** Many tests that show diffs when run in parallel (`diff <(our_bash test) <(bash test)`) pass when run sequentially due to race conditions on shared `/tmp` and `/var/tmp` files. Tests like `globstar`, `test`, `redir`, `extglob` pass when run sequentially. Use sequential mode for accurate results:
 
@@ -174,18 +178,18 @@ These exist in `/tmp/bash-5.3/tests/` but not in the nix test list:
 | `src/builtins/exec.rs` | `type`, `command`, `hash` |
 | `src/builtins/flow.rs` | `break`, `continue`, `exit`, `return` |
 | `src/builtins/vars.rs` | `declare` (compound re-expansion, `+a` readonly fix), `local`, `export`, `let`, `unset` (scalar subscript error, `arr[@]` preserves empty array) |
-| `src/builtins/mod.rs` | `parse_array_literal`, function body formatting, `quote_for_declare`, `quote_assoc_key`, `interpret_echo_escapes` (returns `(String, bool)` for `\c` stop) |
+| `src/builtins/mod.rs` | `parse_array_literal`, function body formatting, `quote_for_declare`, `quote_assoc_key` (shell-special-only quoting), `interpret_echo_escapes` (returns `(String, bool)` for `\c` stop) |
 | `src/builtins/set.rs` | `set` (allexport, physical, ignoreeof), `shopt` (update_shellopts call, readline options removed) |
 | `src/builtins/trap.rs` | `trap`, `kill` (kill -l range check), `enable` (full -n/-s/-a/-d impl) |
 | `src/interpreter/mod.rs` | Shell struct, `declared_unset`, `disabled_builtins`, `source_set_params`, `run_string`, `resolve_nameref`, `set_var` (auto-export), SHELLOPTS/BASHOPTS readonly, BASH_ALIASES/BASH_CMDS init |
-| `src/interpreter/commands.rs` | Command execution, `expand_word*`, `set -k` keyword assignment scoping (save/restore), inline compound assignment detection (SingleQuoted `(` support), `execute_assignment` |
-| `src/interpreter/arithmetic.rs` | Arithmetic eval, `expand_comsubs_in_arith` (handles `\$` and backticks), error tokens, short-circuit assignment validation, ternary precedence |
+| `src/interpreter/commands.rs` | Command execution, `expand_word*`, `set -k` keyword assignment scoping (save/restore), inline compound assignment detection (SingleQuoted `(` support), `execute_assignment`, `expand_assoc_subscript` (quote-aware subscript expansion) |
+| `src/interpreter/arithmetic.rs` | Arithmetic eval, `expand_comsubs_in_arith` (handles `\$` and backticks), error tokens, short-circuit assignment validation, ternary precedence, bracket depth tracking in operator scanning, `arith_array_get` (recursive non-numeric value eval), bare array name → [0] resolution |
 | `src/interpreter/redirects.rs` | Redirections (vredir `{var}` fds with nameref support, varredir_close, fd validation, memfd heredocs, pipe fd leak fix) |
 | `src/interpreter/pipeline.rs` | Pipeline execution, PIPESTATUS, `in_pipeline_child` always true for forked children, SIGPIPE reset to SIG_DFL in pipeline/comsub children |
 | `src/expand/mod.rs` | Word expansion, `ExpCtx`, `ifs_first_char()` helper (empty IFS handling), procsub handling, `SyntaxError` handler, `NOUNSET_ERROR` flag, empty-element removal in unquoted `${arr[@]%%pattern}` |
 | `src/expand/params.rs` | Parameter expansion (`${...}` operators), IFS-aware `${arr[*]}` joining, `parse_arith_offset`, `is_valid_var_ref`, negative subscript bounds checking, assoc subscript expansion |
 | `src/expand/pattern.rs` | Pattern matching, `pattern_replace` (handles empty value + `*` match) |
-| `src/expand/arithmetic.rs` | `eval_arith_full`, `resolve_arith_vars` (handles `${var:-default}`) |
+| `src/expand/arithmetic.rs` | `eval_arith_full_with_assoc` (receives real arrays/assoc_arrays/namerefs), `resolve_arith_vars` (handles `${var:-default}`, array subscript lookups) |
 | `src/parser.rs` | Parser, `parse_array_elements` (returns Result), `skip_to_next_command`, heredoc body resolution (full recursive `resolve_heredoc_in_command`) |
 | `src/lexer/mod.rs` | Lexer, `lex_compound_array_content()` (full-quoting re-parser for `declare -a`), thread-locals (`DQUOTE_TOGGLED`), `force_read_pending_heredocs`, `heredoc_resume` |
 | `src/lexer/dollar.rs` | `${}` parsing, `parse_brace_param` (bad substitution for `${$(...)}` ), `$(...)` comsub parser (now handles `<<<` here-strings) |
@@ -198,12 +202,13 @@ These exist in `/tmp/bash-5.3/tests/` but not in the nix test list:
 ### Low-hanging fruit (could flip nix tests to passing)
 
 1. **Fix SIGPIPE flaky tests (comsub/lastpipe/trap)** — 1-line diff each, timing race in nix sandbox. SIGPIPE is reset to SIG_DFL in pipeline/comsub children and EPIPE is suppressed in echo builtin for all subprocess contexts, but the nix sandbox timing still occasionally triggers the race. trap has an extra CHLD signal delivery. printf also has a flaky SIGPIPE race (printf6.sub line 40).
+1. **Fix `let` empty subscript handling** — `let "a[\"\"]"=22` succeeds in nix bash 5.3 (assigns to a[0]) but our shell errors with "not a valid identifier". `(( a[""]=22 ))` correctly errors in both. The difference is `let` processes quotes differently. (~12 nix diff lines from arith10.sub)
 
 ### Medium effort
 
-2. **Fix remaining quotearray diffs** — Single-quoted keys in arithmetic: `(( assoc['key']++ ))`. Need to detect single quotes inside `[...]` subscripts in the arithmetic evaluator. Also tilde expansion in subscripts. (~68 nix diff lines)
+2. **Fix remaining quotearray diffs** — Nested subscripts `${A[${a[i]}]}` need lexer fix to track `${}` nesting inside `[...]` brackets. `((assoc[']']++))` needs `(( ))` lexer to handle single-quoted brackets. Error format for `(( 'expr' ))`. (~36 local diff lines)
 
-3. **Fix arith remaining error format diffs** — arith10.sub: `\\` vs `""` in error tokens for escaped-quote arithmetic, `((:`/`let:` prefix missing/present in some contexts, `let` empty subscript handling differs from `(( ))`. (~10 nix diff lines)
+3. **Fix arith10.sub error format diffs** — `\\` vs `""` in error tokens for escaped-quote arithmetic, `((:`/`let:` prefix missing/present in some contexts, `a[\" \"]` backslash-escaped space handling. (~49 nix diff lines, mostly error format)
 
 4. **Fix array nix-only failures** — array32.sub: `$()` injection protection in array subscripts. array33.sub: assoc-to-indexed conversion errors. (~20 nix diff lines)
 
@@ -228,6 +233,20 @@ These exist in `/tmp/bash-5.3/tests/` but not in the nix test list:
 13. **Implement restricted shell mode (`-r` flag)** — Needed for rsh tests (local-only). (~26 diff lines)
 
 14. **Performance: optimize hot loops** — `ifs-posix` takes ~4 minutes vs bash's ~1s. `arith` takes ~2s vs bash's 0.035s. Profiling needed.
+
+## Recent Fixes (Phase 20)
+
+- **Fix associative array subscript expansion in assignments** — `A[$key]=val` now properly expands `$key` to the variable's value before using it as the assoc array key. Previously stored the literal `$key` as the key. Added `expand_assoc_subscript()` method with full quote handling: single-quoted content is literal, double-quoted and unquoted content expands `$var`, `${var}`, `$(cmd)`, etc. Applied to both regular (`A[$key]=val`) and append (`A[$key]+=val`) assignment paths, plus `BASH_ALIASES[$key]=val`.
+- **Preserve quote markers in assignment subscripts** — Parser's `try_parse_assignment` now preserves single-quote and double-quote markers around subscript content in the assignment name (e.g. `A['literal']` keeps the quotes so `expand_assoc_subscript` can detect literal keys). Double-quoted parts also preserve `$var` and other expansions in the name text.
+- **Fix `$` expansion in assoc subscript lookup** — When `$` is followed by a non-identifier character (like `(` in `$(echo %)`), the inline expansion in `lookup_var` now leaves the `$` as-is instead of replacing it with empty string. Fixes lookup of keys containing literal `$()` like `$(echo %)`.
+- **Fix `declare -p` assoc key quoting** — `quote_assoc_key` now only quotes keys containing shell-special characters (`$`, `!`, `` ` ``, `"`, `\`, `'`, `(`, `)`, `{`, `}`, `<`, `>`, `|`, `&`, `;`, `*`, `?`, `[`, `]`, `~`, `#`, space/tab/newline). Safe punctuation like `%`, `-`, `.`, `/`, `:`, `=`, `@`, `^`, `,`, `+` is left unquoted, matching bash's behavior.
+- **Pass real arrays/assoc_arrays to expand arithmetic evaluator** — `eval_arith_full_with_assoc` and `resolve_arith_vars` now receive the actual `arrays`, `assoc_arrays`, and `namerefs` maps instead of empty dummies. This enables `${string:A[%]:A[$k1]}` to correctly look up associative array elements as arithmetic offsets/lengths. All `ExpCtx`-based call sites updated.
+- **Add array subscript lookups in `resolve_arith_vars`** — Bare `name[subscript]` patterns in arithmetic expressions (without `$` prefix) are now resolved via `lookup_var` when they're not followed by assignment operators, so `A[%]` in `${string:A[%]:5}` correctly evaluates to the assoc array value.
+- **Fix arithmetic bracket depth tracking** — All 9 operator-scanning loops in `eval_arith_expr_inner` now track `[`/`]` bracket depth alongside `(`/`)` parenthesis depth. This prevents operators inside array subscripts from being treated as top-level operators (e.g. `a[1<2]` no longer splits at `<`, `a[7<(4+2)]` now evaluates correctly as `a[0]`=12).
+- **Fix `~-N` bitwise NOT with negative operand** — Added `~` to the list of operator characters that prevent `-` from being treated as binary subtraction. `~-2` now correctly evaluates as `~(-2)` = 1 instead of erroring with "operand expected".
+- **Fix bare array variable names in arithmetic** — `$((x))` where `x` is an indexed array now correctly resolves to `x[0]` (the first element). Previously returned 0 because `vars.get("x")` didn't find array variables. Applied to both the `${...}` and bare-name variable resolution paths.
+- **Fix non-numeric array values in arithmetic** — `arith_array_get` now recursively evaluates non-numeric string values as arithmetic expressions, matching bash behavior where `a[0]="1+2"; echo $((a[0]))` yields 3. Changed from `parse::<i64>().unwrap_or(0)` to try parse then `eval_arith_expr_impl()` fallback.
+- **Fix space-only subscripts in arithmetic** — `is_empty_arith_subscript` now only rejects truly empty subscripts (no characters) or quoted empty strings (`""`, `''`). Whitespace-only subscripts like `a[" "]` are no longer rejected — the space evaluates to 0 in arithmetic, so `a[ ]=N` correctly sets `a[0]`. Fixes `(( a[" "]=11 ))` which should succeed.
 
 ## Recent Fixes (Phase 19)
 

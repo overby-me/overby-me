@@ -1803,6 +1803,154 @@ impl Shell {
         status
     }
 
+    /// Expand an associative array subscript with proper quote handling.
+    ///
+    /// - Single-quoted content is literal (no expansion).
+    /// - Double-quoted content expands `$var`, `${var}`, `$(cmd)`, etc.
+    /// - Unquoted content expands `$var`, `${var}`, `$(cmd)`, etc.
+    ///
+    /// This mirrors bash's behavior for `A[$key]=val`, `A['literal']=val`,
+    /// `A["$key"]=val`.
+    fn expand_assoc_subscript(&mut self, idx_str: &str) -> String {
+        let chars: Vec<char> = idx_str.chars().collect();
+        let mut result = String::new();
+        let mut i = 0;
+        while i < chars.len() {
+            if chars[i] == '\'' {
+                // Single-quoted region: everything is literal until closing '
+                i += 1; // skip opening '
+                while i < chars.len() && chars[i] != '\'' {
+                    result.push(chars[i]);
+                    i += 1;
+                }
+                if i < chars.len() {
+                    i += 1; // skip closing '
+                }
+            } else if chars[i] == '"' {
+                // Double-quoted region: expand $var, ${var}, $(cmd) inside
+                i += 1; // skip opening "
+                let mut inner = String::new();
+                while i < chars.len() && chars[i] != '"' {
+                    if chars[i] == '\\' && i + 1 < chars.len() {
+                        let next = chars[i + 1];
+                        if matches!(next, '$' | '`' | '"' | '\\') {
+                            inner.push(next);
+                            i += 2;
+                            continue;
+                        }
+                    }
+                    inner.push(chars[i]);
+                    i += 1;
+                }
+                if i < chars.len() {
+                    i += 1; // skip closing "
+                }
+                // Expand $references in the inner content
+                let word = crate::lexer::parse_word_string(&inner);
+                result.push_str(&self.expand_word_single(&word));
+            } else if chars[i] == '$' {
+                // Unquoted $var / ${var} / $(cmd) — collect and expand
+                let start = i;
+                if i + 1 < chars.len() && chars[i + 1] == '(' {
+                    // $(cmd) or $((arith)) — find matching close paren
+                    let is_arith = i + 2 < chars.len() && chars[i + 2] == '(';
+                    i += 2; // skip $(
+                    if is_arith {
+                        i += 1; // skip second (
+                    }
+                    let mut depth = 1i32;
+                    while i < chars.len() && depth > 0 {
+                        if chars[i] == '(' {
+                            depth += 1;
+                        } else if chars[i] == ')' {
+                            depth -= 1;
+                        }
+                        if depth > 0 {
+                            i += 1;
+                        }
+                    }
+                    if i < chars.len() {
+                        i += 1; // skip closing )
+                    }
+                    if is_arith && i < chars.len() && chars[i] == ')' {
+                        i += 1; // skip second )
+                    }
+                    let fragment: String = chars[start..i].iter().collect();
+                    let word = crate::lexer::parse_word_string(&fragment);
+                    result.push_str(&self.expand_word_single(&word));
+                } else if i + 1 < chars.len() && chars[i + 1] == '{' {
+                    // ${var} — find matching }
+                    i += 2; // skip ${
+                    let mut depth = 1i32;
+                    while i < chars.len() && depth > 0 {
+                        if chars[i] == '{' {
+                            depth += 1;
+                        } else if chars[i] == '}' {
+                            depth -= 1;
+                        }
+                        if depth > 0 {
+                            i += 1;
+                        }
+                    }
+                    if i < chars.len() {
+                        i += 1; // skip closing }
+                    }
+                    let fragment: String = chars[start..i].iter().collect();
+                    let word = crate::lexer::parse_word_string(&fragment);
+                    result.push_str(&self.expand_word_single(&word));
+                } else if i + 1 < chars.len()
+                    && (chars[i + 1].is_ascii_alphabetic() || chars[i + 1] == '_')
+                {
+                    // $name — collect identifier
+                    i += 1;
+                    let name_start = i;
+                    while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') {
+                        i += 1;
+                    }
+                    let var_name: String = chars[name_start..i].iter().collect();
+                    let val = self.vars.get(&var_name).cloned().unwrap_or_default();
+                    result.push_str(&val);
+                } else if i + 1 < chars.len()
+                    && matches!(chars[i + 1], '#' | '?' | '$' | '!' | '-' | '@' | '*')
+                {
+                    // Special parameter $#, $?, $$, etc.
+                    let fragment: String = chars[start..start + 2].iter().collect();
+                    let word = crate::lexer::parse_word_string(&fragment);
+                    result.push_str(&self.expand_word_single(&word));
+                    i += 2;
+                } else {
+                    result.push(chars[i]);
+                    i += 1;
+                }
+            } else if chars[i] == '`' {
+                // Backtick command substitution
+                let start = i;
+                i += 1;
+                while i < chars.len() && chars[i] != '`' {
+                    if chars[i] == '\\' && i + 1 < chars.len() && chars[i + 1] == '`' {
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+                if i < chars.len() {
+                    i += 1; // skip closing `
+                }
+                let fragment: String = chars[start..i].iter().collect();
+                let word = crate::lexer::parse_word_string(&fragment);
+                result.push_str(&self.expand_word_single(&word));
+            } else if chars[i] == '\\' && i + 1 < chars.len() {
+                // Escaped character — keep the next char literally
+                result.push(chars[i + 1]);
+                i += 2;
+            } else {
+                result.push(chars[i]);
+                i += 1;
+            }
+        }
+        result
+    }
+
     pub fn execute_assignment(&mut self, assign: &Assignment) {
         // Extract base name (before [subscript])
         let base_name = if let Some(bracket) = assign.name.find('[') {
@@ -1915,7 +2063,7 @@ impl Shell {
                         // Check for assoc array FIRST — use string key, not arithmetic
                         if self.assoc_arrays.contains_key(&resolved) {
                             let is_int = self.integer_vars.contains(&resolved);
-                            let key = idx_str.to_string();
+                            let key = self.expand_assoc_subscript(idx_str);
                             if is_int {
                                 let addend = self.eval_arith_expr(&value);
                                 self.assoc_arrays
@@ -2046,7 +2194,7 @@ impl Shell {
 
                         // BASH_ALIASES[key]=value → alias key=value
                         if base == "BASH_ALIASES" {
-                            let alias_name = idx_str.to_string();
+                            let alias_name = self.expand_assoc_subscript(idx_str);
                             let invalid = alias_name.is_empty()
                                 || alias_name.chars().any(|c| {
                                     matches!(
@@ -2079,10 +2227,11 @@ impl Shell {
                             let resolved = self.resolve_nameref(base);
                             // Check if it's an associative array
                             if self.assoc_arrays.contains_key(&resolved) {
+                                let key = self.expand_assoc_subscript(idx_str);
                                 self.assoc_arrays
                                     .entry(resolved)
                                     .or_default()
-                                    .insert(idx_str.to_string(), value);
+                                    .insert(key, value);
                             } else {
                                 // Validate array subscript for indexed arrays
                                 if idx_str.is_empty() {
