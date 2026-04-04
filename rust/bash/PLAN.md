@@ -2,15 +2,21 @@
 
 ## Current State
 
-**~64/77 nix tests verified passing** (Phase 20), ~62/83 local tests passing (0 diff, sequential) on bookmark `bash-integration-test`. Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available).
+**~64/77 nix tests verified passing** (Phase 21), ~62/83 local tests passing (0 diff, sequential) on bookmark `bash-integration-test`. Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available). **read** now flaky in nix (sandbox `/dev/tty` timing), **comsub** occasionally passes.
 
-See `CHANGELOG.md` for full fix history (160+ fixes across 20 phases).
+See `CHANGELOG.md` for full fix history (170+ fixes across 21 phases).
 
 ### Nix test results (64/77 verified passing)
 
 Verified passing (64/77): alias, appendop, arith-for, **array2** ✅, **attr** ✅, braces, case, casemod, **comsub-eof** ✅, comsub-posix, cond, coproc, cprint, **dirstack** ✅, dollars, dynvar, errors, execscript, exp-tests, **exportfunc** ✅, extglob, extglob2, extglob3, func, getopts, glob-bracket, glob-test, globstar, herestr, ifs, ifs-posix, **input-test** ✅, invert, iquote, mapfile, more-exp, nquote, nquote1, nquote2, nquote3, nquote4, nquote5, parser, posix2, posixexp, posixexp2, posixpat, posixpipe, precedence, printf, **procsub** ✅, quote, **read** ✅, redir, rhs-exp, **set-e** ✅, set-x, shopt, strip, **test** ✅, tilde, tilde2, type, vredir
 
-Verified failing (13/77): arith (~49, arith10.sub error format diffs + `let` empty subscript handling), array (~20, array32/33.sub new tests), assoc (~20, tilde expansion in subscripts), builtins (~130, help output + ulimit flags), comsub (1, flaky SIGPIPE), comsub2 (~20, funsub line numbers + jobs + `$*`), heredoc (~4, heredoc7.sub case 2 line off-by-1), lastpipe (1, flaky SIGPIPE), nameref (~20, nameref24.sub edge cases), new-exp (~50, pattern replacement + nounset), quotearray (~36, nested subscripts + single-quoted `(( ))` error format), trap (1, flaky extra CHLD), varenv (~100, local scope + declare -p format)
+Verified failing (13/77): arith (~49, arith10.sub error format diffs + `let` empty subscript handling in assoc_expand_once mode), array (~20, array32/33.sub new tests), assoc (~20, tilde expansion in subscripts), builtins (~130, help output + ulimit flags), comsub (1, flaky SIGPIPE), comsub2 (~20, funsub line numbers + jobs + `$*`), heredoc (~4, heredoc7.sub case 2 line off-by-1), lastpipe (1, flaky SIGPIPE), nameref (~20, nameref24.sub edge cases), new-exp (~50→~30, pattern replacement longest match fixed, performance fixed, remaining: `${!prefix*}` + nounset), quotearray (~36, nested subscripts + single-quoted `(( ))` error format), trap (1, flaky extra CHLD), varenv (~100, local scope + declare -p format)
+
+Note: **read** now flaky in nix (1 line diff, `read -t 1 < /dev/tty` sandbox timing). **comsub** occasionally passes (flaky SIGPIPE).
+
+**Phase 21 fixes:** `let "a[\"\"]"=22` now correctly assigns to `a[0]` when `assoc_expand_once` is unset (empty subscript evaluates to 0 in `let` context), but still errors when `assoc_expand_once` is set (matching bash). `${var/#pat/rep}` and `${var/%pat/rep}` now use longest match (e.g. `${x/#*/yyy}` replaces entire string, not just empty prefix). `pattern_replace` optimized with fast paths: literal patterns use O(n) `str::replace`, single-char patterns (`?`, `[...]`, `[[:class:]]`) use O(n) per-char matching, fixed-length patterns (no `*`) check only one substring length per position, extglob patterns (`*(...)`, `?(...)`, etc.) correctly computed as variable-length. This fixes new-exp8.sub timeout (10K-char `${z//str}` went from >60s to <1s).
+
+**Phase 21 reduced diffs:** new-exp (~50→~30, pattern replacement with `#*/` and `%*/` anchors now correct, new-exp8.sub performance test now completes), arith (let empty subscript fixed for non-assoc_expand_once case, error format diffs remain).
 
 **Phase 20 fixes:** Associative array subscript expansion in assignments (`A[$key]=val` now expands `$key`), proper quote handling in subscripts (single-quoted content is literal, double-quoted expands), arithmetic bracket depth tracking (operators inside `[...]` subscripts no longer split expressions), bare array variable names in arithmetic resolve to element [0] (`$((x))` where `x` is an array), `~-N` bitwise NOT with negative operand, `declare -p` assoc key quoting matches bash (only shell-special chars are quoted), `eval_arith_full` now receives real arrays/assoc_arrays for proper `${string:A[%]:A[$k1]}` offset evaluation, space-only subscripts like `a[" "]` now correctly evaluate to index 0 instead of erroring.
 
@@ -33,15 +39,16 @@ Failing (~13):
 | Test | Nix diff lines | Notes |
 |------|---------------|-------|
 | trap | 1 | Flaky — timing-dependent signal delivery (extra CHLD) |
-| comsub | 1 | Spurious `echo: write error: Broken pipe` (flaky timing) |
+| comsub | 1 | Spurious `echo: write error: Broken pipe` (flaky timing, sometimes passes) |
 | lastpipe | 1 | Spurious `echo: write error: Broken pipe` (flaky timing) |
+| read | 1 | Flaky — `read -t 1 < /dev/tty` sandbox timing (exit 1 vs >128) |
 | heredoc | ~4 | heredoc7.sub case 2: line number off-by-1 in comsub+heredoc interaction |
 | comsub2 | ~20 | Line number off-by-1 in funsubs + missing `jobs` output + funsub `$*` ordering |
-| arith | ~49 | arith10.sub: `let` empty subscript handling (`let "a[\"\"]"=22` succeeds in nix bash but we error), error format diffs (`\\` vs `""`, `((:`/`let:` prefix, error token quoting), `a[\" \"]` backslash-escaped space subscripts |
+| arith | ~49 | arith10.sub: `let` empty subscript with `assoc_expand_once` error format, `\\` vs `""` in error tokens, `((:`/`let:` prefix, `a[\" \"]` backslash-escaped space subscripts |
 | array | ~20 | array32/33.sub: `$()` injection protection + assoc-to-indexed conversion (nix-only tests) |
 | assoc | ~20 | assoc subscript tilde expansion (`~/key` → `/homes/user/key`) |
 | nameref | ~20 | nameref24.sub: invalid nameref name validation + nounset edge cases |
-| new-exp | ~50 | Pattern replacement with arrays + nounset parameter error format |
+| new-exp | ~30 | `${!prefix*}` expansion, nounset parameter error format, `$(< filename)` redirect behavior |
 | builtins | ~130 | help output formatting + ulimit `-g` flag + ulimit number validation |
 | varenv | ~100 | varenv25.sub: local scope + `declare -p` format in function context |
 | quotearray | ~36 | Remaining: nested subscripts `${A[${a[i]}]}`, `assoc[']]` parsing in `(( ))`, single-quoted `(( ))` error format, `uname` leakage from `$()` in subscript keys |
@@ -202,13 +209,13 @@ These exist in `/tmp/bash-5.3/tests/` but not in the nix test list:
 ### Low-hanging fruit (could flip nix tests to passing)
 
 1. **Fix SIGPIPE flaky tests (comsub/lastpipe/trap)** — 1-line diff each, timing race in nix sandbox. SIGPIPE is reset to SIG_DFL in pipeline/comsub children and EPIPE is suppressed in echo builtin for all subprocess contexts, but the nix sandbox timing still occasionally triggers the race. trap has an extra CHLD signal delivery. printf also has a flaky SIGPIPE race (printf6.sub line 40).
-1. **Fix `let` empty subscript handling** — `let "a[\"\"]"=22` succeeds in nix bash 5.3 (assigns to a[0]) but our shell errors with "not a valid identifier". `(( a[""]=22 ))` correctly errors in both. The difference is `let` processes quotes differently. (~12 nix diff lines from arith10.sub)
+1. **Fix read nix sandbox timing** — `read -t 1 < /dev/tty` returns exit status 1 instead of >128 in nix sandbox. The sandbox may not have `/dev/tty` or behaves differently. (~1 nix diff line)
 
 ### Medium effort
 
 2. **Fix remaining quotearray diffs** — Nested subscripts `${A[${a[i]}]}` need lexer fix to track `${}` nesting inside `[...]` brackets. `((assoc[']']++))` needs `(( ))` lexer to handle single-quoted brackets. Error format for `(( 'expr' ))`. (~36 local diff lines)
 
-3. **Fix arith10.sub error format diffs** — `\\` vs `""` in error tokens for escaped-quote arithmetic, `((:`/`let:` prefix missing/present in some contexts, `a[\" \"]` backslash-escaped space handling. (~49 nix diff lines, mostly error format)
+3. **Fix arith10.sub error format diffs** — `\\` vs `""` in error tokens for escaped-quote arithmetic, `((:`/`let:` prefix missing/present in some contexts, `a[\" \"]` backslash-escaped space handling, `let` empty subscript with `assoc_expand_once` error format. (~49 nix diff lines, mostly error format)
 
 4. **Fix array nix-only failures** — array32.sub: `$()` injection protection in array subscripts. array33.sub: assoc-to-indexed conversion errors. (~20 nix diff lines)
 
@@ -216,7 +223,7 @@ These exist in `/tmp/bash-5.3/tests/` but not in the nix test list:
 
 6. **Fix nameref edge cases** — nameref24.sub: invalid nameref name validation (`aa&bb` should error), nounset with nameref indirection. (~20 nix diff lines)
 
-7. **Fix new-exp remaining diffs** — Pattern replacement with arrays, nounset parameter error format. (~50 nix diff lines)
+7. **Fix new-exp remaining diffs** — `${!prefix*}` indirect expansion (space-separated vs IFS-joined), `$(< filename)` redirect-in-comsub, nounset parameter error format. (~30 nix diff lines)
 
 ### Feature work
 
@@ -233,6 +240,17 @@ These exist in `/tmp/bash-5.3/tests/` but not in the nix test list:
 13. **Implement restricted shell mode (`-r` flag)** — Needed for rsh tests (local-only). (~26 diff lines)
 
 14. **Performance: optimize hot loops** — `ifs-posix` takes ~4 minutes vs bash's ~1s. `arith` takes ~2s vs bash's 0.035s. Profiling needed.
+
+## Recent Fixes (Phase 21)
+
+- **Fix `let` empty subscript handling** — `let "a[\"\"]"=22` now correctly assigns to `a[0]` when `assoc_expand_once` is unset (the default). The `""` inside the subscript is stripped by the arithmetic quote-removal pass, leaving `a[]=22`. In `let` context (not `(( ))`), a pre-stripped expression snapshot detects that the subscript was originally `""` (not truly empty), and treats it as index 0. When `assoc_expand_once` is set, bash still rejects the empty subscript, so the check is conditioned on `!assoc_expand_once`. Fixes first section of arith10.sub `afunc` (assoc_expand_once unset). The second section (assoc_expand_once set) now correctly errors but with different error format than bash (error format is a separate issue).
+- **Fix `${var/#pat/rep}` prefix replacement longest match** — `ReplacePrefix` now iterates from longest to shortest match (`(0..=len).rev()`) instead of shortest to longest. This fixes `${x/#*/yyy}` which should replace the entire string with `yyy` (since `*` matches the whole string from the anchor), not just prepend `yyy` (matching empty string at start). Same fix applied to both `apply_param_op` and `expand_param` call sites.
+- **Fix `${var/%pat/rep}` suffix replacement longest match** — `ReplaceSuffix` now iterates from position 0 upward (`0..=len`) instead of from the end downward. This ensures `${x/%*/yyy}` replaces the entire string (since `*` starting from position 0 is the longest suffix match), not just appends `yyy` (matching empty string at end). Fixes 24 diff lines in new-exp nix test.
+- **Optimize `pattern_replace` for literal patterns** — When the pattern contains no glob metacharacters (`*`, `?`, `[`, `\`, etc.), use `str::replace()` for O(n) performance instead of O(n³) glob matching. Fixes `${z//str}` on 10K-char strings going from >60s timeout to <1s.
+- **Optimize `pattern_replace` for single-char patterns** — Patterns that match exactly one character (`?`, `[abc]`, `[^;]`, `[[:alnum:]]`, `[[:alnum:]_]`) now use O(n) per-character matching. Added `is_single_char_pattern()` that recognizes bracket expressions including POSIX character classes `[:name:]`.
+- **Optimize `pattern_replace` for fixed-length patterns** — When the pattern has no `*` or extglob variable-length constructs, the match length is fixed (min == max), so only one substring length is checked per position — O(n) instead of O(n²). Added proper `min_match_len` calculation that walks pattern tokens (`[...]` = 1 char, `?` = 1, `*` = 0+, extglob `*(...)` = 0+, `+(...)` = 1+, etc.).
+- **Handle extglob in `min_match_len`** — Extglob patterns `*(...)`, `?(...)`, `+(...)`, `@(...)`, `!(...)` are now recognized and correctly computed: `*(...)` and `?(...)` contribute 0 min chars (variable length), `+(...)` contributes 1 min char, `@(...)` and `!(...)` are variable length. Prevents extglob patterns from being miscomputed as fixed-length and missing matches (was causing extglob test regression).
+- **Performance: new-exp8.sub completes** — The test creates a 10K-char string and does 16 `${z//pattern}` operations with various patterns. Previously timed out at 300s. Now completes in seconds thanks to the fast paths.
 
 ## Recent Fixes (Phase 20)
 
