@@ -2,17 +2,19 @@
 
 ## Current State
 
-**~63/77 nix tests verified passing** (Phase 19), ~59/83 local tests passing (0 diff, sequential) on bookmark `bash-integration-test`. Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available).
+**~64/77 nix tests verified passing** (Phase 19), ~60/83 local tests passing (0 diff, sequential) on bookmark `bash-integration-test`. Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available).
 
 See `CHANGELOG.md` for full fix history (150+ fixes across 19 phases).
 
-### Nix test results (63/77 verified passing)
+### Nix test results (64/77 verified passing)
 
-Verified passing (63/77): alias, appendop, arith-for, **array2** ✅, **attr** ✅, braces, case, casemod, **comsub-eof** ✅, comsub-posix, cond, coproc, cprint, **dirstack** ✅, dollars, dynvar, errors, execscript, exp-tests, **exportfunc** ✅, extglob, extglob2, extglob3, func, getopts, glob-bracket, glob-test, globstar, herestr, ifs, ifs-posix, **input-test** ✅, invert, iquote, mapfile, more-exp, nquote, nquote1, nquote2, nquote3, nquote4, nquote5, parser, posix2, posixexp, posixexp2, posixpat, posixpipe, precedence, printf, **procsub** ✅, quote, redir, rhs-exp, **set-e** ✅, set-x, shopt, strip, **test** ✅, tilde, tilde2, type, vredir
+Verified passing (64/77): alias, appendop, arith-for, **array2** ✅, **attr** ✅, braces, case, casemod, **comsub-eof** ✅, comsub-posix, cond, coproc, cprint, **dirstack** ✅, dollars, dynvar, errors, execscript, exp-tests, **exportfunc** ✅, extglob, extglob2, extglob3, func, getopts, glob-bracket, glob-test, globstar, herestr, ifs, ifs-posix, **input-test** ✅, invert, iquote, mapfile, more-exp, nquote, nquote1, nquote2, nquote3, nquote4, nquote5, parser, posix2, posixexp, posixexp2, posixpat, posixpipe, precedence, printf, **procsub** ✅, quote, **read** ✅, redir, rhs-exp, **set-e** ✅, set-x, shopt, strip, **test** ✅, tilde, tilde2, type, vredir
 
-Verified failing (14/77): arith (~16, arith10.sub `a[]` + error format), array (~20, array32/33.sub new tests), assoc (~20, tilde expansion in subscripts), builtins (~130, help output + ulimit flags), comsub (1, flaky SIGPIPE), comsub2 (~20, funsub line numbers + jobs + `$*`), heredoc (~4, heredoc7.sub case 2 line off-by-1), lastpipe (1, flaky SIGPIPE), nameref (~20, nameref24.sub edge cases), new-exp (~50, pattern replacement + nounset), quotearray (~68, single-quoted keys + tilde), read (1, `read -t` timeout format), trap (1, flaky extra CHLD), varenv (~100, local scope + declare -p format)
+Verified failing (13/77): arith (~10, arith10.sub error format diffs), array (~20, array32/33.sub new tests), assoc (~20, tilde expansion in subscripts), builtins (~130, help output + ulimit flags), comsub (1, flaky SIGPIPE), comsub2 (~20, funsub line numbers + jobs + `$*`), heredoc (~4, heredoc7.sub case 2 line off-by-1), lastpipe (1, flaky SIGPIPE), nameref (~20, nameref24.sub edge cases), new-exp (~50, pattern replacement + nounset), quotearray (~68, single-quoted keys + tilde), trap (1, flaky extra CHLD), varenv (~100, local scope + declare -p format)
 
-**Phase 19 flipped to passing:** attr (~4→0 diff, readonly error prefix fix + single-quoted compound assignment scalar treatment), exportfunc (~2→0 diff, funsub `$()` terminator detection in redirect targets). Also newly verified passing: array2, dirstack, input-test, procsub, set-e, test.
+**Phase 19 flipped to passing:** attr (~4→0 diff, readonly error prefix fix + single-quoted compound assignment scalar treatment), exportfunc (~2→0 diff, funsub `$()` terminator detection in redirect targets), read (1→0 diff, poll revents fix). Also newly verified passing: array2, dirstack, input-test, procsub, set-e, test.
+
+**Phase 19 reduced diffs:** arith (~16→~10, empty subscript `a[""]=N` validation in `(( ))` context)
 
 **Phase 18 fixes:** xtrace atomic writes (pipeline interleaving fix), funsub `set -e` disabled in non-posix mode, bad interpreter shebang error messages, `${scalar[@]:offset:length}` character-level substring, associative array subscripts in arithmetic evaluation
 
@@ -22,17 +24,16 @@ Verified failing (14/77): arith (~16, arith10.sub `a[]` + error format), array (
 
 **Phase 15 flipped to passing:** assoc (462→0 diff), quotearray (179→0 diff, from IFS fix), new-exp (310→0 diff), nameref (678→PID-only diff), trap (1→0 locally, may still be flaky in nix)
 
-Failing (~14):
+Failing (~13):
 
 | Test | Nix diff lines | Notes |
 |------|---------------|-------|
 | trap | 1 | Flaky — timing-dependent signal delivery (extra CHLD) |
 | comsub | 1 | Spurious `echo: write error: Broken pipe` (flaky timing) |
 | lastpipe | 1 | Spurious `echo: write error: Broken pipe` (flaky timing) |
-| read | 1 | `read -t` timeout: prints `1` instead of `timeout 1: ok` |
 | heredoc | ~4 | heredoc7.sub case 2: line number off-by-1 in comsub+heredoc interaction |
 | comsub2 | ~20 | Line number off-by-1 in funsubs + missing `jobs` output + funsub `$*` ordering |
-| arith | ~16 | arith10.sub: empty subscript `a[]` handling + error format diffs (nix-only test) |
+| arith | ~10 | arith10.sub: error format diffs (`\\` vs `""`, `((:`/`let:` prefix, error token quoting) |
 | array | ~20 | array32/33.sub: `$()` injection protection + assoc-to-indexed conversion (nix-only tests) |
 | assoc | ~20 | assoc subscript tilde expansion (`~/key` → `/homes/user/key`) |
 | nameref | ~20 | nameref24.sub: invalid nameref name validation + nounset edge cases |
@@ -102,7 +103,6 @@ Suggested nix timeout: 30s for most tests, 120s for trap.
 - **trap** (1 line) — Timing-dependent signal delivery (extra CHLD)
 - **comsub** (1 line) — Spurious `echo: write error: Broken pipe` (SIGPIPE timing race in nix sandbox)
 - **lastpipe** (1 line) — Spurious `echo: write error: Broken pipe` (SIGPIPE timing race in nix sandbox)
-- **read** (1 line) — `read -t` timeout: prints `1` instead of `timeout 1: ok`
 
 ### Medium diffs
 
@@ -110,7 +110,7 @@ Suggested nix timeout: 30s for most tests, 120s for trap.
 - **comsub2** (~20 lines) — Line number off-by-1 in funsubs + missing `jobs` output + funsub `$*` ordering
 - **nameref** (~20 lines) — nameref24.sub: invalid nameref name validation (`aa&bb`) + nounset edge cases with namerefs
 - **new-exp** (~50 lines) — Pattern replacement with arrays (`${arr[@]/pat/rep}`) + nounset parameter error format
-- **arith** (~16 lines) — arith10.sub: empty subscript `a[]` handling + error format diffs (nix-only test)
+- **arith** (~10 lines) — arith10.sub: error format diffs (`\\` vs `""` in error tokens, `((:`/`let:` prefix differences, `let` empty subscript handling)
 - **array** (~20 lines) — array32/33.sub: `$()` injection protection + assoc-to-indexed conversion (nix-only tests)
 - **assoc** (~20 lines) — assoc subscript tilde expansion (`~/key` → `/homes/user/key`)
 - **quotearray** (~68 lines) — Single-quoted keys in arithmetic (`(( assoc['key']++ ))`), tilde in subscripts
@@ -124,6 +124,7 @@ Suggested nix timeout: 30s for most tests, 120s for trap.
 
 - **~~attr~~** (~4→0 lines) — Fixed readonly error prefix: `readonly -a r='(7)'` now uses `readonly:` as context (not function name). Single-quoted compound values without `-a` flag treated as scalar (not compound assignment). ✅
 - **~~exportfunc~~** (~2→0 lines) — Fixed funsub `$()` terminator detection: `$( )` closing paren inside funsub no longer incorrectly sets the command-terminator flag, so `${ $() }` without `;` correctly fails to parse. ✅
+- **~~read~~** (1→0 lines) — Fixed `read -t` poll revents bug: `poll_fd.revents()` was read from the original variable instead of the mutable array element after `poll()`, always returning empty flags. Non-poll timeout now also checks for POLLHUP without POLLIN. ✅
 
 ### Now passing (Phase 17 fixed)
 
@@ -198,44 +199,44 @@ These exist in `/tmp/bash-5.3/tests/` but not in the nix test list:
 
 1. **Fix SIGPIPE flaky tests (comsub/lastpipe/trap)** — 1-line diff each, timing race in nix sandbox. SIGPIPE is reset to SIG_DFL in pipeline/comsub children and EPIPE is suppressed in echo builtin for all subprocess contexts, but the nix sandbox timing still occasionally triggers the race. trap has an extra CHLD signal delivery. printf also has a flaky SIGPIPE race (printf6.sub line 40).
 
-2. **Fix read -t timeout format** — `read -t 1` on timeout should print `timeout 1: ok` but prints `1`. (~1 nix diff line)
-
 ### Medium effort
 
-3. **Fix remaining quotearray diffs** — Single-quoted keys in arithmetic: `(( assoc['key']++ ))`. Need to detect single quotes inside `[...]` subscripts in the arithmetic evaluator. Also tilde expansion in subscripts. (~68 nix diff lines)
+2. **Fix remaining quotearray diffs** — Single-quoted keys in arithmetic: `(( assoc['key']++ ))`. Need to detect single quotes inside `[...]` subscripts in the arithmetic evaluator. Also tilde expansion in subscripts. (~68 nix diff lines)
 
-4. **Fix arith nix-only failures** — arith10.sub: empty subscript `a[""]=24` in `(( ))` should error. Error format differences for backslash and let prefixes. (~16 nix diff lines)
+3. **Fix arith remaining error format diffs** — arith10.sub: `\\` vs `""` in error tokens for escaped-quote arithmetic, `((:`/`let:` prefix missing/present in some contexts, `let` empty subscript handling differs from `(( ))`. (~10 nix diff lines)
 
-5. **Fix array nix-only failures** — array32.sub: `$()` injection protection in array subscripts. array33.sub: assoc-to-indexed conversion errors. (~20 nix diff lines)
+4. **Fix array nix-only failures** — array32.sub: `$()` injection protection in array subscripts. array33.sub: assoc-to-indexed conversion errors. (~20 nix diff lines)
 
-6. **Fix assoc tilde expansion** — Tilde expansion in associative array subscripts and values: `aa[~/key]=~/Desktop` should expand `~` to home directory. (~20 nix diff lines)
+5. **Fix assoc tilde expansion** — Tilde expansion in associative array subscripts and values: `aa[~/key]=~/Desktop` should expand `~` to home directory. (~20 nix diff lines)
 
-7. **Fix nameref edge cases** — nameref24.sub: invalid nameref name validation (`aa&bb` should error), nounset with nameref indirection. (~20 nix diff lines)
+6. **Fix nameref edge cases** — nameref24.sub: invalid nameref name validation (`aa&bb` should error), nounset with nameref indirection. (~20 nix diff lines)
 
-8. **Fix new-exp remaining diffs** — Pattern replacement with arrays, nounset parameter error format. (~50 nix diff lines)
+7. **Fix new-exp remaining diffs** — Pattern replacement with arrays, nounset parameter error format. (~50 nix diff lines)
 
 ### Feature work
 
-9. **Fix remaining heredoc7.sub case 2** — heredoc started outside comsub (`cat <<EOF && grep $(`) where the heredoc delimiter `EOF` appears on a line consumed by the comsub body. Line numbers off by 1. (~4 nix diff lines)
+8. **Fix remaining heredoc7.sub case 2** — heredoc started outside comsub (`cat <<EOF && grep $(`) where the heredoc delimiter `EOF` appears on a line consumed by the comsub body. Line numbers off by 1. (~4 nix diff lines)
 
-10. **Fix comsub2 remaining diffs** — (a) funsub `$*` ordering issue: `"$*${ set -- a b c;}$*"` should see updated positional params for the second `$*` — requires expansion layer to re-read shell state after funsub callback; (b) `jobs` builtin stub needs real job table access in funsubs; (c) line number off-by-1 in multi-line funsubs. (~20 nix diff lines)
+9. **Fix comsub2 remaining diffs** — (a) funsub `$*` ordering issue: `"$*${ set -- a b c;}$*"` should see updated positional params for the second `$*` — requires expansion layer to re-read shell state after funsub callback; (b) `jobs` builtin stub needs real job table access in funsubs; (c) line number off-by-1 in multi-line funsubs. (~20 nix diff lines)
 
-11. **Fix builtins test** — help output formatting, ulimit `-g` flag, ulimit number validation. (~130 nix diff lines)
+10. **Fix builtins test** — help output formatting, ulimit `-g` flag, ulimit number validation. (~130 nix diff lines)
 
-12. **Fix varenv test** — varenv25.sub: local scope management, `declare -p` format inside function context. (~100 nix diff lines)
+11. **Fix varenv test** — varenv25.sub: local scope management, `declare -p` format inside function context. (~100 nix diff lines)
 
-13. **Implement `caller` builtin and fix DEBUG trap context** — Needed for dbg-support tests (local-only). (~375+15 diff lines)
+12. **Implement `caller` builtin and fix DEBUG trap context** — Needed for dbg-support tests (local-only). (~375+15 diff lines)
 
-14. **Implement restricted shell mode (`-r` flag)** — Needed for rsh tests (local-only). (~26 diff lines)
+13. **Implement restricted shell mode (`-r` flag)** — Needed for rsh tests (local-only). (~26 diff lines)
 
-15. **Performance: optimize hot loops** — `ifs-posix` takes ~4 minutes vs bash's ~1s. `arith` takes ~2s vs bash's 0.035s. Profiling needed.
+14. **Performance: optimize hot loops** — `ifs-posix` takes ~4 minutes vs bash's ~1s. `arith` takes ~2s vs bash's 0.035s. Profiling needed.
 
 ## Recent Fixes (Phase 19)
 
 - **Fix readonly error prefix for single-quoted compound assignments** — `readonly -a r='(7)'` (quoted, with `-a` flag) now uses `readonly:` as error context instead of the function name. `readonly r='(5)'` (quoted, without `-a`) uses just the variable name. Unquoted compound `readonly -a r=(6)` still uses function name as context. Fixes **attr** nix test (4→0 diff lines).
 - **Fix single-quoted values treated as scalar without `-a` flag** — `export r='(5)'` without `-a` flag now correctly stores the literal string `(5)` in `r[0]` instead of parsing `(5)` as a compound array assignment. When `paren_from_single_quote` is true, compound assignment pre-processing in `run_simple_command` only activates if `-a` or `-A` flag is present. Fixes the `declare -ax r=([0]="5")` vs `declare -ax r=([0]="(5)")` nix diff.
 - **Fix funsub `$()` terminator detection** — Inside funsub `${ ... }` parsing, `$(...)` command substitutions are now properly skipped as nested constructs. Previously, the `)` from `$()` incorrectly set `has_terminator_at_depth1 = true` (because the `(` and `)` were tracked as subshell parentheses), which allowed `}` to close the funsub without a `;` terminator. Now `$()`, `$((...))`, and `${ ... }` inside funsubs are fully skipped. `${ $() }` correctly fails with "unexpected EOF while looking for matching `}'". Fixes **exportfunc** nix test (2→0 diff lines).
-- **Newly verified passing tests** — array2, dirstack, input-test, procsub, set-e, test all verified passing in nix (were previously unverified).
+- **Fix `read -t` poll revents bug** — `poll_fd.revents()` was read from the original `PollFd` variable instead of the mutable array element modified by `poll()`, always returning empty flags. Changed to use `poll_fds[0].revents()`. Also added POLLHUP-without-POLLIN check for non-poll timeouts: when the fd has no readable data (only hangup/error), return 142 (timeout) instead of falling through to a read that would immediately return EOF. Fixes **read** nix test (1→0 diff lines).
+- **Fix empty arithmetic subscript validation** — `(( a[""]=24 ))`, `a[""]=N` in `(( ))` context, and similar empty-subscript array assignments now correctly error with `` `a[]': not a valid identifier `` instead of silently treating `""` as index 0. Added `is_empty_arith_subscript()` check at all 5 array access paths in the arithmetic evaluator (compound assignment, simple assignment, post-inc/dec, pre-inc, pre-dec). Uses context-aware `arith_cmd_prefix()` for proper `((:`/`let:`/no prefix. Reduced **arith** nix diff from ~16→~10 lines.
+- **Newly verified passing tests** — array2, dirstack, input-test, procsub, set-e, test, read all verified passing in nix.
 
 ## Recent Fixes (Phase 18)
 
