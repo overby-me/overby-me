@@ -2,15 +2,19 @@
 
 ## Current State
 
-**~73/77 nix tests passing** (estimated), ~57/83 local tests passing (0 diff, sequential) on bookmark `bash-integration-test`. Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available).
+**~55/60 nix tests verified passing** (Phase 18), ~57/83 local tests passing (0 diff, sequential) on bookmark `bash-integration-test`. Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available).
 
 See `CHANGELOG.md` for full fix history (150+ fixes across 18 phases).
 
-### Nix test results (~73/77 passing, estimated)
+### Nix test results (55/60 verified passing)
 
-Passing (~73): alias, appendop, **arith** ✅, arith-for, **array** ✅, array2, **assoc** ✅, attr, braces, **builtins** ✅, case, casemod, **comsub-eof** ✅, comsub-posix, cond, coproc, cprint, dirstack, dollars, dynvar, errors, execscript, exp-tests, exportfunc, extglob, extglob2, extglob3, func, getopts, glob-bracket, glob-test, globstar, **heredoc** ✅, herestr, ifs, ifs-posix, input-test, invert, iquote, mapfile, more-exp, **nameref** ✅, **new-exp** ✅, nquote, nquote1, nquote2, nquote3, nquote4, nquote5, parser, posix2, posixexp, posixexp2, posixpat, posixpipe, precedence, printf, procsub, quote, ~~quotearray~~, read, redir, rhs-exp, set-e, set-x, shopt, strip, test, tilde, tilde2, type, **varenv** ✅, vredir
+Verified passing (55/60): alias, appendop, arith-for, braces, case, casemod, **comsub-eof** ✅, comsub-posix, cond, coproc, cprint, dollars, dynvar, errors, execscript, exp-tests, extglob, extglob2, extglob3, func, getopts, glob-bracket, glob-test, globstar, herestr, ifs, ifs-posix, invert, iquote, mapfile, more-exp, nquote, nquote1, nquote2, nquote3, nquote4, nquote5, parser, posix2, posixexp, posixexp2, posixpat, posixpipe, precedence, printf, quote, redir, rhs-exp, set-x, shopt, strip, tilde, tilde2, type, vredir
 
-**Phase 18 fixes:** xtrace atomic writes (pipeline interleaving fix), funsub `set -e` disabled in non-posix mode, bad interpreter shebang error messages, `${scalar[@]:offset:length}` character-level substring
+Verified failing (5/60): arith (arith10.sub `a[]` + error format), array (array32/33.sub new tests), assoc (tilde expansion in subscripts), attr (readonly error prefix + value format), exportfunc (funsub `${` parsing in redirect targets)
+
+Not yet re-verified in nix (17): array2, builtins, comsub, dirstack, heredoc, input-test, lastpipe, nameref, new-exp, procsub, quotearray, read, set-e, test, trap, varenv (many expected PID-only or flaky timing diffs)
+
+**Phase 18 fixes:** xtrace atomic writes (pipeline interleaving fix), funsub `set -e` disabled in non-posix mode, bad interpreter shebang error messages, `${scalar[@]:offset:length}` character-level substring, associative array subscripts in arithmetic evaluation
 
 **Phase 17 flipped to passing:** comsub-eof (1→0 diff, incomplete comsub detection fix + heredoc EOF warning on parse errors), heredoc3.sub (1→0 diff, subshell EOF error reporting)
 
@@ -28,9 +32,14 @@ Failing (~4):
 | set-e | 1 | Spurious `echo: write error: Broken pipe` (flaky timing) |
 | heredoc | ~4 | heredoc7.sub case 2: line number off-by-1 in comsub+heredoc interaction |
 | comsub2 | ~20 | Line number off-by-1 in funsubs + missing `jobs` output + funsub `$*` ordering |
-| quotearray | ~200 | Arithmetic eval of quoted assoc array subscripts (`(( assoc['key']++ ))`) |
+| arith | ~16 | arith10.sub: empty subscript `a[]` handling + error format diffs (nix-only test) |
+| array | ~20 | array32/33.sub: `$()` injection protection + assoc-to-indexed conversion (nix-only tests) |
+| assoc | ~20 | assoc subscript tilde expansion (`~/key` → `/homes/user/key`) |
+| attr | ~4 | readonly error prefix format (`f:` vs `readonly:`) + value parenthesization |
+| exportfunc | ~2 | funsub `${` parsing in redirect targets: `>_[${ $() }]` should fail to parse |
+| quotearray | ~68 | Remaining: single-quoted keys in arithmetic (`(( assoc['key']++ ))`), tilde in subscripts |
 
-**Note on quotearray:** Previously passing in Phase 15 (IFS fix), but now failing due to arithmetic evaluation of single-quoted associative array subscripts inside `(( ... ))`. The bash 5.3 test suite requires `(( assoc['x],b[$(echo uname >&2)']++ ))` to treat the single-quoted key as a literal subscript. Our arithmetic evaluator mishandles the quote parsing.
+**Phase 18 improved quotearray** from ~200→~68 diff lines by adding associative array subscript support in arithmetic evaluation. The basic case `(( assoc[$key]++ ))` now works correctly. Remaining issues: single-quoted subscripts in `(( ))`, `~` tilde expansion in subscripts, and some error format differences.
 
 ### Local test results (~57/83 passing, 0 diff sequential)
 
@@ -170,19 +179,31 @@ These exist in `/tmp/bash-5.3/tests/` but not in the nix test list:
 
 1. **Fix SIGPIPE flaky tests (comsub/lastpipe/trap/set-e)** — 1-line diff each, timing race in nix sandbox. SIGPIPE is reset to SIG_DFL in pipeline/comsub children and EPIPE is suppressed in echo builtin for all subprocess contexts, but the nix sandbox timing still occasionally triggers the race. trap has an extra CHLD signal delivery. printf also has a flaky SIGPIPE race (printf6.sub line 40).
 
-2. **Fix quotearray regression** — Arithmetic evaluation of single-quoted associative array subscripts inside `(( ... ))`. Need to handle `(( assoc['key']++ ))` where the single-quoted content should be used as a literal subscript key. (~200 diff lines)
+2. **Fix attr test** — (a) readonly error prefix: function context says `f: r:` instead of `readonly: r:`; (b) `declare -ax r=(5)` stores `"5"` instead of `"(5)"`. (~4 nix diff lines)
+
+3. **Fix exportfunc test** — The eval `'foo() { _; } >_[${ $() }] ;{ echo eval ok; }'` should fail to parse because `${` followed by space starts a funsub that consumes the closing `}`. Our parser incorrectly succeeds. (~2 nix diff lines)
+
+### Medium effort
+
+4. **Fix remaining quotearray diffs** — Single-quoted keys in arithmetic: `(( assoc['key']++ ))`. Need to detect single quotes inside `[...]` subscripts in the arithmetic evaluator. Also tilde expansion in subscripts. (~68 nix diff lines)
+
+5. **Fix arith nix-only failures** — arith10.sub: empty subscript `a[""]=24` in `(( ))` should error. Error format differences for backslash and let prefixes. (~16 nix diff lines)
+
+6. **Fix array nix-only failures** — array32.sub: `$()` injection protection in array subscripts. array33.sub: assoc-to-indexed conversion errors. (~20 nix diff lines)
+
+7. **Fix assoc tilde expansion** — Tilde expansion in associative array subscripts and values: `aa[~/key]=~/Desktop` should expand `~` to home directory. (~20 nix diff lines)
 
 ### Feature work
 
-3. **Fix remaining heredoc7.sub case 2** — heredoc started outside comsub (`cat <<EOF && grep $(`) where the heredoc delimiter `EOF` appears on a line consumed by the comsub body. Line numbers off by 1. (~4 nix diff lines)
+8. **Fix remaining heredoc7.sub case 2** — heredoc started outside comsub (`cat <<EOF && grep $(`) where the heredoc delimiter `EOF` appears on a line consumed by the comsub body. Line numbers off by 1. (~4 nix diff lines)
 
-4. **Fix comsub2 remaining diffs** — (a) funsub `$*` ordering issue: `"$*${ set -- a b c;}$*"` should see updated positional params for the second `$*` — requires expansion layer to re-read shell state after funsub callback; (b) `jobs` builtin stub needs real job table access in funsubs; (c) line number off-by-1 in multi-line funsubs. (~20 nix diff lines)
+9. **Fix comsub2 remaining diffs** — (a) funsub `$*` ordering issue: `"$*${ set -- a b c;}$*"` should see updated positional params for the second `$*` — requires expansion layer to re-read shell state after funsub callback; (b) `jobs` builtin stub needs real job table access in funsubs; (c) line number off-by-1 in multi-line funsubs. (~20 nix diff lines)
 
-5. **Implement `caller` builtin and fix DEBUG trap context** — Needed for dbg-support tests (local-only). (~375+15 diff lines)
+10. **Implement `caller` builtin and fix DEBUG trap context** — Needed for dbg-support tests (local-only). (~375+15 diff lines)
 
-6. **Implement restricted shell mode (`-r` flag)** — Needed for rsh tests (local-only). (~26 diff lines)
+11. **Implement restricted shell mode (`-r` flag)** — Needed for rsh tests (local-only). (~26 diff lines)
 
-7. **Performance: optimize hot loops** — `ifs-posix` takes ~4 minutes vs bash's ~1s. `arith` takes ~2s vs bash's 0.035s. Profiling needed.
+12. **Performance: optimize hot loops** — `ifs-posix` takes ~4 minutes vs bash's ~1s. `arith` takes ~2s vs bash's 0.035s. Profiling needed.
 
 ## Recent Fixes (Phase 18)
 
@@ -190,6 +211,8 @@ These exist in `/tmp/bash-5.3/tests/` but not in the nix test list:
 - **Disable `set -e` inside funsubs (non-posix mode)** — Bash disables `set -e` (errexit) inside `${ ... }` nofork command substitutions in non-posix mode, matching regular command substitution behavior. In posix mode, `set -e` still propagates. Applied to both `capture_output_nofork` (funsub) and `capture_valuesub` (valuesub). Fixed **comsub22.sub** (`set -e` + funsub + `false` test).
 - **Detect bad interpreter shebang error** — When exec fails with ENOENT for a file that exists (bad interpreter in shebang), read the `#!` line and report `script: interp: bad interpreter: No such file or directory` matching bash's error format. Previously reported just `No such file or directory`.
 - **Fix `${scalar[@]:offset:length}` substring** — When a scalar variable is accessed with `[@]` subscript and a `:offset:length` operation, perform character-level substring (same as `${var:offset:length}`) instead of returning empty for offset > 0. Fixed in both `expand_param` and `get_array_elements`. Fixed **new-exp** test (18→PID-only diff).
+- **Support associative array subscripts in arithmetic evaluation** — Added `ArithSubscript` enum and helper methods (`arith_subscript_key`, `arith_array_get`, `arith_array_set`) so that `(( assoc[key]++ ))`, `(( assoc[$key]=val ))`, `++assoc[key]`, `assoc[key]--` all correctly use string keys for associative arrays while keeping numeric index evaluation for indexed arrays. Applied to all 6 array access patterns in `eval_arith_expr_inner` (compound assignment, simple assignment, post-inc/dec, pre-inc/dec, pre-dec, and value lookup).
+- **Skip `$var` expansion inside associative array subscripts in arithmetic** — Modified `expand_comsubs_in_arith` to track whether we're inside `name[...]` where `name` is an associative array. When inside such a subscript, `$var` and `${var}` references are left unexpanded so the arithmetic evaluator's `arith_subscript_key` can handle them properly (expanded values containing `]` would break bracket matching). Indexed array subscripts still expand normally. Reduced **quotearray** from ~200→~68 diff lines.
 
 ## Recent Fixes (Phase 17)
 
