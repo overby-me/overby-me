@@ -17,11 +17,6 @@
     sed -i '/journalctl -n 1 -p info -o cat --unit="\$UNIT_NAME" --after-cursor=.*_PID=1/s/.*/true # SKIP: cursor race/' TEST-04-JOURNAL.journal.sh
     # Also skip the --reverse variant of the same cursor test (same race issue)
     sed -i '/journalctl -n 1 -p info -o cat --unit="\$UNIT_NAME" --after-cursor=.*--reverse/s/.*/true # SKIP: cursor race/' TEST-04-JOURNAL.journal.sh
-    # Skip --follow tests (lines 215-231): --follow --file, --follow --merge,
-    # and --follow --cursor-file. These hang in the full suite (after other
-    # subtests have produced many journal entries, follow mode is too slow
-    # to read all entries before piped head/timeout expires).
-    sed -i '/^# https:.*\/issues\/15528/,/^# Check that the seqnum/{/^# Check that the seqnum/!s/.*/: # SKIP follow/}' TEST-04-JOURNAL.journal.sh
 
   '';
 }

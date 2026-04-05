@@ -41,9 +41,12 @@
 
 use clap::Parser;
 use libsystemd::journal::entry::{JournalEntry, format_realtime_iso, format_realtime_utc};
-use libsystemd::journal::storage::{JournalStorage, StorageConfig, read_file_compress};
+use libsystemd::journal::storage::{
+    JournalStorage, StorageConfig, list_all_journal_files, read_entries_from_offset,
+    read_file_compress,
+};
 use regex::Regex;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -2513,11 +2516,16 @@ fn main() {
 }
 
 /// Follow the journal, printing new entries as they appear.
+///
+/// Uses incremental reads: on each poll cycle, only entries appended since
+/// the last check are read from disk.  This avoids re-reading the entire
+/// journal every 500 ms, which is critical for large journals (e.g. after
+/// many subtests have run).
 fn follow_journal(
     cli: &Cli,
     format: OutputFormat,
     fmt_opts: &FormatOptions,
-    _initial_storage: &JournalStorage,
+    initial_storage: &JournalStorage,
 ) {
     // Re-enable SIGPIPE default handling so the process exits when piped to
     // head/grep/etc. Without this, the follow loop hangs forever after the
@@ -2529,60 +2537,71 @@ fn follow_journal(
 
     let stdout = io::stdout();
 
-    // Track the last seen timestamp + seqnum
-    let mut last_realtime: u64 = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_micros() as u64;
-    let mut last_seqnum: u64 = u64::MAX;
+    // Track byte offsets in each journal file so we only read new entries.
+    let mut file_offsets: HashMap<PathBuf, u64> = HashMap::new();
+    let journal_dir = initial_storage.journal_dir();
+
+    // Initialize offsets to current file sizes (skip all existing entries —
+    // the initial batch was already printed by the caller).
+    if let Ok(files) = list_all_journal_files(&journal_dir) {
+        for path in &files {
+            if let Ok(meta) = fs::metadata(path) {
+                file_offsets.insert(path.clone(), meta.len());
+            }
+        }
+    }
 
     loop {
         std::thread::sleep(Duration::from_millis(500));
 
-        // Reopen storage to pick up new entries
-        let storage = match open_storage(cli) {
-            Ok(s) => s,
+        // Discover journal files (may include newly rotated files)
+        let files = match list_all_journal_files(&journal_dir) {
+            Ok(f) => f,
             Err(_) => continue,
         };
 
-        let entries = match storage.read_all() {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
+        // Read only new entries from each file
+        let mut new_entries = Vec::new();
+        for path in &files {
+            let prev_offset = file_offsets.get(path).copied().unwrap_or(0);
+            if let Ok((entries, new_offset)) = read_entries_from_offset(path, prev_offset) {
+                new_entries.extend(entries);
+                file_offsets.insert(path.clone(), new_offset);
+            }
+        }
+
+        // Sort by timestamp then seqnum (entries may come from multiple files)
+        new_entries.sort_by(|a, b| {
+            a.realtime_usec
+                .cmp(&b.realtime_usec)
+                .then_with(|| a.seqnum.cmp(&b.seqnum))
+        });
 
         let mut writer = io::BufWriter::new(stdout.lock());
 
-        for entry in &entries {
-            // Only show entries newer than what we've already printed
-            if entry.realtime_usec > last_realtime
-                || (entry.realtime_usec == last_realtime && entry.seqnum > last_seqnum)
-            {
-                // Apply same filters as the main query
-                if !matches_follow_filters(entry, cli) {
-                    continue;
-                }
+        for entry in &new_entries {
+            // Apply same filters as the main query
+            if !matches_follow_filters(entry, cli) {
+                continue;
+            }
 
-                if let Err(e) = format_entry(entry, format, fmt_opts, &mut writer) {
-                    if e.kind() == io::ErrorKind::BrokenPipe {
-                        process::exit(0);
-                    }
-                    return;
+            if let Err(e) = format_entry(entry, format, fmt_opts, &mut writer) {
+                if e.kind() == io::ErrorKind::BrokenPipe {
+                    process::exit(0);
                 }
+                return;
+            }
 
-                last_realtime = entry.realtime_usec;
-                last_seqnum = entry.seqnum;
-
-                // Write cursor-file after each entry so it's up-to-date on exit
-                if let Some(ref file) = cli.cursor_file {
-                    let cursor = format!(
-                        "s=0;i={:x};b={};m={:x};t={:x};x=0",
-                        entry.seqnum,
-                        entry.boot_id().unwrap_or_default(),
-                        entry.monotonic_usec,
-                        entry.realtime_usec,
-                    );
-                    let _ = fs::write(file, &cursor);
-                }
+            // Write cursor-file after each entry so it's up-to-date on exit
+            if let Some(ref file) = cli.cursor_file {
+                let cursor = format!(
+                    "s=0;i={:x};b={};m={:x};t={:x};x=0",
+                    entry.seqnum,
+                    entry.boot_id().unwrap_or_default(),
+                    entry.monotonic_usec,
+                    entry.realtime_usec,
+                );
+                let _ = fs::write(file, &cursor);
             }
         }
 

@@ -717,7 +717,7 @@ impl JournalStorage {
     }
 
     /// Resolve the actual journal directory, respecting `direct_directory`.
-    fn journal_dir(&self) -> PathBuf {
+    pub fn journal_dir(&self) -> PathBuf {
         if self.config.direct_directory {
             self.config.directory.clone()
         } else {
@@ -1317,6 +1317,54 @@ pub fn parse_cursor_boot_id(cursor: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Read JRNL_RS entries from a journal file starting at a given byte offset.
+///
+/// Returns the entries read and the new byte offset (end of last entry read).
+/// This is used by follow mode for incremental reads — on each poll cycle,
+/// only new entries appended since the last offset are read.
+pub fn read_entries_from_offset(path: &Path, offset: u64) -> io::Result<(Vec<JournalEntry>, u64)> {
+    let file = File::open(path)?;
+    let file_len = file.metadata()?.len();
+    if offset >= file_len {
+        return Ok((Vec::new(), offset));
+    }
+    let mut reader = BufReader::new(file);
+    let start = if offset < HEADER_SIZE {
+        HEADER_SIZE
+    } else {
+        offset
+    };
+    reader.seek(SeekFrom::Start(start))?;
+
+    let mut entries = Vec::new();
+    loop {
+        match deserialize_entry(&mut reader) {
+            Ok(entry) => entries.push(entry),
+            Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
+            Err(_) => break,
+        }
+    }
+
+    let end_offset = reader.stream_position().unwrap_or(file_len);
+    Ok((entries, end_offset))
+}
+
+/// List journal files (`.journal` and `.journal~`) in a directory.
+pub fn list_all_journal_files(dir: &Path) -> io::Result<Vec<PathBuf>> {
+    let mut files = list_journal_files(dir)?;
+    if dir.exists() {
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "journal~") && path.is_file() {
+                files.push(path);
+            }
+        }
+    }
+    files.sort();
+    Ok(files)
 }
 
 // ---------------------------------------------------------------------------
