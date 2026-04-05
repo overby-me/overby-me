@@ -2358,17 +2358,29 @@ fn main() {
         None
     };
 
+    // In C systemd, the cursor sets the iteration start position and
+    // --reverse controls direction.  With --reverse, the cursor becomes an
+    // upper bound (iterate backwards from cursor).  Without --reverse it is
+    // a lower bound (iterate forward from cursor).
     if let Some(ref cursor_str) = effective_cursor
         && effective_after_cursor.is_none()
         && let Some((seqnum, _realtime)) = parse_cursor(cursor_str)
     {
-        filtered.retain(|e| e.seqnum >= seqnum);
+        if cli.reverse {
+            filtered.retain(|e| e.seqnum <= seqnum);
+        } else {
+            filtered.retain(|e| e.seqnum >= seqnum);
+        }
     }
 
     if let Some(ref cursor_str) = effective_after_cursor
         && let Some((seqnum, _realtime)) = parse_cursor(cursor_str)
     {
-        filtered.retain(|e| e.seqnum > seqnum);
+        if cli.reverse {
+            filtered.retain(|e| e.seqnum < seqnum);
+        } else {
+            filtered.retain(|e| e.seqnum > seqnum);
+        }
     }
 
     // Free-form match expressions: FIELD=VALUE, /path/to/executable, or + (OR)
@@ -2425,6 +2437,13 @@ fn main() {
     let last_entry_before_truncation = filtered.last().cloned();
 
     // Limit number of entries
+    //
+    // In C systemd, --after-cursor sets the iteration start to the cursor
+    // position, so `-n N` counts N entries forward from cursor (head, not
+    // tail).  Without a cursor, `-n N` shows the last N entries (tail).
+    // Match this: when a cursor is active and direction is forward (no
+    // --reverse), `-n` uses head-from-cursor semantics.
+    let cursor_active = effective_after_cursor.is_some() || effective_cursor.is_some();
     if let Some(ref n_str) = cli.lines {
         // -n all: show all entries (no limit)
         if n_str.eq_ignore_ascii_case("all") {
@@ -2436,8 +2455,8 @@ fn main() {
             } else {
                 n_str.parse().unwrap_or(0)
             };
-            if from_start {
-                // +N: show the first N entries from the start
+            if from_start || (cursor_active && !cli.reverse) {
+                // +N or cursor-based forward: show the first N entries
                 filtered.truncate(n);
             } else if n > 0 && !cli.reverse {
                 // Show the last N entries (tail behavior)
