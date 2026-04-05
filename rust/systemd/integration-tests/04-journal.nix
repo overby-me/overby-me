@@ -1,6 +1,6 @@
 {
   name = "04-JOURNAL";
-  # Passing subtests: cat, corrupted-journals, fss, invocation, journal, journal-corrupt, reload, stopped-socket-activation
+  # Passing subtests: cat, corrupted-journals, fss, invocation, journal, journal-append, journal-corrupt, LogFilterPatterns, reload, stopped-socket-activation
   # Skipped subtests and reasons:
   # - bsod: systemd-bsod hangs reading journal (VT display timeout in VM)
   # - journal-gatewayd: uses C systemd-journal-gatewayd HTTP server (not reimplemented)
