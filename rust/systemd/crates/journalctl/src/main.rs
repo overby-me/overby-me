@@ -1478,8 +1478,9 @@ fn detect_boots(entries: &[JournalEntry]) -> Vec<BootRecord> {
         }
     }
 
-    // Sort by first timestamp
-    boots.sort_by_key(|b| b.first_timestamp);
+    // Sort by last timestamp (matches C systemd behavior — the boot with
+    // the most recent final entry is index 0)
+    boots.sort_by_key(|b| b.last_timestamp);
     boots
 }
 

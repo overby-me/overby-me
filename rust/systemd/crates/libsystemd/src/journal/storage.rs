@@ -1221,7 +1221,19 @@ impl JournalReader {
 /// files before being skipped with a warning.
 fn read_all_from_directory(directory: &Path) -> io::Result<Vec<JournalEntry>> {
     let mut all_entries = Vec::new();
+    // Include both .journal and .journal~ (dirty/unclean) files for reading.
+    // list_journal_files() only returns .journal files (used by the write path),
+    // so we also scan for .journal~ files here.
     let mut files = list_journal_files(directory)?;
+    if directory.exists() {
+        for entry in fs::read_dir(directory)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "journal~") && path.is_file() {
+                files.push(path);
+            }
+        }
+    }
     files.sort();
 
     for file_path in &files {
