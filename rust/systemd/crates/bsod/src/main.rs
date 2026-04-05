@@ -5,7 +5,10 @@
 //! it on a free virtual terminal with a blue background.
 
 use clap::Parser;
-use libsystemd::journal::storage::{JournalStorage, StorageConfig};
+use libsystemd::journal::storage::{
+    list_all_journal_files, read_entries_from_offset, JournalStorage, StorageConfig,
+};
+use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::os::unix::io::AsRawFd;
@@ -38,112 +41,104 @@ fn read_boot_id() -> String {
         .unwrap_or_else(|_| "0".repeat(32))
 }
 
-/// Find the first emergency message from the current boot with UID=0.
+/// Resolve the journal directory (with machine-id subdirectory).
+fn journal_directory() -> PathBuf {
+    let base = if PathBuf::from("/var/log/journal").is_dir() {
+        PathBuf::from("/var/log/journal")
+    } else {
+        PathBuf::from("/run/log/journal")
+    };
+
+    // Append machine-id subdirectory (matching JournalStorage layout)
+    let machine_id = fs::read_to_string("/etc/machine-id")
+        .map(|s| s.trim().to_owned())
+        .unwrap_or_default();
+
+    if machine_id.is_empty() {
+        base
+    } else {
+        base.join(machine_id)
+    }
+}
+
+/// Check if an entry matches our emergency message criteria.
+fn is_emergency_match(
+    entry: &libsystemd::journal::entry::JournalEntry,
+    boot_id: &str,
+) -> bool {
+    entry.boot_id().as_deref() == Some(boot_id)
+        && entry.uid() == Some(0)
+        && entry.priority() == Some(0)
+}
+
+/// Find the first emergency message by scanning journal files incrementally.
+/// Returns as soon as a match is found, without loading the entire journal.
 fn find_emergency_message(continuous: bool) -> Option<String> {
     let boot_id = read_boot_id();
+    let journal_dir = journal_directory();
 
-    let directory = if PathBuf::from("/var/log/journal").is_dir() {
-        "/var/log/journal".into()
-    } else {
-        "/run/log/journal".into()
-    };
+    // First pass: scan all existing entries
+    let files = list_all_journal_files(&journal_dir).unwrap_or_default();
+    let mut offsets: HashMap<PathBuf, u64> = HashMap::new();
 
-    let config = StorageConfig {
-        directory,
-        max_file_size: u64::MAX,
-        max_disk_usage: u64::MAX,
-        max_files: usize::MAX,
-        persistent: false,
-        keep_free: 0,
-        direct_directory: false,
-        ..Default::default()
-    };
-
-    let storage = match JournalStorage::open_read_only(config) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("Failed to open journal: {e}");
-            return None;
-        }
-    };
-
-    let entries = match storage.read_all() {
-        Ok(e) => e,
-        Err(e) => {
-            eprintln!("Failed to read journal: {e}");
-            return None;
-        }
-    };
-
-    // Filter: current boot, UID=0, PRIORITY=0 (emerg)
-    for entry in &entries {
-        if entry.boot_id().as_deref() != Some(&boot_id) {
-            continue;
-        }
-        if entry.uid() != Some(0) {
-            continue;
-        }
-        if entry.priority() != Some(0) {
-            continue;
-        }
-        if let Some(msg) = entry.field("MESSAGE") {
-            return Some(msg);
-        }
-    }
-
-    if continuous {
-        // In continuous mode, wait for new entries by polling.
-        // For simplicity, poll with a sleep loop.
-        loop {
-            std::thread::sleep(std::time::Duration::from_secs(1));
-
-            // Re-read journal
-            let config2 = StorageConfig {
-                directory: if PathBuf::from("/var/log/journal").is_dir() {
-                    "/var/log/journal".into()
-                } else {
-                    "/run/log/journal".into()
-                },
-                max_file_size: u64::MAX,
-                max_disk_usage: u64::MAX,
-                max_files: usize::MAX,
-                persistent: false,
-                keep_free: 0,
-                direct_directory: false,
-                ..Default::default()
-            };
-            let storage2 = match JournalStorage::open_read_only(config2) {
-                Ok(s) => s,
-                Err(_) => continue,
-            };
-            let entries2 = match storage2.read_all() {
-                Ok(e) => e,
-                Err(_) => continue,
-            };
-
-            for entry in &entries2 {
-                if entry.boot_id().as_deref() != Some(&boot_id) {
-                    continue;
-                }
-                if entry.uid() != Some(0) {
-                    continue;
-                }
-                if entry.priority() != Some(0) {
-                    continue;
-                }
-                if let Some(msg) = entry.field("MESSAGE") {
-                    return Some(msg);
+    for file in &files {
+        match read_entries_from_offset(file, 0) {
+            Ok((entries, end_offset)) => {
+                offsets.insert(file.clone(), end_offset);
+                for entry in &entries {
+                    if is_emergency_match(entry, &boot_id)
+                        && let Some(msg) = entry.field("MESSAGE")
+                    {
+                        return Some(msg);
+                    }
                 }
             }
-
-            // Check if we received a signal
-            if check_signal() {
-                return None;
+            Err(_) => {
+                // Try C journal format via read_all fallback for this file
+                if let Ok(entries) =
+                    libsystemd::journal::c_journal::read_c_journal(file)
+                {
+                    for entry in &entries {
+                        if is_emergency_match(entry, &boot_id)
+                            && let Some(msg) = entry.field("MESSAGE")
+                        {
+                            return Some(msg);
+                        }
+                    }
+                }
             }
         }
     }
 
-    None
+    if !continuous {
+        return None;
+    }
+
+    // Continuous mode: poll for new entries using incremental reads
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(1));
+
+        if check_signal() {
+            return None;
+        }
+
+        // Check for new files and new data in existing files
+        let current_files = list_all_journal_files(&journal_dir).unwrap_or_default();
+
+        for file in &current_files {
+            let offset = offsets.get(file).copied().unwrap_or(0);
+            if let Ok((entries, end_offset)) = read_entries_from_offset(file, offset) {
+                offsets.insert(file.clone(), end_offset);
+                for entry in &entries {
+                    if is_emergency_match(entry, &boot_id)
+                        && let Some(msg) = entry.field("MESSAGE")
+                    {
+                        return Some(msg);
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Check if SIGTERM or SIGINT has been received.

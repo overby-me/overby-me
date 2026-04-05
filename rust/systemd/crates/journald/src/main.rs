@@ -32,7 +32,7 @@ use std::fs;
 use std::io::{self, BufRead, BufReader, Write};
 
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-use std::os::unix::io::FromRawFd;
+use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::net::{UnixDatagram, UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -1296,6 +1296,8 @@ struct SocketActivationFds {
     native: Option<UnixDatagram>,
     /// Stdout capture socket (stream) — `/run/systemd/journal/stdout`
     stdout: Option<UnixListener>,
+    /// Recovered stdout stream FDs from FDSTORE (previously stored via sd_notify).
+    stored_stdout_streams: Vec<RawFd>,
 }
 
 /// Parse LISTEN_FDS and convert raw FDs to typed sockets.
@@ -1307,6 +1309,7 @@ fn receive_socket_activation_fds() -> SocketActivationFds {
     let mut result = SocketActivationFds {
         native: None,
         stdout: None,
+        stored_stdout_streams: Vec::new(),
     };
 
     let fd_count: usize = match std::env::var("LISTEN_FDS") {
@@ -1323,8 +1326,23 @@ fn receive_socket_activation_fds() -> SocketActivationFds {
 
     const SD_LISTEN_FDS_START: i32 = 3;
 
+    // Parse LISTEN_FDNAMES to identify stored FDs vs socket-activation FDs.
+    let fd_names: Vec<String> = std::env::var("LISTEN_FDNAMES")
+        .unwrap_or_default()
+        .split(':')
+        .map(|s| s.to_owned())
+        .collect();
+
     for i in 0..fd_count {
         let fd = SD_LISTEN_FDS_START + i as i32;
+        let fd_name = fd_names.get(i).map(|s| s.as_str()).unwrap_or("");
+
+        // Check if this is a stored stdout stream FD from FDSTORE
+        if fd_name == "stdout-stream" {
+            eprintln!("journald: Recovering FDSTORE stdout stream fd {fd}");
+            result.stored_stdout_streams.push(fd);
+            continue;
+        }
 
         // Determine socket type via getsockopt(SO_TYPE)
         let mut sock_type: libc::c_int = 0;
@@ -2041,6 +2059,10 @@ fn handle_stdout_connection(stream: UnixStream, state: Arc<JournaldState>) {
     // Get peer credentials for initial trusted fields
     let peer_cred = get_peer_cred(&stream);
 
+    // Capture the raw FD for FDSTORE before CredLineReader takes ownership.
+    // The FD remains valid as long as the stream lives inside the reader.
+    let stream_raw_fd = stream.as_raw_fd();
+
     // Enable per-write SCM_CREDENTIALS so we can track PID changes
     enable_passcred(&stream);
 
@@ -2101,6 +2123,13 @@ fn handle_stdout_connection(stream: UnixStream, state: Arc<JournaldState>) {
             first_log_line = Some(cl);
         }
     }
+
+    // Store this stream FD with PID 1 via FDSTORE so it survives journald
+    // restart (including SIGKILL). PID 1 holds a duplicate of the FD; if
+    // journald dies, the service's writes still succeed (buffered in the
+    // kernel socket buffer). On restart, journald recovers the FD and
+    // resumes reading.
+    sd_notify_with_fds("FDSTORE=1\nFDNAME=stdout-stream", &[stream_raw_fd]);
 
     // Helper to process a single log line with credentials
     let process_line = |cl: CredLine| {
@@ -2178,6 +2207,80 @@ fn handle_stdout_connection(stream: UnixStream, state: Arc<JournaldState>) {
         }
         match reader.next_line() {
             Some(cl) => process_line(cl),
+            None => break,
+        }
+    }
+}
+
+/// Handle a recovered stdout stream FD from FDSTORE.
+///
+/// The header was already consumed by the previous journald instance, so we
+/// go straight to reading data lines. We use default metadata since the
+/// original stream context was lost.
+fn handle_recovered_stdout_connection(raw_fd: RawFd, state: Arc<JournaldState>) {
+    let stream = unsafe { UnixStream::from_raw_fd(raw_fd) };
+    enable_passcred(&stream);
+
+    let peer_cred = get_peer_cred(&stream);
+    let mut reader = CredLineReader::new(stream);
+
+    // Default metadata for recovered streams
+    let identifier = "unknown";
+    let priority: u8 = 6; // LOG_INFO
+    let level_prefix = true;
+
+    loop {
+        if state.shutdown.load(Ordering::Relaxed) {
+            break;
+        }
+        match reader.next_line() {
+            Some(cl) => {
+                if cl.text.is_empty() {
+                    continue;
+                }
+
+                let (effective_priority, message) = if level_prefix {
+                    parse_level_prefix_line(&cl.text, priority)
+                } else {
+                    (priority, cl.text.as_str())
+                };
+
+                let message = message.trim_end();
+                if message.is_empty() {
+                    continue;
+                }
+
+                let mut entry = JournalEntry::new();
+                entry.set_field("MESSAGE", message);
+                entry.set_field("PRIORITY", effective_priority.to_string());
+                entry.set_field("SYSLOG_IDENTIFIER", identifier);
+                entry.set_field("_TRANSPORT", "stdout");
+
+                if cl.pid_change {
+                    entry.set_field("_LINE_BREAK", "pid-change");
+                }
+
+                let write_pid = cl.cred.map(|c| c.pid as u32).filter(|&p| p > 0);
+                let metadata_pid = write_pid.or(peer_cred.map(|c| c.pid as u32));
+
+                if let Some(pid) = metadata_pid {
+                    entry.set_trusted_process_fields(pid);
+                }
+
+                let uid = cl.cred.map(|c| c.uid).or(peer_cred.map(|c| c.uid));
+                let gid = cl.cred.map(|c| c.gid).or(peer_cred.map(|c| c.gid));
+                if let Some(uid) = uid {
+                    entry.set_field("_UID", uid.to_string());
+                }
+                if let Some(gid) = gid {
+                    entry.set_field("_GID", gid.to_string());
+                }
+
+                entry.set_boot_id();
+                entry.set_machine_id();
+                entry.set_hostname();
+                state.dispatch_entry(entry);
+            }
             None => break,
         }
     }
@@ -2379,6 +2482,96 @@ fn sd_notify(msg: &str) {
             let _ = sock.set_nonblocking(true);
             let _ = sock.send_to(msg.as_bytes(), &path);
         }
+    }
+}
+
+/// Send an sd_notify message with file descriptors via SCM_RIGHTS.
+///
+/// This is used for FDSTORE=1: journald stores stdout stream connection FDs
+/// with PID 1 so they survive across restarts (even SIGKILL).
+fn sd_notify_with_fds(msg: &str, fds: &[RawFd]) {
+    let socket_path = match std::env::var("NOTIFY_SOCKET") {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+
+    let sock_fd = unsafe {
+        libc::socket(
+            libc::AF_UNIX,
+            libc::SOCK_DGRAM | libc::SOCK_CLOEXEC | libc::SOCK_NONBLOCK,
+            0,
+        )
+    };
+    if sock_fd < 0 {
+        return;
+    }
+
+    // Build sockaddr_un
+    let mut addr: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+    addr.sun_family = libc::AF_UNIX as libc::sa_family_t;
+
+    let (path_bytes, addr_len) = if let Some(name) = socket_path.strip_prefix('@') {
+        // Abstract socket: sun_path[0] = 0, then the name
+        let name_bytes = name.as_bytes();
+        let copy_len = name_bytes.len().min(addr.sun_path.len() - 1);
+        for (i, &b) in name_bytes[..copy_len].iter().enumerate() {
+            addr.sun_path[i + 1] = b as libc::c_char;
+        }
+        (
+            copy_len + 1,
+            std::mem::size_of::<libc::sa_family_t>() + 1 + copy_len,
+        )
+    } else {
+        let path_bytes = socket_path.as_bytes();
+        let copy_len = path_bytes.len().min(addr.sun_path.len() - 1);
+        for (i, &b) in path_bytes[..copy_len].iter().enumerate() {
+            addr.sun_path[i] = b as libc::c_char;
+        }
+        (
+            copy_len,
+            std::mem::size_of::<libc::sa_family_t>() + copy_len,
+        )
+    };
+
+    let _ = path_bytes; // used for addr_len computation
+
+    let iov_buf = msg.as_bytes();
+    let mut iov = libc::iovec {
+        iov_base: iov_buf.as_ptr() as *mut libc::c_void,
+        iov_len: iov_buf.len(),
+    };
+
+    // Build cmsg for SCM_RIGHTS
+    let fds_bytes = fds.len() * std::mem::size_of::<RawFd>();
+    let cmsg_len = unsafe { libc::CMSG_SPACE(fds_bytes as u32) } as usize;
+    let mut cmsg_buf = vec![0u8; cmsg_len];
+
+    let mut msghdr: libc::msghdr = unsafe { std::mem::zeroed() };
+    msghdr.msg_name = std::ptr::from_mut(&mut addr).cast();
+    msghdr.msg_namelen = addr_len as libc::socklen_t;
+    msghdr.msg_iov = &mut iov;
+    msghdr.msg_iovlen = 1;
+
+    if !fds.is_empty() {
+        msghdr.msg_control = cmsg_buf.as_mut_ptr().cast();
+        msghdr.msg_controllen = cmsg_len;
+
+        unsafe {
+            let cmsg = libc::CMSG_FIRSTHDR(&msghdr);
+            (*cmsg).cmsg_level = libc::SOL_SOCKET;
+            (*cmsg).cmsg_type = libc::SCM_RIGHTS;
+            (*cmsg).cmsg_len = libc::CMSG_LEN(fds_bytes as u32) as usize;
+            std::ptr::copy_nonoverlapping(
+                fds.as_ptr().cast::<u8>(),
+                libc::CMSG_DATA(cmsg),
+                fds_bytes,
+            );
+        }
+    }
+
+    unsafe {
+        libc::sendmsg(sock_fd, &msghdr, libc::MSG_NOSIGNAL);
+        libc::close(sock_fd);
     }
 }
 
@@ -3365,6 +3558,17 @@ fn main() {
         .name("stdout-socket".into())
         .spawn(move || stdout_socket_listener(state_stdout, activated_stdout, ready_stdout))
         .expect("failed to spawn stdout socket thread");
+
+    // Recover stdout stream FDs from FDSTORE (passed back by PID 1 after restart).
+    // These are connected stream sockets whose headers were already consumed by the
+    // previous journald instance; spawn handlers that read data lines directly.
+    for stored_fd in activated.stored_stdout_streams {
+        let state_recovered = Arc::clone(&state);
+        thread::Builder::new()
+            .name("stdout-recovered".into())
+            .spawn(move || handle_recovered_stdout_connection(stored_fd, state_recovered))
+            .expect("failed to spawn recovered stdout stream thread");
+    }
 
     let _kmsg_handle = if namespace.is_none() {
         let state_kmsg = Arc::clone(&state);
