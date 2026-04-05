@@ -1825,7 +1825,7 @@ impl Shell {
     ///
     /// This mirrors bash's behavior for `A[$key]=val`, `A['literal']=val`,
     /// `A["$key"]=val`.
-    fn expand_assoc_subscript(&mut self, idx_str: &str) -> String {
+    pub(crate) fn expand_assoc_subscript(&mut self, idx_str: &str) -> String {
         let chars: Vec<char> = idx_str.chars().collect();
         let mut result = String::new();
         let mut i = 0;
@@ -2487,6 +2487,7 @@ impl Shell {
                             );
                         }
                     }
+                    self.declared_unset.remove(&resolved);
                     self.assoc_arrays.insert(resolved, map);
                 } else {
                     let mut arr = if assign.append {
@@ -2591,6 +2592,7 @@ impl Shell {
                             }
                         }
                     }
+                    self.declared_unset.remove(&resolved);
                     self.arrays.insert(resolved, arr);
                 }
             }

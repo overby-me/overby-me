@@ -225,14 +225,18 @@ pub(super) fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
             let idx_str = &name[bracket + 1..name.len() - 1];
             let resolved = shell.resolve_nameref(base);
             if idx_str == "@" || idx_str == "*" {
-                // unset arr[@] / arr[*] — clear all elements but keep the
-                // array variable (bash keeps it as an empty array).
-                if let Some(arr) = shell.arrays.get_mut(&resolved) {
+                // For indexed arrays: unset arr[@] / arr[*] clears all elements
+                // but keeps the array variable (bash keeps it as an empty array).
+                // For associative arrays: unset assoc[@] / assoc[*] removes the
+                // KEY "@" or "*" (does NOT clear all elements — bash treats these
+                // as literal keys in associative array context).
+                if shell.assoc_arrays.contains_key(&resolved) {
+                    shell
+                        .assoc_arrays
+                        .get_mut(&resolved)
+                        .map(|a| a.remove(idx_str));
+                } else if let Some(arr) = shell.arrays.get_mut(&resolved) {
                     arr.clear();
-                } else if let std::collections::hash_map::Entry::Occupied(mut entry) =
-                    shell.assoc_arrays.entry(resolved.clone())
-                {
-                    *entry.get_mut() = crate::interpreter::AssocArray::default();
                 } else {
                     // Not an array — remove scalar
                     shell.vars.remove(&resolved);

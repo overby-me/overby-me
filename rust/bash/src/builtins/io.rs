@@ -155,15 +155,28 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
     // Handle -v varname option
     if args.len() >= 3 && args[0] == "-v" {
         let var_name = args[1].clone();
-        // Validate variable name
-        if !var_name
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
-            || !var_name
+        // Validate variable name — allow simple names (foo) and array
+        // subscript syntax (arr[idx], assoc[key], arr[@], arr[*]).
+        let is_valid = if let Some(bracket) = var_name.find('[') {
+            let base = &var_name[..bracket];
+            let has_close = var_name.ends_with(']');
+            !base.is_empty()
+                && base
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                && base.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                && has_close
+        } else {
+            var_name
                 .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '_')
-        {
+                .next()
+                .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                && var_name
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        };
+        if !is_valid {
             eprintln!(
                 "{}: printf: `{}': not a valid identifier",
                 shell.error_prefix(),
@@ -200,7 +213,31 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
         }
         nix::unistd::close(read_fd).ok();
         let output_str = String::from_utf8_lossy(&output).to_string();
-        shell.set_var(&var_name, output_str);
+        // Handle array subscript syntax: arr[idx] or assoc[key]
+        if let Some(bracket) = var_name.find('[') {
+            let base = &var_name[..bracket];
+            let idx_str = &var_name[bracket + 1..var_name.len() - 1];
+            let resolved = shell.resolve_nameref(base);
+            if shell.assoc_arrays.contains_key(&resolved) {
+                let key = shell.expand_assoc_subscript(idx_str);
+                shell.declared_unset.remove(&resolved);
+                shell
+                    .assoc_arrays
+                    .entry(resolved)
+                    .or_default()
+                    .insert(key, output_str);
+            } else {
+                let idx = shell.eval_arith_expr(idx_str) as usize;
+                shell.declared_unset.remove(&resolved);
+                let arr = shell.arrays.entry(resolved).or_default();
+                while arr.len() <= idx {
+                    arr.push(None);
+                }
+                arr[idx] = Some(output_str);
+            }
+        } else {
+            shell.set_var(&var_name, output_str);
+        }
         return result;
     }
     // Skip -- (end of options marker)

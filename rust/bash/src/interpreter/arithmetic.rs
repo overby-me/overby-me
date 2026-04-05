@@ -369,6 +369,53 @@ impl Shell {
             }
         }
 
+        // Check for "invalid arithmetic operator" BEFORE comma/assignment/binary
+        // operator scanning.  When a valid identifier or number is followed by a
+        // character that is not a valid arithmetic operator (], #, @, {, }, ., ;,
+        // \, '), report the error immediately.  This must run before the comma
+        // check because e.g. `x],b` would otherwise be split at `,` into `x]`
+        // and `b`, masking the real error at `]`.
+        {
+            let trimmed = expr.trim();
+            let ident_end = trimmed
+                .find(|c: char| !c.is_alphanumeric() && c != '_')
+                .unwrap_or(trimmed.len());
+            if ident_end > 0 && ident_end < trimmed.len() {
+                let next_ch = trimmed.as_bytes()[ident_end];
+                if matches!(
+                    next_ch,
+                    b']' | b'@' | b'{' | b'}' | b'.' | b';' | b'\\' | b'\''
+                ) {
+                    let invalid_part = &trimmed[ident_end..];
+                    let display_expr = trimmed;
+                    let error_token = invalid_part;
+                    eprintln!(
+                        "{}: {}: arithmetic syntax error: invalid arithmetic operator (error token is \"{}\")",
+                        self.arith_error_prefix(),
+                        display_expr,
+                        error_token
+                    );
+                    crate::expand::set_arith_error();
+                    return 0;
+                }
+            }
+            // Also check when the expression starts with an invalid operator character
+            if !trimmed.is_empty() {
+                let first_ch = trimmed.as_bytes()[0];
+                if matches!(first_ch, b']' | b'@' | b'{' | b'}' | b'.' | b';') {
+                    let display_expr = trimmed;
+                    eprintln!(
+                        "{}: {}: arithmetic syntax error: invalid arithmetic operator (error token is \"{}\")",
+                        self.arith_error_prefix(),
+                        display_expr,
+                        display_expr
+                    );
+                    crate::expand::set_arith_error();
+                    return 0;
+                }
+            }
+        }
+
         // Handle comma operator (only at top level, not inside parens)
         {
             let mut depth = 0i32;
@@ -1568,20 +1615,41 @@ impl Shell {
 
         // Array element: arr[idx]
         if let Some(bracket) = expr.find('[') {
-            let close = expr.rfind(']').unwrap_or(expr.len());
-            if close <= bracket + 1 {
-                return 0;
+            // Use depth-aware bracket matching to find the closing ']' that
+            // matches the first '['.  This correctly handles expanded subscript
+            // values that themselves contain ']' (e.g. a[$key] where $key
+            // expanded to 'x],b[...]').
+            let mut depth = 0i32;
+            let mut close = None;
+            for (idx, ch) in expr[bracket..].char_indices() {
+                match ch {
+                    '[' => depth += 1,
+                    ']' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            close = Some(bracket + idx);
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
             }
-            // No closing ']' found — not a valid array reference
-            if close >= expr.len() {
-                let top_expr = self.arith_top_expr.as_deref().unwrap_or(expr);
-                eprintln!(
-                    "{}: {}: arithmetic syntax error: operand expected (error token is \"{}\")",
-                    self.arith_error_prefix(),
-                    top_expr,
-                    expr
-                );
-                crate::expand::set_arith_error();
+            let close = match close {
+                Some(c) => c,
+                None => {
+                    // No matching ']' found
+                    let top_expr = self.arith_top_expr.as_deref().unwrap_or(expr);
+                    eprintln!(
+                        "{}: {}: arithmetic syntax error: operand expected (error token is \"{}\")",
+                        self.arith_error_prefix(),
+                        top_expr,
+                        expr
+                    );
+                    crate::expand::set_arith_error();
+                    return 0;
+                }
+            };
+            if close <= bracket + 1 {
                 return 0;
             }
             // Check for extra text after arr[idx] (e.g., b[c]d → "d" is extra)
@@ -1599,7 +1667,13 @@ impl Shell {
             }
             let name = &expr[..bracket];
             let idx_str = &expr[bracket + 1..close];
+            // For indexed array subscript evaluation, temporarily set the
+            // top expression to the subscript value so errors report the
+            // subscript content (matching bash behavior where e.g.
+            // `a[$key]` with key='x],b' shows 'x],b' as the expression).
+            let saved_top = self.arith_top_expr.take();
             let sub = self.arith_subscript_key(name, idx_str);
+            self.arith_top_expr = saved_top;
             let val = self.arith_array_get(&sub);
             // Check nounset for unset array elements (value == 0 and no entry)
             if val == 0 && self.opt_nounset {
@@ -1634,6 +1708,7 @@ impl Shell {
         // Fall back to reporting error
         // Check if this looks like "valid_expr extra_stuff" — syntax error in expression
         let trimmed = expr.trim();
+
         let first_word_end = trimmed
             .find(|c: char| c.is_whitespace() || c == '[')
             .unwrap_or(trimmed.len());
@@ -1718,24 +1793,25 @@ impl Shell {
         let mut result = String::new();
         let chars: Vec<char> = expr.chars().collect();
         let mut i = 0;
-        // Track whether we are inside an associative array subscript `[...]`
-        // so we can skip $var expansion there.  For associative arrays the
-        // raw $var text must reach the arithmetic evaluator's
+        // Track whether we are inside an array subscript `[...]` so we can
+        // skip $var expansion there.  For both associative AND indexed arrays,
+        // the raw $var text must reach the arithmetic evaluator's
         // `arith_subscript_key` which does its own context-aware expansion.
-        // For indexed arrays we MUST still expand $var (the subscript is an
-        // arithmetic expression).
-        let mut assoc_bracket_depth: i32 = 0;
+        // Expanding $var here would embed the expanded value (which may
+        // contain `]`, `[`, or `$(...)`) into the expression, breaking
+        // bracket matching and causing spurious command execution.
+        let mut array_bracket_depth: i32 = 0;
         while i < chars.len() {
-            // Detect `name[` where `name` is an associative array.
-            // When we see `[` preceded by a valid identifier, check if that
-            // identifier is an associative array.  Only then do we enter the
-            // "skip expansion" mode.
+            // Detect `name[` where `name` is any array (or potential array variable).
+            // Skip $var expansion inside [..] so that expanded values containing
+            // `]` don't break bracket matching in the arithmetic evaluator.
+            // The subscript content will be expanded later by `arith_subscript_key`.
             if chars[i] == '[' && (i == 0 || chars[i - 1] != '$') {
-                if assoc_bracket_depth > 0 {
-                    // Already inside an assoc subscript — nested bracket
-                    assoc_bracket_depth += 1;
+                if array_bracket_depth > 0 {
+                    // Already inside a subscript — nested bracket
+                    array_bracket_depth += 1;
                 } else {
-                    // Check if the identifier before `[` is an associative array
+                    // Check if the identifier before `[` is a variable name
                     let name_end = i;
                     let mut name_start = name_end;
                     while name_start > 0
@@ -1744,15 +1820,11 @@ impl Shell {
                         name_start -= 1;
                     }
                     if name_start < name_end {
-                        let arr_name: String = chars[name_start..name_end].iter().collect();
-                        let resolved = self.resolve_nameref(&arr_name);
-                        if self.is_assoc_array(&resolved) {
-                            assoc_bracket_depth = 1;
-                        }
+                        array_bracket_depth = 1;
                     }
                 }
-            } else if chars[i] == ']' && assoc_bracket_depth > 0 {
-                assoc_bracket_depth -= 1;
+            } else if chars[i] == ']' && array_bracket_depth > 0 {
+                array_bracket_depth -= 1;
                 result.push(chars[i]);
                 i += 1;
                 continue;
@@ -1910,9 +1982,9 @@ impl Shell {
                 && (i + 2 >= chars.len() || chars[i + 2] != ' ')
             {
                 // ${...} parameter expansion — find matching } and expand
-                // BUT: if we're inside associative array [...] brackets,
+                // BUT: if we're inside array [...] brackets,
                 // leave unexpanded for arith_subscript_key to handle.
-                if assoc_bracket_depth > 0 {
+                if array_bracket_depth > 0 {
                     result.push(chars[i]);
                     i += 1;
                     continue;
@@ -1968,11 +2040,11 @@ impl Shell {
                 && !(i > 0 && chars[i - 1] == '\\')
             {
                 // Simple variable: $var — expand using word expansion (skip if preceded by \)
-                // BUT: if we're inside associative array [...] brackets,
+                // BUT: if we're inside array [...] brackets,
                 // leave the $var unexpanded so arith_subscript_key can
                 // handle it properly (the expanded value may contain ]
                 // characters that would break bracket matching).
-                if assoc_bracket_depth > 0 {
+                if array_bracket_depth > 0 {
                     result.push(chars[i]);
                     i += 1;
                     continue;

@@ -330,14 +330,44 @@ fn quote_for_declare(s: &str) -> String {
 fn quote_assoc_key(key: &str) -> String {
     // Match bash's quoting rules: only quote keys containing characters that
     // would be misinterpreted in an unquoted shell context.  Safe punctuation
-    // like %, -, ., /, :, =, @, ^, ,, + are left unquoted.
+    // like %, -, ., /, :, =, ^, ,, + are left unquoted.
+    // Note: @ is quoted because it has special meaning in bash (e.g. $@, ${arr[@]}).
+
+    // Check if the key contains non-printable characters (tab, newline, control chars).
+    // If so, use $'...' ANSI-C quoting (matching bash's declare -p output).
+    let has_nonprintable = key.chars().any(|c| {
+        let b = c as u32;
+        c == '\t' || c == '\n' || c == '\r' || (b < 0x20) || b == 0x7f
+    });
+    if has_nonprintable {
+        let mut out = String::from("$'");
+        for ch in key.chars() {
+            match ch {
+                '\t' => out.push_str("\\t"),
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\x07' => out.push_str("\\a"),
+                '\x08' => out.push_str("\\b"),
+                '\x0b' => out.push_str("\\v"),
+                '\x1b' => out.push_str("\\E"),
+                '\'' => out.push_str("\\'"),
+                '\\' => out.push_str("\\\\"),
+                c if (c as u32) < 0x20 || c as u32 == 0x7f => {
+                    // Use \NNN octal for other control characters
+                    out.push_str(&format!("\\{:03o}", c as u32));
+                }
+                c => out.push(c),
+            }
+        }
+        out.push('\'');
+        return out;
+    }
+
     let needs_quoting = key.is_empty()
         || key.chars().any(|c| {
             matches!(
                 c,
-                ' ' | '\t'
-                    | '\n'
-                    | '$'
+                ' ' | '$'
                     | '!'
                     | '`'
                     | '"'
@@ -358,6 +388,7 @@ fn quote_assoc_key(key: &str) -> String {
                     | ']'
                     | '~'
                     | '#'
+                    | '@'
             )
         });
     if needs_quoting {
