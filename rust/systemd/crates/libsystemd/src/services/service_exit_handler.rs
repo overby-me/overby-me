@@ -1223,6 +1223,8 @@ pub(crate) fn service_exit_handler(
         // This matches real systemd's behavior of removing empty cgroup dirs.
         // Skip cleanup if the unit is restarting (Stopping/Starting/Started)
         // to avoid racing with the new process's cgroup setup.
+        // Note: child cgroup dirs (from Delegate=yes) are cleaned up in
+        // pre_fork_os_specific before each service start.
         #[cfg(target_os = "linux")]
         if let Some(unit) = run_info.unit_table.get(&srvc_id)
             && let Specific::Service(svc) = &unit.specific

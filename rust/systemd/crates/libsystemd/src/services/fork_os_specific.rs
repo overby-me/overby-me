@@ -10,6 +10,23 @@ use crate::units::TasksMax;
 #[cfg(feature = "cgroups")]
 use log::trace;
 
+/// Recursively remove child cgroup directories (depth-first) left over from
+/// previous service runs. Only removes subdirectories, not cgroup pseudo-files.
+#[cfg(feature = "cgroups")]
+fn remove_delegate_children(path: &std::path::Path) {
+    let entries = match std::fs::read_dir(path) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.filter_map(|e| e.ok()) {
+        let child = entry.path();
+        if child.is_dir() {
+            remove_delegate_children(&child);
+            let _ = std::fs::remove_dir(&child);
+        }
+    }
+}
+
 /// This is the place to do anything that is not standard unix but specific to one os. Like cgroups
 pub fn pre_fork_os_specific(srvc: &ServiceConfig) -> Result<(), String> {
     #[cfg(feature = "cgroups")]
@@ -20,6 +37,11 @@ pub fn pre_fork_os_specific(srvc: &ServiceConfig) -> Result<(), String> {
                 srvc.platform_specific.cgroup_path, e
             )
         })?;
+
+        // Clean up child cgroup directories from previous runs (e.g. created
+        // by Delegate=yes services). Without this, a second start of a delegated
+        // service would fail with "File exists" when creating sub-cgroups.
+        remove_delegate_children(&srvc.platform_specific.cgroup_path);
 
         // When Delegate is enabled, chown the cgroup directory to the service user
         // so the service process can manage its own sub-cgroup hierarchy.
