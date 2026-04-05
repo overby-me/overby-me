@@ -2,17 +2,23 @@
 
 ## Current State
 
-**~64/77 nix tests verified passing** (Phase 21), ~62/83 local tests passing (0 diff, sequential) on bookmark `bash-integration-test`. Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available). **read** now flaky in nix (sandbox `/dev/tty` timing), **comsub** occasionally passes.
+**~65/77 nix tests verified passing** (Phase 22), ~62/83 local tests passing (0 diff, sequential) on bookmark `bash-integration-test`. Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available). **read** now flaky in nix (sandbox `/dev/tty` timing), **comsub** occasionally passes.
 
-See `CHANGELOG.md` for full fix history (170+ fixes across 21 phases).
+See `CHANGELOG.md` for full fix history (170+ fixes across 22 phases).
 
-### Nix test results (64/77 verified passing)
+### Nix test results (65/77 verified passing)
 
-Verified passing (64/77): alias, appendop, arith-for, **array2** ✅, **attr** ✅, braces, case, casemod, **comsub-eof** ✅, comsub-posix, cond, coproc, cprint, **dirstack** ✅, dollars, dynvar, errors, execscript, exp-tests, **exportfunc** ✅, extglob, extglob2, extglob3, func, getopts, glob-bracket, glob-test, globstar, herestr, ifs, ifs-posix, **input-test** ✅, invert, iquote, mapfile, more-exp, nquote, nquote1, nquote2, nquote3, nquote4, nquote5, parser, posix2, posixexp, posixexp2, posixpat, posixpipe, precedence, printf, **procsub** ✅, quote, **read** ✅, redir, rhs-exp, **set-e** ✅, set-x, shopt, strip, **test** ✅, tilde, tilde2, type, vredir
+Verified passing (65/77): alias, appendop, arith-for, **array2** ✅, **attr** ✅, braces, case, casemod, **comsub-eof** ✅, comsub-posix, cond, coproc, cprint, **dirstack** ✅, dollars, dynvar, errors, execscript, exp-tests, **exportfunc** ✅, extglob, extglob2, extglob3, func, getopts, glob-bracket, glob-test, globstar, **heredoc** ✅, herestr, ifs, ifs-posix, **input-test** ✅, invert, iquote, mapfile, more-exp, nquote, nquote1, nquote2, nquote3, nquote4, nquote5, parser, posix2, posixexp, posixexp2, posixpat, posixpipe, precedence, printf, **procsub** ✅, quote, **read** ✅, redir, rhs-exp, **set-e** ✅, set-x, shopt, strip, **test** ✅, tilde, tilde2, type, vredir
 
-Verified failing (13/77): arith (~49, arith10.sub error format diffs + `let` empty subscript handling in assoc_expand_once mode), array (~20, array32/33.sub new tests), assoc (~20, tilde expansion in subscripts), builtins (~130, help output + ulimit flags), comsub (1, flaky SIGPIPE), comsub2 (~20, funsub line numbers + jobs + `$*`), heredoc (~4, heredoc7.sub case 2 line off-by-1), lastpipe (1, flaky SIGPIPE), nameref (~20, nameref24.sub edge cases), new-exp (~50→~30, pattern replacement longest match fixed, performance fixed, remaining: `${!prefix*}` + nounset), quotearray (~36, nested subscripts + single-quoted `(( ))` error format), trap (1, flaky extra CHLD), varenv (~100, local scope + declare -p format)
+Verified failing (12/77): arith (~49, arith10.sub error format diffs + `let` empty subscript handling in assoc_expand_once mode), array (~20, array32/33.sub new tests), assoc (~20, tilde expansion in subscripts), builtins (~130, help output + ulimit flags), comsub (1, flaky SIGPIPE), comsub2 (~20, funsub line numbers + jobs + `$*`), lastpipe (1, flaky SIGPIPE), nameref (~20, nameref24.sub edge cases), new-exp (~30, `&` in replacement strings + `${!prefix*}` edge cases), quotearray (~36, nested subscripts + single-quoted `(( ))` error format), trap (1, flaky extra CHLD), varenv (~100, local scope + declare -p format)
 
 Note: **read** now flaky in nix (1 line diff, `read -t 1 < /dev/tty` sandbox timing). **comsub** occasionally passes (flaky SIGPIPE).
+
+**Phase 22 fixes:** Fix command substitution LINENO off-by-one: multi-line `$(\ncmd)` now reports correct line numbers matching bash (first content line = `$(` line). Root cause was `set_line_offset` using relative `+=` after the parser constructor already consumed the leading `\n`; replaced with absolute `set_line_number()` for comsub contexts. Fix `${!prefix*}` to join with first char of IFS (like `"$*"`) instead of always space. Fix `"${!prefix@}"` to split into separate words (like `"$@"`). Fix `$(< $var)` to expand variables/tilde/globs in filenames (was wrapping raw text in `Literal` instead of parsing into word parts). Fix `$(< file)` inside double quotes (separate code path was also not expanding). Fix `$(< nonexistent)` to report error and set exit status 1 (was silently returning empty). Fix `${var:?message}` error prefix to use `EXPAND_ERROR_PREFIX` instead of hardcoded `"bash:"` (now shows script name + line number in `-c` mode with `$0`).
+
+**Phase 22 flipped to passing:** heredoc (~4→0 diff, comsub LINENO off-by-one fixed in heredoc7.sub case 2).
+
+**Phase 22 reduced diffs:** new-exp (many diffs eliminated: `${!prefix*}` IFS separator, `$(< $var)` expansion, `${var:?}` error prefix; remaining: `&` in replacement strings, `//a` vs `/` path simplification).
 
 **Phase 21 fixes:** `let "a[\"\"]"=22` now correctly assigns to `a[0]` when `assoc_expand_once` is unset (empty subscript evaluates to 0 in `let` context), but still errors when `assoc_expand_once` is set (matching bash). `${var/#pat/rep}` and `${var/%pat/rep}` now use longest match (e.g. `${x/#*/yyy}` replaces entire string, not just empty prefix). `pattern_replace` optimized with fast paths: literal patterns use O(n) `str::replace`, single-char patterns (`?`, `[...]`, `[[:class:]]`) use O(n) per-char matching, fixed-length patterns (no `*`) check only one substring length per position, extglob patterns (`*(...)`, `?(...)`, etc.) correctly computed as variable-length. This fixes new-exp8.sub timeout (10K-char `${z//str}` went from >60s to <1s).
 
@@ -41,14 +47,12 @@ Failing (~13):
 | trap | 1 | Flaky — timing-dependent signal delivery (extra CHLD) |
 | comsub | 1 | Spurious `echo: write error: Broken pipe` (flaky timing, sometimes passes) |
 | lastpipe | 1 | Spurious `echo: write error: Broken pipe` (flaky timing) |
-| read | 1 | Flaky — `read -t 1 < /dev/tty` sandbox timing (exit 1 vs >128) |
-| heredoc | ~4 | heredoc7.sub case 2: line number off-by-1 in comsub+heredoc interaction |
 | comsub2 | ~20 | Line number off-by-1 in funsubs + missing `jobs` output + funsub `$*` ordering |
 | arith | ~49 | arith10.sub: `let` empty subscript with `assoc_expand_once` error format, `\\` vs `""` in error tokens, `((:`/`let:` prefix, `a[\" \"]` backslash-escaped space subscripts |
 | array | ~20 | array32/33.sub: `$()` injection protection + assoc-to-indexed conversion (nix-only tests) |
 | assoc | ~20 | assoc subscript tilde expansion (`~/key` → `/homes/user/key`) |
 | nameref | ~20 | nameref24.sub: invalid nameref name validation + nounset edge cases |
-| new-exp | ~30 | `${!prefix*}` expansion, nounset parameter error format, `$(< filename)` redirect behavior |
+| new-exp | ~30 | `&` in replacement strings (bash 5.3 matched-text substitution), `//a` vs `/` path edge case, `${!prefix*}` edge cases |
 | builtins | ~130 | help output formatting + ulimit `-g` flag + ulimit number validation |
 | varenv | ~100 | varenv25.sub: local scope + `declare -p` format in function context |
 | quotearray | ~36 | Remaining: nested subscripts `${A[${a[i]}]}`, `assoc[']]` parsing in `(( ))`, single-quoted `(( ))` error format, `uname` leakage from `$()` in subscript keys |
@@ -117,19 +121,22 @@ Suggested nix timeout: 30s for most tests, 120s for trap.
 
 ### Medium diffs
 
-- **heredoc** (~4 lines) — heredoc7.sub case 2: heredoc started outside comsub where delimiter overlaps comsub body (complex parser interaction). Case 1 (`$(cat << EOF)`) now fixed. Main test PID-only.
 - **comsub2** (~20 lines) — Line number off-by-1 in funsubs + missing `jobs` output + funsub `$*` ordering
 - **nameref** (~20 lines) — nameref24.sub: invalid nameref name validation (`aa&bb`) + nounset edge cases with namerefs
-- **new-exp** (~50 lines) — Pattern replacement with arrays (`${arr[@]/pat/rep}`) + nounset parameter error format
-- **arith** (~10 lines) — arith10.sub: error format diffs (`\\` vs `""` in error tokens, `((:`/`let:` prefix differences, `let` empty subscript handling)
+- **new-exp** (~30 lines) — `&` in replacement strings (bash 5.3 matched-text substitution), `//a` vs `/` path edge case, remaining `${!prefix*}` edge cases
+- **arith** (~49 lines) — arith10.sub: error format diffs (`\\` vs `""` in error tokens, `((:`/`let:` prefix differences, `let` empty subscript handling)
 - **array** (~20 lines) — array32/33.sub: `$()` injection protection + assoc-to-indexed conversion (nix-only tests)
 - **assoc** (~20 lines) — assoc subscript tilde expansion (`~/key` → `/homes/user/key`)
-- **quotearray** (~68 lines) — Single-quoted keys in arithmetic (`(( assoc['key']++ ))`), tilde in subscripts
+- **quotearray** (~36 lines) — Single-quoted keys in arithmetic (`(( assoc['key']++ ))`), nested subscripts, error format
 
 ### Larger diffs
 
 - **builtins** (~130 lines) — help output formatting + ulimit `-g` flag + ulimit number validation
 - **varenv** (~100 lines) — varenv25.sub: local scope + `declare -p` format in function context
+
+### Now passing (Phase 22 fixed)
+
+- **~~heredoc~~** (~4→0 lines) — Fixed comsub LINENO off-by-one: `set_line_number()` (absolute set) replaces `set_line_offset()` (relative add) for comsub contexts, so the leading `\n` consumed during parser construction doesn't shift line numbers. Fixes heredoc7.sub case 2 (`cat <<EOF && grep $(`) line number diffs. ✅
 
 ### Now passing (Phase 19 fixed)
 
@@ -178,38 +185,37 @@ These exist in `/tmp/bash-5.3/tests/` but not in the nix test list:
 
 ## Key Source Files
 
-| File | Contents |
-|------|----------|
-| `src/ast.rs` | AST types, `WordPart` (includes `SyntaxError` variant) |
-| `src/builtins/io.rs` | `read` (prompt suppression on non-tty), `echo` (EPIPE handling), `printf`, `mapfile` |
-| `src/builtins/exec.rs` | `type`, `command`, `hash` |
-| `src/builtins/flow.rs` | `break`, `continue`, `exit`, `return` |
-| `src/builtins/vars.rs` | `declare` (compound re-expansion, `+a` readonly fix), `local`, `export`, `let`, `unset` (scalar subscript error, `arr[@]` preserves empty array) |
-| `src/builtins/mod.rs` | `parse_array_literal`, function body formatting, `quote_for_declare`, `quote_assoc_key` (shell-special-only quoting), `interpret_echo_escapes` (returns `(String, bool)` for `\c` stop) |
-| `src/builtins/set.rs` | `set` (allexport, physical, ignoreeof), `shopt` (update_shellopts call, readline options removed) |
-| `src/builtins/trap.rs` | `trap`, `kill` (kill -l range check), `enable` (full -n/-s/-a/-d impl) |
-| `src/interpreter/mod.rs` | Shell struct, `declared_unset`, `disabled_builtins`, `source_set_params`, `run_string`, `resolve_nameref`, `set_var` (auto-export), SHELLOPTS/BASHOPTS readonly, BASH_ALIASES/BASH_CMDS init |
-| `src/interpreter/commands.rs` | Command execution, `expand_word*`, `set -k` keyword assignment scoping (save/restore), inline compound assignment detection (SingleQuoted `(` support), `execute_assignment`, `expand_assoc_subscript` (quote-aware subscript expansion) |
+| File                            | Contents                                                                                                                                                                                                                                                                            |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/ast.rs`                    | AST types, `WordPart` (includes `SyntaxError` variant)                                                                                                                                                                                                                              |
+| `src/builtins/io.rs`            | `read` (prompt suppression on non-tty), `echo` (EPIPE handling), `printf`, `mapfile`                                                                                                                                                                                                |
+| `src/builtins/exec.rs`          | `type`, `command`, `hash`                                                                                                                                                                                                                                                           |
+| `src/builtins/flow.rs`          | `break`, `continue`, `exit`, `return`                                                                                                                                                                                                                                               |
+| `src/builtins/vars.rs`          | `declare` (compound re-expansion, `+a` readonly fix), `local`, `export`, `let`, `unset` (scalar subscript error, `arr[@]` preserves empty array)                                                                                                                                    |
+| `src/builtins/mod.rs`           | `parse_array_literal`, function body formatting, `quote_for_declare`, `quote_assoc_key` (shell-special-only quoting), `interpret_echo_escapes` (returns `(String, bool)` for `\c` stop)                                                                                             |
+| `src/builtins/set.rs`           | `set` (allexport, physical, ignoreeof), `shopt` (update_shellopts call, readline options removed)                                                                                                                                                                                   |
+| `src/builtins/trap.rs`          | `trap`, `kill` (kill -l range check), `enable` (full -n/-s/-a/-d impl)                                                                                                                                                                                                              |
+| `src/interpreter/mod.rs`        | Shell struct, `declared_unset`, `disabled_builtins`, `source_set_params`, `run_string`, `resolve_nameref`, `set_var` (auto-export), SHELLOPTS/BASHOPTS readonly, BASH_ALIASES/BASH_CMDS init                                                                                        |
+| `src/interpreter/commands.rs`   | Command execution, `expand_word*`, `set -k` keyword assignment scoping (save/restore), inline compound assignment detection (SingleQuoted `(` support), `execute_assignment`, `expand_assoc_subscript` (quote-aware subscript expansion)                                            |
 | `src/interpreter/arithmetic.rs` | Arithmetic eval, `expand_comsubs_in_arith` (handles `\$` and backticks), error tokens, short-circuit assignment validation, ternary precedence, bracket depth tracking in operator scanning, `arith_array_get` (recursive non-numeric value eval), bare array name → [0] resolution |
-| `src/interpreter/redirects.rs` | Redirections (vredir `{var}` fds with nameref support, varredir_close, fd validation, memfd heredocs, pipe fd leak fix) |
-| `src/interpreter/pipeline.rs` | Pipeline execution, PIPESTATUS, `in_pipeline_child` always true for forked children, SIGPIPE reset to SIG_DFL in pipeline/comsub children |
-| `src/expand/mod.rs` | Word expansion, `ExpCtx`, `ifs_first_char()` helper (empty IFS handling), procsub handling, `SyntaxError` handler, `NOUNSET_ERROR` flag, empty-element removal in unquoted `${arr[@]%%pattern}` |
-| `src/expand/params.rs` | Parameter expansion (`${...}` operators), IFS-aware `${arr[*]}` joining, `parse_arith_offset`, `is_valid_var_ref`, negative subscript bounds checking, assoc subscript expansion |
-| `src/expand/pattern.rs` | Pattern matching, `pattern_replace` (handles empty value + `*` match) |
-| `src/expand/arithmetic.rs` | `eval_arith_full_with_assoc` (receives real arrays/assoc_arrays/namerefs), `resolve_arith_vars` (handles `${var:-default}`, array subscript lookups) |
-| `src/parser.rs` | Parser, `parse_array_elements` (returns Result), `skip_to_next_command`, heredoc body resolution (full recursive `resolve_heredoc_in_command`) |
-| `src/lexer/mod.rs` | Lexer, `lex_compound_array_content()` (full-quoting re-parser for `declare -a`), thread-locals (`DQUOTE_TOGGLED`), `force_read_pending_heredocs`, `heredoc_resume` |
-| `src/lexer/dollar.rs` | `${}` parsing, `parse_brace_param` (bad substitution for `${$(...)}` ), `$(...)` comsub parser (now handles `<<<` here-strings) |
-| `src/lexer/word.rs` | `read_param_word_impl`, `skip_comsub` (case state machine), `take_heredoc_body` |
-| `src/lexer/heredoc.rs` | `register_heredoc` (line count fix), `read_heredoc_bodies` (backslash-newline, `<<-` tab-stripped delimiter matching), `parse_double_quoted_content` (backslash fix for `\"`) |
-| `rust/bash/testsuite.nix` | Test harness with path/PID normalization |
+| `src/interpreter/redirects.rs`  | Redirections (vredir `{var}` fds with nameref support, varredir_close, fd validation, memfd heredocs, pipe fd leak fix)                                                                                                                                                             |
+| `src/interpreter/pipeline.rs`   | Pipeline execution, PIPESTATUS, `in_pipeline_child` always true for forked children, SIGPIPE reset to SIG_DFL in pipeline/comsub children                                                                                                                                           |
+| `src/expand/mod.rs`             | Word expansion, `ExpCtx`, `ifs_first_char()` helper (empty IFS handling), procsub handling, `SyntaxError` handler, `NOUNSET_ERROR` flag, empty-element removal in unquoted `${arr[@]%%pattern}`                                                                                     |
+| `src/expand/params.rs`          | Parameter expansion (`${...}` operators), IFS-aware `${arr[*]}` joining, `parse_arith_offset`, `is_valid_var_ref`, negative subscript bounds checking, assoc subscript expansion                                                                                                    |
+| `src/expand/pattern.rs`         | Pattern matching, `pattern_replace` (handles empty value + `*` match)                                                                                                                                                                                                               |
+| `src/lexer/mod.rs`              | Lexer, `lex_compound_array_content()` (full-quoting re-parser for `declare -a`), thread-locals (`DQUOTE_TOGGLED`), `force_read_pending_heredocs`, `heredoc_resume`                                                                                                                  |
+| `src/lexer/dollar.rs`           | `${}` parsing, `parse_brace_param` (bad substitution for `${$(...)}` ), `$(...)` comsub parser (now handles `<<<` here-strings)                                                                                                                                                     |
+| `src/lexer/word.rs`             | `read_param_word_impl`, `skip_comsub` (case state machine), `take_heredoc_body`                                                                                                                                                                                                     |
+| `src/lexer/heredoc.rs`          | `register_heredoc` (line count fix), `read_heredoc_bodies` (backslash-newline, `<<-` tab-stripped delimiter matching), `parse_double_quoted_content` (backslash fix for `\"`)                                                                                                       |
+| `src/expand/arithmetic.rs`      | `eval_arith_full_with_assoc` (receives real arrays/assoc_arrays/namerefs), `resolve_arith_vars` (handles `${var:-default}`, array subscript lookups)                                                                                                                                |
+| `src/parser.rs`                 | Parser, `parse_array_elements` (returns Result), `skip_to_next_command`, heredoc body resolution (full recursive `resolve_heredoc_in_command`), `set_line_number` (absolute line set for comsub)                                                                                    |
+| `rust/bash/testsuite.nix`       | Test harness with path/PID normalization                                                                                                                                                                                                                                            |
 
 ## Recommended Next Priorities
 
 ### Low-hanging fruit (could flip nix tests to passing)
 
 1. **Fix SIGPIPE flaky tests (comsub/lastpipe/trap)** — 1-line diff each, timing race in nix sandbox. SIGPIPE is reset to SIG_DFL in pipeline/comsub children and EPIPE is suppressed in echo builtin for all subprocess contexts, but the nix sandbox timing still occasionally triggers the race. trap has an extra CHLD signal delivery. printf also has a flaky SIGPIPE race (printf6.sub line 40).
-1. **Fix read nix sandbox timing** — `read -t 1 < /dev/tty` returns exit status 1 instead of >128 in nix sandbox. The sandbox may not have `/dev/tty` or behaves differently. (~1 nix diff line)
 
 ### Medium effort
 
@@ -223,23 +229,30 @@ These exist in `/tmp/bash-5.3/tests/` but not in the nix test list:
 
 6. **Fix nameref edge cases** — nameref24.sub: invalid nameref name validation (`aa&bb` should error), nounset with nameref indirection. (~20 nix diff lines)
 
-7. **Fix new-exp remaining diffs** — `${!prefix*}` indirect expansion (space-separated vs IFS-joined), `$(< filename)` redirect-in-comsub, nounset parameter error format. (~30 nix diff lines)
+7. **Implement `&` in replacement strings** — Bash 5.3 treats `&` in `${var//pat/rep}` replacement as matched-text reference (like sed). `\&` is a literal `&`. Affects new-exp nix test (~30 diff lines). Requires changes to `pattern_replace` in `src/expand/pattern.rs`.
 
 ### Feature work
 
-8. **Fix remaining heredoc7.sub case 2** — heredoc started outside comsub (`cat <<EOF && grep $(`) where the heredoc delimiter `EOF` appears on a line consumed by the comsub body. Line numbers off by 1. (~4 nix diff lines)
+8. **Fix comsub2 remaining diffs** — (a) funsub `$*` ordering issue: `"$*${ set -- a b c;}$*"` should see updated positional params for the second `$*` — requires expansion layer to re-read shell state after funsub callback; (b) `jobs` builtin stub needs real job table access in funsubs; (c) line number off-by-1 in multi-line funsubs. (~20 nix diff lines)
 
-9. **Fix comsub2 remaining diffs** — (a) funsub `$*` ordering issue: `"$*${ set -- a b c;}$*"` should see updated positional params for the second `$*` — requires expansion layer to re-read shell state after funsub callback; (b) `jobs` builtin stub needs real job table access in funsubs; (c) line number off-by-1 in multi-line funsubs. (~20 nix diff lines)
+9. **Fix builtins test** — help output formatting, ulimit `-g` flag, ulimit number validation. (~130 nix diff lines)
 
-10. **Fix builtins test** — help output formatting, ulimit `-g` flag, ulimit number validation. (~130 nix diff lines)
+10. **Fix varenv test** — varenv25.sub: local scope management, `declare -p` format inside function context. (~100 nix diff lines)
 
-11. **Fix varenv test** — varenv25.sub: local scope management, `declare -p` format inside function context. (~100 nix diff lines)
+11. **Implement `caller` builtin and fix DEBUG trap context** — Needed for dbg-support tests (local-only). (~375+15 diff lines)
 
-12. **Implement `caller` builtin and fix DEBUG trap context** — Needed for dbg-support tests (local-only). (~375+15 diff lines)
+12. **Implement restricted shell mode (`-r` flag)** — Needed for rsh tests (local-only). (~26 diff lines)
 
-13. **Implement restricted shell mode (`-r` flag)** — Needed for rsh tests (local-only). (~26 diff lines)
+13. **Performance: optimize hot loops** — `ifs-posix` takes ~4 minutes vs bash's ~1s. `arith` takes ~2s vs bash's 0.035s. Profiling needed.
 
-14. **Performance: optimize hot loops** — `ifs-posix` takes ~4 minutes vs bash's ~1s. `arith` takes ~2s vs bash's 0.035s. Profiling needed.
+## Recent Fixes (Phase 22)
+
+- **Fix command substitution LINENO off-by-one** — Multi-line `$(\ncmd)` now reports correct line numbers matching bash. The root cause was that `set_line_offset()` used `lexer.line += offset` (relative add) after the parser constructor's `next_token()` call had already consumed the leading `\n` (incrementing `lexer.line` from 1 to 2). Added `set_line_number(target)` method that sets `lexer.line` to the absolute target value, discarding whatever the constructor consumed. All comsub execution sites (`capture_output`, `capture_output_nofork`, `capture_valuesub`, procsub runners) now store the actual 1-based LINENO and use `set_line_number()`. Eval continues to use `set_line_offset()` (which works correctly since eval text doesn't start with `\n`). Fixes **heredoc** nix test (heredoc7.sub case 2: `cat <<EOF && grep $(` line numbers now match).
+- **Fix `${!prefix*}` IFS separator** — `"${!prefix*}"` now joins matching variable names with the first character of IFS (like `"$*"`) instead of always using space. `"${!prefix@}"` correctly splits into separate words (like `"$@"`). Added `is_array_at_expansion` handling for `NamePrefix('@')` and `get_array_elements` handler to return individual variable names as separate fields.
+- **Fix `$(< $var)` variable expansion** — The `$(< filename)` fast path now parses the filename string into proper word parts using `lex_compound_array_content()` so that `$var`, `${var}`, tilde, and other expansions work. Previously wrapped the raw text in `WordPart::Literal` which didn't expand `$`. Fixed in both the unquoted and double-quoted code paths.
+- **Fix `$(< file)` glob expansion** — `$(< $TMPDIR/bashtmp.x*)` now performs glob expansion on the filename (unless in posix mode), matching bash behavior. Uses the `glob` crate to resolve single-match patterns.
+- **Fix `$(< nonexistent)` error handling** — Now reports the error with proper `strerror`-style message (no `(os error N)` suffix) and sets exit status to 1 via `set_arith_error()`, matching bash behavior. Previously silently returned empty string with exit status 0.
+- **Fix `${var:?message}` error prefix** — Now uses `EXPAND_ERROR_PREFIX` (which includes script name and line number) instead of hardcoded `"bash:"`. In `-c` mode with `$0` set to a script name, errors now correctly show `./script: line N: VAR: message` instead of `bash: VAR: message`.
 
 ## Recent Fixes (Phase 21)
 

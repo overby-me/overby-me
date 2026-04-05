@@ -379,12 +379,16 @@ impl Shell {
 
             // Set comsub_line_offset so LINENO inside the funsub reflects
             // the script line where the substitution appeared, not line 1.
+            // We store the actual 1-based LINENO and use set_line_number()
+            // (absolute set) instead of set_line_offset() (relative add),
+            // so that a leading '\n' consumed during parser construction
+            // doesn't cause an off-by-one.
             let lineno: usize = self
                 .vars
                 .get("LINENO")
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(1);
-            self.comsub_line_offset = lineno.saturating_sub(1);
+            self.comsub_line_offset = lineno;
 
             // In non-posix mode, bash disables `set -e` inside funsubs
             // (just like regular command substitutions).  In posix mode,
@@ -456,12 +460,13 @@ impl Shell {
 
         // Set comsub_line_offset so LINENO inside the valuesub reflects
         // the script line where the substitution appeared, not line 1.
+        // Store actual 1-based LINENO; run_string uses set_line_number().
         let lineno: usize = self
             .vars
             .get("LINENO")
             .and_then(|s| s.parse().ok())
             .unwrap_or(1);
-        self.comsub_line_offset = lineno.saturating_sub(1);
+        self.comsub_line_offset = lineno;
 
         // In non-posix mode, bash disables `set -e` inside valuesubs
         // (just like funsubs and regular command substitutions).
@@ -531,13 +536,16 @@ impl Shell {
                     // Clear EXIT trap in command substitution subshell
                     self.traps.remove("EXIT");
                     self.traps.remove("0");
-                    // Set comsub_line_offset so LINENO inside comsub reflects the script line
+                    // Set comsub_line_offset so LINENO inside comsub reflects the script line.
+                    // Store actual 1-based LINENO; run_string uses set_line_number() which
+                    // sets lexer.line absolutely, so a leading '\n' consumed during parser
+                    // construction doesn't cause an off-by-one.
                     let lineno: usize = self
                         .vars
                         .get("LINENO")
                         .and_then(|s| s.parse().ok())
                         .unwrap_or(1);
-                    self.comsub_line_offset = lineno.saturating_sub(1);
+                    self.comsub_line_offset = lineno;
                     self.in_comsub = true;
                     let status = self.run_string(cmd_str);
                     std::io::Write::flush(&mut std::io::stdout()).ok();

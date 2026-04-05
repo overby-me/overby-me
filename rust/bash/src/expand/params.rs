@@ -39,6 +39,11 @@ pub(super) fn is_array_at_expansion(expr: &ParamExpr, ctx: &ExpCtx) -> bool {
     if matches!(&expr.op, ParamOp::ArrayIndices('@')) {
         return ctx.arrays.contains_key(&expr.name) || ctx.assoc_arrays.contains_key(&expr.name);
     }
+    // ${!prefix@} — variable names matching prefix should split into separate
+    // fields (like "$@"), while ${!prefix*} joins with IFS (like "$*").
+    if matches!(&expr.op, ParamOp::NamePrefix('@')) {
+        return true;
+    }
     if let Some(bracket) = expr.name.find('[') {
         let idx_str = &expr.name[bracket + 1..expr.name.len() - 1];
         if idx_str == "@" {
@@ -90,6 +95,18 @@ pub(super) fn get_array_elements(expr: &ParamExpr, ctx: &ExpCtx) -> Vec<String> 
             return ctx.positional[1..].to_vec();
         }
         return vec![];
+    }
+    // ${!prefix@} — return matching variable names as separate elements
+    if let ParamOp::NamePrefix('@') = &expr.op {
+        let prefix = &expr.name;
+        let mut names: Vec<String> = ctx
+            .vars
+            .keys()
+            .filter(|k| k.starts_with(prefix.as_str()))
+            .cloned()
+            .collect();
+        names.sort();
+        return names;
     }
     // ${!arr[@]} — return indices/keys as elements
     if let ParamOp::ArrayIndices(_) = &expr.op {
@@ -1175,7 +1192,7 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                 lookup_var(&target, ctx)
             }
         }
-        ParamOp::NamePrefix(_ch) => {
+        ParamOp::NamePrefix(ch) => {
             // ${!prefix@} or ${!prefix*} — variable names matching prefix
             let prefix = &expr.name;
             let mut names: Vec<&String> = ctx
@@ -1184,13 +1201,21 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                 .filter(|k| k.starts_with(prefix.as_str()))
                 .collect();
             names.sort();
-            // TODO: when ch == '*', join with first char of IFS instead of space
-            let sep = " ";
+            // ${!prefix*} joins with first char of IFS (like "$*");
+            // ${!prefix@} always joins with space (like "$@" in double quotes).
+            let sep = if *ch == '*' {
+                match super::ifs_first_char(ctx.vars) {
+                    Some(c) => c.to_string(),
+                    None => String::new(), // IFS="" → no separator
+                }
+            } else {
+                " ".to_string()
+            };
             names
                 .iter()
                 .map(|s| s.as_str())
                 .collect::<Vec<_>>()
-                .join(sep)
+                .join(&sep)
         }
         ParamOp::ArrayIndices(_ch) => {
             // ${!arr[@]} or ${!arr[*]} — array indices/keys
@@ -1255,15 +1280,20 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
             let unset = !ctx.is_param_set(&expr.name);
             if unset || empty {
                 let msg = expand_word_nosplit_ctx(word, ctx, cmd_sub);
-                eprintln!(
-                    "bash: {}: {}",
-                    expr.name,
-                    if msg.is_empty() {
-                        "parameter null or not set"
+                let prefix = super::EXPAND_ERROR_PREFIX.with(|p| {
+                    let p = p.borrow();
+                    if p.is_empty() {
+                        "bash".to_string()
                     } else {
-                        &msg
+                        p.clone()
                     }
-                );
+                });
+                let error_msg = if msg.is_empty() {
+                    "parameter null or not set"
+                } else {
+                    &msg
+                };
+                eprintln!("{}: {}: {}", prefix, expr.name, error_msg);
                 std::process::exit(1);
             }
             val

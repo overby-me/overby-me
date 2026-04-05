@@ -783,8 +783,63 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                                 .or_else(|| trimmed.strip_prefix("<\t"))
                             {
                                 let file = file.trim();
-                                if let Ok(content) = std::fs::read_to_string(file) {
-                                    s.push_str(content.trim_end_matches('\n'));
+                                // Parse the filename into word parts so $var,
+                                // ${var}, $(cmd), tilde etc. are expanded.
+                                let file_parts = crate::lexer::lex_compound_array_content(file);
+                                let expanded =
+                                    expand_word_nosplit_ctx(&file_parts, ctx, &mut |c| cmd_sub(c));
+                                let expanded = expanded.trim().to_string();
+                                // Glob expansion (unless posix mode)
+                                let resolved = if !ctx.opt_flags.contains('P')
+                                    && (expanded.contains('*')
+                                        || expanded.contains('?')
+                                        || expanded.contains('['))
+                                {
+                                    match glob::glob(&expanded) {
+                                        Ok(mut paths) => {
+                                            if let Some(Ok(p)) = paths.next() {
+                                                if paths.next().is_none() {
+                                                    p.to_string_lossy().to_string()
+                                                } else {
+                                                    expanded.clone()
+                                                }
+                                            } else {
+                                                expanded.clone()
+                                            }
+                                        }
+                                        Err(_) => expanded.clone(),
+                                    }
+                                } else {
+                                    expanded.clone()
+                                };
+                                match std::fs::read_to_string(&resolved) {
+                                    Ok(content) => {
+                                        s.push_str(content.trim_end_matches('\n'));
+                                    }
+                                    Err(e) => {
+                                        let prefix = EXPAND_ERROR_PREFIX.with(|p| {
+                                            let p = p.borrow();
+                                            if p.is_empty() {
+                                                "bash".to_string()
+                                            } else {
+                                                p.clone()
+                                            }
+                                        });
+                                        let msg = if let Some(code) = e.raw_os_error() {
+                                            let c_msg = unsafe { libc::strerror(code) };
+                                            if c_msg.is_null() {
+                                                e.to_string()
+                                            } else {
+                                                unsafe { std::ffi::CStr::from_ptr(c_msg) }
+                                                    .to_string_lossy()
+                                                    .to_string()
+                                            }
+                                        } else {
+                                            e.to_string()
+                                        };
+                                        eprintln!("{}: {}: {}", prefix, resolved, msg);
+                                        set_arith_error();
+                                    }
                                 }
                             } else {
                                 s.push_str(&cmd_sub(cmd));
@@ -1285,18 +1340,68 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                     .or_else(|| trimmed.strip_prefix("<\t"))
                     .unwrap()
                     .trim();
-                // Expand the filename
-                let expanded = expand_word_nosplit_ctx(
-                    &vec![WordPart::Literal(file.to_string())],
-                    ctx,
-                    &mut |c| cmd_sub(c),
-                );
-                match std::fs::read_to_string(expanded.trim()) {
+                // Parse the filename into word parts so that $var, ${var},
+                // $(cmd), tilde, etc. are expanded properly.
+                let file_parts = crate::lexer::lex_compound_array_content(file);
+                let expanded = expand_word_nosplit_ctx(&file_parts, ctx, &mut |c| cmd_sub(c));
+                let expanded = expanded.trim().to_string();
+                // Handle glob expansion in the filename (like bash does for
+                // $(< $TMPDIR/bashtmp.x*)) — unless in posix mode where
+                // glob expansion in redirections is disabled.
+                let resolved = if !ctx.opt_flags.contains('P')
+                    && (expanded.contains('*') || expanded.contains('?') || expanded.contains('['))
+                {
+                    match glob::glob(&expanded) {
+                        Ok(mut paths) => {
+                            if let Some(Ok(p)) = paths.next() {
+                                // Only use glob if exactly one match
+                                if paths.next().is_none() {
+                                    p.to_string_lossy().to_string()
+                                } else {
+                                    expanded.clone()
+                                }
+                            } else {
+                                expanded.clone()
+                            }
+                        }
+                        Err(_) => expanded.clone(),
+                    }
+                } else {
+                    expanded.clone()
+                };
+                match std::fs::read_to_string(&resolved) {
                     Ok(content) => {
                         // Strip trailing newlines (like command substitution)
                         content.trim_end_matches('\n').to_string()
                     }
-                    Err(_) => String::new(),
+                    Err(e) => {
+                        // Report error for non-existent files (bash does this).
+                        // Use strerror-style message matching bash (no "os error N").
+                        let prefix = EXPAND_ERROR_PREFIX.with(|p| {
+                            let p = p.borrow();
+                            if p.is_empty() {
+                                "bash".to_string()
+                            } else {
+                                p.clone()
+                            }
+                        });
+                        let msg = if let Some(code) = e.raw_os_error() {
+                            let c_msg = unsafe { libc::strerror(code) };
+                            if c_msg.is_null() {
+                                e.to_string()
+                            } else {
+                                unsafe { std::ffi::CStr::from_ptr(c_msg) }
+                                    .to_string_lossy()
+                                    .to_string()
+                            }
+                        } else {
+                            e.to_string()
+                        };
+                        eprintln!("{}: {}: {}", prefix, resolved, msg);
+                        // Signal failure so capture_output sees exit 1.
+                        set_arith_error();
+                        String::new()
+                    }
                 }
             } else if nofork_prefix.is_empty() {
                 cmd_sub(cmd)

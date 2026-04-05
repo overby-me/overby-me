@@ -337,13 +337,14 @@ impl Shell {
         let self_ptr = self as *mut Shell;
         let mut procsub_runner = move |cmd: &str| -> i32 {
             let shell = unsafe { &mut *self_ptr };
-            // Set comsub_line_offset so LINENO inside procsub reflects the script line
+            // Set comsub_line_offset so LINENO inside procsub reflects the script line.
+            // Store actual 1-based LINENO; run_string uses set_line_number().
             let lineno: usize = shell
                 .vars
                 .get("LINENO")
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(1);
-            shell.comsub_line_offset = lineno.saturating_sub(1);
+            shell.comsub_line_offset = lineno;
             shell.run_string(cmd)
         };
         crate::expand::set_procsub_runner(&mut procsub_runner as *mut dyn FnMut(&str) -> i32);
@@ -462,13 +463,14 @@ impl Shell {
         let self_ptr2 = self as *mut Shell;
         let mut procsub_runner = move |cmd: &str| -> i32 {
             let shell = unsafe { &mut *self_ptr2 };
-            // Set comsub_line_offset so LINENO inside procsub reflects the script line
+            // Set comsub_line_offset so LINENO inside procsub reflects the script line.
+            // Store actual 1-based LINENO; run_string uses set_line_number().
             let lineno: usize = shell
                 .vars
                 .get("LINENO")
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(1);
-            shell.comsub_line_offset = lineno.saturating_sub(1);
+            shell.comsub_line_offset = lineno;
             shell.run_string(cmd)
         };
         crate::expand::set_procsub_runner(&mut procsub_runner as *mut dyn FnMut(&str) -> i32);

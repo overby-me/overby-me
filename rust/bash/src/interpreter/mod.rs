@@ -840,9 +840,13 @@ impl Shell {
             self.shopt_expand_aliases,
             self.opt_posix,
         );
-        // Apply command substitution line offset so LINENO reflects the script line
+        // Apply command substitution line offset so LINENO reflects the script line.
+        // comsub_line_offset stores the actual 1-based LINENO of the `$(` line.
+        // Use set_line_number() (absolute set) instead of set_line_offset() (relative
+        // add) so that a leading '\n' consumed during parser construction doesn't
+        // cause an off-by-one.
         if self.comsub_line_offset > 0 {
-            parser.set_line_offset(self.comsub_line_offset);
+            parser.set_line_number(self.comsub_line_offset);
             self.comsub_line_offset = 0; // consume the offset
         }
 

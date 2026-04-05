@@ -963,6 +963,20 @@ impl Parser {
         self.lexer.line += offset;
     }
 
+    /// Set the lexer line to an absolute 1-based line number, discarding any
+    /// newlines already consumed during parser construction.
+    ///
+    /// Used by command substitution execution: `target_line` is the 1-based
+    /// script line where `$(` appeared.  The constructor's `next_token()` call
+    /// may have consumed a leading `\n` (incrementing `lexer.line` from 1 to
+    /// 2), but that newline is merely the line break between `$(` and the
+    /// comsub body — bash does not count it as a LINENO increment.  By
+    /// setting `lexer.line` to `target_line` unconditionally, the first real
+    /// content reports the same LINENO as the `$(` line (matching bash).
+    pub fn set_line_number(&mut self, target_line: usize) {
+        self.lexer.line = target_line;
+    }
+
     pub fn current_pos(&self) -> usize {
         self.lexer.current_pos()
     }
