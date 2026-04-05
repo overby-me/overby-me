@@ -472,10 +472,15 @@ fn start_service_with_filedescriptors(
             conf.exec_config.stdout_path,
             None | Some(StdIoOption::Journal) | Some(StdIoOption::Kmsg)
         ),
-        stderr_is_journal: matches!(
-            conf.exec_config.stderr_path,
-            Some(StdIoOption::Journal) | Some(StdIoOption::Kmsg)
-        ),
+        stderr_is_journal: match &conf.exec_config.stderr_path {
+            // None = StandardError=inherit: stderr inherits from stdout,
+            // so stderr_is_journal should match stdout_is_journal.
+            None => matches!(
+                conf.exec_config.stdout_path,
+                None | Some(StdIoOption::Journal) | Some(StdIoOption::Kmsg)
+            ),
+            Some(p) => matches!(p, StdIoOption::Journal | StdIoOption::Kmsg),
+        },
         ambient_capabilities: conf.exec_config.ambient_capabilities.clone(),
 
         // Security & sandboxing directives
