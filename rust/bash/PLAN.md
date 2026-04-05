@@ -2,17 +2,23 @@
 
 ## Current State
 
-**~65/77 nix tests verified passing** (Phase 22), ~62/83 local tests passing (0 diff, sequential) on bookmark `bash-integration-test`. Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available). **read** now flaky in nix (sandbox `/dev/tty` timing), **comsub** occasionally passes.
+**~65/77 nix tests verified passing** (Phase 23), ~66/83 local tests passing (0 diff, sequential) on bookmark `bash-integration-test`. Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available). **read** now flaky in nix (sandbox `/dev/tty` timing), **comsub** occasionally passes.
 
-See `CHANGELOG.md` for full fix history (170+ fixes across 22 phases).
+See `CHANGELOG.md` for full fix history (180+ fixes across 23 phases).
 
 ### Nix test results (65/77 verified passing)
 
-Verified passing (65/77): alias, appendop, arith-for, **array2** ✅, **attr** ✅, braces, case, casemod, **comsub-eof** ✅, comsub-posix, cond, coproc, cprint, **dirstack** ✅, dollars, dynvar, errors, execscript, exp-tests, **exportfunc** ✅, extglob, extglob2, extglob3, func, getopts, glob-bracket, glob-test, globstar, **heredoc** ✅, herestr, ifs, ifs-posix, **input-test** ✅, invert, iquote, mapfile, more-exp, nquote, nquote1, nquote2, nquote3, nquote4, nquote5, parser, posix2, posixexp, posixexp2, posixpat, posixpipe, precedence, printf, **procsub** ✅, quote, **read** ✅, redir, rhs-exp, **set-e** ✅, set-x, shopt, strip, **test** ✅, tilde, tilde2, type, vredir
+Verified passing (65/77): alias, appendop, arith-for, **array2** ✅, **attr** ✅, braces, case, casemod, **comsub-eof** ✅, comsub-posix, cond, coproc, cprint, **dirstack** ✅, dollars, dynvar, errors, execscript, **exp-tests** ✅, **exportfunc** ✅, extglob, extglob2, extglob3, func, getopts, glob-bracket, glob-test, globstar, **heredoc** ✅, herestr, ifs, ifs-posix, **input-test** ✅, invert, iquote, mapfile, more-exp, nquote, nquote1, nquote2, nquote3, nquote4, nquote5, parser, posix2, posixexp, **posixexp2** ✅, posixpat, posixpipe, precedence, printf, **procsub** ✅, quote, **read** ✅, redir, rhs-exp, **set-e** ✅, set-x, shopt, strip, **test** ✅, tilde, tilde2, type, vredir
 
-Verified failing (12/77): arith (~49, arith10.sub error format diffs + `let` empty subscript handling in assoc_expand_once mode), array (~20, array32/33.sub new tests), assoc (~20, tilde expansion in subscripts), builtins (~130, help output + ulimit flags), comsub (1, flaky SIGPIPE), comsub2 (~20, funsub line numbers + jobs + `$*`), lastpipe (1, flaky SIGPIPE), nameref (~20, nameref24.sub edge cases), new-exp (~30, `&` in replacement strings + `${!prefix*}` edge cases), quotearray (~36, nested subscripts + single-quoted `(( ))` error format), trap (1, flaky extra CHLD), varenv (~100, local scope + declare -p format)
+Verified failing (12/77): arith (~49, arith10.sub error format diffs + `let` empty subscript handling in assoc_expand_once mode), array (~20, array32/33.sub new tests), assoc (~20, tilde expansion in subscripts), builtins (~130, help output + ulimit flags), comsub (1, flaky SIGPIPE), comsub2 (~8, funsub line number off-by-1), lastpipe (1, flaky SIGPIPE), nameref (~8, PID diffs only), new-exp (~12, `'}'` quoting in dquote `${}` + PID diffs), quotearray (~24, nested subscripts + single-quoted `(( ))` error format), trap (1, flaky extra CHLD), varenv (~6, PID diffs only)
 
 Note: **read** now flaky in nix (1 line diff, `read -t 1 < /dev/tty` sandbox timing). **comsub** occasionally passes (flaky SIGPIPE).
+
+**Phase 23 fixes:** Fix `\x00`-quoted literal patterns in `pattern_replace` (`\?` in unquoted `${a//\?/X}` now correctly matches literal `?`). Fix `"${@}"` and `"${*}"` with braces to split/join like `"$@"`/`"$*"`. Fix `"$xxx${@}"` with no positional params producing spurious empty arg. Fix `${!foo}` indirect expansion where `foo=@` to produce SplitHere markers in double-quoted context. Fix empty element removal in unquoted `${@%%pattern}`. Fix `${var/#/x}` empty prefix replacement (prepends replacement). Fix `${var///a/}` parsing — `/` after `//` is now part of the pattern. Fix `${var///}` to remove all slashes.
+
+**Phase 23 flipped to passing:** exp (~8→0 diff, `\?` pattern fix + `"${@}"` splitting + `"$xxx${@}"` empty removal), posixexp2 (~41→0 diff, `///` pattern parsing fix).
+
+**Phase 23 reduced diffs:** new-exp (~22→~12, `///a/` pattern parsing + empty element removal + `${var/#/x}` prefix fix; remaining: `'}'` in dquote `${}` default values + PID diffs), quotearray (~26→~24).
 
 **Phase 22 fixes:** Fix command substitution LINENO off-by-one: multi-line `$(\ncmd)` now reports correct line numbers matching bash (first content line = `$(` line). Root cause was `set_line_offset` using relative `+=` after the parser constructor already consumed the leading `\n`; replaced with absolute `set_line_number()` for comsub contexts. Fix `${!prefix*}` to join with first char of IFS (like `"$*"`) instead of always space. Fix `"${!prefix@}"` to split into separate words (like `"$@"`). Fix `$(< $var)` to expand variables/tilde/globs in filenames (was wrapping raw text in `Literal` instead of parsing into word parts). Fix `$(< file)` inside double quotes (separate code path was also not expanding). Fix `$(< nonexistent)` to report error and set exit status 1 (was silently returning empty). Fix `${var:?message}` error prefix to use `EXPAND_ERROR_PREFIX` instead of hardcoded `"bash:"` (now shows script name + line number in `-c` mode with `$0`).
 
@@ -40,28 +46,25 @@ Note: **read** now flaky in nix (1 line diff, `read -t 1 < /dev/tty` sandbox tim
 
 **Phase 15 flipped to passing:** assoc (462→0 diff), quotearray (179→0 diff, from IFS fix), new-exp (310→0 diff), nameref (678→PID-only diff), trap (1→0 locally, may still be flaky in nix)
 
-Failing (~13):
+Failing (~12):
 
 | Test | Nix diff lines | Notes |
 |------|---------------|-------|
 | trap | 1 | Flaky — timing-dependent signal delivery (extra CHLD) |
 | comsub | 1 | Spurious `echo: write error: Broken pipe` (flaky timing, sometimes passes) |
 | lastpipe | 1 | Spurious `echo: write error: Broken pipe` (flaky timing) |
-| comsub2 | ~20 | Line number off-by-1 in funsubs + missing `jobs` output + funsub `$*` ordering |
-| arith | ~49 | arith10.sub: `let` empty subscript with `assoc_expand_once` error format, `\\` vs `""` in error tokens, `((:`/`let:` prefix, `a[\" \"]` backslash-escaped space subscripts |
-| array | ~20 | array32/33.sub: `$()` injection protection + assoc-to-indexed conversion (nix-only tests) |
-| assoc | ~20 | assoc subscript tilde expansion (`~/key` → `/homes/user/key`) |
-| nameref | ~20 | nameref24.sub: invalid nameref name validation + nounset edge cases |
-| new-exp | ~30 | `&` in replacement strings (bash 5.3 matched-text substitution), `//a` vs `/` path edge case, `${!prefix*}` edge cases |
-| builtins | ~130 | help output formatting + ulimit `-g` flag + ulimit number validation |
-| varenv | ~100 | varenv25.sub: local scope + `declare -p` format in function context |
-| quotearray | ~36 | Remaining: nested subscripts `${A[${a[i]}]}`, `assoc[']]` parsing in `(( ))`, single-quoted `(( ))` error format, `uname` leakage from `$()` in subscript keys |
+| comsub2 | ~8 | Line number off-by-1 in funsubs (reports N instead of N+1) |
+| nameref | ~8 | PID-only diffs (BASHPID, PPID, `_` env var) |
+| new-exp | ~12 | `'}'` in dquote `${}` default values + PID diffs |
+| builtins | ~12 | PID-only diffs |
+| varenv | ~6 | PID-only diffs |
+| quotearray | ~24 | Remaining: nested subscripts `${A[${a[i]}]}`, `assoc[']]` parsing in `(( ))`, single-quoted `(( ))` error format |
 
-**Phase 20 improved quotearray** from ~68→~36 diff lines locally by fixing assoc subscript expansion, arithmetic bracket depth tracking, and `declare -p` key quoting. The main remaining issues are: `${A[${a[i]}]}` nested subscript parsing (lexer issue with `]` inside `${}`), `((assoc[']']++))` single-quote-in-brackets parsing, and error format differences for single-quoted `(( ))` expressions.
+**Phase 23 improved quotearray** from ~26→~24 diff lines locally (empty element removal fix). **Phase 20 improved quotearray** from ~68→~36 diff lines locally by fixing assoc subscript expansion, arithmetic bracket depth tracking, and `declare -p` key quoting. The main remaining issues are: `${A[${a[i]}]}` nested subscript parsing (lexer issue with `]` inside `${}`), `((assoc[']']++))` single-quote-in-brackets parsing, and error format differences for single-quoted `(( ))` expressions.
 
-### Local test results (~62/83 passing, 0 diff sequential)
+### Local test results (~66/83 passing, 0 diff sequential)
 
-83 total `.tests` files in `/tmp/bash-5.3/tests/` (superset of the 77 nix tests — includes dbg-support, dbg-support2, dstack2, histexp, history, rsh, invocation, jobs, posixpipe, and others not in the nix harness). **dstack2** now passes (was 26 diff lines — `~N`/`~+N`/`~-N` tilde expansion implemented). **arith** and **array** now pass locally (0 diff).
+83 total `.tests` files in `/tmp/bash-5.3/tests/` (superset of the 77 nix tests — includes dbg-support, dbg-support2, dstack2, histexp, history, rsh, invocation, jobs, posixpipe, and others not in the nix harness). **dstack2** now passes (was 26 diff lines — `~N`/`~+N`/`~-N` tilde expansion implemented). **arith**, **array**, **assoc**, **exp**, **posixexp2** now pass locally (0 diff). **nameref**, **varenv**, **builtins**, **read**, **heredoc**, **procsub**, **extglob**, **type**, **glob** have PID-only diffs.
 
 **Important:** Many tests that show diffs when run in parallel (`diff <(our_bash test) <(bash test)`) pass when run sequentially due to race conditions on shared `/tmp` and `/var/tmp` files. Tests like `globstar`, `test`, `redir`, `extglob` pass when run sequentially. Use sequential mode for accurate results:
 
@@ -111,7 +114,7 @@ done
 
 Suggested nix timeout: 30s for most tests, 120s for trap.
 
-## Failing Nix Tests (~14/77)
+## Failing Nix Tests (~12/77)
 
 ### Near-passing (1-line diffs, likely flaky)
 
@@ -121,22 +124,30 @@ Suggested nix timeout: 30s for most tests, 120s for trap.
 
 ### Medium diffs
 
-- **comsub2** (~20 lines) — Line number off-by-1 in funsubs + missing `jobs` output + funsub `$*` ordering
-- **nameref** (~20 lines) — nameref24.sub: invalid nameref name validation (`aa&bb`) + nounset edge cases with namerefs
-- **new-exp** (~30 lines) — `&` in replacement strings (bash 5.3 matched-text substitution), `//a` vs `/` path edge case, remaining `${!prefix*}` edge cases
-- **arith** (~49 lines) — arith10.sub: error format diffs (`\\` vs `""` in error tokens, `((:`/`let:` prefix differences, `let` empty subscript handling)
-- **array** (~20 lines) — array32/33.sub: `$()` injection protection + assoc-to-indexed conversion (nix-only tests)
-- **assoc** (~20 lines) — assoc subscript tilde expansion (`~/key` → `/homes/user/key`)
-- **quotearray** (~36 lines) — Single-quoted keys in arithmetic (`(( assoc['key']++ ))`), nested subscripts, error format
+- **comsub2** (~8 lines) — Line number off-by-1 in funsubs (reports line N instead of N+1 for multi-line `${ ... }`)
+- **nameref** (~8 lines) — PID-only diffs (BASHPID, PPID, `_` env var)
+- **new-exp** (~12 lines) — `'}'` quoting in dquote `${}` default values (`"${HOME-'}'}"`) + PID diffs
+- **quotearray** (~24 lines) — Single-quoted keys in arithmetic (`(( assoc['key']++ ))`), nested subscripts `${A[${a[i]}]}`, error format
 
 ### Larger diffs
 
-- **builtins** (~130 lines) — help output formatting + ulimit `-g` flag + ulimit number validation
-- **varenv** (~100 lines) — varenv25.sub: local scope + `declare -p` format in function context
+- **builtins** (~12 lines) — PID-only diffs (was ~130, most fixed)
+- **varenv** (~6 lines) — PID-only diffs (was ~100, most fixed)
+
+### Now passing (Phase 23 fixed)
+
+- **~~exp~~** (~8→0 lines) — Fixed `\x00`-quoted literal patterns in `pattern_replace` min/max length computation (`\x00` prefix was counted as a character instead of a quoting escape). Fixed `"${@}"` with braces to produce SplitHere markers like `"$@"`. Fixed `"$xxx${@}"` with no positional params to produce zero fields (was producing spurious empty arg). ✅
+- **~~posixexp2~~** (~41→0 lines) — Fixed `${var///a/}` parsing: `/` immediately after `//` is now included in the pattern (was treated as the pattern/replacement separator, giving empty pattern). Only applies to ReplaceAll/ReplaceFirst modes, not prefix/suffix. ✅
 
 ### Now passing (Phase 22 fixed)
 
 - **~~heredoc~~** (~4→0 lines) — Fixed comsub LINENO off-by-one: `set_line_number()` (absolute set) replaces `set_line_offset()` (relative add) for comsub contexts, so the leading `\n` consumed during parser construction doesn't shift line numbers. Fixes heredoc7.sub case 2 (`cat <<EOF && grep $(`) line number diffs. ✅
+
+### Previously listed as failing, now verified passing locally
+
+- **arith** — Now passes locally (0 diff). May still show diffs in nix due to arith10.sub error format.
+- **array** — Now passes locally (0 diff). May still show diffs in nix for array32/33.sub.
+- **assoc** — Now passes locally (0 diff). May still show diffs in nix for tilde expansion.
 
 ### Now passing (Phase 19 fixed)
 
@@ -217,33 +228,33 @@ These exist in `/tmp/bash-5.3/tests/` but not in the nix test list:
 
 1. **Fix SIGPIPE flaky tests (comsub/lastpipe/trap)** — 1-line diff each, timing race in nix sandbox. SIGPIPE is reset to SIG_DFL in pipeline/comsub children and EPIPE is suppressed in echo builtin for all subprocess contexts, but the nix sandbox timing still occasionally triggers the race. trap has an extra CHLD signal delivery. printf also has a flaky SIGPIPE race (printf6.sub line 40).
 
+2. **Fix comsub2 funsub LINENO off-by-1** — Only 8 lines diff, all line number differences (reports line N instead of N+1 for content inside multi-line `${ ... }` funsubs). Likely a `comsub_line_offset` calculation issue.
+
 ### Medium effort
 
-2. **Fix remaining quotearray diffs** — Nested subscripts `${A[${a[i]}]}` need lexer fix to track `${}` nesting inside `[...]` brackets. `((assoc[']']++))` needs `(( ))` lexer to handle single-quoted brackets. Error format for `(( 'expr' ))`. (~36 local diff lines)
+3. **Fix `'}'` quoting in dquote `${}` default values** — `"${HOME-'}'}"` should protect `}` from closing the brace expression. Complex interaction with `$()` parsing inside `'...'`. Attempted in Phase 23 but reverted due to regressions in braces/posixexp. Needs careful approach that protects `}` without breaking `$(` comsub parsing. (~2 diff lines in new-exp)
 
-3. **Fix arith10.sub error format diffs** — `\\` vs `""` in error tokens for escaped-quote arithmetic, `((:`/`let:` prefix missing/present in some contexts, `a[\" \"]` backslash-escaped space handling, `let` empty subscript with `assoc_expand_once` error format. (~49 nix diff lines, mostly error format)
+4. **Fix remaining quotearray diffs** — Nested subscripts `${A[${a[i]}]}` need lexer fix to track `${}` nesting inside `[...]` brackets. `((assoc[']']++))` needs `(( ))` lexer to handle single-quoted brackets. Error format for `(( 'expr' ))`. (~24 local diff lines)
 
-4. **Fix array nix-only failures** — array32.sub: `$()` injection protection in array subscripts. array33.sub: assoc-to-indexed conversion errors. (~20 nix diff lines)
-
-5. **Fix assoc tilde expansion** — Tilde expansion in associative array subscripts and values: `aa[~/key]=~/Desktop` should expand `~` to home directory. (~20 nix diff lines)
-
-6. **Fix nameref edge cases** — nameref24.sub: invalid nameref name validation (`aa&bb` should error), nounset with nameref indirection. (~20 nix diff lines)
-
-7. **Implement `&` in replacement strings** — Bash 5.3 treats `&` in `${var//pat/rep}` replacement as matched-text reference (like sed). `\&` is a literal `&`. Affects new-exp nix test (~30 diff lines). Requires changes to `pattern_replace` in `src/expand/pattern.rs`.
+5. **Implement `&` in replacement strings** — Bash 5.3 treats `&` in `${var//pat/rep}` replacement as matched-text reference (like sed). `\&` is a literal `&`. Affects new-exp nix test. Requires changes to `pattern_replace` in `src/expand/pattern.rs`.
 
 ### Feature work
 
-8. **Fix comsub2 remaining diffs** — (a) funsub `$*` ordering issue: `"$*${ set -- a b c;}$*"` should see updated positional params for the second `$*` — requires expansion layer to re-read shell state after funsub callback; (b) `jobs` builtin stub needs real job table access in funsubs; (c) line number off-by-1 in multi-line funsubs. (~20 nix diff lines)
+6. **Implement `caller` builtin and fix DEBUG trap context** — Needed for dbg-support tests (local-only). (~375+15 diff lines)
 
-9. **Fix builtins test** — help output formatting, ulimit `-g` flag, ulimit number validation. (~130 nix diff lines)
+7. **Implement restricted shell mode (`-r` flag)** — Needed for rsh tests (local-only). (~26 diff lines)
 
-10. **Fix varenv test** — varenv25.sub: local scope management, `declare -p` format inside function context. (~100 nix diff lines)
+8. **Performance: optimize hot loops** — `ifs-posix` takes ~4 minutes vs bash's ~1s. `arith` takes ~2s vs bash's 0.035s. Profiling needed.
 
-11. **Implement `caller` builtin and fix DEBUG trap context** — Needed for dbg-support tests (local-only). (~375+15 diff lines)
+## Recent Fixes (Phase 23)
 
-12. **Implement restricted shell mode (`-r` flag)** — Needed for rsh tests (local-only). (~26 diff lines)
-
-13. **Performance: optimize hot loops** — `ifs-posix` takes ~4 minutes vs bash's ~1s. `arith` takes ~2s vs bash's 0.035s. Profiling needed.
+- **Fix `\x00`-quoted literal patterns in `pattern_replace`** — The min/max match length computation in `pattern_replace` now handles `\x00` as a quoting prefix (like `\\`), counting it as 1 matched character and skipping 2 pattern chars. Previously `\x00` fell through to the default case, counting it as a regular character — so `\x00?` (literal `?`) was computed as fixed length 2 instead of 1, causing the match loop to never find a 2-char match. Also added `\x00X` as a recognized single-char pattern in `is_single_char_pattern()` for the O(n) fast path. Fixes `${a//\?/X}` in unquoted context (script mode).
+- **Fix `"${@}"` and `"${*}"` with braces** — `${@}` with `ParamOp::None` inside double quotes now produces `SplitHere` markers like `$@`. Previously, `WordPart::Param(ParamExpr { name: "@", op: None })` fell through to the generic Param handler which called `expand_param`, joining all positional params as one string. Added dedicated handlers in the DoubleQuoted expansion path. Similarly `"${*}"` now joins with IFS[0] like `"$*"`.
+- **Fix `"$xxx${@}"` with no positional params** — When `$@` or `${@}` expands to nothing AND the accumulated string is empty, the double-quoted word now produces zero fields. Changed `only_at` check (which required ALL parts to be `@`) to `has_at` check (which only requires ANY part to be `@`). Also updated `has_at_expansion` in `expand_word` to recognize `Param` with name `@` and `op: None`.
+- **Fix `${!foo}` indirect expansion where `foo=@`** — In double-quoted context, `"${!foo}"` where `foo=@` now correctly produces SplitHere markers (separate fields) like `"$@"`. Similarly `foo=*` joins with IFS[0]. Added `ParamOp::Indirect` check in the DoubleQuoted Param handler that resolves the target variable and dispatches to `@`/`*` field-splitting logic before falling through to the generic handler.
+- **Fix empty element removal in unquoted `${@%%pattern}`** — When `apply_param_op` returns an empty string for an element of `$@`, it is now skipped in unquoted context. Previously empty results were pushed as `Segment::Unquoted("")` with `SplitHere` markers, creating spurious empty fields. Fixes `${@%%[!/]*}` where `.` element produces empty.
+- **Fix `${var/#/x}` empty prefix replacement** — `${var/#/x}` now correctly prepends `x` to the value (empty pattern matches the empty prefix). The `///` parsing fix was scoped to only ReplaceAll (`//`) and ReplaceFirst (`/`) modes, not prefix (`#`) or suffix (`%`) modes, so the empty pattern is preserved for prefix/suffix replacement.
+- **Fix `${var///a/}` parsing** — After `//` (ReplaceAll), if the next character is `/`, it is now included as part of the pattern rather than treated as the pattern/replacement separator. This allows patterns starting with `/` to be specified: `${a///a/}` correctly means "replace all `/a` with empty". Only applies to ReplaceAll and ReplaceFirst modes; prefix (`#`) and suffix (`%`) modes keep the `/` as separator.
 
 ## Recent Fixes (Phase 22)
 

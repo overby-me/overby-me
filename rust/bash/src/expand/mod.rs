@@ -337,12 +337,13 @@ pub fn expand_word(
         }
     }
     if result.is_empty() && !word.is_empty() {
-        // Check if word contains "$@" or "${arr[@]}" which expand to nothing with 0 elements
+        // Check if word contains "$@" / "${@}" or "${arr[@]}" which expand to nothing with 0 elements
         let has_at_expansion = word.iter().any(|p| {
             if let WordPart::DoubleQuoted(parts) = p {
-                parts
-                    .iter()
-                    .any(|inner| matches!(inner, WordPart::Variable(n) if n == "@"))
+                parts.iter().any(|inner| {
+                    matches!(inner, WordPart::Variable(n) if n == "@")
+                        || matches!(inner, WordPart::Param(expr) if expr.name == "@" && matches!(expr.op, ParamOp::None))
+                })
             } else {
                 false
             }
@@ -582,6 +583,38 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                             }
                         }
                     }
+                    // "${@}" with braces — same behavior as "$@"
+                    WordPart::Param(expr)
+                        if expr.name == "@" && matches!(expr.op, ParamOp::None) =>
+                    {
+                        if ctx.positional.len() > 1 {
+                            if !s.is_empty() {
+                                out.push(Segment::Quoted(std::mem::take(&mut s)));
+                            }
+                            for (i, arg) in ctx.positional[1..].iter().enumerate() {
+                                if i > 0 {
+                                    out.push(Segment::SplitHere);
+                                }
+                                out.push(Segment::Quoted(arg.clone()));
+                            }
+                        }
+                    }
+                    // "${*}" with braces — same behavior as "$*"
+                    WordPart::Param(expr)
+                        if expr.name == "*" && matches!(expr.op, ParamOp::None) =>
+                    {
+                        if ctx.positional.len() > 1 {
+                            let sep = ifs_first_char(ctx.vars);
+                            for (i, arg) in ctx.positional[1..].iter().enumerate() {
+                                if i > 0
+                                    && let Some(c) = sep
+                                {
+                                    s.push(c);
+                                }
+                                s.push_str(arg);
+                            }
+                        }
+                    }
                     WordPart::Variable(name) => {
                         let val = lookup_var(name, ctx);
                         let is_pos_unbound = if let Ok(n) = name.parse::<usize>() {
@@ -699,66 +732,98 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                         }
                     }
                     WordPart::Param(expr) => {
-                        // Check if this is ${var+"$@"} or ${var-"$@"} — needs per-field expansion
-                        let has_at_in_word = match &expr.op {
-                            ParamOp::Default(_, word) | ParamOp::Alt(_, word) => {
-                                word.iter().any(|p| {
-                                    matches!(p, WordPart::Variable(n) if n == "@")
-                                        || matches!(p, WordPart::DoubleQuoted(parts) if parts.iter().any(|ip| matches!(ip, WordPart::Variable(n) if n == "@")))
-                                })
-                            }
-                            _ => false,
-                        };
-                        let is_alt_active = match &expr.op {
-                            ParamOp::Default(colon, _) => {
-                                let val = lookup_var(&expr.name, ctx);
-                                let set = ctx.is_param_set(&expr.name);
-                                let empty = if *colon { val.is_empty() } else { false };
-                                !set || empty
-                            }
-                            ParamOp::Alt(colon, _) => {
-                                let val = lookup_var(&expr.name, ctx);
-                                let set = ctx.is_param_set(&expr.name);
-                                let empty = if *colon { val.is_empty() } else { false };
-                                set && !empty
-                            }
-                            _ => false,
-                        };
-                        if has_at_in_word && is_alt_active {
-                            // Expand the word per-part to get SplitHere from $@
-                            if !s.is_empty() {
-                                out.push(Segment::Quoted(std::mem::take(&mut s)));
-                            }
-                            if let ParamOp::Default(_, word) | ParamOp::Alt(_, word) = &expr.op {
-                                let mut inner = Vec::new();
-                                for part in word {
-                                    // For bare $@ inside dquoted Default/Alt,
-                                    // produce SplitHere markers like "$@" does
-                                    if matches!(part, WordPart::Variable(n) if n == "@") {
-                                        for (i, arg) in ctx.positional[1..].iter().enumerate() {
-                                            if i > 0 {
-                                                inner.push(Segment::SplitHere);
-                                            }
-                                            inner.push(Segment::Quoted(arg.clone()));
-                                        }
-                                    } else {
-                                        expand_part(part, ctx, &mut inner, cmd_sub);
-                                    }
+                        // Handle ${!var} indirect expansion where var=@ or var=*
+                        // In double-quoted context, "${!foo}" where foo=@ should
+                        // produce SplitHere markers like "$@" does.
+                        if matches!(expr.op, ParamOp::Indirect) {
+                            let target = lookup_var(&expr.name, ctx);
+                            if target == "@" && ctx.positional.len() > 1 {
+                                if !s.is_empty() {
+                                    out.push(Segment::Quoted(std::mem::take(&mut s)));
                                 }
-                                for seg in inner {
-                                    match seg {
-                                        Segment::Quoted(t)
-                                        | Segment::Unquoted(t)
-                                        | Segment::Literal(t) => s.push_str(&t),
-                                        Segment::SplitHere | Segment::SplitHereStar => {
-                                            out.push(Segment::Quoted(std::mem::take(&mut s)));
-                                            out.push(seg.clone());
-                                        }
+                                for (i, arg) in ctx.positional[1..].iter().enumerate() {
+                                    if i > 0 {
+                                        out.push(Segment::SplitHere);
                                     }
+                                    out.push(Segment::Quoted(arg.clone()));
                                 }
+                            } else if target == "*" && ctx.positional.len() > 1 {
+                                let sep = ifs_first_char(ctx.vars);
+                                for (i, arg) in ctx.positional[1..].iter().enumerate() {
+                                    if i > 0
+                                        && let Some(c) = sep
+                                    {
+                                        s.push(c);
+                                    }
+                                    s.push_str(arg);
+                                }
+                            } else {
+                                let val = expand_param(expr, ctx, cmd_sub);
+                                s.push_str(&val);
                             }
                         } else {
-                            s.push_str(&expand_param(expr, ctx, cmd_sub));
+                            // Check if this is ${var+"$@"} or ${var-"$@"} — needs per-field expansion
+                            let has_at_in_word = match &expr.op {
+                                ParamOp::Default(_, word) | ParamOp::Alt(_, word) => {
+                                    word.iter().any(|p| {
+                                        matches!(p, WordPart::Variable(n) if n == "@")
+                                            || matches!(p, WordPart::DoubleQuoted(parts) if parts.iter().any(|ip| matches!(ip, WordPart::Variable(n) if n == "@")))
+                                    })
+                                }
+                                _ => false,
+                            };
+                            let is_alt_active = match &expr.op {
+                                ParamOp::Default(colon, _) => {
+                                    let val = lookup_var(&expr.name, ctx);
+                                    let set = ctx.is_param_set(&expr.name);
+                                    let empty = if *colon { val.is_empty() } else { false };
+                                    !set || empty
+                                }
+                                ParamOp::Alt(colon, _) => {
+                                    let val = lookup_var(&expr.name, ctx);
+                                    let set = ctx.is_param_set(&expr.name);
+                                    let empty = if *colon { val.is_empty() } else { false };
+                                    set && !empty
+                                }
+                                _ => false,
+                            };
+                            if has_at_in_word && is_alt_active {
+                                // Expand the word per-part to get SplitHere from $@
+                                if !s.is_empty() {
+                                    out.push(Segment::Quoted(std::mem::take(&mut s)));
+                                }
+                                if let ParamOp::Default(_, word) | ParamOp::Alt(_, word) = &expr.op
+                                {
+                                    let mut inner = Vec::new();
+                                    for part in word {
+                                        // For bare $@ inside dquoted Default/Alt,
+                                        // produce SplitHere markers like "$@" does
+                                        if matches!(part, WordPart::Variable(n) if n == "@") {
+                                            for (i, arg) in ctx.positional[1..].iter().enumerate() {
+                                                if i > 0 {
+                                                    inner.push(Segment::SplitHere);
+                                                }
+                                                inner.push(Segment::Quoted(arg.clone()));
+                                            }
+                                        } else {
+                                            expand_part(part, ctx, &mut inner, cmd_sub);
+                                        }
+                                    }
+                                    for seg in inner {
+                                        match seg {
+                                            Segment::Quoted(t)
+                                            | Segment::Unquoted(t)
+                                            | Segment::Literal(t) => s.push_str(&t),
+                                            Segment::SplitHere | Segment::SplitHereStar => {
+                                                out.push(Segment::Quoted(std::mem::take(&mut s)));
+                                                out.push(seg.clone());
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                s.push_str(&expand_param(expr, ctx, cmd_sub));
+                            }
                         }
                     }
                     WordPart::CommandSub(cmd) | WordPart::FunSub(cmd) | WordPart::ValueSub(cmd) => {
@@ -872,13 +937,14 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                 }
             }
             // Push Quoted for DoubleQuoted — even empty strings create a field.
-            // EXCEPT when the only content was "$@" with no positional params,
-            // which should produce zero fields, not one empty field.
-            let only_at = parts
-                .iter()
-                .all(|p| matches!(p, WordPart::Variable(n) if n == "@"))
-                && !parts.is_empty();
-            let at_was_empty = only_at && s.is_empty() && ctx.positional.len() <= 1;
+            // EXCEPT when the word contains "$@" or "${@}" that expanded to nothing
+            // (no positional params) AND the accumulated string is empty.
+            // This covers "$@", "${@}", "$xxx${@}" (where $xxx is also empty), etc.
+            let has_at = parts.iter().any(|p| {
+                matches!(p, WordPart::Variable(n) if n == "@")
+                    || matches!(p, WordPart::Param(expr) if expr.name == "@" && matches!(expr.op, ParamOp::None))
+            });
+            let at_was_empty = has_at && s.is_empty() && ctx.positional.len() <= 1;
             if !at_was_empty {
                 out.push(Segment::Quoted(s));
             }
@@ -1003,6 +1069,12 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
             {
                 let mut first = true;
                 for elem in &ctx.positional[1..] {
+                    let result = apply_param_op(elem, &expr.op, ctx, cmd_sub, &expr.name);
+                    // In unquoted context, skip empty results from per-element
+                    // operations like ${@%%pattern} — bash removes them.
+                    if result.is_empty() {
+                        continue;
+                    }
                     if !first {
                         out.push(if expr.name == "@" {
                             Segment::SplitHere
@@ -1014,7 +1086,6 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                         });
                     }
                     first = false;
-                    let result = apply_param_op(elem, &expr.op, ctx, cmd_sub, &expr.name);
                     out.push(Segment::Unquoted(result));
                 }
                 return;

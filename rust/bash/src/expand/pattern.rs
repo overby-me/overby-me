@@ -68,8 +68,12 @@ fn is_single_char_pattern(pattern: &str) -> bool {
     if pattern == "?" {
         return true;
     }
-    // Bracket expression: [...]  or [^...] or [!...]
+    // \x00-quoted single character: \x00X matches exactly the literal char X
     let chars: Vec<char> = pattern.chars().collect();
+    if chars.len() == 2 && chars[0] == '\x00' {
+        return true;
+    }
+    // Bracket expression: [...]  or [^...] or [!...]
     if chars.len() >= 3 && chars[0] == '[' && chars[chars.len() - 1] == ']' {
         // Make sure there's no nested `*` or `?` or other bracket inside
         // and no extglob patterns — just a simple bracket expression
@@ -266,8 +270,8 @@ pub(super) fn pattern_replace(value: &str, pattern: &str, replacement: &str, all
                     }
                     count += 1;
                 }
-                '\\' => {
-                    // Escaped character matches 1 character
+                '\x00' | '\\' => {
+                    // \x00 or \ prefix: quoted literal — matches 1 character
                     count += 1;
                     pi += 2;
                 }

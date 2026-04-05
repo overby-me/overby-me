@@ -1338,7 +1338,25 @@ fn read_param_op(chars: &[char], i: &mut usize, _name: &str, in_dquote: bool) ->
             } else {
                 'f'
             };
-            let pattern = read_pattern_word_until(chars, i, '/');
+            // If the first char after // is '/', it's part of the pattern
+            // (e.g. ${a///a/} means replace-all "/a" with empty).
+            // Push it as a literal before reading the rest of the pattern.
+            // If the first char after //  (or / for first-match) is '/',
+            // it's part of the pattern — but only for ReplaceAll ('a') and
+            // ReplaceFirst ('f') modes.  For prefix ('#') and suffix ('%')
+            // modes the '/' is the pattern/replacement separator.
+            // e.g. ${a///a/} means replace-all "/a" with empty,
+            //      ${a/#/x} means replace empty prefix with "x".
+            let mut pattern_prefix: Word = vec![];
+            if matches!(mode, 'a' | 'f') && *i < chars.len() && chars[*i] == '/' {
+                pattern_prefix.push(WordPart::Literal("/".to_string()));
+                *i += 1;
+            }
+            let mut pattern = read_pattern_word_until(chars, i, '/');
+            if !pattern_prefix.is_empty() {
+                pattern_prefix.extend(pattern);
+                pattern = pattern_prefix;
+            }
             let replacement = if *i < chars.len() && chars[*i] == '/' {
                 *i += 1;
                 read_pattern_word(chars, i)
