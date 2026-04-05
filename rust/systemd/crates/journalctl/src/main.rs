@@ -1266,15 +1266,22 @@ impl MatchCondition {
             }
             MatchCondition::Exe(exe) => entry.exe().is_some_and(|e| e == *exe),
             MatchCondition::Script { interpreter, comm } => {
-                // _COMM from /proc/pid/comm is truncated to 15 chars by the kernel,
-                // so match using a prefix when the name exceeds 15 chars.
+                // Match entries from a script: _EXE must match the interpreter,
+                // and _COMM can be either the script basename (if the kernel or
+                // runtime set it) or the interpreter basename (e.g. "bash" for
+                // shell scripts, which is the common case).
                 entry.exe().is_some_and(|e| e == *interpreter)
                     && entry.comm().is_some_and(|c| {
-                        if comm.len() > 15 {
+                        let comm_matches = if comm.len() > 15 {
                             c == comm[..15]
                         } else {
                             c == *comm
-                        }
+                        };
+                        let interp_basename = std::path::Path::new(interpreter)
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("");
+                        comm_matches || c == interp_basename
                     })
             }
             MatchCondition::KernelDevice(dev) => {
