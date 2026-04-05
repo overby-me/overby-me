@@ -755,14 +755,51 @@ fn parse_brace_param(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart
             // ${!prefix*} or ${!prefix@} — names matching prefix
             if *i < chars.len() && (chars[*i] == '*' || chars[*i] == '@') {
                 let ch = chars[*i];
+                // Validate that the prefix is a valid variable name prefix
+                // (starts with letter or underscore). ${!1*}, ${!@*} etc. are
+                // bad substitution in bash 5.3+.
+                let valid_prefix = !name.is_empty()
+                    && name
+                        .chars()
+                        .next()
+                        .map(|c| c == '_' || c.is_ascii_alphabetic())
+                        .unwrap_or(false);
+                if !valid_prefix {
+                    // Skip to closing }
+                    *i += 1;
+                    while *i < chars.len() && chars[*i] != '}' {
+                        *i += 1;
+                    }
+                    if *i < chars.len() {
+                        *i += 1;
+                    }
+                    return WordPart::SyntaxError(format!(
+                        "${{!{}{}}}: bad substitution",
+                        name, ch
+                    ));
+                }
                 *i += 1;
                 if *i < chars.len() && chars[*i] == '}' {
                     *i += 1;
+                    return WordPart::Param(ParamExpr {
+                        name,
+                        op: ParamOp::NamePrefix(ch),
+                    });
                 }
-                return WordPart::Param(ParamExpr {
-                    name,
-                    op: ParamOp::NamePrefix(ch),
-                });
+                // Extra content after * or @ before } → bad substitution
+                // e.g. ${!_Q* } or ${!prefix*xyz}
+                let mut trailing = String::new();
+                while *i < chars.len() && chars[*i] != '}' {
+                    trailing.push(chars[*i]);
+                    *i += 1;
+                }
+                if *i < chars.len() {
+                    *i += 1; // skip }
+                }
+                return WordPart::SyntaxError(format!(
+                    "${{!{}{}{}}}: bad substitution",
+                    name, ch, trailing
+                ));
             }
             // Check for operator after indirect name: ${!name+word}, ${!name-word}, etc.
             if *i < chars.len() && chars[*i] != '}' {

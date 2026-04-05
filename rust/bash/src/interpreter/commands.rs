@@ -1829,6 +1829,75 @@ impl Shell {
         let chars: Vec<char> = idx_str.chars().collect();
         let mut result = String::new();
         let mut i = 0;
+
+        // Tilde expansion at the start of the subscript key.
+        // bash expands `~` (or `~user`) at the beginning of unquoted subscripts
+        // in assignment context: `aa[~/path]=val` → key is `/home/user/path`.
+        if !chars.is_empty()
+            && chars[0] == '~'
+            && (chars.len() == 1 || chars[1] != '\'' && chars[1] != '"')
+        {
+            i = 1; // skip ~
+            let mut user = String::new();
+            while i < chars.len()
+                && chars[i] != '/'
+                && chars[i] != '$'
+                && chars[i] != '`'
+                && chars[i] != '\''
+                && chars[i] != '"'
+                && chars[i] != '\\'
+            {
+                user.push(chars[i]);
+                i += 1;
+            }
+            if user.is_empty() {
+                // ~ alone or ~/ — expand to $HOME
+                if let Some(home) = self.vars.get("HOME") {
+                    result.push_str(home);
+                } else {
+                    result.push('~');
+                }
+            } else if user == "+" {
+                if let Some(pwd) = self.vars.get("PWD") {
+                    result.push_str(pwd);
+                } else {
+                    result.push('~');
+                    result.push_str(&user);
+                }
+            } else if user == "-" {
+                if let Some(oldpwd) = self.vars.get("OLDPWD") {
+                    result.push_str(oldpwd);
+                } else {
+                    result.push('~');
+                    result.push_str(&user);
+                }
+            } else {
+                // ~user — look up user's home directory
+                #[cfg(unix)]
+                {
+                    use std::ffi::CString;
+                    if let Ok(cname) = CString::new(user.as_str()) {
+                        let pw = unsafe { libc::getpwnam(cname.as_ptr()) };
+                        if !pw.is_null() {
+                            let dir = unsafe { std::ffi::CStr::from_ptr((*pw).pw_dir) };
+                            result.push_str(&dir.to_string_lossy());
+                        } else {
+                            result.push('~');
+                            result.push_str(&user);
+                        }
+                    } else {
+                        result.push('~');
+                        result.push_str(&user);
+                    }
+                }
+                #[cfg(not(unix))]
+                {
+                    result.push('~');
+                    result.push_str(&user);
+                }
+            }
+        }
+
         while i < chars.len() {
             if chars[i] == '\'' {
                 // Single-quoted region: everything is literal until closing '

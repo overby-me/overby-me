@@ -2259,7 +2259,20 @@ impl Parser {
                             }
                             match part {
                                 WordPart::Literal(lit) => {
-                                    if let Some(eq_pos) = lit.find("]=") {
+                                    if let Some(eq_pos) = lit.find("]+=") {
+                                        // Append assignment: arr[sub]+=value
+                                        // Must check before "]=" since "]+" contains "]"
+                                        let before = &lit[..eq_pos + 1]; // include ]
+                                        name_text.push_str(before);
+                                        name_text.push('+'); // mark as append (name ends with ]+)
+                                        let after_eq = &lit[eq_pos + 3..]; // skip ]+=
+                                        if !after_eq.is_empty() {
+                                            value_parts
+                                                .push(WordPart::Literal(after_eq.to_string()));
+                                        }
+                                        found_eq = true;
+                                        eq_part_idx = idx + 1;
+                                    } else if let Some(eq_pos) = lit.find("]=") {
                                         let before = &lit[..eq_pos + 1]; // include ]
                                         name_text.push_str(before);
                                         let after_eq = &lit[eq_pos + 2..];
@@ -2315,7 +2328,12 @@ impl Parser {
                             needs_multi_token = true;
                         }
                         if found_eq {
-                            let append = name_text.ends_with("+=");
+                            let append = name_text.ends_with('+');
+                            // Strip trailing '+' from name when it's an append assignment
+                            // (the '+' was added by the ]+= detection above)
+                            if append {
+                                name_text.pop();
+                            }
                             let _ = eq_part_idx;
                             Some((name_text, append, String::new(), parts.len(), value_parts))
                         } else if needs_multi_token {
@@ -2491,6 +2509,31 @@ impl Parser {
         }))
     }
 
+    /// Convert a literal string to word parts, recognizing leading `~` as a
+    /// `Tilde` part so that tilde expansion works in compound array element
+    /// values like `[key]=~/Desktop`.
+    fn literal_to_parts_with_tilde(s: &str) -> Vec<WordPart> {
+        if let Some(rest) = s.strip_prefix('~') {
+            // Find where the tilde prefix ends (at '/' or end of string)
+            if let Some(slash_pos) = rest.find('/') {
+                let user = rest[..slash_pos].to_string();
+                let after_tilde = &rest[slash_pos..]; // includes the '/'
+                let mut parts = vec![WordPart::Tilde(user)];
+                if !after_tilde.is_empty() {
+                    parts.push(WordPart::Literal(after_tilde.to_string()));
+                }
+                parts
+            } else {
+                // ~ or ~user with nothing after
+                vec![WordPart::Tilde(rest.to_string())]
+            }
+        } else if !s.is_empty() {
+            vec![WordPart::Literal(s.to_string())]
+        } else {
+            vec![]
+        }
+    }
+
     /// Extract `[index]=value` or `[index]+=value` from a word's parts.
     /// Returns `(index_parts, value_parts, is_append)` if found, else `None`.
     fn extract_array_index(parts: &[WordPart]) -> Option<(Vec<WordPart>, Vec<WordPart>, bool)> {
@@ -2502,26 +2545,22 @@ impl Parser {
 
         // Fast path: everything in the first literal, e.g. [key]=value or [key]+=value
         if let Some(close) = first_lit.find("]+=") {
-            let idx_str = first_lit[1..close].to_string();
-            let after = first_lit[close + 3..].to_string();
+            let idx_str = &first_lit[1..close];
+            let after = &first_lit[close + 3..];
             let rest: Vec<WordPart> = parts[1..].to_vec();
-            let mut value_parts = Vec::new();
-            if !after.is_empty() {
-                value_parts.push(WordPart::Literal(after));
-            }
+            let idx_parts = Self::literal_to_parts_with_tilde(idx_str);
+            let mut value_parts = Self::literal_to_parts_with_tilde(after);
             value_parts.extend(rest);
-            return Some((vec![WordPart::Literal(idx_str)], value_parts, true));
+            return Some((idx_parts, value_parts, true));
         }
         if let Some(close) = first_lit.find("]=") {
-            let idx_str = first_lit[1..close].to_string();
-            let after = first_lit[close + 2..].to_string();
+            let idx_str = &first_lit[1..close];
+            let after = &first_lit[close + 2..];
             let rest: Vec<WordPart> = parts[1..].to_vec();
-            let mut value_parts = Vec::new();
-            if !after.is_empty() {
-                value_parts.push(WordPart::Literal(after));
-            }
+            let idx_parts = Self::literal_to_parts_with_tilde(idx_str);
+            let mut value_parts = Self::literal_to_parts_with_tilde(after);
             value_parts.extend(rest);
-            return Some((vec![WordPart::Literal(idx_str)], value_parts, false));
+            return Some((idx_parts, value_parts, false));
         }
 
         // Slow path: key spans multiple parts, e.g. ["key"]=value
@@ -2542,10 +2581,7 @@ impl Parser {
                         idx_parts.push(WordPart::Literal(before.to_string()));
                     }
                     let after = &s[pos + 3..];
-                    let mut value_parts = Vec::new();
-                    if !after.is_empty() {
-                        value_parts.push(WordPart::Literal(after.to_string()));
-                    }
+                    let mut value_parts = Self::literal_to_parts_with_tilde(after);
                     value_parts.extend(parts[i + 1..].to_vec());
                     return Some((idx_parts, value_parts, true));
                 }
@@ -2556,10 +2592,7 @@ impl Parser {
                         idx_parts.push(WordPart::Literal(before.to_string()));
                     }
                     let after = &s[pos + 2..];
-                    let mut value_parts = Vec::new();
-                    if !after.is_empty() {
-                        value_parts.push(WordPart::Literal(after.to_string()));
-                    }
+                    let mut value_parts = Self::literal_to_parts_with_tilde(after);
                     value_parts.extend(parts[i + 1..].to_vec());
                     return Some((idx_parts, value_parts, false));
                 }
@@ -2590,10 +2623,7 @@ impl Parser {
                     if !before.is_empty() {
                         key_tail.push(WordPart::Literal(before.to_string()));
                     }
-                    let mut value_parts = Vec::new();
-                    if !after.is_empty() {
-                        value_parts.push(WordPart::Literal(after.to_string()));
-                    }
+                    let mut value_parts = Self::literal_to_parts_with_tilde(after);
                     value_parts.extend(parts[i + 1..].iter().cloned());
                     return Some((key_tail, value_parts, true));
                 }
@@ -2605,10 +2635,7 @@ impl Parser {
                     if !before.is_empty() {
                         key_tail.push(WordPart::Literal(before.to_string()));
                     }
-                    let mut value_parts = Vec::new();
-                    if !after.is_empty() {
-                        value_parts.push(WordPart::Literal(after.to_string()));
-                    }
+                    let mut value_parts = Self::literal_to_parts_with_tilde(after);
                     value_parts.extend(parts[i + 1..].iter().cloned());
                     return Some((key_tail, value_parts, false));
                 }

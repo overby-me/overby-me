@@ -2,9 +2,9 @@
 
 ## Current State
 
-**66/77 nix tests verified passing** (Phase 25), ~66/83 local tests passing (0 diff, sequential) on bookmark `bash-integration-test`. Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available). **read** now flaky in nix (sandbox `/dev/tty` timing), **comsub** occasionally passes.
+**66/77 nix tests verified passing** (Phase 26), ~66/83 local tests passing (0 diff, sequential) on bookmark `bash-integration-test`. Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available). **read** now flaky in nix (sandbox `/dev/tty` timing), **comsub** occasionally passes.
 
-See `CHANGELOG.md` for full fix history (190+ fixes across 25 phases).
+See `CHANGELOG.md` for full fix history (195+ fixes across 26 phases).
 
 ### Nix test results (66/77 verified passing)
 
@@ -13,6 +13,10 @@ Verified passing (66/77): alias, appendop, arith-for, **array2** ✅, **attr** �
 Verified failing (11/77): arith (nix-only: arith10.sub error format diffs + `let` empty subscript handling in assoc_expand_once mode), array (nix-only: array32/33.sub new tests), assoc (nix-only: tilde expansion in subscripts + empty array formatting), builtins (~130, help output + ulimit flags), comsub (1, flaky SIGPIPE), comsub2 (~8, funsub line number off-by-1), lastpipe (1, flaky SIGPIPE), nameref (nix: nameref resolution bugs revealed by sandbox), new-exp (~16, `'}'` quoting in dquote `${}` + `&` replacement quoting edge cases + PID diffs), quotearray (~20, `assoc[']]` parsing + single-quoted `(( ))` error format + `declare -p` formatting), trap (1, flaky extra CHLD)
 
 Note: **read** now flaky in nix (1 line diff, `read -t 1 < /dev/tty` sandbox timing). **comsub** occasionally passes (flaky SIGPIPE). **arith**, **array**, **assoc** pass locally (0 diff) but fail in nix sandbox due to stricter environment revealing edge cases. **varenv**, **nameref**, **builtins** have PID-only diffs locally but real diffs in nix.
+
+**Phase 26 fixes:** Fix `assoc[$var]+=1` append assignment parsing when subscript contains quotes/brackets — `]+=` detection in array subscript assignment context (previously only `]=` was detected). Add tilde expansion in associative array subscript keys (`aa[~/path]=val` → expands `~` to `$HOME`). Add tilde expansion in compound array element values and keys (`declare -A aa=([~/key]=~/Desktop)` → tildes expand in both). Fix `${!prefix* }` bad substitution detection (trailing content after `*`/`@`). Fix `${!1*}` and `${!@*}` bad substitution (prefixes starting with digits or special chars now correctly rejected).
+
+**Phase 26 improved quotearray** from ~32→~27 diff lines locally (`]+=` append assignment fix eliminates `command not found` error + corrects `declare -p` output). **Phase 26 improved assoc** for nix — tilde expansion in subscript keys and compound assignment values now matches bash behavior.
 
 **Phase 25 fixes:** Fix `${A[${a[i]}]}` nested subscript expansion — `${}` inside array subscripts now correctly uses brace-depth-aware matching to find the closing `}`, then recursively calls `lookup_var` to resolve the inner expression. Previously, `rest.find('}')` matched the first `}` which could be inside nested `${...}`, causing misparse. Investigated comsub/funsub LINENO counting — traced bash's `parse_and_execute` line counting model through `shell_getc`, `yy_string_get`, and YACC grammar. Discovered bash counts lines via `shell_getc`'s line-buffer refill (not per-`\n` character), so `\n` after `;` doesn't increment `line_number` in string-eval contexts. Our character-level lexer has fundamentally different counting. The funsub off-by-1 in comsub2 is actually caused by compound commands (`for`/`while`) adding extra line counts in bash's `parse_and_execute` model. Left as known issue.
 
@@ -59,15 +63,15 @@ Failing (~11 nix):
 | lastpipe | 0 ✅ | 1 | Spurious `echo: write error: Broken pipe` (flaky timing) |
 | comsub2 | ~12 | ~12 | Line number off-by-1 in funsubs (compound command line counting) |
 | new-exp | ~16 (PID+`&`) | ~40 | `'}'` quoting + `&` replacement quoting edge cases + tilde in replacement + PID diffs |
-| quotearray | ~32 | ~80 | `assoc[']]` parsing, `(( ))` single-quoted keys, `declare -p` formatting, error format |
+| quotearray | ~27 | ~80 | `(( ))` single-quoted keys, `declare -p` formatting, error format |
 | arith | 0 ✅ | ~50 | Nix-only: arith10.sub error format + `let` empty subscript in assoc_expand_once |
 | array | 0 ✅ | ~20 | Nix-only: array32/33.sub differences |
-| assoc | 0 ✅ | ~20 | Nix-only: empty assoc `declare -p` formatting, tilde in subscripts |
+| assoc | 0 ✅ | ~20 | Nix-only: bash 5.3 `A[]]`/`A[[]` bracket parsing, `$'\001'` key handling, compound assignment diffs |
 | builtins | ~18 (PID) | ~130 | `help` output formatting, `ulimit -g` flag, PID diffs |
 | nameref | ~16 (PID) | ~678 | Nix reveals nameref resolution bugs (`aa&bb`, nounset, indirect) |
 | varenv | ~12 (PID) | ~30 | `declare` output format, `local` error handling, PID diffs |
 
-**Phase 25 improved quotearray** from ~36→~32 diff lines locally (nested subscript `${A[${a[i]}]}` fix). **Phase 23 improved quotearray** from ~26→~24 diff lines locally (empty element removal fix). **Phase 20 improved quotearray** from ~68→~36 diff lines locally by fixing assoc subscript expansion, arithmetic bracket depth tracking, and `declare -p` key quoting. The main remaining issues are: `assoc[']]` bracket parsing in assignments, `((assoc[']']++))` single-quote-in-brackets parsing, `declare -p` tab/`@` key formatting, and error format differences for single-quoted `(( ))` expressions.
+**Phase 26 improved quotearray** from ~32→~27 diff lines locally (`]+=` append assignment fix). **Phase 25 improved quotearray** from ~36→~32 diff lines locally (nested subscript `${A[${a[i]}]}` fix). **Phase 23 improved quotearray** from ~26→~24 diff lines locally (empty element removal fix). **Phase 20 improved quotearray** from ~68→~36 diff lines locally by fixing assoc subscript expansion, arithmetic bracket depth tracking, and `declare -p` key quoting. The main remaining issues are: `((assoc[']']++))` single-quote-in-brackets parsing, `declare -p` tab/`@` key formatting, error format differences for single-quoted `(( ))` expressions, and `]` as invalid arithmetic operator in expanded subscripts.
 
 ### Local test results (~66/83 passing, 0 diff sequential)
 
@@ -121,7 +125,7 @@ done
 
 Suggested nix timeout: 30s for most tests, 120s for trap.
 
-## Failing Nix Tests (~12/77)
+## Failing Nix Tests (~11/77)
 
 ### Near-passing (1-line diffs, likely flaky)
 
@@ -133,13 +137,13 @@ Suggested nix timeout: 30s for most tests, 120s for trap.
 
 - **comsub2** (~8 lines) — Line number off-by-1 in funsubs. Root cause: bash's `parse_and_execute` counts lines via `shell_getc` line-buffer refills (not per-`\n` character), and compound commands (`for`/`while`) add extra line increments. Our character-level lexer counts differently.
 - **new-exp** (~16 lines) — `'}'` quoting in dquote `${}` default values (`"${HOME-'}'}"`) + `&` replacement quoting edge cases (`$'&'` inside `\$'&'` should be literal) + PID diffs
-- **quotearray** (~20 lines) — Single-quoted keys in arithmetic (`(( assoc['key']++ ))`), `assoc[']]` bracket parsing in assignments, `declare -p` formatting (tab escaping, `@` quoting), error format differences
+- **quotearray** (~20 lines) — Single-quoted keys in arithmetic (`(( assoc['key']++ ))`), `declare -p` formatting (tab escaping, `@` quoting), error format differences for single-quoted `(( ))` expressions, `]` as invalid arithmetic operator in expanded subscripts
 
 ### Nix-only failures (pass locally, fail in nix sandbox)
 
 - **arith** — Passes locally (0 diff). Nix reveals arith10.sub error format diffs + `let` empty subscript handling in `assoc_expand_once` mode
 - **array** — Passes locally (0 diff). Nix reveals array32/33.sub differences
-- **assoc** — Passes locally (0 diff). Nix reveals tilde expansion in subscripts + empty assoc array `declare -p` formatting (`declare -A a` vs `declare -A a=()`)
+- **assoc** — Passes locally (0 diff). Nix reveals bash 5.3 `A[]]`/`A[[]` bracket parsing, `$'\001'` key handling in compound assignments, and other bash 5.3 differences
 - **nameref** — PID-only locally. Nix reveals nameref resolution bugs (invalid variable names like `aa&bb`, nounset behavior with namerefs)
 - **varenv** — PID-only locally. Nix reveals `declare` output format diffs, `local` error handling
 
@@ -241,13 +245,13 @@ These exist in `/tmp/bash-5.3/tests/` but not in the nix test list:
 
 1. **Fix SIGPIPE flaky tests (comsub/lastpipe/trap)** — 1-line diff each, timing race in nix sandbox. SIGPIPE is reset to SIG_DFL in pipeline/comsub children and EPIPE is suppressed in echo builtin for all subprocess contexts, but the nix sandbox timing still occasionally triggers the race. trap has an extra CHLD signal delivery. printf also has a flaky SIGPIPE race (printf6.sub line 40).
 
-2. **Fix nix-only failures (arith/array/assoc/nameref/varenv)** — Pass locally but fail in nix sandbox. Fixing these would bring nix passing count from 66→71. Key issues: empty assoc array `declare -p` formatting, tilde expansion in assoc subscripts, nameref resolution edge cases, `declare` output format.
+2. **Fix nix-only failures (arith/array/nameref/varenv)** — Pass locally but fail in nix sandbox. Fixing these would bring nix passing count from 66→70. Key issues: arith10.sub error format + `let` empty subscript in assoc_expand_once, array32/33.sub bash 5.3 differences, nameref resolution edge cases, `declare` output format. **assoc** tilde expansion fixed in Phase 26 but still fails in nix due to bash 5.3-specific bracket parsing and `$'\001'` key handling.
 
 ### Medium effort
 
 3. **Fix `'}'` quoting in dquote `${}` default values** — `"${HOME-'}'}"` should protect `}` from closing the brace expression. Complex interaction with `$()` parsing inside `'...'`. Attempted in Phase 23 but reverted due to regressions in braces/posixexp. Needs careful approach that protects `}` without breaking `$(` comsub parsing. (~2 diff lines in new-exp)
 
-4. **Fix remaining quotearray diffs** — ~~Nested subscripts `${A[${a[i]}]}` need lexer fix to track `${}` nesting inside `[...]` brackets.~~ ✅ Fixed in Phase 25. Remaining: `((assoc[']']++))` needs `(( ))` lexer to handle single-quoted brackets. `assoc[$var]+=1` where `$var` expands to `']` — bracket parsing in assignments. `declare -p` tab/`@` key formatting. Error format for `(( 'expr' ))`. (~20 local diff lines)
+4. **Fix remaining quotearray diffs** — ~~Nested subscripts `${A[${a[i]}]}` need lexer fix to track `${}` nesting inside `[...]` brackets.~~ ✅ Fixed in Phase 25. ~~`assoc[$var]+=1` where `$var` expands to `']` — bracket parsing in assignments.~~ ✅ Fixed in Phase 26. Remaining: `((assoc[']']++))` needs `(( ))` lexer to handle single-quoted brackets. Single-quoted full expressions `(( 'expr' ))` should not be treated as shell-level quoting (single quotes in `(( ))` are literal, not quoting). `declare -p` tab/`@` key formatting. `]` as "invalid arithmetic operator" error type. (~27 local diff lines)
 
 5. **Fix `&` replacement quoting edge cases** — Basic `&` replacement implemented in Phase 24. Remaining: `$'&'` inside `\$'&'` should be literal (ANSI-C quoted `&`), `\&` in various quoting contexts, tilde expansion in replacement strings. (~16 diff lines in new-exp locally, some PID-only)
 
@@ -262,6 +266,18 @@ These exist in `/tmp/bash-5.3/tests/` but not in the nix test list:
 9. **Performance: optimize hot loops** — `ifs-posix` takes ~4 minutes vs bash's ~1s. `arith` takes ~2s vs bash's 0.035s. Profiling needed.
 
 10. **Fix `help` builtin output + `ulimit` flags** — Needed for builtins test in nix. `help` needs column-formatted output matching bash's layout. `ulimit -g` (max locked memory) not implemented. (~130 nix diff lines)
+
+## Recent Fixes (Phase 26)
+
+- **Fix `assoc[$var]+=1` append assignment parsing** — When an associative array subscript is followed by `]+=` (append assignment), the parser's `try_parse_assignment` multi-part branch only searched for `]=` but not `]+=`. For `assoc[$var]+=1` where `$var` expands to `']`, the expanded token `assoc[']]+=1` was treated as a command (not found) instead of an assignment. Fixed by adding `]+=` detection before `]=` in the literal-scanning loop, correctly extracting the append flag and value. quotearray test reduced from ~32→~27 diff lines locally.
+
+- **Add tilde expansion in associative array subscript keys** — `aa[~/path]=val` now correctly expands `~` to `$HOME` in the subscript key during assignment. Previously, `expand_assoc_subscript()` handled `$var`, `'...'`, `"..."`, backticks, and `\\` but not tilde expansion. Added tilde prefix detection at the start of the subscript: `~` alone or `~/` expands to `$HOME`, `~+` to `$PWD`, `~-` to `$OLDPWD`, and `~user` to the user's home directory via `getpwnam`. Affects nix assoc test (tilde in subscript keys).
+
+- **Add tilde expansion in compound array element values and keys** — `declare -A aa=([~/key]=~/Desktop)` now expands tildes in both keys and values. The parser's `extract_array_index()` was putting the raw value string (e.g. `~/Desktop`) into a `WordPart::Literal`, bypassing tilde recognition. Added `literal_to_parts_with_tilde()` helper that converts a leading `~[user]/` into `WordPart::Tilde(user)` + `WordPart::Literal(rest)`. Applied to all value and key extraction paths in `extract_array_index()` and `find_bracket_close_in_parts()`. Affects nix assoc test.
+
+- **Fix `${!prefix* }` bad substitution detection** — `${!_Q* }` (with trailing space before `}`) was incorrectly accepted, producing output instead of erroring. After consuming `*` or `@` in the `${!prefix*}` parser, the code returned `NamePrefix` even when the next char was not `}`. Now checks that `}` immediately follows `*`/`@`; any other content triggers a `SyntaxError` with "bad substitution" message.
+
+- **Fix `${!1*}` and `${!@*}` bad substitution** — Prefixes starting with digits or special characters (not valid variable name prefixes) were accepted by `${!prefix*}` expansion. Added validation that the prefix starts with a letter or underscore before returning `NamePrefix`. Invalid prefixes now produce `SyntaxError("bad substitution")`. Matches bash 5.3 behavior.
 
 ## Recent Fixes (Phase 25)
 
