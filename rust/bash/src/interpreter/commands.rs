@@ -326,6 +326,12 @@ impl Shell {
         );
         crate::expand::set_globstar(self.shopt_globstar);
         crate::expand::set_nullglob(self.shopt_nullglob);
+        crate::expand::set_patsub_replacement(
+            self.shopt_options
+                .get("patsub_replacement")
+                .copied()
+                .unwrap_or(true),
+        );
         crate::expand::set_globignore(
             self.vars
                 .get("GLOBIGNORE")
@@ -442,6 +448,12 @@ impl Shell {
         );
         crate::expand::set_globstar(self.shopt_globstar);
         crate::expand::set_nullglob(self.shopt_nullglob);
+        crate::expand::set_patsub_replacement(
+            self.shopt_options
+                .get("patsub_replacement")
+                .copied()
+                .unwrap_or(true),
+        );
         crate::expand::set_globignore(
             self.vars
                 .get("GLOBIGNORE")
@@ -2068,6 +2080,7 @@ impl Shell {
                             let key = self.expand_assoc_subscript(idx_str);
                             if is_int {
                                 let addend = self.eval_arith_expr(&value);
+                                self.declared_unset.remove(&resolved);
                                 self.assoc_arrays
                                     .entry(resolved)
                                     .or_default()
@@ -2078,6 +2091,7 @@ impl Shell {
                                     })
                                     .or_insert(addend.to_string());
                             } else {
+                                self.declared_unset.remove(&resolved);
                                 self.assoc_arrays
                                     .entry(resolved)
                                     .or_default()
@@ -2120,6 +2134,7 @@ impl Shell {
                             {
                                 self.arrays.insert(resolved.clone(), vec![Some(scalar_val)]);
                             }
+                            self.declared_unset.remove(&resolved);
                             if let Some(arr) = self.arrays.get_mut(&resolved) {
                                 // Handle negative indices
                                 let idx = if raw_idx < 0 {
@@ -2147,6 +2162,7 @@ impl Shell {
                         }
                     } else if self.assoc_arrays.contains_key(&resolved) {
                         // Associative array: foo+=val adds [0]=val
+                        self.declared_unset.remove(&resolved);
                         self.assoc_arrays
                             .entry(resolved)
                             .or_default()
@@ -2155,6 +2171,7 @@ impl Shell {
                             .or_insert(value);
                     } else if self.arrays.contains_key(&resolved) {
                         let is_int = self.integer_vars.contains(&resolved);
+                        self.declared_unset.remove(&resolved);
                         if is_int {
                             // Integer array: arr+=val adds to element 0
                             let n = self.eval_arith_expr(&value);
@@ -2230,6 +2247,7 @@ impl Shell {
                             // Check if it's an associative array
                             if self.assoc_arrays.contains_key(&resolved) {
                                 let key = self.expand_assoc_subscript(idx_str);
+                                self.declared_unset.remove(&resolved);
                                 self.assoc_arrays
                                     .entry(resolved)
                                     .or_default()
@@ -2281,6 +2299,7 @@ impl Shell {
                                 {
                                     self.arrays.insert(resolved.clone(), vec![Some(scalar_val)]);
                                 }
+                                self.declared_unset.remove(&resolved);
                                 let arr = self.arrays.entry(resolved).or_default();
                                 let idx = if raw_idx < 0 {
                                     let len = arr.len() as i64;
@@ -2309,12 +2328,14 @@ impl Shell {
                         // Scalar assignment to assoc array → assign to key "0"
                         let resolved = self.resolve_nameref(&assign.name);
                         if self.assoc_arrays.contains_key(&resolved) {
+                            self.declared_unset.remove(&resolved);
                             self.assoc_arrays
                                 .entry(resolved)
                                 .or_default()
                                 .insert("0".to_string(), value);
                         } else if self.arrays.contains_key(&resolved) {
                             // Scalar assignment to indexed array → assign to element [0]
+                            self.declared_unset.remove(&resolved);
                             let arr = self.arrays.entry(resolved).or_default();
                             if arr.is_empty() {
                                 arr.push(Some(value));

@@ -1,3 +1,5 @@
+use super::get_patsub_replacement;
+
 pub(super) enum TrimMode {
     SmallLeft,
     LargeLeft,
@@ -118,19 +120,141 @@ fn is_single_char_pattern(pattern: &str) -> bool {
     false
 }
 
+/// Process `&` in a replacement string: unescaped `&` is replaced by
+/// the matched text, `\&` becomes a literal `&`.  Only active when the
+/// `patsub_replacement` shopt option is enabled.
+fn apply_replacement_amp(replacement: &str, matched: &str) -> String {
+    let mut result = String::with_capacity(replacement.len() + matched.len());
+    let chars: Vec<char> = replacement.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '\\' && i + 1 < chars.len() && chars[i + 1] == '&' {
+            // \& → literal &
+            result.push('&');
+            i += 2;
+        } else if chars[i] == '&' {
+            // & → matched text
+            result.push_str(matched);
+            i += 1;
+        } else {
+            result.push(chars[i]);
+            i += 1;
+        }
+    }
+    result
+}
+
+/// Check whether a replacement string contains an unescaped `&`.
+fn replacement_has_amp(replacement: &str) -> bool {
+    let chars: Vec<char> = replacement.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '\\' && i + 1 < chars.len() && chars[i + 1] == '&' {
+            i += 2;
+        } else if chars[i] == '&' {
+            return true;
+        } else {
+            i += 1;
+        }
+    }
+    false
+}
+
+/// If patsub_replacement is active and the replacement contains `\&` but
+/// no unescaped `&`, we still need to unescape `\&` → `&`.
+fn unescape_replacement_amp(replacement: &str) -> String {
+    let mut result = String::with_capacity(replacement.len());
+    let chars: Vec<char> = replacement.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '\\' && i + 1 < chars.len() && chars[i + 1] == '&' {
+            result.push('&');
+            i += 2;
+        } else {
+            result.push(chars[i]);
+            i += 1;
+        }
+    }
+    result
+}
+
+/// Produce the replacement string for a given match.  When
+/// `patsub_replacement` is enabled and the replacement contains `&`,
+/// substitute `&` with the matched text.
+fn make_replacement(replacement: &str, matched: &str, use_amp: bool) -> String {
+    if use_amp {
+        apply_replacement_amp(replacement, matched)
+    } else {
+        replacement.to_string()
+    }
+}
+
 pub(super) fn pattern_replace(value: &str, pattern: &str, replacement: &str, all: bool) -> String {
     if pattern.is_empty() {
         return value.to_string();
     }
 
+    // Determine whether `&` replacement is active for this call.
+    let patsub = get_patsub_replacement();
+    // We need `&` processing when patsub_replacement is on AND the
+    // replacement contains `&` or `\&`.
+    let has_amp = patsub && (replacement.contains('&'));
+    // Even if there are no unescaped `&`, we must unescape `\&` → `&`
+    // when the option is active.
+    let needs_amp_unescape = patsub && replacement.contains("\\&");
+    let use_amp = has_amp && replacement_has_amp(replacement);
+    // Precompute a "plain" replacement for fast paths when `&` processing
+    // isn't needed but `\&` unescaping is.
+    let plain_rep;
+    let rep = if use_amp {
+        // Will be handled per-match via make_replacement()
+        replacement
+    } else if needs_amp_unescape {
+        plain_rep = unescape_replacement_amp(replacement);
+        &plain_rep
+    } else {
+        replacement
+    };
+
     // Fast path: literal patterns use simple string matching — O(n) instead of O(n³)
     if is_literal_pattern(pattern) {
+        if use_amp {
+            // Need per-match replacement (matched text = pattern literal)
+            if all {
+                let mut result = String::new();
+                let mut start = 0;
+                while let Some(pos) = value[start..].find(pattern) {
+                    let abs = start + pos;
+                    result.push_str(&value[start..abs]);
+                    result.push_str(&make_replacement(
+                        replacement,
+                        &value[abs..abs + pattern.len()],
+                        true,
+                    ));
+                    start = abs + pattern.len();
+                }
+                result.push_str(&value[start..]);
+                return result;
+            } else if let Some(pos) = value.find(pattern) {
+                let mut result = String::with_capacity(value.len());
+                result.push_str(&value[..pos]);
+                result.push_str(&make_replacement(
+                    replacement,
+                    &value[pos..pos + pattern.len()],
+                    true,
+                ));
+                result.push_str(&value[pos + pattern.len()..]);
+                return result;
+            } else {
+                return value.to_string();
+            }
+        }
         if all {
-            return value.replace(pattern, replacement);
+            return value.replace(pattern, rep);
         } else if let Some(pos) = value.find(pattern) {
             let mut result = String::with_capacity(value.len());
             result.push_str(&value[..pos]);
-            result.push_str(replacement);
+            result.push_str(rep);
             result.push_str(&value[pos + pattern.len()..]);
             return result;
         } else {
@@ -150,7 +274,11 @@ pub(super) fn pattern_replace(value: &str, pattern: &str, replacement: &str, all
             for &c in &chars {
                 let s = c.to_string();
                 if shell_pattern_match(&s, pattern) {
-                    result.push_str(replacement);
+                    if use_amp {
+                        result.push_str(&make_replacement(replacement, &s, true));
+                    } else {
+                        result.push_str(rep);
+                    }
                 } else {
                     result.push(c);
                 }
@@ -164,7 +292,11 @@ pub(super) fn pattern_replace(value: &str, pattern: &str, replacement: &str, all
                 if !replaced {
                     let s = c.to_string();
                     if shell_pattern_match(&s, pattern) {
-                        result.push_str(replacement);
+                        if use_amp {
+                            result.push_str(&make_replacement(replacement, &s, true));
+                        } else {
+                            result.push_str(rep);
+                        }
                         replaced = true;
                         continue;
                     }
@@ -177,7 +309,10 @@ pub(super) fn pattern_replace(value: &str, pattern: &str, replacement: &str, all
 
     // Fast path: `*` matches the whole string (longest match from any position)
     if pattern == "*" {
-        return replacement.to_string();
+        if use_amp {
+            return make_replacement(replacement, value, true);
+        }
+        return rep.to_string();
     }
 
     let mut result = String::new();
@@ -302,7 +437,12 @@ pub(super) fn pattern_replace(value: &str, pattern: &str, replacement: &str, all
         };
         for j in (lo..=hi).rev() {
             if pattern_match_impl(&chars[i..j], 0, &pat_chars, 0) {
-                result.push_str(replacement);
+                if use_amp {
+                    let matched: String = chars[i..j].iter().collect();
+                    result.push_str(&make_replacement(replacement, &matched, true));
+                } else {
+                    result.push_str(rep);
+                }
                 i = j;
                 found = true;
                 if !all {
@@ -321,7 +461,11 @@ pub(super) fn pattern_replace(value: &str, pattern: &str, replacement: &str, all
     }
     // Handle empty value: if pattern matches empty string, replace
     if chars.is_empty() && pattern_match_impl(&[], 0, &pat_chars, 0) {
-        result.push_str(replacement);
+        if use_amp {
+            result.push_str(&make_replacement(replacement, "", true));
+        } else {
+            result.push_str(rep);
+        }
     }
     result
 }

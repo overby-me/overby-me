@@ -1,6 +1,46 @@
 use super::*;
 use crate::builtins::string_to_raw_bytes;
 
+/// Process `&` in a replacement string for pattern substitution.
+/// When `patsub_replacement` shopt is enabled, unescaped `&` in the
+/// replacement is substituted with the matched text, and `\&` becomes
+/// a literal `&`.  When the option is disabled, the replacement is
+/// returned as-is.
+fn process_replacement_amp(replacement: &str, matched: &str) -> String {
+    if !super::get_patsub_replacement() {
+        return replacement.to_string();
+    }
+    let chars: Vec<char> = replacement.chars().collect();
+    let mut result = String::with_capacity(replacement.len() + matched.len());
+    let mut i = 0;
+    let mut had_special = false;
+    // Quick check: if no `&` or `\&` at all, return as-is
+    if !replacement.contains('&') {
+        return replacement.to_string();
+    }
+    while i < chars.len() {
+        if chars[i] == '\\' && i + 1 < chars.len() && chars[i + 1] == '&' {
+            // \& → literal &
+            result.push('&');
+            i += 2;
+            had_special = true;
+        } else if chars[i] == '&' {
+            // & → matched text
+            result.push_str(matched);
+            i += 1;
+            had_special = true;
+        } else {
+            result.push(chars[i]);
+            i += 1;
+        }
+    }
+    if had_special {
+        result
+    } else {
+        replacement.to_string()
+    }
+}
+
 /// Count the number of multibyte characters in a bash-style string.
 /// Bash stores raw bytes as chars with their byte value (Latin-1 mapping).
 /// In a UTF-8 locale, this interprets the raw byte sequence as UTF-8 and
@@ -376,15 +416,30 @@ pub(super) fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
                                 while let Some(pos) = expanded.find('$') {
                                     let rest = &expanded[pos + 1..];
                                     if rest.starts_with('{') {
-                                        if let Some(close) = rest.find('}') {
-                                            let var_name = &rest[1..close];
-                                            let var_val =
-                                                ctx.vars.get(var_name).cloned().unwrap_or_default();
+                                        // Find matching '}' — must handle nested brackets
+                                        // so that ${a[i]} finds the right closing brace.
+                                        let mut brace_depth = 1;
+                                        let mut j = 1; // skip opening '{'
+                                        while j < rest.len() && brace_depth > 0 {
+                                            match rest.as_bytes()[j] {
+                                                b'{' => brace_depth += 1,
+                                                b'}' => brace_depth -= 1,
+                                                _ => {}
+                                            }
+                                            if brace_depth > 0 {
+                                                j += 1;
+                                            }
+                                        }
+                                        if brace_depth == 0 {
+                                            let var_name = &rest[1..j];
+                                            // Recursively look up — handles array subscripts
+                                            // like a[i] inside ${a[i]}
+                                            let var_val = lookup_var(var_name, ctx);
                                             expanded = format!(
                                                 "{}{}{}",
                                                 &expanded[..pos],
                                                 var_val,
-                                                &rest[close + 1..]
+                                                &rest[j + 1..]
                                             );
                                         } else {
                                             break;
@@ -789,7 +844,8 @@ pub(super) fn apply_param_op(
                             continue;
                         }
                         if shell_pattern_match(&val[..i], &pat) {
-                            return format!("{}{}", rep, &val[i..]);
+                            let effective_rep = process_replacement_amp(&rep, &val[..i]);
+                            return format!("{}{}", effective_rep, &val[i..]);
                         }
                     }
                     val.to_string()
@@ -802,7 +858,8 @@ pub(super) fn apply_param_op(
                             continue;
                         }
                         if shell_pattern_match(&val[i..], &pat) {
-                            return format!("{}{}", &val[..i], rep);
+                            let effective_rep = process_replacement_amp(&rep, &val[i..]);
+                            return format!("{}{}", &val[..i], effective_rep);
                         }
                     }
                     val.to_string()
@@ -1351,7 +1408,8 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                             continue;
                         }
                         if shell_pattern_match(&val[..i], &pat) {
-                            return format!("{}{}", rep, &val[i..]);
+                            let effective_rep = process_replacement_amp(&rep, &val[..i]);
+                            return format!("{}{}", effective_rep, &val[i..]);
                         }
                     }
                     val
@@ -1363,7 +1421,8 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                             continue;
                         }
                         if shell_pattern_match(&val[i..], &pat) {
-                            return format!("{}{}", &val[..i], rep);
+                            let effective_rep = process_replacement_amp(&rep, &val[i..]);
+                            return format!("{}{}", &val[..i], effective_rep);
                         }
                     }
                     val

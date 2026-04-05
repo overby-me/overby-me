@@ -53,6 +53,8 @@ thread_local! {
     static GLOBSTAR_ENABLED: RefCell<bool> = const { RefCell::new(false) };
     /// Whether nullglob shopt is enabled (unmatched globs expand to nothing)
     static NULLGLOB_ENABLED: RefCell<bool> = const { RefCell::new(false) };
+    /// Whether patsub_replacement shopt is enabled (`&` in replacement = matched text)
+    static PATSUB_REPLACEMENT: RefCell<bool> = const { RefCell::new(true) };
     /// GLOBIGNORE patterns (colon-separated, empty = no ignore)
     static GLOBIGNORE: RefCell<String> = const { RefCell::new(String::new()) };
     /// Callback for running process substitution commands inline (instead of exec'ing
@@ -113,6 +115,14 @@ pub fn set_globstar(enabled: bool) {
 
 pub fn set_nullglob(enabled: bool) {
     NULLGLOB_ENABLED.with(|d| *d.borrow_mut() = enabled);
+}
+
+pub fn set_patsub_replacement(enabled: bool) {
+    PATSUB_REPLACEMENT.with(|d| *d.borrow_mut() = enabled);
+}
+
+pub fn get_patsub_replacement() -> bool {
+    PATSUB_REPLACEMENT.with(|d| *d.borrow())
 }
 
 /// Seed the RANDOM PRNG (called when RANDOM=N is assigned)
