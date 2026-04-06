@@ -250,8 +250,8 @@ pub enum ParamOp {
     Indirect,
     /// `${!prefix*}` or `${!prefix@}` — names matching prefix
     NamePrefix(char),
-    /// `${!arr[@]}` or `${!arr[*]}` — array indices
-    ArrayIndices(char),
+    /// `${!arr[@]}` or `${!arr[*]}` — array indices, with optional transform
+    ArrayIndices(char, Option<char>),
     Default(bool, Word),
     Assign(bool, Word),
     Error(bool, Word),

@@ -413,7 +413,9 @@ impl Shell {
         attrs
     }
 
-    /// Inject ${var@a} results into vars before expansion using special key
+    /// Inject ${var@a} results into vars before expansion using special key.
+    /// Also injects `__UNSET__name` markers for declared-but-unset variables
+    /// so that `@A` can omit the `=''` suffix.
     fn inject_transform_attrs(&self, word: &Word, vars: &mut HashMap<String, String>) {
         fn scan_parts(
             parts: &[WordPart],
@@ -425,8 +427,28 @@ impl Shell {
                     && let crate::ast::ParamOp::Transform(ch) = &expr.op
                     && matches!(ch, 'a' | 'A')
                 {
-                    let attrs = shell.get_var_attrs(&expr.name);
-                    vars.insert(format!("__ATTRS__{}", expr.name), attrs);
+                    // Strip [@] or [*] subscripts to get the base variable name
+                    let base_name = if let Some(bracket) = expr.name.find('[') {
+                        &expr.name[..bracket]
+                    } else {
+                        &expr.name
+                    };
+                    let attrs = shell.get_var_attrs(base_name);
+                    // Inject attrs under both the full name (e.g. "VAR1[@]") and
+                    // the base name (e.g. "VAR1") so lookups work from either path.
+                    vars.insert(format!("__ATTRS__{}", expr.name), attrs.clone());
+                    if base_name != expr.name.as_str() {
+                        vars.insert(format!("__ATTRS__{}", base_name), attrs);
+                    }
+                    // Inject __UNSET__ marker for declared-but-unset variables
+                    // so the @A handler can omit the ='...' suffix.
+                    let resolved = shell.resolve_nameref(base_name);
+                    if shell.declared_unset.contains(&resolved) {
+                        vars.insert(format!("__UNSET__{}", base_name), "1".to_string());
+                        if base_name != expr.name.as_str() {
+                            vars.insert(format!("__UNSET__{}", expr.name), "1".to_string());
+                        }
+                    }
                 }
                 if let WordPart::DoubleQuoted(inner) = part {
                     scan_parts(inner, shell, vars);

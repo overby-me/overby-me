@@ -1,3 +1,4 @@
+use super::transform_helpers::{expand_backslash_escapes, shell_quote};
 use super::*;
 use crate::builtins::string_to_raw_bytes;
 
@@ -105,7 +106,7 @@ pub(super) fn is_array_at_expansion(expr: &ParamExpr, ctx: &ExpCtx) -> bool {
         return true;
     }
     // ${!arr[@]} — array indices should split into separate fields
-    if matches!(&expr.op, ParamOp::ArrayIndices('@')) {
+    if matches!(&expr.op, ParamOp::ArrayIndices('@', _)) {
         return ctx.arrays.contains_key(&expr.name) || ctx.assoc_arrays.contains_key(&expr.name);
     }
     // ${!prefix@} — variable names matching prefix should split into separate
@@ -118,8 +119,13 @@ pub(super) fn is_array_at_expansion(expr: &ParamExpr, ctx: &ExpCtx) -> bool {
         if idx_str == "@" {
             let base = &expr.name[..bracket];
             let resolved = ctx.resolve_nameref(base);
-            // Array[@] with any operation should expand per-element
-            if !matches!(&expr.op, ParamOp::Length) {
+            // Array[@] with any operation should expand per-element,
+            // EXCEPT Transform('A') and Transform('a') which produce
+            // whole-variable declaration/attribute output (not per-element).
+            if !matches!(
+                &expr.op,
+                ParamOp::Length | ParamOp::Transform('A') | ParamOp::Transform('a')
+            ) {
                 return ctx.arrays.contains_key(&resolved)
                     || ctx.assoc_arrays.contains_key(&resolved);
             }
@@ -178,7 +184,7 @@ pub(super) fn get_array_elements(expr: &ParamExpr, ctx: &ExpCtx) -> Vec<String> 
         return names;
     }
     // ${!arr[@]} — return indices/keys as elements
-    if let ParamOp::ArrayIndices(_) = &expr.op {
+    if let ParamOp::ArrayIndices(_, _) = &expr.op {
         let resolved = ctx.resolve_nameref(&expr.name);
         if let Some(arr) = ctx.arrays.get(&resolved) {
             return (0..arr.len())
@@ -916,7 +922,23 @@ pub(super) fn apply_param_op(
                 val.chars().skip(start).collect()
             }
         }
-        // For other operations, just return the value unchanged
+        ParamOp::Transform(ch) => match ch {
+            'Q' => shell_quote(val),
+            'E' => expand_backslash_escapes(val),
+            'U' => val.to_uppercase(),
+            'L' => val.to_lowercase(),
+            'u' => {
+                let mut chars = val.chars();
+                match chars.next() {
+                    None => String::new(),
+                    Some(c) => c.to_uppercase().to_string() + chars.as_str(),
+                }
+            }
+            // 'a' and 'A' are per-variable, not per-element; return as-is
+            _ => val.to_string(),
+        },
+        // For other operations (NamePrefix, ArrayIndices, Default, Assign, Error, etc.),
+        // just return the value unchanged
         _ => val.to_string(),
     }
 }
@@ -986,6 +1008,16 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
         && ctx.positional.len() > 1
     {
         let sep = ifs_join_sep(expr.name == "*");
+
+        // ${@@A} / ${*@A} — assignment form for positional params: set -- 'val1' 'val2' ...
+        if matches!(&expr.op, ParamOp::Transform('A')) {
+            let quoted: Vec<String> = ctx.positional[1..]
+                .iter()
+                .map(|s| format!("'{}'", s.replace('\'', "'\\''")))
+                .collect();
+            return format!("set -- {}", quoted.join(" "));
+        }
+
         // For Substring: slice the positional params array
         if let ParamOp::Substring(offset_str, length_str) = &expr.op {
             let offset: i64 = parse_arith_offset(offset_str.trim(), &expr.name, ctx, cmd_sub);
@@ -1131,6 +1163,62 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
             }
 
             // For non-Substring ops on arrays, apply per-element
+            // ${arr[@]@A} — full declaration form for arrays
+            if let ParamOp::Transform('A') = &expr.op {
+                let attrs_key = format!("__ATTRS__{}", resolved);
+                let attrs = ctx.vars.get(&attrs_key).cloned().unwrap_or_default();
+                if let Some(arr) = ctx.arrays.get(&resolved) {
+                    let elems: Vec<String> = arr
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, v)| {
+                            v.as_ref()
+                                .map(|val| format!("[{}]=\"{}\"", i, val.replace('"', "\\\"")))
+                        })
+                        .collect();
+                    let flags = if attrs.is_empty() {
+                        "a".to_string()
+                    } else {
+                        attrs
+                    };
+                    return format!("declare -{} {}=({})", flags, resolved, elems.join(" "));
+                } else if let Some(assoc) = ctx.assoc_arrays.get(&resolved) {
+                    let elems: Vec<String> = assoc
+                        .iter()
+                        .map(|(k, v)| format!("[{}]=\"{}\"", k, v.replace('"', "\\\"")))
+                        .collect();
+                    let flags = if attrs.is_empty() {
+                        "A".to_string()
+                    } else {
+                        attrs
+                    };
+                    // Bash adds a trailing space before ) for assoc arrays
+                    return format!("declare -{} {}=({} )", flags, resolved, elems.join(" "));
+                } else {
+                    // Scalar variable — fall through to normal handler
+                }
+            }
+
+            // ${arr[@]@a} — attribute string, repeated per element
+            if let ParamOp::Transform('a') = &expr.op {
+                let attrs_key = format!("__ATTRS__{}", resolved);
+                let attrs = ctx.vars.get(&attrs_key).cloned().unwrap_or_default();
+                let count = if let Some(arr) = ctx.arrays.get(&resolved) {
+                    arr.iter().filter(|v| v.is_some()).count()
+                } else if let Some(assoc) = ctx.assoc_arrays.get(&resolved) {
+                    assoc.len()
+                } else if ctx.vars.contains_key(&resolved) {
+                    1
+                } else {
+                    0
+                };
+                if count > 0 {
+                    let repeated: Vec<String> = (0..count).map(|_| attrs.clone()).collect();
+                    return repeated.join(&sep);
+                }
+                return attrs;
+            }
+
             let elements: Vec<String> = if let Some(arr) = ctx.arrays.get(&resolved) {
                 arr.iter().filter_map(|v| v.clone()).collect()
             } else if let Some(assoc) = ctx.assoc_arrays.get(&resolved) {
@@ -1303,26 +1391,47 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                 .collect::<Vec<_>>()
                 .join(&sep)
         }
-        ParamOp::ArrayIndices(_ch) => {
+        ParamOp::ArrayIndices(_ch, transform) => {
             // ${!arr[@]} or ${!arr[*]} — array indices/keys
             let resolved = ctx.resolve_nameref(&expr.name);
-            if let Some(arr) = ctx.arrays.get(&resolved) {
-                let indices: Vec<String> = (0..arr.len())
+            let elements: Vec<String> = if let Some(arr) = ctx.arrays.get(&resolved) {
+                (0..arr.len())
                     .filter(|&i| arr[i].is_some())
                     .map(|i| i.to_string())
-                    .collect();
-                indices.join(" ")
+                    .collect()
             } else if let Some(assoc) = ctx.assoc_arrays.get(&resolved) {
-                let keys: Vec<String> = assoc.keys().cloned().collect();
-                keys.join(" ")
+                assoc.keys().cloned().collect()
             } else {
                 // Scalar variable — index 0
                 if ctx.vars.contains_key(&resolved) {
-                    "0".to_string()
+                    vec!["0".to_string()]
                 } else {
-                    String::new()
+                    vec![]
                 }
-            }
+            };
+            // Apply optional transform to each element
+            let elements: Vec<String> = if let Some(t) = transform {
+                elements
+                    .into_iter()
+                    .map(|e| match t {
+                        'Q' => shell_quote(&e),
+                        'E' => expand_backslash_escapes(&e),
+                        'U' => e.to_uppercase(),
+                        'L' => e.to_lowercase(),
+                        'u' => {
+                            let mut chars = e.chars();
+                            match chars.next() {
+                                None => String::new(),
+                                Some(c) => c.to_uppercase().to_string() + chars.as_str(),
+                            }
+                        }
+                        _ => e,
+                    })
+                    .collect()
+            } else {
+                elements
+            };
+            elements.join(" ")
         }
         ParamOp::Default(colon, word) => {
             let empty = if *colon { val.is_empty() } else { false };
@@ -1587,83 +1696,123 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
             }
         }
         #[allow(clippy::match_single_binding)]
-        ParamOp::Transform(ch) => match ch {
-            'E' => {
-                // Expand backslash escapes like $'...'
-                val.replace("\\n", "\n")
-                    .replace("\\t", "\t")
-                    .replace("\\r", "\r")
-                    .replace("\\\\", "\\")
-                    .replace("\\a", "\x07")
-                    .replace("\\b", "\x08")
+        ParamOp::Transform(ch) => {
+            // For transforms, unset variables produce empty string (not quoted empty).
+            // Bash distinguishes unset from empty: ${unset@Q} → "", ${empty@Q} → "''".
+            // Check if the variable is truly unset (not in vars, arrays, assoc_arrays,
+            // not a special variable, and not in the environment).
+            let base_name = if let Some(bracket) = expr.name.find('[') {
+                &expr.name[..bracket]
+            } else {
+                expr.name.as_str()
+            };
+            let is_special = matches!(
+                base_name,
+                "?" | "$"
+                    | "#"
+                    | "@"
+                    | "*"
+                    | "-"
+                    | "0"
+                    | "!"
+                    | "RANDOM"
+                    | "BASHPID"
+                    | "SRANDOM"
+                    | "SECONDS"
+                    | "EPOCHSECONDS"
+                    | "EPOCHREALTIME"
+                    | "BASH_COMMAND"
+                    | "LINENO"
+                    | "BASH_SUBSHELL"
+            );
+            let is_positional = base_name.parse::<usize>().is_ok();
+            // A variable is "truly unset" if it was never declared at all.
+            // declared-but-unset variables (e.g. `declare -lr VAR1`) have
+            // an __UNSET__ entry injected by inject_transform_attrs, so
+            // they are NOT truly unset — @A and @a should still report
+            // their declaration/attributes.
+            // Note: __ATTRS__ is injected for ANY @a/@A transform (even
+            // for unset vars), so we cannot use it to determine existence.
+            // Instead, check vars, arrays, assoc_arrays, declared_unset
+            // markers (__UNSET__), and environment.
+            let has_declared_unset = ctx.vars.contains_key(&format!("__UNSET__{}", base_name));
+            let is_truly_unset = !is_special
+                && !is_positional
+                && !has_declared_unset
+                && !ctx.vars.contains_key(base_name)
+                && !ctx.arrays.contains_key(base_name)
+                && !ctx.assoc_arrays.contains_key(base_name)
+                && std::env::var(base_name).is_err();
+            if is_truly_unset {
+                return String::new();
             }
-            'Q' => {
-                let has_control = val.bytes().any(|b| b < 0x20 || b == 0x7f);
-                if val.is_empty() {
-                    "''".to_string()
-                } else if has_control {
-                    // Use $'...' quoting for strings with control chars
-                    let mut s = String::from("$'");
-                    for ch in val.chars() {
-                        match ch {
-                            '\x07' => s.push_str("\\a"),
-                            '\x08' => s.push_str("\\b"),
-                            '\x1b' => s.push_str("\\E"),
-                            '\x0c' => s.push_str("\\f"),
-                            '\n' => s.push_str("\\n"),
-                            '\r' => s.push_str("\\r"),
-                            '\t' => s.push_str("\\t"),
-                            '\x0b' => s.push_str("\\v"),
-                            '\'' => s.push_str("\\'"),
-                            '\\' => s.push_str("\\\\"),
-                            c if (c as u32) < 0x20 || c == '\x7f' => {
-                                s.push_str(&format!("\\x{:02x}", c as u32));
-                            }
-                            c => s.push(c),
+            match ch {
+                'E' => expand_backslash_escapes(&val),
+                'Q' => shell_quote(&val),
+                'U' => val.to_uppercase(),
+                'L' => val.to_lowercase(),
+                'u' => {
+                    let mut chars = val.chars();
+                    match chars.next() {
+                        None => String::new(),
+                        Some(c) => c.to_uppercase().to_string() + chars.as_str(),
+                    }
+                }
+                'a' => {
+                    // Variable attributes — look up pre-computed attrs from interpreter
+                    // Strip [@] or [*] subscript from name for attribute lookup
+                    let base_name = if let Some(bracket) = expr.name.find('[') {
+                        &expr.name[..bracket]
+                    } else {
+                        expr.name.as_str()
+                    };
+                    ctx.vars
+                        .get(&format!("__ATTRS__{}", base_name))
+                        .cloned()
+                        .unwrap_or_default()
+                }
+                'A' => {
+                    // Assignment form: declare -FLAGS name='value'
+                    // Strip [@] or [*] subscript from name for attribute/unset lookup
+                    let base_name = if let Some(bracket) = expr.name.find('[') {
+                        &expr.name[..bracket]
+                    } else {
+                        expr.name.as_str()
+                    };
+                    let attrs = ctx
+                        .vars
+                        .get(&format!("__ATTRS__{}", base_name))
+                        .cloned()
+                        .unwrap_or_default();
+                    // If the variable is declared but unset (no assignment),
+                    // omit the ='...' suffix to match bash behavior.
+                    let is_unset = ctx.vars.get(&format!("__UNSET__{}", base_name)).is_some();
+                    if attrs.is_empty() {
+                        // Plain variable with no special attributes: use name='value'
+                        // form without "declare -- " prefix, matching bash behavior.
+                        // For unset variables (never declared or declared-unset with
+                        // no attributes), return empty.
+                        if is_unset {
+                            String::new()
+                        } else {
+                            format!("{}='{}'", base_name, val.replace('\'', "'\\''"))
+                        }
+                    } else {
+                        let flags = format!("-{}", attrs);
+                        if is_unset {
+                            format!("declare {} {}", flags, base_name)
+                        } else {
+                            format!(
+                                "declare {} {}='{}'",
+                                flags,
+                                base_name,
+                                val.replace('\'', "'\\''")
+                            )
                         }
                     }
-                    s.push('\'');
-                    s
-                } else {
-                    format!("'{}'", val.replace('\'', "'\\''"))
                 }
+                _ => val, // @P, @K — return as-is for now
             }
-            'U' => val.to_uppercase(),
-            'L' => val.to_lowercase(),
-            'u' => {
-                let mut chars = val.chars();
-                match chars.next() {
-                    None => String::new(),
-                    Some(c) => c.to_uppercase().to_string() + chars.as_str(),
-                }
-            }
-            'a' => {
-                // Variable attributes — look up pre-computed attrs from interpreter
-                ctx.vars
-                    .get(&format!("__ATTRS__{}", expr.name))
-                    .cloned()
-                    .unwrap_or_default()
-            }
-            'A' => {
-                // Assignment form: declare -FLAGS name='value'
-                let attrs = ctx
-                    .vars
-                    .get(&format!("__ATTRS__{}", expr.name))
-                    .cloned()
-                    .unwrap_or_default();
-                let flags = if attrs.is_empty() {
-                    "--".to_string()
-                } else {
-                    format!("-{}", attrs)
-                };
-                format!(
-                    "declare {} {}='{}'",
-                    flags,
-                    expr.name,
-                    val.replace('\'', "'\\''")
-                )
-            }
-            _ => val, // @P, @K — return as-is for now
-        },
+        }
     }
 }

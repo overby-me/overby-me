@@ -1,6 +1,7 @@
 mod arithmetic;
 mod params;
 mod pattern;
+pub(crate) mod transform_helpers;
 
 use params::{apply_param_op, expand_param, get_array_elements, is_array_at_expansion, lookup_var};
 use pattern::{TrimMode, pattern_replace, shell_pattern_match, trim_pattern};
@@ -667,7 +668,11 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                         if (expr.name == "@" || expr.name == "*")
                             && !matches!(
                                 expr.op,
-                                ParamOp::None | ParamOp::Length | ParamOp::Substring(..)
+                                ParamOp::None
+                                    | ParamOp::Length
+                                    | ParamOp::Substring(..)
+                                    | ParamOp::Transform('A')
+                                    | ParamOp::Transform('a')
                             )
                             && ctx.positional.len() > 1 =>
                     {
@@ -1073,7 +1078,11 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
             if (expr.name == "@" || expr.name == "*")
                 && !matches!(
                     expr.op,
-                    ParamOp::None | ParamOp::Length | ParamOp::Substring(..)
+                    ParamOp::None
+                        | ParamOp::Length
+                        | ParamOp::Substring(..)
+                        | ParamOp::Transform('A')
+                        | ParamOp::Transform('a')
                 )
                 && ctx.positional.len() > 1
             {
@@ -1108,7 +1117,11 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                 if (idx == "@" || idx == "*")
                     && !matches!(
                         expr.op,
-                        ParamOp::None | ParamOp::Length | ParamOp::Substring(..)
+                        ParamOp::None
+                            | ParamOp::Length
+                            | ParamOp::Substring(..)
+                            | ParamOp::Transform('A')
+                            | ParamOp::Transform('a')
                     )
                     && let Some(arr) = ctx.arrays.get(&resolved)
                 {

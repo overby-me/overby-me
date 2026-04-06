@@ -743,13 +743,45 @@ fn parse_brace_param(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart
             if name.ends_with("[@]") || name.ends_with("[*]") {
                 let ch = if name.ends_with("[@]") { '@' } else { '*' };
                 let arr_name = name[..name.len() - 3].to_string();
-                if *i < chars.len() && chars[*i] == '}' {
-                    *i += 1;
-                }
+                // Check for @X transform after [@]/[*] (e.g. ${!arr[@]@Q})
+                let transform = if *i + 2 < chars.len()
+                    && chars[*i] == '@'
+                    && matches!(
+                        chars[*i + 1],
+                        'E' | 'Q' | 'P' | 'A' | 'a' | 'K' | 'k' | 'L' | 'U' | 'u'
+                    )
+                    && chars[*i + 2] == '}'
+                {
+                    let t = chars[*i + 1];
+                    *i += 3; // skip @, transform_char, }
+                    Some(t)
+                } else {
+                    if *i < chars.len() && chars[*i] == '}' {
+                        *i += 1;
+                    }
+                    None
+                };
                 return WordPart::Param(ParamExpr {
                     name: arr_name,
-                    op: ParamOp::ArrayIndices(ch),
+                    op: ParamOp::ArrayIndices(ch, transform),
                 });
+            }
+
+            // ${!name@X} — indirect + transform (e.g., ${!var@Q}, ${!var@a})
+            // Must check before name prefix to distinguish from ${!prefix@}
+            if *i + 2 < chars.len() && chars[*i] == '@' {
+                let transform_char = chars[*i + 1];
+                if matches!(
+                    transform_char,
+                    'E' | 'Q' | 'P' | 'A' | 'a' | 'K' | 'k' | 'L' | 'U' | 'u'
+                ) && chars[*i + 2] == '}'
+                {
+                    *i += 3; // skip @, transform_char, }
+                    return WordPart::Param(ParamExpr {
+                        name: format!("!{}", name),
+                        op: ParamOp::Transform(transform_char),
+                    });
+                }
             }
 
             // ${!prefix*} or ${!prefix@} — names matching prefix
@@ -961,6 +993,22 @@ fn parse_brace_param(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart
                 op: ParamOp::Transform(transform_char),
             });
         }
+        // ${var@C}, ${var@Z}, etc. — unsupported transform → bad substitution
+        // (bash 5.3 does not support @C)
+        if chars[*i + 1] != '}' {
+            let bad_char = chars[*i + 1];
+            *i += 2;
+            if *i < chars.len() && chars[*i] == '}' {
+                *i += 1;
+            }
+            return WordPart::BadSubstitution(format!("${{{}@{}}}", name, bad_char));
+        }
+    }
+
+    // ${var@} — bare @ with no transform letter → bad substitution
+    if *i + 1 < chars.len() && chars[*i] == '@' && chars[*i + 1] == '}' {
+        *i += 2; // skip @ and }
+        return WordPart::BadSubstitution(format!("${{{}@}}", name));
     }
 
     if *i >= chars.len() || chars[*i] == '}' {

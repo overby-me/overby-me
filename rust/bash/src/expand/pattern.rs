@@ -454,15 +454,25 @@ pub(super) fn pattern_replace(value: &str, pattern: &str, replacement: &str, all
         None
     };
 
+    // Whether the pattern can match an empty string (e.g. ?(b), *(b), *)
+    let can_match_empty = min_match_len == 0 && pattern_match_impl(&[], 0, &pat_chars, 0);
+
     while i < chars.len() {
         let mut found = false;
-        let lo = (i + min_match_len.max(1)).min(chars.len() + 1);
+        // When the pattern can match empty, start from i (try empty match at
+        // this position).  Otherwise start from i + min_match_len (at least 1).
+        let lo = if can_match_empty {
+            i
+        } else {
+            (i + min_match_len.max(1)).min(chars.len() + 1)
+        };
         // When the match length is fixed, only try the one possible length.
         let hi = if let Some(fl) = fixed_len {
             (i + fl).min(chars.len())
         } else {
             chars.len()
         };
+        // Try longest match first (greedy).
         for j in (lo..=hi).rev() {
             if pattern_match_impl(&chars[i..j], 0, &pat_chars, 0) {
                 if use_amp {
@@ -471,7 +481,16 @@ pub(super) fn pattern_replace(value: &str, pattern: &str, replacement: &str, all
                 } else {
                     result.push_str(rep);
                 }
-                i = j;
+                if j == i {
+                    // Empty match: output the replacement, then consume the
+                    // current character to avoid an infinite loop.  This
+                    // matches bash behaviour for replace-all with patterns
+                    // like ?(b) and *(b).
+                    result.push(chars[i]);
+                    i += 1;
+                } else {
+                    i = j;
+                }
                 found = true;
                 if !all {
                     for &c in &chars[i..] {
@@ -487,8 +506,11 @@ pub(super) fn pattern_replace(value: &str, pattern: &str, replacement: &str, all
             i += 1;
         }
     }
-    // Handle empty value: if pattern matches empty string, replace
-    if chars.is_empty() && pattern_match_impl(&[], 0, &pat_chars, 0) {
+    // Handle empty value: if the value is empty and the pattern matches the
+    // empty string, produce one replacement (e.g. ${x/*/z} where x="").
+    // Do NOT add a trailing empty-match replacement after processing a
+    // non-empty value — bash doesn't do this.
+    if can_match_empty && chars.is_empty() {
         if use_amp {
             result.push_str(&make_replacement(replacement, "", true));
         } else {

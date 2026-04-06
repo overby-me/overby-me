@@ -55,7 +55,6 @@ pub(super) fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
                         }
                         "hashall" => shell.opt_hashall = enable,
                         "braceexpand"
-                        | "emacs"
                         | "errtrace"
                         | "functrace"
                         | "histexpand"
@@ -80,7 +79,7 @@ pub(super) fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
                             shell.shopt_options.insert(option.to_string(), enable);
                             shell.opt_physical = enable;
                         }
-                        "notify" | "onecmd" | "privileged" | "verbose" | "vi" => {
+                        "notify" | "onecmd" | "privileged" | "verbose" => {
                             shell.shopt_options.insert(option.to_string(), enable);
                         }
                         _ => {
@@ -99,7 +98,6 @@ pub(super) fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
                     let options: Vec<(&str, bool)> = vec![
                         ("allexport", shell.opt_allexport),
                         ("braceexpand", so("braceexpand", true)),
-                        ("emacs", so("emacs", false)),
                         ("errexit", shell.opt_errexit),
                         ("errtrace", so("errtrace", false)),
                         ("functrace", so("functrace", false)),
@@ -122,7 +120,6 @@ pub(super) fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
                         ("posix", shell.opt_posix),
                         ("privileged", so("privileged", false)),
                         ("verbose", so("verbose", false)),
-                        ("vi", so("vi", false)),
                         ("xtrace", shell.opt_xtrace),
                     ];
                     if enable {

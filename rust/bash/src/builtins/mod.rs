@@ -624,7 +624,13 @@ fn format_param_expr(name: &str, op: &ParamOp) -> String {
         ParamOp::Length => format!("${{#{}}}", name),
         ParamOp::Indirect => format!("${{!{}}}", name),
         ParamOp::NamePrefix(ch) => format!("${{!{}{}}}", name, ch),
-        ParamOp::ArrayIndices(ch) => format!("${{!{}[{}]}}", name, ch),
+        ParamOp::ArrayIndices(ch, transform) => {
+            if let Some(t) = transform {
+                format!("${{!{}[{}]@{}}}", name, ch, t)
+            } else {
+                format!("${{!{}[{}]}}", name, ch)
+            }
+        }
         ParamOp::Default(colon, w) => {
             let op_str = if *colon { ":-" } else { "-" };
             format!("${{{}{}{}}}", name, op_str, format_word(w))
