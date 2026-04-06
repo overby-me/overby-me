@@ -289,7 +289,14 @@ impl Shell {
                 && let Some(ref mut top) = self.arith_top_expr
                 && top.contains('$')
             {
-                *top = expanded_cs.trim_start().replace("\\$", "$");
+                // When the expression contains single quotes (literal in
+                // arithmetic), keep \$ escaping in the display form — bash
+                // shows the backslash-escaped expansion in error messages.
+                if expr.contains('\'') {
+                    *top = expanded_cs.trim_start().to_string();
+                } else {
+                    *top = expanded_cs.trim_start().replace("\\$", "$");
+                }
             }
             &expanded_cs
         } else {
@@ -316,13 +323,15 @@ impl Shell {
             expr
         };
 
-        // Check for leading operators that can't start an expression (/, *, %)
-        // These indicate "operand expected" — report once for the full expression
+        // Check for leading operators that can't start an expression (/, *, %, ')
+        // These indicate "operand expected" — report once for the full expression.
+        // Single quotes are literal chars in arithmetic (not quoting) and are
+        // invalid operands, matching bash's behavior.
         if self.arith_depth == 1 {
             let trimmed = expr.trim();
             if !trimmed.is_empty() {
                 let first = trimmed.as_bytes()[0];
-                if matches!(first, b'/' | b'%') {
+                if matches!(first, b'/' | b'%' | b'\'') {
                     let top_expr = self.arith_top_expr.as_deref().unwrap_or(expr);
                     eprintln!(
                         "{}: {}{}: arithmetic syntax error: operand expected (error token is \"{}\")",
@@ -1801,6 +1810,11 @@ impl Shell {
         // contain `]`, `[`, or `$(...)`) into the expression, breaking
         // bracket matching and causing spurious command execution.
         let mut array_bracket_depth: i32 = 0;
+        // When true, we are inside `[...]` brackets preceded by a single-quoted
+        // identifier in (( )) context.  $var expansion proceeds but the result
+        // is backslash-escaped (`]`, `[`, `$`) to protect bracket matching and
+        // match bash's error message format.
+        let mut squote_bracket_escape = false;
         while i < chars.len() {
             // Detect `name[` where `name` is any array (or potential array variable).
             // Skip $var expansion inside [..] so that expanded values containing
@@ -1819,12 +1833,27 @@ impl Shell {
                     {
                         name_start -= 1;
                     }
-                    if name_start < name_end {
+                    // Don't activate bracket protection if the identifier is
+                    // preceded by `'` — single quotes are literal in (( ))
+                    // arithmetic, so this is not a real array subscript access.
+                    // $var should be expanded (and backslash-escaped) for the
+                    // error message to match bash.
+                    let preceded_by_squote = name_start > 0 && chars[name_start - 1] == '\'';
+                    if name_start < name_end && !preceded_by_squote {
                         array_bracket_depth = 1;
+                    } else if name_start < name_end && preceded_by_squote {
+                        // Inside single-quoted (( )) expression — enter bracket
+                        // tracking but with escape mode: $var expansion will
+                        // proceed but results will be backslash-escaped.
+                        array_bracket_depth = 1;
+                        squote_bracket_escape = true;
                     }
                 }
             } else if chars[i] == ']' && array_bracket_depth > 0 {
                 array_bracket_depth -= 1;
+                if array_bracket_depth == 0 {
+                    squote_bracket_escape = false;
+                }
                 result.push(chars[i]);
                 i += 1;
                 continue;
@@ -1983,8 +2012,10 @@ impl Shell {
             {
                 // ${...} parameter expansion — find matching } and expand
                 // BUT: if we're inside array [...] brackets,
-                // leave unexpanded for arith_subscript_key to handle.
-                if array_bracket_depth > 0 {
+                // leave unexpanded for arith_subscript_key to handle —
+                // UNLESS squote_bracket_escape is set (single-quoted (( ))
+                // context where $var should be expanded with escaping).
+                if array_bracket_depth > 0 && !squote_bracket_escape {
                     result.push(chars[i]);
                     i += 1;
                     continue;
@@ -2011,7 +2042,18 @@ impl Shell {
                 let param_text: String = chars[start..i].iter().collect();
                 let expanded =
                     self.expand_word_single(&crate::lexer::parse_word_string(&param_text));
-                result.push_str(&expanded);
+                if squote_bracket_escape {
+                    // Backslash-escape ], [, $ in the expanded value to protect
+                    // bracket matching and match bash's error message format.
+                    for ch in expanded.chars() {
+                        if matches!(ch, ']' | '[' | '$') {
+                            result.push('\\');
+                        }
+                        result.push(ch);
+                    }
+                } else {
+                    result.push_str(&expanded);
+                }
             } else if chars[i] == '$'
                 && i + 1 < chars.len()
                 && matches!(chars[i + 1], '#' | '?' | '$' | '!' | '-' | '@' | '*')
@@ -2044,7 +2086,9 @@ impl Shell {
                 // leave the $var unexpanded so arith_subscript_key can
                 // handle it properly (the expanded value may contain ]
                 // characters that would break bracket matching).
-                if array_bracket_depth > 0 {
+                // UNLESS squote_bracket_escape is set (single-quoted (( ))
+                // context where $var should be expanded with escaping).
+                if array_bracket_depth > 0 && !squote_bracket_escape {
                     result.push(chars[i]);
                     i += 1;
                     continue;
@@ -2060,7 +2104,18 @@ impl Shell {
                 let param_text: String = chars[start..i].iter().collect();
                 let expanded =
                     self.expand_word_single(&crate::lexer::parse_word_string(&param_text));
-                result.push_str(&expanded);
+                if squote_bracket_escape {
+                    // Backslash-escape ], [, $ in the expanded value to protect
+                    // bracket matching and match bash's error message format.
+                    for ch in expanded.chars() {
+                        if matches!(ch, ']' | '[' | '$') {
+                            result.push('\\');
+                        }
+                        result.push(ch);
+                    }
+                } else {
+                    result.push_str(&expanded);
+                }
             } else if chars[i] == '`' {
                 // Backtick command substitution: `...`
                 let start = i;

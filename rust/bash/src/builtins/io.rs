@@ -227,6 +227,16 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                     .or_default()
                     .insert(key, output_str);
             } else {
+                // For indexed arrays, @ and * are not valid assignment targets
+                if idx_str == "@" || idx_str == "*" {
+                    eprintln!(
+                        "{}: {}[{}]: bad array subscript",
+                        shell.error_prefix(),
+                        resolved,
+                        idx_str
+                    );
+                    return result;
+                }
                 let idx = shell.eval_arith_expr(idx_str) as usize;
                 shell.declared_unset.remove(&resolved);
                 let arr = shell.arrays.entry(resolved).or_default();
