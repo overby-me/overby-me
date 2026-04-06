@@ -279,6 +279,19 @@ fn run(sigpipe_was_ignored: bool) -> i32 {
         .insert("_BASH_SOURCE_FILE".to_string(), shell.script_name.clone());
     crate::expand::set_script_name(&shell.script_name);
 
+    // Initialize $_ to the shell's own absolute path (matching bash behavior).
+    // Bash always overrides the inherited $_ from the environment at startup.
+    {
+        let shell_path = std::env::current_exe()
+            .map(|p| p.to_string_lossy().to_string())
+            .or_else(|_| {
+                std::fs::read_link("/proc/self/exe").map(|p| p.to_string_lossy().to_string())
+            })
+            .unwrap_or_else(|_| args.first().cloned().unwrap_or_else(|| "bash".to_string()));
+        shell.vars.insert("_".to_string(), shell_path.clone());
+        shell.exports.insert("_".to_string(), shell_path);
+    }
+
     // Set BASH_SOURCE array
     if !shell.script_name.is_empty() {
         shell.arrays.insert(

@@ -128,7 +128,17 @@ fn apply_replacement_amp(replacement: &str, matched: &str) -> String {
     let chars: Vec<char> = replacement.chars().collect();
     let mut i = 0;
     while i < chars.len() {
-        if chars[i] == '\\' && i + 1 < chars.len() && chars[i + 1] == '&' {
+        if chars[i] == '\x00' && i + 1 < chars.len() {
+            // \x00X → literal X (was quoted in the original word).
+            // This covers \x00& (quoted &) and \x00\ (quoted \) so that
+            // a quoted backslash doesn't accidentally escape a following &.
+            result.push(chars[i + 1]);
+            i += 2;
+        } else if chars[i] == '\\' && i + 1 < chars.len() && chars[i + 1] == '\\' {
+            // \\ → literal \ (escaped backslash)
+            result.push('\\');
+            i += 2;
+        } else if chars[i] == '\\' && i + 1 < chars.len() && chars[i + 1] == '&' {
             // \& → literal &
             result.push('&');
             i += 2;
@@ -145,11 +155,19 @@ fn apply_replacement_amp(replacement: &str, matched: &str) -> String {
 }
 
 /// Check whether a replacement string contains an unescaped `&`.
+/// `\x00&` (quoted marker) and `\&` (backslash-escaped) are NOT unescaped.
 fn replacement_has_amp(replacement: &str) -> bool {
     let chars: Vec<char> = replacement.chars().collect();
     let mut i = 0;
     while i < chars.len() {
-        if chars[i] == '\\' && i + 1 < chars.len() && chars[i + 1] == '&' {
+        if chars[i] == '\x00' && i + 1 < chars.len() {
+            // Quoted char (& or \) — skip both
+            i += 2;
+        } else if chars[i] == '\\' && i + 1 < chars.len() && chars[i + 1] == '\\' {
+            // Escaped backslash — skip
+            i += 2;
+        } else if chars[i] == '\\' && i + 1 < chars.len() && chars[i + 1] == '&' {
+            // Escaped & — skip
             i += 2;
         } else if chars[i] == '&' {
             return true;
@@ -160,14 +178,23 @@ fn replacement_has_amp(replacement: &str) -> bool {
     false
 }
 
-/// If patsub_replacement is active and the replacement contains `\&` but
-/// no unescaped `&`, we still need to unescape `\&` → `&`.
+/// If patsub_replacement is active and the replacement contains `\&` or
+/// `\x00&` but no unescaped `&`, we still need to unescape them → `&`.
 fn unescape_replacement_amp(replacement: &str) -> String {
     let mut result = String::with_capacity(replacement.len());
     let chars: Vec<char> = replacement.chars().collect();
     let mut i = 0;
     while i < chars.len() {
-        if chars[i] == '\\' && i + 1 < chars.len() && chars[i + 1] == '&' {
+        if chars[i] == '\x00' && i + 1 < chars.len() {
+            // Quoted char marker → literal char (covers \x00& and \x00\)
+            result.push(chars[i + 1]);
+            i += 2;
+        } else if chars[i] == '\\' && i + 1 < chars.len() && chars[i + 1] == '\\' {
+            // Escaped backslash → literal \
+            result.push('\\');
+            i += 2;
+        } else if chars[i] == '\\' && i + 1 < chars.len() && chars[i + 1] == '&' {
+            // Escaped & → literal &
             result.push('&');
             i += 2;
         } else {
@@ -197,11 +224,12 @@ pub(super) fn pattern_replace(value: &str, pattern: &str, replacement: &str, all
     // Determine whether `&` replacement is active for this call.
     let patsub = get_patsub_replacement();
     // We need `&` processing when patsub_replacement is on AND the
-    // replacement contains `&` or `\&`.
+    // replacement contains `&` or `\&` or `\x00&` (quoted marker).
     let has_amp = patsub && (replacement.contains('&'));
     // Even if there are no unescaped `&`, we must unescape `\&` → `&`
-    // when the option is active.
-    let needs_amp_unescape = patsub && replacement.contains("\\&");
+    // and `\x00&` → `&` when the option is active.
+    let needs_amp_unescape =
+        patsub && (replacement.contains("\\&") || replacement.contains('\x00'));
     let use_amp = has_amp && replacement_has_amp(replacement);
     // Precompute a "plain" replacement for fast paths when `&` processing
     // isn't needed but `\&` unescaping is.

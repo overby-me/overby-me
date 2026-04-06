@@ -8,18 +8,47 @@ use crate::builtins::string_to_raw_bytes;
 /// returned as-is.
 fn process_replacement_amp(replacement: &str, matched: &str) -> String {
     if !super::get_patsub_replacement() {
+        // Still need to strip \x00 markers even when patsub is off.
+        // \x00X pairs become literal X (covers quoted & and quoted \).
+        if replacement.contains('\x00') {
+            let mut r = String::with_capacity(replacement.len());
+            let cs: Vec<char> = replacement.chars().collect();
+            let mut j = 0;
+            while j < cs.len() {
+                if cs[j] == '\x00' && j + 1 < cs.len() {
+                    r.push(cs[j + 1]);
+                    j += 2;
+                } else {
+                    r.push(cs[j]);
+                    j += 1;
+                }
+            }
+            return r;
+        }
         return replacement.to_string();
     }
     let chars: Vec<char> = replacement.chars().collect();
     let mut result = String::with_capacity(replacement.len() + matched.len());
     let mut i = 0;
     let mut had_special = false;
-    // Quick check: if no `&` or `\&` at all, return as-is
-    if !replacement.contains('&') {
+    // Quick check: if no `&` or `\&` or `\x00` at all, return as-is
+    if !replacement.contains('&') && !replacement.contains('\x00') {
         return replacement.to_string();
     }
     while i < chars.len() {
-        if chars[i] == '\\' && i + 1 < chars.len() && chars[i + 1] == '&' {
+        if chars[i] == '\x00' && i + 1 < chars.len() {
+            // \x00X → literal X (was quoted in the original word).
+            // This covers \x00& (quoted &) and \x00\ (quoted \) so that
+            // a quoted backslash doesn't accidentally escape a following &.
+            result.push(chars[i + 1]);
+            i += 2;
+            had_special = true;
+        } else if chars[i] == '\\' && i + 1 < chars.len() && chars[i + 1] == '\\' {
+            // \\ → literal \ (escaped backslash)
+            result.push('\\');
+            i += 2;
+            had_special = true;
+        } else if chars[i] == '\\' && i + 1 < chars.len() && chars[i + 1] == '&' {
             // \& → literal &
             result.push('&');
             i += 2;
@@ -834,7 +863,7 @@ pub(super) fn apply_param_op(
         | ParamOp::ReplacePrefix(pattern, replacement)
         | ParamOp::ReplaceSuffix(pattern, replacement) => {
             let pat = expand_pattern_word(pattern, ctx, cmd_sub);
-            let rep = expand_word_nosplit_ctx(replacement, ctx, cmd_sub);
+            let rep = super::expand_replacement_word(replacement, ctx, cmd_sub);
             match op {
                 ParamOp::ReplaceAll(..) => pattern_replace(val, &pat, &rep, true),
                 ParamOp::ReplacePrefix(..) => {
@@ -1398,7 +1427,7 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
         | ParamOp::ReplacePrefix(pattern, replacement)
         | ParamOp::ReplaceSuffix(pattern, replacement) => {
             let pat = expand_pattern_word(pattern, ctx, cmd_sub);
-            let rep = expand_word_nosplit_ctx(replacement, ctx, cmd_sub);
+            let rep = super::expand_replacement_word(replacement, ctx, cmd_sub);
             match &expr.op {
                 ParamOp::ReplaceAll(..) => pattern_replace(&val, &pat, &rep, true),
                 ParamOp::ReplacePrefix(..) => {

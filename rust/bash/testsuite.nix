@@ -55,6 +55,17 @@ pkgs.runCommand "rust-bash-test-${name}" {
   # Match: a word-hyphen-digits pattern where the digits are 2-7 long.
   sed -i -E 's|([a-zA-Z])-([0-9]{2,7})\b|\1-PID|g' "$TMPDIR/expected" "$TMPDIR/actual"
 
+  # Normalize BASHPID="<pid>" and PPID="<pid>" in declare output, and
+  # bare PID values like ref_PID="<pid>" that appear in variable dumps.
+  sed -i -E 's|BASHPID="[0-9]+"|BASHPID="PID"|g' "$TMPDIR/expected" "$TMPDIR/actual"
+  sed -i -E 's|PPID="[0-9]+"|PPID="PID"|g' "$TMPDIR/expected" "$TMPDIR/actual"
+  sed -i -E 's|_PID="[0-9]+"|_PID="PID"|g' "$TMPDIR/expected" "$TMPDIR/actual"
+
+  # Normalize $_ which contains different nix store paths (e.g. timeout,
+  # coreutils, or the shell itself).  Replace the full nix store path
+  # with a generic placeholder.
+  sed -i -E 's|_="/nix/store/[^"]+"|_="NIXPATH"|g' "$TMPDIR/expected" "$TMPDIR/actual"
+
   # Normalize thread/process IDs in Rust panic messages
   sed -i -E "s|thread '([^']*)' \([0-9]+\)|thread '\1' (PID)|g" "$TMPDIR/expected" "$TMPDIR/actual"
 

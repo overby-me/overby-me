@@ -1737,6 +1737,98 @@ fn expand_pattern_word(word: &Word, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
     result
 }
 
+/// Like expand_word_nosplit_ctx but preserves quoting context for `&` in
+/// replacement strings of `${var/pat/rep}`.  When `patsub_replacement` is
+/// enabled, unquoted `&` means "matched text" while quoted `&` (inside
+/// `"..."` or `'...'`) is literal.  We mark quoted `&` with a `\x00`
+/// prefix so that `apply_replacement_amp` can distinguish them.
+///
+/// Also performs tilde expansion on the replacement: a leading unquoted
+/// `~` (or `~/`) is expanded to `$HOME`, matching bash behavior.
+fn expand_replacement_word(word: &Word, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
+    // Check whether the replacement word starts with an unquoted tilde.
+    // Tilde expansion only happens when `~` is unquoted and at the very
+    // start of the replacement word (optionally followed by `/`).
+    let tilde_prefix = match word.first() {
+        Some(WordPart::Literal(s)) if s.starts_with('~') => {
+            // Check for ~/ or lone ~
+            let rest = &s[1..];
+            if rest.is_empty() || rest.starts_with('/') {
+                ctx.vars.get("HOME").cloned()
+            } else {
+                None
+            }
+        }
+        Some(WordPart::Tilde(user)) if user.is_empty() => ctx.vars.get("HOME").cloned(),
+        _ => None,
+    };
+
+    let patsub = get_patsub_replacement();
+    if !patsub {
+        // When patsub_replacement is off, `&` has no special meaning —
+        // just do a normal expansion (no markers needed).
+        let val = expand_word_nosplit_ctx(word, ctx, cmd_sub);
+        return apply_tilde_in_replacement(&val, tilde_prefix.as_deref());
+    }
+
+    let segments = expand_word_to_segments(word, ctx, cmd_sub);
+    // Check for incomplete comsub marker before stripping \x00
+    for seg in &segments {
+        match seg {
+            Segment::Unquoted(t) | Segment::Quoted(t) if t.starts_with("\x00INCOMPLETE_COMSUB") => {
+                return t.clone();
+            }
+            _ => {}
+        }
+    }
+    let star_sep = match ctx.vars.get("IFS") {
+        None => " ",
+        Some(s) if s.is_empty() => "",
+        Some(s) => &s[..s.chars().next().unwrap().len_utf8()],
+    };
+    let mut result = String::new();
+    for s in &segments {
+        match s {
+            Segment::Quoted(t) => {
+                // Quoted context: mark `&` and `\` with `\x00` prefix so
+                // they stay literal.  Without marking `\`, a quoted `\`
+                // followed by an unquoted `&` would be misparsed as `\&`
+                // (escaped-amp) in apply_replacement_amp.
+                for ch in t.chars() {
+                    if ch == '&' || ch == '\\' {
+                        result.push('\x00');
+                        result.push(ch);
+                    } else if ch == '\x00' {
+                        // Strip existing \x00 markers
+                    } else {
+                        result.push(ch);
+                    }
+                }
+            }
+            Segment::Unquoted(t) | Segment::Literal(t) => {
+                // Unquoted context: `&` stays bare (will be matched-text),
+                // `\x00` markers are stripped.
+                result.push_str(&t.replace('\x00', ""));
+            }
+            Segment::SplitHere => result.push(' '),
+            Segment::SplitHereStar => result.push_str(star_sep),
+        }
+    }
+    apply_tilde_in_replacement(&result, tilde_prefix.as_deref())
+}
+
+/// Apply tilde expansion to a replacement string value.
+/// Only expands if `tilde_home` is `Some` (meaning the word started with
+/// an unquoted `~`).  Replaces the leading `~` with the home directory.
+fn apply_tilde_in_replacement(val: &str, tilde_home: Option<&str>) -> String {
+    if let Some(home) = tilde_home
+        && let Some(rest) = val.strip_prefix('~')
+    {
+        return format!("{}{}", home, rest);
+    }
+    val.to_string()
+}
+
 fn expand_arith(expr: &str, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
     // Pre-expand command substitutions ($(...) and ${ ...; }) in the
     // arithmetic expression before evaluating it.  eval_arith_full only
