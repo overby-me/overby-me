@@ -5,9 +5,7 @@
 //! it on a free virtual terminal with a blue background.
 
 use clap::Parser;
-use libsystemd::journal::storage::{
-    list_all_journal_files, read_entries_from_offset, JournalStorage, StorageConfig,
-};
+use libsystemd::journal::storage::{list_all_journal_files, read_entries_from_offset};
 use std::collections::HashMap;
 use std::fs;
 use std::io;
@@ -62,10 +60,7 @@ fn journal_directory() -> PathBuf {
 }
 
 /// Check if an entry matches our emergency message criteria.
-fn is_emergency_match(
-    entry: &libsystemd::journal::entry::JournalEntry,
-    boot_id: &str,
-) -> bool {
+fn is_emergency_match(entry: &libsystemd::journal::entry::JournalEntry, boot_id: &str) -> bool {
     entry.boot_id().as_deref() == Some(boot_id)
         && entry.uid() == Some(0)
         && entry.priority() == Some(0)
@@ -95,9 +90,7 @@ fn find_emergency_message(continuous: bool) -> Option<String> {
             }
             Err(_) => {
                 // Try C journal format via read_all fallback for this file
-                if let Ok(entries) =
-                    libsystemd::journal::c_journal::read_c_journal(file)
-                {
+                if let Ok(entries) = libsystemd::journal::c_journal::read_c_journal(file) {
                     for entry in &entries {
                         if is_emergency_match(entry, &boot_id)
                             && let Some(msg) = entry.field("MESSAGE")

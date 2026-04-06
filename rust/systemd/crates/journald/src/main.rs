@@ -2542,7 +2542,7 @@ fn sd_notify_with_fds(msg: &str, fds: &[RawFd]) {
     };
 
     // Build cmsg for SCM_RIGHTS
-    let fds_bytes = fds.len() * std::mem::size_of::<RawFd>();
+    let fds_bytes = std::mem::size_of_val(fds);
     let cmsg_len = unsafe { libc::CMSG_SPACE(fds_bytes as u32) } as usize;
     let mut cmsg_buf = vec![0u8; cmsg_len];
 
