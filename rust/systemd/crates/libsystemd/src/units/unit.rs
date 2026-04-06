@@ -522,6 +522,41 @@ impl ServiceState {
             }
         }
 
+        // Clear any PID/PGID that may have been set by socket activation
+        // during the window between killing the old process and starting
+        // the new one.  Kill the socket-activated replacement first so we
+        // don't leave an orphan.
+        if let Some(new_pid) = self.srvc.pid
+            && Some(new_pid) != old_pid
+        {
+            log::debug!(
+                "Killing socket-activated replacement PID {} before restart",
+                new_pid
+            );
+            let _ = nix::sys::signal::kill(new_pid, nix::sys::signal::Signal::SIGKILL);
+            // Wait briefly for it to exit
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+            loop {
+                {
+                    let pt = run_info.pid_table.lock_poisoned();
+                    match pt.get(&new_pid) {
+                        Some(PidEntry::ServiceExited(_)) | None => break,
+                        _ => {}
+                    }
+                }
+                if std::time::Instant::now() >= deadline {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+        self.srvc.pid = None;
+        self.srvc.process_group = None;
+        info!(
+            "reactivate {}: cleared PID/PGID, calling start (old_pid={:?})",
+            id.name, old_pid
+        );
+
         // Restart and set the status according to the result
         let start_res = self
             .srvc
@@ -1645,6 +1680,36 @@ impl Unit {
                 }
                 LockedState::Service(mut state, conf) => {
                     let state = &mut *state;
+                    // During a restart where the service is no longer in
+                    // Started state (e.g. exited and got socket-activated),
+                    // clear any stale PID/PGID so activate() doesn't fail
+                    // with AlreadyHasPID.  Kill the orphan first.
+                    if let Some(stale_pid) = state.srvc.pid {
+                        log::debug!(
+                            "reactivate (activate path) {}: killing stale PID {} before activate",
+                            self.id.name,
+                            stale_pid
+                        );
+                        let _ =
+                            nix::sys::signal::kill(stale_pid, nix::sys::signal::Signal::SIGKILL);
+                        let deadline =
+                            std::time::Instant::now() + std::time::Duration::from_secs(2);
+                        loop {
+                            {
+                                let pt = run_info.pid_table.lock_poisoned();
+                                match pt.get(&stale_pid) {
+                                    Some(PidEntry::ServiceExited(_)) | None => break,
+                                    _ => {}
+                                }
+                            }
+                            if std::time::Instant::now() >= deadline {
+                                break;
+                            }
+                            std::thread::sleep(std::time::Duration::from_millis(10));
+                        }
+                    }
+                    state.srvc.pid = None;
+                    state.srvc.process_group = None;
                     state
                         .activate(&self.id, conf, &self.common.status, run_info, source)
                         .map(|_| ())

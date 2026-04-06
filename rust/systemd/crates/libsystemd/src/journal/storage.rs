@@ -1287,13 +1287,48 @@ fn parse_cursor_seqnum(cursor: &str) -> Option<u64> {
     None
 }
 
+/// C journal header incompatible flags for compression algorithms.
+const C_HEADER_INCOMPATIBLE_COMPRESSED_XZ: u32 = 1 << 0;
+const C_HEADER_INCOMPATIBLE_COMPRESSED_LZ4: u32 = 1 << 1;
+// bit 2 = KEYED_HASH (not compression)
+const C_HEADER_INCOMPATIBLE_COMPRESSED_ZSTD: u32 = 1 << 3;
+
+/// C journal magic signature.
+const C_JOURNAL_MAGIC: &[u8; 8] = b"LPKSHHRH";
+
 /// Read the compression algorithm from a journal file's header.
+///
+/// Supports both JRNL_RS format (compress byte at offset 60) and
+/// C systemd's LPKSHHRH format (incompatible_flags at offset 12).
 pub fn read_file_compress(path: &Path) -> io::Result<JournalCompress> {
     let mut file = File::open(path)?;
     let mut header_buf = [0u8; 64];
     file.read_exact(&mut header_buf)?;
-    let header = FileHeader::deserialize(&header_buf)?;
-    Ok(header.compress)
+
+    let mut magic = [0u8; 8];
+    magic.copy_from_slice(&header_buf[0..8]);
+
+    if &magic == JOURNAL_MAGIC {
+        let header = FileHeader::deserialize(&header_buf)?;
+        Ok(header.compress)
+    } else if &magic == C_JOURNAL_MAGIC {
+        // C journal: compression is encoded in incompatible_flags at offset 12
+        let incompatible_flags = u32::from_le_bytes(header_buf[12..16].try_into().unwrap());
+        if incompatible_flags & C_HEADER_INCOMPATIBLE_COMPRESSED_ZSTD != 0 {
+            Ok(JournalCompress::Zstd)
+        } else if incompatible_flags & C_HEADER_INCOMPATIBLE_COMPRESSED_LZ4 != 0 {
+            Ok(JournalCompress::Lz4)
+        } else if incompatible_flags & C_HEADER_INCOMPATIBLE_COMPRESSED_XZ != 0 {
+            Ok(JournalCompress::Xz)
+        } else {
+            Ok(JournalCompress::None)
+        }
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "unrecognized journal file magic",
+        ))
+    }
 }
 
 /// Parse the realtime timestamp (`t=HEX`) from a cursor string.
