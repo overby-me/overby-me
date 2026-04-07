@@ -261,7 +261,10 @@ in
         # upstream units because loading hundreds of extra units at boot can
         # overwhelm PID 1.
         mkdir -p /usr/lib/systemd/system
-        for f in ${config.systemd.package}/example/systemd/system/systemd-importd.service; do
+        for f in ${config.systemd.package}/example/systemd/system/systemd-importd.service \
+                 ${config.systemd.package}/example/systemd/system/systemd-journald@.service \
+                 ${config.systemd.package}/example/systemd/system/systemd-journald@.socket \
+                 ${config.systemd.package}/example/systemd/system/systemd-journald-varlink@.socket; do
           name=$(basename "$f")
           [ -e "/usr/lib/systemd/system/$name" ] || ln -sfn "$f" "/usr/lib/systemd/system/$name"
         done

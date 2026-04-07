@@ -49,7 +49,7 @@ use regex::Regex;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -2837,15 +2837,21 @@ fn handle_vacuum(cli: &Cli, storage: &JournalStorage) {
     let directory = storage.directory();
     let directory = &directory;
 
-    // List journal files
+    // List archived journal files only.  Active journal files (e.g.
+    // system.journal, user-1000.journal) are NOT vacuumed — only archived
+    // files whose stem contains '@' (e.g. system@0006…….journal).
+    let is_archived = |p: &Path| -> bool {
+        p.extension()
+            .is_some_and(|ext| ext == "journal" || ext == "journal~")
+            && p.file_stem()
+                .and_then(|s| s.to_str())
+                .is_some_and(|s| s.contains('@'))
+    };
     let mut files: Vec<PathBuf> = match fs::read_dir(directory) {
         Ok(rd) => rd
             .flatten()
             .map(|e| e.path())
-            .filter(|p| {
-                p.extension()
-                    .is_some_and(|ext| ext == "journal" || ext == "journal~")
-            })
+            .filter(|p| is_archived(p))
             .collect(),
         Err(e) => {
             eprintln!("journalctl: Failed to read journal directory: {}", e);
@@ -2863,9 +2869,7 @@ fn handle_vacuum(cli: &Cli, storage: &JournalStorage) {
             {
                 for f in rd2.flatten() {
                     let p = f.path();
-                    if p.extension()
-                        .is_some_and(|ext| ext == "journal" || ext == "journal~")
-                    {
+                    if is_archived(&p) {
                         files.push(p);
                     }
                 }

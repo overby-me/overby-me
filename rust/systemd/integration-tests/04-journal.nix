@@ -1,13 +1,12 @@
 {
   name = "04-JOURNAL";
-  # Passing subtests: corrupted-journals, fss, invocation, journal, journal-append, journal-corrupt, LogFilterPatterns, reload, stopped-socket-activation, SYSTEMD_JOURNAL_COMPRESS
+  # Passing subtests: cat, corrupted-journals, fss, invocation, journal, journal-append, journal-corrupt, LogFilterPatterns, reload, stopped-socket-activation, SYSTEMD_JOURNAL_COMPRESS
   # Skipped subtests and reasons:
   # - journal-gatewayd: uses C systemd-journal-gatewayd HTTP server (not reimplemented)
   # - journal-remote: uses C systemd-journal-remote/upload (not reimplemented)
   # - bsod: C systemd-bsod uses sd_journal_wait() which needs inotify on LPKSHHRH journal files
-  # - cat: requires namespace journal instances (not implemented)
   testEnv = {
-    TEST_SKIP_SUBTESTS = "journal-gatewayd journal-remote \\.bsod\\. \\.cat\\.";
+    TEST_SKIP_SUBTESTS = "journal-gatewayd journal-remote \\.bsod\\.";
   };
   patchScript = ''
     # Add timeouts to bsod at_exit cleanup to prevent infinite hangs.
@@ -65,5 +64,11 @@
     sed -i 's#| journalctl #| timeout 30 journalctl #' TEST-04-JOURNAL.journal.sh
     sed -i 's#| systemd-cat$#| timeout 30 systemd-cat#' TEST-04-JOURNAL.journal.sh
     sed -i 's#| systemd-cat #| timeout 30 systemd-cat #' TEST-04-JOURNAL.journal.sh
+
+    # cat.sh patches:
+    # Add sync+sleep after waiting for the namespace journald to become active.
+    # Our journald processes entries in threads; the service may become active
+    # before the entry is committed to disk.
+    sed -i '/^timeout 30 bash.*systemd-journald@cat-test/a\journalctl --namespace cat-test --sync 2>/dev/null || true; sleep 1' TEST-04-JOURNAL.cat.sh
   '';
 }
