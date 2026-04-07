@@ -822,11 +822,11 @@ impl JournalStorage {
             }
         } else if let Some(newest) = files.last() {
             // Fallback: try the newest existing file (e.g. from an older version)
-            if let Ok(jf) = JournalFile::open(newest, true) {
-                if jf.size() < self.config.max_file_size {
-                    self.active_file = Some(jf);
-                    return Ok(());
-                }
+            if let Ok(jf) = JournalFile::open(newest, true)
+                && jf.size() < self.config.max_file_size
+            {
+                self.active_file = Some(jf);
+                return Ok(());
             }
         }
 

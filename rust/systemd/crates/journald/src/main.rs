@@ -1981,6 +1981,7 @@ struct ProcMeta {
 }
 
 impl ProcMeta {
+    #[allow(clippy::field_reassign_with_default)]
     fn read_for_pid(pid: u32) -> Self {
         let proc_base = format!("/proc/{pid}");
         let mut meta = ProcMeta::default();
@@ -2007,14 +2008,14 @@ impl ProcMeta {
 
         if let Ok(status) = std::fs::read_to_string(format!("{proc_base}/status")) {
             for line in status.lines() {
-                if let Some(rest) = line.strip_prefix("Uid:") {
-                    if let Some(uid_str) = rest.split_whitespace().next() {
-                        meta.uid = Some(uid_str.to_string());
-                    }
-                } else if let Some(rest) = line.strip_prefix("Gid:") {
-                    if let Some(gid_str) = rest.split_whitespace().next() {
-                        meta.gid = Some(gid_str.to_string());
-                    }
+                if let Some(rest) = line.strip_prefix("Uid:")
+                    && let Some(uid_str) = rest.split_whitespace().next()
+                {
+                    meta.uid = Some(uid_str.to_string());
+                } else if let Some(rest) = line.strip_prefix("Gid:")
+                    && let Some(gid_str) = rest.split_whitespace().next()
+                {
+                    meta.gid = Some(gid_str.to_string());
                 }
             }
         }
@@ -2053,10 +2054,10 @@ impl ProcMeta {
         if let Ok(environ) = std::fs::read(format!("{proc_base}/environ")) {
             for entry in environ.split(|&b| b == 0) {
                 if let Some(id) = entry.strip_prefix(b"INVOCATION_ID=") {
-                    if let Ok(id_str) = std::str::from_utf8(id) {
-                        if !id_str.is_empty() {
-                            meta.invocation_id = Some(id_str.to_string());
-                        }
+                    if let Ok(id_str) = std::str::from_utf8(id)
+                        && !id_str.is_empty()
+                    {
+                        meta.invocation_id = Some(id_str.to_string());
                     }
                     break;
                 }
@@ -2353,6 +2354,21 @@ fn handle_stdout_connection(
         }
     }
 
+    // Refresh the PID metadata cache after reading the header.  For
+    // command-mode systemd-cat the process calls execvp() between sending
+    // the header and writing log data, so /proc/PID/exe changes (e.g.
+    // from systemd-cat → bash).  Try to re-read /proc now; if the process
+    // is still alive we get the post-exec metadata.  If the process is
+    // already dead (short-lived pipe mode), keep the accept-time metadata.
+    if let Some((pid, _)) = peer_meta {
+        let fresh = ProcMeta::read_for_pid(pid);
+        if fresh.exe.is_some() {
+            // Process is still alive and we got fresh metadata (post-exec)
+            reader.pid_meta_cache.insert(pid, fresh);
+        }
+        // else: process already exited — keep the accept-time metadata
+    }
+
     // Store this stream FD with PID 1 via FDSTORE so it survives journald
     // restart (including SIGKILL). PID 1 holds a duplicate of the FD; if
     // journald dies, the service's writes still succeed (buffered in the
@@ -2378,67 +2394,29 @@ fn handle_stdout_connection(
             return;
         }
 
-        // DEBUG: log metadata state for stdout stream entries
-        {
-            use std::io::Write as _;
-            if let Ok(mut f) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open("/tmp/journald-stdout-debug.log")
-            {
-                let _ = writeln!(
-                    f,
-                    "STDOUT LINE: cred={:?} proc_meta={} peer_meta={} peer_cred={:?} id={} msg={}",
-                    cl.cred.map(|c| c.pid),
-                    cl.proc_meta
-                        .as_ref()
-                        .map(|(p, m)| format!("pid={} exe={:?}", p, m.exe))
-                        .unwrap_or_else(|| "None".to_string()),
-                    peer_meta
-                        .as_ref()
-                        .map(|(p, m)| format!("pid={} exe={:?}", p, m.exe))
-                        .unwrap_or_else(|| "None".to_string()),
-                    peer_cred.map(|c| c.pid),
-                    identifier,
-                    &message[..std::cmp::min(message.len(), 80)]
-                );
-            }
-        }
-        // DEBUG: after setting all fields, log what's in the entry
-        let log_entry_fields = |tag: &str, entry: &JournalEntry| {
-            use std::io::Write as _;
-            if let Ok(mut f) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open("/tmp/journald-stdout-debug.log")
-            {
-                let _ = writeln!(
-                    f,
-                    "  {} fields: _EXE={:?} _PID={:?} _COMM={:?} _TRANSPORT={:?} fields_count={}",
-                    tag,
-                    entry.field("_EXE"),
-                    entry.field("_PID"),
-                    entry.field("_COMM"),
-                    entry.field("_TRANSPORT"),
-                    entry.fields.len(),
-                );
-            }
-        };
-
         let mut entry = JournalEntry::new();
 
-        // Apply eagerly-captured /proc metadata first. These are read
-        // right after recvmsg() returns, when the process is most likely
-        // still alive (avoids races with short-lived processes).
-        if let Some((pid, ref meta)) = cl.proc_meta {
+        // Apply eagerly-captured /proc metadata. We require exe to be
+        // present — if the process exited before we could read /proc,
+        // exe will be None and we fall through to peer_meta which was
+        // captured at accept() time when the process was definitely alive.
+        let applied = if let Some((pid, ref meta)) = cl.proc_meta
+            && meta.exe.is_some()
+        {
             meta.apply_to_entry(&mut entry, pid);
-        } else if let Some((pid, ref meta)) = peer_meta {
-            // Fallback: use metadata captured at accept() time.
-            // This handles the case where SCM_CREDENTIALS were not
-            // delivered (cl.proc_meta is None) — the peer metadata
-            // was read when the process was definitely alive.
-            meta.apply_to_entry(&mut entry, pid);
+            true
+        } else if let Some((pid, ref meta)) = peer_meta
+            && meta.exe.is_some()
+        {
+            // Use accept-time metadata but prefer the per-write PID
+            // (may differ from accept-time PID after exec).
+            let effective_pid = cl.proc_meta.as_ref().map(|(p, _)| *p).unwrap_or(pid);
+            meta.apply_to_entry(&mut entry, effective_pid);
+            true
         } else {
+            false
+        };
+        if !applied {
             // Last resort: try peer credentials + lazy /proc read
             let write_pid = cl.cred.map(|c| c.pid as u32).filter(|&p| p > 0);
             let metadata_pid = write_pid.or(peer_cred.map(|c| c.pid as u32));
@@ -2481,7 +2459,6 @@ fn handle_stdout_connection(
         entry.set_machine_id();
         entry.set_hostname();
 
-        log_entry_fields("PRE-DISPATCH", &entry);
         state.dispatch_entry(entry);
     };
 
