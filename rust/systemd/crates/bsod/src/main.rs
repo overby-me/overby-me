@@ -156,7 +156,8 @@ struct VtState {
     v_state: u16,
 }
 
-/// Find the next free virtual terminal using VT_OPENQRY.
+/// Find the next free virtual terminal by scanning the v_state bitmap.
+/// Matches the C systemd `find_next_free_vt()` implementation.
 fn find_free_vt(fd: i32) -> io::Result<(i32, i32)> {
     let mut state = VtState {
         v_active: 0,
@@ -168,13 +169,14 @@ fn find_free_vt(fd: i32) -> io::Result<(i32, i32)> {
         return Err(io::Error::last_os_error());
     }
 
-    // VT_OPENQRY = 0x5600 — ask the kernel for the next free VT
-    let mut free_vt: libc::c_int = 0;
-    if unsafe { libc::ioctl(fd, 0x5600, &mut free_vt) } < 0 || free_vt <= 0 {
-        return Err(io::Error::last_os_error());
+    // Find the first free VT by scanning the v_state bitmap (bit i = VT i+1)
+    for i in 0..16 {
+        if state.v_state & (1 << i) == 0 {
+            return Ok((i + 1, state.v_active as i32));
+        }
     }
 
-    Ok((free_vt, state.v_active as i32))
+    Err(io::Error::new(io::ErrorKind::NotFound, "no free VT found"))
 }
 
 /// Set the terminal cursor position (1-based row, col).
@@ -196,16 +198,19 @@ fn display_message(message: &str, tty_path: Option<&PathBuf>) -> io::Result<()> 
         std::mem::forget(f);
         (raw_fd, 0, 0)
     } else {
-        // Open /dev/tty1 to find a free VT
-        let console = fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open("/dev/tty1")?;
-        let console_fd = console.as_raw_fd();
-        let (free_vt, original_vt) = find_free_vt(console_fd)?;
+        // Open /dev/tty1 to query VT state, then close it before opening
+        // the target — matching the C systemd-bsod approach.
+        let (free_vt, original_vt) = {
+            let console = fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open("/dev/tty1")?;
+            let result = find_free_vt(console.as_raw_fd())?;
+            drop(console);
+            result
+        };
 
-        // Open the target VT before activating — this ensures the kernel
-        // initialises the VT so VT_ACTIVATE can succeed.
+        // Open the target VT
         let tty_name = format!("/dev/tty{free_vt}");
         let f = fs::OpenOptions::new()
             .read(true)
@@ -214,17 +219,13 @@ fn display_message(message: &str, tty_path: Option<&PathBuf>) -> io::Result<()> 
         let raw_fd = f.as_raw_fd();
         std::mem::forget(f);
 
-        // Activate the free VT.  Skip VT_WAITACTIVE — it can hang
-        // indefinitely in headless VMs where the VT switch cannot
-        // complete.  A short sleep gives the kernel time to switch.
+        // Activate the free VT on its own fd (matching C systemd-bsod).
         // VT_ACTIVATE = 0x5606
         if free_vt > 0 {
             unsafe {
-                libc::ioctl(console_fd, 0x5606, free_vt);
+                libc::ioctl(raw_fd, 0x5606, free_vt);
             }
-            std::thread::sleep(std::time::Duration::from_millis(100));
         }
-        drop(console);
 
         (raw_fd, free_vt, original_vt)
     };
