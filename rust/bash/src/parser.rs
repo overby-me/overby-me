@@ -1693,7 +1693,8 @@ impl Parser {
             .lexer
             .read_until_char(';')
             .map_err(|_| "syntax error: arithmetic expression required".to_string())?;
-        let step = self.lexer.read_until_double_paren()?;
+        let step_raw = self.lexer.read_until_double_paren()?;
+        let step = step_raw.trim_start().to_string();
         // Sync parser — skip ; or newline before 'do'
         self.current = self.lexer.next_token();
         if matches!(self.current, Token::Semi | Token::Newline) {

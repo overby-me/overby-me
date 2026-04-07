@@ -1225,7 +1225,7 @@ impl Lexer {
                     if self.pos < self.input.len() && self.input[self.pos] == ')' {
                         // Found )) (possibly with whitespace between)
                         self.pos += 1;
-                        return Ok(expr.trim_start().to_string());
+                        return Ok(expr);
                     }
                     // Not )), restore position and treat as expression
                     self.pos = saved;
