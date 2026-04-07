@@ -810,46 +810,22 @@ impl JournalStorage {
         // Try to open system.journal (C journald active file convention)
         let active_path = journal_dir.join("system.journal");
         if active_path.exists() {
-            match JournalFile::open(&active_path, true) {
-                Ok(jf) => {
-                    if jf.header.compress != self.config.compress {
-                        // Compression setting changed (e.g. SYSTEMD_JOURNAL_COMPRESS
-                        // env var). Archive the old file and create a new one.
-                        eprintln!(
-                            "journald: Compression changed ({} -> {}), rotating {}",
-                            jf.header.compress.as_str(),
-                            self.config.compress.as_str(),
-                            active_path.display()
-                        );
-                        drop(jf);
-                    } else if jf.size() < self.config.max_file_size {
-                        self.active_file = Some(jf);
-                        return Ok(());
-                    }
-                }
-                Err(e) => {
-                    eprintln!(
-                        "journald: Could not reopen {}: {}; creating new file",
-                        active_path.display(),
-                        e
-                    );
+            if let Ok(jf) = JournalFile::open(&active_path, true) {
+                if jf.header.compress != self.config.compress {
+                    // Compression setting changed (e.g. SYSTEMD_JOURNAL_COMPRESS
+                    // env var). Archive the old file and create a new one.
+                    drop(jf);
+                } else if jf.size() < self.config.max_file_size {
+                    self.active_file = Some(jf);
+                    return Ok(());
                 }
             }
         } else if let Some(newest) = files.last() {
             // Fallback: try the newest existing file (e.g. from an older version)
-            match JournalFile::open(newest, true) {
-                Ok(jf) => {
-                    if jf.size() < self.config.max_file_size {
-                        self.active_file = Some(jf);
-                        return Ok(());
-                    }
-                }
-                Err(e) => {
-                    eprintln!(
-                        "journald: Could not reopen {}: {}; creating new file",
-                        newest.display(),
-                        e
-                    );
+            if let Ok(jf) = JournalFile::open(newest, true) {
+                if jf.size() < self.config.max_file_size {
+                    self.active_file = Some(jf);
+                    return Ok(());
                 }
             }
         }

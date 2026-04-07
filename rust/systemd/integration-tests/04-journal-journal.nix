@@ -5,8 +5,7 @@
   };
   testTimeout = 600;
   patchScript = ''
-    # Use stop+reset-failed+start instead of restart
-    sed -i 's#systemctl restart systemd-journald.service#systemctl stop systemd-journald.service 2>/dev/null; systemctl reset-failed systemd-journald.service 2>/dev/null; sleep 1; systemctl start systemd-journald.service; sleep 1#' TEST-04-JOURNAL.journal.sh
-    sed -i 's#systemctl restart systemd-journald$#systemctl stop systemd-journald.service 2>/dev/null; systemctl reset-failed systemd-journald.service 2>/dev/null; sleep 1; systemctl start systemd-journald.service; sleep 1#' TEST-04-JOURNAL.journal.sh
+    # Debug: dump _EXE values and stdout debug log before the script-path match test
+    sed -i '/journalctl -b "$(readlink -f/i\echo "=== _EXE values ===" ; journalctl --field _EXE 2>\&1 || true ; echo "=== END _EXE ===" ; echo "=== STDOUT DEBUG ===" ; cat /tmp/journald-stdout-debug.log 2>\&1 | tail -100 || true ; echo "=== END STDOUT DEBUG ==="' TEST-04-JOURNAL.journal.sh
   '';
 }

@@ -1,11 +1,13 @@
 {
   name = "04-JOURNAL";
-  # Passing subtests: bsod, cat, corrupted-journals, fss, invocation, journal, journal-append, journal-corrupt, LogFilterPatterns, reload, stopped-socket-activation, SYSTEMD_JOURNAL_COMPRESS
+  # Passing subtests: corrupted-journals, fss, invocation, journal-append, journal-corrupt, LogFilterPatterns, reload, stopped-socket-activation, SYSTEMD_JOURNAL_COMPRESS
   # Skipped subtests and reasons:
   # - journal-gatewayd: uses C systemd-journal-gatewayd HTTP server (not reimplemented)
   # - journal-remote: uses C systemd-journal-remote/upload (not reimplemented)
+  # - bsod: C systemd-bsod uses sd_journal_wait() which needs inotify on LPKSHHRH journal files
+  # - cat: requires namespace journal instances (not implemented)
   testEnv = {
-    TEST_SKIP_SUBTESTS = "journal-gatewayd journal-remote bsod cat";
+    TEST_SKIP_SUBTESTS = "journal-gatewayd journal-remote \\.bsod\\. \\.cat\\.";
   };
   patchScript = ''
     # Add timeouts to bsod at_exit cleanup to prevent infinite hangs.
@@ -17,12 +19,6 @@
     sed -i '/system@\*\.journal/s/$/ || true/' TEST-04-JOURNAL.bsod.sh
     # umount may fail if journald still holds the directory open.
     sed -i 's#umount /var/log/journal#umount /var/log/journal 2>/dev/null || true#' TEST-04-JOURNAL.bsod.sh
-    # Stop sockets too to prevent socket-activation from re-triggering with old env.
-    # Uses # as sed delimiter since replacement contains || which breaks | delimiter.
-    for f in TEST-04-JOURNAL.SYSTEMD_JOURNAL_COMPRESS.sh TEST-04-JOURNAL.journal.sh TEST-04-JOURNAL.reload.sh TEST-04-JOURNAL.bsod.sh; do
-      sed -i 's#systemctl restart systemd-journald.service#systemctl stop systemd-journald.socket systemd-journald-dev-log.socket systemd-journald-audit.socket systemd-journald.service 2>/dev/null || true; systemctl reset-failed systemd-journald.service 2>/dev/null || true; sleep 1; systemctl start systemd-journald.socket systemd-journald-dev-log.socket systemd-journald-audit.socket systemd-journald.service 2>/dev/null || true; sleep 1#' "$f"
-      sed -i 's#systemctl restart systemd-journald$#systemctl stop systemd-journald.socket systemd-journald-dev-log.socket systemd-journald-audit.socket systemd-journald.service 2>/dev/null || true; systemctl reset-failed systemd-journald.service 2>/dev/null || true; sleep 1; systemctl start systemd-journald.socket systemd-journald-dev-log.socket systemd-journald-audit.socket systemd-journald.service 2>/dev/null || true; sleep 1#' "$f"
-    done
     # Skip journal-remote sub-test (uses C systemd-journal-remote, not reimplemented)
     sed -i 's#if \[\[ -x /usr/lib/systemd/systemd-journal-remote \]\]#if false#' TEST-04-JOURNAL.SYSTEMD_JOURNAL_COMPRESS.sh
   '';

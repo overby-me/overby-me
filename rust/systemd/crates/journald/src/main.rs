@@ -1829,9 +1829,17 @@ fn stdout_socket_listener(
                 // spawning the handler thread, to minimize the race
                 // window where the sender might write without credentials.
                 enable_passcred(&stream);
+                // Read /proc metadata for the peer NOW, while the process
+                // is definitely alive (it just connected). This is used as
+                // a fallback in the handler thread when /proc is gone by
+                // the time recvmsg() processes the data.
+                let peer_meta = get_peer_cred(&stream)
+                    .map(|c| c.pid as u32)
+                    .filter(|&p| p > 0)
+                    .map(|pid| (pid, ProcMeta::read_for_pid(pid)));
                 let state = Arc::clone(&state);
                 thread::spawn(move || {
-                    handle_stdout_connection(stream, state);
+                    handle_stdout_connection(stream, peer_meta, state);
                 });
             }
             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
@@ -1957,11 +1965,146 @@ fn stream_recv_with_cred(
     Ok((n as usize, cred))
 }
 
+/// Eagerly-captured /proc metadata for a PID.  Read as soon as
+/// recvmsg() delivers SCM_CREDENTIALS so the process is still alive.
+#[derive(Clone, Default)]
+struct ProcMeta {
+    comm: Option<String>,
+    exe: Option<String>,
+    cmdline: Option<String>,
+    uid: Option<String>,
+    gid: Option<String>,
+    cgroup: Option<String>,
+    unit: Option<String>,
+    slice: Option<String>,
+    invocation_id: Option<String>,
+}
+
+impl ProcMeta {
+    fn read_for_pid(pid: u32) -> Self {
+        let proc_base = format!("/proc/{pid}");
+        let mut meta = ProcMeta::default();
+
+        meta.comm = std::fs::read_to_string(format!("{proc_base}/comm"))
+            .ok()
+            .map(|s| s.trim().to_string());
+
+        meta.exe = std::fs::read_link(format!("{proc_base}/exe"))
+            .ok()
+            .and_then(|p| p.to_str().map(String::from));
+
+        if let Ok(cmdline_bytes) = std::fs::read(format!("{proc_base}/cmdline")) {
+            let cmdline: String = cmdline_bytes
+                .split(|&b| b == 0)
+                .filter(|s| !s.is_empty())
+                .map(|s| String::from_utf8_lossy(s).into_owned())
+                .collect::<Vec<_>>()
+                .join(" ");
+            if !cmdline.is_empty() {
+                meta.cmdline = Some(cmdline);
+            }
+        }
+
+        if let Ok(status) = std::fs::read_to_string(format!("{proc_base}/status")) {
+            for line in status.lines() {
+                if let Some(rest) = line.strip_prefix("Uid:") {
+                    if let Some(uid_str) = rest.split_whitespace().next() {
+                        meta.uid = Some(uid_str.to_string());
+                    }
+                } else if let Some(rest) = line.strip_prefix("Gid:") {
+                    if let Some(gid_str) = rest.split_whitespace().next() {
+                        meta.gid = Some(gid_str.to_string());
+                    }
+                }
+            }
+        }
+
+        if let Ok(cgroup) = std::fs::read_to_string(format!("{proc_base}/cgroup")) {
+            for line in cgroup.lines() {
+                if let Some(rest) = line.strip_prefix("0::") {
+                    meta.cgroup = Some(rest.to_string());
+                    // Derive unit from cgroup path
+                    for component in rest.rsplit('/').filter(|s| !s.is_empty()) {
+                        if component.ends_with(".service")
+                            || component.ends_with(".scope")
+                            || component.ends_with(".mount")
+                            || component.ends_with(".socket")
+                            || component.ends_with(".timer")
+                            || component.ends_with(".path")
+                            || component.ends_with(".swap")
+                            || component.ends_with(".target")
+                        {
+                            meta.unit = Some(component.to_string());
+                            break;
+                        }
+                    }
+                    // Derive slice from cgroup path
+                    for component in rest.split('/').filter(|s| !s.is_empty()) {
+                        if component.ends_with(".slice") {
+                            meta.slice = Some(component.to_string());
+                            break;
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+
+        if let Ok(environ) = std::fs::read(format!("{proc_base}/environ")) {
+            for entry in environ.split(|&b| b == 0) {
+                if let Some(id) = entry.strip_prefix(b"INVOCATION_ID=") {
+                    if let Ok(id_str) = std::str::from_utf8(id) {
+                        if !id_str.is_empty() {
+                            meta.invocation_id = Some(id_str.to_string());
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+
+        meta
+    }
+
+    fn apply_to_entry(&self, entry: &mut JournalEntry, pid: u32) {
+        entry.set_field("_PID", pid.to_string());
+        if let Some(ref v) = self.comm {
+            entry.set_field("_COMM", v);
+        }
+        if let Some(ref v) = self.exe {
+            entry.set_field("_EXE", v);
+        }
+        if let Some(ref v) = self.cmdline {
+            entry.set_field("_CMDLINE", v);
+        }
+        if let Some(ref v) = self.uid {
+            entry.set_field("_UID", v);
+        }
+        if let Some(ref v) = self.gid {
+            entry.set_field("_GID", v);
+        }
+        if let Some(ref v) = self.cgroup {
+            entry.set_field("_SYSTEMD_CGROUP", v);
+        }
+        if let Some(ref v) = self.unit {
+            entry.set_field("_SYSTEMD_UNIT", v);
+        }
+        if let Some(ref v) = self.slice {
+            entry.set_field("_SYSTEMD_SLICE", v);
+        }
+        if let Some(ref v) = self.invocation_id {
+            entry.set_field("_SYSTEMD_INVOCATION_ID", v);
+        }
+    }
+}
+
 /// A line produced by the CredLineReader, with metadata about how it
 /// was terminated.
 struct CredLine {
     text: String,
     cred: Option<libc::ucred>,
+    /// Eagerly-captured /proc metadata, read right after recvmsg().
+    proc_meta: Option<(u32, ProcMeta)>,
     /// True if this line was force-flushed because the sender PID changed
     /// (matching C journald's LINE_BREAK_PID_CHANGE behavior).
     pid_change: bool,
@@ -1980,6 +2123,10 @@ struct CredLineReader {
     line_buf: Vec<u8>,
     /// Current credentials (from the most recent recv).
     current_cred: Option<libc::ucred>,
+    /// Eagerly-captured /proc metadata for the current PID.
+    current_meta: Option<(u32, ProcMeta)>,
+    /// Cache of /proc metadata per PID (read eagerly after recvmsg).
+    pid_meta_cache: std::collections::HashMap<u32, ProcMeta>,
     /// Queue of completed lines ready to return.
     ready: std::collections::VecDeque<CredLine>,
 }
@@ -1991,7 +2138,28 @@ impl CredLineReader {
             recv_buf: vec![0u8; 4096],
             line_buf: Vec::new(),
             current_cred: None,
+            current_meta: None,
+            pid_meta_cache: std::collections::HashMap::new(),
             ready: std::collections::VecDeque::new(),
+        }
+    }
+
+    /// Read /proc metadata for a PID. Always tries a fresh read first
+    /// (the process image may change after exec). Falls back to cached
+    /// data if /proc is unavailable (process exited).
+    fn get_or_read_meta(&mut self, pid: u32) -> ProcMeta {
+        let fresh = ProcMeta::read_for_pid(pid);
+        if fresh.exe.is_some() {
+            // Fresh read succeeded — update cache
+            self.pid_meta_cache.insert(pid, fresh.clone());
+            fresh
+        } else if let Some(cached) = self.pid_meta_cache.get(&pid) {
+            // Process exited but we have cached data from earlier
+            cached.clone()
+        } else {
+            // No cached data either — return whatever we got (partial metadata)
+            self.pid_meta_cache.insert(pid, fresh.clone());
+            fresh
         }
     }
 
@@ -2007,6 +2175,7 @@ impl CredLineReader {
                 self.ready.push_back(CredLine {
                     text,
                     cred: self.current_cred,
+                    proc_meta: self.current_meta.clone(),
                     // Only the first line in this recv batch can carry pid_change
                     // from a force-flush that already happened.  Lines completed
                     // within the same recv have consistent credentials.
@@ -2041,6 +2210,7 @@ impl CredLineReader {
                         return Some(CredLine {
                             text,
                             cred: self.current_cred,
+                            proc_meta: self.current_meta.clone(),
                             pid_change: false,
                         });
                     }
@@ -2049,27 +2219,41 @@ impl CredLineReader {
                 Ok((n, cred)) => {
                     let data = self.recv_buf[..n].to_vec();
 
+                    // Eagerly read /proc metadata for the new PID right after
+                    // recvmsg() returns. This is the earliest point where we
+                    // know the PID, and the process is most likely still alive.
+                    let new_pid = cred.map(|c| c.pid as u32).filter(|&p| p > 0);
+                    if let Some(pid) = new_pid {
+                        let meta = self.get_or_read_meta(pid);
+                        self.current_meta = Some((pid, meta));
+                    }
+
                     // Check for PID change: if the new recv has a different
                     // PID than the current, force-flush any buffered data
                     // as a pid-change line (matching C journald).
                     let mut pid_change = false;
-                    let new_pid = cred.map(|c| c.pid);
+                    let new_pid_raw = cred.map(|c| c.pid);
                     let old_pid = self.current_cred.map(|c| c.pid);
 
-                    if new_pid.is_some()
+                    if new_pid_raw.is_some()
                         && old_pid.is_some()
-                        && new_pid != old_pid
+                        && new_pid_raw != old_pid
                         && !self.line_buf.is_empty()
                     {
                         // Force-flush buffered data with OLD credentials
+                        // Use the OLD meta for the flushed line
+                        let old_meta = old_pid
+                            .map(|p| p as u32)
+                            .and_then(|p| self.pid_meta_cache.get(&p).map(|m| (p, m.clone())));
                         let text = String::from_utf8_lossy(&self.line_buf).into_owned();
                         self.line_buf.clear();
                         self.ready.push_back(CredLine {
                             text,
                             cred: self.current_cred,
+                            proc_meta: old_meta,
                             pid_change: true,
                         });
-                    } else if new_pid.is_some() && old_pid.is_some() && new_pid != old_pid {
+                    } else if new_pid_raw.is_some() && old_pid.is_some() && new_pid_raw != old_pid {
                         // PID changed but no buffered data — mark next line
                         pid_change = true;
                     }
@@ -2088,7 +2272,11 @@ impl CredLineReader {
     }
 }
 
-fn handle_stdout_connection(stream: UnixStream, state: Arc<JournaldState>) {
+fn handle_stdout_connection(
+    stream: UnixStream,
+    peer_meta: Option<(u32, ProcMeta)>,
+    state: Arc<JournaldState>,
+) {
     // Get peer credentials for initial trusted fields
     let peer_cred = get_peer_cred(&stream);
 
@@ -2100,6 +2288,14 @@ fn handle_stdout_connection(stream: UnixStream, state: Arc<JournaldState>) {
     enable_passcred(&stream);
 
     let mut reader = CredLineReader::new(stream);
+
+    // Seed the metadata cache with peer credentials metadata that was
+    // read at accept() time, when the process was definitely alive.
+    // This is a fallback for short-lived processes where /proc is gone
+    // by the time recvmsg() returns.
+    if let Some((pid, ref meta)) = peer_meta {
+        reader.pid_meta_cache.insert(pid, meta.clone());
+    }
 
     // Read the 7-line positional header (plus optional 8th line for invocation ID)
     let mut identifier = String::from("unknown");
@@ -2182,7 +2378,78 @@ fn handle_stdout_connection(stream: UnixStream, state: Arc<JournaldState>) {
             return;
         }
 
+        // DEBUG: log metadata state for stdout stream entries
+        {
+            use std::io::Write as _;
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("/tmp/journald-stdout-debug.log")
+            {
+                let _ = writeln!(
+                    f,
+                    "STDOUT LINE: cred={:?} proc_meta={} peer_meta={} peer_cred={:?} id={} msg={}",
+                    cl.cred.map(|c| c.pid),
+                    cl.proc_meta
+                        .as_ref()
+                        .map(|(p, m)| format!("pid={} exe={:?}", p, m.exe))
+                        .unwrap_or_else(|| "None".to_string()),
+                    peer_meta
+                        .as_ref()
+                        .map(|(p, m)| format!("pid={} exe={:?}", p, m.exe))
+                        .unwrap_or_else(|| "None".to_string()),
+                    peer_cred.map(|c| c.pid),
+                    identifier,
+                    &message[..std::cmp::min(message.len(), 80)]
+                );
+            }
+        }
+        // DEBUG: after setting all fields, log what's in the entry
+        let log_entry_fields = |tag: &str, entry: &JournalEntry| {
+            use std::io::Write as _;
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("/tmp/journald-stdout-debug.log")
+            {
+                let _ = writeln!(
+                    f,
+                    "  {} fields: _EXE={:?} _PID={:?} _COMM={:?} _TRANSPORT={:?} fields_count={}",
+                    tag,
+                    entry.field("_EXE"),
+                    entry.field("_PID"),
+                    entry.field("_COMM"),
+                    entry.field("_TRANSPORT"),
+                    entry.fields.len(),
+                );
+            }
+        };
+
         let mut entry = JournalEntry::new();
+
+        // Apply eagerly-captured /proc metadata first. These are read
+        // right after recvmsg() returns, when the process is most likely
+        // still alive (avoids races with short-lived processes).
+        if let Some((pid, ref meta)) = cl.proc_meta {
+            meta.apply_to_entry(&mut entry, pid);
+        } else if let Some((pid, ref meta)) = peer_meta {
+            // Fallback: use metadata captured at accept() time.
+            // This handles the case where SCM_CREDENTIALS were not
+            // delivered (cl.proc_meta is None) — the peer metadata
+            // was read when the process was definitely alive.
+            meta.apply_to_entry(&mut entry, pid);
+        } else {
+            // Last resort: try peer credentials + lazy /proc read
+            let write_pid = cl.cred.map(|c| c.pid as u32).filter(|&p| p > 0);
+            let metadata_pid = write_pid.or(peer_cred.map(|c| c.pid as u32));
+            if let Some(pid) = metadata_pid {
+                entry.set_trusted_process_fields(pid);
+            }
+        }
+
+        // Set message and protocol fields (these take precedence over
+        // any /proc-derived values, especially _SYSTEMD_UNIT from the
+        // stream header which is more authoritative than cgroup-derived).
         entry.set_field("MESSAGE", message);
         entry.set_field("PRIORITY", effective_priority.to_string());
         entry.set_field("SYSLOG_IDENTIFIER", &identifier);
@@ -2194,21 +2461,10 @@ fn handle_stdout_connection(stream: UnixStream, state: Arc<JournaldState>) {
         }
         entry.set_field("_TRANSPORT", "stdout");
 
-        // Determine PIDs for this entry:
-        // - write_pid: per-write SCM_CREDENTIALS PID (the writer)
-        // - metadata_pid: the actual service process whose _COMM/_EXE we want
-        let write_pid = cl.cred.map(|c| c.pid as u32).filter(|&p| p > 0);
-
-        let metadata_pid = write_pid.or(peer_cred.map(|c| c.pid as u32));
-
         // Set _LINE_BREAK=pid-change when the CredLineReader detected a
         // credential PID change (matching C journald's behavior).
         if cl.pid_change {
             entry.set_field("_LINE_BREAK", "pid-change");
-        }
-
-        if let Some(pid) = metadata_pid {
-            entry.set_trusted_process_fields(pid);
         }
 
         // UID/GID from per-write creds or fallback to peer creds
@@ -2225,6 +2481,7 @@ fn handle_stdout_connection(stream: UnixStream, state: Arc<JournaldState>) {
         entry.set_machine_id();
         entry.set_hostname();
 
+        log_entry_fields("PRE-DISPATCH", &entry);
         state.dispatch_entry(entry);
     };
 
@@ -2284,6 +2541,18 @@ fn handle_recovered_stdout_connection(raw_fd: RawFd, state: Arc<JournaldState>) 
                 }
 
                 let mut entry = JournalEntry::new();
+
+                // Use eagerly-captured /proc metadata
+                if let Some((pid, ref meta)) = cl.proc_meta {
+                    meta.apply_to_entry(&mut entry, pid);
+                } else {
+                    let write_pid = cl.cred.map(|c| c.pid as u32).filter(|&p| p > 0);
+                    let metadata_pid = write_pid.or(peer_cred.map(|c| c.pid as u32));
+                    if let Some(pid) = metadata_pid {
+                        entry.set_trusted_process_fields(pid);
+                    }
+                }
+
                 entry.set_field("MESSAGE", message);
                 entry.set_field("PRIORITY", effective_priority.to_string());
                 entry.set_field("SYSLOG_IDENTIFIER", identifier);
@@ -2291,13 +2560,6 @@ fn handle_recovered_stdout_connection(raw_fd: RawFd, state: Arc<JournaldState>) 
 
                 if cl.pid_change {
                     entry.set_field("_LINE_BREAK", "pid-change");
-                }
-
-                let write_pid = cl.cred.map(|c| c.pid as u32).filter(|&p| p > 0);
-                let metadata_pid = write_pid.or(peer_cred.map(|c| c.pid as u32));
-
-                if let Some(pid) = metadata_pid {
-                    entry.set_trusted_process_fields(pid);
                 }
 
                 let uid = cl.cred.map(|c| c.uid).or(peer_cred.map(|c| c.uid));
