@@ -807,14 +807,25 @@ pub(crate) fn service_exit_handler(
             let restart_mode = srvc.conf.restart_mode;
 
             // Check whether the watchdog or RuntimeMaxSec enforcement
-            // thread killed this service.
-            let (watchdog_fired, runtime_max_fired) = {
+            // thread killed this service, and whether it was manually stopped.
+            let (watchdog_fired, runtime_max_fired, manual_stop) = {
                 let state = srvc.state.read_poisoned();
                 (
                     state.srvc.watchdog_timeout_fired,
                     state.srvc.runtime_max_timeout_fired,
+                    state.srvc.manual_stop,
                 )
             };
+            // If the service was explicitly stopped (systemctl stop), suppress
+            // automatic restart regardless of Restart= policy. This matches
+            // real systemd behavior.
+            if manual_stop {
+                trace!(
+                    "Service {}: manual_stop flag set, suppressing automatic restart",
+                    unit.id.name
+                );
+                return Ok(None);
+            }
             if watchdog_fired {
                 trace!(
                     "Service {}: exit was caused by watchdog timeout",

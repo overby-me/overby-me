@@ -427,7 +427,15 @@ impl JournaldConfig {
             PathBuf::from("/run/log/journal")
         };
         let compress = std::env::var("SYSTEMD_JOURNAL_COMPRESS")
-            .map(|s| JournalCompress::from_env_str(&s))
+            .map(|s| {
+                let c = JournalCompress::from_env_str(&s);
+                eprintln!(
+                    "journald: SYSTEMD_JOURNAL_COMPRESS={:?} -> {}",
+                    s,
+                    c.as_str()
+                );
+                c
+            })
             .unwrap_or_else(|_| {
                 if self.compress {
                     JournalCompress::Zstd

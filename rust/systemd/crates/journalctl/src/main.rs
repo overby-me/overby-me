@@ -1256,7 +1256,7 @@ enum MatchCondition {
     /// _EXE match (from executable path argument)
     Exe(String),
     /// _EXE + _COMM match (from script path argument)
-    Script { interpreter: String, comm: String },
+    Script { interpreter: String },
     /// _KERNEL_DEVICE match (from /dev/ path argument)
     KernelDevice(String),
 }
@@ -1268,24 +1268,23 @@ impl MatchCondition {
                 entry.field(key).is_some_and(|v| v == *value)
             }
             MatchCondition::Exe(exe) => entry.exe().is_some_and(|e| e == *exe),
-            MatchCondition::Script { interpreter, comm } => {
-                // Match entries from a script: _EXE must match the interpreter,
-                // and _COMM can be either the script basename (if the kernel or
-                // runtime set it) or the interpreter basename (e.g. "bash" for
-                // shell scripts, which is the common case).
-                entry.exe().is_some_and(|e| e == *interpreter)
-                    && entry.comm().is_some_and(|c| {
-                        let comm_matches = if comm.len() > 15 {
-                            c == comm[..15]
-                        } else {
-                            c == *comm
-                        };
-                        let interp_basename = std::path::Path::new(interpreter)
+            MatchCondition::Script { interpreter } => {
+                // Match entries from a script: _EXE must match the interpreter.
+                // This matches C systemd behavior (sd_journal_add_match with
+                // _EXE=<interpreter>). We also compare by basename because on
+                // NixOS, the same interpreter (e.g. bash) can exist under
+                // different store paths (bash vs bash-interactive).
+                let interp_basename = std::path::Path::new(interpreter)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("");
+                entry.exe().is_some_and(|e| {
+                    e == *interpreter
+                        || std::path::Path::new(&*e)
                             .file_name()
                             .and_then(|n| n.to_str())
-                            .unwrap_or("");
-                        comm_matches || c == interp_basename
-                    })
+                            .is_some_and(|b| b == interp_basename)
+                })
             }
             MatchCondition::KernelDevice(dev) => {
                 entry.field("_KERNEL_DEVICE").is_some_and(|d| d == *dev)
@@ -1412,14 +1411,8 @@ fn build_match_groups(matches: &[String]) -> Vec<Vec<MatchCondition>> {
                             .unwrap_or_else(|| m.to_string());
                         if let Some(interp) = script_interpreter(&real_path) {
                             // Script: match interpreter + comm
-                            let basename = std::path::Path::new(m)
-                                .file_name()
-                                .and_then(|n| n.to_str())
-                                .unwrap_or("")
-                                .to_string();
                             current.push(MatchCondition::Script {
                                 interpreter: interp,
-                                comm: basename,
                             });
                         } else {
                             // Regular executable

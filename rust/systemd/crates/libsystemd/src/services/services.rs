@@ -306,6 +306,12 @@ pub struct Service {
     /// PID of a running service whose mount namespace this service should join
     /// via setns(2), resolved from JoinsNamespaceOf= at start time.
     pub join_namespace_pid: Option<u32>,
+    /// Set to `true` when the service is explicitly stopped via `systemctl stop`
+    /// (i.e. `kill()` is called). The exit handler checks this flag to suppress
+    /// automatic restart even when `Restart=always` is configured. This matches
+    /// real systemd's behavior where manual stop inhibits auto-restart.
+    /// Cleared on `start()`.
+    pub manual_stop: bool,
 }
 
 /// Environment variables passed to OnSuccess=/OnFailure= handler services.
@@ -446,6 +452,10 @@ impl Service {
         // traffic arrives on their socket — but in that case start() is
         // called with ActivationSource::SocketActivation anyway.
         trace!("Start service {name}");
+
+        // Clear manual_stop flag so that a subsequent exit will respect
+        // the Restart= policy again.
+        self.manual_stop = false;
 
         // Clear watchdog state from any previous run so that the watchdog
         // enforcement thread doesn't immediately kill the freshly started
@@ -763,6 +773,10 @@ impl Service {
                 self.run_poststop(conf, id.clone(), name, run_info)
                     .map_err(ServiceErrorReason::PoststopFailed)
             });
+
+        // Mark that this service was explicitly stopped so the exit handler
+        // suppresses automatic restart (Restart=always etc.).
+        self.manual_stop = true;
 
         // Kill any remaining processes in the cgroup after ExecStop +
         // ExecStopPost have run, matching real systemd's behavior.

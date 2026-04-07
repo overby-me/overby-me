@@ -1168,6 +1168,10 @@ fn reset_failed_unit(unit: &Unit) {
         *status = UnitStatus::NeverStarted;
     }
     drop(status);
+    // Clear the manual_stop flag so the service can be restarted cleanly.
+    if let Specific::Service(srvc) = &unit.specific {
+        srvc.state.write_poisoned().srvc.manual_stop = false;
+    }
     // Reset path-specific result.
     if let Specific::Path(path_specific) = &unit.specific {
         let mut state = path_specific.state.write_poisoned();
@@ -3796,6 +3800,7 @@ fn create_transient_unit(
                     extend_timeout_usec: None,
                     extend_timeout_timestamp: None,
                     join_namespace_pid: None,
+                    manual_stop: false,
                 },
             }),
         }),

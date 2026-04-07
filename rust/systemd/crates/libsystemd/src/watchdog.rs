@@ -415,6 +415,7 @@ mod tests {
             trigger_timer_realtime_usec: None,
             trigger_timer_monotonic_usec: None,
             monitor_env: None,
+            manual_stop: false,
         }
     }
 

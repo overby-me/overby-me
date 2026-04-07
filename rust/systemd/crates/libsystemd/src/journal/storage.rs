@@ -812,7 +812,17 @@ impl JournalStorage {
         if active_path.exists() {
             match JournalFile::open(&active_path, true) {
                 Ok(jf) => {
-                    if jf.size() < self.config.max_file_size {
+                    if jf.header.compress != self.config.compress {
+                        // Compression setting changed (e.g. SYSTEMD_JOURNAL_COMPRESS
+                        // env var). Archive the old file and create a new one.
+                        eprintln!(
+                            "journald: Compression changed ({} -> {}), rotating {}",
+                            jf.header.compress.as_str(),
+                            self.config.compress.as_str(),
+                            active_path.display()
+                        );
+                        drop(jf);
+                    } else if jf.size() < self.config.max_file_size {
                         self.active_file = Some(jf);
                         return Ok(());
                     }

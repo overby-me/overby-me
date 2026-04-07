@@ -237,6 +237,7 @@ pub fn unit_from_parsed_service(conf: ParsedServiceConfig) -> Result<Unit, Strin
                     extend_timeout_usec: None,
                     extend_timeout_timestamp: None,
                     join_namespace_pid: None,
+                    manual_stop: false,
                 },
             }),
         }),
