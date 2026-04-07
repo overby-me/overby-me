@@ -1,12 +1,11 @@
 {
   name = "04-JOURNAL";
-  # Passing subtests: cat, corrupted-journals, fss, invocation, journal, journal-append, journal-corrupt, LogFilterPatterns, reload, stopped-socket-activation, SYSTEMD_JOURNAL_COMPRESS
+  # Passing subtests: bsod, cat, corrupted-journals, fss, invocation, journal, journal-append, journal-corrupt, LogFilterPatterns, reload, stopped-socket-activation, SYSTEMD_JOURNAL_COMPRESS
   # Skipped subtests and reasons:
   # - journal-gatewayd: uses C systemd-journal-gatewayd HTTP server (not reimplemented)
   # - journal-remote: uses C systemd-journal-remote/upload (not reimplemented)
-  # - bsod: C systemd-bsod uses sd_journal_wait() which needs inotify on LPKSHHRH journal files
   testEnv = {
-    TEST_SKIP_SUBTESTS = "journal-gatewayd journal-remote \\.bsod\\.";
+    TEST_SKIP_SUBTESTS = "journal-gatewayd journal-remote";
   };
   patchScript = ''
     # Add timeouts to bsod at_exit cleanup to prevent infinite hangs.
@@ -18,6 +17,11 @@
     sed -i '/system@\*\.journal/s/$/ || true/' TEST-04-JOURNAL.bsod.sh
     # umount may fail if journald still holds the directory open.
     sed -i 's#umount /var/log/journal#umount /var/log/journal 2>/dev/null || true#' TEST-04-JOURNAL.bsod.sh
+    # Restart journald after tmpfs unmount so it opens a fresh journal file
+    # on the real /var/log/journal.  Our journald does not implement
+    # --relinquish-var, so after the tmpfs unmount it would keep writing to
+    # an orphaned file descriptor.
+    sed -i '/timeout 10 journalctl --flush/a\    systemctl restart systemd-journald' TEST-04-JOURNAL.bsod.sh
     # Skip journal-remote sub-test (uses C systemd-journal-remote, not reimplemented)
     sed -i 's#if \[\[ -x /usr/lib/systemd/systemd-journal-remote \]\]#if false#' TEST-04-JOURNAL.SYSTEMD_JOURNAL_COMPRESS.sh
 

@@ -219,11 +219,12 @@ fn display_message(message: &str, tty_path: Option<&PathBuf>) -> io::Result<()> 
         let raw_fd = f.as_raw_fd();
         std::mem::forget(f);
 
-        // Activate the free VT on its own fd (matching C systemd-bsod).
-        // VT_ACTIVATE = 0x5606
+        // Activate the free VT and wait until it is actually in the
+        // foreground (matching C systemd-bsod).
         if free_vt > 0 {
             unsafe {
-                libc::ioctl(raw_fd, 0x5606, free_vt);
+                libc::ioctl(raw_fd, 0x5606, free_vt); // VT_ACTIVATE
+                libc::ioctl(raw_fd, 0x5607, free_vt); // VT_WAITACTIVE
             }
         }
 
