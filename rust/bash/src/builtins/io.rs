@@ -1008,18 +1008,44 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                         }
                         let arg = fmt_args.get(arg_idx).map(|s| s.as_str()).unwrap_or("");
                         if let Some(ch) = arg.chars().next() {
-                            let ch_str = ch.to_string();
-                            if w > 0 {
-                                let printed_len = w.max(ch_str.len());
-                                if left {
-                                    print!("{:<w$}", ch_str);
+                            let cp = ch as u32;
+                            if super::is_pua_raw_byte(cp) {
+                                // PUA-encoded raw byte — write as single byte
+                                let byte_val = (cp - super::RAW_BYTE_BASE) as u8;
+                                use std::io::Write;
+                                if w > 0 {
+                                    // Pad around a single byte
+                                    let padding = w.saturating_sub(1);
+                                    if left {
+                                        std::io::stdout().write_all(&[byte_val]).ok();
+                                        for _ in 0..padding {
+                                            print!(" ");
+                                        }
+                                    } else {
+                                        for _ in 0..padding {
+                                            print!(" ");
+                                        }
+                                        std::io::stdout().write_all(&[byte_val]).ok();
+                                    }
+                                    bytes_written += w.max(1);
                                 } else {
-                                    print!("{:>w$}", ch_str);
+                                    std::io::stdout().write_all(&[byte_val]).ok();
+                                    bytes_written += 1;
                                 }
-                                bytes_written += printed_len;
                             } else {
-                                print!("{}", ch_str);
-                                bytes_written += ch_str.len();
+                                let ch_str = ch.to_string();
+                                if w > 0 {
+                                    let printed_len = w.max(ch_str.len());
+                                    if left {
+                                        print!("{:<w$}", ch_str);
+                                    } else {
+                                        print!("{:>w$}", ch_str);
+                                    }
+                                    bytes_written += printed_len;
+                                } else {
+                                    print!("{}", ch_str);
+                                    bytes_written += ch_str.len();
+                                }
                             }
                         } else {
                             // Empty/missing argument: output a NUL byte (bash behavior)

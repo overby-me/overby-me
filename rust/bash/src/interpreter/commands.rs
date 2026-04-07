@@ -4637,22 +4637,7 @@ fn pattern_match_impl(text: &[char], ti: usize, pattern: &[char], pi: usize) -> 
                                 })
                         {
                             let class_name: String = pattern[pi + 2..pi + 2 + end].iter().collect();
-                            let in_class = match class_name.as_str() {
-                                "alpha" => ch.is_alphabetic(),
-                                "digit" => ch.is_ascii_digit(),
-                                "alnum" => ch.is_alphanumeric(),
-                                "upper" => ch.is_uppercase(),
-                                "lower" => ch.is_lowercase(),
-                                "space" => ch.is_whitespace(),
-                                "blank" => ch == ' ' || ch == '\t',
-                                "print" => !ch.is_control() || ch == ' ',
-                                "graph" => !ch.is_control() && ch != ' ',
-                                "cntrl" => ch.is_control(),
-                                "punct" => ch.is_ascii_punctuation(),
-                                "xdigit" => ch.is_ascii_hexdigit(),
-                                "ascii" => ch.is_ascii(),
-                                _ => false,
-                            };
+                            let in_class = crate::expand::pattern_char_in_class(ch, &class_name);
                             if in_class {
                                 matched = true;
                             }

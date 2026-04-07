@@ -140,13 +140,31 @@ fn list_all_signals() -> Vec<(i32, &'static str)> {
     ]
 }
 
+/// Encode a raw byte value (0x00-0xFF) as a PUA character.
+/// Used by escape sequence processing ($'\xNN', echo -e '\xNN', printf '\xNN')
+/// so that `string_to_raw_bytes` can distinguish escape-derived bytes from
+/// normal Unicode characters.
+pub const RAW_BYTE_BASE: u32 = 0xE000;
+
+/// Check if a Unicode codepoint is a PUA-encoded raw byte (U+E000–U+E0FF).
+pub fn is_pua_raw_byte(cp: u32) -> bool {
+    (RAW_BYTE_BASE..=RAW_BYTE_BASE + 0xFF).contains(&cp)
+}
+
+pub fn raw_byte_char(byte: u8) -> char {
+    // Safety: U+E000-U+E0FF are valid Unicode PUA codepoints
+    char::from_u32(RAW_BYTE_BASE + byte as u32).unwrap()
+}
+
 pub fn string_to_raw_bytes(s: &str) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(s.len());
     for ch in s.chars() {
         let cp = ch as u32;
-        if cp <= 0xFF {
-            bytes.push(cp as u8);
+        if is_pua_raw_byte(cp) {
+            // PUA-encoded raw byte → output as single byte
+            bytes.push((cp - RAW_BYTE_BASE) as u8);
         } else {
+            // Normal Unicode character → output as UTF-8
             let mut buf = [0u8; 4];
             let encoded = ch.encode_utf8(&mut buf);
             bytes.extend_from_slice(encoded.as_bytes());
@@ -189,7 +207,7 @@ fn interpret_echo_escapes(s: &str) -> (String, bool) {
                             _ => break,
                         }
                     }
-                    result.push(val as char);
+                    result.push(raw_byte_char(val));
                 }
                 Some('x') => {
                     let mut val = 0u8;
@@ -210,7 +228,7 @@ fn interpret_echo_escapes(s: &str) -> (String, bool) {
                         result.push('\\');
                         result.push('x');
                     } else {
-                        result.push(val as char);
+                        result.push(raw_byte_char(val));
                     }
                 }
                 Some('u') => {
@@ -281,11 +299,13 @@ fn parse_printf_int(arg: &str) -> i64 {
 }
 
 fn quote_for_declare(s: &str) -> String {
+    // Convert to raw bytes first so PUA-encoded chars become their original byte values
+    let raw = string_to_raw_bytes(s);
     let needs_dollar_quote =
-        s.bytes().any(|b| b < 0x20 || b == 0x7f || b > 0x7f) || s.contains('\'');
+        raw.iter().any(|&b| b < 0x20 || b == 0x7f || b > 0x7f) || s.contains('\'');
     if needs_dollar_quote {
         let mut out = String::from("$'");
-        for b in s.bytes() {
+        for &b in &raw {
             match b {
                 b'\n' => out.push_str("\\n"),
                 b'\t' => out.push_str("\\t"),
@@ -337,11 +357,33 @@ fn quote_assoc_key(key: &str) -> String {
     // If so, use $'...' ANSI-C quoting (matching bash's declare -p output).
     let has_nonprintable = key.chars().any(|c| {
         let b = c as u32;
-        c == '\t' || c == '\n' || c == '\r' || (b < 0x20) || b == 0x7f
+        c == '\t' || c == '\n' || c == '\r' || (b < 0x20) || b == 0x7f || is_pua_raw_byte(b)
     });
     if has_nonprintable {
         let mut out = String::from("$'");
         for ch in key.chars() {
+            let cp = ch as u32;
+            if is_pua_raw_byte(cp) {
+                // PUA-encoded raw byte — emit as octal of the original byte value
+                let byte_val = (cp - RAW_BYTE_BASE) as u8;
+                match byte_val {
+                    b'\t' => out.push_str("\\t"),
+                    b'\n' => out.push_str("\\n"),
+                    b'\r' => out.push_str("\\r"),
+                    0x07 => out.push_str("\\a"),
+                    0x08 => out.push_str("\\b"),
+                    0x0b => out.push_str("\\v"),
+                    0x1b => out.push_str("\\E"),
+                    b'\'' => out.push_str("\\'"),
+                    b'\\' => out.push_str("\\\\"),
+                    b if b < 0x20 || b == 0x7f => {
+                        out.push_str(&format!("\\{:03o}", b));
+                    }
+                    b if (0x20..0x7f).contains(&b) => out.push(b as char),
+                    b => out.push_str(&format!("\\{:03o}", b)),
+                }
+                continue;
+            }
             match ch {
                 '\t' => out.push_str("\\t"),
                 '\n' => out.push_str("\\n"),
@@ -432,9 +474,10 @@ fn shell_escape(s: &str) -> String {
         return s.to_string();
     }
     // Check if we can use simple backslash quoting (no control/non-ASCII chars)
-    let has_control = s
-        .chars()
-        .any(|c| c.is_ascii_control() || (c as u32) >= 0x80);
+    let has_control = s.chars().any(|c| {
+        let cp = c as u32;
+        c.is_ascii_control() || (0x80..=0xFF).contains(&cp) || is_pua_raw_byte(cp)
+    });
     if !has_control {
         let mut result = String::new();
         for ch in s.chars() {
@@ -461,12 +504,16 @@ fn shell_escape(s: &str) -> String {
             '\x1b' => result.push_str("\\E"),
             c if c.is_ascii_graphic() || c == ' ' => result.push(c),
             c => {
-                // Use octal format: for Latin-1 range (U+0080..U+00FF),
-                // output as single byte; for others, use UTF-8 bytes
                 let cp = c as u32;
-                if cp <= 0xFF {
+                if is_pua_raw_byte(cp) {
+                    // PUA-encoded raw byte — output as octal of the original byte value
+                    let byte_val = (cp - RAW_BYTE_BASE) as u8;
+                    result.push_str(&format!("\\{:03o}", byte_val));
+                } else if cp <= 0xFF {
+                    // Latin-1 range — output as single-byte octal
                     result.push_str(&format!("\\{:03o}", cp));
                 } else {
+                    // Other Unicode — output UTF-8 bytes as octal
                     let mut buf = [0u8; 4];
                     let encoded = c.encode_utf8(&mut buf);
                     for b in encoded.as_bytes() {

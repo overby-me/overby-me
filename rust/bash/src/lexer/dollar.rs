@@ -580,7 +580,7 @@ fn parse_dollar_inner(
                             if val == 0 {
                                 break; // NUL terminates
                             }
-                            s.push(val as char);
+                            s.push(crate::builtins::raw_byte_char(val));
                         }
                         'x' => {
                             let mut val = 0u32;
@@ -616,7 +616,7 @@ fn parse_dollar_inner(
                                 if byte_val == 0 {
                                     break; // NUL terminates
                                 }
-                                s.push(byte_val as char);
+                                s.push(crate::builtins::raw_byte_char(byte_val));
                             } else {
                                 s.push('\\');
                                 s.push('x');

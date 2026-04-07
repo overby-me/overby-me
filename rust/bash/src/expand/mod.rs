@@ -7,6 +7,7 @@ use params::{
     apply_param_op, expand_param, get_array_elements, is_array_at_expansion, lookup_var,
     parse_arith_offset,
 };
+pub(crate) use pattern::char_in_class as pattern_char_in_class;
 use pattern::{TrimMode, pattern_replace, shell_pattern_match, trim_pattern};
 
 use crate::ast::*;

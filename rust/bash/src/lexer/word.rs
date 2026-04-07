@@ -619,7 +619,7 @@ impl Lexer {
                                             nul_terminated = true;
                                             break; // NUL terminates string
                                         }
-                                        s.push(val as char);
+                                        s.push(crate::builtins::raw_byte_char(val));
                                     }
                                     Some('x') => {
                                         let mut val = 0u32;
@@ -661,7 +661,7 @@ impl Lexer {
                                                 nul_terminated = true;
                                                 break;
                                             }
-                                            s.push(byte_val as char);
+                                            s.push(crate::builtins::raw_byte_char(byte_val));
                                         } else {
                                             s.push('\\');
                                             s.push('x');

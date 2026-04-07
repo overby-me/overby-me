@@ -49,6 +49,60 @@ fn char_in_range(ch: char, lo: char, hi: char, nocase: bool) -> bool {
     false
 }
 
+use crate::builtins::{RAW_BYTE_BASE, is_pua_raw_byte};
+
+/// If `ch` is a PUA-encoded raw byte, return the original byte value.
+/// Otherwise return `None`.
+pub(crate) fn pua_byte(ch: char) -> Option<u8> {
+    let cp = ch as u32;
+    if is_pua_raw_byte(cp) {
+        Some((cp - RAW_BYTE_BASE) as u8)
+    } else {
+        None
+    }
+}
+
+/// Check if a character (possibly PUA-encoded) belongs to a POSIX character class.
+/// PUA-encoded raw bytes are decoded to their original byte value before checking.
+pub(crate) fn char_in_class(ch: char, class_name: &str) -> bool {
+    if let Some(b) = pua_byte(ch) {
+        // Decode PUA to original byte and check against ASCII-based classes
+        match class_name {
+            "alpha" => b.is_ascii_alphabetic(),
+            "digit" => b.is_ascii_digit(),
+            "alnum" => b.is_ascii_alphanumeric(),
+            "upper" => b.is_ascii_uppercase(),
+            "lower" => b.is_ascii_lowercase(),
+            "space" => b.is_ascii_whitespace(),
+            "blank" => b == b' ' || b == b'\t',
+            "print" => (0x20..0x7f).contains(&b),
+            "graph" => b > 0x20 && b < 0x7f,
+            "cntrl" => b < 0x20 || b == 0x7f,
+            "punct" => b.is_ascii_punctuation(),
+            "xdigit" => b.is_ascii_hexdigit(),
+            "ascii" => b <= 0x7f,
+            _ => false,
+        }
+    } else {
+        match class_name {
+            "alpha" => ch.is_alphabetic(),
+            "digit" => ch.is_ascii_digit(),
+            "alnum" => ch.is_alphanumeric(),
+            "upper" => ch.is_uppercase(),
+            "lower" => ch.is_lowercase(),
+            "space" => ch.is_whitespace(),
+            "blank" => ch == ' ' || ch == '\t',
+            "print" => !ch.is_control() || ch == ' ',
+            "graph" => !ch.is_control() && ch != ' ',
+            "cntrl" => ch.is_control(),
+            "punct" => ch.is_ascii_punctuation(),
+            "xdigit" => ch.is_ascii_hexdigit(),
+            "ascii" => ch.is_ascii(),
+            _ => false,
+        }
+    }
+}
+
 pub(super) enum TrimMode {
     SmallLeft,
     LargeLeft,
@@ -797,22 +851,7 @@ fn pattern_match_impl(text: &[char], ti: usize, pattern: &[char], pi: usize) -> 
                                 })
                     {
                         let class_name: String = pattern[pi + 2..pi + 2 + end].iter().collect();
-                        let in_class = match class_name.as_str() {
-                            "alpha" => ch.is_alphabetic(),
-                            "digit" => ch.is_ascii_digit(),
-                            "alnum" => ch.is_alphanumeric(),
-                            "upper" => ch.is_uppercase(),
-                            "lower" => ch.is_lowercase(),
-                            "space" => ch.is_whitespace(),
-                            "blank" => ch == ' ' || ch == '\t',
-                            "print" => !ch.is_control() || ch == ' ',
-                            "graph" => !ch.is_control() && ch != ' ',
-                            "cntrl" => ch.is_control(),
-                            "punct" => ch.is_ascii_punctuation(),
-                            "xdigit" => ch.is_ascii_hexdigit(),
-                            "ascii" => ch.is_ascii(),
-                            _ => false,
-                        };
+                        let in_class = char_in_class(ch, &class_name);
                         if in_class {
                             matched = true;
                         }
