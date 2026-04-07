@@ -1919,13 +1919,13 @@ impl Shell {
                 i = j + 1;
                 continue;
             }
-            if i + 2 < chars.len()
-                && chars[i] == '$'
-                && chars[i + 1] == '('
-                && chars[i + 2] == '('
-                && array_bracket_depth == 0
+            if i + 2 < chars.len() && chars[i] == '$' && chars[i + 1] == '(' && chars[i + 2] == '('
             {
                 // $((arith)) — nested arithmetic expansion
+                // NOTE: unlike $(...) command subs and ${ } funsubs, $((expr))
+                // is pure arithmetic and safe to expand inside array subscript
+                // brackets.  e.g. ${a[$(( 0 ))]} should evaluate the inner
+                // arithmetic and use the result as the subscript index.
                 // Recursively expand comsubs inside, then evaluate as arithmetic
                 // Find the matching ))
                 let mut depth = 1i32;

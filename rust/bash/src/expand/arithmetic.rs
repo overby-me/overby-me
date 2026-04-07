@@ -90,6 +90,48 @@ fn resolve_arith_vars(
             } else if i < chars.len() && chars[i] == '$' {
                 result.push_str(&std::process::id().to_string());
                 i += 1;
+            } else if i + 1 < chars.len() && chars[i] == '(' && chars[i + 1] == '(' {
+                // $((expr)) — arithmetic expansion inside arithmetic context
+                // Find matching )) and recursively evaluate
+                i += 2; // skip ((
+                let mut depth = 1i32;
+                let start = i;
+                while i < chars.len() {
+                    if chars[i] == '(' {
+                        depth += 1;
+                    } else if chars[i] == ')'
+                        && i + 1 < chars.len()
+                        && chars[i + 1] == ')'
+                        && depth == 1
+                    {
+                        // Found matching ))
+                        let inner: String = chars[start..i].iter().collect();
+                        let val = eval_arith_full_with_assoc(
+                            &inner,
+                            vars,
+                            arrays,
+                            assoc_arrays,
+                            namerefs,
+                            positional,
+                            last_status,
+                            opt_flags,
+                        );
+                        result.push_str(&val.to_string());
+                        i += 2; // skip ))
+                        break;
+                    } else if chars[i] == ')' {
+                        depth -= 1;
+                    }
+                    i += 1;
+                }
+            } else if i < chars.len() && chars[i] == '(' {
+                // $(...) — command substitution inside arithmetic context
+                // Find matching ) and pass through as literal (will be
+                // expanded by expand_comsubs_in_arith in the interpreter)
+                // For now, just output $( literally so it doesn't get
+                // consumed as a variable name.
+                result.push('$');
+                // Don't advance i — the ( will be pushed by the normal path
             } else if i < chars.len() && chars[i] == '{' {
                 // ${var}, ${var:-default}, ${var:+alt}, ${#var}, ${-%%pat}, etc.
                 i += 1; // skip '{'
