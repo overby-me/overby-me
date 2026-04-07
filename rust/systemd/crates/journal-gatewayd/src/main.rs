@@ -5,17 +5,14 @@
 
 use clap::Parser;
 use libsystemd::journal::entry::JournalEntry;
-use libsystemd::journal::storage::{
-    list_all_journal_files, read_entries_from_offset, JournalStorage, StorageConfig,
-};
+use libsystemd::journal::storage::{JournalStorage, StorageConfig};
 use serde_json::json;
 use std::collections::BTreeMap;
-use std::io::{self, Write as _};
 use std::net::TcpListener;
 use std::os::unix::io::FromRawFd;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::{fs, thread, time::Duration};
+use std::{fs, thread};
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 
 // ---------------------------------------------------------------------------
@@ -75,38 +72,32 @@ fn read_os_pretty_name() -> String {
     "Linux".to_owned()
 }
 
-fn expand_file_globs(patterns: &[String]) -> Vec<String> {
+fn expand_file_globs(patterns: &[String]) -> Vec<PathBuf> {
     patterns
         .iter()
         .flat_map(|p| {
             if p.contains('*') || p.contains('?') || p.contains('[') {
                 glob::glob(p)
                     .ok()
-                    .map(|paths| {
-                        paths
-                            .filter_map(|r| r.ok())
-                            .map(|p| p.to_string_lossy().into_owned())
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_else(|| vec![p.clone()])
+                    .map(|paths| paths.filter_map(|r| r.ok()).collect::<Vec<_>>())
+                    .unwrap_or_else(|| vec![PathBuf::from(p)])
             } else {
-                vec![p.clone()]
+                vec![PathBuf::from(p)]
             }
         })
         .collect()
 }
 
-fn open_storage(file_globs: &[String]) -> io::Result<JournalStorage> {
+fn open_storage(file_globs: &[String]) -> std::io::Result<JournalStorage> {
     let expanded = expand_file_globs(file_globs);
 
     let (directory, direct_directory, file_filter) = if !expanded.is_empty() {
-        let dirs: Vec<PathBuf> = expanded
+        let dir = expanded
             .iter()
-            .filter_map(|f| PathBuf::from(f).parent().map(|p| p.to_path_buf()))
-            .collect();
-        let dir = dirs.into_iter().next().unwrap_or_else(|| PathBuf::from("."));
-        let filter: Vec<PathBuf> = expanded.iter().map(PathBuf::from).collect();
-        (dir, true, filter)
+            .filter_map(|f| f.parent().map(|p| p.to_path_buf()))
+            .next()
+            .unwrap_or_else(|| PathBuf::from("."));
+        (dir, true, expanded)
     } else {
         let persistent = PathBuf::from("/var/log/journal");
         let volatile = PathBuf::from("/run/log/journal");
@@ -135,20 +126,20 @@ fn open_storage(file_globs: &[String]) -> io::Result<JournalStorage> {
 
 fn make_cursor(entry: &JournalEntry) -> String {
     format!(
-        "s={:032x};i={:x};b={};m={:x};t={:x};x={:x}",
-        0u128,
+        "s=0;i={:x};b={};m={:x};t={:x};x=0",
         entry.seqnum,
         entry.boot_id().unwrap_or_default(),
         entry.monotonic_usec,
         entry.realtime_usec,
-        0u64,
     )
 }
 
 fn read_all_entries(file_globs: &[String]) -> Vec<JournalEntry> {
-    open_storage(file_globs)
+    let mut entries = open_storage(file_globs)
         .and_then(|s| s.read_all())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    entries.sort_by_key(|e| (e.realtime_usec, e.seqnum));
+    entries
 }
 
 struct BootRecord {
@@ -183,33 +174,44 @@ fn detect_boots(entries: &[JournalEntry]) -> Vec<BootRecord> {
         }
     }
 
-    boots.sort_by_key(|b| b.last_entry);
+    boots.sort_by_key(|b| b.first_entry);
     boots
+}
+
+// ---------------------------------------------------------------------------
+// Cursor parsing
+// ---------------------------------------------------------------------------
+
+fn parse_cursor_seqnum(cursor: &str) -> Option<u64> {
+    for part in cursor.split(';') {
+        if let Some(val) = part.strip_prefix("i=") {
+            return u64::from_str_radix(val, 16).ok();
+        }
+    }
+    None
 }
 
 // ---------------------------------------------------------------------------
 // Range header parsing
 // ---------------------------------------------------------------------------
 
+#[derive(Default)]
 struct RangeSpec {
     cursor: Option<String>,
-    realtime_start: Option<u64>,
-    realtime_end: Option<u64>,
+    since: Option<u64>,
+    until: Option<u64>,
     skip: i64,
     count: Option<usize>,
     discrete: bool,
 }
 
-impl Default for RangeSpec {
-    fn default() -> Self {
-        Self {
-            cursor: None,
-            realtime_start: None,
-            realtime_end: None,
-            skip: 0,
-            count: None,
-            discrete: false,
-        }
+/// Convert a timestamp to microseconds.  Values that look like seconds
+/// (< 10^12) are multiplied by 1_000_000, matching C systemd's parse_sec().
+fn to_usec(val: u64) -> u64 {
+    if val < 1_000_000_000_000 {
+        val * 1_000_000
+    } else {
+        val
     }
 }
 
@@ -229,22 +231,21 @@ fn parse_range_header(value: &str) -> RangeSpec {
             spec.count = parts[2].parse().ok();
         }
     } else if let Some(rest) = value.strip_prefix("realtime=") {
-        // realtime=START:END  or  realtime=TIMESTAMP::SKIP:COUNT
         let parts: Vec<&str> = rest.split(':').collect();
         match parts.len() {
+            // realtime=START:END
             2 => {
-                // realtime=START:END
                 if !parts[0].is_empty() {
-                    spec.realtime_start = parts[0].parse().ok();
+                    spec.since = parts[0].parse::<u64>().ok().map(to_usec);
                 }
                 if !parts[1].is_empty() {
-                    spec.realtime_end = parts[1].parse().ok();
+                    spec.until = parts[1].parse::<u64>().ok().map(to_usec);
                 }
             }
+            // realtime=TIMESTAMP::SKIP:COUNT  (parts[1] is empty)
             4 => {
-                // realtime=TIMESTAMP::SKIP:COUNT  (parts[1] is empty)
                 if !parts[0].is_empty() {
-                    spec.realtime_start = parts[0].parse().ok();
+                    spec.since = parts[0].parse::<u64>().ok().map(to_usec);
                 }
                 if !parts[2].is_empty() {
                     spec.skip = parts[2].parse().unwrap_or(0);
@@ -272,13 +273,11 @@ fn filter_and_slice(
 ) -> Vec<(JournalEntry, String)> {
     let current_boot = read_boot_id();
 
-    // Apply field filters
+    // Apply field and boot filters (matches sd_journal_add_match() in C)
     let filtered: Vec<&JournalEntry> = entries
         .iter()
         .filter(|e| {
-            if boot_filter
-                && e.boot_id().as_deref() != Some(&current_boot)
-            {
+            if boot_filter && e.boot_id().as_deref() != Some(&current_boot) {
                 return false;
             }
             for (key, value) in query_filters {
@@ -290,84 +289,69 @@ fn filter_and_slice(
         })
         .collect();
 
-    // Find cursor position
-    let mut start_idx: usize = 0;
-    if let Some(ref cursor) = range.cursor {
-        for (i, e) in filtered.iter().enumerate() {
-            let c = make_cursor(e);
-            if c == *cursor {
-                start_idx = i;
-                break;
-            }
-        }
-    }
-
-    // Apply realtime range
-    let filtered: Vec<&JournalEntry> = if range.realtime_start.is_some() || range.realtime_end.is_some() {
-        filtered
-            .into_iter()
-            .filter(|e| {
-                if let Some(start) = range.realtime_start {
-                    // realtime is in seconds from the test, but journal uses microseconds
-                    let start_usec = if start < 1_000_000_000_000 {
-                        start * 1_000_000
-                    } else {
-                        start
-                    };
-                    if e.realtime_usec < start_usec {
-                        return false;
-                    }
-                }
-                if let Some(end) = range.realtime_end {
-                    let end_usec = if end < 1_000_000_000_000 {
-                        end * 1_000_000
-                    } else {
-                        end
-                    };
-                    if e.realtime_usec > end_usec {
-                        return false;
-                    }
-                }
-                true
-            })
-            .collect()
-    } else {
-        filtered
-    };
-
-    // Apply skip
-    let start = if range.cursor.is_some() {
-        // Cursor-based: start from cursor position + skip
-        let base = start_idx;
+    // C gatewayd uses since as a SEEK position (not a range filter), then
+    // applies skip from there.  until is checked during forward iteration.
+    //
+    // Seek: find the starting index in the filtered array.
+    // Priority: cursor > since > head/tail (depending on skip sign).
+    let seek_idx = if let Some(cursor) = &range.cursor {
+        let target_seqnum = parse_cursor_seqnum(cursor);
+        target_seqnum.and_then(|seq| filtered.iter().position(|e| e.seqnum == seq))
+    } else if let Some(since) = range.since {
         if range.skip >= 0 {
-            base.saturating_add(range.skip as usize)
+            // Forward: first entry with realtime >= since
+            let pos = filtered.iter().position(|e| e.realtime_usec >= since);
+            // If no exact match, start from begin (like sd_journal_seek_realtime)
+            Some(pos.unwrap_or(filtered.len()))
         } else {
-            base.saturating_sub((-range.skip) as usize)
+            // Backward: seek to since position, previous_skip goes backwards
+            let pos = filtered.iter().position(|e| e.realtime_usec >= since);
+            Some(pos.unwrap_or(filtered.len()))
         }
-    } else if range.skip < 0 {
-        // Negative skip from end
-        filtered.len().saturating_sub((-range.skip) as usize)
-    } else if range.skip > 0 {
-        range.skip as usize
+    } else if range.skip >= 0 {
+        Some(0) // seek_head
+    } else if let Some(until) = range.until {
+        // Seek to until for negative skip
+        let pos = filtered.iter().rposition(|e| e.realtime_usec <= until);
+        Some(pos.map(|p| p + 1).unwrap_or(filtered.len()))
     } else {
-        0
+        Some(filtered.len()) // seek_tail
     };
 
-    let end = if let Some(count) = range.count {
-        (start + count).min(filtered.len())
+    let seek_idx = seek_idx.unwrap_or(0);
+
+    // Apply skip from seek position.
+    // C gatewayd: next_skip(n_skip+1) for positive, previous_skip(abs(n_skip)+1)
+    // for negative.  In our flat array, seek_idx points AT the seek target.
+    //   skip=0  → next_skip(1) → start at seek_idx
+    //   skip>0  → next_skip(skip+1) → start at seek_idx + skip
+    //   skip<0  → previous_skip(abs(skip)+1) → start at seek_idx - abs(skip) - 1
+    let start = if range.skip >= 0 {
+        seek_idx.saturating_add(range.skip as usize)
     } else {
-        filtered.len()
+        seek_idx.saturating_sub((-range.skip) as usize + 1)
     };
 
     let start = start.min(filtered.len());
 
-    filtered[start..end]
-        .iter()
-        .map(|e| {
-            let cursor = make_cursor(e);
-            ((*e).clone(), cursor)
-        })
-        .collect()
+    // Apply count limit and until bound (checked during forward iteration)
+    let end = filtered.len();
+    let mut result = Vec::new();
+    for &e in &filtered[start..end] {
+        if let Some(until) = range.until
+            && e.realtime_usec > until
+        {
+            break;
+        }
+        if let Some(count) = range.count
+            && result.len() >= count
+        {
+            break;
+        }
+        let cursor = make_cursor(e);
+        result.push((e.clone(), cursor));
+    }
+    result
 }
 
 // ---------------------------------------------------------------------------
@@ -385,8 +369,7 @@ fn respond_text(request: Request, status: u16, body: &str) {
     let _ = request.respond(response);
 }
 
-fn respond_json(request: Request, status: u16, value: &serde_json::Value) {
-    let body = serde_json::to_string(value).unwrap_or_default();
+fn respond_json_value(request: Request, status: u16, body: &str) {
     let response = Response::from_string(body)
         .with_status_code(StatusCode(status))
         .with_header(header("Content-Type", "application/json"));
@@ -408,7 +391,7 @@ fn handle_browse(request: Request) {
     let browse_path = "/usr/share/systemd/gatewayd/browse.html";
     match fs::read_to_string(browse_path) {
         Ok(html) => respond_html(request, 200, &html),
-        Err(_) => respond_text(request, 404, "browse.html not found"),
+        Err(_) => respond_text(request, 404, "browse.html not found\n"),
     }
 }
 
@@ -420,27 +403,35 @@ fn handle_machine(request: Request) {
         "os_pretty_name": read_os_pretty_name(),
         "virtualization": "",
     });
-    respond_json(request, 200, &info);
+    let body = serde_json::to_string(&info).unwrap_or_default() + "\n";
+    respond_json_value(request, 200, &body);
 }
 
-fn handle_fields(request: Request, field_name: &str) {
+fn handle_fields(request: Request, field_name: &str, file_globs: &[String]) {
     // Validate field name: must be uppercase letters, digits, underscore
     if field_name.is_empty()
         || !field_name
             .chars()
             .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
     {
-        respond_text(request, 404, "Invalid field name");
+        respond_text(request, 404, "Invalid field name\n");
         return;
     }
 
-    let entries = read_all_entries(&[]);
-    let mut values: Vec<String> = entries
-        .iter()
-        .filter_map(|e| e.field(field_name))
-        .collect();
+    let entries = read_all_entries(file_globs);
+    if entries.is_empty() {
+        respond_text(request, 404, "No entries found\n");
+        return;
+    }
+
+    let mut values: Vec<String> = entries.iter().filter_map(|e| e.field(field_name)).collect();
     values.sort();
     values.dedup();
+
+    if values.is_empty() {
+        respond_text(request, 404, "No values for field\n");
+        return;
+    }
 
     let body = values.join("\n") + "\n";
     let response = Response::from_string(body)
@@ -452,18 +443,22 @@ fn handle_fields(request: Request, field_name: &str) {
 fn handle_boots(request: Request, file_globs: &[String]) {
     let entries = read_all_entries(file_globs);
     let boots = detect_boots(&entries);
-    let arr: Vec<serde_json::Value> = boots
-        .iter()
-        .map(|b| {
-            json!({
-                "boot_id": b.boot_id,
-                "first_entry": b.first_entry,
-                "last_entry": b.last_entry,
-            })
-        })
-        .collect();
-    let body = serde_json::to_string(&arr).unwrap_or_default();
-    let response = Response::from_string(body)
+
+    // Output as JSON text sequences (RFC 7464): RS-prefixed JSON objects
+    let mut body = Vec::new();
+    for b in &boots {
+        let obj = json!({
+            "boot_id": b.boot_id,
+            "first_entry": b.first_entry,
+            "last_entry": b.last_entry,
+        });
+        // RS (0x1E) prefix for JSON text sequence
+        body.push(0x1E);
+        body.extend_from_slice(serde_json::to_string(&obj).unwrap_or_default().as_bytes());
+        body.push(b'\n');
+    }
+
+    let response = Response::from_data(body)
         .with_status_code(StatusCode(200))
         .with_header(header("Content-Type", "application/json"));
     let _ = request.respond(response);
@@ -471,12 +466,6 @@ fn handle_boots(request: Request, file_globs: &[String]) {
 
 fn handle_entries(request: Request, file_globs: &[String]) {
     let url = request.url().to_owned();
-    let method = request.method().clone();
-
-    if method != Method::Get {
-        respond_text(request, 405, "Method not allowed");
-        return;
-    }
 
     // Parse Accept header
     let accept = request
@@ -505,6 +494,9 @@ fn handle_entries(request: Request, file_globs: &[String]) {
     let mut query_filters: Vec<(String, String)> = Vec::new();
 
     for param in query.split('&') {
+        if param.is_empty() {
+            continue;
+        }
         if param == "boot" {
             boot_filter = true;
         } else if param == "follow" {
@@ -516,54 +508,41 @@ fn handle_entries(request: Request, file_globs: &[String]) {
         }
     }
 
+    if range.discrete {
+        range.count = Some(1);
+    }
+
     let entries = read_all_entries(file_globs);
     let results = filter_and_slice(&entries, &range, &query_filters, boot_filter);
 
-    if range.discrete {
-        // Discrete mode: return exactly one entry at the cursor
-        let results = if results.is_empty() {
-            vec![]
-        } else {
-            vec![results[0].clone()]
-        };
-        return send_entries(request, &accept, &results, false, file_globs);
+    if follow && range.count.is_none() {
+        // Follow with no count: send existing entries then block
+        send_entries_follow(request, &accept, &results);
+    } else {
+        send_entries(request, &accept, &results);
     }
-
-    if follow && range.count.is_some() {
-        // Follow with count: return up to count entries then stop
-        return send_entries(request, &accept, &results, false, file_globs);
-    }
-
-    if follow {
-        // Follow mode without count: stream entries then poll for new ones
-        return send_entries_follow(request, &accept, &results, file_globs);
-    }
-
-    send_entries(request, &accept, &results, false, file_globs);
 }
 
-fn send_entries(
-    request: Request,
-    accept: &str,
-    results: &[(JournalEntry, String)],
-    _is_sse: bool,
-    _file_globs: &[String],
-) {
+fn entry_to_json_with_cursor(entry: &JournalEntry, cursor: &str) -> serde_json::Value {
+    let mut obj = entry.to_json();
+    if let serde_json::Value::Object(ref mut map) = obj {
+        map.insert(
+            "__CURSOR".to_owned(),
+            serde_json::Value::String(cursor.to_owned()),
+        );
+    }
+    obj
+}
+
+fn send_entries(request: Request, accept: &str, results: &[(JournalEntry, String)]) {
     if accept.contains("application/json") {
-        let arr: Vec<serde_json::Value> = results
-            .iter()
-            .map(|(e, cursor)| {
-                let mut obj = e.to_json();
-                if let serde_json::Value::Object(ref mut map) = obj {
-                    map.insert(
-                        "__CURSOR".to_owned(),
-                        serde_json::Value::String(cursor.clone()),
-                    );
-                }
-                obj
-            })
-            .collect();
-        let body = serde_json::to_string(&arr).unwrap_or_default();
+        // JSON Lines: one JSON object per line
+        let mut body = String::new();
+        for (e, cursor) in results {
+            let obj = entry_to_json_with_cursor(e, cursor);
+            body.push_str(&serde_json::to_string(&obj).unwrap_or_default());
+            body.push('\n');
+        }
         let response = Response::from_string(body)
             .with_status_code(StatusCode(200))
             .with_header(header("Content-Type", "application/json"));
@@ -589,7 +568,7 @@ fn send_entries(
             .with_header(header("Content-Type", "application/vnd.fdo.journal"));
         let _ = request.respond(response);
     } else {
-        // Default: text/plain (syslog short format)
+        // Default: text/plain
         let mut body = String::new();
         for (e, _cursor) in results {
             body.push_str(&format!("{}\n", e));
@@ -601,45 +580,67 @@ fn send_entries(
     }
 }
 
-fn send_entries_follow(
-    request: Request,
-    accept: &str,
-    initial: &[(JournalEntry, String)],
-    _file_globs: &[String],
-) {
-    // For follow mode, we send all existing entries then block until
-    // the client disconnects (timeout kills curl in the test).
-    if accept.contains("application/json") {
-        let arr: Vec<serde_json::Value> = initial
-            .iter()
-            .map(|(e, cursor)| {
-                let mut obj = e.to_json();
-                if let serde_json::Value::Object(ref mut map) = obj {
-                    map.insert(
-                        "__CURSOR".to_owned(),
-                        serde_json::Value::String(cursor.clone()),
-                    );
-                }
-                obj
-            })
-            .collect();
-        // Write initial entries as JSON array, then keep connection open
-        let body = serde_json::to_string(&arr).unwrap_or_default();
-        // Use chunked response to keep connection open
-        let response = Response::from_string(body)
-            .with_status_code(StatusCode(200))
-            .with_header(header("Content-Type", "application/json"));
-        let _ = request.respond(response);
-    } else {
-        let mut body = String::new();
-        for (e, _cursor) in initial {
-            body.push_str(&format!("{}\n", e));
+/// A Read adapter that yields initial data then blocks indefinitely.
+struct FollowReader {
+    data: std::io::Cursor<Vec<u8>>,
+    done_initial: bool,
+}
+
+impl std::io::Read for FollowReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if !self.done_initial {
+            let n = self.data.read(buf)?;
+            if n > 0 {
+                return Ok(n);
+            }
+            self.done_initial = true;
         }
-        let response = Response::from_string(body)
-            .with_status_code(StatusCode(200))
-            .with_header(header("Content-Type", "text/plain"));
-        let _ = request.respond(response);
+        // Block until the connection is closed by the client
+        loop {
+            thread::sleep(std::time::Duration::from_secs(60));
+        }
     }
+}
+
+fn send_entries_follow(request: Request, accept: &str, initial: &[(JournalEntry, String)]) {
+    let content_type = if accept.contains("application/json") {
+        "application/json"
+    } else if accept.contains("text/event-stream") {
+        "text/event-stream"
+    } else {
+        "text/plain"
+    };
+
+    let mut data = Vec::new();
+    for (e, cursor) in initial {
+        let line = if content_type == "application/json" {
+            let obj = entry_to_json_with_cursor(e, cursor);
+            serde_json::to_string(&obj).unwrap_or_default() + "\n"
+        } else if content_type == "text/event-stream" {
+            let obj = e.to_json();
+            format!(
+                "data: {}\n\n",
+                serde_json::to_string(&obj).unwrap_or_default()
+            )
+        } else {
+            format!("{}\n", e)
+        };
+        data.extend_from_slice(line.as_bytes());
+    }
+
+    let reader = FollowReader {
+        data: std::io::Cursor::new(data),
+        done_initial: false,
+    };
+
+    let response = Response::new(
+        StatusCode(200),
+        vec![header("Content-Type", content_type)],
+        reader,
+        None,
+        None,
+    );
+    let _ = request.respond(response);
 }
 
 fn handle_upload(request: Request) {
@@ -653,7 +654,26 @@ fn handle_upload(request: Request) {
 
 fn handle_request(request: Request, file_globs: &[String]) {
     let url = request.url().to_owned();
+    let method = request.method().clone();
     let path = url.split('?').next().unwrap_or(&url);
+
+    // /upload accepts POST/PUT
+    if path == "/upload" {
+        handle_upload(request);
+        return;
+    }
+
+    // Everything else must be GET
+    if method != Method::Get {
+        respond_text(request, 405, "Method not allowed\n");
+        return;
+    }
+
+    // Reject any path with ".." (path traversal)
+    if path.contains("..") {
+        respond_text(request, 404, "Not found\n");
+        return;
+    }
 
     match path {
         "/" => {
@@ -667,13 +687,12 @@ fn handle_request(request: Request, file_globs: &[String]) {
         "/entries" => handle_entries(request, file_globs),
         "/machine" => handle_machine(request),
         "/boots" => handle_boots(request, file_globs),
-        "/upload" => handle_upload(request),
         _ if path.starts_with("/fields/") => {
             let field = &path["/fields/".len()..];
-            handle_fields(request, field);
+            handle_fields(request, field, file_globs);
         }
-        "/fields" => respond_text(request, 404, "Field name required"),
-        _ => respond_text(request, 404, "Not found"),
+        "/fields" => respond_text(request, 404, "Field name required\n"),
+        _ => respond_text(request, 404, "Not found\n"),
     }
 }
 
@@ -705,8 +724,7 @@ fn create_server(cli: &Cli) -> Server {
         let listener = unsafe { TcpListener::from_raw_fd(3) };
         listener.set_nonblocking(false).ok();
 
-        Server::from_listener(listener, ssl_config)
-            .expect("Failed to create server from listener")
+        Server::from_listener(listener, ssl_config).expect("Failed to create server from listener")
     } else if let Some(ssl) = ssl_config {
         Server::https("0.0.0.0:19531", ssl).expect("Failed to create HTTPS server")
     } else {
@@ -722,15 +740,10 @@ fn main() {
     let server = Arc::new(server);
 
     // Handle requests in threads for concurrency
-    loop {
-        match server.recv() {
-            Ok(request) => {
-                let globs = Arc::clone(&file_globs);
-                thread::spawn(move || {
-                    handle_request(request, &globs);
-                });
-            }
-            Err(_) => break,
-        }
+    while let Ok(request) = server.recv() {
+        let globs = Arc::clone(&file_globs);
+        thread::spawn(move || {
+            handle_request(request, &globs);
+        });
     }
 }

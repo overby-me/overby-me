@@ -181,7 +181,7 @@
 
                 # Install rust-only binaries that don't exist in the C systemd package.
                 # These are new binaries implemented in rust-systemd without a C counterpart.
-                for name in systemd-bsod; do
+                for name in systemd-bsod systemd-journal-gatewayd; do
                   if [ -e "${rust-systemd}/bin/$name" ] && [ ! -e "$out/lib/systemd/$name" ]; then
                     cp -a "${rust-systemd}/bin/$name" "$out/lib/systemd/$name"
                   fi
@@ -202,6 +202,31 @@
         RemainAfterExit=yes
         ExecStart=$out/lib/systemd/systemd-bsod --continuous
         BSOD_UNIT
+
+                # Install systemd-journal-gatewayd service and socket units
+                cat > "$out/lib/systemd/system/systemd-journal-gatewayd.service" <<GATEWAYD_SERVICE
+        [Unit]
+        Description=Journal Gateway Service
+        Requires=systemd-journal-gatewayd.socket
+
+        [Service]
+        ExecStart=$out/lib/systemd/systemd-journal-gatewayd
+        SupplementaryGroups=systemd-journal
+        LimitNOFILE=524288
+
+        [Install]
+        Also=systemd-journal-gatewayd.socket
+        GATEWAYD_SERVICE
+                cat > "$out/lib/systemd/system/systemd-journal-gatewayd.socket" <<GATEWAYD_SOCKET
+        [Unit]
+        Description=Journal Gateway Service Socket
+
+        [Socket]
+        ListenStream=19531
+
+        [Install]
+        WantedBy=sockets.target
+        GATEWAYD_SOCKET
 
                 # Install test binaries at paths expected by upstream integration tests.
                 mkdir -p $out/lib/systemd/tests/unit-tests/manual

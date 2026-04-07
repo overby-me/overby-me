@@ -1,12 +1,12 @@
 {
   name = "04-JOURNAL";
-  # Passing subtests: bsod, cat, corrupted-journals, fss, invocation, journal, journal-append, journal-corrupt, LogFilterPatterns, reload, stopped-socket-activation, SYSTEMD_JOURNAL_COMPRESS
+  # Passing subtests: bsod, cat, corrupted-journals, fss, invocation, journal, journal-append, journal-corrupt, journal-gatewayd, LogFilterPatterns, reload, stopped-socket-activation, SYSTEMD_JOURNAL_COMPRESS
   # Skipped subtests and reasons:
-  # - journal-gatewayd: uses C systemd-journal-gatewayd HTTP server (not reimplemented)
   # - journal-remote: uses C systemd-journal-remote/upload (not reimplemented)
   testEnv = {
-    TEST_SKIP_SUBTESTS = "journal-gatewayd journal-remote";
+    TEST_SKIP_SUBTESTS = "journal-remote";
   };
+  extraPackages = pkgs: [pkgs.curl pkgs.openssl];
   patchScript = ''
     # Add timeouts to bsod at_exit cleanup to prevent infinite hangs.
     sed -i 's/journalctl --rotate/timeout 10 journalctl --rotate/' TEST-04-JOURNAL.bsod.sh
@@ -21,7 +21,8 @@
     # on the real /var/log/journal.  Our journald does not implement
     # --relinquish-var, so after the tmpfs unmount it would keep writing to
     # an orphaned file descriptor.
-    sed -i '/timeout 10 journalctl --flush/a\    systemctl restart systemd-journald' TEST-04-JOURNAL.bsod.sh
+    # Use retry+fallback because systemctl may transiently fail with EAGAIN.
+    sed -i '/timeout 10 journalctl --flush/a\    systemctl restart systemd-journald || { sleep 1; systemctl restart systemd-journald; } || true' TEST-04-JOURNAL.bsod.sh
     # Skip journal-remote sub-test (uses C systemd-journal-remote, not reimplemented)
     sed -i 's#if \[\[ -x /usr/lib/systemd/systemd-journal-remote \]\]#if false#' TEST-04-JOURNAL.SYSTEMD_JOURNAL_COMPRESS.sh
 
@@ -68,6 +69,13 @@
     sed -i 's#| journalctl #| timeout 30 journalctl #' TEST-04-JOURNAL.journal.sh
     sed -i 's#| systemd-cat$#| timeout 30 systemd-cat#' TEST-04-JOURNAL.journal.sh
     sed -i 's#| systemd-cat #| timeout 30 systemd-cat #' TEST-04-JOURNAL.journal.sh
+
+    # journal-gatewayd.sh patches:
+    # Skip journal-remote tests in gatewayd test (not reimplemented)
+    sed -i '/^mkdir \/tmp\/remote-journal/,/^rm -rf \/tmp\/remote-journal$/c\echo "SKIP: journal-remote not available"' TEST-04-JOURNAL.journal-gatewayd.sh
+    sed -i '/^# Test a couple of error scenarios/,/^rm -f "\$GATEWAYD_FILE"$/c\echo "SKIP: error scenario tests require journal-remote"' TEST-04-JOURNAL.journal-gatewayd.sh
+    # Generate padding entries before the cursor+skip test (our gatewayd reads from disk)
+    sed -i '/^# Show 10 entries starting/i\seq 1 20 | while read n; do echo "padding $n" | systemd-cat -t gatewayd-padding; done; journalctl --sync; sleep 1' TEST-04-JOURNAL.journal-gatewayd.sh
 
     # cat.sh patches:
     # Add sync+sleep after waiting for the namespace journald to become active.

@@ -2433,7 +2433,8 @@ fn main() {
         filtered.reverse();
     }
 
-    // Save cursor of the last entry before truncation (for -n 0 --cursor-file)
+    // Save cursor of the last entry before truncation (for -n 0 --show-cursor / --cursor-file).
+    // C journalctl with -n 0 seeks to tail, so --show-cursor reports the last entry.
     let last_entry_before_truncation = filtered.last().cloned();
 
     // Limit number of entries
@@ -2499,18 +2500,19 @@ fn main() {
         }
     }
 
-    // Show cursor / write cursor-file after last entry
-    // For cursor-file, use last_entry_before_truncation so -n 0 still saves cursor
+    // Show cursor / write cursor-file after last entry.
+    // With -n 0, filtered is empty but we still need to show the cursor of
+    // the last matching entry (matching C journalctl which seeks to tail).
     let cursor_entry = filtered.last().or(last_entry_before_truncation.as_ref());
-    if let Some(last) = cursor_entry {
+    if let Some(entry) = cursor_entry {
         let cursor = format!(
             "s=0;i={:x};b={};m={:x};t={:x};x=0",
-            last.seqnum,
-            last.boot_id().unwrap_or_default(),
-            last.monotonic_usec,
-            last.realtime_usec,
+            entry.seqnum,
+            entry.boot_id().unwrap_or_default(),
+            entry.monotonic_usec,
+            entry.realtime_usec,
         );
-        if cli.show_cursor && filtered.last().is_some() {
+        if cli.show_cursor {
             let _ = writeln!(writer, "-- cursor: {}", cursor);
         }
         if let Some(ref file) = cli.cursor_file {

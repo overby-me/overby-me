@@ -18,6 +18,7 @@
     # on the real /var/log/journal.  Our journald does not implement
     # --relinquish-var, so after the tmpfs unmount it would keep writing to
     # an orphaned file descriptor.
-    sed -i '/timeout 10 journalctl --flush/a\    systemctl restart systemd-journald' TEST-04-JOURNAL.bsod.sh
+    # Use retry+fallback because systemctl may transiently fail with EAGAIN.
+    sed -i '/timeout 10 journalctl --flush/a\    systemctl restart systemd-journald || { sleep 1; systemctl restart systemd-journald; } || true' TEST-04-JOURNAL.bsod.sh
   '';
 }

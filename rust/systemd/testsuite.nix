@@ -264,7 +264,9 @@ in
         for f in ${config.systemd.package}/example/systemd/system/systemd-importd.service \
                  ${config.systemd.package}/example/systemd/system/systemd-journald@.service \
                  ${config.systemd.package}/example/systemd/system/systemd-journald@.socket \
-                 ${config.systemd.package}/example/systemd/system/systemd-journald-varlink@.socket; do
+                 ${config.systemd.package}/example/systemd/system/systemd-journald-varlink@.socket \
+                 ${config.systemd.package}/lib/systemd/system/systemd-journal-gatewayd.service \
+                 ${config.systemd.package}/lib/systemd/system/systemd-journal-gatewayd.socket; do
           name=$(basename "$f")
           [ -e "/usr/lib/systemd/system/$name" ] || ln -sfn "$f" "/usr/lib/systemd/system/$name"
         done
@@ -275,6 +277,12 @@ in
           name=$(basename "$bin")
           [ -e "/usr/lib/systemd/$name" ] || ln -sfn "$bin" "/usr/lib/systemd/$name"
         done
+
+        # Symlink share data (e.g. gatewayd/browse.html) to /usr/share
+        if [ -d "${config.systemd.package}/share/systemd" ]; then
+          mkdir -p /usr/share
+          ln -sfn "${config.systemd.package}/share/systemd" /usr/share/systemd
+        fi
 
         # Symlink generator directories so tests referencing
         # /usr/lib/systemd/system-generators/ and /usr/lib/systemd/user-environment-generators/

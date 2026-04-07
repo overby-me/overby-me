@@ -61,7 +61,18 @@ pub fn parse_socket(
 }
 
 fn parse_ipv4_addr(addr: &str) -> Result<std::net::SocketAddrV4, std::net::AddrParseError> {
+    // Try full ip:port first
     let sock: Result<std::net::SocketAddrV4, std::net::AddrParseError> = addr.parse();
+    if sock.is_ok() {
+        return sock;
+    }
+    // Bare port number → 0.0.0.0:port (matching C systemd behavior)
+    if let Ok(port) = addr.parse::<u16>() {
+        return Ok(std::net::SocketAddrV4::new(
+            std::net::Ipv4Addr::UNSPECIFIED,
+            port,
+        ));
+    }
     sock
 }
 
