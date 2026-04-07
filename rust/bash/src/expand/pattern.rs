@@ -1,17 +1,41 @@
 use super::{get_nocasematch, get_patsub_replacement};
 
+/// Decode a PUA-encoded raw byte character (U+E000..U+E0FF) back to its
+/// original byte value (U+0000..U+00FF).  Non-PUA characters are returned
+/// as-is.  This allows pattern matching to treat escape-derived bytes
+/// (e.g. `$'\001'` → PUA U+E001) the same as source-literal bytes
+/// (literal 0x01 in the file).
+#[inline]
+fn decode_pua(c: char) -> char {
+    let v = c as u32;
+    if (0xE000..=0xE0FF).contains(&v) {
+        // Safety: v - 0xE000 is in 0..=0xFF, always a valid char
+        char::from_u32(v - 0xE000).unwrap_or(c)
+    } else {
+        c
+    }
+}
+
 /// Case-insensitive character comparison for nocasematch.
 /// Returns true if the two characters are equal, or if nocasematch is enabled
 /// and they are equal ignoring case.
+/// Also decodes PUA-encoded raw bytes before comparison.
 #[inline]
 fn chars_eq(a: char, b: char, nocase: bool) -> bool {
     if a == b {
         return true;
     }
+    // Compare after decoding PUA-encoded raw bytes so that
+    // escape-derived \001 (PUA U+E001) matches source-literal \001 (U+0001).
+    let da = decode_pua(a);
+    let db = decode_pua(b);
+    if da == db {
+        return true;
+    }
     if nocase {
         // Compare by lowercasing both sides (handles ASCII and Unicode)
-        let mut la = a.to_lowercase();
-        let mut lb = b.to_lowercase();
+        let mut la = da.to_lowercase();
+        let mut lb = db.to_lowercase();
         loop {
             match (la.next(), lb.next()) {
                 (Some(x), Some(y)) if x == y => continue,
@@ -26,6 +50,10 @@ fn chars_eq(a: char, b: char, nocase: bool) -> bool {
 /// Case-insensitive range check for nocasematch.
 #[inline]
 fn char_in_range(ch: char, lo: char, hi: char, nocase: bool) -> bool {
+    // Decode PUA before range comparison
+    let ch = decode_pua(ch);
+    let lo = decode_pua(lo);
+    let hi = decode_pua(hi);
     if ch >= lo && ch <= hi {
         return true;
     }

@@ -454,18 +454,50 @@ impl Shell {
                     } else {
                         &expr.name
                     };
-                    let attrs = shell.get_var_attrs(base_name);
+
+                    // For indirect expansion (${!var@a}/${!var@A}), resolve the
+                    // indirect target and inject attrs for the target variable.
+                    // The AST stores the name as "!varname", so we strip the "!"
+                    // prefix, look up the value of varname, and use that as the
+                    // real target for attribute injection.
+                    let (effective_name, effective_expr_name): (String, String) =
+                        if let Some(indirect_name) = base_name.strip_prefix('!') {
+                            // Resolve the indirect: look up the value of indirect_name
+                            let target = shell.vars.get(indirect_name).cloned().unwrap_or_default();
+                            if !target.is_empty() {
+                                // Strip any [@]/[*] from the target for base name
+                                let target_base = if let Some(b) = target.find('[') {
+                                    target[..b].to_string()
+                                } else {
+                                    target.clone()
+                                };
+                                (target_base.clone(), target_base)
+                            } else {
+                                (base_name.to_string(), expr.name.to_string())
+                            }
+                        } else {
+                            (base_name.to_string(), expr.name.to_string())
+                        };
+
+                    let attrs = shell.get_var_attrs(&effective_name);
                     // Inject attrs under both the full name (e.g. "VAR1[@]") and
                     // the base name (e.g. "VAR1") so lookups work from either path.
+                    // Also inject under the original expr.name so the indirect
+                    // expansion's recursive call can find them.
+                    vars.insert(format!("__ATTRS__{}", effective_expr_name), attrs.clone());
                     vars.insert(format!("__ATTRS__{}", expr.name), attrs.clone());
+                    if effective_name != effective_expr_name {
+                        vars.insert(format!("__ATTRS__{}", effective_name), attrs.clone());
+                    }
                     if base_name != expr.name.as_str() {
                         vars.insert(format!("__ATTRS__{}", base_name), attrs);
                     }
                     // Inject __UNSET__ marker for declared-but-unset variables
                     // so the @A handler can omit the ='...' suffix.
-                    let resolved = shell.resolve_nameref(base_name);
+                    let resolved = shell.resolve_nameref(&effective_name);
                     if shell.declared_unset.contains(&resolved) {
-                        vars.insert(format!("__UNSET__{}", base_name), "1".to_string());
+                        vars.insert(format!("__UNSET__{}", effective_name), "1".to_string());
+                        vars.insert(format!("__UNSET__{}", effective_expr_name), "1".to_string());
                         if base_name != expr.name.as_str() {
                             vars.insert(format!("__UNSET__{}", expr.name), "1".to_string());
                         }
@@ -4427,15 +4459,38 @@ pub fn case_pattern_match(text: &str, pattern: &str) -> bool {
     shell_pattern_match(text, pattern)
 }
 
+/// Decode a PUA-encoded raw byte character (U+E000..U+E0FF) back to its
+/// original byte value (U+0000..U+00FF).  Non-PUA characters are returned
+/// as-is.  This allows pattern matching to treat escape-derived bytes
+/// (e.g. `$'\001'` → PUA U+E001) the same as source-literal bytes
+/// (literal 0x01 in the file).
+#[inline]
+fn decode_pua(c: char) -> char {
+    let v = c as u32;
+    if (0xE000..=0xE0FF).contains(&v) {
+        char::from_u32(v - 0xE000).unwrap_or(c)
+    } else {
+        c
+    }
+}
+
 /// Case-insensitive character comparison for nocasematch (commands.rs copy).
+/// Also decodes PUA-encoded raw bytes before comparison.
 #[inline]
 fn chars_eq_nocase(a: char, b: char, nocase: bool) -> bool {
     if a == b {
         return true;
     }
+    // Compare after decoding PUA-encoded raw bytes so that
+    // escape-derived \001 (PUA U+E001) matches source-literal \001 (U+0001).
+    let da = decode_pua(a);
+    let db = decode_pua(b);
+    if da == db {
+        return true;
+    }
     if nocase {
-        let mut la = a.to_lowercase();
-        let mut lb = b.to_lowercase();
+        let mut la = da.to_lowercase();
+        let mut lb = db.to_lowercase();
         loop {
             match (la.next(), lb.next()) {
                 (Some(x), Some(y)) if x == y => continue,
@@ -4450,6 +4505,10 @@ fn chars_eq_nocase(a: char, b: char, nocase: bool) -> bool {
 /// Case-insensitive range check for nocasematch (commands.rs copy).
 #[inline]
 fn char_in_range_nocase(ch: char, lo: char, hi: char, nocase: bool) -> bool {
+    // Decode PUA before range comparison
+    let ch = decode_pua(ch);
+    let lo = decode_pua(lo);
+    let hi = decode_pua(hi);
     if ch >= lo && ch <= hi {
         return true;
     }

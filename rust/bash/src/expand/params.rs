@@ -1419,6 +1419,65 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
             set_arith_error();
             return String::new();
         }
+
+        // Check nounset BEFORE recursing into the resolved target.
+        // bash reports the original indirect name (e.g. "!bar") in the
+        // error message, not the resolved target name.  We must check
+        // here because the recursive expand_param call would use the
+        // target name in its error message instead.
+        if ctx.opt_flags.contains('u')
+            && !matches!(
+                expr.op,
+                ParamOp::Default(..) | ParamOp::Assign(..) | ParamOp::Alt(..) | ParamOp::Error(..)
+            )
+        {
+            // Check if the resolved target is "unbound" for nounset:
+            // scalar access to an array requires element[0] to be set.
+            let target_val = if !target.is_empty() {
+                lookup_var(&target, ctx)
+            } else {
+                String::new()
+            };
+            let target_unbound = if target.is_empty() {
+                true
+            } else if target_val.is_empty() {
+                !ctx.vars.contains_key(&target)
+                    && !ctx.arrays.get(&target).map_or(false, |arr| {
+                        if matches!(&expr.op, ParamOp::Transform('a') | ParamOp::Transform('A')) {
+                            arr.iter().any(|v| v.is_some())
+                        } else {
+                            arr.first().map_or(false, |v| v.is_some())
+                        }
+                    })
+                    && !ctx.assoc_arrays.get(&target).map_or(false, |assoc| {
+                        if matches!(&expr.op, ParamOp::Transform('a') | ParamOp::Transform('A')) {
+                            !assoc.is_empty()
+                        } else {
+                            assoc.contains_key("0")
+                        }
+                    })
+                    && std::env::var(&target).is_err()
+            } else {
+                false
+            };
+            if target_unbound {
+                let sname = ctx
+                    .vars
+                    .get("_BASH_SOURCE_FILE")
+                    .or_else(|| ctx.positional.first())
+                    .map(|s| s.as_str())
+                    .unwrap_or("bash");
+                let lineno = ctx.vars.get("LINENO").map(|s| s.as_str()).unwrap_or("0");
+                eprintln!(
+                    "{}: line {}: {}: unbound variable",
+                    sname, lineno, expr.name
+                );
+                set_arith_error();
+                set_nounset_error();
+                return String::new();
+            }
+        }
+
         // Now apply the operator to the target variable
         let indirect_expr = ParamExpr {
             name: target,
@@ -1772,8 +1831,32 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
         && (is_positional_unbound
             || (expr.name.parse::<usize>().is_err()
                 && !ctx.vars.contains_key(&expr.name)
-                && !ctx.arrays.contains_key(&expr.name)
-                && !ctx.assoc_arrays.contains_key(&expr.name)
+                // For arrays accessed as scalar (no [@] subscript), the
+                // "bound" check depends on the operation:
+                //
+                // - For @a/@A transforms: the variable is bound if the array
+                //   has ANY set elements (even without element[0]).  This is
+                //   because @a/@A report attributes/declaration of the whole
+                //   variable, not element[0].
+                //
+                // - For all other ops (${foo}, ${#foo}, ${foo@Q}, etc.): the
+                //   variable is bound only if element[0] is set.  bash treats
+                //   empty arrays and sparse arrays without element[0] as
+                //   "unbound" for these scalar references.
+                && !ctx.arrays.get(&expr.name).map_or(false, |arr| {
+                    if matches!(&expr.op, ParamOp::Transform('a') | ParamOp::Transform('A')) {
+                        arr.iter().any(|v| v.is_some())
+                    } else {
+                        arr.first().map_or(false, |v| v.is_some())
+                    }
+                })
+                && !ctx.assoc_arrays.get(&expr.name).map_or(false, |assoc| {
+                    if matches!(&expr.op, ParamOp::Transform('a') | ParamOp::Transform('A')) {
+                        !assoc.is_empty()
+                    } else {
+                        assoc.contains_key("0")
+                    }
+                })
                 && std::env::var(&expr.name).is_err()))
     {
         let sname = ctx
@@ -2296,19 +2379,32 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                     // If the variable is declared but unset (no assignment),
                     // omit the ='...' suffix to match bash behavior.
                     let is_unset = ctx.vars.get(&format!("__UNSET__{}", base_name)).is_some();
+                    // For arrays accessed as scalar (${foo@A} not ${foo[@]@A}),
+                    // if element[0] is not set (empty array, or sparse array
+                    // without index 0), bash shows `declare -FLAGS name` with
+                    // no value — same as declared-but-unset.
+                    let is_array_no_elem0 = ctx
+                        .arrays
+                        .get(base_name)
+                        .map_or(false, |arr| !arr.first().map_or(false, |v| v.is_some()))
+                        || ctx
+                            .assoc_arrays
+                            .get(base_name)
+                            .map_or(false, |assoc| !assoc.contains_key("0"));
+                    let effectively_unset = is_unset || is_array_no_elem0;
                     if attrs.is_empty() {
                         // Plain variable with no special attributes: use name='value'
                         // form without "declare -- " prefix, matching bash behavior.
                         // For unset variables (never declared or declared-unset with
                         // no attributes), return empty.
-                        if is_unset {
+                        if effectively_unset {
                             String::new()
                         } else {
                             format!("{}='{}'", base_name, val.replace('\'', "'\\''"))
                         }
                     } else {
                         let flags = format!("-{}", attrs);
-                        if is_unset {
+                        if effectively_unset {
                             format!("declare {} {}", flags, base_name)
                         } else {
                             format!(
