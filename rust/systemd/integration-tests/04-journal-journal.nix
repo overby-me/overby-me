@@ -18,17 +18,6 @@
     # Also skip the journalctl --user-unit check that follows it
     sed -i '/^journalctl -b -n 1 -r --user-unit/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
 
-    # Skip journalctl --machine (not implemented)
-    sed -i '/^journalctl --machine/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
-
-    # Skip journalctl --follow tests (lines 216-231, complex follow+cursor tests)
-    sed -i '/journalctl --follow/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
-    # Skip the surrounding follow test blocks that depend on the follow output
-    sed -i '/pkill -TERM journalctl/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
-    sed -i '/issue-26746/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
-    sed -i '/CURSOR_FROM_FILE/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
-    sed -i '/CURSOR_FROM_JOURNAL/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
-
     # Skip forever-print-hola tests (journald restart survival, lines 198-213)
     sed -i '/forever-print-hola/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
     sed -i '/i-lose-my-logs/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh

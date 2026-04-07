@@ -19,5 +19,8 @@
     # after that point.  Our minimal VM doesn't generate as many background
     # entries as a full C systemd VM, so we inject some.
     sed -i '/^# Show 10 entries starting/i\seq 1 20 | while read n; do echo "padding $n" | systemd-cat -t gatewayd-padding; done; journalctl --sync; sleep 1' TEST-04-JOURNAL.journal-gatewayd.sh
+    # Wait for port 19531 to be released after stopping socket-activated gatewayd.
+    # Note: a\sleep not a\timeout — sed interprets \t as tab.
+    sed -i '/systemctl stop systemd-journal-gatewayd/a\sleep 3' TEST-04-JOURNAL.journal-gatewayd.sh
   '';
 }

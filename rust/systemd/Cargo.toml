@@ -80,6 +80,8 @@ members = [
   "crates/bsod",
   "crates/test-journal-append",
   "crates/journal-gatewayd",
+  "crates/journal-remote",
+  "crates/journal-upload",
 ]
 exclude = ["crates/sd-boot", "crates/sd-stub"]
 resolver = "2"

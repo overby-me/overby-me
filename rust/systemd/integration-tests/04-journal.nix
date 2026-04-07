@@ -36,15 +36,6 @@
     # Skip systemd-run --user (user session not fully supported)
     sed -i '/^systemd-run --user/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
     sed -i '/^journalctl -b -n 1 -r --user-unit/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
-    # Skip journalctl --namespace (namespace journals not implemented)
-    sed -i '/^journalctl --namespace/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
-    sed -i '/^journalctl -q --namespace/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
-    sed -i '/^(! journalctl -q --namespace/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
-    # Skip journalctl --machine (not implemented)
-    sed -i '/^journalctl --machine/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
-    # Skip journalctl --update-catalog and --list-catalog (not implemented)
-    sed -i '/^journalctl --update-catalog/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
-    sed -i '/^journalctl --list-catalog/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
     # Skip journalctl --follow tests
     sed -i '/journalctl --follow/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
     sed -i '/pkill -TERM journalctl/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
@@ -76,6 +67,11 @@
     sed -i '/^# Test a couple of error scenarios/,/^rm -f "\$GATEWAYD_FILE"$/c\echo "SKIP: error scenario tests require journal-remote"' TEST-04-JOURNAL.journal-gatewayd.sh
     # Generate padding entries before the cursor+skip test (our gatewayd reads from disk)
     sed -i '/^# Show 10 entries starting/i\seq 1 20 | while read n; do echo "padding $n" | systemd-cat -t gatewayd-padding; done; journalctl --sync; sleep 1' TEST-04-JOURNAL.journal-gatewayd.sh
+    # Wait for port 19531 to be released after stopping socket-activated gatewayd.
+    # Our gatewayd holds a dup'd listening FD from socket activation; after systemctl stop
+    # the process may not have fully exited before systemd-socket-activate tries to bind.
+    # Note: a\sleep not a\timeout — sed interprets \t as tab.
+    sed -i '/systemctl stop systemd-journal-gatewayd/a\sleep 3' TEST-04-JOURNAL.journal-gatewayd.sh
 
     # cat.sh patches:
     # Add sync+sleep after waiting for the namespace journald to become active.

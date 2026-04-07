@@ -181,7 +181,7 @@
 
                 # Install rust-only binaries that don't exist in the C systemd package.
                 # These are new binaries implemented in rust-systemd without a C counterpart.
-                for name in systemd-bsod systemd-journal-gatewayd; do
+                for name in systemd-bsod systemd-journal-gatewayd systemd-journal-remote systemd-journal-upload; do
                   if [ -e "${rust-systemd}/bin/$name" ] && [ ! -e "$out/lib/systemd/$name" ]; then
                     cp -a "${rust-systemd}/bin/$name" "$out/lib/systemd/$name"
                   fi
@@ -227,6 +227,48 @@
         [Install]
         WantedBy=sockets.target
         GATEWAYD_SOCKET
+
+                # Install systemd-journal-remote service and socket units
+                cat > "$out/lib/systemd/system/systemd-journal-remote.service" <<REMOTE_SERVICE
+        [Unit]
+        Description=Journal Remote Sink Service
+        Requires=systemd-journal-remote.socket
+
+        [Service]
+        ExecStart=$out/lib/systemd/systemd-journal-remote --listen-https=-3 --output=/var/log/journal/remote/
+        User=systemd-journal-remote
+        LimitNOFILE=524288
+
+        [Install]
+        Also=systemd-journal-remote.socket
+        REMOTE_SERVICE
+                cat > "$out/lib/systemd/system/systemd-journal-remote.socket" <<REMOTE_SOCKET
+        [Unit]
+        Description=Journal Remote Sink Socket
+
+        [Socket]
+        ListenStream=19532
+        REMOTE_SOCKET
+
+                # Install systemd-journal-upload service unit
+                cat > "$out/lib/systemd/system/systemd-journal-upload.service" <<UPLOAD_SERVICE
+        [Unit]
+        Description=Journal Remote Upload Service
+        Wants=network-online.target
+        After=network-online.target
+
+        [Service]
+        ExecStart=$out/lib/systemd/systemd-journal-upload --save-state
+        Restart=on-failure
+        RestartSteps=10
+        RestartMaxDelaySec=60
+        SupplementaryGroups=systemd-journal
+        StateDirectory=systemd/journal-upload
+        LimitNOFILE=524288
+
+        [Install]
+        WantedBy=multi-user.target
+        UPLOAD_SERVICE
 
                 # Install test binaries at paths expected by upstream integration tests.
                 mkdir -p $out/lib/systemd/tests/unit-tests/manual

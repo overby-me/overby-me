@@ -400,6 +400,11 @@ in
             group = "testuser";
             createHome = true;
           };
+          # systemd-journal-remote user for journal-remote test
+          systemd-journal-remote = {
+            isSystemUser = true;
+            group = "systemd-journal";
+          };
         };
         groups.daemon = {};
         groups.testuser = {};
