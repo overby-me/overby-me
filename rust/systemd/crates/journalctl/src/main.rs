@@ -1587,6 +1587,12 @@ fn open_storage(cli: &Cli) -> Result<JournalStorage, String> {
             !ns.is_empty() && ns != "*" && !ns.starts_with('+')
         });
 
+    let file_filter: Vec<PathBuf> = if !expanded_files.is_empty() {
+        expanded_files.iter().map(PathBuf::from).collect()
+    } else {
+        Vec::new()
+    };
+
     let config = StorageConfig {
         directory,
         max_file_size: u64::MAX,
@@ -1595,6 +1601,7 @@ fn open_storage(cli: &Cli) -> Result<JournalStorage, String> {
         persistent: false,
         keep_free: 0,
         direct_directory,
+        file_filter,
         ..Default::default()
     };
 

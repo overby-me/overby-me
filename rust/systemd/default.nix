@@ -245,15 +245,21 @@
     # Upstream systemd integration test names (without TEST- prefix).
     # Each corresponds to test/units/TEST-{name}.sh in the systemd source.
     # Run with: nix build .#checks.x86_64-linux.rust-systemd-test-{name}
-    tests =
-      map
-      (f: import (./integration-tests + "/${f}"))
-      (builtins.filter
-        (f: builtins.match ".*\.nix" f != null)
-        (builtins.attrNames (builtins.readDir ./integration-tests)));
+    testFiles =
+      builtins.filter
+      (f: builtins.match ".*\.nix" f != null)
+      (builtins.attrNames (builtins.readDir ./integration-tests));
+    # Each test gets its check name from the filename (e.g. "04-journal-bsod.nix" -> "04-journal-bsod")
+    # and the upstream test script name from t.name (e.g. "04-JOURNAL").
+    tests = map (f:
+      (import (./integration-tests + "/${f}"))
+      // {
+        _checkName = builtins.replaceStrings [".nix"] [""] f;
+      })
+    testFiles;
   in
     builtins.listToAttrs ((map (t: {
-          name = "rust-systemd-test-${t.name}";
+          name = "rust-systemd-test-${t._checkName}";
           value = pkgs:
             import ./testsuite.nix {
               inherit pkgs;
@@ -266,7 +272,7 @@
         })
         tests)
       ++ (map (t: {
-          name = "c-systemd-test-${t.name}";
+          name = "c-systemd-test-${t._checkName}";
           value = pkgs:
             import ./testsuite.nix {
               inherit pkgs;

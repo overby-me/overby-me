@@ -4,6 +4,9 @@
   # Skipped subtests and reasons:
   # - journal-gatewayd: uses C systemd-journal-gatewayd HTTP server (not reimplemented)
   # - journal-remote: uses C systemd-journal-remote/upload (not reimplemented)
+  testEnv = {
+    TEST_SKIP_SUBTESTS = "journal-gatewayd journal-remote";
+  };
   patchScript = ''
     # Add timeouts to bsod at_exit cleanup to prevent infinite hangs.
     sed -i 's/journalctl --rotate/timeout 10 journalctl --rotate/' TEST-04-JOURNAL.bsod.sh

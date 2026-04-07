@@ -510,6 +510,11 @@ pub struct StorageConfig {
     /// Defaults to `Zstd`.  Read from the `SYSTEMD_JOURNAL_COMPRESS`
     /// environment variable by journald.
     pub compress: JournalCompress,
+
+    /// When non-empty, restrict reads to only these specific files.
+    /// Used by `journalctl --file` to read only the specified journal files
+    /// instead of all files in the directory.
+    pub file_filter: Vec<PathBuf>,
 }
 
 /// Default keep-free value: 4 GiB (capped at 15% of filesystem in vacuum()).
@@ -526,6 +531,7 @@ impl Default for StorageConfig {
             keep_free: DEFAULT_KEEP_FREE,
             direct_directory: false,
             compress: JournalCompress::Zstd,
+            file_filter: Vec::new(),
         }
     }
 }
@@ -610,9 +616,14 @@ impl JournalStorage {
     /// Read all entries from all journal files, in chronological order.
     ///
     /// Supports both JRNL_RS and C systemd (LPKSHHRH) journal files.
+    /// When `config.file_filter` is non-empty, only those files are read.
     pub fn read_all(&self) -> io::Result<Vec<JournalEntry>> {
-        let journal_dir = self.journal_dir();
-        read_all_from_directory(&journal_dir)
+        if !self.config.file_filter.is_empty() {
+            read_all_from_files(&self.config.file_filter)
+        } else {
+            let journal_dir = self.journal_dir();
+            read_all_from_directory(&journal_dir)
+        }
     }
 
     /// Generate a cursor string for an entry.  The cursor encodes enough
@@ -1212,6 +1223,50 @@ impl JournalReader {
             }
         }
     }
+}
+
+/// Read all entries from a specific list of journal files, sorted chronologically.
+///
+/// Supports both the native JRNL_RS format and C systemd's LPKSHHRH format.
+fn read_all_from_files(files: &[PathBuf]) -> io::Result<Vec<JournalEntry>> {
+    let mut all_entries = Vec::new();
+
+    for file_path in files {
+        match JournalFile::open(file_path, false) {
+            Ok(jf) => match jf.read_all() {
+                Ok(entries) => all_entries.extend(entries),
+                Err(e) => {
+                    eprintln!(
+                        "journald: Warning: could not read {}: {}",
+                        file_path.display(),
+                        e
+                    );
+                }
+            },
+            Err(_) => {
+                // JRNL_RS open failed — try C journal format (LPKSHHRH)
+                match c_journal::read_c_journal(file_path) {
+                    Ok(entries) => all_entries.extend(entries),
+                    Err(e) => {
+                        eprintln!(
+                            "journald: Warning: could not open {}: {}",
+                            file_path.display(),
+                            e
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // Sort by realtime timestamp, then by sequence number for stability
+    all_entries.sort_by(|a, b| {
+        a.realtime_usec
+            .cmp(&b.realtime_usec)
+            .then_with(|| a.seqnum.cmp(&b.seqnum))
+    });
+
+    Ok(all_entries)
 }
 
 /// Read all entries from all journal files in a directory, sorted chronologically.
