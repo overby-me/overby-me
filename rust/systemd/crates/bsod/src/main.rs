@@ -168,13 +168,8 @@ fn find_free_vt(fd: i32) -> io::Result<(i32, i32)> {
         return Err(io::Error::last_os_error());
     }
     for i in 0..16u16 {
-        let vt_num = i as i32 + 1;
-        // Skip the currently active VT so we don't collide with PID 1's console.
-        if vt_num == state.v_active as i32 {
-            continue;
-        }
         if (state.v_state & (1 << i)) == 0 {
-            return Ok((vt_num, state.v_active as i32));
+            return Ok((i as i32 + 1, state.v_active as i32));
         }
     }
     Err(io::Error::new(io::ErrorKind::NotFound, "No free VT"))
