@@ -13,15 +13,6 @@
     # Skip systemd-run --user --machine (requires systemd-machined, not reimplemented).
     sed -i 's|^systemd-run --user --machine.*|: # SKIP machined not available|' TEST-04-JOURNAL.bsod.sh
 
-    # Add timeouts to at_exit cleanup to prevent hangs and tolerate missing files.
-    sed -i 's/journalctl --rotate/timeout 10 journalctl --rotate || true/' TEST-04-JOURNAL.bsod.sh
-    sed -i 's/journalctl --relinquish-var/timeout 10 journalctl --relinquish-var || true/' TEST-04-JOURNAL.bsod.sh
-    sed -i 's/journalctl --sync/timeout 10 journalctl --sync || true/' TEST-04-JOURNAL.bsod.sh
-    sed -i 's/journalctl --flush/timeout 10 journalctl --flush || true/' TEST-04-JOURNAL.bsod.sh
-    # relinquish-var is not implemented, so mv of archived journals may fail.
-    sed -i '/system@\*\.journal/s/$/ || true/' TEST-04-JOURNAL.bsod.sh
-    # umount may fail without relinquish-var since journald still writes to /var/log/journal.
-    sed -i 's#umount /var/log/journal#umount /var/log/journal 2>/dev/null || true#' TEST-04-JOURNAL.bsod.sh
 
     # Skip journal-remote section in SYSTEMD_JOURNAL_COMPRESS test (C binary writes C-format journals
     # that our journalctl cannot fully read back for entry verification).
