@@ -610,6 +610,21 @@ struct JournaldState {
     last_vacuum: Mutex<Instant>,
 }
 
+impl JournaldState {
+    /// Safely lock the storage mutex, recovering from poison.
+    ///
+    /// If a thread panics while holding the lock, the mutex becomes poisoned.
+    /// Rather than cascading panics (which would crash the entire daemon),
+    /// we recover the inner data and continue. The storage may be in an
+    /// inconsistent state, but that's better than a dead journald.
+    fn lock_storage(&self) -> std::sync::MutexGuard<'_, JournalStorage> {
+        self.storage.lock().unwrap_or_else(|e| {
+            eprintln!("journald: WARNING: storage mutex was poisoned, recovering");
+            e.into_inner()
+        })
+    }
+}
+
 /// Forward-Secure Sealing (FSS) state.
 ///
 /// Uses an HMAC-SHA256 key chain: at each seal epoch the current key is
@@ -781,7 +796,7 @@ impl JournaldState {
                     summary.set_hostname();
                     let seqnum = self.seqnum.fetch_add(1, Ordering::Relaxed);
                     summary.seqnum = seqnum;
-                    let mut storage = self.storage.lock().unwrap();
+                    let mut storage = self.lock_storage();
                     if let Err(e) = storage.append(&summary) {
                         eprintln!("journald: Failed to store suppression summary: {}", e);
                     }
@@ -829,7 +844,7 @@ impl JournaldState {
         }
 
         // Store the entry
-        let mut storage = self.storage.lock().unwrap();
+        let mut storage = self.lock_storage();
         if let Err(e) = storage.append(&entry) {
             eprintln!("journald: Failed to store entry: {}", e);
         }
@@ -3000,7 +3015,7 @@ fn journal_access_get_entries(
 
     // Read entries from storage
     let entries = {
-        let storage = state.storage.lock().unwrap();
+        let storage = state.lock_storage();
         storage.read_all().unwrap_or_default()
     };
 
@@ -3122,7 +3137,7 @@ fn maintenance_thread(state: Arc<JournaldState>) {
             // Lock storage for the ENTIRE flush operation to prevent
             // concurrent writes from creating new files in /run while we're
             // moving files to /var.
-            let mut storage = state.storage.lock().unwrap();
+            let mut storage = state.lock_storage();
             let in_runtime = storage.directory().starts_with("/run/");
 
             if in_runtime && wants_persistent {
@@ -3210,7 +3225,7 @@ fn maintenance_thread(state: Arc<JournaldState>) {
                 eprintln!("journald: Relinquishing persistent storage, switching to runtime");
                 // Flush and close current persistent storage
                 {
-                    let mut storage = state.storage.lock().unwrap();
+                    let mut storage = state.lock_storage();
                     let _ = storage.flush();
                 }
 
@@ -3220,7 +3235,7 @@ fn maintenance_thread(state: Arc<JournaldState>) {
                 drop(config);
                 match JournalStorage::new(sc) {
                     Ok(new_storage) => {
-                        *state.storage.lock().unwrap() = new_storage;
+                        *state.lock_storage() = new_storage;
                         state.relinquished.store(true, Ordering::Release);
                         *state.active_file_opened.lock().unwrap() = Instant::now();
                         eprintln!("journald: Now writing to runtime storage only");
@@ -3247,7 +3262,7 @@ fn maintenance_thread(state: Arc<JournaldState>) {
             // a `journalctl --sync` immediately after writing to stdout may
             // race with the stream handler that processes the write.
             thread::sleep(Duration::from_millis(10));
-            let mut storage = state.storage.lock().unwrap();
+            let mut storage = state.lock_storage();
             let _ = storage.flush();
             drop(storage);
             state.sync_requested.store(false, Ordering::Release);
@@ -3256,7 +3271,7 @@ fn maintenance_thread(state: Arc<JournaldState>) {
         // Handle rotate request (SIGUSR2)
         if state.rotate_requested.load(Ordering::Acquire) {
             eprintln!("journald: Rotating journal files");
-            let mut storage = state.storage.lock().unwrap();
+            let mut storage = state.lock_storage();
             let _ = storage.rotate();
             *state.active_file_opened.lock().unwrap() = Instant::now();
             state.rotate_requested.store(false, Ordering::Release);
@@ -3269,7 +3284,7 @@ fn maintenance_thread(state: Arc<JournaldState>) {
             let max_age = Duration::from_micros(max_file_sec);
             if opened.elapsed() >= max_age {
                 eprintln!("journald: Rotating journal file (MaxFileSec exceeded)");
-                let mut storage = state.storage.lock().unwrap();
+                let mut storage = state.lock_storage();
                 let _ = storage.rotate();
                 *state.active_file_opened.lock().unwrap() = Instant::now();
             }
@@ -3280,7 +3295,7 @@ fn maintenance_thread(state: Arc<JournaldState>) {
         {
             let mut last_vac = state.last_vacuum.lock().unwrap();
             if last_vac.elapsed() >= vacuum_interval {
-                let mut storage = state.storage.lock().unwrap();
+                let mut storage = state.lock_storage();
                 if let Err(e) = storage.vacuum() {
                     eprintln!("journald: Periodic vacuum failed: {}", e);
                 }
@@ -3290,7 +3305,7 @@ fn maintenance_thread(state: Arc<JournaldState>) {
 
         // Periodic disk usage logging
         if last_disk_usage_log.elapsed() >= disk_usage_log_interval {
-            let storage = state.storage.lock().unwrap();
+            let storage = state.lock_storage();
             match storage.disk_usage() {
                 Ok(usage) => {
                     let config = state.config.read().unwrap();
@@ -3792,7 +3807,7 @@ fn main() {
 
     // Flush and close storage
     {
-        let mut storage = state.storage.lock().unwrap();
+        let mut storage = state.lock_storage();
         let _ = storage.flush();
     }
 

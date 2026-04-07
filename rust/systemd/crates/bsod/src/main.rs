@@ -254,8 +254,11 @@ fn display_message(message: &str, tty_path: Option<&PathBuf>) -> io::Result<()> 
     if std::env::var("SYSTEMD_COLORS").is_ok() {
         let qr_row = (winsize.ws_row as u32 * 3) / 5;
         let qr_col = (winsize.ws_col as u32 * 3) / 4;
-        let _ = set_cursor_position(fd, qr_row, qr_col);
         let qr_header = "Scan the error message";
+        // Clamp column so the header text doesn't wrap past the terminal edge
+        let max_col = (winsize.ws_col as u32).saturating_sub(qr_header.len() as u32);
+        let qr_col = qr_col.min(max_col).max(1);
+        let _ = set_cursor_position(fd, qr_row, qr_col);
         let _ = unsafe {
             libc::write(
                 fd,
