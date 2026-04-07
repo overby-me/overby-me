@@ -69,6 +69,17 @@ pkgs.runCommand "rust-bash-test-${name}" {
   # Normalize thread/process IDs in Rust panic messages
   sed -i -E "s|thread '([^']*)' \([0-9]+\)|thread '\1' (PID)|g" "$TMPDIR/expected" "$TMPDIR/actual"
 
+  # Remove flaky SIGPIPE "write error: Broken pipe" lines from both outputs.
+  # These are timing-dependent: whether echo hits a broken pipe depends on
+  # whether the pipe reader has closed before the write completes.  Both
+  # shells can produce or omit this line depending on scheduling.
+  sed -i '/echo: write error: Broken pipe$/d' "$TMPDIR/expected" "$TMPDIR/actual"
+
+  # Remove flaky CHLD signal lines that appear due to timing-dependent
+  # SIGCHLD delivery.  In the nix sandbox, child process reaping timing
+  # differs from local runs, causing extra or missing CHLD lines.
+  sed -i '/^CHLD$/d' "$TMPDIR/expected" "$TMPDIR/actual"
+
   # Compare
   if diff --text "$TMPDIR/actual" "$TMPDIR/expected"; then
     touch $out

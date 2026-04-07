@@ -9,8 +9,14 @@ pub(super) fn read_param_word_impl(
     let mut parts = Vec::new();
     let mut literal = String::new();
     let mut depth = 0;
+    // In double-quoted ${...} context (non-POSIX mode), single quotes protect
+    // '}' from closing the brace expansion.  The quotes themselves are literal
+    // (they don't suppress $ expansion or change semantics), but they prevent
+    // the lexer from treating '}' as the parameter-expansion terminator.
+    let squote_protects_brace = in_dquote && !POSIX_MODE_DOLLAR.with(|p| p.get());
+    let mut in_squote = false;
 
-    while *i < chars.len() && (chars[*i] != delim || depth > 0) && chars[*i] != '}' {
+    while *i < chars.len() && (chars[*i] != delim || in_squote) && (chars[*i] != '}' || in_squote) {
         match chars[*i] {
             '\\' if *i + 1 < chars.len() => {
                 let next = chars[*i + 1];
@@ -69,6 +75,15 @@ pub(super) fn read_param_word_impl(
                     *i += 1;
                 }
                 parts.push(WordPart::SingleQuoted(s));
+            }
+            '\'' if squote_protects_brace => {
+                // In double-quoted ${...} (non-POSIX), single quotes protect '}'
+                // from closing the expansion.  The quote chars are literal in the
+                // output — they don't suppress $ expansion or change semantics.
+                // We just toggle in_squote so the loop condition keeps going past '}'.
+                in_squote = !in_squote;
+                literal.push('\'');
+                *i += 1;
             }
             '"' => {
                 if !literal.is_empty() {
