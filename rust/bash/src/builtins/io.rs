@@ -1872,6 +1872,47 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
         .cloned()
         .unwrap_or_else(|| " \t\n".to_string());
 
+    // PUA-aware IFS matching: bytes read from pipes are PUA-encoded (e.g. \t
+    // becomes U+E009) but IFS contains actual chars (U+0009). We need to match
+    // both forms. Also classify IFS "whitespace" by checking the decoded form.
+    let ifs_chars: Vec<char> = ifs.chars().collect();
+    let ifs_is_match = |ch: char| -> bool {
+        if ifs_chars.contains(&ch) {
+            return true;
+        }
+        let cp = ch as u32;
+        // If ch is a PUA-encoded char, check if the decoded form is in IFS
+        if super::is_pua_raw_byte(cp) {
+            let decoded = char::from_u32(cp - super::RAW_BYTE_BASE).unwrap_or(ch);
+            if ifs_chars.contains(&decoded) {
+                return true;
+            }
+        }
+        // If ch is a raw control char, check if the PUA-encoded form is in IFS
+        if (1..=0xFFu32).contains(&cp) {
+            let pua = super::raw_byte_char(cp as u8);
+            if ifs_chars.contains(&pua) {
+                return true;
+            }
+        }
+        false
+    };
+    let ifs_is_ws = |ch: char| -> bool {
+        if !ifs_is_match(ch) {
+            return false;
+        }
+        // Check if the actual or decoded char is whitespace
+        if ch.is_whitespace() {
+            return true;
+        }
+        let cp = ch as u32;
+        if super::is_pua_raw_byte(cp) {
+            let decoded = char::from_u32(cp - super::RAW_BYTE_BASE).unwrap_or(ch);
+            return decoded.is_whitespace();
+        }
+        false
+    };
+
     // When no variable names given (reading into REPLY), store raw line without IFS processing
     if is_reply {
         shell.set_var("REPLY", line);
@@ -1880,31 +1921,30 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
 
     // Handle -a: read into array
     if let Some(arr_name) = array_name {
-        let ifs_ws_chars: Vec<char> = ifs.chars().filter(|c| c.is_whitespace()).collect();
-        let ifs_non_ws: String = ifs.chars().filter(|c| !c.is_whitespace()).collect();
+        let has_non_ws_ifs = ifs.chars().any(|c| !ifs_is_ws(c));
 
         // Strip leading IFS whitespace
-        let trimmed = line.trim_start_matches(|c: char| ifs_ws_chars.contains(&c));
+        let trimmed = line.trim_start_matches(|c: char| ifs_is_ws(c));
 
-        let mut fields: Vec<String> = if !ifs_non_ws.is_empty() {
+        let mut fields: Vec<String> = if has_non_ws_ifs {
             trimmed
-                .split(|c: char| ifs.contains(c))
+                .split(|c: char| ifs_is_match(c))
                 .map(|s| s.to_string())
                 .collect()
         } else {
             trimmed
-                .split(|c: char| ifs.contains(c))
+                .split(|c: char| ifs_is_match(c))
                 .filter(|s| !s.is_empty())
                 .map(|s| s.to_string())
                 .collect()
         };
         // Remove trailing empty field produced by trailing IFS delimiter
-        if fields.last().is_some_and(|s| s.is_empty()) && !ifs_non_ws.is_empty() {
+        if fields.last().is_some_and(|s| s.is_empty()) && has_non_ws_ifs {
             fields.pop();
         }
         // Also strip trailing IFS whitespace from last field
         if let Some(last) = fields.last_mut() {
-            let new_last = last.trim_end_matches(|c: char| ifs_ws_chars.contains(&c));
+            let new_last = last.trim_end_matches(|c: char| ifs_is_ws(c));
             *last = new_last.to_string();
         }
         shell
@@ -1914,7 +1954,6 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
     }
 
     // Split the line into fields respecting backslash escapes (if not raw)
-    let ifs_ws: Vec<char> = ifs.chars().filter(|c| c.is_whitespace()).collect();
 
     // Parse the line into fields
     let mut fields: Vec<String> = Vec::new();
@@ -1925,7 +1964,7 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
     let max_fields = var_names.len();
 
     // Skip leading IFS whitespace
-    while ci < chars.len() && ifs_ws.contains(&chars[ci]) {
+    while ci < chars.len() && ifs_is_ws(chars[ci]) {
         ci += 1;
     }
 
@@ -1937,7 +1976,7 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
             current.push(chars[ci]);
             last_escaped_pos = Some(current.len() - 1);
             ci += 1;
-        } else if fields.len() < max_fields - 1 && ifs.contains(ch) {
+        } else if fields.len() < max_fields - 1 && ifs_is_match(ch) {
             // IFS character — end current field
             //
             // POSIX rule: a sequence of zero or more IFS-whitespace chars,
@@ -1946,23 +1985,23 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
             //
             // Strategy: when we see ANY IFS character we scan ahead to
             // consume the entire delimiter sequence before pushing a field.
-            if ifs_ws.contains(&ch) {
+            if ifs_is_ws(ch) {
                 // Started with IFS whitespace — skip all consecutive ws
                 let mut scan = ci + 1;
-                while scan < chars.len() && ifs_ws.contains(&chars[scan]) {
+                while scan < chars.len() && ifs_is_ws(chars[scan]) {
                     scan += 1;
                 }
                 // Check if a non-whitespace IFS char follows (merges into
                 // a single delimiter with the surrounding whitespace).
                 if scan < chars.len()
-                    && ifs.contains(chars[scan])
-                    && !ifs_ws.contains(&chars[scan])
+                    && ifs_is_match(chars[scan])
+                    && !ifs_is_ws(chars[scan])
                     && fields.len() < max_fields - 1
                 {
                     // Absorb the non-ws IFS char
                     scan += 1;
                     // …and any trailing IFS whitespace after it
-                    while scan < chars.len() && ifs_ws.contains(&chars[scan]) {
+                    while scan < chars.len() && ifs_is_ws(chars[scan]) {
                         scan += 1;
                     }
                     // This whole span is ONE delimiter — push one field
@@ -1985,7 +2024,7 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
                 fields.push(std::mem::take(&mut current));
                 last_escaped_pos = None;
                 ci += 1;
-                while ci < chars.len() && ifs_ws.contains(&chars[ci]) {
+                while ci < chars.len() && ifs_is_ws(chars[ci]) {
                     ci += 1;
                 }
                 continue;
@@ -2018,7 +2057,7 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
     // Strip trailing IFS whitespace
     while end > trim_limit {
         if let Some(c) = current[..end].chars().last() {
-            if ifs_ws.contains(&c) {
+            if ifs_is_ws(c) {
                 end -= c.len_utf8();
             } else {
                 break;
@@ -2032,12 +2071,12 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
         // delimiters (and their preceding whitespace) in a loop.
         while end > trim_limit {
             if let Some(c) = current[..end].chars().last() {
-                if ifs.contains(c) && !ifs_ws.contains(&c) {
+                if ifs_is_match(c) && !ifs_is_ws(c) {
                     end -= c.len_utf8();
                     // Also strip IFS whitespace before the non-ws delimiter
                     while end > trim_limit {
                         if let Some(c2) = current[..end].chars().last() {
-                            if ifs_ws.contains(&c2) {
+                            if ifs_is_ws(c2) {
                                 end -= c2.len_utf8();
                             } else {
                                 break;
@@ -2076,15 +2115,15 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
         //   remainder "a:"   → strip → "a"
         if end > trim_limit
             && let Some(c) = current[..end].chars().last()
-            && ifs.contains(c)
-            && !ifs_ws.contains(&c)
+            && ifs_is_match(c)
+            && !ifs_is_ws(c)
         {
             let tentative = end - c.len_utf8();
             // Check if the remainder (before the trailing delimiter)
             // contains any non-ws IFS delimiters.
             let has_internal_non_ws_ifs = current[trim_limit..tentative]
                 .chars()
-                .any(|ch| ifs.contains(ch) && !ifs_ws.contains(&ch));
+                .any(|ch| ifs_is_match(ch) && !ifs_is_ws(ch));
             // Check if the remainder has IFS whitespace BETWEEN
             // non-IFS content (i.e., IFS ws that acts as a word
             // separator, not just leading/trailing padding).
@@ -2093,16 +2132,16 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
                 // Trim leading and trailing IFS whitespace, then
                 // check if any IFS whitespace remains inside.
                 let trimmed = inner
-                    .trim_start_matches(|ch: char| ifs_ws.contains(&ch))
-                    .trim_end_matches(|ch: char| ifs_ws.contains(&ch));
-                trimmed.chars().any(|ch| ifs_ws.contains(&ch))
+                    .trim_start_matches(|ch: char| ifs_is_ws(ch))
+                    .trim_end_matches(|ch: char| ifs_is_ws(ch));
+                trimmed.chars().any(&ifs_is_ws)
             };
             if !has_internal_non_ws_ifs && !has_ifs_ws_between_content {
                 end = tentative;
                 // Also strip IFS whitespace before the removed delimiter
                 while end > trim_limit {
                     if let Some(c2) = current[..end].chars().last() {
-                        if ifs_ws.contains(&c2) {
+                        if ifs_is_ws(c2) {
                             end -= c2.len_utf8();
                         } else {
                             break;

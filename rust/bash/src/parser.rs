@@ -2142,7 +2142,118 @@ impl Parser {
                         false
                     }
                 };
-                if last_ends_with_eq {
+                // Only allow inline compound assignment name=(...) as arguments
+                // to assignment builtins (declare/local/export/readonly/typeset).
+                // Bash rejects `cmd a=(x y)` as a syntax error — compound
+                // assignments are not valid in arbitrary command arguments.
+                // `let` is special: `let a=(5+3)` is arithmetic grouping, not
+                // compound assignment — consume balanced parens as part of the word.
+                let first_word_owned: Option<String> =
+                    if let Some(WordPart::Literal(cmd)) = words.first().and_then(|w| w.first()) {
+                        Some(cmd.clone())
+                    } else {
+                        None
+                    };
+                let first_word_str = first_word_owned.as_deref();
+                let first_is_assign_builtin = matches!(
+                    first_word_str,
+                    Some("declare" | "typeset" | "local" | "export" | "readonly")
+                );
+                let first_is_paren_word = matches!(first_word_str, Some("let" | "eval"));
+                if last_ends_with_eq && first_is_paren_word {
+                    // `let a=(5+3)` — arithmetic grouping, not compound assignment.
+                    // `eval a=(1 2 3)` — pass as literal word; eval re-parses it.
+                    // Consume balanced parens as part of the current word.
+                    self.advance(); // consume (
+                    let last = words.last_mut().unwrap();
+                    last.push(WordPart::Literal("(".to_string()));
+                    let mut depth = 1u32;
+                    let mut need_space = false;
+                    loop {
+                        match &self.current {
+                            Token::RParen => {
+                                depth -= 1;
+                                if depth == 0 {
+                                    last.push(WordPart::Literal(")".to_string()));
+                                    self.advance(); // consume )
+                                    break;
+                                }
+                                last.push(WordPart::Literal(")".to_string()));
+                                self.advance();
+                                need_space = true;
+                            }
+                            Token::LParen => {
+                                if need_space {
+                                    last.push(WordPart::Literal(" ".to_string()));
+                                }
+                                depth += 1;
+                                last.push(WordPart::Literal("(".to_string()));
+                                self.advance();
+                            }
+                            Token::Word(parts) => {
+                                if need_space {
+                                    last.push(WordPart::Literal(" ".to_string()));
+                                }
+                                for p in parts {
+                                    last.push(p.clone());
+                                }
+                                self.advance();
+                                need_space = true;
+                            }
+                            Token::Eof | Token::Newline => {
+                                return Err(
+                                    "\x01RECOVERABLE\x01syntax error near unexpected token `('"
+                                        .to_string(),
+                                );
+                            }
+                            _ => {
+                                if need_space {
+                                    last.push(WordPart::Literal(" ".to_string()));
+                                }
+                                last.push(WordPart::Literal(self.token_to_str()));
+                                self.advance();
+                                need_space = true;
+                            }
+                        }
+                    }
+                    // For `let`, after the closing `)` there may be a
+                    // continuation like `/2` in `let a=(4*3)/2`.  Keep
+                    // appending adjacent Word tokens (no intervening
+                    // whitespace in the source — the lexer produces a
+                    // new Word token for `/2`).  For `eval` this is a
+                    // no-op because `eval a=(1 2 3)` has `)` at end.
+                    if first_word_str == Some("let") {
+                        while let Token::Word(parts) = &self.current {
+                            // Check if the next word could re-enter
+                            // balanced-paren mode (another `name=(...)`).
+                            // If so, break and let the outer loop handle it.
+                            let starts_new_assign = if let Some(WordPart::Literal(s)) = parts.last()
+                            {
+                                s.ends_with('=') || s.ends_with("+=")
+                            } else {
+                                false
+                            };
+                            if starts_new_assign {
+                                break;
+                            }
+                            let last = words.last_mut().unwrap();
+                            for p in parts {
+                                last.push(p.clone());
+                            }
+                            self.advance();
+                        }
+                    }
+                    continue;
+                }
+                if last_ends_with_eq && !first_is_assign_builtin {
+                    // Bash rejects `cmd a=(x y)` as a syntax error.
+                    // Compound array assignments are only valid as arguments
+                    // to declare/local/export/readonly/typeset (and `let` handled above).
+                    return Err(
+                        "\x01RECOVERABLE\x01syntax error near unexpected token `('".to_string()
+                    );
+                }
+                if last_ends_with_eq && first_is_assign_builtin {
                     self.advance(); // consume (
                     let elements = self.parse_array_elements()?;
                     // For array assignments in command args (declare/local),
