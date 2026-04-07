@@ -27,9 +27,6 @@
     # that our journalctl cannot fully read back for entry verification).
     sed -i 's|\[\[ -x /usr/lib/systemd/systemd-journal-remote \]\]|false|' TEST-04-JOURNAL.SYSTEMD_JOURNAL_COMPRESS.sh
 
-    # Add reset-failed before restart to clear any rate-limit counters, and wait for
-    # journald's varlink socket to appear after restart before proceeding.
-    sed -i 's#systemctl restart systemd-journald.service#systemctl reset-failed systemd-journald.service; systemctl restart systemd-journald.service; timeout 10 bash -c "until test -S /run/systemd/journal/io.systemd.journal; do sleep 0.5; done"; sleep 1#' TEST-04-JOURNAL.SYSTEMD_JOURNAL_COMPRESS.sh
 
   '';
 }

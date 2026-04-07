@@ -2582,7 +2582,11 @@ fn sd_notify_with_fds(msg: &str, fds: &[RawFd]) {
 /// Minimal Varlink server for `journalctl --sync`, `--rotate`, `--flush`,
 /// and `--relinquish-var`.  The Varlink protocol is JSON + NUL byte framing
 /// over a Unix stream socket at `/run/systemd/journal/io.systemd.journal`.
-fn varlink_server(state: Arc<JournaldState>, socket_path: String) {
+fn varlink_server(
+    state: Arc<JournaldState>,
+    socket_path: String,
+    ready: Option<SocketReadyNotifier>,
+) {
     // Remove stale socket
     let _ = fs::remove_file(&socket_path);
 
@@ -2590,9 +2594,17 @@ fn varlink_server(state: Arc<JournaldState>, socket_path: String) {
         Ok(l) => l,
         Err(e) => {
             eprintln!("journald: Failed to bind Varlink socket: {}", e);
+            if let Some(r) = &ready {
+                r.signal();
+            }
             return;
         }
     };
+
+    // Signal that our socket is bound and ready for connections.
+    if let Some(r) = &ready {
+        r.signal();
+    }
 
     // Make the socket world-accessible (journalctl runs as root but the
     // protocol checks credentials via SO_PEERCRED on the server side).
@@ -3515,8 +3527,8 @@ fn main() {
     // Socket readiness coordination: listener threads signal after binding,
     // main waits for all to be ready before sending READY=1.
     let socket_ready = SocketReadyNotifier::new();
-    // Count: native + stdout + syslog (if no namespace)
-    let expected_sockets: u32 = if namespace.is_none() { 3 } else { 2 };
+    // Count: native + stdout + syslog + varlink (if no namespace)
+    let expected_sockets: u32 = if namespace.is_none() { 4 } else { 2 };
 
     // Block all signals before spawning threads.  Child threads inherit the
     // blocked mask, so signals are only delivered to the main thread where the
@@ -3594,10 +3606,11 @@ fn main() {
     let _varlink_handle = if namespace.is_none() {
         let state_varlink = Arc::clone(&state);
         let varlink_path = varlink_socket_path.clone();
+        let ready_varlink = socket_ready.clone();
         Some(
             thread::Builder::new()
                 .name("varlink".into())
-                .spawn(move || varlink_server(state_varlink, varlink_path))
+                .spawn(move || varlink_server(state_varlink, varlink_path, Some(ready_varlink)))
                 .expect("failed to spawn varlink thread"),
         )
     } else {
