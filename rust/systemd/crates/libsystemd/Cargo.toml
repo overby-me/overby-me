@@ -30,6 +30,9 @@ aes-gcm = "0.10"
 sha2 = "0.10"
 base64 = "0.22"
 
+lz4_flex = "0.11"
+zstd = "0.13"
+lzma-rs = "0.3"
 zbus = { version = "5", optional = true }
 shlex = "1.3"
 clap = { version = "4.5", features = ["derive"] }

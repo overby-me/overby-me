@@ -14,10 +14,6 @@
     sed -i 's|^systemd-run --user --machine.*|: # SKIP machined not available|' TEST-04-JOURNAL.bsod.sh
 
 
-    # Skip journal-remote section in SYSTEMD_JOURNAL_COMPRESS test (C binary writes C-format journals
-    # that our journalctl cannot fully read back for entry verification).
-    sed -i 's|\[\[ -x /usr/lib/systemd/systemd-journal-remote \]\]|false|' TEST-04-JOURNAL.SYSTEMD_JOURNAL_COMPRESS.sh
-
 
   '';
 }

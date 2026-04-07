@@ -271,6 +271,38 @@ fn parse_entry(data: &[u8], offset: u64, compact: bool) -> io::Result<JournalEnt
     Ok(entry)
 }
 
+/// Decompress a compressed data object payload.
+fn decompress_data_object(flags: u8, compressed: &[u8]) -> io::Result<Vec<u8>> {
+    if flags & OBJECT_COMPRESSED_LZ4 != 0 {
+        // C journal LZ4: first 8 bytes are LE64 uncompressed size, rest is LZ4 block
+        if compressed.len() < 8 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "LZ4 compressed data too short for size prefix",
+            ));
+        }
+        let uncompressed_size = u64::from_le_bytes(compressed[..8].try_into().unwrap()) as usize;
+        let lz4_data = &compressed[8..];
+        lz4_flex::decompress(lz4_data, uncompressed_size)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("LZ4 decompress: {e}")))
+    } else if flags & OBJECT_COMPRESSED_ZSTD != 0 {
+        zstd::stream::decode_all(compressed).map_err(|e| {
+            io::Error::new(io::ErrorKind::InvalidData, format!("zstd decompress: {e}"))
+        })
+    } else if flags & OBJECT_COMPRESSED_XZ != 0 {
+        let mut output = Vec::new();
+        lzma_rs::xz_decompress(&mut io::Cursor::new(compressed), &mut output).map_err(|e| {
+            io::Error::new(io::ErrorKind::InvalidData, format!("XZ decompress: {e}"))
+        })?;
+        Ok(output)
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "unknown compression type",
+        ))
+    }
+}
+
 /// Read a data object at the given offset and extract the KEY=VALUE pair.
 fn read_data_object(data: &[u8], offset: u64) -> io::Result<(String, Vec<u8>)> {
     let (obj_type, flags, size) = read_object_header(data, offset)?;
@@ -278,14 +310,6 @@ fn read_data_object(data: &[u8], offset: u64) -> io::Result<(String, Vec<u8>)> {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!("expected data object at {offset}, got type {obj_type}"),
-        ));
-    }
-
-    // Skip compressed data objects — we can't decompress without extra deps
-    if flags & OBJECT_COMPRESSION_MASK != 0 {
-        return Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "compressed data object",
         ));
     }
 
@@ -310,7 +334,15 @@ fn read_data_object(data: &[u8], offset: u64) -> io::Result<(String, Vec<u8>)> {
         ));
     }
 
-    let kv_bytes = &data[kv_start..kv_start + kv_len];
+    let compressed_bytes = &data[kv_start..kv_start + kv_len];
+
+    // Decompress if needed
+    let kv_bytes: std::borrow::Cow<'_, [u8]> = if flags & OBJECT_COMPRESSION_MASK != 0 {
+        let decompressed = decompress_data_object(flags, compressed_bytes)?;
+        std::borrow::Cow::Owned(decompressed)
+    } else {
+        std::borrow::Cow::Borrowed(compressed_bytes)
+    };
 
     // Find the '=' separator
     if let Some(eq_pos) = kv_bytes.iter().position(|&b| b == b'=') {
@@ -342,8 +374,7 @@ pub fn is_c_journal(path: &Path) -> bool {
 /// Read all entries from a C systemd journal file.
 ///
 /// Returns entries sorted by their stored sequence number.  Compressed
-/// data objects are silently skipped (their fields will be missing from
-/// the entry).
+/// data objects (LZ4, ZSTD, XZ) are transparently decompressed.
 pub fn read_c_journal(path: &Path) -> io::Result<Vec<JournalEntry>> {
     let data = std::fs::read(path)?;
     let header = parse_header(&data)?;
