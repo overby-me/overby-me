@@ -57,7 +57,7 @@
     # Replace the diff heredoc block including the heredoc body
     sed -i '/--cursor-file=.*CURSOR_FILE.*_SYSTEMD_UNIT/,/^EOF$/c\echo SKIP' TEST-04-JOURNAL.journal.sh
     # Skip journalctl -b <executable-path> test (test runs via virtconsole, no _EXE entries)
-    sed -i '/journalctl -b "$(readlink -f/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
+    sed -i '/journalctl -b "\$(readlink -f/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
     # Add sleep after journalctl --sync (our threaded stdout handler may not be done)
     sed -i 's#journalctl --sync#journalctl --sync; sleep 1#g' TEST-04-JOURNAL.journal.sh
     # Add timeout to journalctl/systemd-cat invocations
