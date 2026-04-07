@@ -18,19 +18,8 @@
     # Also skip the journalctl --user-unit check that follows it
     sed -i '/^journalctl -b -n 1 -r --user-unit/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
 
-    # Skip journalctl --namespace (namespace journals not implemented)
-    # Must replace the whole line to avoid breaking pipes
-    sed -i '/^journalctl --namespace/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
-    sed -i '/^journalctl -q --namespace/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
-    # Also skip the negated namespace test
-    sed -i '/^(! journalctl -q --namespace/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
-
     # Skip journalctl --machine (not implemented)
     sed -i '/^journalctl --machine/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
-
-    # Skip journalctl --update-catalog and --list-catalog (not implemented)
-    sed -i '/^journalctl --update-catalog/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
-    sed -i '/^journalctl --list-catalog/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
 
     # Skip journalctl --follow tests (lines 216-231, complex follow+cursor tests)
     sed -i '/journalctl --follow/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
