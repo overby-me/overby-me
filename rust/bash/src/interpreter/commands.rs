@@ -4017,7 +4017,21 @@ impl Shell {
                 Ok(self.eval_cond_unary(op, &val))
             }
             CondExpr::Binary(left, op, right) => {
-                let lval = self.expand_word_single(left);
+                // For arithmetic comparison operators, try to resolve array
+                // references directly from word parts before expanding.  This
+                // prevents injection when the subscript key (after $var
+                // expansion) contains `]`, `,`, `$(...)` or other chars that
+                // would confuse the arithmetic evaluator's bracket/operator
+                // scanning.  E.g. `[[ assoc[$key] -eq 42 ]]` where
+                // $key='x],b[$(echo uname >&2)' must NOT execute the comsub.
+                let is_arith_op =
+                    matches!(op.as_str(), "-eq" | "-ne" | "-lt" | "-le" | "-gt" | "-ge");
+                let lval = if is_arith_op {
+                    self.resolve_cond_array_ref(left)
+                        .unwrap_or_else(|| self.expand_word_single(left))
+                } else {
+                    self.expand_word_single(left)
+                };
                 // For = and != operators, the right side is a pattern
                 if op == "=~" {
                     // Check if the ENTIRE pattern is quoted (all parts are quoted/backslash-escaped).
@@ -4059,6 +4073,9 @@ impl Shell {
                 }
                 let rval = if matches!(op.as_str(), "=" | "==" | "!=") {
                     self.expand_word_pattern(right)
+                } else if is_arith_op {
+                    self.resolve_cond_array_ref(right)
+                        .unwrap_or_else(|| self.expand_word_single(right))
                 } else {
                     self.expand_word_single(right)
                 };
@@ -4193,6 +4210,99 @@ impl Shell {
                 self.namerefs.contains_key(val)
             }
             _ => false,
+        }
+    }
+
+    /// Try to resolve `name[subscript]` array references directly from word
+    /// parts, returning the looked-up value as a string.  This avoids
+    /// expanding the subscript into the arithmetic expression string where
+    /// special characters (`]`, `,`, `$(...)`) could cause injection or
+    /// misparsing.
+    ///
+    /// Returns `Some(value_string)` if the word is a simple `name[sub]`
+    /// array reference (with the subscript coming from variable expansion),
+    /// or `None` if the word doesn't match that pattern.
+    fn resolve_cond_array_ref(&mut self, word: &[WordPart]) -> Option<String> {
+        // We're looking for the pattern:
+        //   Literal("name[") + <one or more expansion parts> + Literal("]")
+        // where "name" is a known array/assoc_array variable.
+        if word.len() < 2 {
+            return None;
+        }
+        // First part must be a Literal ending with '['
+        let first_lit = match &word[0] {
+            WordPart::Literal(s) => s.as_str(),
+            _ => return None,
+        };
+        let bracket_pos = first_lit.find('[')?;
+        let base_name = &first_lit[..bracket_pos];
+        if base_name.is_empty() {
+            return None;
+        }
+        // Verify it's a known array
+        let resolved_base = self.resolve_nameref(base_name);
+        let is_assoc = self.assoc_arrays.contains_key(&resolved_base);
+        let is_indexed = self.arrays.contains_key(&resolved_base);
+        if !is_assoc && !is_indexed {
+            // Also accept declared-but-empty arrays and scalar variables
+            // (scalars get a[0] treatment in arithmetic)
+            if !self.vars.contains_key(&resolved_base) {
+                return None;
+            }
+        }
+        // Last part must be a Literal that ends with ']'
+        let last_lit = match word.last()? {
+            WordPart::Literal(s) => s.as_str(),
+            _ => return None,
+        };
+        if !last_lit.ends_with(']') {
+            return None;
+        }
+        // Build the subscript key from the parts between the opening '['
+        // and the closing ']'.  The opening '[' prefix is in first_lit,
+        // the closing ']' suffix is in last_lit.
+        let after_bracket = &first_lit[bracket_pos + 1..];
+        let before_close = &last_lit[..last_lit.len() - 1];
+        // Expand the middle parts to get the full subscript key
+        let mut sub_parts: Vec<WordPart> = Vec::new();
+        if !after_bracket.is_empty() {
+            sub_parts.push(WordPart::Literal(after_bracket.to_string()));
+        }
+        // Add all middle parts (between first and last)
+        if word.len() > 2 {
+            sub_parts.extend_from_slice(&word[1..word.len() - 1]);
+        }
+        if !before_close.is_empty() {
+            sub_parts.push(WordPart::Literal(before_close.to_string()));
+        }
+        let subscript_key = self.expand_word_single(&sub_parts);
+        // Now look up the value
+        if is_assoc {
+            let val = self
+                .assoc_arrays
+                .get(&resolved_base)
+                .and_then(|m| m.get(&subscript_key))
+                .cloned()
+                .unwrap_or_default();
+            Some(val)
+        } else if is_indexed {
+            // Evaluate the subscript as arithmetic to get the index
+            let idx = self.eval_arith_expr(&subscript_key) as usize;
+            if crate::expand::take_arith_error() {
+                return Some("0".to_string());
+            }
+            let val = self
+                .arrays
+                .get(&resolved_base)
+                .and_then(|a| a.get(idx))
+                .and_then(|v| v.as_ref())
+                .cloned()
+                .unwrap_or_default();
+            Some(val)
+        } else {
+            // Scalar — a[0] treatment: just return the scalar value
+            let val = self.vars.get(&resolved_base).cloned().unwrap_or_default();
+            Some(val)
         }
     }
 

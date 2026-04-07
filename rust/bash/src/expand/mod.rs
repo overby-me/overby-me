@@ -2224,6 +2224,35 @@ fn word_split(segments: &[Segment], ifs: &str) -> Vec<String> {
             Segment::Unquoted(s) => {
                 let ifs_ws: Vec<char> = ifs.chars().filter(|c| c.is_whitespace()).collect();
                 let ifs_non_ws: Vec<char> = ifs.chars().filter(|c| !c.is_whitespace()).collect();
+                // Build a set of "decoded" IFS chars: for each PUA-encoded
+                // char in IFS, also accept the non-PUA form (and vice versa).
+                // This allows control chars from pipe output (U+0001) to match
+                // PUA-encoded IFS ($'\001' → U+E001) without re-encoding all
+                // command substitution output (which would break character
+                // class tests in posixexp).
+                let ifs_match = |ch: char, ifs_set: &[char]| -> bool {
+                    if ifs_set.contains(&ch) {
+                        return true;
+                    }
+                    let cp = ch as u32;
+                    // If ch is a raw control char (U+0001-U+001F, U+007F, U+0080-U+00FF),
+                    // check if the PUA-encoded form is in IFS
+                    if (1..=0xFF).contains(&cp) && !ch.is_whitespace() {
+                        let pua = crate::builtins::raw_byte_char(cp as u8);
+                        if ifs_set.contains(&pua) {
+                            return true;
+                        }
+                    }
+                    // If ch is a PUA-encoded char, check if the decoded form is in IFS
+                    if crate::builtins::is_pua_raw_byte(cp) {
+                        let decoded =
+                            char::from_u32(cp - crate::builtins::RAW_BYTE_BASE).unwrap_or(ch);
+                        if ifs_set.contains(&decoded) {
+                            return true;
+                        }
+                    }
+                    false
+                };
                 // If we have accumulated content from Quoted/Literal segments,
                 // start in "in field" state so IFS whitespace causes a split
                 let mut state: u8 = if !current.is_empty() || has_quoted_since_split {
@@ -2232,7 +2261,7 @@ fn word_split(segments: &[Segment], ifs: &str) -> Vec<String> {
                     0
                 };
                 for ch in s.chars() {
-                    if ifs_non_ws.contains(&ch) {
+                    if ifs_match(ch, &ifs_non_ws) {
                         match state {
                             1 => {
                                 // End current field
@@ -2253,7 +2282,7 @@ fn word_split(segments: &[Segment], ifs: &str) -> Vec<String> {
                             }
                         }
                         state = 2;
-                    } else if ifs_ws.contains(&ch) {
+                    } else if ifs_match(ch, &ifs_ws) {
                         if state == 1 {
                             // End current field on whitespace
                             fields.push(std::mem::take(&mut current));

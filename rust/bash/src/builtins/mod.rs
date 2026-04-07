@@ -282,7 +282,17 @@ fn parse_printf_int(arg: &str) -> i64 {
     } else if arg.starts_with("0") && arg.len() > 1 && !arg.contains(['8', '9']) {
         i64::from_str_radix(&arg[1..], 8).unwrap_or(0)
     } else if arg.starts_with('\'') || arg.starts_with('"') {
-        arg.chars().nth(1).map(|c| c as i64).unwrap_or(0)
+        arg.chars()
+            .nth(1)
+            .map(|c| {
+                let cp = c as u32;
+                if is_pua_raw_byte(cp) {
+                    (cp - RAW_BYTE_BASE) as i64
+                } else {
+                    c as i64
+                }
+            })
+            .unwrap_or(0)
     } else {
         match arg.parse::<i64>() {
             Ok(v) => v,

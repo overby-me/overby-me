@@ -436,7 +436,9 @@ impl Shell {
             while s.ends_with('\n') {
                 s.pop();
             }
-            s
+            // Re-encode raw bytes (control chars, DEL) as PUA so they
+            // match PUA-encoded $'\NNN' values in IFS and other variables.
+            reencode_raw_bytes_as_pua(&s)
         }
         #[cfg(not(unix))]
         {
@@ -596,4 +598,35 @@ impl Shell {
             }
         }
     }
+}
+
+/// Re-encode raw byte characters from external command output into PUA form.
+///
+/// Characters in U+0001..U+001F (except TAB U+0009 and LF U+000A),
+/// U+007F (DEL), and U+0080..U+00FF (Latin-1 supplement) are mapped to
+/// PUA U+E001..U+E0FF so they match PUA-encoded `$'\NNN'` values used
+/// internally by the shell for IFS splitting and other operations.
+fn reencode_raw_bytes_as_pua(s: &str) -> String {
+    let needs_reencode = s.chars().any(|c| {
+        let cp = c as u32;
+        ((1..=0x1F).contains(&cp) && cp != 0x09 && cp != 0x0A)
+            || cp == 0x7F
+            || (0x80..=0xFF).contains(&cp)
+    });
+    if !needs_reencode {
+        return s.to_string();
+    }
+    s.chars()
+        .map(|c| {
+            let cp = c as u32;
+            if ((1..=0x1F).contains(&cp) && cp != 0x09 && cp != 0x0A)
+                || cp == 0x7F
+                || (0x80..=0xFF).contains(&cp)
+            {
+                crate::builtins::raw_byte_char(cp as u8)
+            } else {
+                c
+            }
+        })
+        .collect()
 }

@@ -1442,14 +1442,14 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                 true
             } else if target_val.is_empty() {
                 !ctx.vars.contains_key(&target)
-                    && !ctx.arrays.get(&target).map_or(false, |arr| {
+                    && !ctx.arrays.get(&target).is_some_and(|arr| {
                         if matches!(&expr.op, ParamOp::Transform('a') | ParamOp::Transform('A')) {
                             arr.iter().any(|v| v.is_some())
                         } else {
-                            arr.first().map_or(false, |v| v.is_some())
+                            arr.first().is_some_and(|v| v.is_some())
                         }
                     })
-                    && !ctx.assoc_arrays.get(&target).map_or(false, |assoc| {
+                    && !ctx.assoc_arrays.get(&target).is_some_and(|assoc| {
                         if matches!(&expr.op, ParamOp::Transform('a') | ParamOp::Transform('A')) {
                             !assoc.is_empty()
                         } else {
@@ -1843,14 +1843,14 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                 //   variable is bound only if element[0] is set.  bash treats
                 //   empty arrays and sparse arrays without element[0] as
                 //   "unbound" for these scalar references.
-                && !ctx.arrays.get(&expr.name).map_or(false, |arr| {
+                && !ctx.arrays.get(&expr.name).is_some_and(|arr| {
                     if matches!(&expr.op, ParamOp::Transform('a') | ParamOp::Transform('A')) {
                         arr.iter().any(|v| v.is_some())
                     } else {
-                        arr.first().map_or(false, |v| v.is_some())
+                        arr.first().is_some_and(|v| v.is_some())
                     }
                 })
-                && !ctx.assoc_arrays.get(&expr.name).map_or(false, |assoc| {
+                && !ctx.assoc_arrays.get(&expr.name).is_some_and(|assoc| {
                     if matches!(&expr.op, ParamOp::Transform('a') | ParamOp::Transform('A')) {
                         !assoc.is_empty()
                     } else {
@@ -2386,11 +2386,11 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                     let is_array_no_elem0 = ctx
                         .arrays
                         .get(base_name)
-                        .map_or(false, |arr| !arr.first().map_or(false, |v| v.is_some()))
+                        .is_some_and(|arr| !arr.first().is_some_and(|v| v.is_some()))
                         || ctx
                             .assoc_arrays
                             .get(base_name)
-                            .map_or(false, |assoc| !assoc.contains_key("0"));
+                            .is_some_and(|assoc| !assoc.contains_key("0"));
                     let effectively_unset = is_unset || is_array_no_elem0;
                     if attrs.is_empty() {
                         // Plain variable with no special attributes: use name='value'

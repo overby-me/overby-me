@@ -425,15 +425,22 @@ impl Shell {
             }
         }
 
-        // Handle comma operator (only at top level, not inside parens)
+        // Handle comma operator (only at top level, not inside parens or brackets)
         {
-            let mut depth = 0i32;
+            let mut paren_depth = 0i32;
+            let mut bracket_depth = 0i32;
             let mut last_comma = None;
             for (i, ch) in expr.char_indices() {
                 match ch {
-                    '(' => depth += 1,
-                    ')' => depth -= 1,
-                    ',' if depth == 0 => last_comma = Some(i),
+                    '(' => paren_depth += 1,
+                    ')' => paren_depth -= 1,
+                    '[' => bracket_depth += 1,
+                    ']' => {
+                        if bracket_depth > 0 {
+                            bracket_depth -= 1;
+                        }
+                    }
+                    ',' if paren_depth == 0 && bracket_depth == 0 => last_comma = Some(i),
                     _ => {}
                 }
             }
@@ -1868,7 +1875,12 @@ impl Shell {
                 continue;
             }
             // Handle ${ command; } funsub
-            if i + 2 < chars.len() && chars[i] == '$' && chars[i + 1] == '{' && chars[i + 2] == ' '
+            // Skip when inside array subscript brackets to prevent injection
+            if i + 2 < chars.len()
+                && chars[i] == '$'
+                && chars[i + 1] == '{'
+                && chars[i + 2] == ' '
+                && array_bracket_depth == 0
             {
                 // Find matching }
                 let mut depth = 1i32;
@@ -1907,7 +1919,11 @@ impl Shell {
                 i = j + 1;
                 continue;
             }
-            if i + 2 < chars.len() && chars[i] == '$' && chars[i + 1] == '(' && chars[i + 2] == '('
+            if i + 2 < chars.len()
+                && chars[i] == '$'
+                && chars[i + 1] == '('
+                && chars[i + 2] == '('
+                && array_bracket_depth == 0
             {
                 // $((arith)) — nested arithmetic expansion
                 // Recursively expand comsubs inside, then evaluate as arithmetic
@@ -1943,7 +1959,11 @@ impl Shell {
                 }
                 continue;
             }
-            if i + 1 < chars.len() && chars[i] == '$' && chars[i + 1] == '(' {
+            if i + 1 < chars.len()
+                && chars[i] == '$'
+                && chars[i + 1] == '('
+                && array_bracket_depth == 0
+            {
                 // Find matching closing paren with case/esac and quote awareness
                 let mut depth = 0i32;
                 let mut case_depth = 0i32;
@@ -2116,7 +2136,7 @@ impl Shell {
                 } else {
                     result.push_str(&expanded);
                 }
-            } else if chars[i] == '`' {
+            } else if chars[i] == '`' && array_bracket_depth == 0 {
                 // Backtick command substitution: `...`
                 let start = i;
                 i += 1; // skip opening backtick

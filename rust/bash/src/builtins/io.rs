@@ -1,5 +1,18 @@
 use super::*;
 
+/// Re-encode a raw byte as a PUA character for bytes that need it
+/// (control chars U+0001-U+001F except TAB/LF, DEL U+007F, and
+/// U+0080-U+00FF).  This ensures bytes read from pipes/files match
+/// PUA-encoded `$'\NNN'` values used internally for IFS splitting.
+fn reencode_byte_as_pua(byte: u8) -> char {
+    let b = byte as u32;
+    if ((1..=0x1F).contains(&b) && b != 0x09 && b != 0x0A) || b == 0x7F || b >= 0x80 {
+        super::raw_byte_char(byte)
+    } else {
+        byte as char
+    }
+}
+
 pub(super) fn builtin_echo(shell: &mut Shell, args: &[String]) -> i32 {
     let mut newline = true;
     let mut start = 0;
@@ -1707,7 +1720,7 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
                         break;
                     }
                     Ok(_) => {
-                        let ch = buf[0] as char;
+                        let ch = reencode_byte_as_pua(buf[0]);
                         if ch == delim_char {
                             break;
                         }
@@ -1733,7 +1746,7 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
                 match std::io::stdin().read(&mut buf) {
                     Ok(0) => break,
                     Ok(_) => {
-                        let ch = buf[0] as char;
+                        let ch = reencode_byte_as_pua(buf[0]);
                         if ch == delim_char {
                             break;
                         }
@@ -1755,7 +1768,7 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
                         break;
                     }
                     Ok(_) => {
-                        let ch = buf[0] as char;
+                        let ch = reencode_byte_as_pua(buf[0]);
                         if ch == '\n' {
                             break;
                         }
@@ -1779,7 +1792,7 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
                         break;
                     }
                     Ok(_) => {
-                        let ch = buf[0] as char;
+                        let ch = reencode_byte_as_pua(buf[0]);
                         if ch == '\n' {
                             break;
                         }
@@ -1805,7 +1818,7 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
                         break;
                     }
                     Ok(_) => {
-                        let ch = buf[0] as char;
+                        let ch = reencode_byte_as_pua(buf[0]);
                         if ch == '\n' {
                             // In non-raw mode, backslash-newline is line continuation
                             if !raw && line.ends_with('\\') {
