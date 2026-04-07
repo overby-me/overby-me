@@ -1787,15 +1787,20 @@ fn stdout_socket_listener(
     };
 
     eprintln!("journald: Listening on {}", STDOUT_SOCKET_PATH);
+    // Set non-blocking so accept() doesn't block indefinitely.
+    // This allows us to check the shutdown flag in the loop.
+    listener
+        .set_nonblocking(true)
+        .expect("stdout: set_nonblocking");
     ready.signal();
 
-    for stream in listener.incoming() {
+    loop {
         if state.shutdown.load(Ordering::Relaxed) {
             break;
         }
 
-        match stream {
-            Ok(stream) => {
+        match listener.accept() {
+            Ok((stream, _addr)) => {
                 // Enable SO_PASSCRED immediately after accept, before
                 // spawning the handler thread, to minimize the race
                 // window where the sender might write without credentials.
@@ -1804,6 +1809,10 @@ fn stdout_socket_listener(
                 thread::spawn(move || {
                     handle_stdout_connection(stream, state);
                 });
+            }
+            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                // No pending connection — sleep briefly then retry
+                thread::sleep(Duration::from_millis(200));
             }
             Err(e) => {
                 if state.shutdown.load(Ordering::Relaxed) {
