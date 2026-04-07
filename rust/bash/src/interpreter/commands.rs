@@ -327,6 +327,7 @@ impl Shell {
         crate::expand::set_globstar(self.shopt_globstar);
         crate::expand::set_nullglob(self.shopt_nullglob);
         crate::expand::set_nocasematch(self.shopt_nocasematch);
+        crate::expand::set_posix_mode(self.opt_posix);
         crate::expand::set_patsub_replacement(
             self.shopt_options
                 .get("patsub_replacement")
@@ -426,6 +427,25 @@ impl Shell {
             for part in parts {
                 if let WordPart::Param(expr) = part
                     && let crate::ast::ParamOp::Transform(ch) = &expr.op
+                    && *ch == 'P'
+                {
+                    // Inject line-editing flag for @P prompt expansion.
+                    // When emacs or vi mode is enabled via `set -o emacs`/`set -o vi`,
+                    // \[ and \] produce RL_PROMPT_START/END_IGNORE (0x01/0x02).
+                    let emacs_on = shell.shopt_options.get("emacs").copied().unwrap_or(false);
+                    let vi_on = shell.shopt_options.get("vi").copied().unwrap_or(false);
+                    if emacs_on || vi_on {
+                        vars.insert("__LINE_EDITING__".to_string(), "1".to_string());
+                    }
+                    // Inject POSIX flag for @P prompt expansion.
+                    // In POSIX mode, `!` at the start of a prompt string means
+                    // history number, and `!!` means literal `!`.
+                    if shell.opt_posix {
+                        vars.insert("__POSIX__".to_string(), "1".to_string());
+                    }
+                }
+                if let WordPart::Param(expr) = part
+                    && let crate::ast::ParamOp::Transform(ch) = &expr.op
                     && matches!(ch, 'a' | 'A')
                 {
                     // Strip [@] or [*] subscripts to get the base variable name
@@ -472,6 +492,7 @@ impl Shell {
         crate::expand::set_globstar(self.shopt_globstar);
         crate::expand::set_nullglob(self.shopt_nullglob);
         crate::expand::set_nocasematch(self.shopt_nocasematch);
+        crate::expand::set_posix_mode(self.opt_posix);
         crate::expand::set_patsub_replacement(
             self.shopt_options
                 .get("patsub_replacement")

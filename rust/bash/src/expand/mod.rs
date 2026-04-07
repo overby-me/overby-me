@@ -60,6 +60,8 @@ thread_local! {
     static NULLGLOB_ENABLED: RefCell<bool> = const { RefCell::new(false) };
     /// Whether nocasematch shopt is enabled (case-insensitive pattern matching)
     static NOCASEMATCH_ENABLED: RefCell<bool> = const { RefCell::new(false) };
+    /// Whether POSIX mode is enabled (disables glob expansion in $(< file*) etc.)
+    static POSIX_MODE: RefCell<bool> = const { RefCell::new(false) };
     /// Whether patsub_replacement shopt is enabled (`&` in replacement = matched text)
     static PATSUB_REPLACEMENT: RefCell<bool> = const { RefCell::new(true) };
     /// GLOBIGNORE patterns (colon-separated, empty = no ignore)
@@ -130,6 +132,14 @@ pub fn set_nocasematch(enabled: bool) {
 
 pub fn get_nocasematch() -> bool {
     NOCASEMATCH_ENABLED.with(|d| *d.borrow())
+}
+
+pub fn set_posix_mode(enabled: bool) {
+    POSIX_MODE.with(|d| *d.borrow_mut() = enabled);
+}
+
+pub fn get_posix_mode() -> bool {
+    POSIX_MODE.with(|d| *d.borrow())
 }
 
 pub fn set_patsub_replacement(enabled: bool) {
@@ -964,7 +974,7 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                                     expand_word_nosplit_ctx(&file_parts, ctx, &mut |c| cmd_sub(c));
                                 let expanded = expanded.trim().to_string();
                                 // Glob expansion (unless posix mode)
-                                let resolved = if !ctx.opt_flags.contains('P')
+                                let resolved = if !get_posix_mode()
                                     && (expanded.contains('*')
                                         || expanded.contains('?')
                                         || expanded.contains('['))
@@ -1541,7 +1551,7 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                 // Handle glob expansion in the filename (like bash does for
                 // $(< $TMPDIR/bashtmp.x*)) — unless in posix mode where
                 // glob expansion in redirections is disabled.
-                let resolved = if !ctx.opt_flags.contains('P')
+                let resolved = if !get_posix_mode()
                     && (expanded.contains('*') || expanded.contains('?') || expanded.contains('['))
                 {
                     match glob::glob(&expanded) {

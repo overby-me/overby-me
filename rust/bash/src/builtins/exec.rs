@@ -1,4 +1,5 @@
 use super::*;
+use crate::builtins::string_to_raw_bytes;
 
 pub(super) fn builtin_eval(shell: &mut Shell, args: &[String]) -> i32 {
     // Check for invalid options
@@ -479,7 +480,20 @@ pub(super) fn builtin_type(shell: &mut Shell, args: &[String]) -> i32 {
                         .map(|v| v.as_slice())
                         .unwrap_or(&[]);
                     let body_str = format_func_body_with_redirs(body, 0, redirs);
-                    println!("{}{} () \n{}", prefix, name, body_str);
+                    // Use raw byte output so PUA-encoded bytes (e.g. $'\001')
+                    // are written as single raw bytes matching bash behavior.
+                    let output = format!("{}{} () \n{}\n", prefix, name, body_str);
+                    let bytes = string_to_raw_bytes(&output);
+                    std::io::Write::flush(&mut std::io::stdout()).ok();
+                    #[cfg(unix)]
+                    {
+                        nix::unistd::write(std::io::stdout(), &bytes).ok();
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        use std::io::Write;
+                        std::io::stdout().write_all(&bytes).ok();
+                    }
                     true
                 } else {
                     false
@@ -732,7 +746,20 @@ pub(super) fn builtin_command(shell: &mut Shell, args: &[String]) -> i32 {
                         .map(|v| v.as_slice())
                         .unwrap_or(&[]);
                     let body = format_func_body_with_redirs(func_body, 0, redirs);
-                    println!("{}{} () \n{}", prefix, name, body);
+                    // Use raw byte output so PUA-encoded bytes (e.g. $'\001')
+                    // are written as single raw bytes matching bash behavior.
+                    let output = format!("{}{} () \n{}\n", prefix, name, body);
+                    let bytes = string_to_raw_bytes(&output);
+                    std::io::Write::flush(&mut std::io::stdout()).ok();
+                    #[cfg(unix)]
+                    {
+                        nix::unistd::write(std::io::stdout(), &bytes).ok();
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        use std::io::Write;
+                        std::io::stdout().write_all(&bytes).ok();
+                    }
                 } else if builtin_map.contains_key(name.as_str()) {
                     println!("{} is a shell builtin", name);
                 } else if let Some((hpath, _)) = shell.hash_table.get(name.as_str()) {

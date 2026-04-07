@@ -991,6 +991,410 @@ fn is_valid_var_ref(name: &str) -> bool {
     chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
+/// Decode prompt escape sequences for `${var@P}`.
+///
+/// Handles `\v`, `\V`, `\$`, `\W`, `\w`, `\h`, `\H`, `\u`, `\s`, `\n`, `\r`,
+/// `\a`, `\e`, `\\`, `\[`, `\]`, `\j`, `\!`, `\#`, `\l`, `\d`, `\t`, `\T`,
+/// `\@`, `\A`, `\D{fmt}`, `\0NNN` octal, and POSIX `!` history expansion.
+///
+/// After decoding, `promptvars` expansion (variable/command substitution) is
+/// performed by the caller via `cmd_sub`.
+fn decode_prompt_string(s: &str, ctx: &ExpCtx) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let mut result = String::new();
+    let mut i = 0;
+
+    // Determine values we might need
+    let hostname = {
+        let h = ctx
+            .vars
+            .get("HOSTNAME")
+            .cloned()
+            .unwrap_or_else(|| std::env::var("HOSTNAME").unwrap_or_default());
+        if h.is_empty() {
+            // Try to read from system
+            #[cfg(unix)]
+            {
+                let mut buf = [0u8; 256];
+                if unsafe { libc::gethostname(buf.as_mut_ptr() as *mut libc::c_char, buf.len()) }
+                    == 0
+                {
+                    let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+                    String::from_utf8_lossy(&buf[..end]).to_string()
+                } else {
+                    String::new()
+                }
+            }
+            #[cfg(not(unix))]
+            String::new()
+        } else {
+            h
+        }
+    };
+
+    let version = "5.3"; // dist_version equivalent
+    let patch_level = 0; // patch_level equivalent
+
+    let posixly_correct = ctx.vars.contains_key("__POSIX__");
+
+    while i < chars.len() {
+        let c = chars[i];
+
+        // POSIX mode: `!` means history number, `!!` means literal `!`
+        if posixly_correct && c == '!' {
+            if i + 1 < chars.len() && chars[i + 1] == '!' {
+                result.push('!');
+                i += 2;
+            } else {
+                // History number — we always return "1"
+                result.push('1');
+                i += 1;
+            }
+            continue;
+        }
+
+        if c == '\\' && i + 1 < chars.len() {
+            let next = chars[i + 1];
+            match next {
+                '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' => {
+                    // Octal escape: \0NNN (up to 3 octal digits)
+                    let mut val = 0u32;
+                    let mut count = 0;
+                    let mut j = i + 1;
+                    while j < chars.len() && count < 3 && chars[j] >= '0' && chars[j] <= '7' {
+                        val = val * 8 + (chars[j] as u32 - '0' as u32);
+                        j += 1;
+                        count += 1;
+                    }
+                    if val > 0 && val <= 0x7f {
+                        result.push(val as u8 as char);
+                    } else if val == 0 {
+                        // \0 — skip
+                    } else {
+                        result.push(char::from_u32(val).unwrap_or('?'));
+                    }
+                    i = j;
+                    continue;
+                }
+                'd' => {
+                    // Date: "Weekday Month Day"
+                    use std::time::SystemTime;
+                    let now = SystemTime::now()
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    // Simple date formatting (avoid chrono dependency)
+                    // Just output a placeholder — tests don't usually compare exact dates
+                    let _ = now;
+                    // Use libc localtime + strftime on unix
+                    #[cfg(unix)]
+                    {
+                        let time = now as libc::time_t;
+                        let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+                        unsafe { libc::localtime_r(&time, &mut tm) };
+                        let mut buf = [0u8; 64];
+                        let fmt = std::ffi::CString::new("%a %b %d").unwrap();
+                        let len = unsafe {
+                            libc::strftime(
+                                buf.as_mut_ptr() as *mut libc::c_char,
+                                buf.len(),
+                                fmt.as_ptr(),
+                                &tm,
+                            )
+                        };
+                        if len > 0 {
+                            result.push_str(&String::from_utf8_lossy(&buf[..len]));
+                        }
+                    }
+                    i += 2;
+                    continue;
+                }
+                't' => {
+                    // Time: HH:MM:SS (24-hour)
+                    push_strftime(&mut result, "%H:%M:%S");
+                    i += 2;
+                    continue;
+                }
+                'T' => {
+                    // Time: HH:MM:SS (12-hour)
+                    push_strftime(&mut result, "%I:%M:%S");
+                    i += 2;
+                    continue;
+                }
+                '@' => {
+                    // Time: HH:MM AM/PM
+                    push_strftime(&mut result, "%I:%M %p");
+                    i += 2;
+                    continue;
+                }
+                'A' => {
+                    // Time: HH:MM (24-hour)
+                    push_strftime(&mut result, "%H:%M");
+                    i += 2;
+                    continue;
+                }
+                'D' => {
+                    // \D{format} — strftime format
+                    if i + 2 < chars.len() && chars[i + 2] == '{' {
+                        let start = i + 3;
+                        let mut end = start;
+                        while end < chars.len() && chars[end] != '}' {
+                            end += 1;
+                        }
+                        let fmt: String = chars[start..end].iter().collect();
+                        let fmt = if fmt.is_empty() {
+                            "%X".to_string() // locale-specific time
+                        } else {
+                            fmt
+                        };
+                        push_strftime(&mut result, &fmt);
+                        i = if end < chars.len() { end + 1 } else { end };
+                        continue;
+                    }
+                    // Not followed by {, treat as literal
+                    result.push('\\');
+                    result.push('D');
+                    i += 2;
+                    continue;
+                }
+                'n' => {
+                    // Newline (in non-editing mode, just \n)
+                    result.push('\n');
+                    i += 2;
+                    continue;
+                }
+                'r' => {
+                    result.push('\r');
+                    i += 2;
+                    continue;
+                }
+                'a' => {
+                    result.push('\x07'); // bell
+                    i += 2;
+                    continue;
+                }
+                'e' => {
+                    result.push('\x1b'); // escape
+                    i += 2;
+                    continue;
+                }
+                '\\' => {
+                    result.push('\\');
+                    i += 2;
+                    continue;
+                }
+                's' => {
+                    // Shell name — bash uses the basename of argv[0] (the shell
+                    // binary itself), NOT $0 (which is the script name).  Since
+                    // we are a bash-compatible shell, always use "bash".
+                    result.push_str("bash");
+                    i += 2;
+                    continue;
+                }
+                'v' => {
+                    result.push_str(version);
+                    i += 2;
+                    continue;
+                }
+                'V' => {
+                    result.push_str(&format!("{}.{}", version, patch_level));
+                    i += 2;
+                    continue;
+                }
+                'w' => {
+                    // Working directory (with ~ substitution for HOME)
+                    let pwd = ctx.vars.get("PWD").cloned().unwrap_or_else(|| {
+                        std::env::var("PWD").unwrap_or_else(|_| {
+                            std::env::current_dir()
+                                .map(|p| p.to_string_lossy().to_string())
+                                .unwrap_or_else(|_| ".".to_string())
+                        })
+                    });
+                    let home = ctx
+                        .vars
+                        .get("HOME")
+                        .cloned()
+                        .unwrap_or_else(|| std::env::var("HOME").unwrap_or_default());
+                    if !home.is_empty() && pwd.starts_with(&home) {
+                        let rest = &pwd[home.len()..];
+                        if rest.is_empty() || rest.starts_with('/') {
+                            result.push('~');
+                            result.push_str(rest);
+                        } else {
+                            result.push_str(&pwd);
+                        }
+                    } else {
+                        result.push_str(&pwd);
+                    }
+                    i += 2;
+                    continue;
+                }
+                'W' => {
+                    // Basename of working directory (or ~ if HOME)
+                    let pwd = ctx.vars.get("PWD").cloned().unwrap_or_else(|| {
+                        std::env::var("PWD").unwrap_or_else(|_| {
+                            std::env::current_dir()
+                                .map(|p| p.to_string_lossy().to_string())
+                                .unwrap_or_else(|_| ".".to_string())
+                        })
+                    });
+                    let home = ctx
+                        .vars
+                        .get("HOME")
+                        .cloned()
+                        .unwrap_or_else(|| std::env::var("HOME").unwrap_or_default());
+                    if !home.is_empty() && pwd == home {
+                        result.push('~');
+                    } else if pwd == "/" {
+                        result.push('/');
+                    } else {
+                        let base = pwd.rsplit('/').next().unwrap_or(&pwd);
+                        result.push_str(base);
+                    }
+                    i += 2;
+                    continue;
+                }
+                'u' => {
+                    // Username
+                    let user = ctx
+                        .vars
+                        .get("USER")
+                        .cloned()
+                        .unwrap_or_else(|| std::env::var("USER").unwrap_or_default());
+                    result.push_str(&user);
+                    i += 2;
+                    continue;
+                }
+                'h' => {
+                    // Hostname (up to first .)
+                    let h = if let Some(dot) = hostname.find('.') {
+                        &hostname[..dot]
+                    } else {
+                        &hostname
+                    };
+                    result.push_str(h);
+                    i += 2;
+                    continue;
+                }
+                'H' => {
+                    // Full hostname
+                    result.push_str(&hostname);
+                    i += 2;
+                    continue;
+                }
+                'j' => {
+                    // Number of jobs — we don't track jobs well, return "0"
+                    result.push('0');
+                    i += 2;
+                    continue;
+                }
+                'l' => {
+                    // Terminal device basename
+                    #[cfg(unix)]
+                    {
+                        let tty = unsafe { libc::ttyname(0) };
+                        if !tty.is_null() {
+                            let s = unsafe { std::ffi::CStr::from_ptr(tty) }.to_string_lossy();
+                            let base = s.rsplit('/').next().unwrap_or(&s);
+                            result.push_str(base);
+                        } else {
+                            result.push_str("tty");
+                        }
+                    }
+                    #[cfg(not(unix))]
+                    result.push_str("tty");
+                    i += 2;
+                    continue;
+                }
+                '!' => {
+                    // History number — return "1" (no history tracking)
+                    result.push('1');
+                    i += 2;
+                    continue;
+                }
+                '#' => {
+                    // Command number — return "1"
+                    result.push('1');
+                    i += 2;
+                    continue;
+                }
+                '$' => {
+                    // $ or # depending on UID
+                    #[cfg(unix)]
+                    {
+                        let euid = unsafe { libc::geteuid() };
+                        result.push(if euid == 0 { '#' } else { '$' });
+                    }
+                    #[cfg(not(unix))]
+                    result.push('$');
+                    i += 2;
+                    continue;
+                }
+                '[' | ']' => {
+                    // Readline non-printing markers.
+                    // When line editing is enabled (set -o emacs / set -o vi),
+                    // \[ produces RL_PROMPT_START_IGNORE (0x01) and
+                    // \] produces RL_PROMPT_END_IGNORE (0x02).
+                    // When line editing is off (default in scripts), these are
+                    // silently skipped (no output), matching bash behavior.
+                    let line_editing = ctx.vars.contains_key("__LINE_EDITING__");
+                    if line_editing {
+                        let ch = if next == '[' { '\x01' } else { '\x02' };
+                        result.push(ch);
+                    }
+                    // In both cases, consume the escape sequence
+                    i += 2;
+                    continue;
+                }
+                _ => {
+                    // Unknown escape — keep as \X
+                    result.push('\\');
+                    result.push(next);
+                    i += 2;
+                    continue;
+                }
+            }
+        } else {
+            result.push(c);
+            i += 1;
+        }
+    }
+
+    result
+}
+
+/// Helper: push strftime-formatted current time into a string.
+#[cfg(unix)]
+fn push_strftime(out: &mut String, fmt: &str) {
+    use std::time::SystemTime;
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let time = now as libc::time_t;
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    unsafe { libc::localtime_r(&time, &mut tm) };
+    let mut buf = [0u8; 128];
+    if let Ok(fmt_c) = std::ffi::CString::new(fmt) {
+        let len = unsafe {
+            libc::strftime(
+                buf.as_mut_ptr() as *mut libc::c_char,
+                buf.len(),
+                fmt_c.as_ptr(),
+                &tm,
+            )
+        };
+        if len > 0 {
+            out.push_str(&String::from_utf8_lossy(&buf[..len]));
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn push_strftime(out: &mut String, _fmt: &str) {
+    out.push_str("??");
+}
+
 pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
     // Handle indirect expansion with operators: ${!name+word}, ${!name-word}, etc.
     if expr.name.starts_with('!')
@@ -1917,7 +2321,25 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                     }
                 }
                 'K' | 'k' => shell_quote(&val),
-                _ => val, // @P — return as-is for now
+                'P' => {
+                    // Prompt string expansion: decode prompt escapes, then
+                    // expand variables/command substitutions in the result
+                    // (matching bash's promptvars behavior).
+                    let decoded = decode_prompt_string(&val, ctx);
+                    // Perform variable expansion on the decoded string via
+                    // cmd_sub.  Escape `"`, backtick, and `\` for double-quote
+                    // context so that $VAR references are expanded but special
+                    // chars don't break the quoting.
+                    let mut escaped = String::with_capacity(decoded.len() + 16);
+                    for dc in decoded.chars() {
+                        if dc == '"' || dc == '`' || dc == '\\' {
+                            escaped.push('\\');
+                        }
+                        escaped.push(dc);
+                    }
+                    cmd_sub(&format!("printf '%s' \"{}\"", escaped))
+                }
+                _ => val,
             }
         }
     }
