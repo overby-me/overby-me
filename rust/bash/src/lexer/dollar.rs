@@ -740,11 +740,24 @@ fn parse_brace_param(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart
             let name = read_param_name_with_subscript(chars, i);
 
             // Check if name ends with [@] or [*] — this is ${!arr[@]} for array indices
+            // BUT only when followed immediately by '}'. If followed by an operator
+            // like @Q, %b, #pat, etc., it's indirect expansion: resolve name[@] to
+            // get the value, then apply the operator on that value as a variable name.
             if name.ends_with("[@]") || name.ends_with("[*]") {
                 let ch = if name.ends_with("[@]") { '@' } else { '*' };
                 let arr_name = name[..name.len() - 3].to_string();
-                // Check for @X transform after [@]/[*] (e.g. ${!arr[@]@Q})
-                let transform = if *i + 2 < chars.len()
+                if *i < chars.len() && chars[*i] == '}' {
+                    // ${!arr[@]} or ${!arr[*]} — plain array indices, no operator
+                    *i += 1;
+                    return WordPart::Param(ParamExpr {
+                        name: arr_name,
+                        op: ParamOp::ArrayIndices(ch, None),
+                    });
+                }
+                // There's an operator after [@]/[*] — this is indirect expansion.
+                // Resolve name[@] to get the value(s), then apply the operator.
+                // Check for @X transform (e.g. ${!varname[@]@Q})
+                if *i + 2 < chars.len()
                     && chars[*i] == '@'
                     && matches!(
                         chars[*i + 1],
@@ -754,16 +767,19 @@ fn parse_brace_param(chars: &[char], i: &mut usize, in_dquote: bool) -> WordPart
                 {
                     let t = chars[*i + 1];
                     *i += 3; // skip @, transform_char, }
-                    Some(t)
-                } else {
-                    if *i < chars.len() && chars[*i] == '}' {
-                        *i += 1;
-                    }
-                    None
-                };
+                    return WordPart::Param(ParamExpr {
+                        name: format!("!{}", name),
+                        op: ParamOp::Transform(t),
+                    });
+                }
+                // Other operator (%, #, -, +, =, ?, :, etc.)
+                let op = read_param_op(chars, i, &name, in_dquote);
+                if *i < chars.len() && chars[*i] == '}' {
+                    *i += 1;
+                }
                 return WordPart::Param(ParamExpr {
-                    name: arr_name,
-                    op: ParamOp::ArrayIndices(ch, transform),
+                    name: format!("!{}", name),
+                    op,
                 });
             }
 

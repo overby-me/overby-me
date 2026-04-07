@@ -3,7 +3,10 @@ mod params;
 mod pattern;
 pub(crate) mod transform_helpers;
 
-use params::{apply_param_op, expand_param, get_array_elements, is_array_at_expansion, lookup_var};
+use params::{
+    apply_param_op, expand_param, get_array_elements, is_array_at_expansion, lookup_var,
+    parse_arith_offset,
+};
 use pattern::{TrimMode, pattern_replace, shell_pattern_match, trim_pattern};
 
 use crate::ast::*;
@@ -54,6 +57,8 @@ thread_local! {
     static GLOBSTAR_ENABLED: RefCell<bool> = const { RefCell::new(false) };
     /// Whether nullglob shopt is enabled (unmatched globs expand to nothing)
     static NULLGLOB_ENABLED: RefCell<bool> = const { RefCell::new(false) };
+    /// Whether nocasematch shopt is enabled (case-insensitive pattern matching)
+    static NOCASEMATCH_ENABLED: RefCell<bool> = const { RefCell::new(false) };
     /// Whether patsub_replacement shopt is enabled (`&` in replacement = matched text)
     static PATSUB_REPLACEMENT: RefCell<bool> = const { RefCell::new(true) };
     /// GLOBIGNORE patterns (colon-separated, empty = no ignore)
@@ -116,6 +121,14 @@ pub fn set_globstar(enabled: bool) {
 
 pub fn set_nullglob(enabled: bool) {
     NULLGLOB_ENABLED.with(|d| *d.borrow_mut() = enabled);
+}
+
+pub fn set_nocasematch(enabled: bool) {
+    NOCASEMATCH_ENABLED.with(|d| *d.borrow_mut() = enabled);
+}
+
+pub fn get_nocasematch() -> bool {
+    NOCASEMATCH_ENABLED.with(|d| *d.borrow())
 }
 
 pub fn set_patsub_replacement(enabled: bool) {
@@ -701,48 +714,84 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                         }
                     }
                     WordPart::Param(expr) if is_array_at_expansion(expr, ctx) => {
-                        // "${arr[@]}" — each element becomes a separate field
-                        // For Substring, get_array_elements handles index-based slicing
-                        // for all array types (indexed, assoc, and positional @/*)
-                        let elements = get_array_elements(expr, ctx);
-                        // Determine if this is $* (join with IFS) or $@ (split)
-                        let is_star = if let Some(bracket) = expr.name.find('[') {
-                            &expr.name[bracket + 1..expr.name.len() - 1] == "*"
-                        } else {
-                            expr.name == "*"
-                        };
-                        if is_star {
-                            // "${*:...}" or "${arr[*]:...}" — join with IFS[0]
-                            let ifs_sep = ifs_first_char(ctx.vars);
-                            for (i, elem) in elements.iter().enumerate() {
-                                if i > 0
-                                    && let Some(c) = ifs_sep
-                                {
-                                    s.push(c);
+                        // "${arr[@]@k}" — lowercase k produces separate words
+                        // for each key-value pair (key and value as separate argv entries)
+                        if matches!(&expr.op, ParamOp::Transform('k')) {
+                            if let Some(bracket) = expr.name.find('[') {
+                                let base = &expr.name[..bracket];
+                                let resolved = ctx.resolve_nameref(base);
+                                if !s.is_empty() {
+                                    out.push(Segment::Quoted(std::mem::take(&mut s)));
                                 }
-                                let modified = if matches!(&expr.op, ParamOp::Substring(..)) {
-                                    elem.clone()
-                                } else {
-                                    apply_param_op(elem, &expr.op, ctx, cmd_sub, &expr.name)
-                                };
-                                s.push_str(&modified);
+                                let mut first = true;
+                                if let Some(arr) = ctx.arrays.get(&resolved) {
+                                    for (i, v) in arr.iter().enumerate() {
+                                        if let Some(val) = v {
+                                            if !first {
+                                                out.push(Segment::SplitHere);
+                                            }
+                                            first = false;
+                                            out.push(Segment::Quoted(i.to_string()));
+                                            out.push(Segment::SplitHere);
+                                            out.push(Segment::Quoted(val.clone()));
+                                        }
+                                    }
+                                } else if let Some(assoc) = ctx.assoc_arrays.get(&resolved) {
+                                    for (k, v) in assoc.iter() {
+                                        if !first {
+                                            out.push(Segment::SplitHere);
+                                        }
+                                        first = false;
+                                        out.push(Segment::Quoted(k.clone()));
+                                        out.push(Segment::SplitHere);
+                                        out.push(Segment::Quoted(v.clone()));
+                                    }
+                                }
                             }
                         } else {
-                            if !s.is_empty() {
-                                out.push(Segment::Quoted(std::mem::take(&mut s)));
-                            }
-                            for (i, elem) in elements.iter().enumerate() {
-                                if i > 0 {
-                                    out.push(Segment::SplitHere);
+                            // "${arr[@]}" — each element becomes a separate field
+                            // For Substring, get_array_elements handles index-based slicing
+                            // for all array types (indexed, assoc, and positional @/*)
+                            let elements = get_array_elements(expr, ctx, cmd_sub);
+                            // Determine if this is $* (join with IFS) or $@ (split)
+                            let is_star = if let Some(bracket) = expr.name.find('[') {
+                                &expr.name[bracket + 1..expr.name.len() - 1] == "*"
+                            } else {
+                                expr.name == "*"
+                            };
+                            if is_star {
+                                // "${*:...}" or "${arr[*]:...}" — join with IFS[0]
+                                let ifs_sep = ifs_first_char(ctx.vars);
+                                for (i, elem) in elements.iter().enumerate() {
+                                    if i > 0
+                                        && let Some(c) = ifs_sep
+                                    {
+                                        s.push(c);
+                                    }
+                                    let modified = if matches!(&expr.op, ParamOp::Substring(..)) {
+                                        elem.clone()
+                                    } else {
+                                        apply_param_op(elem, &expr.op, ctx, cmd_sub, &expr.name)
+                                    };
+                                    s.push_str(&modified);
                                 }
-                                // Apply param operation (^, ^^, ,, etc.) to each element
-                                // (but not Substring, which was already handled as array slice)
-                                let modified = if matches!(&expr.op, ParamOp::Substring(..)) {
-                                    elem.clone()
-                                } else {
-                                    apply_param_op(elem, &expr.op, ctx, cmd_sub, &expr.name)
-                                };
-                                out.push(Segment::Quoted(modified));
+                            } else {
+                                if !s.is_empty() {
+                                    out.push(Segment::Quoted(std::mem::take(&mut s)));
+                                }
+                                for (i, elem) in elements.iter().enumerate() {
+                                    if i > 0 {
+                                        out.push(Segment::SplitHere);
+                                    }
+                                    // Apply param operation (^, ^^, ,, etc.) to each element
+                                    // (but not Substring, which was already handled as array slice)
+                                    let modified = if matches!(&expr.op, ParamOp::Substring(..)) {
+                                        elem.clone()
+                                    } else {
+                                        apply_param_op(elem, &expr.op, ctx, cmd_sub, &expr.name)
+                                    };
+                                    out.push(Segment::Quoted(modified));
+                                }
                             }
                         }
                     }
@@ -771,6 +820,50 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                                         s.push(c);
                                     }
                                     s.push_str(arg);
+                                }
+                            } else if target.ends_with("[@]") {
+                                let base = &target[..target.len() - 3];
+                                let resolved = ctx.resolve_nameref(base);
+                                if !s.is_empty() {
+                                    out.push(Segment::Quoted(std::mem::take(&mut s)));
+                                }
+                                let elements: Vec<String> =
+                                    if let Some(arr) = ctx.arrays.get(&resolved) {
+                                        arr.iter().filter_map(|v| v.clone()).collect()
+                                    } else if let Some(assoc) = ctx.assoc_arrays.get(&resolved) {
+                                        assoc.values().cloned().collect()
+                                    } else if let Some(val) = ctx.vars.get(&resolved) {
+                                        vec![val.clone()]
+                                    } else {
+                                        vec![]
+                                    };
+                                for (i, elem) in elements.iter().enumerate() {
+                                    if i > 0 {
+                                        out.push(Segment::SplitHere);
+                                    }
+                                    out.push(Segment::Quoted(elem.clone()));
+                                }
+                            } else if target.ends_with("[*]") {
+                                let base = &target[..target.len() - 3];
+                                let resolved = ctx.resolve_nameref(base);
+                                let sep = ifs_first_char(ctx.vars);
+                                let elements: Vec<String> =
+                                    if let Some(arr) = ctx.arrays.get(&resolved) {
+                                        arr.iter().filter_map(|v| v.clone()).collect()
+                                    } else if let Some(assoc) = ctx.assoc_arrays.get(&resolved) {
+                                        assoc.values().cloned().collect()
+                                    } else if let Some(val) = ctx.vars.get(&resolved) {
+                                        vec![val.clone()]
+                                    } else {
+                                        vec![]
+                                    };
+                                for (i, elem) in elements.iter().enumerate() {
+                                    if i > 0
+                                        && let Some(c) = sep
+                                    {
+                                        s.push(c);
+                                    }
+                                    s.push_str(elem);
                                 }
                             } else {
                                 let val = expand_param(expr, ctx, cmd_sub);
@@ -1122,6 +1215,8 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                             | ParamOp::Substring(..)
                             | ParamOp::Transform('A')
                             | ParamOp::Transform('a')
+                            | ParamOp::Transform('K')
+                            | ParamOp::Transform('k')
                     )
                     && let Some(arr) = ctx.arrays.get(&resolved)
                 {
@@ -1161,7 +1256,8 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                 if (idx == "@" || idx == "*")
                     && let ParamOp::Substring(offset_str, length_str) = &expr.op
                 {
-                    let offset: i64 = offset_str.trim().parse().unwrap_or(0);
+                    let offset: i64 =
+                        parse_arith_offset(offset_str.trim(), &expr.name, ctx, cmd_sub);
 
                     // For indexed arrays, use index-based offset matching:
                     // ${arr[@]:N:L} selects set elements with array index >= N,
@@ -1185,7 +1281,8 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                             .position(|(i, _)| *i >= effective_offset as usize)
                             .unwrap_or(count);
                         let end = if let Some(len_str) = length_str {
-                            let len: i64 = len_str.trim().parse().unwrap_or(count as i64);
+                            let len: i64 =
+                                parse_arith_offset(len_str.trim(), &expr.name, ctx, cmd_sub);
                             if len < 0 {
                                 let target = (count as i64 + len).max(0) as usize;
                                 target.max(start)
@@ -1225,7 +1322,8 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                             (offset as usize).min(count)
                         };
                         let end = if let Some(len_str) = length_str {
-                            let len: i64 = len_str.trim().parse().unwrap_or(count as i64);
+                            let len: i64 =
+                                parse_arith_offset(len_str.trim(), &expr.name, ctx, cmd_sub);
                             if len < 0 {
                                 (count as i64 + len).max(start as i64) as usize
                             } else {

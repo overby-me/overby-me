@@ -124,7 +124,10 @@ pub(super) fn is_array_at_expansion(expr: &ParamExpr, ctx: &ExpCtx) -> bool {
             // whole-variable declaration/attribute output (not per-element).
             if !matches!(
                 &expr.op,
-                ParamOp::Length | ParamOp::Transform('A') | ParamOp::Transform('a')
+                ParamOp::Length
+                    | ParamOp::Transform('A')
+                    | ParamOp::Transform('a')
+                    | ParamOp::Transform('K')
             ) {
                 return ctx.arrays.contains_key(&resolved)
                     || ctx.assoc_arrays.contains_key(&resolved);
@@ -135,11 +138,11 @@ pub(super) fn is_array_at_expansion(expr: &ParamExpr, ctx: &ExpCtx) -> bool {
 }
 
 /// Get array elements for an array[@] expansion.
-pub(super) fn get_array_elements(expr: &ParamExpr, ctx: &ExpCtx) -> Vec<String> {
+pub(super) fn get_array_elements(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> Vec<String> {
     // Handle ${@:offset:length} — slice of positional params
     if expr.name == "@" || expr.name == "*" {
         if let ParamOp::Substring(offset_str, length_str) = &expr.op {
-            let offset: i64 = offset_str.trim().parse().unwrap_or(0);
+            let offset: i64 = parse_arith_offset(offset_str.trim(), &expr.name, ctx, cmd_sub);
             let params = if offset == 0 {
                 ctx.positional
             } else {
@@ -154,7 +157,7 @@ pub(super) fn get_array_elements(expr: &ParamExpr, ctx: &ExpCtx) -> Vec<String> 
                 ((offset - 1) as usize).min(count)
             };
             let end = if let Some(len_str) = length_str {
-                let len: i64 = len_str.trim().parse().unwrap_or(count as i64);
+                let len: i64 = parse_arith_offset(len_str.trim(), &expr.name, ctx, cmd_sub);
                 if len < 0 {
                     (count as i64 + len).max(start as i64) as usize
                 } else {
@@ -205,7 +208,7 @@ pub(super) fn get_array_elements(expr: &ParamExpr, ctx: &ExpCtx) -> Vec<String> 
         // ${arr[@]:offset:length} selects elements starting at array index >= offset,
         // then takes `length` existing (set) elements from that point.
         if let ParamOp::Substring(offset_str, length_str) = &expr.op {
-            let offset: i64 = offset_str.trim().parse().unwrap_or(0);
+            let offset: i64 = parse_arith_offset(offset_str.trim(), &expr.name, ctx, cmd_sub);
             if let Some(arr) = ctx.arrays.get(&resolved) {
                 // Collect (index, value) pairs for set elements
                 let set_elements: Vec<(usize, &str)> = arr
@@ -228,7 +231,7 @@ pub(super) fn get_array_elements(expr: &ParamExpr, ctx: &ExpCtx) -> Vec<String> 
                     .position(|(idx, _)| *idx >= effective_offset as usize)
                     .unwrap_or(count);
                 let end = if let Some(len_str) = length_str {
-                    let len: i64 = len_str.trim().parse().unwrap_or(count as i64);
+                    let len: i64 = parse_arith_offset(len_str.trim(), &expr.name, ctx, cmd_sub);
                     if len < 0 {
                         let target = (count as i64 + len).max(0) as usize;
                         target.max(start)
@@ -252,7 +255,7 @@ pub(super) fn get_array_elements(expr: &ParamExpr, ctx: &ExpCtx) -> Vec<String> 
                     (offset as usize).min(count)
                 };
                 let end = if let Some(len_str) = length_str {
-                    let len: i64 = len_str.trim().parse().unwrap_or(count as i64);
+                    let len: i64 = parse_arith_offset(len_str.trim(), &expr.name, ctx, cmd_sub);
                     if len < 0 {
                         let target = (count as i64 + len).max(0) as usize;
                         target.max(start)
@@ -275,7 +278,7 @@ pub(super) fn get_array_elements(expr: &ParamExpr, ctx: &ExpCtx) -> Vec<String> 
                     (offset as usize).min(chars.len())
                 };
                 let end = if let Some(len_str) = length_str {
-                    let len: i64 = len_str.trim().parse().unwrap_or(count);
+                    let len: i64 = parse_arith_offset(len_str.trim(), &expr.name, ctx, cmd_sub);
                     if len < 0 {
                         let target = (count + len).max(0) as usize;
                         target.max(start)
@@ -666,10 +669,28 @@ fn expand_backticks_in_str(s: &str, cmd_sub: CmdSubFn) -> String {
 /// Parse an arithmetic expression for substring offset/length.
 /// If the string is a simple integer, parse it directly. If it's a variable name,
 /// resolve it. Otherwise, report an arithmetic error.
-fn parse_arith_offset(s: &str, param_name: &str, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> i64 {
+pub(super) fn parse_arith_offset(
+    s: &str,
+    param_name: &str,
+    ctx: &ExpCtx,
+    cmd_sub: CmdSubFn,
+) -> i64 {
     if s.is_empty() {
         return 0;
     }
+    // Pre-expand ${...} parameter expressions (e.g. ${#arr[@]}) before
+    // arithmetic evaluation.  The arithmetic resolver (resolve_arith_vars)
+    // uses raw_val.len() for ${#name} which gives byte-length of the
+    // joined string, not the element count.  By expanding through the
+    // normal word-expansion pipeline first we get the correct value.
+    let preexpanded;
+    let s = if s.contains("${") || s.contains("$(") {
+        let word = crate::lexer::parse_word_string(s);
+        preexpanded = expand_word_nosplit_ctx(&word, ctx, cmd_sub);
+        &preexpanded
+    } else {
+        s
+    };
     // Expand backtick command substitutions before arithmetic evaluation
     let expanded;
     let s = if s.contains('`') {
@@ -923,7 +944,7 @@ pub(super) fn apply_param_op(
             }
         }
         ParamOp::Transform(ch) => match ch {
-            'Q' => shell_quote(val),
+            'Q' | 'K' | 'k' => shell_quote(val),
             'E' => expand_backslash_escapes(val),
             'U' => val.to_uppercase(),
             'L' => val.to_lowercase(),
@@ -979,6 +1000,21 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
         let real_name = &expr.name[1..];
         // First resolve the indirect: get the value of real_name, use as variable name
         let target = lookup_var(real_name, ctx);
+        // Check if the resolved target is a valid variable name.
+        // If not (e.g., "aaa bbb" from array expansion), emit an error.
+        if !target.is_empty() && !is_valid_var_ref(&target) {
+            let prefix = EXPAND_ERROR_PREFIX.with(|p| {
+                let p = p.borrow();
+                if p.is_empty() {
+                    "bash".to_string()
+                } else {
+                    p.clone()
+                }
+            });
+            eprintln!("{}: {}: invalid variable name", prefix, target);
+            set_arith_error();
+            return String::new();
+        }
         // Now apply the operator to the target variable
         let indirect_expr = ParamExpr {
             name: target,
@@ -1008,6 +1044,12 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
         && ctx.positional.len() > 1
     {
         let sep = ifs_join_sep(expr.name == "*");
+
+        // ${@@K} / ${@@k} — for positional params, single-quote each element (same as @Q)
+        if matches!(&expr.op, ParamOp::Transform('K') | ParamOp::Transform('k')) {
+            let quoted: Vec<String> = ctx.positional[1..].iter().map(|s| shell_quote(s)).collect();
+            return quoted.join(" ");
+        }
 
         // ${@@A} / ${*@A} — assignment form for positional params: set -- 'val1' 'val2' ...
         if matches!(&expr.op, ParamOp::Transform('A')) {
@@ -1162,11 +1204,46 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                 }
             }
 
+            // ${arr[@]@K} / ${arr[@]@k} — key-value pairs for arrays
+            if matches!(&expr.op, ParamOp::Transform('K') | ParamOp::Transform('k')) {
+                let uppercase = matches!(&expr.op, ParamOp::Transform('K'));
+                if let Some(arr) = ctx.arrays.get(&resolved) {
+                    let pairs: Vec<String> = arr
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, v)| {
+                            v.as_ref().map(|val| {
+                                if uppercase {
+                                    format!("{} \"{}\"", i, val.replace('"', "\\\""))
+                                } else {
+                                    format!("{} {}", i, val)
+                                }
+                            })
+                        })
+                        .collect();
+                    return pairs.join(" ");
+                } else if let Some(assoc) = ctx.assoc_arrays.get(&resolved) {
+                    let pairs: Vec<String> = assoc
+                        .iter()
+                        .map(|(k, v)| {
+                            if uppercase {
+                                format!("{} \"{}\"", k, v.replace('"', "\\\""))
+                            } else {
+                                format!("{} {}", k, v)
+                            }
+                        })
+                        .collect();
+                    return pairs.join(" ");
+                }
+                // Scalar — fall through to normal handler (single-quote the value)
+            }
+
             // For non-Substring ops on arrays, apply per-element
             // ${arr[@]@A} — full declaration form for arrays
             if let ParamOp::Transform('A') = &expr.op {
                 let attrs_key = format!("__ATTRS__{}", resolved);
                 let attrs = ctx.vars.get(&attrs_key).cloned().unwrap_or_default();
+                let is_unset = ctx.vars.contains_key(&format!("__UNSET__{}", resolved));
                 if let Some(arr) = ctx.arrays.get(&resolved) {
                     let elems: Vec<String> = arr
                         .iter()
@@ -1181,6 +1258,12 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                     } else {
                         attrs
                     };
+                    // If declared-but-unset, omit =() to match bash.
+                    // An explicitly assigned empty array (e.g. B=()) should
+                    // still show =(), only truly unset arrays omit it.
+                    if is_unset {
+                        return format!("declare -{} {}", flags, resolved);
+                    }
                     return format!("declare -{} {}=({})", flags, resolved, elems.join(" "));
                 } else if let Some(assoc) = ctx.assoc_arrays.get(&resolved) {
                     let elems: Vec<String> = assoc
@@ -1195,7 +1278,29 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                     // Bash adds a trailing space before ) for assoc arrays
                     return format!("declare -{} {}=({} )", flags, resolved, elems.join(" "));
                 } else {
-                    // Scalar variable — fall through to normal handler
+                    // Scalar variable (possibly declared-but-unset without -a flag)
+                    // — fall through to the scalar @A handler at the bottom of expand_param
+                    // by NOT returning here. We need to skip the per-element code below.
+                    let val = lookup_var(&expr.name, ctx);
+                    if attrs.is_empty() {
+                        if is_unset {
+                            return String::new();
+                        } else {
+                            return format!("{}='{}'", resolved, val.replace('\'', "'\\''"));
+                        }
+                    } else {
+                        let flags = format!("-{}", attrs);
+                        if is_unset {
+                            return format!("declare {} {}", flags, resolved);
+                        } else {
+                            return format!(
+                                "declare {} {}='{}'",
+                                flags,
+                                resolved,
+                                val.replace('\'', "'\\''")
+                            );
+                        }
+                    }
                 }
             }
 
@@ -1811,7 +1916,8 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                         }
                     }
                 }
-                _ => val, // @P, @K — return as-is for now
+                'K' | 'k' => shell_quote(&val),
+                _ => val, // @P — return as-is for now
             }
         }
     }

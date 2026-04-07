@@ -1,4 +1,53 @@
-use super::get_patsub_replacement;
+use super::{get_nocasematch, get_patsub_replacement};
+
+/// Case-insensitive character comparison for nocasematch.
+/// Returns true if the two characters are equal, or if nocasematch is enabled
+/// and they are equal ignoring case.
+#[inline]
+fn chars_eq(a: char, b: char, nocase: bool) -> bool {
+    if a == b {
+        return true;
+    }
+    if nocase {
+        // Compare by lowercasing both sides (handles ASCII and Unicode)
+        let mut la = a.to_lowercase();
+        let mut lb = b.to_lowercase();
+        loop {
+            match (la.next(), lb.next()) {
+                (Some(x), Some(y)) if x == y => continue,
+                (None, None) => return true,
+                _ => return false,
+            }
+        }
+    }
+    false
+}
+
+/// Case-insensitive range check for nocasematch.
+#[inline]
+fn char_in_range(ch: char, lo: char, hi: char, nocase: bool) -> bool {
+    if ch >= lo && ch <= hi {
+        return true;
+    }
+    if nocase {
+        // Check if any case variant of ch falls in the range of case variants
+        for lc in ch.to_lowercase() {
+            if lc >= lo.to_lowercase().next().unwrap_or(lo)
+                && lc <= hi.to_lowercase().next().unwrap_or(hi)
+            {
+                return true;
+            }
+        }
+        for uc in ch.to_uppercase() {
+            if uc >= lo.to_uppercase().next().unwrap_or(lo)
+                && uc <= hi.to_uppercase().next().unwrap_or(hi)
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
 
 pub(super) enum TrimMode {
     SmallLeft,
@@ -61,6 +110,11 @@ pub(super) fn trim_pattern(value: &str, pattern: &str, mode: TrimMode) -> String
 /// This function only handles \<newline> → removed (line continuation).
 /// Check if a pattern is a literal string (no glob metacharacters).
 fn is_literal_pattern(pattern: &str) -> bool {
+    // When nocasematch is on, we cannot use the literal fast path because
+    // string operations (find/replace) are case-sensitive.
+    if get_nocasematch() {
+        return false;
+    }
     !pattern.contains(['*', '?', '[', '\\', '!', '@', '+'])
 }
 
@@ -609,6 +663,7 @@ fn split_extglob_alts_ex(pattern: &[char]) -> Vec<Vec<char>> {
 }
 
 fn pattern_match_impl(text: &[char], ti: usize, pattern: &[char], pi: usize) -> bool {
+    let nocase = get_nocasematch();
     let mut ti = ti;
     let mut pi = pi;
 
@@ -676,7 +731,7 @@ fn pattern_match_impl(text: &[char], ti: usize, pattern: &[char], pi: usize) -> 
                 if pi >= pattern.len() {
                     return false;
                 }
-                if ti >= text.len() || text[ti] != pattern[pi] {
+                if ti >= text.len() || !chars_eq(text[ti], pattern[pi], nocase) {
                     return false;
                 }
                 ti += 1;
@@ -722,7 +777,7 @@ fn pattern_match_impl(text: &[char], ti: usize, pattern: &[char], pi: usize) -> 
                     // Handle backslash or \x00 escape inside bracket
                     if (pattern[pi] == '\\' || pattern[pi] == '\x00') && pi + 1 < pattern.len() {
                         pi += 1;
-                        if pattern[pi] == ch {
+                        if chars_eq(ch, pattern[pi], nocase) {
                             matched = true;
                         }
                         pi += 1;
@@ -779,7 +834,7 @@ fn pattern_match_impl(text: &[char], ti: usize, pattern: &[char], pi: usize) -> 
                     {
                         // In C locale, equivalence class matches the character itself
                         let equiv: String = pattern[pi + 2..pi + 2 + end].iter().collect();
-                        if equiv.len() == 1 && ch == equiv.chars().next().unwrap() {
+                        if equiv.len() == 1 && chars_eq(ch, equiv.chars().next().unwrap(), nocase) {
                             matched = true;
                         }
                         pi = pi + 2 + end + 2;
@@ -844,8 +899,7 @@ fn pattern_match_impl(text: &[char], ti: usize, pattern: &[char], pi: usize) -> 
                                         _ => None,
                                     };
                                     if let (Some(rs), Some(re)) = (range_start, range_end)
-                                        && ch >= rs
-                                        && ch <= re
+                                        && char_in_range(ch, rs, re, nocase)
                                     {
                                         matched = true;
                                     }
@@ -856,8 +910,7 @@ fn pattern_match_impl(text: &[char], ti: usize, pattern: &[char], pi: usize) -> 
                                 // Range: [.x.]-y (collating start, literal end)
                                 let range_end = pattern[collating_end_pi + 1];
                                 if let Some(rs) = collating_char
-                                    && ch >= rs
-                                    && ch <= range_end
+                                    && char_in_range(ch, rs, range_end, nocase)
                                 {
                                     matched = true;
                                 }
@@ -866,7 +919,7 @@ fn pattern_match_impl(text: &[char], ti: usize, pattern: &[char], pi: usize) -> 
                             }
                         }
                         if let Some(cc) = collating_char
-                            && ch == cc
+                            && chars_eq(ch, cc, nocase)
                         {
                             matched = true;
                         }
@@ -874,12 +927,12 @@ fn pattern_match_impl(text: &[char], ti: usize, pattern: &[char], pi: usize) -> 
                         continue;
                     }
                     if pi + 2 < pattern.len() && pattern[pi + 1] == '-' && pattern[pi + 2] != ']' {
-                        if ch >= pattern[pi] && ch <= pattern[pi + 2] {
+                        if char_in_range(ch, pattern[pi], pattern[pi + 2], nocase) {
                             matched = true;
                         }
                         pi += 3;
                     } else {
-                        if ch == pattern[pi] {
+                        if chars_eq(ch, pattern[pi], nocase) {
                             matched = true;
                         }
                         pi += 1;
@@ -906,14 +959,14 @@ fn pattern_match_impl(text: &[char], ti: usize, pattern: &[char], pi: usize) -> 
                 if pi >= pattern.len() || ti >= text.len() {
                     return false;
                 }
-                if text[ti] != pattern[pi] {
+                if !chars_eq(text[ti], pattern[pi], nocase) {
                     return false;
                 }
                 ti += 1;
                 pi += 1;
             }
             ch => {
-                if ti >= text.len() || text[ti] != ch {
+                if ti >= text.len() || !chars_eq(text[ti], ch, nocase) {
                     return false;
                 }
                 ti += 1;
