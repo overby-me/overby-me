@@ -2,17 +2,19 @@
 
 ## Current State
 
-**67/77 nix tests verified passing** (Phase 35), ~68/83 local tests passing (0 diff, sequential) on bookmark `bash-integration-test`. Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available). **read** now flaky in nix (sandbox `/dev/tty` timing + missing `read -d` output for non-ASCII delimiters), **comsub** occasionally passes. Nix harness now normalizes BASHPID/PPID/ref_PID and `$_` nix store paths — **varenv** and **nameref** should flip to passing in nix once verified. **new-exp** now ~2 diff in nix (was ~16, Phase 34 fixed `declare -ai` nounset behavior + indirect `@a`/`@A` transforms; remaining: `'}'` quoting only). **case** was regressed from Phase 31 PUA bytes (literal `\001` vs PUA mismatch in case2.sub) — Phase 34 fixed it via PUA decoding in both `pattern.rs` and `commands.rs` pattern matchers. **shopt** now passes in nix (Phase 33 added `emacs`/`vi` to `set -o` listing). **Phase 35** fixed command injection vulnerability in arithmetic evaluation via array subscripts — `$()`, `${ }`, backticks, and `$((  ))` inside `[...]` brackets are now protected; comma operator respects bracket depth; `[[ -eq ]]` resolves array references from word parts instead of re-parsing expanded strings. **Phase 35 also fixed PUA boundary issues**: `printf '%d' "'$x"` now decodes PUA before integer conversion (fixes **iquote**); `read` builtin and `capture_output` now re-encode raw bytes from pipes as PUA so IFS splitting works with control-char delimiters (fixes **nquote5**).
+**70/77 nix tests verified passing** (Phase 36), ~68/83 local tests passing (0 diff, sequential) on bookmark `bash-phase-36`. Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available). **read** now passes in nix (Phase 36 fixed PUA-aware IFS matching in read builtin). **comsub** occasionally passes (flaky SIGPIPE). Nix harness normalizes BASHPID/PPID/ref_PID and `$_` nix store paths. **new-exp** now ~2 diff in nix (remaining: `'}'` quoting only). **Phase 36** fixed PUA-aware IFS splitting in `read` builtin — bytes from pipes are PUA-encoded but IFS contains actual chars; `ifs_is_match`/`ifs_is_ws` closures now check both forms. **Phase 36 also restricted compound assignment parsing** — `name=(...)` in command arguments now correctly emits syntax error for non-assignment builtins (e.g. `printf a=(x)` rejected); `let a=(expr)` handled as arithmetic grouping; `eval a=(1 2 3)` handled as balanced-paren word. **Phase 36 also fixed `$((expr))` in array subscripts** — `${a[$(( 0 ))]}` now works via arithmetic expansion in `resolve_arith_vars`. **Phase 36 also fixed scalar assignment misparse** — `a=(4*3)/2` now assigns string `(4*3)/2` instead of creating array + running `/2`.
 
-See `CHANGELOG.md` for full fix history (200+ fixes across 35 phases).
+See `CHANGELOG.md` for full fix history (200+ fixes across 36 phases).
 
-### Nix test results (67/77 verified passing, likely 69+ with Phase 29/32 harness fixes)
+### Nix test results (70/77 verified passing — Phase 36)
 
-Verified passing (67/77, likely 69+ with Phase 35 PUA fixes): alias, appendop, arith-for, **array2** ✅, **attr** ✅, braces, **case** ✅, casemod, **comsub-eof** ✅, comsub-posix, cond, coproc, cprint, **dirstack** ✅, dollars, dynvar, errors, execscript, **exp-tests** ✅, **exportfunc** ✅, extglob, extglob2, extglob3, func, getopts, glob-bracket, glob-test, globstar, **heredoc** ✅, herestr, ifs, ifs-posix, **input-test** ✅, invert, **iquote** ✅, mapfile, more-exp, nquote, nquote1, nquote2, nquote3, nquote4, **nquote5** ✅, parser, posix2, posixexp, **posixexp2** ✅, posixpat, posixpipe, precedence, printf, **procsub** ✅, quote, redir, rhs-exp, **set-e** ✅, set-x, **shopt** ✅, strip, **test** ✅, tilde, tilde2, **type** ✅, **vredir** ✅ — **iquote** fixed in Phase 35 (PUA decode in `parse_printf_int`) — **nquote5** fixed in Phase 35 (PUA re-encoding in `read` builtin + `capture_output`) — **read** now has 4-line nix diff (non-ASCII `read -d` delimiter output) — **quotearray** now 0 diff locally (Phase 28), nix diffs reduced (Phase 35 eliminated uname injection) — **new-exp** now PID-only locally (Phase 34 fixed `declare -ai` nounset + indirect transforms) — **varenv** and **nameref** now PID-only locally (Phase 29 `$_` fix + nix harness PID normalization should flip them)
+Verified passing (70/77): alias, appendop, arith-for, **array2** ✅, **attr** ✅, braces, **case** ✅, casemod, **comsub-eof** ✅, comsub-posix, cond, coproc, cprint, **dirstack** ✅, dollars, dynvar, errors, execscript, **exp-tests** ✅, **exportfunc** ✅, extglob, extglob2, extglob3, func, getopts, glob-bracket, glob-test, globstar, **heredoc** ✅, herestr, ifs, ifs-posix, **input-test** ✅, invert, **iquote** ✅, mapfile, more-exp, nquote, nquote1, nquote2, nquote3, nquote4, **nquote5** ✅, parser, posix2, posixexp, **posixexp2** ✅, posixpat, posixpipe, precedence, printf, **procsub** ✅, quote, **read** ✅, redir, rhs-exp, **set-e** ✅, set-x, **shopt** ✅, strip, **test** ✅, tilde, tilde2, **type** ✅, **vredir** ✅ — **read** fixed in Phase 36 (PUA-aware IFS matching in read builtin) — **iquote** fixed in Phase 35 (PUA decode in `parse_printf_int`) — **nquote5** fixed in Phase 35 (PUA re-encoding in `read` builtin + `capture_output`) — **quotearray** now 0 diff locally (Phase 28), nix diffs remain (~95 lines) — **new-exp** now PID-only locally (Phase 34 fixed `declare -ai` nounset + indirect transforms) — **varenv** and **nameref** now PID-only locally (Phase 29 `$_` fix + nix harness PID normalization)
 
-Verified failing (10/77): arith (nix-only: arith10.sub error format diffs + `let` empty subscript handling in assoc_expand_once mode), array (nix-only: array32/33.sub new tests), assoc (nix-only: tilde expansion in subscripts + empty array formatting), builtins (~130, help output + ulimit flags), comsub (1, flaky SIGPIPE), comsub2 (~8, funsub line number off-by-1), lastpipe (1, flaky SIGPIPE), nameref (nix: nameref resolution bugs revealed by sandbox), new-exp (~2 nix, `'}'` quoting only — Phase 34 fixed `declare -ai` nounset), quotearray (~95 nix, reduced from ~77 — Phase 35 eliminated uname injection but revealed process substitution and `(( ))` partial-execution diffs)
+Verified failing (7/77): arith (~43 nix, arith10.sub error format diffs + `let` empty subscript handling in assoc_expand_once mode), array (~430 nix, array1/2/4/6/7/32/33.sub — Phase 36 reduced from ~467 via compound assignment + `$((expr))` fixes), assoc (~354 nix, tilde expansion in subscripts + `BASH_ALIASES`/`BASH_CMDS` + bracket parsing), builtins (~216 nix, help output + ulimit flags), comsub (1, flaky SIGPIPE), comsub2 (~20, funsub line number off-by-1 + job listing), lastpipe (1, flaky SIGPIPE), nameref (~756 nix, nameref resolution bugs revealed by sandbox), new-exp (~2 nix, `'}'` quoting only), quotearray (~95 nix, `A[]]` bracket parsing + `assoc_expand_once` + `test -v` with `@` keys), varenv (~352 nix, function-local scoping + readonly + tempenv leaking)
 
-Note: **read** now flaky in nix (1 line diff, `read -t 1 < /dev/tty` sandbox timing). **comsub** occasionally passes (flaky SIGPIPE). **trap** now flaky (passes locally, 1-2 line diff in nix). **arith**, **array**, **assoc** pass locally (0 diff) but fail in nix sandbox due to stricter environment revealing edge cases. **varenv** and **nameref** now PID-only locally (Phase 29 `$_` init fix); nix harness updated to normalize BASHPID/PPID/ref_PID and `$_` paths. **builtins** PID-only locally but has `help` output + `ulimit` diffs in nix. **new-exp** ~2 nix diff (was ~16 pre-Phase 34, was ~40 pre-Phase 33). **case** was temporarily regressed (case2.sub `\001` pattern matching) — fixed in Phase 34.
+Note: **trap** is flaky (passes most runs, occasionally 2-line CHLD diff). **comsub** occasionally passes (flaky SIGPIPE).
+
+Note: **arith**, **array**, **assoc**, **quotearray** pass locally (0 diff) but fail in nix sandbox due to stricter environment revealing edge cases. **varenv** and **nameref** now PID-only locally; nix harness normalizes BASHPID/PPID/ref_PID and `$_` paths. **builtins** PID-only locally but has `help` output + `ulimit` diffs in nix. **new-exp** PID-only locally, ~2 nix diff (`'}'` quoting). Phase 36 reduced array nix diffs from ~467→~430 (compound assignment + `$((expr))` fixes).
 
 **Phase 31 fixes:** Implement `shopt -s nocasematch` support for pattern matching — add `NOCASEMATCH_ENABLED` thread-local flag (like `DOTGLOB_ENABLED` etc.), propagate from `shell.shopt_nocasematch` in `expand_word_fields`, `expand_word_single`, `run_case`, and `run_conditional`. Pattern matching (`pattern_match_impl` in both `pattern.rs` and `commands.rs`) now does case-insensitive comparison for literal chars, bracket expressions, ranges, and `\x00`-escaped literals when nocasematch is on. `[[ =~ ]]` regex wraps pattern with `(?i)` prefix. Fix `"${!ref}"` indirect array expansion in double-quoted context — when indirect target ends with `[@]`, produce `SplitHere` markers between elements (like `"$@"`); when target ends with `[*]`, join with IFS. Fix `${arr[@]:offset:length}` array slice arithmetic offset parsing — replace all `offset_str.trim().parse().unwrap_or(0)` in `get_array_elements` with `parse_arith_offset()` calls so that expressions like `${#x[@]}-1` are evaluated arithmetically instead of defaulting to 0. Add `cmd_sub: CmdSubFn` parameter to `get_array_elements` for this. Fix `${!name[@]@Q}` / `${!name[@]%b}` lexer parsing — `${!name[@]}` (followed by `}`) is array indices, but `${!name[@]@Q}` (followed by operator) is now correctly treated as indirect expansion (resolve `name[@]`, apply operator on result). Fix `${!target@Q}` invalid variable name error — when indirect expansion resolves to an invalid variable name (e.g. `aaa bbb` from array `[@]` join), emit `invalid variable name` error and set `arith_error` flag to abort the command. Fix `${VAR[@]@A}` for declared-but-unset scalars — when the base variable is a scalar with attributes (not in arrays/assoc_arrays), produce `declare -FLAGS name` instead of empty. Fix `${arr[@]@A}` for declared-but-unset arrays — omit `=()` when `__UNSET__` marker is set, but keep `=()` for explicitly empty arrays (e.g. `B=()`). Add `${var@K}`/`${var@k}` key-value transform operators — for indexed arrays produce `idx "val"` pairs (K) or `idx val` pairs (k); for assoc arrays produce `key "val"` pairs; for scalars/positional params produce single-quoted values; `"${arr[@]@k}"` in double quotes produces `SplitHere`-separated key/value words. Add `parse_arith_offset` pre-expansion of `${...}` and `$(...)` in offset expressions. Fix `string_to_raw_bytes` UTF-8 encoding — introduce PUA-based raw byte tracking (U+E000–U+E0FF) so that `$'\xNN'`/`\NNN` escape sequences produce PUA-encoded characters that `string_to_raw_bytes` converts to single bytes, while regular Unicode characters (from source code) are output as proper UTF-8. Update `shell_quote`, `shell_escape` (printf %q), `quote_for_declare`, and `quote_assoc_key` to decode PUA chars to their original byte values when quoting. Add `char_in_class` helper for POSIX character class matching that decodes PUA chars before classification (e.g. `[[:cntrl:]]` correctly matches PUA-encoded `$'\003'`).
 
@@ -78,29 +80,29 @@ Failing (~10 nix):
 
 | Test | Local diff | Nix diff | Notes |
 |------|-----------|----------|-------|
-| trap | 0 ✅ | ~2 | Flaky — timing-dependent signal delivery (extra CHLD) |
+| trap | 0 ✅ | 0 ✅ (flaky) | Usually passes; occasionally 2-line CHLD diff (timing-dependent) |
 | comsub | 0 ✅ | 1 | Spurious `echo: write error: Broken pipe` (flaky timing, sometimes passes) |
 | lastpipe | 0 ✅ | 1 | Spurious `echo: write error: Broken pipe` (flaky timing) |
 | comsub2 | ~12 | ~20 | Line number off-by-1 in funsubs + control char word splitting + job listing |
-| new-exp | 0 (PID) ✅ | ~2 | Phase 34 fixed `declare -ai` nounset + indirect `@a`/`@A`; remaining: `'}'` quoting only |
-| quotearray | 0 ✅ | ~95 | Phase 35 eliminated injection (uname); remaining: `A[]]` bracket parsing, `assoc_expand_once`, `test -v`, process sub in `[[ ]]` arith |
-| iquote | 0 ✅ | 0 ✅ | Phase 35 fixed PUA decode in `parse_printf_int` (`0xe07f` → `0x7f`) |
+| new-exp | 0 (PID) ✅ | ~2 | Remaining: `'}'` quoting in dquote `${}` default values only |
+| quotearray | 0 ✅ | ~95 | `A[]]` bracket parsing, `assoc_expand_once`, `test -v`, process sub in `[[ ]]` arith |
+| iquote | 0 ✅ | 0 ✅ | Phase 35 fixed PUA decode in `parse_printf_int` |
 | nquote5 | 0 ✅ | 0 ✅ | Phase 35 fixed PUA re-encoding in `read` builtin + `capture_output` |
-| arith | 0 ✅ | ~42 | Nix-only: arith10.sub error format + `let` empty subscript in assoc_expand_once |
-| array | 0 ✅ | ~513 | Nix-only: array1/4/6/7/10/12/14/32/33.sub — injection prevention, type conversion, subscript diffs |
-| assoc | 0 ✅ | ~354 | Nix-only: key quoting, type conversion, subscript assignment validation |
+| read | 0 ✅ | 0 ✅ | Phase 36 fixed PUA-aware IFS matching in read builtin |
+| arith | 0 ✅ | ~43 | Nix-only: arith10.sub error format + `let` empty subscript in assoc_expand_once |
+| array | 0 ✅ | ~430 | Nix-only: array1/2/4/6/7/32/33.sub — Phase 36 reduced from ~467; remaining: `'}'` quoting, bracket parsing, type conversion |
+| assoc | 0 ✅ | ~354 | Nix-only: `BASH_ALIASES`/`BASH_CMDS`, bracket parsing, key quoting, tilde expansion |
 | builtins | ~18 (PID) | ~216 | `help` output formatting, `ulimit` flags, `umask` symbolic mode, PID diffs |
 | nameref | ~12 (PID) | ~756 | Nix reveals nameref resolution bugs (`aa&bb`, nounset, indirect, circular refs) |
 | varenv | ~8 (PID) | ~352 | Nix reveals function-local scoping, readonly, tempenv leaking diffs |
-| read | 0 ✅ | ~4 | Non-ASCII `read -d` delimiter output missing |
 
 **Phase 29 improved new-exp** — `new-exp16.sub` from ~36→0 diff (`&` replacement quoting + tilde in replacements). **Phase 29 improved varenv** from ~6→~4 PID-only (`$_` init fix). **Phase 29 improved nameref** — `$_` diff eliminated.
 
 **Phase 28 improved quotearray** from ~8→0 diff lines locally (single-quoted `(( ))` fix + `printf -v array[@]` fix). **Phase 27 improved quotearray** from ~27→~8 diff lines locally (invalid arithmetic operator detection + indexed array subscript `$var` expansion fix + `@` key quoting + `$'\t'` non-printable key formatting). **Phase 26 improved quotearray** from ~32→~27 diff lines locally (`]+=` append assignment fix). **Phase 25 improved quotearray** from ~36→~32 diff lines locally (nested subscript `${A[${a[i]}]}` fix). **Phase 23 improved quotearray** from ~26→~24 diff lines locally (empty element removal fix). **Phase 20 improved quotearray** from ~68→~36 diff lines locally by fixing assoc subscript expansion, arithmetic bracket depth tracking, and `declare -p` key quoting. No remaining local diffs. Nix diffs remain in quotearray3/4/5.sub (unset quoting, test -v with @ keys, assoc_expand_once).
 
-### Local test results (~68/83 passing, 0 diff sequential — Phase 32)
+### Local test results (~68/83 passing, 0 diff sequential — Phase 36)
 
-83 total `.tests` files in `/tmp/bash-5.3/tests/` (superset of the 77 nix tests — includes dbg-support, dbg-support2, dstack2, histexp, history, rsh, invocation, jobs, posixpipe, and others not in the nix harness). **dstack2** now passes (was 26 diff lines — `~N`/`~+N`/`~-N` tilde expansion implemented). **arith**, **array**, **assoc**, **exp**, **posixexp2**, **comsub**, **lastpipe**, **trap**, **quotearray**, **new-exp** now pass locally (0 diff or PID-only). Phase 32 fixed `local b=("${!1}")` compound assignment in new-exp12 (was ~4 diff lines). UTF-8 encoding (new-exp11) and printf %q quoting (new-exp10) fixed via PUA raw byte tracking. **nameref**, **varenv**, **builtins**, **read**, **heredoc**, **procsub**, **extglob**, **type**, **glob** have PID-only diffs.
+83 total `.tests` files in `/tmp/bash-5.3/tests/` (superset of the 77 nix tests — includes dbg-support, dbg-support2, dstack2, histexp, history, rsh, invocation, jobs, posixpipe, and others not in the nix harness). **dstack2** now passes (was 26 diff lines — `~N`/`~+N`/`~-N` tilde expansion implemented). **arith**, **array**, **assoc**, **exp**, **posixexp2**, **comsub**, **lastpipe**, **trap**, **quotearray**, **new-exp**, **read** now pass locally (0 diff or PID-only). Phase 36 fixed PUA-aware IFS in `read` builtin, restricted compound assignment parsing, `$((expr))` in array subscripts, and scalar assignment misparse. **nameref**, **varenv**, **builtins**, **heredoc**, **procsub**, **extglob**, **type**, **glob** have PID-only diffs.
 
 **Important:** Many tests that show diffs when run in parallel (`diff <(our_bash test) <(bash test)`) pass when run sequentially due to race conditions on shared `/tmp` and `/var/tmp` files. Tests like `globstar`, `test`, `redir`, `extglob` pass when run sequentially. Use sequential mode for accurate results:
 
@@ -150,27 +152,27 @@ done
 
 Suggested nix timeout: 30s for most tests, 120s for trap.
 
-## Failing Nix Tests (~10/77)
+## Failing Nix Tests (~7/77)
 
-### Near-passing (1-line diffs, likely flaky)
+### Near-passing (1-line diffs, flaky)
 
-- **trap** (1 line) — Timing-dependent signal delivery (extra CHLD)
+- **~~trap~~** — Now usually passes in nix (flaky — timing-dependent CHLD signal delivery, occasionally 2-line diff)
 - **comsub** (1 line) — Spurious `echo: write error: Broken pipe` (SIGPIPE timing race in nix sandbox)
 - **lastpipe** (1 line) — Spurious `echo: write error: Broken pipe` (SIGPIPE timing race in nix sandbox)
 
 ### Medium diffs
 
-- **comsub2** (~8 lines) — Line number off-by-1 in funsubs. Root cause: bash's `parse_and_execute` counts lines via `shell_getc` line-buffer refills (not per-`\n` character), and compound commands (`for`/`while`) add extra line increments. Our character-level lexer counts differently.
-- **new-exp** (~2 nix lines, was ~16 pre-Phase 34, was ~40 pre-Phase 33) — Phase 34 fixed `declare -ai` nounset behavior (14 lines eliminated) + indirect `@a`/`@A` transforms. Remaining: `'}'` quoting in dquote `${}` default values (2 lines, known hard).
-- **quotearray** (~77 nix lines) — 0 diff locally (Phase 28 fixed single-quoted `(( ))` + `printf -v array[@]`). Nix diffs in quotearray2/3/4/5.sub: `A[]]`/`A[[]` bracket parsing, `unset` with complex quoting and `$(echo foo)` keys, `test -v`/`[[ -v ]]` with `@` key for assoc arrays, `assoc_expand_once` interactions, `declare -a array` vs `declare: array: not found` version differences
+- **comsub2** (~20 lines) — Line number off-by-1 in funsubs + job listing diffs. Root cause: bash's `parse_and_execute` counts lines via `shell_getc` line-buffer refills (not per-`\n` character), and compound commands (`for`/`while`) add extra line increments. Our character-level lexer counts differently.
+- **new-exp** (~2 nix lines) — Remaining: `'}'` quoting in dquote `${}` default values (2 lines, known hard — see priority item 5).
+- **quotearray** (~95 nix lines) — 0 diff locally (Phase 28 fixed single-quoted `(( ))` + `printf -v array[@]`). Nix diffs in quotearray1/2/3/4/5.sub: `A[]]`/`A[[]` bracket parsing, `unset` with complex quoting and `$(echo foo)` keys, `test -v`/`[[ -v ]]` with `@` key for assoc arrays, `assoc_expand_once` interactions, process substitution in `[[ ]]` arithmetic context
 
 ### Nix-only failures (pass locally, fail in nix sandbox)
 
-- **arith** — Passes locally (0 diff). Nix reveals arith10.sub error format diffs + `let` empty subscript handling in `assoc_expand_once` mode
-- **array** — Passes locally (0 diff). Nix reveals array32/33.sub differences
-- **assoc** — Passes locally (0 diff). Nix reveals bash 5.3 `A[]]`/`A[[]` bracket parsing, `$'\001'` key handling in compound assignments, and other bash 5.3 differences
-- **nameref** — PID-only locally. Nix reveals nameref resolution bugs (invalid variable names like `aa&bb`, nounset behavior with namerefs)
-- **varenv** — PID-only locally. Nix reveals `declare` output format diffs, `local` error handling
+- **arith** (~43 nix) — Passes locally (0 diff). Nix reveals arith10.sub error format diffs + `let` empty subscript handling in `assoc_expand_once` mode
+- **array** (~430 nix, was ~467 pre-Phase 36) — Passes locally (0 diff). Nix reveals array1/2/4/6/7/32/33.sub differences. Phase 36 fixed: compound assignment restriction (array1.sub), `let a=(expr)` arithmetic grouping (array4.sub), `$((expr))` in subscripts (array4/7.sub), `a=(expr)/suffix` scalar misparse (array4.sub)
+- **assoc** (~354 nix) — Passes locally (0 diff). Nix reveals `BASH_ALIASES`/`BASH_CMDS` not populated, assoc5.sub bracket parsing (`A[]]`, `foo[bar]`), quote handling in keys, tilde expansion diffs
+- **nameref** (~756 nix) — PID-only locally. Nix reveals nameref resolution bugs (invalid variable names like `aa&bb`, nounset behavior with namerefs, circular references, readonly handling)
+- **varenv** (~352 nix) — PID-only locally. Nix reveals function-local scoping, readonly, tempenv leaking, `declare` output format diffs
 
 ### Larger diffs
 
@@ -299,6 +301,24 @@ These exist in `/tmp/bash-5.3/tests/` but not in the nix test list:
 11. **Performance: optimize hot loops** — `ifs-posix` takes ~4 minutes vs bash's ~1s. `arith` takes ~2s vs bash's 0.035s. Profiling needed.
 
 12. **Fix `help` builtin output + `ulimit` flags** — Needed for builtins test in nix. `help` needs column-formatted output matching bash's layout. `ulimit -g` (max locked memory) not implemented. (~130 nix diff lines)
+
+## Recent Fixes (Phase 36)
+
+- **Fix `read` builtin PUA-aware IFS splitting** — Bytes read from pipes are PUA-encoded (e.g. tab U+0009 → U+E009) but IFS contains actual chars (U+0009). Add `ifs_is_match` and `ifs_is_ws` closures that check both the original and PUA-decoded/encoded forms of each character against IFS. Applied to all IFS comparisons in `builtin_read`: field splitting, leading/trailing whitespace stripping, delimiter detection, and the `-a` array reading path. Fixes `read9.sub` where `IFS=$'\t\r\f\v'` wasn't stripping trailing IFS whitespace from the last field. **Flips read to passing in nix** (69/77 → 70/77).
+
+- **Restrict inline compound array `name=(...)` parsing to assignment builtins** — Previously, any command could have `name=(...)` arguments parsed as compound assignments (e.g. `printf a=(x)` was accepted, `echo a=(1 2)` created an array). Now only `declare`/`typeset`/`local`/`export`/`readonly` trigger compound assignment parsing in argument position. All other commands emit `syntax error near unexpected token '('`, matching bash behavior. Fixes array1.sub syntax error diff in nix.
+
+- **Handle `let a=(expr)` as arithmetic grouping** — `let` arguments with `name=(expr)` now consume balanced parentheses as part of the word token (arithmetic grouping), then continue appending adjacent word tokens (e.g. `let a=(4*3)/2` produces single arg `a=(4*3)/2` evaluating to `a=6`). Previously misinterpreted as compound array assignment producing `a=("4*3")` then running `/2` as command. Fixes array4.sub `let` diffs in nix.
+
+- **Handle `eval a=(1 2 3)` as balanced-paren word** — `eval` arguments with `name=(...)` consume balanced parens with space separators between tokens, producing a single word like `a=(1 2 3)` that `eval` re-parses as a compound assignment. Previously used `\x1F` separators that eval couldn't interpret. Fixes array4/6.sub eval compound assignment diffs.
+
+- **Fix `$((expr))` arithmetic expansion in `resolve_arith_vars`** — When `$((` appears inside arithmetic variable resolution (e.g. `${a[$(( 0 ))]}` subscript), find matching `))` and recursively evaluate the inner arithmetic expression. Previously `$` was consumed as variable prefix, leaving `0(( 0 ))` as the expression, causing `operand expected` errors. Also handle `$(...)` by outputting literal `$(` so command substitution syntax isn't consumed as a variable name.
+
+- **Allow `$((expr))` inside array subscript brackets in `expand_comsubs_in_arith`** — Unlike `$(...)` command subs and `${ }` funsubs, `$((expr))` is pure arithmetic with no injection risk. Removes the `array_bracket_depth == 0` guard for `$((` specifically, so `${a[$(( 0 ))]}` correctly evaluates the inner arithmetic.
+
+- **Fix `a=(expr)/suffix` scalar assignment misparse** — When a leading assignment `a=(...)` is followed by an adjacent word token after the closing `)` (e.g. `a=(4*3)/2`), treat it as a scalar assignment instead of compound array. Reconstructs the original text from parsed elements and trailing word parts. Previously created array `a=("4*3")` and tried to run `/2` as a command.
+
+- **Phase 36 reduced array nix diffs** from ~467→~430 lines (compound assignment restriction + `let`/`eval` handling + `$((expr))` in subscripts + scalar assignment fix).
 
 ## Recent Fixes (Phase 35)
 
