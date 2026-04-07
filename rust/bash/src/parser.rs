@@ -2595,6 +2595,40 @@ impl Parser {
                 let elements = self.parse_array_elements();
                 match elements {
                     Ok(elems) => {
+                        // Check if ) is immediately followed by a word
+                        // token (e.g. /2 in a=(4*3)/2).  In bash, when
+                        // content follows the closing ), it's a scalar
+                        // assignment — not a compound array.  Reconstruct
+                        // the original text as a scalar value.
+                        if let Token::Word(trail_parts) = &self.current {
+                            // Adjacent word after ) — this is a scalar
+                            // like a=(4*3)/2.  Reconstruct the value from
+                            // the parsed elements + trailing text.
+                            let mut scalar_parts: Vec<WordPart> = Vec::new();
+                            scalar_parts.push(WordPart::Literal("(".to_string()));
+                            for (ei, elem) in elems.iter().enumerate() {
+                                if ei > 0 {
+                                    scalar_parts.push(WordPart::Literal(" ".to_string()));
+                                }
+                                if let Some(idx) = &elem.index {
+                                    scalar_parts.push(WordPart::Literal("[".to_string()));
+                                    scalar_parts.extend(idx.iter().cloned());
+                                    scalar_parts.push(WordPart::Literal("]=".to_string()));
+                                }
+                                scalar_parts.extend(elem.value.iter().cloned());
+                            }
+                            scalar_parts.push(WordPart::Literal(")".to_string()));
+                            // Append the trailing word parts (e.g. "/2")
+                            for p in trail_parts {
+                                scalar_parts.push(p.clone());
+                            }
+                            self.advance(); // consume trailing word
+                            return Some(Ok(Assignment {
+                                name: full_name,
+                                value: AssignValue::Scalar(scalar_parts),
+                                append,
+                            }));
+                        }
                         return Some(Ok(Assignment {
                             name: full_name,
                             value: AssignValue::Array(elems),
