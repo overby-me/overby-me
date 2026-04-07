@@ -1456,10 +1456,6 @@ impl Shell {
                     // Only if the original word had unquoted array syntax (not from 'name=(val)')
                     // and NOT from variable/command expansion (e.g., declare e=$y where y="(abc)")
                     let word_idx = arg_idx + 1; // skip command name
-                    let is_quoted_arg = word_idx < cmd.words.len()
-                        && cmd.words[word_idx].iter().any(|p| {
-                            matches!(p, WordPart::SingleQuoted(_) | WordPart::DoubleQuoted(_))
-                        });
                     // Check if the '(' after '=' was literally in the source code (not from expansion).
                     // When the parser handles `e=(one two three)`, it embeds the '(' into a Literal
                     // word part. When it handles `e=$y`, the value comes from Variable expansion
@@ -1519,15 +1515,24 @@ impl Shell {
                         }
                         result
                     };
-                    // Allow compound assignment when the '(' came from a
-                    // single-quoted part (e.g. declare -a f='("${d[@]}")').
-                    // The is_quoted_arg guard only blocks expansion-derived parens.
-                    // When '(' comes from single quotes, only treat as compound
-                    // assignment if -a or -A flag is present (bash behavior:
-                    // `export r='(5)'` without -a is scalar assignment).
-                    if (!is_quoted_arg
-                        || (paren_from_single_quote && (has_array_flag || has_assoc_flag)))
-                        && has_literal_paren
+                    // Allow compound assignment when the '(' is literally in the
+                    // source code.  There are three sub-cases:
+                    //
+                    // 1. '(' is a plain Literal (not from single quotes) — always
+                    //    allow, even if the word also contains double-quoted parts
+                    //    (e.g. `local a=("${!1}")`).  The is_quoted_arg guard is
+                    //    irrelevant here because we verified via has_literal_paren
+                    //    that the '(' itself is source-level, not from expansion.
+                    //
+                    // 2. '(' came from a single-quoted part (e.g. declare -a
+                    //    f='("${d[@]}")') — only treat as compound assignment if
+                    //    -a or -A flag is present (bash behavior: `export r='(5)'`
+                    //    without -a is scalar assignment).
+                    //
+                    // 3. '(' came from expansion (has_literal_paren is false) —
+                    //    never treat as compound assignment.
+                    if has_literal_paren
+                        && (!paren_from_single_quote || (has_array_flag || has_assoc_flag))
                         && let Some(eq_pos) = arg.find('=')
                     {
                         let name = &arg[..eq_pos];
@@ -1538,6 +1543,17 @@ impl Shell {
                             && name.chars().all(|c| c.is_alphanumeric() || c == '_')
                             && !name.starts_with(|c: char| c.is_ascii_digit())
                         {
+                            // For local/declare in function context, save the
+                            // old value BEFORE we overwrite the array.  The
+                            // builtin_local call later will see the name
+                            // without '=' and call declare_local again, but
+                            // that's a no-op because the scope already has it.
+                            let make_local_here =
+                                matches!(command_name.as_str(), "local" | "declare" | "typeset")
+                                    && !self.local_scopes.is_empty();
+                            if make_local_here {
+                                self.declare_local(name);
+                            }
                             // Perform the array assignment
                             if self.readonly_vars.contains(name) {
                                 if paren_from_single_quote && has_array_flag {
@@ -1608,9 +1624,95 @@ impl Shell {
                                         expanded.into_iter().map(Some).collect();
                                     self.arrays.insert(name.to_string(), arr);
                                 } else {
-                                    let arr =
-                                        crate::builtins::parse_indexed_compound_assignment(value);
-                                    self.arrays.insert(name.to_string(), arr);
+                                    // Re-expand compound assignment elements
+                                    // from the original word parts so that
+                                    // "$@"-like splitting (from "${!ref}" where
+                                    // ref=arr[@]) produces separate array
+                                    // elements.  Extract the word parts between
+                                    // Literal("(") and Literal(")") and expand
+                                    // them with expand_word_fields.
+                                    let mut used_word_expand = false;
+                                    if word_idx < cmd.words.len() {
+                                        let orig_word = &cmd.words[word_idx];
+                                        // Find the index of the Literal("(") part
+                                        let paren_start = orig_word.iter().position(
+                                            |p| matches!(p, WordPart::Literal(s) if s == "("),
+                                        );
+                                        // Find the index of the last Literal(")") part
+                                        let paren_end = orig_word.iter().rposition(
+                                            |p| matches!(p, WordPart::Literal(s) if s == ")"),
+                                        );
+                                        if let (Some(start), Some(end)) = (paren_start, paren_end)
+                                            && end > start
+                                        {
+                                            // Check if the parts between ( and ) contain
+                                            // anything that could produce "$@"-like splitting
+                                            // (DoubleQuoted with Param/Variable/CommandSub).
+                                            // Also check for \x1F element separators from the
+                                            // parser's array element embedding.
+                                            let inner_parts = &orig_word[start + 1..end];
+                                            let has_dquoted_expansion = inner_parts
+                                                .iter()
+                                                .any(|p| matches!(p, WordPart::DoubleQuoted(_)));
+                                            let has_element_sep = inner_parts.iter().any(|p| {
+                                                matches!(p, WordPart::Literal(s) if s.contains('\x1F'))
+                                            });
+                                            if has_dquoted_expansion || has_element_sep {
+                                                let ifs = self
+                                                    .vars
+                                                    .get("IFS")
+                                                    .cloned()
+                                                    .unwrap_or_else(|| " \t\n".to_string());
+                                                // Split on \x1F element separators first
+                                                // (from parser's array element embedding),
+                                                // then expand each sub-element.
+                                                let mut elements: Vec<Vec<&WordPart>> =
+                                                    vec![vec![]];
+                                                for part in inner_parts {
+                                                    if let WordPart::Literal(s) = part
+                                                        && s.contains('\x1F')
+                                                    {
+                                                        // Split this literal on \x1F
+                                                        let pieces: Vec<&str> =
+                                                            s.split('\x1F').collect();
+                                                        for (pi, _piece) in
+                                                            pieces.iter().enumerate()
+                                                        {
+                                                            if pi > 0 {
+                                                                elements.push(vec![]);
+                                                            }
+                                                        }
+                                                        continue;
+                                                    }
+                                                    elements.last_mut().unwrap().push(part);
+                                                }
+                                                let mut arr: Vec<Option<String>> = Vec::new();
+                                                for elem_parts in &elements {
+                                                    if elem_parts.is_empty() {
+                                                        continue;
+                                                    }
+                                                    let sub_word: Vec<WordPart> = elem_parts
+                                                        .iter()
+                                                        .map(|p| (*p).clone())
+                                                        .collect();
+                                                    let fields =
+                                                        self.expand_word_fields(&sub_word, &ifs);
+                                                    for f in fields {
+                                                        arr.push(Some(f));
+                                                    }
+                                                }
+                                                self.arrays.insert(name.to_string(), arr);
+                                                used_word_expand = true;
+                                            }
+                                        }
+                                    }
+                                    if !used_word_expand {
+                                        let arr =
+                                            crate::builtins::parse_indexed_compound_assignment(
+                                                value,
+                                            );
+                                        self.arrays.insert(name.to_string(), arr);
+                                    }
                                 }
                             }
                             new_args.push(name.to_string());

@@ -2,6 +2,14 @@
 
 All notable fixes to the bash test suite are documented here, grouped by phase.
 
+## Phase 32 — Compound array assignment in local/declare (fixes 210–212)
+
+1. **Fix `local b=("${!1}")` compound array assignment detection** (`src/interpreter/commands.rs`) — The `is_quoted_arg` guard in `run_simple_command`'s compound assignment handler blocked detection when the word contained `DoubleQuoted` parts (e.g., `"${!1}"`), even though the `(` was literally in the source code. When `has_literal_paren` is true (verified via AST word part inspection), compound assignment is now allowed regardless of whether the word also contains double-quoted parts. The `is_quoted_arg` check was only relevant when the `(` came from expansion (where `has_literal_paren` would be false), so it was removed entirely — `has_literal_paren` already provides the necessary distinction. This fixes `new-exp12.sub` where `local a=("${!1}")` with `$1=array_1[@]` was incorrectly treated as a scalar assignment `a="(HELLO)"` instead of an array `a=([0]="HELLO")`.
+
+2. **Fix `local` compound array scope restoration** (`src/interpreter/commands.rs`) — `declare_local` (which saves the old value for restoration on function exit) was called AFTER the compound assignment handler had already overwritten the array via `self.arrays.insert()`. This caused local array variables to leak into outer scope — e.g., `local array_1=('HELLO')` inside a function would persist `HELLO` after the function returned instead of restoring the original value. Fix: call `declare_local(name)` BEFORE performing the compound assignment so the previous value is properly saved. The subsequent `builtin_local` call (which receives just the name) is a no-op since the scope already contains the variable.
+
+3. **Fix `"${!ref}"` word splitting in compound array assignments** (`src/interpreter/commands.rs`) — When `"${!ref}"` where `ref=arr[@]` appeared as a compound assignment element (e.g., `local b=("${!2}")`), the value was expanded via `expand_word_single` which joins `"$@"`-like splits with space, losing element boundaries. Then `parse_indexed_compound_assignment` would re-split on whitespace, incorrectly splitting `"1 foo"` into separate elements `1`, `foo`. Fix: when the compound assignment content contains `DoubleQuoted` word parts (or `\x1F` element separators from the parser), re-expand from the original word parts using `expand_word_fields`, which preserves `SplitHere` markers from `"${!ref}"` with `[@]` as separate fields. This makes `local b=("${!2}")` with `$2=array_2[@]` (where `array_2=("1 foo" "2 foo")`) correctly produce `b=([0]="1 foo" [1]="2 foo")` instead of `b=([0]="1" [1]="foo" [2]="2" [3]="foo")`.
+
 ## Phase 10 — Array compound assignment / substring slicing (fixes 100–106)
 
 **Tests improved:** quotearray 205→0 ✅, array 96→40, attr 0 ✅ (new), arith-for 0 ✅ (new)
