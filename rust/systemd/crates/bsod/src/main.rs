@@ -156,7 +156,7 @@ struct VtState {
     v_state: u16,
 }
 
-/// Find the next free virtual terminal.
+/// Find the next free virtual terminal using VT_OPENQRY.
 fn find_free_vt(fd: i32) -> io::Result<(i32, i32)> {
     let mut state = VtState {
         v_active: 0,
@@ -167,12 +167,14 @@ fn find_free_vt(fd: i32) -> io::Result<(i32, i32)> {
     if unsafe { libc::ioctl(fd, 0x5603, &mut state) } < 0 {
         return Err(io::Error::last_os_error());
     }
-    for i in 0..16u16 {
-        if (state.v_state & (1 << i)) == 0 {
-            return Ok((i as i32 + 1, state.v_active as i32));
-        }
+
+    // VT_OPENQRY = 0x5600 — ask the kernel for the next free VT
+    let mut free_vt: libc::c_int = 0;
+    if unsafe { libc::ioctl(fd, 0x5600, &mut free_vt) } < 0 || free_vt <= 0 {
+        return Err(io::Error::last_os_error());
     }
-    Err(io::Error::new(io::ErrorKind::NotFound, "No free VT"))
+
+    Ok((free_vt, state.v_active as i32))
 }
 
 /// Set the terminal cursor position (1-based row, col).
@@ -202,16 +204,8 @@ fn display_message(message: &str, tty_path: Option<&PathBuf>) -> io::Result<()> 
         let console_fd = console.as_raw_fd();
         let (free_vt, original_vt) = find_free_vt(console_fd)?;
 
-        // Activate the free VT via the console fd
-        // VT_ACTIVATE = 0x5606, VT_WAITACTIVE = 0x5607
-        if free_vt > 0 {
-            unsafe {
-                libc::ioctl(console_fd, 0x5606, free_vt);
-                libc::ioctl(console_fd, 0x5607, free_vt);
-            }
-        }
-        drop(console);
-
+        // Open the target VT before activating — this ensures the kernel
+        // initialises the VT so VT_ACTIVATE can succeed.
         let tty_name = format!("/dev/tty{free_vt}");
         let f = fs::OpenOptions::new()
             .read(true)
@@ -219,6 +213,18 @@ fn display_message(message: &str, tty_path: Option<&PathBuf>) -> io::Result<()> 
             .open(&tty_name)?;
         let raw_fd = f.as_raw_fd();
         std::mem::forget(f);
+
+        // Activate the free VT.  Skip VT_WAITACTIVE — it can hang
+        // indefinitely in headless VMs where the VT switch cannot
+        // complete.  A short sleep gives the kernel time to switch.
+        // VT_ACTIVATE = 0x5606
+        if free_vt > 0 {
+            unsafe {
+                libc::ioctl(console_fd, 0x5606, free_vt);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        drop(console);
 
         (raw_fd, free_vt, original_vt)
     };
