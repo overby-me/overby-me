@@ -2857,7 +2857,7 @@ impl Shell {
             .get("LINENO")
             .cloned()
             .unwrap_or_else(|| "0".to_string());
-        let bash_lineno = vec![lineno; self.func_names.len().saturating_sub(1)];
+        let bash_lineno = vec![lineno; self.func_names.len()];
         self.arrays.insert(
             "BASH_LINENO".to_string(),
             bash_lineno.into_iter().map(Some).collect(),

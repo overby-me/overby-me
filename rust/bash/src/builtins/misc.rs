@@ -427,8 +427,79 @@ pub(super) fn builtin_umask(shell: &mut Shell, args: &[String]) -> i32 {
     }
 }
 
-pub(super) fn builtin_caller(_shell: &mut Shell, _args: &[String]) -> i32 {
-    0 // stub
+pub(super) fn builtin_caller(shell: &mut Shell, args: &[String]) -> i32 {
+    // caller [expr]
+    // Without EXPR: returns "$line $filename"
+    // With EXPR: returns "$line $subroutine $filename"
+    //
+    // Frame indexing (bash convention):
+    //   FUNCNAME[0] = current function
+    //   FUNCNAME[1] = caller of current function
+    //   BASH_LINENO[N] = line number where FUNCNAME[N] was invoked
+    //   BASH_SOURCE[N+1] = source file of the context that called FUNCNAME[N]
+    //
+    // caller    → BASH_LINENO[0], BASH_SOURCE[1]  (no subroutine name)
+    // caller N  → BASH_LINENO[N], FUNCNAME[N+1], BASH_SOURCE[N+1]
+    //             (requires FUNCNAME[N+1] to exist, else returns 1)
+    //
+    // Returns 1 if not in a function or EXPR is out of range.
+
+    // Must be inside a function
+    if shell.func_names.is_empty() {
+        return 1;
+    }
+
+    let funcname_arr = shell.arrays.get("FUNCNAME").cloned().unwrap_or_default();
+    let lineno_arr = shell.arrays.get("BASH_LINENO").cloned().unwrap_or_default();
+    let source_arr = shell.arrays.get("BASH_SOURCE").cloned().unwrap_or_default();
+
+    let get_elem = |arr: &[Option<String>], idx: usize| -> Option<String> {
+        arr.get(idx).and_then(|v| v.as_ref()).cloned()
+    };
+
+    // Resolve filename: if BASH_SOURCE[idx] is missing/empty, use "NULL"
+    // (bash uses "NULL" when there's no source file, e.g. in -c mode)
+    let resolve_filename = |idx: usize| -> String {
+        match get_elem(&source_arr, idx) {
+            Some(f) if !f.is_empty() => f,
+            _ => "NULL".to_string(),
+        }
+    };
+
+    if args.is_empty() {
+        // No EXPR: print "$line $filename"
+        // line = BASH_LINENO[0] (where current function was called)
+        // file = BASH_SOURCE[1] (source of the caller's context)
+        let line = get_elem(&lineno_arr, 0).unwrap_or_else(|| "0".to_string());
+        let filename = resolve_filename(1);
+        println!("{} {}", line, filename);
+        0
+    } else {
+        // With EXPR: go back EXPR frames
+        let expr_str = &args[0];
+        let frame: usize = match expr_str.parse() {
+            Ok(n) => n,
+            Err(_) => {
+                eprintln!(
+                    "{}: caller: {}: invalid value",
+                    shell.error_prefix(),
+                    expr_str
+                );
+                return 1;
+            }
+        };
+
+        // Need FUNCNAME[frame+1] to exist (the caller at this frame)
+        if frame + 1 >= funcname_arr.len() {
+            return 1;
+        }
+
+        let line = get_elem(&lineno_arr, frame).unwrap_or_else(|| "0".to_string());
+        let subroutine = get_elem(&funcname_arr, frame + 1).unwrap_or_default();
+        let filename = resolve_filename(frame + 1);
+        println!("{} {} {}", line, subroutine, filename);
+        0
+    }
 }
 
 pub(super) fn builtin_alias(shell: &mut Shell, args: &[String]) -> i32 {
