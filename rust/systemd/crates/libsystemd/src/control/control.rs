@@ -7746,6 +7746,16 @@ pub fn execute_command(
             }
             let irreversible = job_mode.as_deref() == Some("replace-irreversibly");
 
+            // Sort units so services are stopped before their sockets.
+            // This ensures the service process releases the listening fd
+            // before the socket unit closes its copy, avoiding EADDRINUSE
+            // on quick restart.
+            actual_names.sort_by(|a, b| {
+                let a_is_socket = a.ends_with(".socket");
+                let b_is_socket = b.ends_with(".socket");
+                a_is_socket.cmp(&b_is_socket)
+            });
+
             let run_info = &*run_info.read_poisoned();
             for unit_name in &actual_names {
                 let id = {

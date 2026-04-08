@@ -1299,6 +1299,65 @@ fn main() {
     } else {
         method.to_string()
     };
+
+    // Commands that only accept a single unit on the server side.
+    // When multiple units are given, iterate client-side (like real systemctl).
+    let single_unit_methods = [
+        "restart",
+        "restart-noblock",
+        "status",
+        "show",
+        "reload",
+        "reload-or-restart",
+        "try-restart",
+    ];
+    if single_unit_methods.contains(&method.as_str()) && positional.len() > 2 {
+        let units: Vec<String> = positional[1..].to_vec();
+        let mut any_failed = false;
+        for unit in &units {
+            let unit_params = if method == "show" && !property_filter.is_empty() {
+                let mut arr = vec![Value::String(unit.clone())];
+                for prop in &property_filter {
+                    arr.push(Value::String(prop.clone()));
+                }
+                Some(Value::Array(arr))
+            } else {
+                Some(Value::String(unit.clone()))
+            };
+            let call = Call {
+                method: method.clone(),
+                params: unit_params,
+                id: None,
+            };
+            let str_call = serde_json::to_string(&call.to_json()).unwrap();
+            let result = send_with_retry(&addr, &str_call, positional[0] != "daemon-reexec");
+            match result {
+                Ok(resp) => {
+                    handle_response(
+                        &positional[0],
+                        &resp,
+                        quiet,
+                        value_only,
+                        force,
+                        no_legend,
+                        output_format.as_deref(),
+                        &property_filter,
+                    );
+                }
+                Err(e) => {
+                    if !quiet {
+                        eprintln!("Error communicating with rust-systemd: {e}");
+                    }
+                    any_failed = true;
+                }
+            }
+        }
+        if any_failed {
+            std::process::exit(1);
+        }
+        return;
+    }
+
     // Append --job-mode to params so the server can use it
     if let Some(ref jm) = job_mode {
         let jm_param = Value::String(format!("--job-mode={jm}"));
@@ -1317,29 +1376,7 @@ fn main() {
     };
     let str_call = serde_json::to_string(&call.to_json()).unwrap();
 
-    // Retry on connection refused (e.g. after daemon-reexec, the socket
-    // may not be ready yet).
-    let mut result = if addr.starts_with('/') {
-        send_unix(&addr, &str_call)
-    } else {
-        send_tcp(&addr, &str_call)
-    };
-    // daemon-reexec causes the server to execve(), dropping the connection.
-    // Don't retry — the broken connection IS the success signal.
-    let is_daemon_reexec = positional[0] == "daemon-reexec";
-    if result.is_err() && !is_daemon_reexec {
-        for _ in 0..10 {
-            std::thread::sleep(std::time::Duration::from_millis(500));
-            result = if addr.starts_with('/') {
-                send_unix(&addr, &str_call)
-            } else {
-                send_tcp(&addr, &str_call)
-            };
-            if result.is_ok() {
-                break;
-            }
-        }
-    }
+    let result = send_with_retry(&addr, &str_call, positional[0] != "daemon-reexec");
 
     match result {
         Ok(resp) => {
@@ -1967,6 +2004,33 @@ Examples:
     systemctl mask tmp.mount
     systemctl unmask tmp.mount"
     );
+}
+
+/// Send an RPC call with retry on connection refused.
+fn send_with_retry(
+    addr: &str,
+    str_call: &str,
+    retry: bool,
+) -> Result<Value, Box<dyn std::error::Error>> {
+    let mut result = if addr.starts_with('/') {
+        send_unix(addr, str_call)
+    } else {
+        send_tcp(addr, str_call)
+    };
+    if result.is_err() && retry {
+        for _ in 0..10 {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            result = if addr.starts_with('/') {
+                send_unix(addr, str_call)
+            } else {
+                send_tcp(addr, str_call)
+            };
+            if result.is_ok() {
+                break;
+            }
+        }
+    }
+    result
 }
 
 fn send_unix(path: &str, payload: &str) -> Result<Value, Box<dyn std::error::Error>> {
