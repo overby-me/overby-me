@@ -55,25 +55,57 @@ pub(super) fn eval_test_expr(
             "-z" => return if args[1].is_empty() { 0 } else { 1 },
             "-v" => {
                 let name = &args[1];
-                let is_set =
-                    if let Some(bracket) = name.find('[') {
-                        let base = &name[..bracket];
-                        let idx = &name[bracket + 1..name.len() - 1];
-                        if idx == "@" || idx == "*" {
-                            shell.arrays.contains_key(base) || shell.assoc_arrays.contains_key(base)
-                        } else {
-                            shell.arrays.get(base).is_some_and(|a| {
-                                idx.parse::<usize>().ok().is_some_and(|n| n < a.len())
-                            }) || shell
+                let is_set = if let Some(bracket) = name.find('[') {
+                    let base = &name[..bracket];
+                    let idx = &name[bracket + 1..name.len() - 1];
+                    if idx == "@" || idx == "*" {
+                        // Post-bash-5.1 behavior for [ -v name[@] ] / [ -v name[*] ]:
+                        // - Assoc arrays: check if "@"/"*" is a literal key → usually false
+                        // - Indexed arrays: check if the array has any elements → true/false
+                        // - Scalars: check if the variable is set (even if empty)
+                        if shell.assoc_arrays.contains_key(base) {
+                            shell
                                 .assoc_arrays
                                 .get(base)
-                                .is_some_and(|a| a.get(idx).is_some())
+                                .is_some_and(|a| a.contains_key(idx))
+                        } else if let Some(a) = shell.arrays.get(base) {
+                            // Indexed array: true if any element is set (Some)
+                            a.iter().any(|v| v.is_some())
+                        } else {
+                            // Scalar: [ -v scalar[@] ] checks if scalar is set
+                            shell.vars.contains_key(base)
                         }
                     } else {
+                        // Specific index: check if element exists
+                        if let Some(a) = shell.arrays.get(base) {
+                            idx.parse::<usize>()
+                                .ok()
+                                .is_some_and(|n| a.get(n).is_some_and(|v| v.is_some()))
+                        } else if let Some(a) = shell.assoc_arrays.get(base) {
+                            a.contains_key(idx)
+                        } else if let Some(_val) = shell.vars.get(base) {
+                            // Scalar with subscript: [ -v scalar[0] ] → true if set
+                            // [ -v scalar[N] ] for N>0 → false
+                            idx.parse::<usize>().ok().is_some_and(|n| n == 0)
+                        } else {
+                            false
+                        }
+                    }
+                } else {
+                    // Bare name without subscript:
+                    // For arrays, bash checks if element [0] is set.
+                    // For assoc arrays, bash checks if key "0" is set.
+                    if let Some(a) = shell.arrays.get(name.as_str()) {
+                        // Indexed array: check if element [0] is set (Some, not None)
+                        a.first().is_some_and(|v| v.is_some())
+                    } else if let Some(a) = shell.assoc_arrays.get(name.as_str()) {
+                        // Assoc array: check if key "0" is set
+                        a.contains_key("0")
+                    } else {
+                        // Scalar variable
                         shell.vars.contains_key(name.as_str())
-                            || shell.arrays.contains_key(name.as_str())
-                            || shell.assoc_arrays.contains_key(name.as_str())
-                    };
+                    }
+                };
                 return if is_set { 0 } else { 1 };
             }
             "-e" | "-a" => {
