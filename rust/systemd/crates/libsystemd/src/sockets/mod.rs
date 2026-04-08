@@ -677,6 +677,18 @@ impl Socket {
         id: UnitId,
         fd_store: &mut FDStore,
     ) -> std::io::Result<()> {
+        // Close any stale fds for this socket name before opening new ones.
+        // This handles cases where the socket was stopped but the fd_store
+        // entry wasn't cleaned up (e.g. the unit was marked Stopped before
+        // deactivate() had a chance to call close_all()).
+        if let Some(old_fds) = fd_store.remove_global(&name) {
+            for (sock_conf, fd_entry) in conf.sockets.iter().zip(old_fds.iter()) {
+                let _ = sock_conf
+                    .specialized
+                    .close(fd_entry.2.as_raw_fd(), conf.remove_on_stop);
+            }
+        }
+
         let mut fds = Vec::new();
         for idx in 0..conf.sockets.len() {
             let single_conf = &conf.sockets[idx];

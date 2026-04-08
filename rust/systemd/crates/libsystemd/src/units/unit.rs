@@ -410,6 +410,11 @@ impl ServiceState {
         status: &RwLock<UnitStatus>,
         run_info: &RuntimeInfo,
     ) -> Result<(), UnitOperationError> {
+        // Save the PID before killing so we can wait for the process to
+        // be fully reaped.  This ensures that when systemctl stop returns,
+        // all resources (including inherited socket fds) are released.
+        let old_pid = self.srvc.pid;
+
         let kill_result = self
             .srvc
             .kill(conf, id.clone(), &id.name, run_info)
@@ -418,6 +423,33 @@ impl ServiceState {
                 unit_id: id.clone(),
                 reason: UnitOperationErrorReason::ServiceStopError(e),
             });
+
+        // Wait for the signal handler thread to reap the old process.
+        // Without this, the process may still hold inherited fds (e.g.
+        // socket-activated listening sockets) when stop returns, causing
+        // EADDRINUSE on subsequent socket restarts.
+        if let Some(pid) = old_pid {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            loop {
+                {
+                    let pt = run_info.pid_table.lock_poisoned();
+                    match pt.get(&pid) {
+                        Some(PidEntry::ServiceExited(_)) | None => break,
+                        _ => {}
+                    }
+                }
+                if std::time::Instant::now() >= deadline {
+                    log::warn!(
+                        "Timed out waiting for PID {} of {} to be reaped during stop",
+                        pid,
+                        id.name
+                    );
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+
         match &kill_result {
             Ok(()) => {
                 let mut status = status.write_poisoned();

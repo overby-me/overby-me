@@ -609,6 +609,11 @@ struct JournaldState {
     relinquish_requested: AtomicBool,
     /// Reload config requested (SIGHUP, `systemctl reload`).
     reload_requested: AtomicBool,
+    /// Number of dispatch_entry calls currently in progress across all threads.
+    /// Used by the sync handler to wait for all pending writes to complete
+    /// before flushing, avoiding the race where `journalctl --sync` returns
+    /// before a recently-written stdout entry has been committed.
+    pending_writes: AtomicU64,
     /// Whether we are currently in "relinquished" mode (writing to /run only).
     relinquished: AtomicBool,
     /// When the current active journal file was opened (for time-based rotation).
@@ -617,6 +622,15 @@ struct JournaldState {
     seal_state: Mutex<Option<SealState>>,
     /// Last time a periodic vacuum was performed.
     last_vacuum: Mutex<Instant>,
+}
+
+/// RAII guard that decrements `pending_writes` when dropped, even on early return.
+struct PendingWriteGuard<'a>(&'a AtomicU64);
+
+impl Drop for PendingWriteGuard<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Release);
+    }
 }
 
 impl JournaldState {
@@ -739,6 +753,7 @@ impl JournaldState {
             rotate_requested: AtomicBool::new(false),
             relinquish_requested: AtomicBool::new(false),
             reload_requested: AtomicBool::new(false),
+            pending_writes: AtomicU64::new(0),
             relinquished: AtomicBool::new(false),
             active_file_opened: Mutex::new(Instant::now()),
             seal_state: Mutex::new(seal_state),
@@ -748,6 +763,9 @@ impl JournaldState {
 
     /// Dispatch a fully-formed journal entry into storage.
     fn dispatch_entry(&self, mut entry: JournalEntry) {
+        self.pending_writes.fetch_add(1, Ordering::Release);
+        let _guard = PendingWriteGuard(&self.pending_writes);
+
         let config = self.config.read().unwrap();
 
         // Check priority against MaxLevelStore
@@ -3505,11 +3523,25 @@ fn maintenance_thread(state: Arc<JournaldState>) {
         // Handle sync request (SIGRTMIN+1, from `journalctl --sync`)
         if state.sync_requested.load(Ordering::Acquire) {
             eprintln!("journald: Syncing journal to disk");
-            // Brief pause to let stdout stream handler threads finish
-            // appending any pending entries before we flush. Without this,
-            // a `journalctl --sync` immediately after writing to stdout may
-            // race with the stream handler that processes the write.
-            thread::sleep(Duration::from_millis(10));
+            // Two-phase wait to ensure all pending data is committed:
+            //
+            // Phase 1: Brief sleep to let data drain from kernel socket
+            // buffers into stream handler threads.  Data written by
+            // systemd-cat sits in the kernel buffer until the stream
+            // handler's blocking recvmsg() returns — this sleep gives
+            // the kernel time to schedule those threads.
+            thread::sleep(Duration::from_millis(50));
+            //
+            // Phase 2: Wait for all in-flight dispatch_entry() calls to
+            // finish.  Each dispatch_entry increments pending_writes on
+            // entry and decrements on exit (via RAII guard), so once the
+            // counter reaches 0, all entries have been written to storage.
+            let sync_start = Instant::now();
+            while state.pending_writes.load(Ordering::Acquire) > 0
+                && sync_start.elapsed() < Duration::from_secs(5)
+            {
+                thread::sleep(Duration::from_millis(10));
+            }
             let mut storage = state.lock_storage();
             let _ = storage.flush();
             drop(storage);
