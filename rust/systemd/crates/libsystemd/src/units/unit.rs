@@ -287,6 +287,7 @@ impl SocketState {
             }
         }
     }
+
 }
 
 /// Flush pending connections/data on all fds belonging to a socket unit.

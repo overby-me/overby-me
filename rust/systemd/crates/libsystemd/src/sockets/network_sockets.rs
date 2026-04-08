@@ -44,51 +44,71 @@ fn create_and_bind_socket(
     // 2. Apply pre-bind options (SO_REUSEADDR, SO_REUSEPORT, IP_FREEBIND, etc.)
     super::apply_pre_bind_socket_options(fd, conf, is_ipv6);
 
-    // 3. Bind
-    let bind_result = match addr {
-        std::net::SocketAddr::V4(v4) => {
-            let sockaddr = libc::sockaddr_in {
-                sin_family: libc::AF_INET as libc::sa_family_t,
-                sin_port: v4.port().to_be(),
-                sin_addr: libc::in_addr {
-                    s_addr: u32::from(*v4.ip()).to_be(),
-                },
-                sin_zero: [0; 8],
-            };
-            unsafe {
-                libc::bind(
-                    fd,
-                    &sockaddr as *const _ as *const libc::sockaddr,
-                    std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
-                )
+    // 3. Bind (with retry for EADDRINUSE from orphaned kernel sockets)
+    let do_bind = |fd: libc::c_int, addr: &std::net::SocketAddr| -> libc::c_int {
+        match addr {
+            std::net::SocketAddr::V4(v4) => {
+                let sockaddr = libc::sockaddr_in {
+                    sin_family: libc::AF_INET as libc::sa_family_t,
+                    sin_port: v4.port().to_be(),
+                    sin_addr: libc::in_addr {
+                        s_addr: u32::from(*v4.ip()).to_be(),
+                    },
+                    sin_zero: [0; 8],
+                };
+                unsafe {
+                    libc::bind(
+                        fd,
+                        &sockaddr as *const _ as *const libc::sockaddr,
+                        std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
+                    )
+                }
             }
-        }
-        std::net::SocketAddr::V6(v6) => {
-            let sockaddr = libc::sockaddr_in6 {
-                sin6_family: libc::AF_INET6 as libc::sa_family_t,
-                sin6_port: v6.port().to_be(),
-                sin6_flowinfo: v6.flowinfo(),
-                sin6_addr: libc::in6_addr {
-                    s6_addr: v6.ip().octets(),
-                },
-                sin6_scope_id: v6.scope_id(),
-            };
-            unsafe {
-                libc::bind(
-                    fd,
-                    &sockaddr as *const _ as *const libc::sockaddr,
-                    std::mem::size_of::<libc::sockaddr_in6>() as libc::socklen_t,
-                )
+            std::net::SocketAddr::V6(v6) => {
+                let sockaddr = libc::sockaddr_in6 {
+                    sin6_family: libc::AF_INET6 as libc::sa_family_t,
+                    sin6_port: v6.port().to_be(),
+                    sin6_flowinfo: v6.flowinfo(),
+                    sin6_addr: libc::in6_addr {
+                        s6_addr: v6.ip().octets(),
+                    },
+                    sin6_scope_id: v6.scope_id(),
+                };
+                unsafe {
+                    libc::bind(
+                        fd,
+                        &sockaddr as *const _ as *const libc::sockaddr,
+                        std::mem::size_of::<libc::sockaddr_in6>() as libc::socklen_t,
+                    )
+                }
             }
         }
     };
 
-    if bind_result != 0 {
+    let mut bind_ok = do_bind(fd, addr) == 0;
+    if !bind_ok {
         let err = std::io::Error::last_os_error();
-        unsafe {
-            libc::close(fd);
+        if err.raw_os_error() == Some(libc::EADDRINUSE) {
+            // Retry: the previous socket may be in an orphaned LISTEN state
+            // (the process died but the kernel hasn't cleaned it up yet).
+            // This can happen when a socket-activated service is killed and
+            // its fd isn't fully released before we try to rebind.
+            for attempt in 1..=10 {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                if do_bind(fd, addr) == 0 {
+                    log::trace!(
+                        "bind to {addr} succeeded on retry {attempt} after EADDRINUSE"
+                    );
+                    bind_ok = true;
+                    break;
+                }
+            }
         }
-        return Err(format!("Failed to bind socket to {addr}: {err}"));
+        if !bind_ok {
+            let err = std::io::Error::last_os_error();
+            unsafe { libc::close(fd); }
+            return Err(format!("Failed to bind socket to {addr}: {err}"));
+        }
     }
 
     // 4. Listen (for stream sockets)
