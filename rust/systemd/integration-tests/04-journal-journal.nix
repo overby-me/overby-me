@@ -21,12 +21,6 @@
     sed -i '/i-lose-my-logs/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
     sed -i '/systemctl kill --signal=SIGKILL/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
 
-    # Skip systemd-run --unit=... --wait --service-type=exec (lines 263-278)
-    sed -i '/systemd-run --unit=.*UNIT_NAME/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
-    sed -i '/UNIT_NAME.*--after-cursor/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
-    # Replace the diff heredoc block (line 272-278) including the heredoc body
-    sed -i '/--cursor-file=.*CURSOR_FILE.*_SYSTEMD_UNIT/,/^EOF$/c\echo SKIP' TEST-04-JOURNAL.journal.sh
-
     # Skip journalctl -b <script> test (executable_is_script test).
     # In the NixOS VM the test script runs via the backdoor (virtconsole),
     # not as a systemd service, so there are no journal entries with _EXE
