@@ -31,6 +31,8 @@
     sed -i '/mkdir -p \/run\/systemd\/system\/systemd-journal-upload.service.d/,/systemctl daemon-reload/d' TEST-04-JOURNAL.journal-remote.sh
     # Give upload service time to connect and trigger socket activation
     sed -i '/^timeout 15 bash.*is-active systemd-journal-remote/i\sleep 3' TEST-04-JOURNAL.journal-remote.sh
+    # Wait before restarting socket to avoid EADDRINUSE from TIME_WAIT
+    sed -i '/^systemctl restart systemd-journal-remote.socket/i\sleep 3' TEST-04-JOURNAL.journal-remote.sh
     # Sleep after stopping socket to allow port to be released before rebind
     sed -i '/^rm -rf \/var\/log\/journal\/remote/a\sleep 2' TEST-04-JOURNAL.journal-remote.sh
 
@@ -44,12 +46,6 @@
     # Skip systemd-run --user (user session not fully supported)
     sed -i '/^systemd-run --user/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
     sed -i '/^journalctl -b -n 1 -r --user-unit/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
-    # Skip journalctl --follow tests
-    sed -i '/journalctl --follow/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
-    sed -i '/pkill -TERM journalctl/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
-    sed -i '/issue-26746/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
-    sed -i '/CURSOR_FROM_FILE/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
-    sed -i '/CURSOR_FROM_JOURNAL/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
     # Skip forever-print-hola tests (journald restart survival)
     sed -i '/forever-print-hola/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
     sed -i '/i-lose-my-logs/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
