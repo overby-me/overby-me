@@ -2402,9 +2402,24 @@ impl Parser {
                                     // Preserve single-quote markers so that
                                     // expand_assoc_subscript can detect literal
                                     // subscripts (e.g. A['$(echo %)']=val).
-                                    name_text.push('\'');
-                                    name_text.push_str(sq);
-                                    name_text.push('\'');
+                                    // If the content itself contains a single
+                                    // quote (from \' in unquoted context), use
+                                    // double-quote wrapping with inner escaping
+                                    // so expand_assoc_subscript doesn't misparse.
+                                    if sq.contains('\'') {
+                                        name_text.push('"');
+                                        for ch in sq.chars() {
+                                            if ch == '"' || ch == '\\' || ch == '$' || ch == '`' {
+                                                name_text.push('\\');
+                                            }
+                                            name_text.push(ch);
+                                        }
+                                        name_text.push('"');
+                                    } else {
+                                        name_text.push('\'');
+                                        name_text.push_str(sq);
+                                        name_text.push('\'');
+                                    }
                                 }
                                 WordPart::DoubleQuoted(dq) => {
                                     // Preserve double-quote markers so that
@@ -2413,7 +2428,18 @@ impl Parser {
                                     for dp in dq {
                                         match dp {
                                             WordPart::Literal(l) => {
-                                                name_text.push_str(l);
+                                                // Escape literal `"` and `\` characters
+                                                // that came from `\"` or `\\` escapes
+                                                // inside double quotes, so they don't
+                                                // prematurely close the reconstructed
+                                                // double-quote region when processed
+                                                // by expand_assoc_subscript.
+                                                for ch in l.chars() {
+                                                    if ch == '"' || ch == '\\' {
+                                                        name_text.push('\\');
+                                                    }
+                                                    name_text.push(ch);
+                                                }
                                             }
                                             other => {
                                                 name_text.push_str(&crate::ast::word_to_string(
@@ -2658,25 +2684,55 @@ impl Parser {
     /// Convert a literal string to word parts, recognizing leading `~` as a
     /// `Tilde` part so that tilde expansion works in compound array element
     /// values like `[key]=~/Desktop`.
+    /// Also expands `~` after `:` separators (assignment-context tilde
+    /// expansion), so `~/Desktop:~/Documents:~/Applications` correctly
+    /// expands all three tildes, matching bash behavior for PATH-like values.
     fn literal_to_parts_with_tilde(s: &str) -> Vec<WordPart> {
-        if let Some(rest) = s.strip_prefix('~') {
-            // Find where the tilde prefix ends (at '/' or end of string)
-            if let Some(slash_pos) = rest.find('/') {
-                let user = rest[..slash_pos].to_string();
-                let after_tilde = &rest[slash_pos..]; // includes the '/'
-                let mut parts = vec![WordPart::Tilde(user)];
-                if !after_tilde.is_empty() {
-                    parts.push(WordPart::Literal(after_tilde.to_string()));
+        if s.is_empty() {
+            return vec![];
+        }
+
+        // Split on ':' to handle assignment-context tilde expansion
+        // (tildes after ':' are expanded just like the leading tilde).
+        // We only do this when the string actually contains ':' followed
+        // by '~' to avoid unnecessary splitting.
+        if s.contains(":~") || s.starts_with('~') {
+            let mut parts: Vec<WordPart> = Vec::new();
+            let segments: Vec<&str> = s.split(':').collect();
+            for (seg_idx, seg) in segments.iter().enumerate() {
+                if seg_idx > 0 {
+                    // Re-insert the ':' separator as literal text.
+                    // Append to previous Literal part if possible, otherwise create new one.
+                    if let Some(WordPart::Literal(prev)) = parts.last_mut() {
+                        prev.push(':');
+                    } else {
+                        parts.push(WordPart::Literal(":".to_string()));
+                    }
                 }
-                parts
-            } else {
-                // ~ or ~user with nothing after
-                vec![WordPart::Tilde(rest.to_string())]
+                if let Some(rest) = seg.strip_prefix('~') {
+                    if let Some(slash_pos) = rest.find('/') {
+                        let user = rest[..slash_pos].to_string();
+                        let after_tilde = &rest[slash_pos..]; // includes the '/'
+                        parts.push(WordPart::Tilde(user));
+                        if !after_tilde.is_empty() {
+                            parts.push(WordPart::Literal(after_tilde.to_string()));
+                        }
+                    } else {
+                        // ~ or ~user with nothing after (within this segment)
+                        parts.push(WordPart::Tilde(rest.to_string()));
+                    }
+                } else if !seg.is_empty() {
+                    // Append to previous Literal part if possible
+                    if let Some(WordPart::Literal(prev)) = parts.last_mut() {
+                        prev.push_str(seg);
+                    } else {
+                        parts.push(WordPart::Literal(seg.to_string()));
+                    }
+                }
             }
-        } else if !s.is_empty() {
-            vec![WordPart::Literal(s.to_string())]
+            parts
         } else {
-            vec![]
+            vec![WordPart::Literal(s.to_string())]
         }
     }
 
