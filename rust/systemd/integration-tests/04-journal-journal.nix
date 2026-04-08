@@ -5,11 +5,6 @@
   };
   testTimeout = 600;
   patchScript = ''
-    # Replace varlinkctl calls with their journalctl equivalents
-    sed -i 's#^varlinkctl call .*/io.systemd.journal io.systemd.Journal.Rotate.*#journalctl --rotate#' TEST-04-JOURNAL.journal.sh
-    sed -i 's#^varlinkctl call .*/io.systemd.journal io.systemd.Journal.FlushToVar.*#journalctl --flush#' TEST-04-JOURNAL.journal.sh
-    sed -i 's#^varlinkctl call .*/io.systemd.journal io.systemd.Journal.Synchronize.*#journalctl --sync#' TEST-04-JOURNAL.journal.sh
-
     # Reduce dd|base64|systemd-cat loop iterations from 10/50 to 3 (avoids slow I/O)
     sed -i 's#ITERATIONS=10#ITERATIONS=3#; s#ITERATIONS=50#ITERATIONS=3#' TEST-04-JOURNAL.journal.sh
 

@@ -96,9 +96,7 @@ fn create_and_bind_socket(
             for attempt in 1..=10 {
                 std::thread::sleep(std::time::Duration::from_millis(100));
                 if do_bind(fd, addr) == 0 {
-                    log::trace!(
-                        "bind to {addr} succeeded on retry {attempt} after EADDRINUSE"
-                    );
+                    log::trace!("bind to {addr} succeeded on retry {attempt} after EADDRINUSE");
                     bind_ok = true;
                     break;
                 }
@@ -106,7 +104,9 @@ fn create_and_bind_socket(
         }
         if !bind_ok {
             let err = std::io::Error::last_os_error();
-            unsafe { libc::close(fd); }
+            unsafe {
+                libc::close(fd);
+            }
             return Err(format!("Failed to bind socket to {addr}: {err}"));
         }
     }
