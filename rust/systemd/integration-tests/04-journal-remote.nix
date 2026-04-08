@@ -28,10 +28,10 @@
     # sockets on port 19532.  Our socket deactivate properly calls close_all()
     # but an orphaned kernel socket may persist in VM testing (no process holds
     # the fd yet the socket remains in LISTEN state).  ss --kill destroys it.
-    sed -i '/^systemctl restart systemd-journal-remote.socket/i\systemctl stop systemd-journal-remote.service 2>/dev/null || true; systemctl stop systemd-journal-remote.socket 2>/dev/null || true; ss --kill state listening src :19532 2>/dev/null || true; sleep 1' TEST-04-JOURNAL.journal-remote.sh
-    # Kill orphaned LISTEN sockets on port 19532 before every upload restart.
-    # This covers all test sections including the invalid-cert test where the
-    # remote socket is stopped but an orphaned kernel socket may linger.
-    sed -i '/^systemctl restart systemd-journal-upload/i\ss --kill state listening src :19532 2>/dev/null || true' TEST-04-JOURNAL.journal-remote.sh
+    sed -i '/systemctl restart systemd-journal-remote.socket/i\systemctl stop systemd-journal-remote.service 2>/dev/null || true; systemctl stop systemd-journal-remote.socket 2>/dev/null || true; ss --kill state listening src :19532 2>/dev/null || true; sleep 1' TEST-04-JOURNAL.journal-remote.sh
+    # Kill orphaned LISTEN sockets before test 3 (invalid cert) restarts upload.
+    # The remote socket was stopped but an orphaned kernel socket may linger,
+    # causing curl to hang on TLS handshake with no process behind it.
+    sed -i '/^chmod -R g+rwX \/run\/systemd\/journal-remote-tls$/a\ss --kill state listening src :19532 2>/dev/null || true' TEST-04-JOURNAL.journal-remote.sh
   '';
 }
