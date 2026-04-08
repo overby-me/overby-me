@@ -60,14 +60,34 @@ impl Shell {
     /// Used in `let` context where `let "a[\"\"]"=22` is valid (assigns to a[0])
     /// — but only when `assoc_expand_once` is **unset**.  When that shopt is on,
     /// bash still rejects the empty subscript even from `let`.
-    fn had_quoted_empty_subscript(pre_strip_expr: &str, bracket_pos: usize) -> bool {
+    /// Check whether the pre-strip subscript was a quoted-empty form.
+    /// Returns (bare_quoted, escaped_quoted):
+    ///   bare_quoted: `""` or `''` — valid in `let` context, invalid in `(( ))`
+    ///   escaped_quoted: `\"\"` or `\" \"` — valid in both `let` and `(( ))` contexts
+    fn had_quoted_empty_subscript(pre_strip_expr: &str, bracket_pos: usize) -> (bool, bool) {
         // Find the `[` in the pre-stripped expression and extract the subscript
         if let Some(close) = pre_strip_expr[bracket_pos + 1..].find(']') {
             let sub = &pre_strip_expr[bracket_pos + 1..bracket_pos + 1 + close];
             let trimmed = sub.trim();
-            trimmed == "\"\"" || trimmed == "''"
+            // Exact `""` or `''` pair (bare quotes)
+            if trimmed == "\"\"" || trimmed == "''" {
+                return (true, false);
+            }
+            // Backslash-escaped quote pairs: `\"\"` (two escaped quotes)
+            // After strip_arith_quotes these become empty, but they should
+            // evaluate to 0 for indexed arrays, not error.
+            if trimmed == "\\\"\\\"" {
+                return (false, true);
+            }
+            // Also handle `\" \"` (escaped quote, space, escaped quote) —
+            // the space between quotes is significant but the result after
+            // stripping is just a space which evaluates to 0.
+            if trimmed == "\\\" \\\"" {
+                return (false, true);
+            }
+            (false, false)
         } else {
-            false
+            (false, false)
         }
     }
 
@@ -84,7 +104,10 @@ impl Shell {
         let inner = if trimmed.len() >= 2 && trimmed.starts_with('"') && trimmed.ends_with('"') {
             &trimmed[1..trimmed.len() - 1]
         } else {
-            trimmed
+            // Preserve original whitespace for assoc array keys — spaces
+            // are significant (e.g. `a[ ]=val` stores key " ").  Only
+            // trim for the outer-quote detection above.
+            key
         };
         // Simple variable expansion: $name and ${name}
         let mut result = String::new();
@@ -186,6 +209,27 @@ impl Shell {
     /// Evaluate an arithmetic expression and return the integer result.
     ///
     /// Find an operator in the expression at top-level (outside parentheses).
+    /// Strip double quotes from an arithmetic expression, also consuming
+    /// backslashes that escape quotes (`\"` → empty, `\\"` → `\`, `"` → empty).
+    fn strip_arith_quotes(s: &str) -> String {
+        let bytes = s.as_bytes();
+        let mut result = String::with_capacity(s.len());
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'\\' && i + 1 < bytes.len() && bytes[i + 1] == b'"' {
+                // `\"` → consume both (the backslash was escaping the quote)
+                i += 2;
+            } else if bytes[i] == b'"' {
+                // Standalone `"` → consume
+                i += 1;
+            } else {
+                result.push(bytes[i] as char);
+                i += 1;
+            }
+        }
+        result
+    }
+
     fn find_top_level_arith_op(expr: &str, op: &str) -> Option<usize> {
         let mut paren_depth = 0i32;
         let mut bracket_depth = 0i32;
@@ -309,13 +353,19 @@ impl Shell {
         let unquoted: String;
         let expr = if expr.contains('"') {
             pre_strip_expr = expr.to_string();
-            unquoted = expr.replace('"', "");
+            // Strip double quotes AND preceding backslashes from arithmetic
+            // expressions.  `\"` is an escaped literal quote — both the `\`
+            // and the `"` should be removed (bash treats `\"` in arithmetic
+            // as a literal `"` which is then stripped).  `\\"` is a literal
+            // backslash followed by a quote — only the `"` is stripped, the
+            // `\\` becomes `\`.  Standalone `"` is simply removed.
+            unquoted = Self::strip_arith_quotes(expr);
             // Update top expression to match stripped version for error messages
             if self.arith_depth == 1
                 && let Some(ref mut top) = self.arith_top_expr
                 && top.contains('"')
             {
-                *top = top.replace('"', "");
+                *top = Self::strip_arith_quotes(top);
             }
             &unquoted
         } else {
@@ -547,16 +597,25 @@ impl Shell {
                             // but is valid — the empty subscript evaluates to 0.
                             // Only when `assoc_expand_once` is unset though; when set,
                             // bash still rejects the empty subscript.
+                            // In (( )) and $(( )) contexts, `a[\"\"]=20` (escaped quotes)
+                            // also strips to `a[]=20` and should evaluate to a[0]=20.
+                            // But bare `a[""]=24` in (( )) DOES error — only escaped forms pass.
                             let assoc_expand_once = self
                                 .shopt_options
                                 .get("assoc_expand_once")
                                 .copied()
                                 .unwrap_or(false);
+                            let (bare_quoted, escaped_quoted) = if !pre_strip_expr.is_empty() {
+                                Self::had_quoted_empty_subscript(&pre_strip_expr, bracket)
+                            } else {
+                                (false, false)
+                            };
                             let is_let_quoted_empty = self.arith_is_let
                                 && !assoc_expand_once
-                                && !pre_strip_expr.is_empty()
-                                && Self::had_quoted_empty_subscript(&pre_strip_expr, bracket);
-                            if !is_let_quoted_empty {
+                                && (bare_quoted || escaped_quoted);
+                            // In (( )) and $(( )), only escaped-quote forms like `\"\"` are allowed
+                            let is_arith_quoted_empty = !self.arith_is_let && escaped_quoted;
+                            if !is_let_quoted_empty && !is_arith_quoted_empty {
                                 eprintln!(
                                     "{}: {}`{}[]': not a valid identifier",
                                     self.arith_error_prefix(),
@@ -568,6 +627,10 @@ impl Shell {
                             }
                         }
                         let sub = self.arith_subscript_key(base, idx_str);
+                        if crate::expand::take_arith_error() {
+                            crate::expand::set_arith_error();
+                            return 0;
+                        }
                         let lhs: i64 = self.arith_array_get(&sub);
                         let result = func(lhs, rhs);
                         self.arith_array_set(&sub, result);
@@ -656,11 +719,16 @@ impl Shell {
                             .get("assoc_expand_once")
                             .copied()
                             .unwrap_or(false);
+                        let (bare_quoted, escaped_quoted) = if !pre_strip_expr.is_empty() {
+                            Self::had_quoted_empty_subscript(&pre_strip_expr, bracket)
+                        } else {
+                            (false, false)
+                        };
                         let is_let_quoted_empty = self.arith_is_let
                             && !assoc_expand_once
-                            && !pre_strip_expr.is_empty()
-                            && Self::had_quoted_empty_subscript(&pre_strip_expr, bracket);
-                        if !is_let_quoted_empty {
+                            && (bare_quoted || escaped_quoted);
+                        let is_arith_quoted_empty = !self.arith_is_let && escaped_quoted;
+                        if !is_let_quoted_empty && !is_arith_quoted_empty {
                             eprintln!(
                                 "{}: {}`{}[]': not a valid identifier",
                                 self.arith_error_prefix(),
@@ -672,6 +740,10 @@ impl Shell {
                         }
                     }
                     let sub = self.arith_subscript_key(base, idx_str);
+                    if crate::expand::take_arith_error() {
+                        crate::expand::set_arith_error();
+                        return 0;
+                    }
                     self.arith_array_set(&sub, val);
                 } else {
                     self.set_var(name, val.to_string());
@@ -734,11 +806,16 @@ impl Shell {
                             .get("assoc_expand_once")
                             .copied()
                             .unwrap_or(false);
+                        let (bare_quoted, escaped_quoted) = if !pre_strip_expr.is_empty() {
+                            Self::had_quoted_empty_subscript(&pre_strip_expr, bracket)
+                        } else {
+                            (false, false)
+                        };
                         let is_let_quoted_empty = self.arith_is_let
                             && !assoc_expand_once
-                            && !pre_strip_expr.is_empty()
-                            && Self::had_quoted_empty_subscript(&pre_strip_expr, bracket);
-                        if !is_let_quoted_empty {
+                            && (bare_quoted || escaped_quoted);
+                        let is_arith_quoted_empty = !self.arith_is_let && escaped_quoted;
+                        if !is_let_quoted_empty && !is_arith_quoted_empty {
                             eprintln!(
                                 "{}: {}`{}[]': not a valid identifier",
                                 self.arith_error_prefix(),
@@ -750,6 +827,10 @@ impl Shell {
                         }
                     }
                     let sub = self.arith_subscript_key(base, idx_str);
+                    if crate::expand::take_arith_error() {
+                        crate::expand::set_arith_error();
+                        return 0;
+                    }
                     let val: i64 = self.arith_array_get(&sub);
                     self.arith_array_set(&sub, val + delta);
                     return val;
@@ -830,11 +911,16 @@ impl Shell {
                             .get("assoc_expand_once")
                             .copied()
                             .unwrap_or(false);
+                        let (bare_quoted, escaped_quoted) = if !pre_strip_expr.is_empty() {
+                            Self::had_quoted_empty_subscript(&pre_strip_expr, bracket)
+                        } else {
+                            (false, false)
+                        };
                         let is_let_quoted_empty = self.arith_is_let
                             && !assoc_expand_once
-                            && !pre_strip_expr.is_empty()
-                            && Self::had_quoted_empty_subscript(&pre_strip_expr, bracket);
-                        if !is_let_quoted_empty {
+                            && (bare_quoted || escaped_quoted);
+                        let is_arith_quoted_empty = !self.arith_is_let && escaped_quoted;
+                        if !is_let_quoted_empty && !is_arith_quoted_empty {
                             eprintln!(
                                 "{}: {}`{}[]': not a valid identifier",
                                 self.arith_error_prefix(),
@@ -846,6 +932,10 @@ impl Shell {
                         }
                     }
                     let sub = self.arith_subscript_key(base, idx_expr);
+                    if crate::expand::take_arith_error() {
+                        crate::expand::set_arith_error();
+                        return 0;
+                    }
                     let val: i64 = self.arith_array_get(&sub);
                     let new_val = val + 1;
                     self.arith_array_set(&sub, new_val);
@@ -911,11 +1001,16 @@ impl Shell {
                             .get("assoc_expand_once")
                             .copied()
                             .unwrap_or(false);
+                        let (bare_quoted, escaped_quoted) = if !pre_strip_expr.is_empty() {
+                            Self::had_quoted_empty_subscript(&pre_strip_expr, bracket)
+                        } else {
+                            (false, false)
+                        };
                         let is_let_quoted_empty = self.arith_is_let
                             && !assoc_expand_once
-                            && !pre_strip_expr.is_empty()
-                            && Self::had_quoted_empty_subscript(&pre_strip_expr, bracket);
-                        if !is_let_quoted_empty {
+                            && (bare_quoted || escaped_quoted);
+                        let is_arith_quoted_empty = !self.arith_is_let && escaped_quoted;
+                        if !is_let_quoted_empty && !is_arith_quoted_empty {
                             eprintln!(
                                 "{}: {}`{}[]': not a valid identifier",
                                 self.arith_error_prefix(),
@@ -927,6 +1022,10 @@ impl Shell {
                         }
                     }
                     let sub = self.arith_subscript_key(base, idx_expr);
+                    if crate::expand::take_arith_error() {
+                        crate::expand::set_arith_error();
+                        return 0;
+                    }
                     let val: i64 = self.arith_array_get(&sub);
                     let new_val = val - 1;
                     self.arith_array_set(&sub, new_val);
@@ -1691,6 +1790,10 @@ impl Shell {
             let saved_top = self.arith_top_expr.take();
             let sub = self.arith_subscript_key(name, idx_str);
             self.arith_top_expr = saved_top;
+            if crate::expand::take_arith_error() {
+                crate::expand::set_arith_error();
+                return 0;
+            }
             let val = self.arith_array_get(&sub);
             // Check nounset for unset array elements (value == 0 and no entry)
             if val == 0 && self.opt_nounset {
