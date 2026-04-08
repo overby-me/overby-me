@@ -4443,7 +4443,18 @@ impl Shell {
                     let base = &val[..bracket];
                     let idx = &val[bracket + 1..val.len() - 1];
                     if idx == "@" || idx == "*" {
-                        self.arrays.contains_key(base) || self.assoc_arrays.contains_key(base)
+                        // For assoc arrays: check if literal "@"/"*" key exists
+                        // For indexed arrays: check if any element is set
+                        // For scalars: check if the variable is set
+                        if self.assoc_arrays.contains_key(base) {
+                            self.assoc_arrays
+                                .get(base)
+                                .is_some_and(|a| a.contains_key(idx))
+                        } else if let Some(a) = self.arrays.get(base) {
+                            a.iter().any(|v| v.is_some())
+                        } else {
+                            self.vars.contains_key(base)
+                        }
                     } else if let Ok(n) = idx.parse::<usize>() {
                         self.arrays.get(base).is_some_and(|a| {
                             n < a.len() && a[n].as_ref().is_some_and(|s| !s.is_empty())
