@@ -197,6 +197,17 @@ pub(super) fn read_param_word_impl(
                 literal.push('\'');
                 *i += 1;
             }
+            '"' if in_squote => {
+                // Inside squote-protects-brace region (e.g. "${dbg-'"'hey}"),
+                // " is literal during the lexing/extraction phase.  Bash's
+                // extract_dollar_brace_string calls skip_single_quoted() which
+                // skips everything (including ") between the two '.  The
+                // expansion phase later processes " with its normal quoting
+                // semantics.  We push " as literal here so the dquote parser
+                // doesn't consume the outer closing " as a nested match.
+                literal.push('"');
+                *i += 1;
+            }
             '"' => {
                 if !literal.is_empty() {
                     parts.push(WordPart::Literal(std::mem::take(&mut literal)));
