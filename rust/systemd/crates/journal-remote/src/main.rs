@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use clap::Parser;
 use libsystemd::journal::entry::from_export_format;
-use libsystemd::journal::storage::{JournalStorage, StorageConfig};
+use libsystemd::journal::storage::{JournalCompress, JournalStorage, StorageConfig};
 use tiny_http::{Response, Server, SslConfig, StatusCode};
 
 // ---------------------------------------------------------------------------
@@ -161,6 +161,16 @@ fn open_output_storage(output: &str) -> io::Result<JournalStorage> {
         path.to_path_buf()
     };
 
+    let compress = std::env::var("SYSTEMD_JOURNAL_COMPRESS")
+        .map(|s| JournalCompress::from_env_str(&s))
+        .unwrap_or(JournalCompress::Zstd);
+
+    let active_filename = if output.ends_with(".journal") {
+        path.file_name().map(|n| n.to_string_lossy().into_owned())
+    } else {
+        None
+    };
+
     let config = StorageConfig {
         directory,
         direct_directory: true,
@@ -169,6 +179,8 @@ fn open_output_storage(output: &str) -> io::Result<JournalStorage> {
         max_files: usize::MAX,
         persistent: false,
         keep_free: 0,
+        compress,
+        active_filename,
         ..Default::default()
     };
     JournalStorage::new(config)

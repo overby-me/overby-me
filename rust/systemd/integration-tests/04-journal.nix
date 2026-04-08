@@ -1,11 +1,7 @@
 {
   name = "04-JOURNAL";
-  # Passing subtests: bsod, cat, corrupted-journals, fss, invocation, journal, journal-append, journal-corrupt, journal-gatewayd, LogFilterPatterns, reload, stopped-socket-activation, SYSTEMD_JOURNAL_COMPRESS
-  # Skipped subtests and reasons:
-  # - journal-remote: uses C systemd-journal-remote/upload (not reimplemented)
-  testEnv = {
-    TEST_SKIP_SUBTESTS = "journal-remote";
-  };
+  # Passing subtests: bsod, cat, corrupted-journals, fss, invocation, journal, journal-append, journal-corrupt, journal-gatewayd, journal-remote, LogFilterPatterns, reload, stopped-socket-activation, SYSTEMD_JOURNAL_COMPRESS
+  testTimeout = 3600;
   extraPackages = pkgs: [pkgs.curl pkgs.openssl];
   patchScript = ''
     # Add timeouts to bsod at_exit cleanup to prevent infinite hangs.
@@ -23,8 +19,20 @@
     # an orphaned file descriptor.
     # Use retry+fallback because systemctl may transiently fail with EAGAIN.
     sed -i '/timeout 10 journalctl --flush/a\    systemctl restart systemd-journald || { sleep 1; systemctl restart systemd-journald; } || true' TEST-04-JOURNAL.bsod.sh
-    # Skip journal-remote sub-test (uses C systemd-journal-remote, not reimplemented)
-    sed -i 's#if \[\[ -x /usr/lib/systemd/systemd-journal-remote \]\]#if false#' TEST-04-JOURNAL.SYSTEMD_JOURNAL_COMPRESS.sh
+    # journal-remote.sh patches:
+    # Our systemctl doesn't support multiple service names in one call
+    sed -i 's#systemctl status systemd-journal-{remote,upload}#systemctl status systemd-journal-remote; systemctl status systemd-journal-upload#g' TEST-04-JOURNAL.journal-remote.sh
+    # Our systemctl stop doesn't support brace expansion with multiple units
+    sed -i 's#systemctl stop systemd-journal-remote.{socket,service}#systemctl stop systemd-journal-remote.socket; systemctl stop systemd-journal-remote.service#g' TEST-04-JOURNAL.journal-remote.sh
+    # Our systemctl restart doesn't support brace expansion either
+    sed -i 's#systemctl restart systemd-journal-remote.{socket,service}#systemctl restart systemd-journal-remote.socket; systemctl restart systemd-journal-remote.service#g' TEST-04-JOURNAL.journal-remote.sh
+    # Our service unit already has Restart=no (no drop-in support needed).
+    # Remove the drop-in creation and daemon-reload that test 3 does.
+    sed -i '/mkdir -p \/run\/systemd\/system\/systemd-journal-upload.service.d/,/systemctl daemon-reload/d' TEST-04-JOURNAL.journal-remote.sh
+    # Give upload service time to connect and trigger socket activation
+    sed -i '/^timeout 15 bash.*is-active systemd-journal-remote/i\sleep 3' TEST-04-JOURNAL.journal-remote.sh
+    # Sleep after stopping socket to allow port to be released before rebind
+    sed -i '/^rm -rf \/var\/log\/journal\/remote/a\sleep 2' TEST-04-JOURNAL.journal-remote.sh
 
     # journal.sh patches:
     # Replace varlinkctl calls with their journalctl equivalents

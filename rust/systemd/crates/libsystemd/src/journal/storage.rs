@@ -515,6 +515,11 @@ pub struct StorageConfig {
     /// Used by `journalctl --file` to read only the specified journal files
     /// instead of all files in the directory.
     pub file_filter: Vec<PathBuf>,
+
+    /// Override the active journal filename (default: `system.journal`).
+    /// Used by `journal-remote -o /path/to/specific.journal` to create
+    /// the file with the exact name requested by the caller.
+    pub active_filename: Option<String>,
 }
 
 /// Default keep-free value: 4 GiB (capped at 15% of filesystem in vacuum()).
@@ -532,6 +537,7 @@ impl Default for StorageConfig {
             direct_directory: false,
             compress: JournalCompress::Zstd,
             file_filter: Vec::new(),
+            active_filename: None,
         }
     }
 }
@@ -835,7 +841,12 @@ impl JournalStorage {
 
     fn create_new_active_file(&mut self) -> io::Result<()> {
         let journal_dir = self.journal_dir();
-        let path = journal_dir.join("system.journal");
+        let filename = self
+            .config
+            .active_filename
+            .as_deref()
+            .unwrap_or("system.journal");
+        let path = journal_dir.join(filename);
 
         // If system.journal already exists (e.g. unclean shutdown), archive it first
         if path.exists() {

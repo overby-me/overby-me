@@ -465,6 +465,7 @@ impl JournaldConfig {
             direct_directory: false,
             compress,
             file_filter: Vec::new(),
+            active_filename: None,
         }
     }
 }

@@ -19,7 +19,10 @@
     # Remove the drop-in creation and daemon-reload that test 3 does.
     sed -i '/mkdir -p \/run\/systemd\/system\/systemd-journal-upload.service.d/,/systemctl daemon-reload/d' TEST-04-JOURNAL.journal-remote.sh
 
-    # Debug: check exit code of systemctl status for failed service
-    sed -i 's#(! systemctl status systemd-journal-upload)#_rc=0; systemctl status systemd-journal-upload || _rc=$?; echo "DEBUG STATUS RC=$_rc"; test "$_rc" -ne 0#' TEST-04-JOURNAL.journal-remote.sh
+    # Give upload service time to connect and trigger socket activation
+    sed -i '/^timeout 15 bash.*is-active systemd-journal-remote/i\sleep 3' TEST-04-JOURNAL.journal-remote.sh
+
+    # Sleep after stopping socket to allow port to be released before rebind
+    sed -i '/^rm -rf \/var\/log\/journal\/remote/a\sleep 2' TEST-04-JOURNAL.journal-remote.sh
   '';
 }
