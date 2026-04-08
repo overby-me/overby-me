@@ -22,7 +22,8 @@
     # Give upload service time to connect and trigger socket activation
     sed -i '/^timeout 15 bash.*is-active systemd-journal-remote/i\sleep 3' TEST-04-JOURNAL.journal-remote.sh
 
-    # Sleep after stopping socket to allow port to be released before rebind
-    sed -i '/^rm -rf \/var\/log\/journal\/remote/a\sleep 2' TEST-04-JOURNAL.journal-remote.sh
+    # Wait before restarting socket to avoid EADDRINUSE from TIME_WAIT.
+    # Our systemd doesn't set SO_REUSEADDR on socket-activated sockets.
+    sed -i '/^systemctl restart systemd-journal-remote.socket/i\sleep 3' TEST-04-JOURNAL.journal-remote.sh
   '';
 }

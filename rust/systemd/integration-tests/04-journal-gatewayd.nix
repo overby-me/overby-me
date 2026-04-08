@@ -6,6 +6,8 @@
   testTimeout = 300;
   extraPackages = pkgs: [pkgs.curl pkgs.openssl];
   patchScript = ''
+    # Add sleep after journalctl --sync (stream handler may not have flushed yet)
+    sed -i 's#journalctl --sync#journalctl --sync; sleep 1#g' TEST-04-JOURNAL.journal-gatewayd.sh
     # Skip systemd-journal-remote tests (not reimplemented)
     # Lines 140-150: export format piped through journal-remote
     sed -i '/^mkdir \/tmp\/remote-journal/,/^rm -rf \/tmp\/remote-journal$/c\echo "SKIP: journal-remote not available"' TEST-04-JOURNAL.journal-gatewayd.sh

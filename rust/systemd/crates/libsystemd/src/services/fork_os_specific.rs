@@ -342,6 +342,12 @@ pub fn post_fork_os_specific(conf: &PlatformSpecificServiceFields) -> Result<(),
     {
         use log::trace;
         trace!("Move service to cgroup: {:?}", &conf.cgroup_path);
+        // Ensure the cgroup directory exists before moving into it.
+        // For socket-activated services, PID 1 may not have created the
+        // cgroup yet when the exec helper runs.
+        if let Err(e) = std::fs::create_dir_all(&conf.cgroup_path) {
+            trace!("Could not create cgroup dir {:?}: {}", &conf.cgroup_path, e);
+        }
         cgroups::move_self_to_cgroup(&conf.cgroup_path)
             .map_err(|e| format!("postfork os specific: {}", e))?;
     }

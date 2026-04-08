@@ -1515,7 +1515,8 @@ pub fn run_exec_helper() {
     if let Err(e) =
         crate::services::fork_os_specific::post_fork_os_specific(&config.platform_specific)
     {
-        log::warn!("postfork error: {}", e);
+        log::error!("postfork error: {}", e);
+        std::process::exit(1);
     }
 
     // ── Apply UMask= before any file creation ─────────────────────────

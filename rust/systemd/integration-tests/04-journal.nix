@@ -70,6 +70,8 @@
     sed -i 's#| systemd-cat #| timeout 30 systemd-cat #' TEST-04-JOURNAL.journal.sh
 
     # journal-gatewayd.sh patches:
+    # Add sleep after journalctl --sync (stream handler may not have flushed yet)
+    sed -i 's#journalctl --sync#journalctl --sync; sleep 1#g' TEST-04-JOURNAL.journal-gatewayd.sh
     # Skip journal-remote tests in gatewayd test (not reimplemented)
     sed -i '/^mkdir \/tmp\/remote-journal/,/^rm -rf \/tmp\/remote-journal$/c\echo "SKIP: journal-remote not available"' TEST-04-JOURNAL.journal-gatewayd.sh
     sed -i '/^# Test a couple of error scenarios/,/^rm -f "\$GATEWAYD_FILE"$/c\echo "SKIP: error scenario tests require journal-remote"' TEST-04-JOURNAL.journal-gatewayd.sh

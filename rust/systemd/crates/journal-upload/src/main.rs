@@ -299,6 +299,61 @@ fn upload_entries(
 }
 
 // ---------------------------------------------------------------------------
+// Server health check
+// ---------------------------------------------------------------------------
+
+fn check_server(
+    url: &str,
+    key: Option<&str>,
+    cert: Option<&str>,
+    trust: Option<&str>,
+) -> io::Result<()> {
+    let upload_url = format!("{}/upload", url.trim_end_matches('/'));
+
+    let mut cmd = Command::new("curl");
+    cmd.arg("-LSfs")
+        .arg("--head")
+        .arg("--max-time")
+        .arg("5")
+        .arg(&upload_url)
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+
+    if let Some(key) = key
+        && key != "-"
+    {
+        cmd.arg("--key").arg(key);
+    }
+    if let Some(cert) = cert
+        && cert != "-"
+    {
+        cmd.arg("--cert").arg(cert);
+    }
+    match trust {
+        Some("all") | Some("-") | None => {
+            cmd.arg("--insecure");
+        }
+        Some(ca) => {
+            cmd.arg("--cacert").arg(ca);
+        }
+    }
+
+    let output = cmd
+        .output()
+        .map_err(|e| io::Error::other(format!("Failed to run curl: {}", e)))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(io::Error::other(format!(
+            "Server unreachable at {}: {}",
+            upload_url,
+            stderr.trim()
+        )));
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -370,6 +425,11 @@ fn main() {
             if !follow {
                 eprintln!("No new entries to upload");
                 break;
+            }
+            // Check server is still reachable while idle
+            if let Err(e) = check_server(&url, key.as_deref(), cert.as_deref(), trust.as_deref()) {
+                eprintln!("Server check failed: {}", e);
+                std::process::exit(1);
             }
             std::thread::sleep(std::time::Duration::from_secs(5));
             continue;
