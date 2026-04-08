@@ -154,7 +154,12 @@ struct Cli {
     transport: Option<String>,
 
     /// Filter by a grep pattern applied to the MESSAGE field.
-    #[arg(short = 'g', long = "grep", value_name = "PATTERN")]
+    #[arg(
+        short = 'g',
+        long = "grep",
+        value_name = "PATTERN",
+        allow_hyphen_values = true
+    )]
     grep: Option<String>,
 
     /// Control case sensitivity of --grep. Default is "smart-case":
