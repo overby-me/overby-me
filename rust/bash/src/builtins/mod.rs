@@ -11,6 +11,7 @@ mod compgen;
 mod exec;
 mod flow;
 pub(crate) mod fs;
+pub(crate) mod help_data;
 mod io;
 mod misc;
 mod set;

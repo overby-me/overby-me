@@ -817,6 +817,25 @@ impl Shell {
         }
     }
 
+    /// Check if the first argument to a builtin is `--help`, and if so,
+    /// print the help text for that builtin (matching bash's CHECK_HELPOPT behavior).
+    /// Returns true if `--help` was handled.
+    fn check_builtin_help(command_name: &str, args: &[String]) -> bool {
+        if args.first().map(|s| s.as_str()) == Some("--help") {
+            // Look up help entry for this builtin
+            use crate::builtins::help_data::HELP_ENTRIES;
+            if let Some(entry) = HELP_ENTRIES.iter().find(|e| e.name == command_name) {
+                // Print in the same format as `help <builtin>`
+                eprintln!("{}: {}", entry.name, entry.synopsis);
+                for line in entry.long_help.lines() {
+                    eprintln!("    {}", line);
+                }
+                return true;
+            }
+        }
+        false
+    }
+
     pub fn error_prefix(&self) -> String {
         let name = self
             .positional
@@ -1787,7 +1806,11 @@ impl Shell {
                     let prefix_exports: Vec<(String, String)> = vec![];
                     let saved: Vec<(String, Option<String>)> = vec![];
                     self.current_builtin = Some(command_name.clone());
-                    let result = builtin(self, args);
+                    let result = if Self::check_builtin_help(command_name, args) {
+                        2
+                    } else {
+                        builtin(self, args)
+                    };
                     self.current_builtin = None;
                     for (k, old) in saved {
                         match old {
@@ -1859,7 +1882,11 @@ impl Shell {
                 .collect();
 
             self.current_builtin = Some(command_name.clone());
-            let result = builtin(self, args);
+            let result = if Self::check_builtin_help(command_name, args) {
+                2
+            } else {
+                builtin(self, args)
+            };
             self.current_builtin = None;
 
             // In POSIX mode, prefix assignments to special builtins persist

@@ -57,5 +57,7 @@ extend-exclude = [
   # Upstream compiler code with assembly mnemonics and domain-specific abbreviations
   "rust/gcc/src/",
   "rust/gcc/include/",
+  # Auto-generated bash 5.3 help text (upstream wording triggers false positives)
+  "rust/bash/src/builtins/help_data.rs",
 ]
 ignore-hidden = false

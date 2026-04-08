@@ -1,4 +1,5 @@
 use super::*;
+use crate::builtins::help_data::HELP_ENTRIES;
 use crate::builtins::string_to_raw_bytes;
 
 pub(super) fn builtin_eval(shell: &mut Shell, args: &[String]) -> i32 {
@@ -357,10 +358,367 @@ pub(super) fn builtin_source(shell: &mut Shell, args: &[String]) -> i32 {
     }
 }
 
-pub(super) fn builtin_help(_shell: &mut Shell, _args: &[String]) -> i32 {
-    // Minimal help builtin — just enough to not fail as "command not found"
+pub(super) fn builtin_help(shell: &mut Shell, args: &[String]) -> i32 {
+    let mut flag_d = false; // short description
+    let mut flag_s = false; // short usage synopsis
+    let mut flag_m = false; // man page format
+    let mut patterns: Vec<String> = Vec::new();
+
+    let mut i = 0;
+    let mut past_opts = false;
+    while i < args.len() {
+        let arg = &args[i];
+        if !past_opts && arg == "--" {
+            past_opts = true;
+            i += 1;
+            continue;
+        }
+        if !past_opts && arg.starts_with('-') && arg.len() > 1 {
+            for ch in arg[1..].chars() {
+                match ch {
+                    'd' => flag_d = true,
+                    's' => flag_s = true,
+                    'm' => flag_m = true,
+                    _ => {
+                        eprintln!("{}: help: -{}: invalid option", shell.error_prefix(), ch);
+                        eprintln!("help: usage: help [-dms] [pattern ...]");
+                        return 2;
+                    }
+                }
+            }
+        } else {
+            patterns.push(arg.clone());
+        }
+        i += 1;
+    }
+
+    // If no patterns given, print the full builtin listing
+    if patterns.is_empty() {
+        help_print_listing(shell);
+        return 0;
+    }
+
+    // Match patterns against help entries
+    let mut status = 0;
+    for pattern in &patterns {
+        let is_glob = pattern.contains('*') || pattern.contains('?') || pattern.contains('[');
+
+        let matches: Vec<&crate::builtins::help_data::HelpEntry> = HELP_ENTRIES
+            .iter()
+            .filter(|e| help_name_matches(e.name, pattern))
+            .collect();
+
+        if matches.is_empty() {
+            eprintln!(
+                "{}: help: no help topics match `{}'.  Try `help help' or `man -k {}' or `info {}'.",
+                shell.error_prefix(),
+                pattern,
+                pattern,
+                pattern
+            );
+            status = 1;
+            continue;
+        }
+
+        // Bash prints a header when the pattern is a glob
+        if is_glob {
+            println!("Shell commands matching keyword `{}'", pattern);
+            println!();
+        }
+
+        for entry in &matches {
+            if flag_m {
+                help_print_manpage(entry);
+            } else if flag_d {
+                println!("{} - {}", entry.name, entry.short_desc);
+            } else if flag_s {
+                println!("{}: {}", entry.name, entry.synopsis);
+            } else {
+                help_print_full(entry);
+            }
+        }
+    }
+
+    status
+}
+
+/// Check if a help entry name matches a pattern (glob-style with * and ?).
+fn help_name_matches(name: &str, pattern: &str) -> bool {
+    // Bash matches against the builtin name. Patterns can use * and ?.
+    // Also match prefix: e.g. "rea" matches "read", "readarray", "readonly"
+    if pattern.contains('*') || pattern.contains('?') || pattern.contains('[') {
+        glob_match(pattern, name)
+    } else {
+        // Exact match or prefix match
+        name == pattern || name.starts_with(pattern)
+    }
+}
+
+/// Simple glob matching for help patterns.
+fn glob_match(pattern: &str, text: &str) -> bool {
+    let pat: Vec<char> = pattern.chars().collect();
+    let txt: Vec<char> = text.chars().collect();
+    glob_match_impl(&pat, &txt, 0, 0)
+}
+
+fn glob_match_impl(pat: &[char], txt: &[char], mut pi: usize, mut ti: usize) -> bool {
+    while pi < pat.len() {
+        match pat[pi] {
+            '*' => {
+                // Skip consecutive *
+                while pi < pat.len() && pat[pi] == '*' {
+                    pi += 1;
+                }
+                if pi == pat.len() {
+                    return true;
+                }
+                // Try matching * with 0, 1, 2, ... chars
+                for start in ti..=txt.len() {
+                    if glob_match_impl(pat, txt, pi, start) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+            '?' => {
+                if ti >= txt.len() {
+                    return false;
+                }
+                pi += 1;
+                ti += 1;
+            }
+            '[' => {
+                if ti >= txt.len() {
+                    return false;
+                }
+                // Find closing ]
+                let mut end = pi + 1;
+                if end < pat.len() && pat[end] == '!' {
+                    end += 1;
+                }
+                if end < pat.len() && pat[end] == ']' {
+                    end += 1;
+                }
+                while end < pat.len() && pat[end] != ']' {
+                    end += 1;
+                }
+                if end >= pat.len() {
+                    // No closing ], treat [ as literal
+                    if txt[ti] != '[' {
+                        return false;
+                    }
+                    pi += 1;
+                    ti += 1;
+                    continue;
+                }
+                let negate = pi + 1 < pat.len() && pat[pi + 1] == '!';
+                let start = if negate { pi + 2 } else { pi + 1 };
+                let mut matched = false;
+                let mut j = start;
+                while j < end {
+                    if j + 2 < end && pat[j + 1] == '-' {
+                        if txt[ti] >= pat[j] && txt[ti] <= pat[j + 2] {
+                            matched = true;
+                        }
+                        j += 3;
+                    } else {
+                        if txt[ti] == pat[j] {
+                            matched = true;
+                        }
+                        j += 1;
+                    }
+                }
+                if negate {
+                    matched = !matched;
+                }
+                if !matched {
+                    return false;
+                }
+                pi = end + 1;
+                ti += 1;
+            }
+            c => {
+                if ti >= txt.len() || txt[ti] != c {
+                    return false;
+                }
+                pi += 1;
+                ti += 1;
+            }
+        }
+    }
+    ti == txt.len()
+}
+
+/// Print the two-column listing of all builtins (same as `help` with no args).
+fn help_print_listing(shell: &Shell) {
+    // Print version header
     println!("GNU bash, version 5.3");
-    0
+
+    // Print intro text
+    println!("These shell commands are defined internally.  Type `help' to see this list.");
+    println!("Type `help name' to find out more about the function `name'.");
+    println!("Use `info bash' to find out more about the shell in general.");
+    println!("Use `man -k' or `info' to find out more about commands not in this list.");
+    println!();
+    println!("A star (*) next to a name means that the command is disabled.");
+    println!();
+
+    // Two-column layout matching bash's dispcolumn():
+    // screenwidth = 80, width = screenwidth / 2 = 40
+    // Left column: prefix(1) + synopsis(width-2=38) + '>' if truncated, padded to `width`
+    // Right column: prefix(1) + synopsis(width-3=37) + '>' if truncated
+    let width = 40;
+    let total = HELP_ENTRIES.len();
+    let rows = total.div_ceil(2);
+
+    for row in 0..rows {
+        let left_idx = row;
+        let right_idx = row + rows;
+
+        // Format left column
+        let left = format_help_column(
+            &HELP_ENTRIES[left_idx],
+            &shell.disabled_builtins,
+            width,
+            false,
+            shell,
+        );
+
+        if right_idx < total {
+            // Format right column
+            let right = format_help_column(
+                &HELP_ENTRIES[right_idx],
+                &shell.disabled_builtins,
+                width,
+                true,
+                shell,
+            );
+            // Left column padded to `width` columns, then right column
+            print!("{:<w$}", left, w = width);
+            println!("{}", right);
+        } else {
+            println!("{}", left);
+        }
+    }
+}
+
+/// Format a help column entry matching bash's truncation logic.
+///
+/// In C locale, bash uses dispcolumn() with strncpy-based truncation:
+///   Left:  strncpy(buf+1, doc, width-2); buf[width-2]='>'; buf[width-1]='\0';
+///   Right: strncpy(buf+1, doc, width-3); buf[width-3]='>'; buf[width-2]='\0';
+///   The '>' is visible when synopsis fills to within 1 char of the end.
+///   Left threshold: len >= width-2-1 = 37.  Keep = width-2-1 = 37 chars + '>'.
+///   Right threshold: len >= width-3-1 = 36.  Keep = width-3-1 = 36 chars + '>'.
+///
+/// In UTF-8 locale, bash uses wdispcolumn() with different right-column logic:
+///   Right column uses wcstr[dispchars-1]='>' instead of wcstr[dispchars]='>'
+///   which effectively shows one fewer character before '>'.
+///   Left threshold: len >= 37.  Keep = min(len,38)-1 = 37 chars + '>'.
+///   Right threshold: len >= 37.  Keep = min(len,38)-2 = 36 chars + '>'.
+///   BUT slen is clamped to min(len, width-2=38) first, so for len >= 38,
+///   right keep = 38-2 = 36; for len == 37, right keep = 37-2 = 35.
+fn format_help_column(
+    entry: &crate::builtins::help_data::HelpEntry,
+    disabled_builtins: &std::collections::HashSet<String>,
+    width: usize,
+    is_right: bool,
+    shell: &Shell,
+) -> String {
+    let disabled = disabled_builtins.contains(entry.name);
+    let prefix = if disabled { '*' } else { ' ' };
+    let synopsis = entry.synopsis;
+    let synopsis_chars: Vec<char> = synopsis.chars().collect();
+    let len = synopsis_chars.len();
+
+    // Detect UTF-8 locale from shell variables (LC_ALL is special in bash —
+    // setting it as a shell variable affects locale even without export)
+    let is_utf8 = is_utf8_locale(shell);
+
+    if is_utf8 {
+        // wdispcolumn logic: clamp slen, then use dispchars/dispchars-1
+        let max_slen = width - 2; // 38
+        let effective_len = len.min(max_slen);
+        // dispcols = effective_len + 1 (for prefix, ASCII assumption)
+        let truncated = effective_len + 1 >= max_slen; // effective_len >= 37
+        if truncated {
+            let keep = if is_right {
+                effective_len.saturating_sub(2)
+            } else {
+                effective_len.saturating_sub(1)
+            };
+            let truncated_text: String = synopsis_chars[..keep].iter().collect();
+            format!("{}{}>", prefix, truncated_text)
+        } else {
+            format!("{}{}", prefix, synopsis)
+        }
+    } else {
+        // dispcolumn (C locale) logic: strncpy-based truncation
+        let max_copy = if is_right { width - 3 } else { width - 2 };
+        let threshold = max_copy - 1;
+        if len >= threshold {
+            let keep = max_copy - 1;
+            let truncated_text: String = synopsis_chars[..keep].iter().collect();
+            format!("{}{}>", prefix, truncated_text)
+        } else {
+            format!("{}{}", prefix, synopsis)
+        }
+    }
+}
+
+/// Check if the current locale is UTF-8 (for help column truncation logic).
+/// Checks shell variables first (bash treats LC_* as special), then falls back
+/// to environment variables.
+fn is_utf8_locale(shell: &Shell) -> bool {
+    // Check LC_ALL, then LC_CTYPE, then LANG — first in shell vars, then env
+    for var in &["LC_ALL", "LC_CTYPE", "LANG"] {
+        // Check shell variable first (bash applies LC_* even without export)
+        if let Some(val) = shell.vars.get(*var)
+            && !val.is_empty()
+        {
+            let lower = val.to_lowercase();
+            return lower.contains("utf-8") || lower.contains("utf8");
+        }
+        // Fall back to environment variable
+        if let Ok(val) = std::env::var(var)
+            && !val.is_empty()
+        {
+            let lower = val.to_lowercase();
+            return lower.contains("utf-8") || lower.contains("utf8");
+        }
+    }
+    false
+}
+
+/// Print full help for a single entry.
+fn help_print_full(entry: &crate::builtins::help_data::HelpEntry) {
+    println!("{}: {}", entry.name, entry.synopsis);
+    for line in entry.long_help.lines() {
+        println!("    {}", line);
+    }
+}
+
+/// Print help in man-page format.
+fn help_print_manpage(entry: &crate::builtins::help_data::HelpEntry) {
+    println!("NAME");
+    println!("    {} - {}", entry.name, entry.short_desc);
+    println!();
+    println!("SYNOPSIS");
+    println!("    {}", entry.synopsis);
+    println!();
+    println!("DESCRIPTION");
+    for line in entry.long_help.lines() {
+        println!("    {}", line);
+    }
+    println!();
+    println!("SEE ALSO");
+    println!("    bash(1)");
+    println!();
+    println!("IMPLEMENTATION");
+    println!("    GNU bash, version 5.3");
+    println!("    Copyright (C) 2025 Free Software Foundation, Inc.");
+    println!("    License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>");
+    println!();
 }
 
 pub(super) fn builtin_type(shell: &mut Shell, args: &[String]) -> i32 {
