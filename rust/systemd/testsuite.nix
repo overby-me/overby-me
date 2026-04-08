@@ -122,6 +122,7 @@ in
           # create a stale reload-done before the intended reload runs.
           systemd-journald.serviceConfig = {
             Type = lib.mkForce "simple";
+            FileDescriptorStoreMax = lib.mkDefault 4224;
             ExecReload = let
               reloadScript = pkgs.writeShellScript "journald-reload" ''
                 REQ_FILE=/run/systemd/journal/reload-request
