@@ -1730,8 +1730,10 @@ fn main() {
     }
 
     // Handle special commands that don't need to read entries
+    let ns_ref = cli.namespace.as_deref();
+
     if cli.flush {
-        if !varlink_call("io.systemd.Journal.FlushToVar") {
+        if !varlink_call("io.systemd.Journal.FlushToVar", ns_ref) {
             send_signal_to_journald(libc::SIGUSR1);
             std::thread::sleep(Duration::from_secs(1));
         }
@@ -1739,7 +1741,7 @@ fn main() {
     }
 
     if cli.relinquish_var || cli.smart_relinquish_var {
-        if !varlink_call("io.systemd.Journal.RelinquishVar") {
+        if !varlink_call("io.systemd.Journal.RelinquishVar", ns_ref) {
             // Signal fallback not available for relinquish — it's a varlink-only operation.
             // If varlink fails, just return silently.
             eprintln!("Warning: failed to send RelinquishVar via varlink");
@@ -1763,7 +1765,7 @@ fn main() {
     }
 
     if cli.sync {
-        if !varlink_call("io.systemd.Journal.Synchronize") {
+        if !varlink_call("io.systemd.Journal.Synchronize", ns_ref) {
             send_signal_to_journald(libc::SIGRTMIN() + 1);
             if let Some(ref ns) = cli.namespace {
                 send_signal_to_journald_namespace(ns, libc::SIGRTMIN() + 1);
@@ -1774,7 +1776,7 @@ fn main() {
     }
 
     if cli.rotate {
-        if !varlink_call("io.systemd.Journal.Rotate") {
+        if !varlink_call("io.systemd.Journal.Rotate", ns_ref) {
             send_signal_to_journald(libc::SIGUSR2);
             if cli.vacuum_size.is_some() || cli.vacuum_time.is_some() || cli.vacuum_files.is_some()
             {
@@ -3090,11 +3092,16 @@ const VARLINK_SOCKET_PATH: &str = "/run/systemd/journal/io.systemd.journal";
 
 /// Call a varlink method on journald. Returns true on success, false on failure.
 /// Falls back to signal-based communication if the varlink socket is unavailable.
-fn varlink_call(method: &str) -> bool {
+/// When `namespace` is Some, connects to the namespace-specific varlink socket.
+fn varlink_call(method: &str, namespace: Option<&str>) -> bool {
     use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
 
-    let mut stream = match UnixStream::connect(VARLINK_SOCKET_PATH) {
+    let socket_path = match namespace {
+        Some(ns) => format!("/run/systemd/journal.{ns}/io.systemd.journal"),
+        None => VARLINK_SOCKET_PATH.to_string(),
+    };
+    let mut stream = match UnixStream::connect(&socket_path) {
         Ok(s) => s,
         Err(_) => return false,
     };
