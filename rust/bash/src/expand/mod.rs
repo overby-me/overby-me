@@ -534,10 +534,46 @@ impl ExpCtx<'_> {
         }
         // Shell variables, arrays, or environment
         let resolved = self.resolve_nameref(name);
-        self.vars.contains_key(&resolved)
-            || self.arrays.contains_key(&resolved)
-            || self.assoc_arrays.contains_key(&resolved)
-            || std::env::var(&resolved).is_ok()
+        // For bare names (no subscript), check if the name has a value.
+        // If name is a subscripted reference like arr[@], arrays are checked elsewhere.
+        // For bare array names, bash treats ${arr-default} as ${arr[0]-default},
+        // so check if element [0] is set (not just if the array exists).
+        if let Some(bracket) = name.find('[') {
+            // Has subscript — check the specific element
+            let base = &name[..bracket];
+            let idx_str = &name[bracket + 1..name.len() - 1];
+            let base_resolved = self.resolve_nameref(base);
+            if idx_str == "@" || idx_str == "*" {
+                // ${arr[@]-default}: set if array has any elements
+                if let Some(arr) = self.arrays.get(&base_resolved) {
+                    return arr.iter().any(|v| v.is_some());
+                }
+                if let Some(assoc) = self.assoc_arrays.get(&base_resolved) {
+                    return !assoc.is_empty();
+                }
+                return false;
+            }
+            if let Some(arr) = self.arrays.get(&base_resolved)
+                && let Ok(n) = idx_str.parse::<usize>()
+            {
+                return arr.get(n).is_some_and(|v| v.is_some());
+            }
+            if let Some(assoc) = self.assoc_arrays.get(&base_resolved) {
+                return assoc.contains_key(idx_str);
+            }
+            return self.vars.contains_key(&base_resolved);
+        }
+        if self.vars.contains_key(&resolved) {
+            return true;
+        }
+        // Bare array name: ${A-default} checks element [0] / key "0"
+        if let Some(arr) = self.arrays.get(&resolved) {
+            return arr.first().is_some_and(|v| v.is_some());
+        }
+        if let Some(assoc) = self.assoc_arrays.get(&resolved) {
+            return assoc.contains_key("0");
+        }
+        std::env::var(&resolved).is_ok()
     }
 }
 

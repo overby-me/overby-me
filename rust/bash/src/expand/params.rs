@@ -1894,6 +1894,12 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                     if let Some(assoc) = ctx.assoc_arrays.get(&resolved) {
                         return assoc.len().to_string();
                     }
+                    // Scalar with [@] or [*]: ${#scalar[@]} returns 1 if set, 0 if unset.
+                    // Scalars are treated as single-element arrays.
+                    if ctx.vars.contains_key(&resolved) {
+                        return "1".to_string();
+                    }
+                    return "0".to_string();
                 }
                 // ${#arr[N]} with negative N — check bounds and use [-N] error format
                 if !ctx.assoc_arrays.contains_key(&resolved) && idx_str != "@" && idx_str != "*" {
