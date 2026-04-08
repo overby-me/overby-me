@@ -29,7 +29,26 @@ fn ifs_first_char(vars: &HashMap<String, String>) -> Option<char> {
 /// Function type for evaluating command substitutions.
 pub type CmdSubFn<'a> = &'a mut dyn FnMut(&str) -> String;
 
+/// Owned snapshot of shell state, used to refresh ExpCtx after funsub execution.
+/// Funsubs (`${ cmd; }`) and valuesubs (`${| cmd; }`) run in the current shell
+/// and can modify positional params, variables, arrays, etc.  Subsequent word
+/// parts in the same word must see those changes.
+#[derive(Clone)]
+pub struct FunsubState {
+    pub vars: HashMap<String, String>,
+    pub arrays: HashMap<String, Vec<Option<String>>>,
+    pub assoc_arrays: HashMap<String, crate::interpreter::AssocArray>,
+    pub namerefs: HashMap<String, String>,
+    pub positional: Vec<String>,
+    pub last_status: i32,
+    pub opt_flags: String,
+}
+
 thread_local! {
+    /// After a funsub/valuesub executes, the interpreter stores fresh shell
+    /// state here so the expand module can pick it up and refresh its ExpCtx.
+    static FUNSUB_UPDATED_STATE: RefCell<Option<FunsubState>> = const { RefCell::new(None) };
+
     /// File descriptors opened by process substitutions that need to be closed
     /// after the command using them completes.
     static PROCSUB_FDS: RefCell<Vec<i32>> = const { RefCell::new(Vec::new()) };
@@ -80,11 +99,23 @@ pub fn set_procsub_runner(f: *mut dyn FnMut(&str) -> i32) {
     });
 }
 
-/// Clear the process substitution runner
 pub fn clear_procsub_runner() {
     PROCSUB_RUNNER.with(|r| {
         *r.borrow_mut() = None;
     });
+}
+
+/// Called by the interpreter after a funsub/valuesub executes to store
+/// the updated shell state so subsequent word-part expansions see changes.
+pub fn set_funsub_state(state: FunsubState) {
+    FUNSUB_UPDATED_STATE.with(|s| {
+        *s.borrow_mut() = Some(state);
+    });
+}
+
+/// Take (and clear) any pending funsub state update.
+pub fn take_funsub_state() -> Option<FunsubState> {
+    FUNSUB_UPDATED_STATE.with(|s| s.borrow_mut().take())
 }
 
 /// Run a process substitution command using the registered runner
@@ -579,8 +610,34 @@ impl ExpCtx<'_> {
 
 fn expand_word_to_segments(word: &Word, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> Vec<Segment> {
     let mut segments = Vec::new();
+    // After a funsub/valuesub executes, the shell state may have changed.
+    // We need to refresh the ExpCtx so subsequent word parts see the updates.
+    let mut funsub_owned: Option<FunsubState> = None;
+    // Clear any stale funsub state before we start
+    let _ = take_funsub_state();
     for part in word {
-        expand_part(part, ctx, &mut segments, cmd_sub);
+        let fresh_ctx;
+        let effective_ctx = if let Some(ref state) = funsub_owned {
+            fresh_ctx = ExpCtx {
+                vars: &state.vars,
+                arrays: &state.arrays,
+                assoc_arrays: &state.assoc_arrays,
+                namerefs: &state.namerefs,
+                positional: &state.positional,
+                last_status: state.last_status,
+                last_bg_pid: ctx.last_bg_pid,
+                top_level_pid: ctx.top_level_pid,
+                opt_flags: &state.opt_flags,
+            };
+            &fresh_ctx
+        } else {
+            ctx
+        };
+        expand_part(part, effective_ctx, &mut segments, cmd_sub);
+        // Check if a funsub/valuesub updated the shell state
+        if let Some(new_state) = take_funsub_state() {
+            funsub_owned = Some(new_state);
+        }
     }
     // If any segment came from an incomplete comsub/funsub, suppress output
     let has_any_incomplete = segments.iter().any(|s| match s {
@@ -637,7 +694,28 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
         }
         WordPart::DoubleQuoted(parts) => {
             let mut s = String::new();
+            let mut dq_funsub_owned: Option<FunsubState> = None;
             for p in parts {
+                // After a funsub/valuesub inside double quotes, refresh the
+                // expansion context so subsequent parts see the updated state
+                // (e.g. "$*${ set -- a b c;}$*" — second $* must see new params).
+                let dq_fresh_ctx;
+                #[allow(unused_assignments)]
+                let mut ctx = ctx;
+                if let Some(ref state) = dq_funsub_owned {
+                    dq_fresh_ctx = ExpCtx {
+                        vars: &state.vars,
+                        arrays: &state.arrays,
+                        assoc_arrays: &state.assoc_arrays,
+                        namerefs: &state.namerefs,
+                        positional: &state.positional,
+                        last_status: state.last_status,
+                        last_bg_pid: ctx.last_bg_pid,
+                        top_level_pid: ctx.top_level_pid,
+                        opt_flags: &state.opt_flags,
+                    };
+                    ctx = &dq_fresh_ctx;
+                }
                 match p {
                     WordPart::Literal(t) => s.push_str(t),
                     WordPart::Variable(name) if name == "@" => {
@@ -687,42 +765,103 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                         }
                     }
                     WordPart::Variable(name) => {
-                        let val = lookup_var(name, ctx);
-                        let is_pos_unbound = if let Ok(n) = name.parse::<usize>() {
-                            n > 0 && n >= ctx.positional.len()
+                        // Check if this variable is a nameref that resolves to
+                        // arr[@] or arr[*] — if so, produce SplitHere markers
+                        // (like "${arr[@]}") instead of a single joined string.
+                        let resolved_nr = ctx.resolve_nameref(name);
+                        let nameref_is_at_star = if resolved_nr != *name {
+                            if let Some(bracket) = resolved_nr.find('[') {
+                                let idx =
+                                    &resolved_nr[bracket + 1..resolved_nr.len().saturating_sub(1)];
+                                idx == "@" || idx == "*"
+                            } else {
+                                false
+                            }
                         } else {
                             false
                         };
-                        if val.is_empty()
-                            && ctx.opt_flags.contains('u')
-                            && !matches!(name.as_str(), "?" | "$" | "#" | "@" | "*" | "-" | "0")
-                            && !(name == "!" && ctx.last_bg_pid != 0)
-                            && (is_pos_unbound
-                                || (name.parse::<usize>().is_err()
-                                    && !ctx.vars.contains_key(name.as_str())
-                                    && !ctx.arrays.contains_key(name.as_str())
-                                    && std::env::var(name.as_str()).is_err()))
-                        {
-                            let sname = ctx
-                                .vars
-                                .get("_BASH_SOURCE_FILE")
-                                .or_else(|| ctx.positional.first())
-                                .map(|s| s.as_str())
-                                .unwrap_or("bash");
-                            let lineno = ctx.vars.get("LINENO").map(|s| s.as_str()).unwrap_or("0");
-                            // Include $ prefix only for positional params (numeric names)
-                            if name.chars().all(|c| c.is_ascii_digit()) {
-                                eprintln!(
-                                    "{}: line {}: ${}: unbound variable",
-                                    sname, lineno, name
-                                );
+                        if nameref_is_at_star {
+                            let bracket = resolved_nr.find('[').unwrap();
+                            let base = &resolved_nr[..bracket];
+                            let idx = &resolved_nr[bracket + 1..resolved_nr.len() - 1];
+                            let resolved_base = ctx.resolve_nameref(base);
+                            let elements: Vec<String> =
+                                if let Some(arr) = ctx.arrays.get(&resolved_base) {
+                                    arr.iter().filter_map(|v| v.clone()).collect()
+                                } else if let Some(assoc) = ctx.assoc_arrays.get(&resolved_base) {
+                                    assoc.values().cloned().collect()
+                                } else if let Some(val) = ctx.vars.get(&resolved_base) {
+                                    vec![val.clone()]
+                                } else {
+                                    vec![]
+                                };
+                            if idx == "@" {
+                                // Like "${arr[@]}" — each element is a separate field
+                                if !elements.is_empty() {
+                                    if !s.is_empty() {
+                                        out.push(Segment::Quoted(std::mem::take(&mut s)));
+                                    }
+                                    for (i, elem) in elements.iter().enumerate() {
+                                        if i > 0 {
+                                            out.push(Segment::SplitHere);
+                                        }
+                                        out.push(Segment::Quoted(elem.clone()));
+                                    }
+                                }
                             } else {
-                                eprintln!("{}: line {}: {}: unbound variable", sname, lineno, name);
+                                // Like "${arr[*]}" — join with IFS first char
+                                let sep = ifs_first_char(ctx.vars);
+                                for (i, elem) in elements.iter().enumerate() {
+                                    if i > 0
+                                        && let Some(c) = sep
+                                    {
+                                        s.push(c);
+                                    }
+                                    s.push_str(elem);
+                                }
                             }
-                            set_arith_error();
-                            set_nounset_error();
+                        } else {
+                            let val = lookup_var(name, ctx);
+                            let is_pos_unbound = if let Ok(n) = name.parse::<usize>() {
+                                n > 0 && n >= ctx.positional.len()
+                            } else {
+                                false
+                            };
+                            if val.is_empty()
+                                && ctx.opt_flags.contains('u')
+                                && !matches!(name.as_str(), "?" | "$" | "#" | "@" | "*" | "-" | "0")
+                                && !(name == "!" && ctx.last_bg_pid != 0)
+                                && (is_pos_unbound
+                                    || (name.parse::<usize>().is_err()
+                                        && !ctx.vars.contains_key(name.as_str())
+                                        && !ctx.arrays.contains_key(name.as_str())
+                                        && std::env::var(name.as_str()).is_err()))
+                            {
+                                let sname = ctx
+                                    .vars
+                                    .get("_BASH_SOURCE_FILE")
+                                    .or_else(|| ctx.positional.first())
+                                    .map(|s| s.as_str())
+                                    .unwrap_or("bash");
+                                let lineno =
+                                    ctx.vars.get("LINENO").map(|s| s.as_str()).unwrap_or("0");
+                                // Include $ prefix only for positional params (numeric names)
+                                if name.chars().all(|c| c.is_ascii_digit()) {
+                                    eprintln!(
+                                        "{}: line {}: ${}: unbound variable",
+                                        sname, lineno, name
+                                    );
+                                } else {
+                                    eprintln!(
+                                        "{}: line {}: {}: unbound variable",
+                                        sname, lineno, name
+                                    );
+                                }
+                                set_arith_error();
+                                set_nounset_error();
+                            }
+                            s.push_str(&val);
                         }
-                        s.push_str(&val);
                     }
                     WordPart::Param(expr)
                         if (expr.name == "@" || expr.name == "*")
@@ -1066,6 +1205,12 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                             }
                         } else {
                             s.push_str(&cmd_sub(&format!("{}{}", nofork_prefix, cmd)));
+                            // Funsub/valuesub may have modified shell state; pick up
+                            // the refresh so remaining parts in this DoubleQuoted word
+                            // see the updated positional params, variables, etc.
+                            if let Some(new_state) = take_funsub_state() {
+                                dq_funsub_owned = Some(new_state);
+                            }
                         }
                     }
                     WordPart::BacktickSub(cmd) => {

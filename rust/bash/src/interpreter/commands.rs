@@ -521,9 +521,32 @@ impl Shell {
         let arrays = self.arrays.clone();
         let mut cmd_sub = |cmd: &str| -> String {
             if let Some(rest) = cmd.strip_prefix("\x01FUNSUB:") {
-                self.capture_output_nofork(rest)
+                let result = self.capture_output_nofork(rest);
+                // Funsub runs in current shell — publish refreshed state so
+                // subsequent word parts in the same expansion see changes
+                // (e.g. "$*${ set -- a b c;}$*" — second $* must see new params).
+                crate::expand::set_funsub_state(crate::expand::FunsubState {
+                    vars: self.vars.clone(),
+                    arrays: self.arrays.clone(),
+                    assoc_arrays: self.assoc_arrays.clone(),
+                    namerefs: self.namerefs.clone(),
+                    positional: self.positional.clone(),
+                    last_status: self.last_status,
+                    opt_flags: self.get_opt_flags(),
+                });
+                result
             } else if let Some(rest) = cmd.strip_prefix("\x01VALUESUB:") {
-                self.capture_valuesub(rest)
+                let result = self.capture_valuesub(rest);
+                crate::expand::set_funsub_state(crate::expand::FunsubState {
+                    vars: self.vars.clone(),
+                    arrays: self.arrays.clone(),
+                    assoc_arrays: self.assoc_arrays.clone(),
+                    namerefs: self.namerefs.clone(),
+                    positional: self.positional.clone(),
+                    last_status: self.last_status,
+                    opt_flags: self.get_opt_flags(),
+                });
+                result
             } else {
                 self.capture_output(cmd)
             }
@@ -728,9 +751,29 @@ impl Shell {
         let arrays = self.arrays.clone();
         let mut cmd_sub = |cmd: &str| -> String {
             if let Some(rest) = cmd.strip_prefix("\x01FUNSUB:") {
-                self.capture_output_nofork(rest)
+                let result = self.capture_output_nofork(rest);
+                crate::expand::set_funsub_state(crate::expand::FunsubState {
+                    vars: self.vars.clone(),
+                    arrays: self.arrays.clone(),
+                    assoc_arrays: self.assoc_arrays.clone(),
+                    namerefs: self.namerefs.clone(),
+                    positional: self.positional.clone(),
+                    last_status: self.last_status,
+                    opt_flags: self.get_opt_flags(),
+                });
+                result
             } else if let Some(rest) = cmd.strip_prefix("\x01VALUESUB:") {
-                self.capture_valuesub(rest)
+                let result = self.capture_valuesub(rest);
+                crate::expand::set_funsub_state(crate::expand::FunsubState {
+                    vars: self.vars.clone(),
+                    arrays: self.arrays.clone(),
+                    assoc_arrays: self.assoc_arrays.clone(),
+                    namerefs: self.namerefs.clone(),
+                    positional: self.positional.clone(),
+                    last_status: self.last_status,
+                    opt_flags: self.get_opt_flags(),
+                });
+                result
             } else {
                 self.capture_output(cmd)
             }
@@ -767,9 +810,29 @@ impl Shell {
         let arrays = self.arrays.clone();
         let mut cmd_sub = |cmd: &str| -> String {
             if let Some(rest) = cmd.strip_prefix("\x01FUNSUB:") {
-                self.capture_output_nofork(rest)
+                let result = self.capture_output_nofork(rest);
+                crate::expand::set_funsub_state(crate::expand::FunsubState {
+                    vars: self.vars.clone(),
+                    arrays: self.arrays.clone(),
+                    assoc_arrays: self.assoc_arrays.clone(),
+                    namerefs: self.namerefs.clone(),
+                    positional: self.positional.clone(),
+                    last_status: self.last_status,
+                    opt_flags: self.get_opt_flags(),
+                });
+                result
             } else if let Some(rest) = cmd.strip_prefix("\x01VALUESUB:") {
-                self.capture_valuesub(rest)
+                let result = self.capture_valuesub(rest);
+                crate::expand::set_funsub_state(crate::expand::FunsubState {
+                    vars: self.vars.clone(),
+                    arrays: self.arrays.clone(),
+                    assoc_arrays: self.assoc_arrays.clone(),
+                    namerefs: self.namerefs.clone(),
+                    positional: self.positional.clone(),
+                    last_status: self.last_status,
+                    opt_flags: self.get_opt_flags(),
+                });
+                result
             } else {
                 self.capture_output(cmd)
             }

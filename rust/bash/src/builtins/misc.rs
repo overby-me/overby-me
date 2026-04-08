@@ -681,8 +681,78 @@ pub(super) fn builtin_unalias(shell: &mut Shell, args: &[String]) -> i32 {
     status
 }
 
-pub(super) fn builtin_jobs(_shell: &mut Shell, _args: &[String]) -> i32 {
-    // Minimal stub — job control is not fully implemented
+pub(super) fn builtin_jobs(shell: &mut Shell, args: &[String]) -> i32 {
+    use crate::interpreter::JobStatus;
+
+    // Reap finished jobs before listing
+    shell.reap_jobs();
+
+    let mut show_pids = false;
+    let mut show_running = false;
+    let mut show_stopped = false;
+    for arg in args {
+        match arg.as_str() {
+            "-l" | "-p" => show_pids = true,
+            "-n" => {} // only show jobs that changed status — we don't track this yet
+            "-r" => show_running = true,
+            "-s" => show_stopped = true,
+            _ => {}
+        }
+    }
+
+    let total = shell.jobs.len();
+    for (i, job) in shell.jobs.iter().enumerate() {
+        // Filter by status if -r or -s specified
+        if show_running && job.status != JobStatus::Running {
+            continue;
+        }
+        if show_stopped && job.status != JobStatus::Stopped {
+            continue;
+        }
+
+        // Determine current/previous job marker
+        let marker = if i == total - 1 {
+            "+"
+        } else if i == total.saturating_sub(2) {
+            "-"
+        } else {
+            " "
+        };
+
+        let status_str = match &job.status {
+            JobStatus::Running => "Running",
+            JobStatus::Done(0) => "Done",
+            JobStatus::Done(_code) => {
+                // For non-zero exit, bash shows "Done(N)" but only sometimes;
+                // for simplicity, show "Done" for exit 0, "Exit N" for others
+                // Actually bash shows "Done" for 0, "Exit N" for non-zero
+                // but in basic job listing just "Done" is shown
+                "Done"
+            }
+            JobStatus::Stopped => "Stopped",
+        };
+
+        // Bash format: [N]±  Status                     command
+        // The status field is left-aligned in a ~27-char field
+        if show_pids {
+            println!(
+                "[{}]{}  {} {} {}",
+                job.number, marker, job.pid, status_str, job.command
+            );
+        } else {
+            // Match bash's formatting: status is padded to ~27 chars
+            println!(
+                "[{}]{}  {:<27}{}",
+                job.number, marker, status_str, job.command
+            );
+        }
+    }
+
+    // Remove jobs that have been reported as Done
+    shell
+        .jobs
+        .retain(|j| matches!(j.status, JobStatus::Running | JobStatus::Stopped));
+
     0
 }
 

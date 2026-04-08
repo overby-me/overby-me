@@ -234,6 +234,27 @@ use std::io::Write;
 /// Saved shell options: (errexit, nounset, xtrace, noclobber, noglob, pipefail)
 type SavedOpts = (bool, bool, bool, bool, bool, bool);
 
+/// A tracked background job.
+#[derive(Debug, Clone)]
+pub struct Job {
+    /// Job number (1-based)
+    pub number: usize,
+    /// Process ID of the job leader
+    pub pid: i32,
+    /// The command text (for display by `jobs`)
+    pub command: String,
+    /// Current status
+    pub status: JobStatus,
+}
+
+/// Status of a background job.
+#[derive(Debug, Clone, PartialEq)]
+pub enum JobStatus {
+    Running,
+    Done(i32),
+    Stopped,
+}
+
 pub struct Shell {
     pub vars: HashMap<String, String>,
     pub exports: HashMap<String, String>,
@@ -254,6 +275,8 @@ pub struct Shell {
     pub hash_table: HashMap<String, (String, u32)>,
     pub hash_order: Vec<String>,
     pub disabled_builtins: HashSet<String>,
+    /// Tracked background jobs (for `jobs` builtin)
+    pub jobs: Vec<Job>,
     pub positional: Vec<String>,
     pub last_status: i32,
     pub last_bg_pid: i32,
@@ -344,6 +367,33 @@ pub struct Shell {
 }
 
 impl Shell {
+    /// Check status of background jobs and update their status.
+    /// Removes jobs that have been reported as Done.
+    pub fn reap_jobs(&mut self) {
+        #[cfg(unix)]
+        {
+            use nix::sys::wait::{WaitStatus, waitpid};
+            use nix::unistd::Pid;
+            for job in self.jobs.iter_mut() {
+                if job.status == JobStatus::Running {
+                    match waitpid(
+                        Pid::from_raw(job.pid),
+                        Some(nix::sys::wait::WaitPidFlag::WNOHANG),
+                    ) {
+                        Ok(WaitStatus::Exited(_, code)) => {
+                            job.status = JobStatus::Done(code);
+                        }
+                        Ok(WaitStatus::Signaled(_, sig, _)) => {
+                            job.status = JobStatus::Done(128 + sig as i32);
+                        }
+                        Ok(WaitStatus::StillAlive) | Err(_) => {}
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
     pub fn new() -> Self {
         let mut vars = HashMap::new();
         let mut exports = HashMap::new();
@@ -440,6 +490,7 @@ impl Shell {
             hash_table: HashMap::new(),
             hash_order: Vec::new(),
             disabled_builtins: HashSet::new(),
+            jobs: Vec::new(),
             positional: vec!["bash".to_string()],
             last_status: 0,
             last_bg_pid: 0,
@@ -1316,13 +1367,27 @@ impl Shell {
         // Store end_line for compound redirect error reporting
         self.cmd_end_line = Some(cmd.end_line);
 
+        // Reap finished background jobs (non-blocking waitpid check)
+        self.reap_jobs();
+
         if cmd.background {
+            // Build command text for job tracking before forking
+            let cmd_text = crate::builtins::format_complete_command(cmd);
             #[cfg(unix)]
             {
                 match unsafe { nix::unistd::fork() } {
                     Ok(nix::unistd::ForkResult::Parent { child }) => {
                         self.last_bg_pid = child.as_raw();
                         self.vars.insert("!".to_string(), child.to_string());
+                        // Reap any finished jobs before adding new ones
+                        self.reap_jobs();
+                        let job_num = self.jobs.last().map_or(1, |j| j.number + 1);
+                        self.jobs.push(Job {
+                            number: job_num,
+                            pid: child.as_raw(),
+                            command: cmd_text,
+                            status: JobStatus::Running,
+                        });
                         return 0;
                     }
                     Ok(nix::unistd::ForkResult::Child) => {

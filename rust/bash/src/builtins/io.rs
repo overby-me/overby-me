@@ -1398,7 +1398,7 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
                                         shell.error_prefix(),
                                         args[i]
                                     );
-                                    return 2;
+                                    return 1;
                                 }
                                 Ok(t) => timeout_secs = Some(t),
                                 Err(_) => {
@@ -1480,7 +1480,7 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
                                 shell.error_prefix(),
                                 args[i]
                             );
-                            return 2;
+                            return 1;
                         }
                         Ok(t) => timeout_secs = Some(t),
                         Err(_) => {
@@ -1639,14 +1639,39 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
             let ms = (secs * 1000.0).ceil().max(1.0) as i32;
             PollTimeout::from(ms.min(i32::from(u16::MAX)) as u16)
         };
+        // Helper: unset the target variables on timeout (bash 5.3 behavior).
+        // When `read -t` times out, the named variables are unset so that
+        // any previous value is cleared.
+        let unset_on_timeout =
+            |shell: &mut Shell, var_names: &[String], array_name: &Option<String>| {
+                if let Some(aname) = array_name {
+                    shell.arrays.remove(aname);
+                    shell.vars.remove(aname);
+                } else {
+                    for vname in var_names {
+                        let base = if let Some(bracket) = vname.find('[') {
+                            &vname[..bracket]
+                        } else {
+                            vname.as_str()
+                        };
+                        shell.vars.remove(base);
+                    }
+                }
+            };
         match nix::poll::poll(&mut poll_fds, timeout) {
             Ok(0) => {
                 if is_poll {
                     return 1; // polling: no data available
                 }
+                unset_on_timeout(shell, &var_names, &array_name);
                 return 142; // timeout — exit code > 128
             }
-            Err(_) => return if is_poll { 1 } else { 142 },
+            Err(_) => {
+                if !is_poll {
+                    unset_on_timeout(shell, &var_names, &array_name);
+                }
+                return if is_poll { 1 } else { 142 };
+            }
             _ => {
                 let revents = poll_fds[0].revents().unwrap_or(PollFlags::empty());
                 if is_poll {
@@ -1661,6 +1686,7 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
                 // as timeout rather than falling through to a read that would
                 // immediately return EOF.  Bash returns > 128 in this case.
                 if !revents.intersects(PollFlags::POLLIN) {
+                    unset_on_timeout(shell, &var_names, &array_name);
                     return 142; // timeout — no readable data
                 }
             }

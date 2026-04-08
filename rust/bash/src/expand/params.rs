@@ -608,6 +608,14 @@ pub(super) fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
             // Resolve namerefs
             let resolved = ctx.resolve_nameref(name);
 
+            // If the resolved nameref target contains '[', re-dispatch as a
+            // subscript lookup.  This handles `declare -n nref='assoc[@]'`
+            // where `$nref` should expand to all values of the array.
+            if resolved.find('[').is_some() {
+                // Re-enter lookup_var with the resolved subscripted name
+                return lookup_var(&resolved, ctx);
+            }
+
             // Check variables, then environment
             ctx.vars
                 .get(&resolved)

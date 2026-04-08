@@ -1,6 +1,7 @@
 use crate::ast::{
-    AndOr, AssignValue, CaseTerminator, Command, CompoundCommand, CondExpr, ParamOp, Pipeline,
-    ProcessSubKind, Program, RedirFd, RedirectKind, Redirection, SimpleCommand, Word, WordPart,
+    AndOr, AssignValue, CaseTerminator, Command, CompleteCommand, CompoundCommand, CondExpr,
+    ParamOp, Pipeline, ProcessSubKind, Program, RedirFd, RedirectKind, Redirection, SimpleCommand,
+    Word, WordPart,
 };
 use crate::interpreter::{Shell, capitalize_string, is_valid_identifier};
 use std::collections::HashMap;
@@ -866,6 +867,22 @@ fn format_simple_command(cmd: &SimpleCommand) -> String {
         result.push_str(&body);
     }
     result
+}
+
+/// Format a complete command as a single line (for job tracking display).
+pub fn format_complete_command(cmd: &CompleteCommand) -> String {
+    let mut s = format_pipeline_indent(&cmd.list.first, 0);
+    for (op, pipeline) in &cmd.list.rest {
+        match op {
+            AndOr::And => s.push_str(" && "),
+            AndOr::Or => s.push_str(" || "),
+        }
+        s.push_str(&format_pipeline_indent(pipeline, 0));
+    }
+    if cmd.background {
+        s.push_str(" &");
+    }
+    s
 }
 
 fn format_pipeline_indent(pipeline: &Pipeline, indent: usize) -> String {
