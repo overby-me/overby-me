@@ -246,6 +246,10 @@ fn upload_entries(
 
     let mut cmd = Command::new("curl");
     cmd.arg("-LSfs")
+        .arg("--connect-timeout")
+        .arg("5")
+        .arg("--max-time")
+        .arg("60")
         .arg("--header")
         .arg("Content-Type: application/vnd.fdo.journal")
         .arg("--data-binary")
