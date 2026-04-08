@@ -130,7 +130,7 @@ fn apply_passcred(fd: RawFd, conf: &SocketConfig) {
 }
 
 impl UnixSocketConfig {
-    pub fn close(&self, rawfd: RawFd, remove_on_stop: bool) -> Result<(), String> {
+    pub fn close(&self, _rawfd: RawFd, remove_on_stop: bool) -> Result<(), String> {
         if remove_on_stop {
             let strpath = match self {
                 Self::Stream(s) | Self::Datagram(s) | Self::Sequential(s) => s,
@@ -145,7 +145,7 @@ impl UnixSocketConfig {
             }
         }
 
-        super::close_raw_fd(rawfd);
+        // fd is closed by OwnedFd::drop when the Box<dyn AsRawFd> is dropped
         Ok(())
     }
 

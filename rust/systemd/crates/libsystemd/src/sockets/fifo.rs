@@ -50,12 +50,12 @@ impl FifoConfig {
         Ok(Box::new(fifo))
     }
 
-    pub fn close(&self, rawfd: RawFd, remove_on_stop: bool) -> Result<(), String> {
+    pub fn close(&self, _rawfd: RawFd, remove_on_stop: bool) -> Result<(), String> {
         if remove_on_stop && self.path.exists() {
             std::fs::remove_file(&self.path)
                 .map_err(|e| format!("Error removing file {:?}: {}", self.path, e))?;
         }
-        super::close_raw_fd(rawfd);
+        // fd is closed by OwnedFd::drop when the Box<dyn AsRawFd> is dropped
         Ok(())
     }
 }

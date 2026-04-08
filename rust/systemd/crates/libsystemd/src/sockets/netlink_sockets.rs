@@ -130,8 +130,8 @@ impl NetlinkSocketConfig {
         Ok(Box::new(NetlinkFd(Some(fd))))
     }
 
-    pub fn close(&self, rawfd: RawFd) -> Result<(), String> {
-        super::close_raw_fd(rawfd);
+    pub fn close(&self, _rawfd: RawFd) -> Result<(), String> {
+        // fd is closed by the OwnedFd wrapper (NetlinkFd) when dropped
         Ok(())
     }
 }

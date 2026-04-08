@@ -35,10 +35,9 @@ impl SpecialFileConfig {
         Ok(Box::new(file))
     }
 
-    pub fn close(&self, rawfd: RawFd) -> Result<(), String> {
-        // For special files we only close the fd — we do NOT remove the file
-        // (unlike FIFOs), since the file is not owned by us.
-        super::close_raw_fd(rawfd);
+    pub fn close(&self, _rawfd: RawFd) -> Result<(), String> {
+        // fd is closed by OwnedFd::drop when the Box<dyn AsRawFd> is dropped.
+        // For special files we do NOT remove the file (unlike FIFOs).
         Ok(())
     }
 }

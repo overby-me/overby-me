@@ -144,8 +144,8 @@ impl TcpSocketConfig {
         };
         create_and_bind_socket(domain, libc::SOCK_STREAM, 0, &self.addr, true, conf)
     }
-    pub fn close(&self, rawfd: RawFd) -> Result<(), String> {
-        super::close_raw_fd(rawfd);
+    pub fn close(&self, _rawfd: RawFd) -> Result<(), String> {
+        // fd is closed by OwnedFd::drop when the Box<dyn AsRawFd> is dropped
         Ok(())
     }
 }
@@ -165,8 +165,8 @@ impl UdpSocketConfig {
         create_and_bind_socket(domain, libc::SOCK_DGRAM, 0, &self.addr, false, conf)
     }
 
-    pub fn close(&self, rawfd: RawFd) -> Result<(), String> {
-        super::close_raw_fd(rawfd);
+    pub fn close(&self, _rawfd: RawFd) -> Result<(), String> {
+        // fd is closed by OwnedFd::drop when the Box<dyn AsRawFd> is dropped
         Ok(())
     }
 }
