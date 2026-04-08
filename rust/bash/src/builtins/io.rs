@@ -172,14 +172,17 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
         // subscript syntax (arr[idx], assoc[key], arr[@], arr[*]).
         let is_valid = if let Some(bracket) = var_name.find('[') {
             let base = &var_name[..bracket];
-            let has_close = var_name.ends_with(']');
+            // Use first ']' after '[' for bracket matching — bash parses
+            // A[]] as A[] + stray ']' (invalid), not A with key ']'.
+            let close = var_name[bracket + 1..].find(']').map(|p| p + bracket + 1);
+            let has_valid_close = matches!(close, Some(pos) if pos + 1 == var_name.len());
             !base.is_empty()
                 && base
                     .chars()
                     .next()
                     .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
                 && base.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-                && has_close
+                && has_valid_close
         } else {
             var_name
                 .chars()
@@ -1502,14 +1505,30 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
             }
             arg if !arg.starts_with('-') => {
                 // Validate identifier (allow array subscripts like x[1], x[key])
+                // Use first ']' after '[' for matching — bash parses A[]] as
+                // A[] + stray ']' (invalid), not A with key ']'.
                 let base = if let Some(bracket) = arg.find('[') {
-                    if !arg.ends_with(']') {
-                        eprintln!(
-                            "{}: read: `{}': not a valid identifier",
-                            shell.error_prefix(),
-                            arg
-                        );
-                        return 1;
+                    let close = arg[bracket + 1..].find(']').map(|p| p + bracket + 1);
+                    match close {
+                        Some(close_pos) if close_pos + 1 != arg.len() => {
+                            // Stray characters after the closing ']' (e.g. A[]])
+                            eprintln!(
+                                "{}: read: `{}': not a valid identifier",
+                                shell.error_prefix(),
+                                arg
+                            );
+                            return 1;
+                        }
+                        None => {
+                            // No closing ']' at all
+                            eprintln!(
+                                "{}: read: `{}': not a valid identifier",
+                                shell.error_prefix(),
+                                arg
+                            );
+                            return 1;
+                        }
+                        _ => {} // close_pos + 1 == arg.len() — valid
                     }
                     &arg[..bracket]
                 } else {
@@ -1548,14 +1567,27 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
     // Validate variable names (allow array subscripts like x[1], x[key])
     for name in &var_names {
         let base = if let Some(bracket) = name.find('[') {
-            // Array subscript: validate the base name, allow any subscript content
-            if !name.ends_with(']') {
-                eprintln!(
-                    "{}: read: `{}': not a valid identifier",
-                    shell.error_prefix(),
-                    name
-                );
-                return 1;
+            // Array subscript: validate the base name, allow any subscript content.
+            // Use first ']' after '[' for bracket matching (A[]] → invalid).
+            let close = name[bracket + 1..].find(']').map(|p| p + bracket + 1);
+            match close {
+                Some(close_pos) if close_pos + 1 != name.len() => {
+                    eprintln!(
+                        "{}: read: `{}': not a valid identifier",
+                        shell.error_prefix(),
+                        name
+                    );
+                    return 1;
+                }
+                None => {
+                    eprintln!(
+                        "{}: read: `{}': not a valid identifier",
+                        shell.error_prefix(),
+                        name
+                    );
+                    return 1;
+                }
+                _ => {}
             }
             &name[..bracket]
         } else {

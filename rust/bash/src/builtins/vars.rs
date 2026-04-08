@@ -1029,6 +1029,35 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             // Content inside [...] brackets can contain any characters
             // (arithmetic expressions like `a[7 + 8]`, assoc keys, etc.)
             let base_for_check = if let Some(bracket_pos) = pure_name.find('[') {
+                // Use first ']' after '[' for bracket matching — bash parses
+                // A[]] as A[] + stray ']' (invalid), not A with key ']'.
+                let close = pure_name[bracket_pos + 1..]
+                    .find(']')
+                    .map(|p| p + bracket_pos + 1);
+                match close {
+                    Some(close_pos) if close_pos + 1 != pure_name.len() => {
+                        // Stray characters after the closing ']' (e.g. A[]])
+                        // Show full argument including =value, matching bash
+                        eprintln!(
+                            "{}: declare: `{}': not a valid identifier",
+                            shell.error_prefix(),
+                            name
+                        );
+                        status = 1;
+                        continue;
+                    }
+                    None => {
+                        // No closing ']' at all
+                        eprintln!(
+                            "{}: declare: `{}': not a valid identifier",
+                            shell.error_prefix(),
+                            name
+                        );
+                        status = 1;
+                        continue;
+                    }
+                    _ => {} // valid bracket matching
+                }
                 &pure_name[..bracket_pos]
             } else {
                 pure_name
