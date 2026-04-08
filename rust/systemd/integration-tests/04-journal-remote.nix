@@ -6,10 +6,6 @@
   testTimeout = 300;
   extraPackages = pkgs: [pkgs.openssl pkgs.curl pkgs.iproute2];
   patchScript = ''
-    # Our service unit already has Restart=no (no drop-in support needed).
-    # Remove the drop-in creation and daemon-reload that test 3 does.
-    sed -i '/mkdir -p \/run\/systemd\/system\/systemd-journal-upload.service.d/,/systemctl daemon-reload/d' TEST-04-JOURNAL.journal-remote.sh
-
     # Give upload service time to connect and trigger socket activation
     sed -i '/^timeout 15 bash.*is-active systemd-journal-remote/i\sleep 3' TEST-04-JOURNAL.journal-remote.sh
     # Before each socket restart, stop services and kill any orphaned LISTEN

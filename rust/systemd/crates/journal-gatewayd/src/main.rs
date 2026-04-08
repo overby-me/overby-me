@@ -37,6 +37,10 @@ struct Cli {
     /// Journal file glob (may be repeated).
     #[arg(long = "file")]
     file: Vec<String>,
+
+    /// Listen address (host:port or just port).
+    #[arg(long = "listen", default_value = "19531")]
+    listen: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -719,17 +723,39 @@ fn create_server(cli: &Cli) -> Server {
         None
     };
 
-    if listen_fds == Some(1) && listen_pid == Some(my_pid) {
+    let listener = if listen_fds == Some(1) && listen_pid == Some(my_pid) {
         // Socket activation: use FD 3
-        let listener = unsafe { TcpListener::from_raw_fd(3) };
-        listener.set_nonblocking(false).ok();
-
-        Server::from_listener(listener, ssl_config).expect("Failed to create server from listener")
-    } else if let Some(ssl) = ssl_config {
-        Server::https("0.0.0.0:19531", ssl).expect("Failed to create HTTPS server")
+        let l = unsafe { TcpListener::from_raw_fd(3) };
+        l.set_nonblocking(false).ok();
+        l
     } else {
-        Server::http("0.0.0.0:19531").expect("Failed to create HTTP server")
-    }
+        // Parse --listen: bare port or host:port
+        let addr = if cli.listen.contains(':') {
+            cli.listen.clone()
+        } else {
+            format!("0.0.0.0:{}", cli.listen)
+        };
+        // Create socket with SO_REUSEADDR to avoid EADDRINUSE after restart
+        let socket = socket2::Socket::new(
+            socket2::Domain::IPV4,
+            socket2::Type::STREAM,
+            Some(socket2::Protocol::TCP),
+        )
+        .expect("Failed to create socket");
+        socket
+            .set_reuse_address(true)
+            .expect("Failed to set SO_REUSEADDR");
+        let sock_addr: std::net::SocketAddr = addr.parse().expect("Invalid listen address");
+        socket
+            .bind(&sock_addr.into())
+            .unwrap_or_else(|e| panic!("Failed to bind to {addr}: {e}"));
+        socket.listen(128).expect("Failed to listen");
+        let listener: TcpListener = socket.into();
+        listener.set_nonblocking(false).ok();
+        listener
+    };
+
+    Server::from_listener(listener, ssl_config).expect("Failed to create server from listener")
 }
 
 fn main() {
