@@ -2896,6 +2896,13 @@ impl Shell {
                     };
                     let mut map = map;
                     let is_integer = self.integer_vars.contains(&resolved);
+                    // Bash 5.3: when ALL elements are bare (no [key]=val
+                    // subscripts), treat them as alternating key-value pairs.
+                    // E.g. `foo=(a 1 b 2)` assigns foo[a]=1, foo[b]=2.
+                    // But if ANY element has a [key]=val subscript, bare
+                    // elements are errors ("must use subscript").
+                    let has_subscripted = elements.iter().any(|e| e.index.is_some());
+                    let mut pending_key: Option<String> = None;
                     for elem in elements {
                         let raw = self.expand_word_single(&elem.value);
                         let value = if is_integer {
@@ -2920,8 +2927,9 @@ impl Shell {
                             } else {
                                 map.insert(key, value);
                             }
-                        } else {
-                            // Bare value in assoc array compound assignment → error
+                        } else if has_subscripted {
+                            // Mixed mode: subscripted elements present but
+                            // this element is bare → error (bash behavior).
                             let val_str = self.expand_word_single(&elem.value);
                             let name = self
                                 .vars
@@ -2938,7 +2946,19 @@ impl Shell {
                                 "{}: line {}: {}: {}: must use subscript when assigning associative array",
                                 name, lineno, resolved, val_str
                             );
+                        } else if let Some(key) = pending_key.take() {
+                            // All-bare mode: this element is the value for
+                            // the previous bare key.
+                            map.insert(key, value);
+                        } else {
+                            // All-bare mode: this element is a key — store
+                            // it and wait for the next element as its value.
+                            pending_key = Some(value);
                         }
+                    }
+                    // If there's a trailing bare key with no value, assign "".
+                    if let Some(key) = pending_key.take() {
+                        map.insert(key, String::new());
                     }
                     self.declared_unset.remove(&resolved);
                     self.assoc_arrays.insert(resolved, map);
