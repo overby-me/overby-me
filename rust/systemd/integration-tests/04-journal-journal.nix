@@ -32,12 +32,6 @@
     # Replace the diff heredoc block (line 272-278) including the heredoc body
     sed -i '/--cursor-file=.*CURSOR_FILE.*_SYSTEMD_UNIT/,/^EOF$/c\echo SKIP' TEST-04-JOURNAL.journal.sh
 
-    # Add sleep after journalctl --sync to let threaded stdout handler finish
-    # writing entries to disk (our journald processes stdout in separate threads,
-    # unlike C journald's single-threaded event loop, so sync may return before
-    # the entry is committed).
-    sed -i 's#journalctl --sync#journalctl --sync; sleep 1#g' TEST-04-JOURNAL.journal.sh
-
     # Skip journalctl -b <script> test (executable_is_script test).
     # In the NixOS VM the test script runs via the backdoor (virtconsole),
     # not as a systemd service, so there are no journal entries with _EXE

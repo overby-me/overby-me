@@ -27,7 +27,7 @@ use journal::entry::JournalEntry;
 use journal::storage::{JournalCompress, JournalStorage, StorageConfig};
 use libsystemd::services::LogFilter;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{self, BufRead, BufReader, Write};
 
@@ -614,6 +614,12 @@ struct JournaldState {
     /// before flushing, avoiding the race where `journalctl --sync` returns
     /// before a recently-written stdout entry has been committed.
     pending_writes: AtomicU64,
+    /// Raw fds of active stdout stream sockets.  Used by the sync handler
+    /// to check `FIONREAD` on each fd — if any fd has data in the kernel
+    /// receive buffer, the sync waits for the stream handler to drain it
+    /// before flushing.  This replaces the previous fixed 50ms sleep with
+    /// a precise check of kernel buffer state.
+    stream_fds: Mutex<HashSet<RawFd>>,
     /// Whether we are currently in "relinquished" mode (writing to /run only).
     relinquished: AtomicBool,
     /// When the current active journal file was opened (for time-based rotation).
@@ -754,11 +760,26 @@ impl JournaldState {
             relinquish_requested: AtomicBool::new(false),
             reload_requested: AtomicBool::new(false),
             pending_writes: AtomicU64::new(0),
+            stream_fds: Mutex::new(HashSet::new()),
             relinquished: AtomicBool::new(false),
             active_file_opened: Mutex::new(Instant::now()),
             seal_state: Mutex::new(seal_state),
             last_vacuum: Mutex::new(Instant::now()),
         }
+    }
+
+    /// Returns `true` if any active stdout stream socket has unread data in
+    /// the kernel receive buffer (checked via `FIONREAD`).
+    fn streams_have_pending_data(&self) -> bool {
+        let fds = self.stream_fds.lock().unwrap();
+        for &fd in fds.iter() {
+            let mut count: libc::c_int = 0;
+            let ret = unsafe { libc::ioctl(fd, libc::FIONREAD, &mut count) };
+            if ret == 0 && count > 0 {
+                return true;
+            }
+        }
+        false
     }
 
     /// Dispatch a fully-formed journal entry into storage.
@@ -2297,6 +2318,10 @@ fn handle_stdout_connection(
     peer_meta: Option<(u32, ProcMeta)>,
     state: Arc<JournaldState>,
 ) {
+    // Register this stream fd so the sync handler can check FIONREAD on it.
+    let stream_fd = stream.as_raw_fd();
+    state.stream_fds.lock().unwrap().insert(stream_fd);
+
     // Get peer credentials for initial trusted fields
     let peer_cred = get_peer_cred(&stream);
 
@@ -2496,6 +2521,9 @@ fn handle_stdout_connection(
             None => break,
         }
     }
+
+    // Unregister the stream fd before the socket is closed.
+    state.stream_fds.lock().unwrap().remove(&stream_fd);
 }
 
 /// Handle a recovered stdout stream FD from FDSTORE.
@@ -2505,6 +2533,8 @@ fn handle_stdout_connection(
 /// original stream context was lost.
 fn handle_recovered_stdout_connection(raw_fd: RawFd, state: Arc<JournaldState>) {
     let stream = unsafe { UnixStream::from_raw_fd(raw_fd) };
+    let stream_fd = stream.as_raw_fd();
+    state.stream_fds.lock().unwrap().insert(stream_fd);
     enable_passcred(&stream);
 
     let peer_cred = get_peer_cred(&stream);
@@ -2575,6 +2605,8 @@ fn handle_recovered_stdout_connection(raw_fd: RawFd, state: Arc<JournaldState>) 
             None => break,
         }
     }
+
+    state.stream_fds.lock().unwrap().remove(&stream_fd);
 }
 
 /// Parse a kernel-style `<N>` priority prefix from a log line.
@@ -3523,22 +3555,22 @@ fn maintenance_thread(state: Arc<JournaldState>) {
         // Handle sync request (SIGRTMIN+1, from `journalctl --sync`)
         if state.sync_requested.load(Ordering::Acquire) {
             eprintln!("journald: Syncing journal to disk");
-            // Two-phase wait to ensure all pending data is committed:
+            // Wait until all data has been drained from kernel socket
+            // buffers and all in-flight dispatch_entry() calls have
+            // completed.  We check two conditions:
             //
-            // Phase 1: Brief sleep to let data drain from kernel socket
-            // buffers into stream handler threads.  Data written by
-            // systemd-cat sits in the kernel buffer until the stream
-            // handler's blocking recvmsg() returns — this sleep gives
-            // the kernel time to schedule those threads.
-            thread::sleep(Duration::from_millis(50));
+            // 1. FIONREAD on every active stdout stream fd — if any fd
+            //    has unread bytes in the kernel receive buffer, data has
+            //    not yet reached the stream handler thread.
+            // 2. pending_writes counter — if > 0, a dispatch_entry() is
+            //    still running and the entry is not yet committed.
             //
-            // Phase 2: Wait for all in-flight dispatch_entry() calls to
-            // finish.  Each dispatch_entry increments pending_writes on
-            // entry and decrements on exit (via RAII guard), so once the
-            // counter reaches 0, all entries have been written to storage.
+            // This replaces the previous fixed 50ms sleep with a precise
+            // check that adapts to actual kernel scheduling latency.
             let sync_start = Instant::now();
-            while state.pending_writes.load(Ordering::Acquire) > 0
-                && sync_start.elapsed() < Duration::from_secs(5)
+            while sync_start.elapsed() < Duration::from_secs(5)
+                && (state.streams_have_pending_data()
+                    || state.pending_writes.load(Ordering::Acquire) > 0)
             {
                 thread::sleep(Duration::from_millis(10));
             }
