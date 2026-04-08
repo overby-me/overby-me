@@ -367,8 +367,9 @@ impl Shell {
                         &expr[expr.len() - 1..]
                     };
                     eprintln!(
-                        "{}: {}: arithmetic syntax error: operand expected (error token is \"{}\")",
+                        "{}: {}{}: arithmetic syntax error: operand expected (error token is \"{}\")",
                         self.arith_error_prefix(),
+                        self.arith_cmd_prefix(),
                         display_expr,
                         error_token
                     );

@@ -2474,7 +2474,16 @@ impl Shell {
                         // Integer append: arithmetic addition
                         let existing_str = self.vars.get(&resolved).cloned().unwrap_or_default();
                         let existing = self.eval_arith_expr(&existing_str);
+                        // If evaluating the existing value caused an arith error
+                        // (e.g. x=4+; declare -i x; x+=7), bail out without
+                        // modifying the variable — matching bash behavior.
+                        if crate::expand::get_arith_error() {
+                            return;
+                        }
                         let addend = self.eval_arith_expr(&value);
+                        if crate::expand::get_arith_error() {
+                            return;
+                        }
                         self.set_var(&assign.name, (existing + addend).to_string());
                     } else {
                         let existing = self.vars.get(&resolved).cloned().unwrap_or_default();
@@ -2517,6 +2526,19 @@ impl Shell {
                             } else {
                                 self.aliases.insert(alias_name, value);
                             }
+                        } else if base == "BASH_CMDS" {
+                            // BASH_CMDS[key]=value → hash -p value key
+                            let cmd_name = self.expand_assoc_subscript(idx_str);
+                            // Update the assoc array
+                            self.assoc_arrays
+                                .entry("BASH_CMDS".to_string())
+                                .or_default()
+                                .insert(cmd_name.clone(), value.clone());
+                            // Sync to the hash table
+                            if !self.hash_table.contains_key(&cmd_name) {
+                                self.hash_order.push(cmd_name.clone());
+                            }
+                            self.hash_table.insert(cmd_name, (value, 0));
                         } else {
                             let resolved = self.resolve_nameref(base);
                             // Check if it's an associative array
@@ -3061,13 +3083,23 @@ impl Shell {
                         let name_owned = name.to_string();
                         self.hash_table.remove(&name_owned);
                         self.hash_order.retain(|n| n != &name_owned);
+                        // Sync: remove stale entry from BASH_CMDS
+                        if let Some(cmds) = self.assoc_arrays.get_mut("BASH_CMDS") {
+                            cmds.remove(&name_owned);
+                        }
                         let new_path = builtins::find_executable(name);
                         // Re-add to hash table if found via PATH
                         if !new_path.is_empty() && new_path != name {
                             if !self.hash_table.contains_key(&name_owned) {
                                 self.hash_order.push(name_owned.clone());
                             }
-                            self.hash_table.insert(name_owned, (new_path.clone(), 0));
+                            self.hash_table
+                                .insert(name_owned.clone(), (new_path.clone(), 0));
+                            // Sync: update BASH_CMDS with new path
+                            self.assoc_arrays
+                                .entry("BASH_CMDS".to_string())
+                                .or_default()
+                                .insert(name_owned, new_path.clone());
                         }
                         new_path
                     } else {

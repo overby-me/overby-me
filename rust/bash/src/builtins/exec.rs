@@ -1,6 +1,7 @@
 use super::*;
 use crate::builtins::help_data::HELP_ENTRIES;
 use crate::builtins::string_to_raw_bytes;
+use crate::interpreter::AssocArray;
 
 pub(super) fn builtin_eval(shell: &mut Shell, args: &[String]) -> i32 {
     // Check for invalid options
@@ -1336,6 +1337,10 @@ pub(super) fn builtin_hash(shell: &mut Shell, args: &[String]) -> i32 {
     if flag_r {
         shell.hash_table.clear();
         shell.hash_order.clear();
+        // Sync: clear BASH_CMDS associative array
+        if let Some(cmds) = shell.assoc_arrays.get_mut("BASH_CMDS") {
+            *cmds = AssocArray::default();
+        }
     }
 
     // -p path name: set hash entry
@@ -1359,7 +1364,13 @@ pub(super) fn builtin_hash(shell: &mut Shell, args: &[String]) -> i32 {
             if !shell.hash_table.contains_key(&name) {
                 shell.hash_order.push(name.clone());
             }
-            shell.hash_table.insert(name, (path.clone(), 0));
+            shell.hash_table.insert(name.clone(), (path.clone(), 0));
+            // Sync: update BASH_CMDS associative array
+            shell
+                .assoc_arrays
+                .entry("BASH_CMDS".to_string())
+                .or_default()
+                .insert(name, path.clone());
         }
     }
 
@@ -1375,6 +1386,10 @@ pub(super) fn builtin_hash(shell: &mut Shell, args: &[String]) -> i32 {
         for name in &positional {
             if shell.hash_table.remove(name).is_some() {
                 shell.hash_order.retain(|n| n != name);
+                // Sync: remove from BASH_CMDS associative array
+                if let Some(cmds) = shell.assoc_arrays.get_mut("BASH_CMDS") {
+                    cmds.remove(name);
+                }
             } else {
                 eprintln!("{}: hash: {}: not found", shell.error_prefix(), name);
                 status = 1;
@@ -1418,7 +1433,13 @@ pub(super) fn builtin_hash(shell: &mut Shell, args: &[String]) -> i32 {
             if !shell.hash_table.contains_key(name) {
                 shell.hash_order.push(name.to_string());
             }
-            shell.hash_table.insert(name.to_string(), (path, 0));
+            shell.hash_table.insert(name.to_string(), (path.clone(), 0));
+            // Sync: update BASH_CMDS associative array
+            shell
+                .assoc_arrays
+                .entry("BASH_CMDS".to_string())
+                .or_default()
+                .insert(name.to_string(), path);
         } else {
             eprintln!("{}: hash: {}: not found", shell.error_prefix(), name);
             status = 1;
