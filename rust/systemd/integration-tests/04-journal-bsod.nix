@@ -5,11 +5,6 @@
   };
   testTimeout = 300;
   patchScript = ''
-    # Add timeouts to bsod at_exit cleanup to prevent infinite hangs.
-    sed -i 's/journalctl --rotate/timeout 10 journalctl --rotate/' TEST-04-JOURNAL.bsod.sh
-    sed -i 's/journalctl --relinquish-var/timeout 10 journalctl --relinquish-var/' TEST-04-JOURNAL.bsod.sh
-    sed -i 's/journalctl --sync/timeout 10 journalctl --sync/' TEST-04-JOURNAL.bsod.sh
-    sed -i 's/journalctl --flush/timeout 10 journalctl --flush/' TEST-04-JOURNAL.bsod.sh
     # mv of archived journals may fail if rotate did not produce any.
     sed -i '/system@\*\.journal/s/$/ || true/' TEST-04-JOURNAL.bsod.sh
     # umount may fail if journald still holds the directory open.

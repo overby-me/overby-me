@@ -27,10 +27,5 @@
     # matching the script's interpreter.
     sed -i '/journalctl -b "\$(readlink -f/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
 
-    # Add timeout to each journalctl invocation to prevent hangs
-    sed -i 's#^journalctl #timeout 30 journalctl #' TEST-04-JOURNAL.journal.sh
-    sed -i 's#| journalctl #| timeout 30 journalctl #' TEST-04-JOURNAL.journal.sh
-    # Note: do NOT add timeout to piped systemd-cat — the dd|base64|systemd-cat
-    # loop can legitimately take >30s in the slow VM.
   '';
 }
