@@ -5,9 +5,6 @@
   };
   testTimeout = 600;
   patchScript = ''
-    # Reduce dd|base64|systemd-cat loop iterations from 10/50 to 3 (avoids slow I/O)
-    sed -i 's#ITERATIONS=10#ITERATIONS=3#; s#ITERATIONS=50#ITERATIONS=3#' TEST-04-JOURNAL.journal.sh
-
     # Skip systemd-run --user (user session not fully supported)
     sed -i '/^systemd-run --user/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
     # Also skip the journalctl --user-unit check that follows it
