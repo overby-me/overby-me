@@ -60,6 +60,22 @@ const _PID_FILE_PATH: &str = "/run/systemd/journal/pid";
 const _VARLINK_SOCKET_PATH: &str = "/run/systemd/journal/io.systemd.journal";
 
 // ---------------------------------------------------------------------------
+// Hex encoding helpers for FDSTORE metadata in FDNAME
+// ---------------------------------------------------------------------------
+
+fn hex_encode(s: &str) -> String {
+    s.bytes().map(|b| format!("{b:02x}")).collect()
+}
+
+fn hex_decode(s: &str) -> Option<String> {
+    let bytes: Option<Vec<u8>> = (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(s.get(i..i + 2)?, 16).ok())
+        .collect();
+    bytes.and_then(|b| String::from_utf8(b).ok())
+}
+
+// ---------------------------------------------------------------------------
 // Rate limiting
 // ---------------------------------------------------------------------------
 
@@ -1354,6 +1370,15 @@ fn parse_kmsg_line(line: &str) -> Option<JournalEntry> {
 // Socket activation
 // ---------------------------------------------------------------------------
 
+/// Metadata recovered from FDSTORE for a stdout stream.
+struct RecoveredStream {
+    fd: RawFd,
+    identifier: String,
+    priority: u8,
+    level_prefix: bool,
+    unit_name: String,
+}
+
 /// Pre-opened sockets from socket activation (LISTEN_FDS).
 struct SocketActivationFds {
     /// Native journal socket (datagram) — `/run/systemd/journal/socket`
@@ -1361,7 +1386,7 @@ struct SocketActivationFds {
     /// Stdout capture socket (stream) — `/run/systemd/journal/stdout`
     stdout: Option<UnixListener>,
     /// Recovered stdout stream FDs from FDSTORE (previously stored via sd_notify).
-    stored_stdout_streams: Vec<RawFd>,
+    stored_stdout_streams: Vec<RecoveredStream>,
 }
 
 /// Parse LISTEN_FDS and convert raw FDs to typed sockets.
@@ -1401,10 +1426,40 @@ fn receive_socket_activation_fds() -> SocketActivationFds {
         let fd = SD_LISTEN_FDS_START + i as i32;
         let fd_name = fd_names.get(i).map(|s| s.as_str()).unwrap_or("");
 
-        // Check if this is a stored stdout stream FD from FDSTORE
-        if fd_name == "stdout-stream" {
-            eprintln!("journald: Recovering FDSTORE stdout stream fd {fd}");
-            result.stored_stdout_streams.push(fd);
+        // Check if this is a stored stdout stream FD from FDSTORE.
+        // FDNAME format: stdout-stream-<hex_id>-<priority>-<level_prefix>-<hex_unit>
+        // or legacy: stdout-stream (no metadata)
+        if fd_name == "stdout-stream" || fd_name.starts_with("stdout-stream-") {
+            eprintln!("journald: Recovering FDSTORE stdout stream fd {fd} (name={fd_name})");
+            let recovered = if let Some(rest) = fd_name.strip_prefix("stdout-stream-") {
+                let parts: Vec<&str> = rest.splitn(4, '-').collect();
+                if parts.len() == 4 {
+                    RecoveredStream {
+                        fd,
+                        identifier: hex_decode(parts[0]).unwrap_or_else(|| "unknown".into()),
+                        priority: parts[1].parse().unwrap_or(6),
+                        level_prefix: parts[2] != "0",
+                        unit_name: hex_decode(parts[3]).unwrap_or_default(),
+                    }
+                } else {
+                    RecoveredStream {
+                        fd,
+                        identifier: "unknown".into(),
+                        priority: 6,
+                        level_prefix: true,
+                        unit_name: String::new(),
+                    }
+                }
+            } else {
+                RecoveredStream {
+                    fd,
+                    identifier: "unknown".into(),
+                    priority: 6,
+                    level_prefix: true,
+                    unit_name: String::new(),
+                }
+            };
+            result.stored_stdout_streams.push(recovered);
             continue;
         }
 
@@ -2418,7 +2473,21 @@ fn handle_stdout_connection(
     // journald dies, the service's writes still succeed (buffered in the
     // kernel socket buffer). On restart, journald recovers the FD and
     // resumes reading.
-    sd_notify_with_fds("FDSTORE=1\nFDNAME=stdout-stream", &[stream_raw_fd]);
+    //
+    // Encode stream metadata in the FDNAME so the recovery path can restore
+    // the identifier, priority, level-prefix flag, and unit name. Format:
+    //   stdout-stream-<hex_identifier>-<priority>-<level_prefix>-<hex_unit>
+    let meta_name = format!(
+        "stdout-stream-{}-{}-{}-{}",
+        hex_encode(&identifier),
+        priority,
+        u8::from(level_prefix),
+        hex_encode(&unit_name),
+    );
+    sd_notify_with_fds(
+        &format!("FDSTORE=1\nFDNAME={meta_name}"),
+        &[stream_raw_fd],
+    );
 
     // Helper to process a single log line with credentials
     let process_line = |cl: CredLine| {
@@ -2529,10 +2598,13 @@ fn handle_stdout_connection(
 /// Handle a recovered stdout stream FD from FDSTORE.
 ///
 /// The header was already consumed by the previous journald instance, so we
-/// go straight to reading data lines. We use default metadata since the
-/// original stream context was lost.
-fn handle_recovered_stdout_connection(raw_fd: RawFd, state: Arc<JournaldState>) {
-    let stream = unsafe { UnixStream::from_raw_fd(raw_fd) };
+/// go straight to reading data lines. Stream metadata (identifier, priority,
+/// unit name) is recovered from the FDNAME encoding.
+fn handle_recovered_stdout_connection(recovered: RecoveredStream, state: Arc<JournaldState>) {
+    let stream = unsafe { UnixStream::from_raw_fd(recovered.fd) };
+    // Ensure the recovered FD is in blocking mode. PID 1 may have changed
+    // the flags; our recvmsg() expects a blocking socket.
+    stream.set_nonblocking(false).ok();
     let stream_fd = stream.as_raw_fd();
     state.stream_fds.lock().unwrap().insert(stream_fd);
     enable_passcred(&stream);
@@ -2540,10 +2612,10 @@ fn handle_recovered_stdout_connection(raw_fd: RawFd, state: Arc<JournaldState>) 
     let peer_cred = get_peer_cred(&stream);
     let mut reader = CredLineReader::new(stream);
 
-    // Default metadata for recovered streams
-    let identifier = "unknown";
-    let priority: u8 = 6; // LOG_INFO
-    let level_prefix = true;
+    let identifier = recovered.identifier;
+    let priority = recovered.priority;
+    let level_prefix = recovered.level_prefix;
+    let unit_name = recovered.unit_name;
 
     loop {
         if state.shutdown.load(Ordering::Relaxed) {
@@ -2581,7 +2653,10 @@ fn handle_recovered_stdout_connection(raw_fd: RawFd, state: Arc<JournaldState>) 
 
                 entry.set_field("MESSAGE", message);
                 entry.set_field("PRIORITY", effective_priority.to_string());
-                entry.set_field("SYSLOG_IDENTIFIER", identifier);
+                entry.set_field("SYSLOG_IDENTIFIER", &identifier);
+                if !unit_name.is_empty() {
+                    entry.set_field("_SYSTEMD_UNIT", &unit_name);
+                }
                 entry.set_field("_TRANSPORT", "stdout");
 
                 if cl.pid_change {
@@ -3911,11 +3986,11 @@ fn main() {
     // Recover stdout stream FDs from FDSTORE (passed back by PID 1 after restart).
     // These are connected stream sockets whose headers were already consumed by the
     // previous journald instance; spawn handlers that read data lines directly.
-    for stored_fd in activated.stored_stdout_streams {
+    for recovered in activated.stored_stdout_streams {
         let state_recovered = Arc::clone(&state);
         thread::Builder::new()
             .name("stdout-recovered".into())
-            .spawn(move || handle_recovered_stdout_connection(stored_fd, state_recovered))
+            .spawn(move || handle_recovered_stdout_connection(recovered, state_recovered))
             .expect("failed to spawn recovered stdout stream thread");
     }
 
