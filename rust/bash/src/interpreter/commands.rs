@@ -295,9 +295,171 @@ impl Shell {
                 WordPart::DoubleQuoted(parts) => {
                     WordPart::DoubleQuoted(self.eval_arith_in_word(parts))
                 }
+                WordPart::Param(expr) if Self::param_subscript_needs_eval(&expr.name) => {
+                    // Pre-expand arithmetic in parameter subscripts so that
+                    // side-effect operators like count++ work correctly.
+                    // e.g. ${days[$((count++))]} or ${days[count++]}
+                    let new_name = self.expand_subscript_arith(&expr.name);
+                    WordPart::Param(ParamExpr {
+                        name: new_name,
+                        op: expr.op.clone(),
+                    })
+                }
                 other => other.clone(),
             })
             .collect()
+    }
+
+    /// Check if a Param name contains an array subscript that needs
+    /// pre-evaluation through the shell's arithmetic evaluator (for
+    /// side effects like `count++`, `i+=1`, etc.).
+    fn param_subscript_needs_eval(name: &str) -> bool {
+        // Find subscript content between [ and ]
+        let Some(bracket_start) = name.find('[') else {
+            return false;
+        };
+        let subscript = &name[bracket_start + 1..];
+        // Find matching ]
+        let mut depth = 1i32;
+        let mut end = 0;
+        for (j, ch) in subscript.char_indices() {
+            match ch {
+                '[' => depth += 1,
+                ']' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = j;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        if depth != 0 {
+            return false;
+        }
+        let sub = &subscript[..end];
+        // Simple cases that don't need eval: @ * simple integers, empty
+        if sub.is_empty() || sub == "@" || sub == "*" || sub.trim().parse::<i64>().is_ok() {
+            return false;
+        }
+        // Contains $((expr)) — needs eval for side effects
+        if sub.contains("$((") {
+            return true;
+        }
+        // Contains ++ or -- (pre/post increment/decrement)
+        if sub.contains("++") || sub.contains("--") {
+            return true;
+        }
+        // Contains compound assignment operators
+        if sub.contains("+=")
+            || sub.contains("-=")
+            || sub.contains("*=")
+            || sub.contains("/=")
+            || sub.contains("%=")
+        {
+            return true;
+        }
+        // Contains arithmetic operators with variable names — could have
+        // side effects through variable resolution or complex expressions.
+        // Only trigger for non-trivial expressions: if it contains letters
+        // (variable names) AND operators beyond simple subscript access.
+        // A bare variable name like `i` is fine for the expansion evaluator,
+        // but `count++` or `i+1` with side effects needs the shell evaluator.
+        false
+    }
+
+    /// Pre-expand arithmetic in a Param name's subscript using the shell's
+    /// arithmetic evaluator (which supports side effects like `count++`).
+    fn expand_subscript_arith(&mut self, name: &str) -> String {
+        let Some(bracket_start) = name.find('[') else {
+            return name.to_string();
+        };
+        let base = &name[..bracket_start];
+        let after_bracket = &name[bracket_start + 1..];
+
+        // Find matching ]
+        let mut depth = 1i32;
+        let mut bracket_end = after_bracket.len();
+        for (j, ch) in after_bracket.char_indices() {
+            match ch {
+                '[' => depth += 1,
+                ']' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        bracket_end = j;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let subscript = &after_bracket[..bracket_end];
+        let rest = if bracket_end < after_bracket.len() {
+            &after_bracket[bracket_end..] // includes the ]
+        } else {
+            ""
+        };
+
+        // If subscript contains $((expr)), expand those first
+        if subscript.contains("$((") {
+            let expanded = self.expand_dollar_paren_paren(subscript);
+            // Now evaluate the fully expanded subscript as arithmetic
+            let val = self.eval_arith_expr(&expanded);
+            return format!("{}[{}{}", base, val, rest);
+        }
+
+        // Bare arithmetic subscript (e.g., count++, i+=1)
+        let val = self.eval_arith_expr(subscript);
+        format!("{}[{}{}", base, val, rest)
+    }
+
+    /// Expand `$((expr))` patterns within a string using the shell's
+    /// arithmetic evaluator (which supports side effects like `count++`).
+    fn expand_dollar_paren_paren(&mut self, s: &str) -> String {
+        let mut result = String::new();
+        let chars: Vec<char> = s.chars().collect();
+        let mut i = 0;
+        while i < chars.len() {
+            if i + 2 < chars.len() && chars[i] == '$' && chars[i + 1] == '(' && chars[i + 2] == '('
+            {
+                // Found $(( — find matching ))
+                let start = i + 3;
+                let mut depth = 1i32;
+                let mut j = start;
+                while j < chars.len() && depth > 0 {
+                    if j + 1 < chars.len() && chars[j] == '(' && chars[j + 1] == '(' {
+                        depth += 1;
+                        j += 2;
+                        continue;
+                    }
+                    if j + 1 < chars.len() && chars[j] == ')' && chars[j + 1] == ')' {
+                        depth -= 1;
+                        if depth == 0 {
+                            let inner: String = chars[start..j].iter().collect();
+                            let val = self.eval_arith_expr(&inner);
+                            result.push_str(&val.to_string());
+                            j += 2; // skip ))
+                            i = j;
+                            break;
+                        }
+                        j += 2;
+                        continue;
+                    }
+                    j += 1;
+                }
+                if depth > 0 {
+                    // Unmatched $(( — output literally
+                    result.push_str("$((");
+                    i = start;
+                }
+            } else {
+                result.push(chars[i]);
+                i += 1;
+            }
+        }
+        result
     }
 
     pub fn expand_word_fields(&mut self, word: &Word, ifs: &str) -> Vec<String> {
