@@ -804,50 +804,351 @@ pub(super) fn builtin_times(_shell: &mut Shell, _args: &[String]) -> i32 {
     }
 }
 
-pub(super) fn builtin_ulimit(_shell: &mut Shell, args: &[String]) -> i32 {
+pub(super) fn builtin_ulimit(shell: &mut Shell, args: &[String]) -> i32 {
     #[cfg(unix)]
     {
-        // Handle basic -n (open files) case
-        let mut resource = libc::RLIMIT_FSIZE;
+        // Resource descriptor: (flag char, libc resource, description, block divisor)
+        // divisor: 0 = no scaling, 512 = 512-byte blocks, 1024 = 1024-byte blocks
+        struct ResInfo {
+            flag: char,
+            resource: libc::__rlimit_resource_t,
+            desc: &'static str,
+            divisor: u64,
+        }
+
+        let resources: &[ResInfo] = &[
+            ResInfo {
+                flag: 'c',
+                resource: libc::RLIMIT_CORE,
+                desc: "core file size",
+                divisor: 512,
+            },
+            ResInfo {
+                flag: 'd',
+                resource: libc::RLIMIT_DATA,
+                desc: "data seg size",
+                divisor: 1024,
+            },
+            ResInfo {
+                flag: 'e',
+                resource: libc::RLIMIT_NICE,
+                desc: "scheduling priority",
+                divisor: 0,
+            },
+            ResInfo {
+                flag: 'f',
+                resource: libc::RLIMIT_FSIZE,
+                desc: "file size",
+                divisor: 512,
+            },
+            ResInfo {
+                flag: 'i',
+                resource: libc::RLIMIT_SIGPENDING,
+                desc: "pending signals",
+                divisor: 0,
+            },
+            ResInfo {
+                flag: 'k',
+                resource: libc::RLIMIT_MSGQUEUE,
+                desc: "max kqueues",
+                divisor: 0,
+            },
+            ResInfo {
+                flag: 'l',
+                resource: libc::RLIMIT_MEMLOCK,
+                desc: "max locked memory",
+                divisor: 1024,
+            },
+            ResInfo {
+                flag: 'm',
+                resource: libc::RLIMIT_RSS,
+                desc: "max memory size",
+                divisor: 1024,
+            },
+            ResInfo {
+                flag: 'n',
+                resource: libc::RLIMIT_NOFILE,
+                desc: "open files",
+                divisor: 0,
+            },
+            ResInfo {
+                flag: 'p',
+                resource: libc::RLIMIT_NPROC,
+                desc: "pipe size",
+                divisor: 512,
+            },
+            ResInfo {
+                flag: 'q',
+                resource: libc::RLIMIT_MSGQUEUE,
+                desc: "POSIX message queues",
+                divisor: 0,
+            },
+            ResInfo {
+                flag: 'r',
+                resource: libc::RLIMIT_RTPRIO,
+                desc: "real-time priority",
+                divisor: 0,
+            },
+            ResInfo {
+                flag: 's',
+                resource: libc::RLIMIT_STACK,
+                desc: "stack size",
+                divisor: 1024,
+            },
+            ResInfo {
+                flag: 't',
+                resource: libc::RLIMIT_CPU,
+                desc: "cpu time",
+                divisor: 0,
+            },
+            ResInfo {
+                flag: 'u',
+                resource: libc::RLIMIT_NPROC,
+                desc: "max user processes",
+                divisor: 0,
+            },
+            ResInfo {
+                flag: 'v',
+                resource: libc::RLIMIT_AS,
+                desc: "virtual memory",
+                divisor: 1024,
+            },
+            ResInfo {
+                flag: 'x',
+                resource: libc::RLIMIT_LOCKS,
+                desc: "file locks",
+                divisor: 0,
+            },
+            ResInfo {
+                flag: 'P',
+                resource: libc::RLIMIT_NPROC,
+                desc: "number of pseudoterminals",
+                divisor: 0,
+            },
+            ResInfo {
+                flag: 'R',
+                resource: libc::RLIMIT_RTTIME,
+                desc: "real-time non-blocking time",
+                divisor: 0,
+            },
+            ResInfo {
+                flag: 'T',
+                resource: libc::RLIMIT_NPROC,
+                desc: "number of threads",
+                divisor: 0,
+            },
+        ];
+
+        let find_res =
+            |flag: char| -> Option<&ResInfo> { resources.iter().find(|r| r.flag == flag) };
+
+        let mut use_soft = true;
+        let mut use_hard = false;
+        let mut explicit_sh = false; // whether -S or -H was explicitly given
+        let mut print_all = false;
+        let mut selected_flag: char = 'f'; // default resource
         let mut set_value: Option<u64> = None;
+        let mut set_value_str: Option<String> = None;
+        let mut past_options = false;
+        let mut had_error = false;
+
         let mut i = 0;
         while i < args.len() {
-            match args[i].as_str() {
-                "-n" => resource = libc::RLIMIT_NOFILE,
-                "-c" => resource = libc::RLIMIT_CORE,
-                "-d" => resource = libc::RLIMIT_DATA,
-                "-f" => resource = libc::RLIMIT_FSIZE,
-                "-l" => resource = libc::RLIMIT_MEMLOCK,
-                "-m" => resource = libc::RLIMIT_RSS,
-                "-s" => resource = libc::RLIMIT_STACK,
-                "-t" => resource = libc::RLIMIT_CPU,
-                "-v" => resource = libc::RLIMIT_AS,
-                "-S" | "-H" => {} // soft/hard limit flags
+            let arg = &args[i];
+
+            if arg == "--" && !past_options {
+                past_options = true;
+                i += 1;
+                continue;
+            }
+
+            if !past_options && arg.starts_with('-') && arg.len() > 1 && !arg.starts_with("--") {
+                // Parse combined flags like -Sc, -Hn, -SHf
+                let chars: Vec<char> = arg[1..].chars().collect();
+                let mut j = 0;
+                while j < chars.len() {
+                    match chars[j] {
+                        'S' => {
+                            use_soft = true;
+                            use_hard = false;
+                            explicit_sh = true;
+                        }
+                        'H' => {
+                            use_hard = true;
+                            use_soft = false;
+                            explicit_sh = true;
+                        }
+                        'a' => print_all = true,
+                        ch => {
+                            if find_res(ch).is_some() {
+                                selected_flag = ch;
+                            } else {
+                                eprintln!(
+                                    "{}: ulimit: -{}: invalid option",
+                                    shell.error_prefix(),
+                                    ch
+                                );
+                                eprintln!(
+                                    "ulimit: usage: ulimit [-SHabcdefiklmnpqrstuvxPRT] [limit]"
+                                );
+                                return 2;
+                            }
+                        }
+                    }
+                    j += 1;
+                }
+                i += 1;
+                continue;
+            }
+
+            // Value argument
+            let val = arg.as_str();
+            match val {
                 "unlimited" => set_value = Some(libc::RLIM_INFINITY),
-                val => {
+                "soft" => {
+                    // Set to current soft limit value
+                    if let Some(res) = find_res(selected_flag) {
+                        let mut rlim: libc::rlimit = unsafe { std::mem::zeroed() };
+                        unsafe { libc::getrlimit(res.resource, &mut rlim) };
+                        set_value = Some(rlim.rlim_cur);
+                    }
+                }
+                "hard" => {
+                    // Set to current hard limit value
+                    if let Some(res) = find_res(selected_flag) {
+                        let mut rlim: libc::rlimit = unsafe { std::mem::zeroed() };
+                        unsafe { libc::getrlimit(res.resource, &mut rlim) };
+                        set_value = Some(rlim.rlim_max);
+                    }
+                }
+                _ => {
+                    // Check for leading +
+                    if val.starts_with('+') {
+                        eprintln!("{}: ulimit: {}: invalid number", shell.error_prefix(), val);
+                        had_error = true;
+                        i += 1;
+                        continue;
+                    }
                     if let Ok(n) = val.parse::<u64>() {
                         set_value = Some(n);
+                        set_value_str = Some(val.to_string());
+                    } else {
+                        eprintln!("{}: ulimit: {}: invalid number", shell.error_prefix(), val);
+                        had_error = true;
                     }
                 }
             }
             i += 1;
         }
 
-        if let Some(val) = set_value {
-            let rlim = libc::rlimit {
-                rlim_cur: val,
-                rlim_max: val,
-            };
-            unsafe { libc::setrlimit(resource, &rlim) };
-        } else {
-            let mut rlim: libc::rlimit = unsafe { std::mem::zeroed() };
-            unsafe { libc::getrlimit(resource, &mut rlim) };
-            if rlim.rlim_cur == libc::RLIM_INFINITY {
-                println!("unlimited");
-            } else {
-                println!("{}", rlim.rlim_cur);
-            }
+        if had_error {
+            return 1;
         }
+
+        // Helper to get the limit value to display
+        let get_limit = |res: &ResInfo, soft: bool, hard: bool| -> String {
+            let mut rlim: libc::rlimit = unsafe { std::mem::zeroed() };
+            unsafe { libc::getrlimit(res.resource, &mut rlim) };
+            let val = if hard && !soft {
+                rlim.rlim_max
+            } else {
+                rlim.rlim_cur
+            };
+            if val == libc::RLIM_INFINITY {
+                "unlimited".to_string()
+            } else if res.divisor > 0 {
+                format!("{}", val / res.divisor)
+            } else {
+                format!("{}", val)
+            }
+        };
+
+        if print_all {
+            // Print all limits (like ulimit -a)
+            for res in resources {
+                // Skip duplicate flag entries (p and P map differently)
+                let val_str = get_limit(res, use_soft, use_hard);
+                println!("-{}: {:<30} {}", res.flag, res.desc, val_str);
+            }
+            return 0;
+        }
+
+        let res = match find_res(selected_flag) {
+            Some(r) => r,
+            None => {
+                eprintln!(
+                    "{}: ulimit: -{}: invalid option",
+                    shell.error_prefix(),
+                    selected_flag
+                );
+                return 2;
+            }
+        };
+
+        if let Some(val) = set_value {
+            // Scale the value if needed
+            let scaled = if val == libc::RLIM_INFINITY {
+                val
+            } else if res.divisor > 0 {
+                val * res.divisor
+            } else {
+                val
+            };
+
+            let mut rlim: libc::rlimit = unsafe { std::mem::zeroed() };
+            unsafe { libc::getrlimit(res.resource, &mut rlim) };
+
+            if !explicit_sh || (use_soft && use_hard) {
+                // Set both soft and hard
+                rlim.rlim_cur = scaled;
+                rlim.rlim_max = scaled;
+            } else if use_hard {
+                rlim.rlim_max = scaled;
+                if rlim.rlim_cur > scaled {
+                    rlim.rlim_cur = scaled;
+                }
+            } else {
+                // soft only
+                rlim.rlim_cur = scaled;
+            }
+
+            let ret = unsafe { libc::setrlimit(res.resource, &rlim) };
+            if ret != 0 {
+                let val_desc = set_value_str
+                    .as_deref()
+                    .unwrap_or(if val == libc::RLIM_INFINITY {
+                        "unlimited"
+                    } else {
+                        "value"
+                    });
+                let _ = val_desc;
+                // Use nix::errno for strerror-style description without
+                // Rust's "(os error N)" suffix.
+                let err_desc = nix::errno::Errno::last().desc();
+                eprintln!(
+                    "{}: ulimit: {}: cannot modify limit: {}",
+                    shell.error_prefix(),
+                    res.desc,
+                    // Capitalize first letter to match bash's strerror output
+                    {
+                        let mut c = err_desc.chars();
+                        match c.next() {
+                            None => String::new(),
+                            Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                        }
+                    }
+                );
+                return 1;
+            }
+        } else {
+            println!("{}", get_limit(res, use_soft, use_hard));
+        }
+
+        0
     }
-    0
+    #[cfg(not(unix))]
+    {
+        let _ = (shell, args);
+        0
+    }
 }

@@ -371,15 +371,62 @@ pub(super) fn builtin_umask(shell: &mut Shell, args: &[String]) -> i32 {
             }
         }
 
-        // Apply symbolic mask (simplified)
+        // Apply symbolic mask — full POSIX parsing.
+        //
+        // Grammar: symbolic_mode = clause { ',' clause }
+        //          clause        = [who...] op_perm { op_perm }
+        //          who           = 'u' | 'g' | 'o' | 'a'
+        //          op_perm       = op [perm...]
+        //          op            = '+' | '-' | '='
+        //          perm          = 'r' | 'w' | 'x' | 'X' | 's' | 't' | 'u' | 'g' | 'o'
+        //
+        // When perm contains 'u', 'g', or 'o', it means "copy permissions
+        // from that class".  'X' means set execute only if any execute bit
+        // is already set in the current (intermediate) mask value.
+        //
+        // The umask stores the COMPLEMENT of allowed permissions, so:
+        //   '+' means CLEAR those mask bits (allow the permission)
+        //   '-' means SET those mask bits (deny the permission)
+        //   '=' means SET all who bits, then CLEAR the specified ones
         let current = nix::sys::stat::umask(Mode::empty());
         nix::sys::stat::umask(current);
         let mut bits = current.bits();
+
+        // Helper: extract the rwx triple for a given class from the mask.
+        // Returns the ALLOWED permissions (complement of mask bits).
+        let class_perms = |mask: u32, class: char| -> u32 {
+            let allowed = !mask & 0o777;
+            match class {
+                'u' => (allowed >> 6) & 7,
+                'g' => (allowed >> 3) & 7,
+                'o' => allowed & 7,
+                _ => 0,
+            }
+        };
+
+        // Expand a 3-bit rwx value into the full 9-bit mask according to
+        // who_mask (which specifies u/g/o positions).
+        let expand_perm = |rwx: u32, who_mask: u32| -> u32 {
+            let mut result = 0u32;
+            if who_mask & 0o700 != 0 {
+                result |= rwx << 6;
+            }
+            if who_mask & 0o070 != 0 {
+                result |= rwx << 3;
+            }
+            if who_mask & 0o007 != 0 {
+                result |= rwx;
+            }
+            result
+        };
+
         for part in mask_str.split(',') {
             let chars: Vec<char> = part.chars().collect();
             let mut i = 0;
+
+            // Parse who characters
             let mut who_mask = 0u32;
-            while i < chars.len() && valid_who.contains(&chars[i]) {
+            while i < chars.len() && "ugoa".contains(chars[i]) {
                 match chars[i] {
                     'u' => who_mask |= 0o700,
                     'g' => who_mask |= 0o070,
@@ -392,26 +439,47 @@ pub(super) fn builtin_umask(shell: &mut Shell, args: &[String]) -> i32 {
             if who_mask == 0 {
                 who_mask = 0o777;
             }
-            if i < chars.len() && valid_op.contains(&chars[i]) {
+
+            // Parse one or more op+perm sequences for this who
+            while i < chars.len() && valid_op.contains(&chars[i]) {
                 let op = chars[i];
                 i += 1;
-                let mut perm = 0u32;
-                while i < chars.len() && valid_perm.contains(&chars[i]) {
+
+                // Collect permission bits for this operator
+                let mut perm_rwx = 0u32; // 3-bit rwx value
+                let mut has_x_cond = false; // 'X' seen
+                while i < chars.len() && !valid_op.contains(&chars[i]) && chars[i] != ',' {
                     match chars[i] {
-                        'r' => perm |= 0o444,
-                        'w' => perm |= 0o222,
-                        'x' => perm |= 0o111,
+                        'r' => perm_rwx |= 4,
+                        'w' => perm_rwx |= 2,
+                        'x' => perm_rwx |= 1,
+                        'X' => has_x_cond = true,
+                        's' | 't' => { /* setuid/setgid/sticky — ignored for umask */ }
+                        // Reference permissions: copy from another class
+                        'u' | 'g' | 'o' => {
+                            perm_rwx |= class_perms(bits, chars[i]);
+                        }
                         _ => {}
                     }
                     i += 1;
                 }
-                let effective = perm & who_mask;
+
+                // Handle conditional execute: set x only if any x bit is
+                // currently allowed (i.e., cleared in the mask)
+                if has_x_cond {
+                    let allowed = !bits & 0o777;
+                    if allowed & 0o111 != 0 {
+                        perm_rwx |= 1;
+                    }
+                }
+
+                let effective = expand_perm(perm_rwx, who_mask);
                 match op {
-                    '+' => bits &= !effective,
-                    '-' => bits |= effective,
+                    '+' => bits &= !effective, // allow → clear mask bits
+                    '-' => bits |= effective,  // deny → set mask bits
                     '=' => {
-                        bits |= who_mask;
-                        bits &= !effective;
+                        bits |= who_mask; // deny all for who
+                        bits &= !effective; // then allow specified
                     }
                     _ => {}
                 }

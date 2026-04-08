@@ -3041,10 +3041,39 @@ impl Shell {
             // or previous PATH lookups via `hash`).  Do NOT auto-populate
             // the hash table here — bash only caches on explicit `hash`
             // or when hashall (set -h) is active.
+            let mut from_hash_table = false;
             let path = if !name.contains('/') {
                 if let Some((hpath, hits)) = self.hash_table.get_mut(name) {
                     *hits += 1;
-                    hpath.clone()
+                    let hpath = hpath.clone();
+                    // When checkhash is enabled, verify the hashed path still
+                    // exists.  If not, remove the stale entry and fall back to
+                    // PATH lookup.  If the PATH lookup succeeds, re-add the
+                    // new path to the hash table (matching bash behavior so
+                    // that subsequent `hash -t` lookups work).
+                    if self
+                        .shopt_options
+                        .get("checkhash")
+                        .copied()
+                        .unwrap_or(false)
+                        && !std::path::Path::new(&hpath).exists()
+                    {
+                        let name_owned = name.to_string();
+                        self.hash_table.remove(&name_owned);
+                        self.hash_order.retain(|n| n != &name_owned);
+                        let new_path = builtins::find_executable(name);
+                        // Re-add to hash table if found via PATH
+                        if !new_path.is_empty() && new_path != name {
+                            if !self.hash_table.contains_key(&name_owned) {
+                                self.hash_order.push(name_owned.clone());
+                            }
+                            self.hash_table.insert(name_owned, (new_path.clone(), 0));
+                        }
+                        new_path
+                    } else {
+                        from_hash_table = true;
+                        hpath
+                    }
                 } else {
                     builtins::find_executable(name)
                 }
@@ -3155,7 +3184,10 @@ impl Shell {
                             let msg = match e {
                                 nix::errno::Errno::ENOENT => {
                                     // For commands without path separator, report "command not found"
-                                    if !name.contains('/') {
+                                    // BUT if the path came from the hash table, report the
+                                    // actual hashed path with "No such file or directory"
+                                    // (matching bash behavior for `hash -p /bad/path cmd; cmd`).
+                                    if !name.contains('/') && !from_hash_table {
                                         eprintln!(
                                             "{}: {}: command not found",
                                             self.error_prefix(),
@@ -3212,7 +3244,8 @@ impl Shell {
                                 }
                                 _ => "command not found",
                             };
-                            eprintln!("{}: {}: {}", self.error_prefix(), name, msg);
+                            let display_name = if from_hash_table { &path } else { name };
+                            eprintln!("{}: {}: {}", self.error_prefix(), display_name, msg);
                             std::process::exit(if e == nix::errno::Errno::ENOENT {
                                 127
                             } else {

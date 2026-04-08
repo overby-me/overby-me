@@ -2,17 +2,17 @@
 
 ## Current State
 
-**74/77 nix tests consistently passing** (Phase 38), ~68/83 local tests passing (0 diff, sequential). Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available). **Phase 38** implemented full `help` builtin (two-column listing, `-d`/`-s`/`-m` modes, glob pattern matching, `--help` for all builtins), fixed `test -v` for arrays/scalars with subscripts, fixed `${#scalar[@]}` returning string length instead of 1, fixed `is_param_set` for arrays without element [0], implemented `caller` builtin, fixed `BASH_LINENO` population. **builtins** nix diffs reduced from ~205 to ~28 lines. **braces** has a pre-existing Phase 37 regression (`'$('` inside `"${a-...}"` default values causes parser EOF error).
+**75/77 nix tests consistently passing** (Phase 39), ~68/83 local tests passing (0 diff, sequential). Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available). **Phase 39** fixed braces Phase 37 regression (`'$('` inside `"${a-...}"` default values — bounded paren-depth scanner in `read_param_word_impl` for `$(` when `in_squote`, with `SILENT_COMSUB` fallback), implemented full POSIX symbolic umask (multi-operator clauses, permission copying `o=u`/`g+u`, `X` conditional execute), rewrote `ulimit` builtin (all resource flags `-abcdefiklmnpqrstuvxPRT`, `-S`/`-H` soft/hard, `soft`/`hard`/`unlimited` keywords, `+N` rejection, `--` handling, proper error messages), fixed `checkhash` shopt (stale hash entries removed and re-hashed via PATH), fixed exec error for hashed paths (reports actual path instead of "command not found"). **builtins** nix diffs reduced from ~28 to ~3 lines (only `BASH_CMDS` hash sync remains). **braces** now passes (was ~77 nix diff lines).
 
-See `CHANGELOG.md` for full fix history (200+ fixes across 38 phases).
+See `CHANGELOG.md` for full fix history (200+ fixes across 39 phases).
 
-### Nix test results (74/77 consistently passing — Phase 38)
+### Nix test results (75/77 consistently passing — Phase 39)
 
-Verified passing (74/77): alias, appendop, arith-for, **array2** ✅, **attr** ✅, ~~braces~~ ❌ (Phase 37 regression), **case** ✅, casemod, **comsub** ✅, **comsub-eof** ✅, comsub-posix, cond, coproc, cprint, **dirstack** ✅, dollars, dynvar, errors, execscript, **exp-tests** ✅, **exportfunc** ✅, extglob, extglob2, extglob3, func, getopts, glob-bracket, glob-test, globstar, **heredoc** ✅, herestr, ifs, ifs-posix, **input-test** ✅, invert, **iquote** ✅, **lastpipe** ✅, mapfile, more-exp, **new-exp** ✅, nquote, nquote1, nquote2, nquote3, nquote4, **nquote5** ✅, parser, posix2, posixexp, **posixexp2** ✅, posixpat, posixpipe, precedence, printf, **procsub** ✅, quote, **read** ✅, redir, rhs-exp, **set-e** ✅, set-x, **shopt** ✅, strip, **test** ✅, tilde, tilde2, **trap** ✅, **type** ✅, **vredir** ✅ — **builtins** reduced from ~205 to ~28 nix diff lines (Phase 38: help builtin + test -v + ${#scalar[@]} fixes) — **braces** now fails (Phase 37 regression: `'$('` inside `"${a-...}"` default values causes parser EOF) — **quotearray** reduced from ~65 to ~59 nix diff lines (Phase 38: test -v fix) — **new-exp** fixed in Phase 37 (single-quote `}` protection in dquote `${...}`) — **comsub**/**lastpipe**/**trap** stabilized in Phase 37 (nix harness SIGPIPE/CHLD normalization) — **read** fixed in Phase 36 (PUA-aware IFS matching in read builtin) — **iquote** fixed in Phase 35 (PUA decode in`parse_printf_int`) — **nquote5** fixed in Phase 35 (PUA re-encoding in `read` builtin + `capture_output`)
+Verified passing (75/77): alias, appendop, arith-for, **array2** ✅, **attr** ✅, **braces** ✅ (Phase 39 fixed), **case** ✅, casemod, **comsub** ✅, **comsub-eof** ✅, comsub-posix, cond, coproc, cprint, **dirstack** ✅, dollars, dynvar, errors, execscript, **exp-tests** ✅, **exportfunc** ✅, extglob, extglob2, extglob3, func, getopts, glob-bracket, glob-test, globstar, **heredoc** ✅, herestr, ifs, ifs-posix, **input-test** ✅, invert, **iquote** ✅, **lastpipe** ✅, mapfile, more-exp, **new-exp** ✅, nquote, nquote1, nquote2, nquote3, nquote4, **nquote5** ✅, parser, posix2, posixexp, **posixexp2** ✅, posixpat, posixpipe, precedence, printf, **procsub** ✅, quote, **read** ✅, redir, rhs-exp, **set-e** ✅, set-x, **shopt** ✅, strip, **test** ✅, tilde, tilde2, **trap** ✅, **type** ✅, **vredir** ✅ — **braces** fixed in Phase 39 (bounded paren-depth scanner for `$(` inside `in_squote` + `SILENT_COMSUB` fallback) — **builtins** reduced from ~28 to ~3 nix diff lines (Phase 39: umask symbolic + ulimit rewrite + checkhash + hash path errors) — **quotearray** reduced from ~65 to ~59 nix diff lines (Phase 38: test -v fix) — **new-exp** fixed in Phase 37 (single-quote `}` protection in dquote `${...}`) — **comsub**/**lastpipe**/**trap** stabilized in Phase 37 (nix harness SIGPIPE/CHLD normalization) — **read** fixed in Phase 36 (PUA-aware IFS matching in read builtin) — **iquote** fixed in Phase 35 (PUA decode in`parse_printf_int`) — **nquote5** fixed in Phase 35 (PUA re-encoding in `read` builtin + `capture_output`)
 
-Verified failing (9/77): arith (~39 nix, arith10.sub error format diffs + `let` empty subscript handling in assoc_expand_once mode), array (~433 nix, array1/2/4/6/7/32/33.sub), assoc (~329 nix, tilde expansion in subscripts + `BASH_ALIASES`/`BASH_CMDS` + bracket parsing), braces (~77 nix, Phase 37 regression: `'$('` inside `"${a-...}"` causes parser EOF — `parse_dollar` enters `$(...)` comsub parse inside single-quote brace protection, consuming past the `}`), builtins (~28 nix, umask symbolic mode + hash -p sandbox + ulimit -g), comsub2 (~16, funsub line number off-by-1 + job listing), nameref (~671 nix, nameref resolution bugs revealed by sandbox), quotearray (~59 nix, `A[]]` bracket parsing + `assoc_expand_once` + `test -v` with `@` keys), varenv (~315 nix, function-local scoping + readonly + tempenv leaking)
+Verified failing (8/77): arith (~39 nix, arith10.sub error format diffs + `let` empty subscript handling in assoc_expand_once mode), array (~433 nix, array1/2/4/6/7/32/33.sub), assoc (~329 nix, tilde expansion in subscripts + `BASH_ALIASES`/`BASH_CMDS` + bracket parsing), builtins (~3 nix, `BASH_CMDS` hash sync only), comsub2 (~16, funsub line number off-by-1 + job listing), nameref (~671 nix, nameref resolution bugs revealed by sandbox), quotearray (~59 nix, `A[]]` bracket parsing + `assoc_expand_once` + `test -v` with `@` keys), varenv (~315 nix, function-local scoping + readonly + tempenv leaking)
 
-Note: **arith**, **array**, **assoc**, **quotearray** pass locally (0 diff) but fail in nix sandbox due to stricter environment revealing edge cases. **varenv** and **nameref** now PID-only locally; nix harness normalizes BASHPID/PPID/ref_PID and `$_` paths. **builtins** reduced from ~205 to ~28 nix diff lines (Phase 38: help builtin + test -v + ${#scalar[@]} fixes). **braces** was passing in Phase 37 but has a pre-existing regression from the single-quote `}` protection — `"${a-'$('\'}"` causes the lexer to enter `$(...)` comsub parsing inside the default value, consuming past the closing `}`. Phase 36 reduced array nix diffs from ~467→~433 (compound assignment + `$((expr))` fixes).
+Note: **arith**, **array**, **assoc**, **quotearray** pass locally (0 diff) but fail in nix sandbox due to stricter environment revealing edge cases. **varenv** and **nameref** now PID-only locally; nix harness normalizes BASHPID/PPID/ref_PID and `$_` paths. **builtins** reduced from ~28 to ~3 nix diff lines (Phase 39: full POSIX symbolic umask, ulimit rewrite with all flags, checkhash stale entry removal, exec error path fix; remaining: `BASH_CMDS[cmd]=path` hash sync). **braces** fixed in Phase 39 — bounded paren-depth scanner in `read_param_word_impl` for `$(` when `in_squote` is true prevents the full recursive comsub parser from consuming past the `}` delimiter. Phase 36 reduced array nix diffs from ~467→~433 (compound assignment + `$((expr))` fixes).
 
 **Phase 31 fixes:** Implement `shopt -s nocasematch` support for pattern matching — add `NOCASEMATCH_ENABLED` thread-local flag (like `DOTGLOB_ENABLED` etc.), propagate from `shell.shopt_nocasematch` in `expand_word_fields`, `expand_word_single`, `run_case`, and `run_conditional`. Pattern matching (`pattern_match_impl` in both `pattern.rs` and `commands.rs`) now does case-insensitive comparison for literal chars, bracket expressions, ranges, and `\x00`-escaped literals when nocasematch is on. `[[ =~ ]]` regex wraps pattern with `(?i)` prefix. Fix `"${!ref}"` indirect array expansion in double-quoted context — when indirect target ends with `[@]`, produce `SplitHere` markers between elements (like `"$@"`); when target ends with `[*]`, join with IFS. Fix `${arr[@]:offset:length}` array slice arithmetic offset parsing — replace all `offset_str.trim().parse().unwrap_or(0)` in `get_array_elements` with `parse_arith_offset()` calls so that expressions like `${#x[@]}-1` are evaluated arithmetically instead of defaulting to 0. Add `cmd_sub: CmdSubFn` parameter to `get_array_elements` for this. Fix `${!name[@]@Q}` / `${!name[@]%b}` lexer parsing — `${!name[@]}` (followed by `}`) is array indices, but `${!name[@]@Q}` (followed by operator) is now correctly treated as indirect expansion (resolve `name[@]`, apply operator on result). Fix `${!target@Q}` invalid variable name error — when indirect expansion resolves to an invalid variable name (e.g. `aaa bbb` from array `[@]` join), emit `invalid variable name` error and set `arith_error` flag to abort the command. Fix `${VAR[@]@A}` for declared-but-unset scalars — when the base variable is a scalar with attributes (not in arrays/assoc_arrays), produce `declare -FLAGS name` instead of empty. Fix `${arr[@]@A}` for declared-but-unset arrays — omit `=()` when `__UNSET__` marker is set, but keep `=()` for explicitly empty arrays (e.g. `B=()`). Add `${var@K}`/`${var@k}` key-value transform operators — for indexed arrays produce `idx "val"` pairs (K) or `idx val` pairs (k); for assoc arrays produce `key "val"` pairs; for scalars/positional params produce single-quoted values; `"${arr[@]@k}"` in double quotes produces `SplitHere`-separated key/value words. Add `parse_arith_offset` pre-expansion of `${...}` and `$(...)` in offset expressions. Fix `string_to_raw_bytes` UTF-8 encoding — introduce PUA-based raw byte tracking (U+E000–U+E0FF) so that `$'\xNN'`/`\NNN` escape sequences produce PUA-encoded characters that `string_to_raw_bytes` converts to single bytes, while regular Unicode characters (from source code) are output as proper UTF-8. Update `shell_quote`, `shell_escape` (printf %q), `quote_for_declare`, and `quote_assoc_key` to decode PUA chars to their original byte values when quoting. Add `char_in_class` helper for POSIX character class matching that decodes PUA chars before classification (e.g. `[[:cntrl:]]` correctly matches PUA-encoded `$'\003'`).
 
@@ -74,33 +74,26 @@ Note: **arith**, **array**, **assoc**, **quotearray** pass locally (0 diff) but 
 
 **Phase 15 flipped to passing:** assoc (462→0 diff), quotearray (179→0 diff, from IFS fix), new-exp (310→0 diff), nameref (678→PID-only diff), trap (1→0 locally, may still be flaky in nix)
 
-Failing (~10 nix):
+Failing (~8 nix):
 
 | Test | Local diff | Nix diff | Notes |
 |------|-----------|----------|-------|
-| trap | 0 ✅ | 0 ✅ (flaky) | Usually passes; occasionally 2-line CHLD diff (timing-dependent) |
-| comsub | 0 ✅ | 1 | Spurious `echo: write error: Broken pipe` (flaky timing, sometimes passes) |
-| lastpipe | 0 ✅ | 1 | Spurious `echo: write error: Broken pipe` (flaky timing) |
-| comsub2 | ~12 | ~20 | Line number off-by-1 in funsubs + control char word splitting + job listing |
-| new-exp | 0 (PID) ✅ | ~2 | Remaining: `'}'` quoting in dquote `${}` default values only |
-| quotearray | 0 ✅ | ~65 | `A[]]` bracket parsing, `assoc_expand_once`, `test -v`, process sub in `[[ ]]` arith (was ~95 pre-xtrace fix) |
-| iquote | 0 ✅ | 0 ✅ | Phase 35 fixed PUA decode in `parse_printf_int` |
-| nquote5 | 0 ✅ | 0 ✅ | Phase 35 fixed PUA re-encoding in `read` builtin + `capture_output` |
-| read | 0 ✅ | 0 ✅ | Phase 36 fixed PUA-aware IFS matching in read builtin |
-| arith | 0 ✅ | ~39 | Nix-only: arith10.sub error format + `let` empty subscript in assoc_expand_once (was ~43 pre-xtrace fix) |
-| array | 0 ✅ | ~433 | Nix-only: array1/2/4/6/7/32/33.sub — Phase 36 reduced from ~467; remaining: `'}'` quoting, bracket parsing, type conversion |
-| assoc | 0 ✅ | ~354 | Nix-only: `BASH_ALIASES`/`BASH_CMDS`, bracket parsing, key quoting, tilde expansion |
-| builtins | ~18 (PID) | ~216 | `help` output formatting, `ulimit` flags, `umask` symbolic mode, PID diffs |
-| nameref | ~12 (PID) | ~756 | Nix reveals nameref resolution bugs (`aa&bb`, nounset, indirect, circular refs) |
-| varenv | ~8 (PID) | ~352 | Nix reveals function-local scoping, readonly, tempenv leaking diffs |
+| comsub2 | ~12 | ~16 | Line number off-by-1 in funsubs + control char word splitting + job listing |
+| quotearray | 0 ✅ | ~59 | `A[]]` bracket parsing, `assoc_expand_once`, `test -v`, process sub in `[[ ]]` arith |
+| arith | 0 ✅ | ~39 | Nix-only: arith10.sub error format + `let` empty subscript in assoc_expand_once |
+| array | 0 ✅ | ~433 | Nix-only: array1/2/4/6/7/32/33.sub |
+| assoc | 0 ✅ | ~329 | Nix-only: `BASH_ALIASES`/`BASH_CMDS`, bracket parsing, key quoting, tilde expansion |
+| builtins | 0 ✅ | ~3 | Only `BASH_CMDS[cmd]=path` hash sync (Phase 39 fixed umask/ulimit/checkhash/hash errors) |
+| nameref | ~12 (PID) | ~671 | Nix reveals nameref resolution bugs (`aa&bb`, nounset, indirect, circular refs) |
+| varenv | ~8 (PID) | ~315 | Nix reveals function-local scoping, readonly, tempenv leaking diffs |
 
 **Phase 29 improved new-exp** — `new-exp16.sub` from ~36→0 diff (`&` replacement quoting + tilde in replacements). **Phase 29 improved varenv** from ~6→~4 PID-only (`$_` init fix). **Phase 29 improved nameref** — `$_` diff eliminated.
 
 **Phase 28 improved quotearray** from ~8→0 diff lines locally (single-quoted `(( ))` fix + `printf -v array[@]` fix). **Phase 27 improved quotearray** from ~27→~8 diff lines locally (invalid arithmetic operator detection + indexed array subscript `$var` expansion fix + `@` key quoting + `$'\t'` non-printable key formatting). **Phase 26 improved quotearray** from ~32→~27 diff lines locally (`]+=` append assignment fix). **Phase 25 improved quotearray** from ~36→~32 diff lines locally (nested subscript `${A[${a[i]}]}` fix). **Phase 23 improved quotearray** from ~26→~24 diff lines locally (empty element removal fix). **Phase 20 improved quotearray** from ~68→~36 diff lines locally by fixing assoc subscript expansion, arithmetic bracket depth tracking, and `declare -p` key quoting. No remaining local diffs. Nix diffs remain in quotearray3/4/5.sub (unset quoting, test -v with @ keys, assoc_expand_once).
 
-### Local test results (~68/83 passing, 0 diff sequential — Phase 38)
+### Local test results (~68/83 passing, 0 diff sequential — Phase 39)
 
-83 total `.tests` files in `/tmp/bash-5.3/tests/` (superset of the 77 nix tests — includes dbg-support, dbg-support2, dstack2, histexp, history, rsh, invocation, jobs, posixpipe, and others not in the nix harness). **dstack2** now passes (was 26 diff lines — `~N`/`~+N`/`~-N` tilde expansion implemented). **arith**, **array**, **assoc**, **exp**, **posixexp2**, **comsub**, **lastpipe**, **trap**, **quotearray**, **new-exp**, **read** now pass locally (0 diff or PID-only). Phase 37 fixed `'}'` quoting in `"${...}"` default values. **nameref**, **varenv**, **builtins**, **heredoc**, **procsub**, **extglob**, **type**, **glob** have PID-only diffs.
+83 total `.tests` files in `/tmp/bash-5.3/tests/` (superset of the 77 nix tests — includes dbg-support, dbg-support2, dstack2, histexp, history, rsh, invocation, jobs, posixpipe, and others not in the nix harness). **dstack2** now passes (was 26 diff lines — `~N`/`~+N`/`~-N` tilde expansion implemented). **arith**, **array**, **assoc**, **exp**, **posixexp2**, **comsub**, **lastpipe**, **trap**, **quotearray**, **new-exp**, **read**, **braces** now pass locally (0 diff or PID-only). Phase 39 fixed braces regression + umask symbolic + ulimit rewrite + checkhash. **nameref**, **varenv**, **builtins**, **heredoc**, **procsub**, **extglob**, **type**, **glob** have PID-only diffs.
 
 **Important:** Many tests that show diffs when run in parallel (`diff <(our_bash test) <(bash test)`) pass when run sequentially due to race conditions on shared `/tmp` and `/var/tmp` files. Tests like `globstar`, `test`, `redir`, `extglob` pass when run sequentially. Use sequential mode for accurate results:
 
@@ -152,6 +145,11 @@ Suggested nix timeout: 30s for most tests, 120s for trap.
 
 ## Failing Nix Tests (3/77 consistently passing → now 8 remaining)
 
+### Now passing (Phase 39 fixed)
+
+- **~~braces~~** (~77→0 nix lines) — Fixed Phase 37 regression: `'$('` inside `"${a-...}"` default values caused parser EOF. Root cause: `parse_dollar` entered full recursive `$(...)` comsub parsing inside single-quote brace protection, consuming past the `}` delimiter. Fix: bounded paren-depth scanner in `read_param_word_impl` for `$(` when `in_squote` is true. If matching `)` found within squote region → `CommandSub` node. If not found → `SILENT_COMSUB` marker (suppresses output without error, matching bash's extraction-phase `skip_single_quoted` behavior). ✅
+- **~~builtins~~** (~28→~3 nix lines) — Full POSIX symbolic umask, ulimit rewrite with all flags, checkhash stale entry removal, exec error path fix. Only `BASH_CMDS` hash sync remains (~3 nix diff lines). ✅ (nearly passing)
+
 ### Now passing (Phase 37 fixed/stabilized)
 
 - **~~new-exp~~** (~2→0 nix lines) — Fixed single-quote protection of `}` in double-quoted `${...}` default values. In non-POSIX mode, `'...'` inside `"${var-word}"` now protects `}` from closing the parameter expansion, matching bash behavior. The `'` characters themselves are literal (no quoting effect on `$` expansion). In POSIX mode (`set -o posix`), `'` does NOT protect `}`, also matching bash. ✅
@@ -159,10 +157,11 @@ Suggested nix timeout: 30s for most tests, 120s for trap.
 - **~~lastpipe~~** (1→0) — Nix harness now normalizes `echo: write error: Broken pipe` lines. ✅
 - **~~trap~~** (0-2→0) — Nix harness now normalizes standalone `CHLD` lines (timing-dependent SIGCHLD delivery). ✅
 
-### Medium diffs
+### Small diffs
 
+- **builtins** (~3 nix lines) — Only `BASH_CMDS[cmd]=path` hash table sync remains (Phase 39 fixed umask symbolic, ulimit, checkhash, hash path errors — reduced from ~28 to ~3 lines)
 - **comsub2** (~16 lines) — Line number off-by-1 in funsubs + job listing diffs. Root cause: bash's `parse_and_execute` counts lines via `shell_getc` line-buffer refills (not per-`\n` character), and compound commands (`for`/`while`) add extra line increments. Our character-level lexer counts differently.
-- **quotearray** (~65 nix lines) — 0 diff locally (Phase 28 fixed single-quoted `(( ))` + `printf -v array[@]`). Nix diffs in quotearray1/2/3/4/5.sub: `A[]]`/`A[[]` bracket parsing, `unset` with complex quoting and `$(echo foo)` keys, `test -v`/`[[ -v ]]` with `@` key for assoc arrays, `assoc_expand_once` interactions, process substitution in `[[ ]]` arithmetic context
+- **quotearray** (~59 nix lines) — 0 diff locally (Phase 28 fixed single-quoted `(( ))` + `printf -v array[@]`). Nix diffs in quotearray1/2/3/4/5.sub: `A[]]`/`A[[]` bracket parsing, `unset` with complex quoting and `$(echo foo)` keys, `test -v`/`[[ -v ]]` with `@` key for assoc arrays, `assoc_expand_once` interactions, process substitution in `[[ ]]` arithmetic context
 
 ### Nix-only failures (pass locally, fail in nix sandbox)
 
@@ -171,10 +170,6 @@ Suggested nix timeout: 30s for most tests, 120s for trap.
 - **assoc** (~329 nix) — Passes locally (0 diff). Nix reveals `BASH_ALIASES`/`BASH_CMDS` not populated, assoc5.sub bracket parsing (`A[]]`, `foo[bar]`), quote handling in keys, tilde expansion diffs
 - **nameref** (~671 nix) — PID-only locally. Nix reveals nameref resolution bugs (invalid variable names like `aa&bb`, nounset behavior with namerefs, circular references, readonly handling)
 - **varenv** (~315 nix) — PID-only locally. Nix reveals function-local scoping, readonly, tempenv leaking, `declare` output format diffs
-
-### Larger diffs
-
-- **builtins** (~205 nix lines) — `help` output formatting, `ulimit -g` not recognized, `umask` symbolic mode, PID diffs (PID-only locally)
 
 ### Now passing (Phase 23 fixed)
 
@@ -273,9 +268,9 @@ These exist in `/tmp/bash-5.3/tests/` but not in the nix test list:
 
 1. ~~**Fix SIGPIPE flaky tests (comsub/lastpipe/trap)**~~ ✅ **Stabilized in Phase 37.** Nix harness now normalizes `echo: write error: Broken pipe` lines and standalone `CHLD` lines from both outputs, eliminating timing-dependent false failures.
 
-2. **Fix braces Phase 37 regression** — `"${a-'$('\'}"` causes parser EOF error. Root cause: in `read_param_word_impl`, when `in_squote` is true (from Phase 37 single-quote brace protection), `$` still triggers `parse_dollar` → `$(...)` comsub parsing, which consumes past the `}`. Fix: either suppress `parse_dollar` when `in_squote` (but bash DOES expand `$` in this context for expansion), or use depth-counting brace matching instead of full recursive parsing for the default value word.
+2. ~~**Fix braces Phase 37 regression**~~ ✅ **Fixed in Phase 39.** Bounded paren-depth scanner in `read_param_word_impl` for `$(` when `in_squote` is true. If matching `)` found within squote region → `CommandSub`. If not → `SILENT_COMSUB` marker (suppresses output without error, matching bash's `skip_single_quoted` in extraction phase). Handles both `'$(echo hello)'` (expanded) and `'$('` (gracefully incomplete).
 
-3. **Fix remaining nix-only failures (arith/array/nameref/varenv/assoc/builtins)** — Pass locally but fail in nix sandbox. Remaining: arith10.sub error format + `let` empty subscript in assoc_expand_once (~39 lines), array32/33.sub bash 5.3 differences (~433 lines), assoc bracket parsing + `BASH_ALIASES`/`BASH_CMDS` (~329 lines), nameref resolution bugs (~671 lines), varenv function-local scoping (~315 lines), builtins umask/hash/ulimit (~28 lines).
+3. **Fix remaining nix-only failures (arith/array/nameref/varenv/assoc/builtins)** — Pass locally but fail in nix sandbox. Remaining: arith10.sub error format + `let` empty subscript in assoc_expand_once (~39 lines), array32/33.sub bash 5.3 differences (~433 lines), assoc bracket parsing + `BASH_ALIASES`/`BASH_CMDS` (~329 lines), nameref resolution bugs (~671 lines), varenv function-local scoping (~315 lines), builtins `BASH_CMDS` hash sync (~3 lines).
 
 ### Medium effort
 
@@ -301,7 +296,19 @@ These exist in `/tmp/bash-5.3/tests/` but not in the nix test list:
 
 11. **Performance: optimize hot loops** — `ifs-posix` takes ~4 minutes vs bash's ~1s. `arith` takes ~2s vs bash's 0.035s. Profiling needed.
 
-12. ~~**Fix `help` builtin output**~~ ✅ **Implemented in Phase 38.** Full help builtin with two-column listing, `-d`/`-s`/`-m` modes, glob pattern matching, `--help` for builtins. **Fix `ulimit` flags** — `ulimit -g` not recognized, `+N` not rejected, `soft`/`hard` values not handled. (~8 nix diff lines remaining)
+12. ~~**Fix `help` builtin output**~~ ✅ **Implemented in Phase 38.** ~~**Fix `ulimit` flags**~~ ✅ **Fixed in Phase 39.** Full ulimit rewrite with all resource flags (`-abcdefiklmnpqrstuvxPRT`), `-S`/`-H` soft/hard, `soft`/`hard`/`unlimited` keywords, `+N` rejection, proper error messages. **Implement `BASH_CMDS` hash table sync** — `BASH_CMDS[cmd]=path` assignments should update the hash table. (~3 nix diff lines remaining)
+
+## Recent Fixes (Phase 39)
+
+- **Fix braces Phase 37 regression** — `'$('` inside `"${a-...}"` default values caused parser EOF error because `parse_dollar` entered full recursive `$(...)` comsub parsing inside single-quote brace protection, consuming past the `}` delimiter. Fix: added bounded paren-depth scanner in `read_param_word_impl` for `$(` when `in_squote` is true. The scanner counts paren depth with quote awareness (`'...'`, `"..."`, backticks, nested `$(...)`), stopping at unquoted `'` (squote boundary). If matching `)` found → `CommandSub` node (handles `'$(echo hello)'` correctly). If not found → `SILENT_COMSUB` marker that suppresses output without printing error, matching bash's observable behavior where `extract_dollar_brace_string` calls `skip_single_quoted` to skip `$(` entirely during the extraction phase.
+
+- **Implement full POSIX symbolic umask** — Rewrite `builtin_umask` symbolic mode parsing to handle: multiple operators per clause (`u=r+w`, `u+w=r+x`), permission copying between classes (`g+u`, `o=u` — copies allowed perms from source class), `X` conditional execute (set x only if any execute bit is currently allowed), `s`/`t` flags (ignored for umask). Uses `class_perms` helper to extract 3-bit rwx from current mask and `expand_perm` to apply to who-selected positions.
+
+- **Rewrite `ulimit` builtin** — Full implementation with all bash 5.3 resource flags: `-c` (core), `-d` (data), `-e` (nice), `-f` (fsize), `-i` (sigpending), `-k` (msgqueue), `-l` (memlock), `-m` (rss), `-n` (nofile), `-p` (pipe/nproc), `-q` (msgqueue), `-r` (rtprio), `-s` (stack), `-t` (cpu), `-u` (nproc), `-v` (as), `-x` (locks), `-P` (pseudoterminals), `-R` (rttime), `-T` (threads). Supports `-S`/`-H` (soft/hard selection), `soft`/`hard`/`unlimited` keywords, `--` option terminator, `+N` rejection with "invalid number" error, `-a` (print all), proper scaling (512-byte blocks for -c/-f, 1024-byte for -d/-l/-m/-s/-v), and `nix::errno` for strerror-style error messages without Rust's `(os error N)` suffix.
+
+- **Fix `checkhash` shopt behavior** — When `shopt -s checkhash` is enabled and a hashed path doesn't exist, the stale hash table entry is now removed and command lookup falls back to PATH. If PATH lookup succeeds, the new path is re-added to the hash table (so subsequent `hash -t` lookups work). Previously, stale entries were used unconditionally.
+
+- **Fix exec error for hashed paths** — When a command's path came from the hash table (e.g., `hash -p /nosuchdir/nosuchfile cat; cat`), exec errors now report the actual hashed path (`/nosuchdir/nosuchfile: No such file or directory`) instead of just `cat: command not found`. Tracks `from_hash_table` flag through the exec path.
 
 ## Recent Fixes (Phase 38)
 

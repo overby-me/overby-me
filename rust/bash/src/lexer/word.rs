@@ -52,6 +52,118 @@ pub(super) fn read_param_word_impl(
                 }
                 *i += 2;
             }
+            '$' if in_squote && *i + 1 < chars.len() && chars[*i + 1] == '(' => {
+                // When in_squote is true (inside '...' that protects } in dquoted
+                // ${...} default/alt values), $( must NOT use the full recursive
+                // comsub parser — it would consume past the } delimiter.
+                //
+                // Bash's extraction phase (extract_dollar_brace_string) calls
+                // skip_single_quoted() which skips $( entirely inside '...'.
+                // Then in the expansion phase, string_extract_double_quoted
+                // re-parses and expands $() normally.
+                //
+                // We emulate this: use a bounded paren-depth scanner to find
+                // the matching ).  If found within the squote region, produce
+                // a CommandSub node.  If not found (e.g. '$(' with no matching
+                // ')'), push $( as literal so the lexer doesn't abort.
+                *i += 2; // skip '$' and '('
+                let mut depth = 1i32;
+                let mut scan = *i;
+                let mut found_close = false;
+                while scan < chars.len() && depth > 0 {
+                    match chars[scan] {
+                        '\'' => {
+                            // Unescaped ' inside the comsub content — in the
+                            // outer squote-protects-brace context this would
+                            // toggle in_squote off, meaning the comsub extends
+                            // beyond the squote boundary.  Stop scanning.
+                            break;
+                        }
+                        '(' => {
+                            depth += 1;
+                            scan += 1;
+                        }
+                        ')' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                found_close = true;
+                                break;
+                            }
+                            scan += 1;
+                        }
+                        '\\' if scan + 1 < chars.len() => {
+                            scan += 2; // skip escaped char
+                        }
+                        '"' => {
+                            // Skip double-quoted string
+                            scan += 1;
+                            while scan < chars.len() && chars[scan] != '"' {
+                                if chars[scan] == '\\' && scan + 1 < chars.len() {
+                                    scan += 1;
+                                }
+                                scan += 1;
+                            }
+                            if scan < chars.len() {
+                                scan += 1; // skip closing "
+                            }
+                        }
+                        '`' => {
+                            // Skip backtick command sub
+                            scan += 1;
+                            while scan < chars.len() && chars[scan] != '`' {
+                                if chars[scan] == '\\' && scan + 1 < chars.len() {
+                                    scan += 1;
+                                }
+                                scan += 1;
+                            }
+                            if scan < chars.len() {
+                                scan += 1; // skip closing `
+                            }
+                        }
+                        '$' if scan + 1 < chars.len() && chars[scan + 1] == '(' => {
+                            // Nested $( — increase depth
+                            depth += 1;
+                            scan += 2;
+                        }
+                        _ => {
+                            scan += 1;
+                        }
+                    }
+                }
+                if found_close {
+                    // Found matching ) — produce CommandSub with the text
+                    // between $( and )
+                    let cmd_text: String = chars[*i..scan].iter().collect();
+                    *i = scan + 1; // skip past )
+                    if !literal.is_empty() {
+                        parts.push(WordPart::Literal(std::mem::take(&mut literal)));
+                    }
+                    parts.push(WordPart::CommandSub(cmd_text));
+                } else {
+                    // No matching ) found within the squote region.  In bash,
+                    // the extraction phase (extract_dollar_brace_string) calls
+                    // skip_single_quoted() which skips $( entirely — so no
+                    // comsub error is emitted for this particular $(.  The
+                    // expansion phase (parameter_brace_expand_rhs) then
+                    // re-parses the extracted word via string_extract_double_quoted
+                    // which *does* start the comsub, but with access to the full
+                    // input stream (so the comsub may find its ) on a later line).
+                    //
+                    // We can't replicate the stream-reading behavior, so use a
+                    // SILENT_COMSUB marker: it suppresses the echo output without
+                    // printing an error, matching bash's observable behavior for
+                    // constructs like "${a+'$('\'}" where the comsub spans past
+                    // the squote boundary.
+                    //
+                    // Advance *i past the scanned content so the main loop sees
+                    // the closing ' and toggles in_squote off.
+                    *i = scan;
+                    if !literal.is_empty() {
+                        parts.push(WordPart::Literal(std::mem::take(&mut literal)));
+                    }
+                    parts.push(WordPart::CommandSub("\x00SILENT_COMSUB".to_string()));
+                }
+            }
             '$' => {
                 if !literal.is_empty() {
                     parts.push(WordPart::Literal(std::mem::take(&mut literal)));
