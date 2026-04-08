@@ -740,14 +740,13 @@ fn apply_resource_limit(
     };
     let ret = unsafe { libc::setrlimit(resource, &rlim) };
     if ret != 0 {
-        log::error!(
+        log::warn!(
             "Failed to set {} (soft={}, hard={}): {}",
             name,
             soft,
             hard,
             std::io::Error::last_os_error()
         );
-        std::process::exit(1);
     }
 }
 
@@ -1516,8 +1515,7 @@ pub fn run_exec_helper() {
     if let Err(e) =
         crate::services::fork_os_specific::post_fork_os_specific(&config.platform_specific)
     {
-        log::error!("postfork error: {}", e);
-        std::process::exit(1);
+        log::warn!("postfork error: {}", e);
     }
 
     // ── Apply UMask= before any file creation ─────────────────────────

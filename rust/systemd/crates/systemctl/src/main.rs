@@ -1810,6 +1810,31 @@ fn handle_response(
                 }
             }
         }
+        "status" => {
+            // Print the result
+            if !quiet && let Some(result) = result {
+                let is_empty = result.is_null() || result.as_array().is_some_and(|a| a.is_empty());
+                if !is_empty {
+                    println!("{}", serde_json::to_string_pretty(result).unwrap());
+                }
+            }
+            // Exit 3 if the service is not active (matching C systemd behavior)
+            if let Some(result) = result {
+                let is_active = if let Some(arr) = result.as_array() {
+                    arr.iter().all(|entry| {
+                        entry
+                            .get("Status")
+                            .and_then(|v| v.as_str())
+                            .is_some_and(|s| s.starts_with("Started(Running"))
+                    })
+                } else {
+                    true
+                };
+                if !is_active {
+                    std::process::exit(3);
+                }
+            }
+        }
         _ => {
             // For all other commands, print the result if non-null and non-empty.
             if !quiet && let Some(result) = result {

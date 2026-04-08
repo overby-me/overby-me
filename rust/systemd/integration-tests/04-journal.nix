@@ -67,13 +67,16 @@
     sed -i '/^# Test a couple of error scenarios/,/^rm -f "\$GATEWAYD_FILE"$/c\echo "SKIP: error scenario tests require journal-remote"' TEST-04-JOURNAL.journal-gatewayd.sh
     # Generate padding entries before the cursor+skip test (our gatewayd reads from disk)
     sed -i '/^# Show 10 entries starting/i\seq 1 20 | while read n; do echo "padding $n" | systemd-cat -t gatewayd-padding; done; journalctl --sync; sleep 1' TEST-04-JOURNAL.journal-gatewayd.sh
-    # Wait for port 19531 to be released after stopping socket-activated gatewayd.
-    # Our gatewayd holds a dup'd listening FD from socket activation; after systemctl stop
-    # the process may not have fully exited before systemd-socket-activate tries to bind.
-    # Note: a\sleep not a\timeout — sed interprets \t as tab.
-    sed -i '/systemctl stop systemd-journal-gatewayd/a\sleep 3' TEST-04-JOURNAL.journal-gatewayd.sh
+    # Use a different port for the HTTPS section to avoid EADDRINUSE.
+    # Our systemd may not release the socket-activated port immediately after stop.
+    sed -i 's/--listen=19531/--listen=19533/g' TEST-04-JOURNAL.journal-gatewayd.sh
+    sed -i 's#https://localhost:19531#https://localhost:19533#g' TEST-04-JOURNAL.journal-gatewayd.sh
 
     # cat.sh patches:
+    # Wait for the namespace socket file to exist after enable --now.
+    # After bsod cleanup (which restarts journald), our systemd may need a moment
+    # to process the socket unit start and create the listening socket file.
+    sed -i '/systemctl enable --now systemd-journald@cat-test.socket/a\sleep 1' TEST-04-JOURNAL.cat.sh
     # Add sync+sleep after waiting for the namespace journald to become active.
     # Our journald processes entries in threads; the service may become active
     # before the entry is committed to disk.

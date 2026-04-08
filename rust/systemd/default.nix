@@ -236,8 +236,6 @@
 
         [Service]
         ExecStart=$out/lib/systemd/systemd-journal-remote --listen-https=-3 --output=/var/log/journal/remote/
-        User=systemd-journal-remote
-        LimitNOFILE=524288
 
         [Install]
         Also=systemd-journal-remote.socket
@@ -259,12 +257,8 @@
 
         [Service]
         ExecStart=$out/lib/systemd/systemd-journal-upload --save-state
-        Restart=on-failure
-        RestartSteps=10
-        RestartMaxDelaySec=60
         SupplementaryGroups=systemd-journal
         StateDirectory=systemd/journal-upload
-        LimitNOFILE=524288
 
         [Install]
         WantedBy=multi-user.target

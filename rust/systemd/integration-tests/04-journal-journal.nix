@@ -18,10 +18,12 @@
     # Also skip the journalctl --user-unit check that follows it
     sed -i '/^journalctl -b -n 1 -r --user-unit/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
 
-    # Skip forever-print-hola tests (journald restart survival, lines 198-213)
+    # Skip forever-print-hola tests (journald restart survival).
+    # Our FDSTORE stream recovery doesn't fully preserve stdout connections
+    # across journald restart — the service's printf fails and touches
+    # /tmp/i-lose-my-logs.
     sed -i '/forever-print-hola/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
     sed -i '/i-lose-my-logs/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
-    # Skip SIGKILL journald test
     sed -i '/systemctl kill --signal=SIGKILL/s/.*/echo SKIP/' TEST-04-JOURNAL.journal.sh
 
     # Skip systemd-run --unit=... --wait --service-type=exec (lines 263-278)

@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::{self, BufRead, BufReader, Read};
+use std::io::{self, BufRead, BufReader};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -102,15 +102,15 @@ fn read_config() -> (Option<String>, Option<String>, Option<String>) {
             files.sort_by_key(|e| e.file_name());
             for entry in files {
                 let path = entry.path();
-                if path.extension().is_some_and(|e| e == "conf") {
-                    if let Ok(content) = fs::read_to_string(&path) {
-                        parse_config_content(
-                            &content,
-                            &mut server_key,
-                            &mut server_cert,
-                            &mut trusted_cert,
-                        );
-                    }
+                if path.extension().is_some_and(|e| e == "conf")
+                    && let Ok(content) = fs::read_to_string(&path)
+                {
+                    parse_config_content(
+                        &content,
+                        &mut server_key,
+                        &mut server_cert,
+                        &mut trusted_cert,
+                    );
                 }
             }
         }

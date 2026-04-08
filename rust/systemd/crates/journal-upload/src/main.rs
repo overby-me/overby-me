@@ -107,16 +107,16 @@ fn read_config() -> (
             files.sort_by_key(|e| e.file_name());
             for entry in files {
                 let path = entry.path();
-                if path.extension().is_some_and(|e| e == "conf") {
-                    if let Ok(content) = fs::read_to_string(&path) {
-                        parse_config_content(
-                            &content,
-                            &mut url,
-                            &mut server_key,
-                            &mut server_cert,
-                            &mut trusted_cert,
-                        );
-                    }
+                if path.extension().is_some_and(|e| e == "conf")
+                    && let Ok(content) = fs::read_to_string(&path)
+                {
+                    parse_config_content(
+                        &content,
+                        &mut url,
+                        &mut server_key,
+                        &mut server_cert,
+                        &mut trusted_cert,
+                    );
                 }
             }
         }
@@ -256,15 +256,15 @@ fn upload_entries(
         .stderr(Stdio::piped());
 
     // TLS options
-    if let Some(key) = key {
-        if key != "-" {
-            cmd.arg("--key").arg(key);
-        }
+    if let Some(key) = key
+        && key != "-"
+    {
+        cmd.arg("--key").arg(key);
     }
-    if let Some(cert) = cert {
-        if cert != "-" {
-            cmd.arg("--cert").arg(cert);
-        }
+    if let Some(cert) = cert
+        && cert != "-"
+    {
+        cmd.arg("--cert").arg(cert);
     }
     match trust {
         Some("all") | Some("-") | None => {
@@ -326,60 +326,89 @@ fn main() {
             .unwrap_or_else(|| "/var/lib/systemd/journal-upload/state".to_string())
     });
 
-    let after_cursor = cli
+    let mut last_cursor = cli
         .after_cursor
         .clone()
         .or_else(|| cli.cursor.clone())
         .or_else(|| state_file.as_ref().and_then(|f| load_cursor(f)));
 
-    // Read journal entries
-    let entries = match read_journal_entries(&cli) {
-        Ok(e) => e,
-        Err(e) => {
-            eprintln!("Failed to read journal: {}", e);
-            std::process::exit(1);
+    // Determine if we should keep running (follow mode).
+    // --save-state implies continuous operation (like the C implementation).
+    let follow = cli
+        .follow
+        .as_ref()
+        .map(|v| v.unwrap_or(true))
+        .unwrap_or(state_file.is_some());
+
+    loop {
+        // Read journal entries
+        let entries = match read_journal_entries(&cli) {
+            Ok(e) => e,
+            Err(e) => {
+                eprintln!("Failed to read journal: {}", e);
+                if !follow {
+                    std::process::exit(1);
+                }
+                std::thread::sleep(std::time::Duration::from_secs(5));
+                continue;
+            }
+        };
+
+        // Filter entries after cursor
+        let entries: Vec<&JournalEntry> = if let Some(ref cursor) = last_cursor {
+            let cursor_seqnum = parse_cursor_seqnum(cursor);
+            let pos = cursor_seqnum.and_then(|seq| entries.iter().position(|e| e.seqnum == seq));
+            match pos {
+                Some(idx) => entries[idx + 1..].iter().collect(),
+                None => entries.iter().collect(),
+            }
+        } else {
+            entries.iter().collect()
+        };
+
+        if entries.is_empty() {
+            if !follow {
+                eprintln!("No new entries to upload");
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_secs(5));
+            continue;
         }
-    };
 
-    // Filter entries after cursor
-    let entries: Vec<&JournalEntry> = if let Some(ref cursor) = after_cursor {
-        // Find the cursor position and skip past it
-        let cursor_seqnum = parse_cursor_seqnum(cursor);
-        let pos = cursor_seqnum.and_then(|seq| entries.iter().position(|e| e.seqnum == seq));
-        match pos {
-            Some(idx) => entries[idx + 1..].iter().collect(),
-            None => entries.iter().collect(),
-        }
-    } else {
-        entries.iter().collect()
-    };
+        eprintln!("Uploading {} entries to {}", entries.len(), url);
 
-    eprintln!("Uploading {} entries to {}", entries.len(), url);
+        let owned_entries: Vec<JournalEntry> = entries.into_iter().cloned().collect();
 
-    // Convert references to owned for upload
-    let owned_entries: Vec<JournalEntry> = entries.into_iter().cloned().collect();
-
-    match upload_entries(
-        &owned_entries,
-        &url,
-        key.as_deref(),
-        cert.as_deref(),
-        trust.as_deref(),
-    ) {
-        Ok(last_cursor) => {
-            if !last_cursor.is_empty() {
-                if let Some(ref state_file) = state_file {
-                    if let Err(e) = save_cursor(state_file, &last_cursor) {
+        match upload_entries(
+            &owned_entries,
+            &url,
+            key.as_deref(),
+            cert.as_deref(),
+            trust.as_deref(),
+        ) {
+            Ok(cursor) => {
+                if !cursor.is_empty() {
+                    if let Some(ref state_file) = state_file
+                        && let Err(e) = save_cursor(state_file, &cursor)
+                    {
                         eprintln!("Warning: failed to save state: {}", e);
                     }
+                    last_cursor = Some(cursor);
                 }
+                eprintln!("Upload complete");
             }
-            eprintln!("Upload complete");
+            Err(e) => {
+                // Exit on upload failure — let systemd's Restart= handle retries
+                eprintln!("Upload failed: {}", e);
+                std::process::exit(1);
+            }
         }
-        Err(e) => {
-            eprintln!("Upload failed: {}", e);
-            std::process::exit(1);
+
+        if !follow {
+            break;
         }
+
+        std::thread::sleep(std::time::Duration::from_secs(5));
     }
 }
 
