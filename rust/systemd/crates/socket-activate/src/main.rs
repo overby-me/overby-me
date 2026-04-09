@@ -178,6 +178,197 @@ fn create_socket(addr: &str, datagram: bool, backlog: i32) -> io::Result<Listeni
     ))
 }
 
+// ---------------------------------------------------------------------------
+// SOCK_DESTROY — kill orphaned TCP listening sockets via netlink
+// ---------------------------------------------------------------------------
+
+/// Destroy orphaned TCP listening sockets on `port` (both IPv4 and IPv6).
+/// Uses the NETLINK_SOCK_DIAG / SOCK_DESTROY kernel interface.
+fn destroy_tcp_listeners_on_port(port: u16) {
+    for family in [libc::AF_INET as u8, libc::AF_INET6 as u8] {
+        destroy_tcp_listeners_family(port, family);
+    }
+}
+
+fn destroy_tcp_listeners_family(port: u16, family: u8) {
+    const NETLINK_SOCK_DIAG: libc::c_int = 4;
+    const SOCK_DIAG_BY_FAMILY: u16 = 20;
+    const SOCK_DESTROY: u16 = 21;
+    const NLM_F_REQUEST: u16 = 0x0001;
+    const NLM_F_DUMP: u16 = 0x0300;
+    const NLMSG_DONE: u16 = 3;
+    const TCPF_LISTEN: u32 = 1 << 10;
+
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    struct SockId {
+        sport: u16,
+        dport: u16,
+        src: [u32; 4],
+        dst: [u32; 4],
+        if_idx: u32,
+        cookie: [u32; 2],
+    }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct DiagReq {
+        family: u8,
+        protocol: u8,
+        ext: u8,
+        pad: u8,
+        states: u32,
+        id: SockId,
+    }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct NlHdr {
+        len: u32,
+        typ: u16,
+        flags: u16,
+        seq: u32,
+        pid: u32,
+    }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct DiagMsg {
+        family: u8,
+        state: u8,
+        timer: u8,
+        retrans: u8,
+        id: SockId,
+        _rest: [u32; 5],
+    }
+
+    let nl = unsafe {
+        libc::socket(
+            libc::AF_NETLINK,
+            libc::SOCK_DGRAM | libc::SOCK_CLOEXEC,
+            NETLINK_SOCK_DIAG,
+        )
+    };
+    if nl < 0 {
+        return;
+    }
+    let tv = libc::timeval {
+        tv_sec: 2,
+        tv_usec: 0,
+    };
+    unsafe {
+        libc::setsockopt(
+            nl,
+            libc::SOL_SOCKET,
+            libc::SO_RCVTIMEO,
+            (&tv as *const libc::timeval).cast(),
+            std::mem::size_of::<libc::timeval>() as libc::socklen_t,
+        );
+    }
+
+    let hdr_sz = std::mem::size_of::<NlHdr>();
+    let req_sz = std::mem::size_of::<DiagReq>();
+    let msg_sz = std::mem::size_of::<DiagMsg>();
+    let total = hdr_sz + req_sz;
+
+    // Dump LISTEN sockets
+    let hdr = NlHdr {
+        len: total as u32,
+        typ: SOCK_DIAG_BY_FAMILY,
+        flags: NLM_F_REQUEST | NLM_F_DUMP,
+        seq: 1,
+        pid: 0,
+    };
+    let req = DiagReq {
+        family,
+        protocol: libc::IPPROTO_TCP as u8,
+        ext: 0,
+        pad: 0,
+        states: TCPF_LISTEN,
+        id: SockId::default(),
+    };
+
+    let mut buf = vec![0u8; total];
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            (&hdr as *const NlHdr).cast::<u8>(),
+            buf.as_mut_ptr(),
+            hdr_sz,
+        );
+        std::ptr::copy_nonoverlapping(
+            (&req as *const DiagReq).cast::<u8>(),
+            buf.as_mut_ptr().add(hdr_sz),
+            req_sz,
+        );
+    }
+    if unsafe { libc::send(nl, buf.as_ptr().cast(), buf.len(), 0) } < 0 {
+        unsafe { libc::close(nl) };
+        return;
+    }
+
+    let port_be = port.to_be();
+    let mut targets: Vec<(u8, SockId)> = Vec::new();
+    let mut rbuf = vec![0u8; 32768];
+
+    'outer: loop {
+        let n = unsafe { libc::recv(nl, rbuf.as_mut_ptr().cast(), rbuf.len(), 0) };
+        if n <= 0 {
+            break;
+        }
+        let n = n as usize;
+        let mut off = 0;
+        while off + hdr_sz <= n {
+            let h: NlHdr = unsafe { std::ptr::read_unaligned(rbuf.as_ptr().add(off).cast()) };
+            if h.typ == NLMSG_DONE || h.len == 0 {
+                break 'outer;
+            }
+            let payload = off + hdr_sz;
+            if h.typ == SOCK_DIAG_BY_FAMILY && payload + msg_sz <= n {
+                let m: DiagMsg =
+                    unsafe { std::ptr::read_unaligned(rbuf.as_ptr().add(payload).cast()) };
+                if m.id.sport == port_be {
+                    targets.push((m.family, m.id));
+                }
+            }
+            off += ((h.len as usize) + 3) & !3;
+            if off == 0 {
+                break;
+            }
+        }
+    }
+
+    for (fam, id) in &targets {
+        let dh = NlHdr {
+            len: total as u32,
+            typ: SOCK_DESTROY,
+            flags: NLM_F_REQUEST,
+            seq: 2,
+            pid: 0,
+        };
+        let dr = DiagReq {
+            family: *fam,
+            protocol: libc::IPPROTO_TCP as u8,
+            ext: 0,
+            pad: 0,
+            states: TCPF_LISTEN,
+            id: *id,
+        };
+        let mut dbuf = vec![0u8; total];
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                (&dh as *const NlHdr).cast::<u8>(),
+                dbuf.as_mut_ptr(),
+                hdr_sz,
+            );
+            std::ptr::copy_nonoverlapping(
+                (&dr as *const DiagReq).cast::<u8>(),
+                dbuf.as_mut_ptr().add(hdr_sz),
+                req_sz,
+            );
+            libc::send(nl, dbuf.as_ptr().cast(), dbuf.len(), 0);
+        }
+    }
+
+    unsafe { libc::close(nl) };
+}
+
 fn create_tcp_socket(addr: &SocketAddr, name: &str, backlog: i32) -> io::Result<ListeningSocket> {
     // Use low-level socket API to set SO_REUSEADDR and custom backlog
     let domain = if addr.is_ipv4() {
@@ -203,9 +394,19 @@ fn create_tcp_socket(addr: &SocketAddr, name: &str, backlog: i32) -> io::Result<
         );
     }
 
-    // Bind
+    // Bind (with retry + SOCK_DESTROY for orphaned LISTEN sockets)
     let (sockaddr, socklen) = socket_addr_to_raw(addr);
-    let ret = unsafe { libc::bind(fd, sockaddr.as_ptr().cast(), socklen) };
+    let mut ret = unsafe { libc::bind(fd, sockaddr.as_ptr().cast(), socklen) };
+    if ret < 0 && io::Error::last_os_error().raw_os_error() == Some(libc::EADDRINUSE) {
+        destroy_tcp_listeners_on_port(addr.port());
+        for _ in 0..10 {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            ret = unsafe { libc::bind(fd, sockaddr.as_ptr().cast(), socklen) };
+            if ret == 0 {
+                break;
+            }
+        }
+    }
     if ret < 0 {
         let err = io::Error::last_os_error();
         unsafe { libc::close(fd) };

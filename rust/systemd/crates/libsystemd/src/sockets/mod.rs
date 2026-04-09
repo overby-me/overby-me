@@ -2,7 +2,7 @@
 
 mod fifo;
 mod netlink_sockets;
-mod network_sockets;
+pub(crate) mod network_sockets;
 mod special_file;
 mod unix_sockets;
 pub use fifo::*;
@@ -728,6 +728,16 @@ impl Socket {
         name: String,
         fd_store: &mut FDStore,
     ) -> Result<(), String> {
+        // Collect TCP ports before closing so we can destroy orphans afterward.
+        let tcp_ports: Vec<u16> = conf
+            .sockets
+            .iter()
+            .filter_map(|s| match &s.specialized {
+                SpecializedSocketConfig::TcpSocket(tcp) => Some(tcp.addr.port()),
+                _ => None,
+            })
+            .collect();
+
         if let Some(fds) = fd_store.remove_global(&name) {
             for (sock_conf, fd_entry) in conf.sockets.iter().zip(fds.iter()) {
                 sock_conf
@@ -735,6 +745,14 @@ impl Socket {
                     .close(fd_entry.2.as_raw_fd(), conf.remove_on_stop)?;
             }
         }
+
+        // Destroy any orphaned TCP LISTEN sockets that might linger in the
+        // kernel after closing our fds.  This prevents EADDRINUSE when the
+        // socket unit is quickly restarted.
+        for port in tcp_ports {
+            network_sockets::destroy_tcp_listeners_on_port(port);
+        }
+
         Ok(())
     }
 }

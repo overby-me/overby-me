@@ -17,9 +17,5 @@
     # files.  Our gatewayd keeps files open across requests and doesn't notice moves.
     # Also, browse.html mv requires a writable /usr/share which NixOS doesn't provide.
     sed -i '/^# Test a couple of error scenarios/,/^rm -f "\$GATEWAYD_FILE"$/c\echo "SKIP: error scenario tests require file-move detection"' TEST-04-JOURNAL.journal-gatewayd.sh
-    # Use a different port for the HTTPS section to avoid EADDRINUSE.
-    # Our systemd may not release the socket-activated port immediately after stop.
-    sed -i 's/--listen=19531/--listen=19533/g' TEST-04-JOURNAL.journal-gatewayd.sh
-    sed -i 's#https://localhost:19531#https://localhost:19533#g' TEST-04-JOURNAL.journal-gatewayd.sh
   '';
 }
