@@ -2152,12 +2152,50 @@ impl Shell {
                 })
                 .collect();
 
+            // For `unset` builtin: detect which arguments had their `[`
+            // inside a quoted context in the AST (SingleQuoted or DoubleQuoted).
+            // These "string" arguments need subscript re-expansion inside
+            // builtin_unset, matching bash's behavior where quoted tokens are
+            // not recognized as valid array references before word expansion.
+            if command_name == "unset" {
+                self.unset_quoted_subscript_args.clear();
+                // args[i] corresponds to cmd.words[i+1] (skip command name)
+                for (arg_idx, _) in args.iter().enumerate() {
+                    let word_idx = arg_idx + 1; // +1 for command name
+                    if word_idx < cmd.words.len() {
+                        let word = &cmd.words[word_idx];
+                        // Check if `[` appears in a quoted context (not as a bare Literal)
+                        let has_literal_bracket = word.iter().any(
+                            |p| matches!(p, crate::ast::WordPart::Literal(s) if s.contains('[')),
+                        );
+                        let has_bracket_in_quotes = word.iter().any(|p| {
+                            match p {
+                            crate::ast::WordPart::SingleQuoted(s) => s.contains('['),
+                            crate::ast::WordPart::DoubleQuoted(parts) => parts.iter().any(|ip| {
+                                matches!(ip, crate::ast::WordPart::Literal(s) if s.contains('['))
+                            }),
+                            _ => false,
+                        }
+                        });
+                        // If the bracket is ONLY in quoted parts (not in any Literal),
+                        // this is a "string" argument that needs re-expansion.
+                        if has_bracket_in_quotes && !has_literal_bracket {
+                            self.unset_quoted_subscript_args.insert(arg_idx);
+                        }
+                    }
+                }
+            }
+
             self.current_builtin = Some(command_name.clone());
             let result = if Self::check_builtin_help(command_name, args) {
                 2
             } else {
                 builtin(self, args)
             };
+            // Clear unset metadata after use
+            if command_name == "unset" {
+                self.unset_quoted_subscript_args.clear();
+            }
             self.current_builtin = None;
 
             // In POSIX mode, prefix assignments to special builtins persist

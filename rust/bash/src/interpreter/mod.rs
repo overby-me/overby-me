@@ -375,6 +375,12 @@ pub struct Shell {
     /// occurred on this line.  Subsequent commands on the same line should be
     /// skipped (matching bash's `DISCARD` longjmp behavior).
     pub expansion_error_line: Option<usize>,
+    /// For `unset` builtin: indices (into the args slice, 0-based) of arguments
+    /// whose `[` came from a quoted context in the AST.  These "string"
+    /// arguments need their subscript re-expanded (variable expansion only)
+    /// inside `builtin_unset`, matching bash's behavior where quoted tokens
+    /// are not recognized as valid array references before word expansion.
+    pub unset_quoted_subscript_args: HashSet<usize>,
 
     pub aliases: HashMap<String, String>,
     builtins: HashMap<&'static str, BuiltinFn>,
@@ -571,6 +577,7 @@ impl Shell {
             arith_skip_quote_strip: false,
             random_seed: std::process::id(),
             expansion_error_line: None,
+            unset_quoted_subscript_args: HashSet::new(),
             aliases: HashMap::new(),
             builtins: builtins::builtins(),
         };

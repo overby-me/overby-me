@@ -1565,6 +1565,18 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
         return 1;
     }
 
+    // Check that -a target is not an associative array
+    if let Some(ref name) = array_name
+        && shell.assoc_arrays.contains_key(name.as_str())
+    {
+        eprintln!(
+            "{}: read: {}: not an indexed array",
+            shell.error_prefix(),
+            name
+        );
+        return 1;
+    }
+
     // Validate variable names (allow array subscripts like x[1], x[key])
     for name in &var_names {
         let base = if let Some(bracket) = name.find('[') {

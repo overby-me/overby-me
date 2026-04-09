@@ -29,7 +29,7 @@ pub(super) fn test_paren_error(shell: &Shell, cmd_name: &str) {
 
 pub(super) fn eval_test_expr(
     args: &[String],
-    shell: &Shell,
+    shell: &mut Shell,
     cmd_name: &str,
     sub_expr: bool,
 ) -> i32 {
@@ -81,8 +81,24 @@ pub(super) fn eval_test_expr(
                             idx.parse::<usize>()
                                 .ok()
                                 .is_some_and(|n| a.get(n).is_some_and(|v| v.is_some()))
-                        } else if let Some(a) = shell.assoc_arrays.get(base) {
-                            a.contains_key(idx)
+                        } else if shell.assoc_arrays.contains_key(base) {
+                            // Re-expand subscript when assoc_expand_once is off,
+                            // matching bash's behavior where `test -v aa["$key"]`
+                            // re-evaluates $() and $var in the subscript.
+                            let aeo = shell
+                                .shopt_options
+                                .get("assoc_expand_once")
+                                .copied()
+                                .unwrap_or(false);
+                            let effective_idx = if aeo {
+                                idx.to_string()
+                            } else {
+                                shell.expand_assoc_subscript(idx)
+                            };
+                            shell
+                                .assoc_arrays
+                                .get(base)
+                                .is_some_and(|a| a.contains_key(effective_idx.as_str()))
                         } else if let Some(_val) = shell.vars.get(base) {
                             // Scalar with subscript: [ -v scalar[0] ] → true if set
                             // [ -v scalar[N] ] for N>0 → false

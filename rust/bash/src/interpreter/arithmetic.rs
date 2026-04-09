@@ -400,14 +400,57 @@ impl Shell {
         // Check for unmatched parentheses at top level
         if self.arith_depth == 1 {
             let mut paren_depth = 0i32;
+            let mut bracket_depth = 0i32;
+            let mut unmatched_paren_inside_bracket = false;
             for ch in expr.chars() {
                 match ch {
-                    '(' => paren_depth += 1,
+                    '[' => bracket_depth += 1,
+                    ']' => {
+                        if bracket_depth > 0 {
+                            bracket_depth -= 1;
+                        }
+                    }
+                    '(' => {
+                        paren_depth += 1;
+                        if bracket_depth > 0 {
+                            unmatched_paren_inside_bracket = true;
+                        }
+                    }
                     ')' => paren_depth -= 1,
                     _ => {}
                 }
             }
             if paren_depth > 0 {
+                // If the unmatched `(` is inside `[...]` that itself has no
+                // matching `]` (bracket_depth > 0), this is a bad array
+                // subscript, not a missing `)`.  Matches bash's error for
+                // e.g. `b[$(echo` where `$key` expanded into the subscript.
+                if bracket_depth > 0 && unmatched_paren_inside_bracket {
+                    let top_expr = self.arith_top_expr.as_deref().unwrap_or(expr);
+                    // Error token: the portion starting from the identifier
+                    // before the unclosed `[`.  Find the last comma-separated
+                    // segment that contains `[` without `]`.
+                    // For `b[$(echo`, the error token is `b[$(echo`.
+                    let error_token = if let Some(comma_pos) = expr.rfind(',') {
+                        let after_comma = expr[comma_pos + 1..].trim();
+                        if after_comma.contains('[') && !after_comma.contains(']') {
+                            after_comma
+                        } else {
+                            expr.trim()
+                        }
+                    } else {
+                        expr.trim()
+                    };
+                    eprintln!(
+                        "{}: {}{}: bad array subscript (error token is \"{}\")",
+                        self.arith_error_prefix(),
+                        self.arith_cmd_prefix(),
+                        top_expr,
+                        error_token
+                    );
+                    crate::expand::set_arith_error();
+                    return 0;
+                }
                 let top_expr = self.arith_top_expr.as_deref().unwrap_or(expr);
                 // Find the last token for the error
                 let error_token = expr
@@ -1984,13 +2027,17 @@ impl Shell {
             let close = match close {
                 Some(c) => c,
                 None => {
-                    // No matching ']' found
+                    // No matching ']' found — this is a bad array subscript.
+                    // Bash reports "bad array subscript" with the error token
+                    // starting from the identifier before '['.
+                    // e.g. `b[$(echo` → "bad array subscript (error token is "b[$(echo")"
                     let top_expr = self.arith_top_expr.as_deref().unwrap_or(expr);
+                    let error_token = expr;
                     eprintln!(
-                        "{}: {}: arithmetic syntax error: operand expected (error token is \"{}\")",
+                        "{}: {}: bad array subscript (error token is \"{}\")",
                         self.arith_error_prefix(),
                         top_expr,
-                        expr
+                        error_token
                     );
                     crate::expand::set_arith_error();
                     return 0;

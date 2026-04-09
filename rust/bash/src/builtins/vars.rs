@@ -145,10 +145,10 @@ pub(super) fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
     let mut unset_functions = false;
     let mut unset_variables = false;
     let mut unset_nameref = false;
-    let mut names = Vec::new();
+    let mut names: Vec<(usize, &str)> = Vec::new(); // (arg_index, name)
     let mut parsing_opts = true;
 
-    for arg in args {
+    for (arg_idx, arg) in args.iter().enumerate() {
         if parsing_opts && arg.starts_with('-') && arg.len() > 1 {
             let opt = arg.as_str();
             match opt {
@@ -168,7 +168,7 @@ pub(super) fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
             }
         } else {
             parsing_opts = false;
-            names.push(arg.as_str());
+            names.push((arg_idx, arg.as_str()));
         }
     }
 
@@ -182,16 +182,23 @@ pub(super) fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
     }
 
     let mut status = 0;
-    for name in names {
+    for (arg_idx, name) in names {
         // Validate identifier only with explicit -v flag (not default mode)
-        if unset_variables && !name.contains('[') && !is_valid_identifier(name) {
-            eprintln!(
-                "{}: unset: `{}': not a valid identifier",
-                shell.error_prefix(),
-                name
-            );
-            status = 1;
-            continue;
+        // A name containing '[' is only valid if it also ends with ']' (array ref).
+        // Otherwise (e.g. word-split `a[$(echo` without closing `]`), reject it.
+        if unset_variables {
+            let has_bracket = name.contains('[');
+            let is_valid_array_ref = has_bracket && name.ends_with(']');
+            if (!has_bracket && !is_valid_identifier(name)) || (has_bracket && !is_valid_array_ref)
+            {
+                eprintln!(
+                    "{}: unset: `{}': not a valid identifier",
+                    shell.error_prefix(),
+                    name
+                );
+                status = 1;
+                continue;
+            }
         }
         // Check for un-unsettable special variables
         if !unset_functions
@@ -222,11 +229,42 @@ pub(super) fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
         } else if let Some(bracket) = name.find('[') {
             // unset arr[n] — remove specific array element
             let base = &name[..bracket];
-            let idx_str = &name[bracket + 1..name.len() - 1];
+            let raw_idx_str = &name[bracket + 1..name.len() - 1];
+
+            // If this argument had its `[` in a quoted context (e.g. unset 'a[$key]'),
+            // re-expand the subscript to match bash behavior.
+            // Bash treats quoted arguments as "strings" and re-evaluates their subscripts
+            // (including $var, ${var}, and $(cmd)), while bare array references (unquoted
+            // `[`) are already expanded by word expansion.
+            //
+            // When `assoc_expand_once` is ON, the subscript is used literally (no expansion),
+            // matching bash's behavior where the shopt suppresses subscript re-expansion.
+            // When `assoc_expand_once` is OFF, we use `expand_assoc_subscript` for full
+            // expansion of $var, ${var}, $(cmd) etc.
+            let expanded_idx;
+            let idx_str = if shell.unset_quoted_subscript_args.contains(&arg_idx) {
+                let aeo = shell
+                    .shopt_options
+                    .get("assoc_expand_once")
+                    .copied()
+                    .unwrap_or(false);
+                if aeo {
+                    // assoc_expand_once ON: use subscript literally (no expansion)
+                    raw_idx_str
+                } else {
+                    // assoc_expand_once OFF: re-expand the subscript
+                    expanded_idx = shell.expand_assoc_subscript(raw_idx_str);
+                    expanded_idx.as_str()
+                }
+            } else {
+                raw_idx_str
+            };
+
             let resolved = shell.resolve_nameref(base);
             if idx_str == "@" || idx_str == "*" {
                 // For indexed arrays: unset arr[@] / arr[*] clears all elements
                 // but keeps the array variable (bash keeps it as an empty array).
+                // UNLESS BASH_COMPAT <= 51, in which case the entire array is removed.
                 // For associative arrays: unset assoc[@] / assoc[*] removes the
                 // KEY "@" or "*" (does NOT clear all elements — bash treats these
                 // as literal keys in associative array context).
@@ -235,8 +273,41 @@ pub(super) fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
                         .assoc_arrays
                         .get_mut(&resolved)
                         .map(|a| a.remove(idx_str));
-                } else if let Some(arr) = shell.arrays.get_mut(&resolved) {
-                    arr.clear();
+                } else if shell.arrays.contains_key(&resolved) {
+                    // Check BASH_COMPAT: if set to a version <= 51 (e.g. "51", "5.1"),
+                    // unset array[@] removes the entire array variable (bash 5.1 behavior).
+                    // Otherwise, just clear elements but keep the empty array.
+                    let bash_compat = shell.vars.get("BASH_COMPAT").cloned().unwrap_or_default();
+                    let compat_removes_array = if bash_compat.is_empty() {
+                        false
+                    } else if let Ok(n) = bash_compat.parse::<u32>() {
+                        // Two-digit format: "51" means 5.1, "50" means 5.0, etc.
+                        n <= 51
+                    } else if bash_compat.contains('.') {
+                        // Dotted format: "5.1", "5.0", etc.
+                        let parts: Vec<&str> = bash_compat.splitn(2, '.').collect();
+                        if let (Ok(major), Ok(minor)) = (
+                            parts[0].parse::<u32>(),
+                            parts.get(1).unwrap_or(&"0").parse::<u32>(),
+                        ) {
+                            major < 5 || (major == 5 && minor <= 1)
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    };
+
+                    if compat_removes_array {
+                        // BASH_COMPAT <= 51: remove the entire array variable
+                        shell.arrays.remove(&resolved);
+                        shell.declared_unset.remove(&resolved);
+                    } else {
+                        // Default (current bash 5.3): clear elements, keep empty array
+                        if let Some(arr) = shell.arrays.get_mut(&resolved) {
+                            arr.clear();
+                        }
+                    }
                 } else {
                     // Not an array — remove scalar
                     shell.vars.remove(&resolved);
@@ -1935,12 +2006,32 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             } else if flag_assoc {
                 // Error if trying to convert an existing indexed array to assoc
                 if shell.arrays.contains_key(name) {
-                    eprintln!(
-                        "{}: {}: {}: cannot convert indexed to associative array",
-                        shell.error_prefix(),
-                        cmd_name,
-                        name
-                    );
+                    // Bash error format for type conversion:
+                    // - Inside function: two errors: "{func}: {name}: cannot convert..."
+                    //   then "{cmd_name}: {name}: cannot convert..."
+                    // - At top level: one error: "{name}: cannot convert..."
+                    if let Some(func) = shell.func_names.last() {
+                        eprintln!(
+                            "{}: {}: {}: cannot convert indexed to associative array",
+                            shell.error_prefix(),
+                            func,
+                            name
+                        );
+                    }
+                    if shell.func_names.is_empty() {
+                        eprintln!(
+                            "{}: {}: cannot convert indexed to associative array",
+                            shell.error_prefix(),
+                            name
+                        );
+                    } else {
+                        eprintln!(
+                            "{}: {}: {}: cannot convert indexed to associative array",
+                            shell.error_prefix(),
+                            cmd_name,
+                            name
+                        );
+                    }
                     status = 1;
                 } else if !shell.assoc_arrays.contains_key(name) {
                     let mut new_map = crate::interpreter::AssocArray::default();
@@ -1955,12 +2046,32 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             } else if flag_array {
                 // Error if trying to convert an existing assoc array to indexed
                 if shell.assoc_arrays.contains_key(name) {
-                    eprintln!(
-                        "{}: {}: {}: cannot convert associative to indexed array",
-                        shell.error_prefix(),
-                        cmd_name,
-                        name
-                    );
+                    // Bash error format for type conversion:
+                    // - Inside function: two errors: "{func}: {name}: cannot convert..."
+                    //   then "{cmd_name}: {name}: cannot convert..."
+                    // - At top level: one error: "{name}: cannot convert..."
+                    if let Some(func) = shell.func_names.last() {
+                        eprintln!(
+                            "{}: {}: {}: cannot convert associative to indexed array",
+                            shell.error_prefix(),
+                            func,
+                            name
+                        );
+                    }
+                    if shell.func_names.is_empty() {
+                        eprintln!(
+                            "{}: {}: cannot convert associative to indexed array",
+                            shell.error_prefix(),
+                            name
+                        );
+                    } else {
+                        eprintln!(
+                            "{}: {}: {}: cannot convert associative to indexed array",
+                            shell.error_prefix(),
+                            cmd_name,
+                            name
+                        );
+                    }
                     status = 1;
                 } else if !shell.arrays.contains_key(name) {
                     // Convert existing scalar value to array[0]
@@ -2140,6 +2251,11 @@ pub(super) fn builtin_let(shell: &mut Shell, args: &[String]) -> i32 {
     shell.arith_is_let = true;
     for expr in args {
         result = shell.eval_arith_expr(expr);
+        // Stop processing remaining arguments after an arithmetic error,
+        // matching bash which aborts `let` on the first error.
+        if crate::expand::get_arith_error() {
+            break;
+        }
     }
     shell.arith_is_let = false;
 

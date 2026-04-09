@@ -1614,6 +1614,9 @@ impl Parser {
     }
 
     fn parse_for(&mut self) -> Result<CompoundCommand, String> {
+        // Capture the line number of the `for`/`select` keyword for LINENO
+        // reset per iteration (matching bash's execute_for_command behavior).
+        let for_line = self.lexer.line;
         // Accept both 'for' and 'select'
         if !self.eat_keyword("for") {
             self.expect_keyword("select")?;
@@ -1680,6 +1683,7 @@ impl Parser {
             var_raw,
             words,
             body,
+            line: for_line,
         }))
     }
 
