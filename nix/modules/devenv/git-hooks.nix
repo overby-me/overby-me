@@ -251,6 +251,21 @@ in {
         ''}";
         pass_filenames = true;
       };
+      deslop = {
+        enable = true;
+        name = "deslop";
+        entry = "${pkgs.writeShellScript "deslop-precommit" ''
+          exit_code=0
+          for file in "$@"; do
+            if ! ${pkgs.deslop}/bin/deslop scan "$file"; then
+              exit_code=1
+            fi
+          done
+          exit $exit_code
+        ''}";
+        files = "\\.(rs|go|py)$";
+        pass_filenames = true;
+      };
       rumdl = {
         enable = true;
         entry = "${pkgs.rumdl}/bin/rumdl fmt";
