@@ -1515,7 +1515,7 @@ fn quote_value_for_set(value: &str) -> String {
                 '\x0c' => out.push_str("\\f"),
                 '\x1b' => out.push_str("\\E"),
                 c if c.is_control() => {
-                    out.push_str(&format!("\\x{:02x}", c as u32));
+                    out.push_str(&format!("\\{:03o}", c as u32));
                 }
                 c => out.push(c),
             }

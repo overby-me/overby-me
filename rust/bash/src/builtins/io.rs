@@ -174,6 +174,8 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
             let base = &var_name[..bracket];
             // Use first ']' after '[' for bracket matching — bash parses
             // A[]] as A[] + stray ']' (invalid), not A with key ']'.
+            // (When assoc_expand_once is ON, `A[$rkey]` is passed unexpanded,
+            // so the builtin never actually sees `A[]]` as the raw argument.)
             let close = var_name[bracket + 1..].find(']').map(|p| p + bracket + 1);
             let has_valid_close = matches!(close, Some(pos) if pos + 1 == var_name.len());
             !base.is_empty()
@@ -1505,13 +1507,12 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
             }
             arg if !arg.starts_with('-') => {
                 // Validate identifier (allow array subscripts like x[1], x[key])
-                // Use first ']' after '[' for matching — bash parses A[]] as
-                // A[] + stray ']' (invalid), not A with key ']'.
+                // Use first ']' after '[' for bracket matching.
                 let base = if let Some(bracket) = arg.find('[') {
                     let close = arg[bracket + 1..].find(']').map(|p| p + bracket + 1);
                     match close {
                         Some(close_pos) if close_pos + 1 != arg.len() => {
-                            // Stray characters after the closing ']' (e.g. A[]])
+                            // Stray characters after the closing ']'
                             eprintln!(
                                 "{}: read: `{}': not a valid identifier",
                                 shell.error_prefix(),
@@ -1568,7 +1569,7 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
     for name in &var_names {
         let base = if let Some(bracket) = name.find('[') {
             // Array subscript: validate the base name, allow any subscript content.
-            // Use first ']' after '[' for bracket matching (A[]] → invalid).
+            // Use first ']' after '[' for bracket matching.
             let close = name[bracket + 1..].find(']').map(|p| p + bracket + 1);
             match close {
                 Some(close_pos) if close_pos + 1 != name.len() => {

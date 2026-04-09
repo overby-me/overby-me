@@ -1538,7 +1538,7 @@ fn xtrace_quote(s: &str) -> String {
                 '\x08' => out.push_str("\\b"),
                 '\'' => out.push_str("\\'"),
                 '\\' => out.push_str("\\\\"),
-                c if c.is_control() => out.push_str(&format!("\\x{:02x}", c as u32)),
+                c if c.is_control() => out.push_str(&format!("\\{:03o}", c as u32)),
                 c => out.push(c),
             }
         }

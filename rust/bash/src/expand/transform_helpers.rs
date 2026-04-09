@@ -27,7 +27,7 @@ pub(crate) fn shell_quote(val: &str) -> String {
                     0x0c => s.push_str("\\f"),
                     0x0d => s.push_str("\\r"),
                     0x1b => s.push_str("\\E"),
-                    0x7f => s.push_str("\\x7f"),
+                    0x7f => s.push_str("\\177"),
                     b if b < 0x20 => {
                         // Use octal format like bash does for control chars
                         s.push_str(&format!("\\{:03o}", b));
@@ -57,7 +57,7 @@ pub(crate) fn shell_quote(val: &str) -> String {
                 '\'' => s.push_str("\\'"),
                 '\\' => s.push_str("\\\\"),
                 c if (c as u32) < 0x20 || c == '\x7f' => {
-                    s.push_str(&format!("\\x{:02x}", c as u32));
+                    s.push_str(&format!("\\{:03o}", c as u32));
                 }
                 c => s.push(c),
             }

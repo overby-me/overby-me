@@ -1896,7 +1896,15 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     shell.namerefs.insert(name.to_string(), target);
                 }
             } else if flag_assoc {
-                if !shell.assoc_arrays.contains_key(name) {
+                // Error if trying to convert an existing indexed array to assoc
+                if shell.arrays.contains_key(name) {
+                    eprintln!(
+                        "{}: declare: {}: cannot convert indexed to associative array",
+                        shell.error_prefix(),
+                        name
+                    );
+                    status = 1;
+                } else if !shell.assoc_arrays.contains_key(name) {
                     let mut new_map = crate::interpreter::AssocArray::default();
                     // Convert existing scalar value to element [0]
                     if let Some(val) = shell.vars.remove(name) {
@@ -1904,18 +1912,18 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     } else {
                         shell.declared_unset.insert(name.to_string());
                     }
-                    // Convert existing indexed array to assoc array
-                    if let Some(arr) = shell.arrays.remove(name) {
-                        for (i, v) in arr.into_iter().enumerate() {
-                            if let Some(val) = v {
-                                new_map.insert(i.to_string(), val);
-                            }
-                        }
-                    }
                     shell.assoc_arrays.insert(name.to_string(), new_map);
                 }
             } else if flag_array {
-                if !shell.arrays.contains_key(name) {
+                // Error if trying to convert an existing assoc array to indexed
+                if shell.assoc_arrays.contains_key(name) {
+                    eprintln!(
+                        "{}: declare: {}: cannot convert associative to indexed array",
+                        shell.error_prefix(),
+                        name
+                    );
+                    status = 1;
+                } else if !shell.arrays.contains_key(name) {
                     // Convert existing scalar value to array[0]
                     if let Some(val) = shell.vars.remove(name) {
                         shell.arrays.insert(name.to_string(), vec![Some(val)]);
@@ -1979,6 +1987,58 @@ pub fn parse_assoc_literal(s: &str) -> crate::interpreter::AssocArray {
         vec![inner]
     };
     let has_sep = inner.contains('\x1F');
+
+    // First pass: check if any entry has [key]=value subscript syntax.
+    // If none do, use bash 5.3 implicit key-value pair mode.
+    let has_subscripted = entries.iter().any(|entry| {
+        let t = entry.trim();
+        t.starts_with('[') && t.contains("]=")
+    });
+
+    if !has_subscripted {
+        // Implicit key-value pair mode: treat consecutive bare words as
+        // alternating key-value pairs.  E.g. `(a 1 b 2)` → a=1, b=2.
+        let mut bare_words: Vec<String> = Vec::new();
+        for entry in &entries {
+            let mut rest = entry.trim();
+            while !rest.is_empty() {
+                // Handle quoted words
+                if rest.starts_with('"') {
+                    if let Some(end) = rest[1..].find('"') {
+                        bare_words.push(rest[1..1 + end].to_string());
+                        rest = rest[2 + end..].trim_start();
+                    } else {
+                        bare_words.push(rest[1..].to_string());
+                        rest = "";
+                    }
+                } else if rest.starts_with('\'') {
+                    if let Some(end) = rest[1..].find('\'') {
+                        bare_words.push(rest[1..1 + end].to_string());
+                        rest = rest[2 + end..].trim_start();
+                    } else {
+                        bare_words.push(rest[1..].to_string());
+                        rest = "";
+                    }
+                } else {
+                    let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+                    bare_words.push(rest[..end].to_string());
+                    rest = rest[end..].trim_start();
+                }
+            }
+        }
+        // Pair them as key-value
+        let mut i = 0;
+        while i + 1 < bare_words.len() {
+            map.insert(bare_words[i].clone(), bare_words[i + 1].clone());
+            i += 2;
+        }
+        // Trailing key with no value gets empty string
+        if i < bare_words.len() {
+            map.insert(bare_words[i].clone(), String::new());
+        }
+        return map;
+    }
+
     for entry in entries {
         let mut rest = entry.trim();
         while !rest.is_empty() {
@@ -2011,7 +2071,7 @@ pub fn parse_assoc_literal(s: &str) -> crate::interpreter::AssocArray {
                 rest = remaining;
                 continue;
             }
-            // Skip unknown content
+            // Skip unknown content (bare element in mixed mode)
             let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
             rest = rest[end..].trim_start();
         }

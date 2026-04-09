@@ -1685,7 +1685,12 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                         .filter_map(|(i, v)| {
                             v.as_ref().map(|val| {
                                 if uppercase {
-                                    format!("{} \"{}\"", i, val.replace('"', "\\\""))
+                                    let qv = val
+                                        .replace('\\', "\\\\")
+                                        .replace('"', "\\\"")
+                                        .replace('$', "\\$")
+                                        .replace('`', "\\`");
+                                    format!("{} \"{}\"", i, qv)
                                 } else {
                                     format!("{} {}", i, val)
                                 }
@@ -1698,7 +1703,31 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                         .iter()
                         .map(|(k, v)| {
                             if uppercase {
-                                format!("{} \"{}\"", k, v.replace('"', "\\\""))
+                                // Bash quotes keys only when they contain
+                                // special characters; values are always quoted.
+                                let needs_key_quote = k.is_empty()
+                                    || k.chars().any(|c| {
+                                        !c.is_alphanumeric()
+                                            && c != '_'
+                                            && c != '-'
+                                            && c != '.'
+                                            && c != '/'
+                                    });
+                                let qv = v
+                                    .replace('\\', "\\\\")
+                                    .replace('"', "\\\"")
+                                    .replace('$', "\\$")
+                                    .replace('`', "\\`");
+                                if needs_key_quote {
+                                    let qk = k
+                                        .replace('\\', "\\\\")
+                                        .replace('"', "\\\"")
+                                        .replace('$', "\\$")
+                                        .replace('`', "\\`");
+                                    format!("\"{}\" \"{}\"", qk, qv)
+                                } else {
+                                    format!("{} \"{}\"", k, qv)
+                                }
                             } else {
                                 format!("{} {}", k, v)
                             }

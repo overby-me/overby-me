@@ -1,0 +1,16 @@
+fix(rust/bash): Fix control char octal format, @K key quoting, declare -A inside functions, and array type conversion errors
+
+Phase 45 improvements reducing nix test diffs across 5 test suites:
+
+- Fix shell_quote/xtrace_quote control character format from hex (\x01) to
+  octal (\001) matching bash output in @Q transforms and ANSI-C quoting
+- Fix ${arr[@]@K} to properly double-quote assoc array keys containing special
+  characters (spaces, backslash, quotes, dollar, backtick, brackets, semicolons)
+  with proper escaping inside quotes
+- Add implicit key-value pair support to parse_assoc_literal so declare -A
+  foo=(a 1 b 2) works inside functions (bash 5.3 behavior)
+- Add "cannot convert indexed to associative array" and "cannot convert
+  associative to indexed array" errors in declare builtin
+
+assoc ~163->~155, quotearray ~33->~23, array ~306->~294, nameref ~671->~626,
+varenv ~315->~297 nix diff lines
