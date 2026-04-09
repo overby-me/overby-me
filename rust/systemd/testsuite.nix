@@ -279,10 +279,14 @@ in
           [ -e "/usr/lib/systemd/$name" ] || ln -sfn "$bin" "/usr/lib/systemd/$name"
         done
 
-        # Symlink share data (e.g. gatewayd/browse.html) to /usr/share
+        # Copy share data (e.g. gatewayd/browse.html) to /usr/share as a
+        # writable directory.  Tests like journal-gatewayd need to mv/restore
+        # files under /usr/share/systemd, which fails if it's a read-only
+        # symlink into the Nix store.
         if [ -d "${config.systemd.package}/share/systemd" ]; then
           mkdir -p /usr/share
-          ln -sfn "${config.systemd.package}/share/systemd" /usr/share/systemd
+          cp -a "${config.systemd.package}/share/systemd" /usr/share/systemd
+          chmod -R u+w /usr/share/systemd
         fi
 
         # Symlink generator directories so tests referencing

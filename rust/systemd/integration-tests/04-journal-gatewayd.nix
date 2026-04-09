@@ -13,8 +13,5 @@
     # after that point.  Our minimal VM doesn't generate as many background
     # entries as a full C systemd VM, so we inject some.
     sed -i '/^# Show 10 entries starting/i\seq 1 20 | while read n; do echo "padding $n" | systemd-cat -t gatewayd-padding; done; journalctl --sync' TEST-04-JOURNAL.journal-gatewayd.sh
-    # NixOS mounts /usr/share as read-only (Nix store).  The browse.html
-    # mv test cannot work.  Skip only those 4 lines.
-    sed -i '/^mv \/usr\/share\/systemd\/gatewayd\/browse\.html/,/^grep -qF.*title.*Journal/c\echo "SKIP: browse.html mv (read-only Nix store)"' TEST-04-JOURNAL.journal-gatewayd.sh
   '';
 }
