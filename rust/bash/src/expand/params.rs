@@ -1405,16 +1405,51 @@ fn push_strftime(out: &mut String, _fmt: &str) {
 
 pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
     // Pre-expand $(...) command substitutions inside associative array subscripts.
+    // Pre-expand $(...) command substitutions inside associative array subscripts.
     // lookup_var doesn't have access to cmd_sub, so we expand comsubs in the
     // subscript portion of the name here before any lookups.  E.g.
     // ${A[$(echo Darwin)]} → expand $(echo Darwin) to "Darwin" first.
+    // BUT: do NOT expand $(...) that is inside single quotes — e.g.
+    // ${A['$(echo Darwin)']} should look up the literal key "$(echo Darwin)".
     let comsub_expanded: Option<ParamExpr>;
     let expr = if expr.name.contains("$(") || expr.name.contains('`') {
         if let Some(bracket) = expr.name.find('[') {
             let base = &expr.name[..bracket];
             let subscript = &expr.name[bracket + 1..];
-            // Only expand if the subscript region contains $( or backtick
-            if subscript.contains("$(") || subscript.contains('`') {
+            // Check if the $( or backtick is outside single quotes in the subscript.
+            // If ALL $( occurrences are inside '...', skip expansion.
+            let has_unquoted_comsub = {
+                let mut in_sq = false;
+                let mut in_dq = false;
+                let chars: Vec<char> = subscript.chars().collect();
+                let mut found = false;
+                let mut j = 0;
+                while j < chars.len() {
+                    if !in_sq && !in_dq && chars[j] == '\'' {
+                        in_sq = true;
+                        j += 1;
+                    } else if in_sq && chars[j] == '\'' {
+                        in_sq = false;
+                        j += 1;
+                    } else if !in_sq && !in_dq && chars[j] == '"' {
+                        in_dq = true;
+                        j += 1;
+                    } else if in_dq && chars[j] == '"' {
+                        in_dq = false;
+                        j += 1;
+                    } else if !in_sq
+                        && ((chars[j] == '$' && j + 1 < chars.len() && chars[j + 1] == '(')
+                            || chars[j] == '`')
+                    {
+                        found = true;
+                        break;
+                    } else {
+                        j += 1;
+                    }
+                }
+                found
+            };
+            if has_unquoted_comsub {
                 let expanded_sub = super::expand_comsubs_in_arith_expr(subscript, cmd_sub);
                 let expanded_name = format!("{}[{}", base, expanded_sub);
                 comsub_expanded = Some(ParamExpr {
