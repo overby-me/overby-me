@@ -2484,10 +2484,7 @@ fn handle_stdout_connection(
         u8::from(level_prefix),
         hex_encode(&unit_name),
     );
-    sd_notify_with_fds(
-        &format!("FDSTORE=1\nFDNAME={meta_name}"),
-        &[stream_raw_fd],
-    );
+    sd_notify_with_fds(&format!("FDSTORE=1\nFDNAME={meta_name}"), &[stream_raw_fd]);
 
     // Helper to process a single log line with credentials
     let process_line = |cl: CredLine| {

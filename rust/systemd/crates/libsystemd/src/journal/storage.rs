@@ -671,9 +671,6 @@ impl JournalStorage {
         // Drop the current active file (closes the writer)
         self.active_file = None;
 
-        // Vacuum old files if over limits
-        self.vacuum()?;
-
         // Create a new file
         self.create_new_active_file()?;
 

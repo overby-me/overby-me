@@ -1788,6 +1788,13 @@ fn main() {
         }
     }
 
+    // Sync journal before reading to ensure all pending entries are on disk.
+    // Our journald uses file-based storage (not mmap like C journald), so
+    // entries written by other processes may still be in kernel socket buffers
+    // or BufWriter memory.  A best-effort Synchronize call ensures they are
+    // flushed to disk before we open the files for reading.
+    let _ = varlink_call("io.systemd.Journal.Synchronize", ns_ref);
+
     // Open storage
     let storage = match open_storage(&cli) {
         Ok(s) => s,

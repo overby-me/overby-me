@@ -138,7 +138,32 @@ fn make_cursor(entry: &JournalEntry) -> String {
     )
 }
 
+/// Best-effort journal sync: ask journald to flush pending data to disk.
+/// Our storage is file-based (not mmap), so entries may not be visible until
+/// explicitly synced.  Failures are silently ignored (e.g. journald not running).
+fn sync_journal() {
+    use std::io::{Read, Write};
+    use std::os::unix::net::UnixStream;
+
+    const VARLINK_SOCKET: &str = "/run/systemd/journal/io.systemd.journal";
+    let Ok(mut stream) = UnixStream::connect(VARLINK_SOCKET) else {
+        return;
+    };
+    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(10)));
+    let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(5)));
+    let _ = stream.write_all(b"{\"method\":\"io.systemd.Journal.Synchronize\"}\0");
+    let mut buf = [0u8; 1];
+    loop {
+        match stream.read(&mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(_) if buf[0] == 0 => break,
+            _ => {}
+        }
+    }
+}
+
 fn read_all_entries(file_globs: &[String]) -> Vec<JournalEntry> {
+    sync_journal();
     let mut entries = open_storage(file_globs)
         .and_then(|s| s.read_all())
         .unwrap_or_default();
