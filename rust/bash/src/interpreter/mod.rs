@@ -359,6 +359,12 @@ pub struct Shell {
     arith_is_command: bool,
     /// Whether current arithmetic evaluation is from let builtin (adds let: prefix to errors)
     pub arith_is_let: bool,
+    /// When true, `eval_arith_expr_inner` skips `strip_arith_quotes` — the
+    /// caller already dequoted the expression (e.g. assignment subscripts
+    /// extracted from the AST go through `dequote_subscript` which converts
+    /// `\"` → `"`, so the `"` are literal arithmetic-invalid characters that
+    /// must NOT be silently stripped).
+    pub(super) arith_skip_quote_strip: bool,
     /// Seed for RANDOM variable (bash-compatible LCRNG)
     random_seed: u32,
 
@@ -553,6 +559,7 @@ impl Shell {
             arith_depth: 0,
             arith_is_command: false,
             arith_is_let: false,
+            arith_skip_quote_strip: false,
             random_seed: std::process::id(),
             aliases: HashMap::new(),
             builtins: builtins::builtins(),

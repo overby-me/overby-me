@@ -1389,6 +1389,17 @@ impl Shell {
             if self.opt_posix {
                 std::process::exit(1);
             }
+            // In subshells, arithmetic errors during expansion are fatal
+            // (bash aborts the subshell process)
+            let in_subshell = self
+                .vars
+                .get("BASH_SUBSHELL")
+                .and_then(|v| v.parse::<i32>().ok())
+                .unwrap_or(0)
+                > 0;
+            if in_subshell {
+                std::process::exit(1);
+            }
             return 1;
         }
 
@@ -1495,9 +1506,20 @@ impl Shell {
                     }
                     self.execute_assignment(assign);
                     // Check for arithmetic errors (e.g., declare -i i; i=0#4)
-                    // In non-interactive shells, this should abort the script
+                    // In subshells, arithmetic errors during assignment are fatal
+                    // (bash aborts the subshell).  In the main shell, just set
+                    // exit status 1 and continue.
                     if crate::expand::take_arith_error() {
                         self.last_status = 1;
+                        let in_subshell = self
+                            .vars
+                            .get("BASH_SUBSHELL")
+                            .and_then(|v| v.parse::<i32>().ok())
+                            .unwrap_or(0)
+                            > 0;
+                        if in_subshell {
+                            std::process::exit(1);
+                        }
                         return 1;
                     }
                 }
@@ -2502,17 +2524,37 @@ impl Shell {
         // For array assignments with negative subscripts, check bounds BEFORE
         // the readonly check — bash reports "bad array subscript" first.
         if let Some(bracket) = assign.name.find('[') {
-            let idx_str = &assign.name[bracket + 1..assign.name.len() - 1];
+            let raw_idx_str = &assign.name[bracket + 1..assign.name.len() - 1];
+            // Dequote the subscript: the AST stores shell-level quoting
+            // (e.g. `'\"' \"` for source `\" \"`), but arithmetic evaluation
+            // needs the dequoted form (e.g. `" "`).
+            // Only set arith_skip_quote_strip when single quotes were actually
+            // removed — bare `"` in subscripts like `a[" "]` are arithmetic-
+            // level quoting that strip_arith_quotes should handle normally.
+            let had_single_quotes = raw_idx_str.contains('\'');
+            let idx_str_owned = Self::dequote_subscript(raw_idx_str);
+            let idx_str = if had_single_quotes {
+                idx_str_owned.as_str()
+            } else {
+                raw_idx_str
+            };
             // Only check indexed (non-assoc) arrays with numeric subscripts
             if !self.assoc_arrays.contains_key(&resolved_base)
                 && idx_str != "*"
                 && idx_str != "@"
                 && !idx_str.is_empty()
             {
+                if had_single_quotes {
+                    self.arith_skip_quote_strip = true;
+                }
                 let raw_idx = self.eval_arith_expr(idx_str);
+                self.arith_skip_quote_strip = false;
                 // If the subscript itself was a syntax error (e.g. b[c]d),
                 // the error was already printed — bail out to avoid duplicates.
+                // Re-set the flag so run_simple_command can detect it for
+                // subshell abort.
                 if crate::expand::take_arith_error() {
+                    crate::expand::set_arith_error();
                     return;
                 }
                 if raw_idx < 0 {
@@ -2573,11 +2615,20 @@ impl Shell {
                     let resolved = self.resolve_nameref(base_name);
                     // Check if it's an array element append (x[n]+=val)
                     if let Some(bracket) = assign.name.find('[') {
-                        let idx_str = &assign.name[bracket + 1..assign.name.len() - 1];
+                        let raw_idx_str = &assign.name[bracket + 1..assign.name.len() - 1];
+                        let had_single_quotes = raw_idx_str.contains('\'');
+                        let idx_str_owned = Self::dequote_subscript(raw_idx_str);
+                        let idx_str = if had_single_quotes {
+                            idx_str_owned.as_str()
+                        } else {
+                            raw_idx_str
+                        };
                         // Check for assoc array FIRST — use string key, not arithmetic
+                        // Use raw_idx_str for assoc subscript expansion (it handles
+                        // single-quote stripping internally).
                         if self.assoc_arrays.contains_key(&resolved) {
                             let is_int = self.integer_vars.contains(&resolved);
-                            let key = self.expand_assoc_subscript(idx_str);
+                            let key = self.expand_assoc_subscript(raw_idx_str);
                             if is_int {
                                 let addend = self.eval_arith_expr(&value);
                                 self.declared_unset.remove(&resolved);
@@ -2620,7 +2671,11 @@ impl Shell {
                                 self.last_status = 1;
                                 return;
                             }
+                            if had_single_quotes {
+                                self.arith_skip_quote_strip = true;
+                            }
                             let raw_idx = self.eval_arith_expr(idx_str);
+                            self.arith_skip_quote_strip = false;
                             let is_int = self.integer_vars.contains(&resolved);
                             let addend = if is_int {
                                 self.eval_arith_expr(&value)
@@ -2718,11 +2773,18 @@ impl Shell {
                     // Check for arr[n]=value or map[key]=value
                     if let Some(bracket) = assign.name.find('[') {
                         let base = &assign.name[..bracket];
-                        let idx_str = &assign.name[bracket + 1..assign.name.len() - 1];
+                        let raw_idx_str = &assign.name[bracket + 1..assign.name.len() - 1];
+                        let had_single_quotes = raw_idx_str.contains('\'');
+                        let idx_str_owned = Self::dequote_subscript(raw_idx_str);
+                        let idx_str = if had_single_quotes {
+                            idx_str_owned.as_str()
+                        } else {
+                            raw_idx_str
+                        };
 
                         // BASH_ALIASES[key]=value → alias key=value
                         if base == "BASH_ALIASES" {
-                            let alias_name = self.expand_assoc_subscript(idx_str);
+                            let alias_name = self.expand_assoc_subscript(raw_idx_str);
                             let invalid = alias_name.is_empty()
                                 || alias_name.chars().any(|c| {
                                     matches!(
@@ -2753,7 +2815,7 @@ impl Shell {
                             }
                         } else if base == "BASH_CMDS" {
                             // BASH_CMDS[key]=value → hash -p value key
-                            let cmd_name = self.expand_assoc_subscript(idx_str);
+                            let cmd_name = self.expand_assoc_subscript(raw_idx_str);
                             // Update the assoc array
                             self.assoc_arrays
                                 .entry("BASH_CMDS".to_string())
@@ -2768,7 +2830,7 @@ impl Shell {
                             let resolved = self.resolve_nameref(base);
                             // Check if it's an associative array
                             if self.assoc_arrays.contains_key(&resolved) {
-                                let key = self.expand_assoc_subscript(idx_str);
+                                let key = self.expand_assoc_subscript(raw_idx_str);
                                 self.declared_unset.remove(&resolved);
                                 self.assoc_arrays
                                     .entry(resolved)
@@ -2795,7 +2857,11 @@ impl Shell {
                                     self.last_status = 1;
                                     return;
                                 }
+                                if had_single_quotes {
+                                    self.arith_skip_quote_strip = true;
+                                }
                                 let raw_idx = self.eval_arith_expr(idx_str);
+                                self.arith_skip_quote_strip = false;
                                 if raw_idx < 0 && !self.arrays.contains_key(&resolved) {
                                     eprintln!(
                                         "{}: {}[{}]: bad array subscript",

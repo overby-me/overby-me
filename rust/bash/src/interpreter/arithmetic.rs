@@ -230,6 +230,69 @@ impl Shell {
         result
     }
 
+    /// Unescape `\"` → `"` for error display purposes, but keep standalone `"`.
+    /// Bash error messages show the expression with backslash-escapes removed
+    /// but the quote characters themselves preserved.  For example,
+    /// `a[\" \"]=15` displays as `a[" "]=15` in error messages.
+    fn unescape_arith_quotes(s: &str) -> String {
+        let bytes = s.as_bytes();
+        let mut result = String::with_capacity(s.len());
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'\\' && i + 1 < bytes.len() && bytes[i + 1] == b'"' {
+                // `\"` → `"` (remove backslash, keep quote)
+                result.push('"');
+                i += 2;
+            } else {
+                result.push(bytes[i] as char);
+                i += 1;
+            }
+        }
+        result
+    }
+
+    /// Remove only single-quote shell-level quoting from an array subscript
+    /// string that comes from the AST (assign.name).  The parser has already
+    /// converted `\"` → `"` during lexing, so bare `"` in the AST subscript
+    /// are literal characters (not quoting delimiters).  Only `'...'` regions
+    /// remain as shell-level quoting that the arithmetic evaluator cannot
+    /// handle.
+    ///
+    /// After dequoting, the caller must set `arith_skip_quote_strip` so that
+    /// the arithmetic evaluator does NOT re-strip the resulting `"` characters
+    /// (they are literal arithmetic-invalid chars, matching bash behavior
+    /// where `a[\" \"]=15` errors with `" ": arithmetic syntax error`).
+    ///
+    /// Example: AST subscript `'"' "` (bytes: `'`, `"`, `'`, ` `, `"`)
+    /// → dequoted `" "` (the single-quote region `'"'` emits `"`, then
+    /// literal ` ` and `"` pass through).
+    pub(super) fn dequote_subscript(s: &str) -> String {
+        let bytes = s.as_bytes();
+        let mut result = String::with_capacity(s.len());
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'\'' {
+                // Single-quoted region: content is literal until next `'`.
+                // Emit the content without the surrounding quotes.
+                i += 1; // skip opening `'`
+                while i < bytes.len() && bytes[i] != b'\'' {
+                    result.push(bytes[i] as char);
+                    i += 1;
+                }
+                if i < bytes.len() {
+                    i += 1; // skip closing `'`
+                }
+            } else {
+                // Everything else passes through unchanged — bare `"` are
+                // already literal (parser converted `\"` → `"`), `\` may
+                // still appear from single-quote content, etc.
+                result.push(bytes[i] as char);
+                i += 1;
+            }
+        }
+        result
+    }
+
     fn find_top_level_arith_op(expr: &str, op: &str) -> Option<usize> {
         let mut paren_depth = 0i32;
         let mut bracket_depth = 0i32;
@@ -347,11 +410,15 @@ impl Shell {
             expr
         };
 
-        // Strip double quotes from arith expressions (bash behavior)
-        // Save the pre-stripped expression for `let` empty-subscript detection
+        // Strip double quotes from arith expressions (bash behavior).
+        // When `arith_skip_quote_strip` is set, the caller already dequoted
+        // the expression (e.g. assignment subscripts go through
+        // `dequote_subscript`), so `"` characters are literal
+        // arithmetic-invalid chars that must NOT be silently stripped.
+        // Save the pre-stripped expression for `let` empty-subscript detection.
         let pre_strip_expr: String;
         let unquoted: String;
-        let expr = if expr.contains('"') {
+        let expr = if expr.contains('"') && !self.arith_skip_quote_strip {
             pre_strip_expr = expr.to_string();
             // Strip double quotes AND preceding backslashes from arithmetic
             // expressions.  `\"` is an escaped literal quote — both the `\`
@@ -360,12 +427,14 @@ impl Shell {
             // backslash followed by a quote — only the `"` is stripped, the
             // `\\` becomes `\`.  Standalone `"` is simply removed.
             unquoted = Self::strip_arith_quotes(expr);
-            // Update top expression to match stripped version for error messages
+            // Update top expression for error messages: unescape `\"` → `"` but
+            // keep standalone `"` so error messages show the quote characters
+            // (matching bash's display format).
             if self.arith_depth == 1
                 && let Some(ref mut top) = self.arith_top_expr
                 && top.contains('"')
             {
-                *top = Self::strip_arith_quotes(top);
+                *top = Self::unescape_arith_quotes(top);
             }
             &unquoted
         } else {
