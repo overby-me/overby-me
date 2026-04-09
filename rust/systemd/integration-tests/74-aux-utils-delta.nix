@@ -1,6 +1,6 @@
 {
   name = "74-AUX-UTILS";
   testEnv = {
-    TEST_MATCH_SUBTEST = "\\.analyze\\.sh$";
+    TEST_MATCH_SUBTEST = "\\.delta\\.sh$";
   };
 }

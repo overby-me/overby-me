@@ -2955,19 +2955,28 @@ fn create_transient_unit(
                     };
                 }
                 "Environment" => {
-                    // Append to environment (strip surrounding quotes from value)
-                    if let Some((k, v)) = value.split_once('=') {
-                        let v = if (v.starts_with('\'') && v.ends_with('\''))
-                            || (v.starts_with('"') && v.ends_with('"'))
-                        {
-                            &v[1..v.len() - 1]
-                        } else {
-                            v
-                        };
+                    // Use shlex to split multiple KEY=VALUE pairs with
+                    // shell-like quoting, matching the unit file parser.
+                    // Tokens without '=' are continuation of the previous
+                    // value (unquoted spaces in a value).
+                    // Then apply C-style unescaping to match systemd's
+                    // EXTRACT_CUNESCAPE behavior.
+                    if let Some(tokens) = shlex::split(value) {
                         let env = service_conf.exec_config.environment.get_or_insert_with(|| {
                             crate::units::unit_parsing::EnvVars { vars: vec![] }
                         });
-                        env.vars.push((k.to_string(), v.to_string()));
+                        for token in tokens {
+                            if token.contains('=') {
+                                if let Some((k, v)) = token.split_once('=') {
+                                    env.vars.push((k.to_string(), cunescape(v)));
+                                }
+                            } else if let Some(last) = env.vars.last_mut() {
+                                // Token without '=' is a continuation of
+                                // the previous value (unquoted space).
+                                last.1.push(' ');
+                                last.1.push_str(&cunescape(&token));
+                            }
+                        }
                     }
                 }
                 "MemoryMax" => {
@@ -3486,8 +3495,7 @@ fn create_transient_unit(
                         .extend(value.split_whitespace().map(|s| s.to_string()));
                 }
                 "EnvironmentFile" => {
-                    let trimmed = value.trim();
-                    if let Some(stripped) = trimmed.strip_prefix('-') {
+                    if let Some(stripped) = value.strip_prefix('-') {
                         service_conf
                             .exec_config
                             .environment_files
@@ -3496,7 +3504,7 @@ fn create_transient_unit(
                         service_conf
                             .exec_config
                             .environment_files
-                            .push((std::path::PathBuf::from(trimmed), false));
+                            .push((std::path::PathBuf::from(value), false));
                     }
                 }
                 "StandardInput" => {
@@ -4194,6 +4202,35 @@ fn create_transient_unit(
     }
 
     Ok(unit_id)
+}
+
+/// Apply C-style unescaping to a string, matching systemd's `cunescape()`.
+/// Handles `\\`, `\a`, `\b`, `\f`, `\n`, `\r`, `\t`, `\v`.
+fn cunescape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('\\') => out.push('\\'),
+                Some('a') => out.push('\x07'),
+                Some('b') => out.push('\x08'),
+                Some('f') => out.push('\x0c'),
+                Some('n') => out.push('\n'),
+                Some('r') => out.push('\r'),
+                Some('t') => out.push('\t'),
+                Some('v') => out.push('\x0b'),
+                Some(other) => {
+                    out.push('\\');
+                    out.push(other);
+                }
+                None => out.push('\\'),
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// Parse a memory limit value like "50M", "1G", "infinity", or "80%".

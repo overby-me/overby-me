@@ -16,6 +16,13 @@
 }: let
   systemdSrc = pkgs.systemd.src;
 
+  # Write the patchScript to a real file to avoid Python string interpolation
+  # mangling escape sequences like \n, \t inside heredocs.
+  patchScriptFile = pkgs.writeShellScript "patch-test.sh" ''
+    set -eu
+    ${patchScript}
+  '';
+
   # Build a derivation containing all test scripts and testdata from upstream
   testScripts = pkgs.runCommand "systemd-test-scripts" {} ''
     mkdir -p $out/{units,testdata}
@@ -168,8 +175,11 @@ in
 
       environment = {
         # Install test scripts and testdata into the VM
-        etc."systemd-tests/units".source = "${testScripts}/units";
-        etc."systemd-tests/testdata".source = "${testScripts}/testdata";
+        etc = {
+          "systemd-tests/units".source = "${testScripts}/units";
+          "systemd-tests/testdata".source = "${testScripts}/testdata";
+          "systemd-tests/patch-test.sh".source = "${patchScriptFile}";
+        };
 
         # Packages needed by test scripts
         systemPackages = with pkgs;
@@ -445,9 +455,7 @@ in
       # Always copy to writable dir: scripts need +x for direct exec and
       # the Nix store source is read-only.
       machine.succeed("mkdir -p /tmp/test-units && cp -a /etc/systemd-tests/units/* /tmp/test-units/")
-      patch_cmd = """${patchScript}"""
-      if patch_cmd:
-          machine.succeed(f"cd /tmp/test-units && {patch_cmd}")
+      machine.succeed("cd /tmp/test-units && /etc/systemd-tests/patch-test.sh")
       units_dir = "/tmp/test-units"
 
       env_exports = "${builtins.concatStringsSep "; " (builtins.attrValues (builtins.mapAttrs (k: v: "export ${k}='${v}'") testEnv))}"

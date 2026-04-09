@@ -1,6 +1,6 @@
 {
   name = "74-AUX-UTILS";
   testEnv = {
-    TEST_MATCH_SUBTEST = "\\.creds\\.sh$";
+    TEST_MATCH_SUBTEST = "\\.path\\.sh$";
   };
 }
