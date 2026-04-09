@@ -1377,6 +1377,12 @@ impl Shell {
             }
         }
 
+        // Drain non-fatal arithmetic errors during word expansion
+        // (e.g. "not a valid identifier" from empty subscripts in $(( a[""]=25 ))).
+        // These print an error message but do NOT affect exit status or abort
+        // subshells — bash treats them as informational warnings.
+        crate::expand::take_arith_nonfatal_error();
+
         // Check for arithmetic errors during word expansion (e.g., echo $(( 1/0 )))
         let had_nounset = crate::expand::take_nounset_error();
         if crate::expand::take_arith_error() {
@@ -4938,10 +4944,18 @@ impl Shell {
         self.arith_is_command = true;
         let result = self.eval_arith_expr(expr);
         self.arith_is_command = false;
-        // Drain any arithmetic error flag — (( )) errors are handled by exit status
+        // Drain any non-fatal arithmetic error flag (e.g. "not a valid identifier"
+        // from empty subscripts).  These are informational — they don't affect
+        // the exit status of (( )).  Bash returns 0 for `(( a[""]=25 ))`.
+        let had_nonfatal = crate::expand::take_arith_nonfatal_error();
+        // Drain any (fatal) arithmetic error flag — (( )) errors are handled by exit status
         let had_error = crate::expand::take_arith_error();
-        if had_error {
+        if had_error && !had_nonfatal {
             1
+        } else if had_nonfatal {
+            // Non-fatal errors: treat as if the expression evaluated to non-zero
+            // (exit 0), matching bash behavior where (( a[""]=25 )) returns 0.
+            0
         } else if result != 0 {
             0
         } else {

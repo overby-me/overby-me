@@ -359,6 +359,10 @@ pub struct Shell {
     arith_is_command: bool,
     /// Whether current arithmetic evaluation is from let builtin (adds let: prefix to errors)
     pub arith_is_let: bool,
+    /// Whether we are currently inside a recursive subscript evaluation
+    /// (e.g. `arith_subscript_key` → `eval_arith_expr_impl` for indexed arrays).
+    /// When true, errors show just the subscript content without `let:`/`((:` prefix.
+    pub(super) arith_in_subscript: bool,
     /// When true, `eval_arith_expr_inner` skips `strip_arith_quotes` — the
     /// caller already dequoted the expression (e.g. assignment subscripts
     /// extracted from the AST go through `dequote_subscript` which converts
@@ -559,6 +563,7 @@ impl Shell {
             arith_depth: 0,
             arith_is_command: false,
             arith_is_let: false,
+            arith_in_subscript: false,
             arith_skip_quote_strip: false,
             random_seed: std::process::id(),
             aliases: HashMap::new(),

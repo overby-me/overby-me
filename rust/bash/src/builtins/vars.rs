@@ -2143,8 +2143,34 @@ pub(super) fn builtin_let(shell: &mut Shell, args: &[String]) -> i32 {
     }
     shell.arith_is_let = false;
 
-    // Drain arithmetic error flag — let handles errors via return status
+    // Drain non-fatal arithmetic error flag (e.g. "not a valid identifier"
+    // from empty subscripts).  These are informational — they don't affect
+    // the exit status of `let` and don't abort subshells.
+    let had_nonfatal = crate::expand::take_arith_nonfatal_error();
+
+    // Drain (fatal) arithmetic error flag — let handles errors via return status
     let had_error = crate::expand::take_arith_error();
+
+    // In subshells, fatal arithmetic errors during `let` abort the subshell
+    // entirely (e.g. `( let "a[\" \"]"=18 ; echo hi )` never reaches
+    // `echo hi`).  Non-fatal errors do NOT abort.
+    if had_error && !had_nonfatal {
+        let bash_subshell = shell
+            .vars
+            .get("BASH_SUBSHELL")
+            .and_then(|v| v.parse::<i32>().ok())
+            .unwrap_or(0);
+        if bash_subshell > 0 {
+            std::process::exit(1);
+        }
+    }
+
+    // Non-fatal errors: treat as if the expression evaluated to non-zero
+    // (return 0), matching bash where `let 'a[""]=26'` returns 0 after the
+    // "not a valid identifier" error.
+    if had_nonfatal {
+        return 0;
+    }
 
     // let returns 1 if the last expression evaluates to 0 or had error, 0 otherwise
     if had_error || result == 0 { 1 } else { 0 }

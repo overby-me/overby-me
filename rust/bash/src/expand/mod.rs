@@ -56,6 +56,11 @@ thread_local! {
     static SCRIPT_NAME: RefCell<String> = const { RefCell::new(String::new()) };
     /// Flag set when arithmetic evaluation encounters an error.
     static ARITH_ERROR: RefCell<bool> = const { RefCell::new(false) };
+    /// Flag set when arithmetic evaluation encounters a non-fatal error
+    /// (e.g. "not a valid identifier" from empty subscripts).  These errors
+    /// print a message and set exit status 1, but do NOT abort subshells.
+    /// Bash treats these differently from syntax errors and division by zero.
+    static ARITH_NONFATAL_ERROR: RefCell<bool> = const { RefCell::new(false) };
     /// Flag set when a nounset (set -u) error occurs — should exit the shell/subshell.
     static NOUNSET_ERROR: RefCell<bool> = const { RefCell::new(false) };
     /// Flag set when a bad array subscript error was already printed during
@@ -273,14 +278,25 @@ pub fn take_arith_error() -> bool {
     ARITH_ERROR.with(|f| std::mem::replace(&mut *f.borrow_mut(), false))
 }
 
-/// Set the arithmetic error flag.
 pub fn set_arith_error() {
     ARITH_ERROR.with(|f| *f.borrow_mut() = true);
 }
 
-/// Peek at the arithmetic error flag without clearing it.
 pub fn get_arith_error() -> bool {
     ARITH_ERROR.with(|f| *f.borrow())
+}
+
+/// Set a non-fatal arithmetic error flag.  This is used for errors like
+/// "not a valid identifier" from empty array subscripts.  The error message
+/// is already printed, but unlike `set_arith_error()` this does NOT cause
+/// subshell abort in `run_simple_command`.
+pub fn set_arith_nonfatal_error() {
+    ARITH_NONFATAL_ERROR.with(|f| *f.borrow_mut() = true);
+}
+
+/// Take (read and clear) the non-fatal arithmetic error flag.
+pub fn take_arith_nonfatal_error() -> bool {
+    ARITH_NONFATAL_ERROR.with(|f| std::mem::replace(&mut *f.borrow_mut(), false))
 }
 
 pub fn set_bad_subscript() {

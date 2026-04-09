@@ -27,7 +27,10 @@ impl Shell {
             let key = self.expand_arith_subscript_key(idx_str);
             ArithSubscript::Assoc(resolved, key)
         } else {
+            let saved_in_subscript = self.arith_in_subscript;
+            self.arith_in_subscript = true;
             let idx = self.eval_arith_expr_impl(idx_str) as usize;
+            self.arith_in_subscript = saved_in_subscript;
             ArithSubscript::Indexed(resolved, idx)
         }
     }
@@ -209,25 +212,78 @@ impl Shell {
     /// Evaluate an arithmetic expression and return the integer result.
     ///
     /// Find an operator in the expression at top-level (outside parentheses).
-    /// Strip double quotes from an arithmetic expression, also consuming
-    /// backslashes that escape quotes (`\"` → empty, `\\"` → `\`, `"` → empty).
-    fn strip_arith_quotes(s: &str) -> String {
+    /// Strip shell-level double-quote characters from arithmetic expressions.
+    ///
+    /// Bracket-depth-aware:
+    /// - Outside `[...]` subscripts: `\"` → literal `"` (preserved as invalid
+    ///   arithmetic char, matching bash where `$(( \"\" ))` errors).
+    ///   Standalone `"` → removed (shell quoting) unless `keep_standalone_outside`
+    ///   is true (used for `let` context where `"` is literal).
+    /// - Inside `[...]` subscripts: `\"` → removed entirely (both `\` and `"`),
+    ///   matching bash where `(( a[\" \"]=16 ))` strips to subscript ` ` → 0.
+    ///   Standalone `"` → removed (subscript quoting).
+    ///   UNLESS `keep_inside_brackets` is true — when `assoc_expand_once` is
+    ///   set in `let` context, bash keeps `"` inside subscripts as literal
+    ///   chars, causing errors like `" ": arithmetic syntax error`.
+    fn strip_arith_quotes_impl(
+        s: &str,
+        keep_standalone_outside: bool,
+        keep_inside_brackets: bool,
+    ) -> String {
         let bytes = s.as_bytes();
         let mut result = String::with_capacity(s.len());
         let mut i = 0;
+        let mut bracket_depth = 0i32;
         while i < bytes.len() {
-            if bytes[i] == b'\\' && i + 1 < bytes.len() && bytes[i + 1] == b'"' {
-                // `\"` → consume both (the backslash was escaping the quote)
-                i += 2;
-            } else if bytes[i] == b'"' {
-                // Standalone `"` → consume
+            if bytes[i] == b'[' {
+                bracket_depth += 1;
+                result.push('[');
                 i += 1;
+            } else if bytes[i] == b']' && bracket_depth > 0 {
+                bracket_depth -= 1;
+                result.push(']');
+                i += 1;
+            } else if bytes[i] == b'\\' && i + 1 < bytes.len() && bytes[i + 1] == b'"' {
+                if bracket_depth > 0 && !keep_inside_brackets {
+                    // Inside subscript: `\"` → consume both (strip escapes)
+                    i += 2;
+                } else {
+                    // Outside subscript (or keep_inside_brackets mode):
+                    // `\"` → literal `"` (invalid in arith)
+                    result.push('"');
+                    i += 2;
+                }
+            } else if bytes[i] == b'"' {
+                if bracket_depth > 0 && !keep_inside_brackets {
+                    // Strip standalone `"` inside subscript
+                    i += 1;
+                } else if bracket_depth > 0 && keep_inside_brackets {
+                    // assoc_expand_once + let: keep `"` inside brackets as literal
+                    result.push('"');
+                    i += 1;
+                } else if keep_standalone_outside {
+                    // In let context, keep standalone `"` outside brackets
+                    // as literal chars — they'll be caught as invalid later
+                    result.push('"');
+                    i += 1;
+                } else {
+                    // Strip standalone `"` (shell quoting)
+                    i += 1;
+                }
             } else {
                 result.push(bytes[i] as char);
                 i += 1;
             }
         }
         result
+    }
+
+    fn strip_arith_quotes(s: &str) -> String {
+        Self::strip_arith_quotes_impl(s, false, false)
+    }
+
+    fn strip_arith_quotes_for_let(s: &str, assoc_expand_once: bool) -> String {
+        Self::strip_arith_quotes_impl(s, true, assoc_expand_once)
     }
 
     /// Unescape `\"` → `"` for error display purposes, but keep standalone `"`.
@@ -420,21 +476,39 @@ impl Shell {
         let unquoted: String;
         let expr = if expr.contains('"') && !self.arith_skip_quote_strip {
             pre_strip_expr = expr.to_string();
-            // Strip double quotes AND preceding backslashes from arithmetic
-            // expressions.  `\"` is an escaped literal quote — both the `\`
-            // and the `"` should be removed (bash treats `\"` in arithmetic
-            // as a literal `"` which is then stripped).  `\\"` is a literal
-            // backslash followed by a quote — only the `"` is stripped, the
-            // `\\` becomes `\`.  Standalone `"` is simply removed.
-            unquoted = Self::strip_arith_quotes(expr);
-            // Update top expression for error messages: unescape `\"` → `"` but
-            // keep standalone `"` so error messages show the quote characters
-            // (matching bash's display format).
+            // Strip double quotes from arithmetic expressions.
+            // Outside brackets: `\"` → literal `"` (invalid in arith).
+            // Inside brackets: `\"` → removed (subscript quoting).
+            // Standalone `"` → removed (shell quoting) unless in `let` context.
+            let assoc_expand_once_on = self
+                .shopt_options
+                .get("assoc_expand_once")
+                .copied()
+                .unwrap_or(false);
+            unquoted = if self.arith_is_let {
+                Self::strip_arith_quotes_for_let(expr, assoc_expand_once_on)
+            } else {
+                Self::strip_arith_quotes(expr)
+            };
+            // Update top expression for error messages.
+            // If the original had `\"` → `unescape_arith_quotes` converts
+            // `\"` → `"` for display (bash shows literal quotes in errors).
+            // If the original had only standalone `""` and we're NOT in `let`
+            // context → strip them from the display too (bash shows the
+            // quote-stripped expression for `(( ))` and `$(( ))`).
+            // In `let` context, keep `"` in the display — bash shows them
+            // in the error message (e.g. `let: 0 - "": operand expected`).
             if self.arith_depth == 1
                 && let Some(ref mut top) = self.arith_top_expr
                 && top.contains('"')
             {
-                *top = Self::unescape_arith_quotes(top);
+                if top.contains("\\\"") {
+                    *top = Self::unescape_arith_quotes(top);
+                } else if !self.arith_is_let {
+                    // Only standalone `"` in non-let context — strip from display
+                    *top = Self::strip_arith_quotes(top);
+                }
+                // In let context with only standalone `"`, keep them for display
             }
             &unquoted
         } else {
@@ -462,6 +536,53 @@ impl Shell {
                     crate::expand::set_arith_error();
                     return 0;
                 }
+            }
+        }
+
+        // Check for literal `"` at any depth — `"` is never valid in arithmetic.
+        // This catches `$(( \"\" ))` (depth 1), `let '0 - ""'` right operand
+        // (depth 2+), and subscript `" "` errors (depth 2+ in subscript context).
+        {
+            let trimmed = expr.trim();
+            if !trimmed.is_empty() && trimmed.as_bytes()[0] == b'"' {
+                if self.arith_depth == 1 {
+                    // Top-level: use arith_top_expr for display and error token
+                    let top_expr = self.arith_top_expr.as_deref().unwrap_or(trimmed);
+                    eprintln!(
+                        "{}: {}{}: arithmetic syntax error: operand expected (error token is \"{}\")",
+                        self.arith_error_prefix(),
+                        self.arith_cmd_prefix(),
+                        top_expr,
+                        top_expr
+                    );
+                } else if self.arith_in_subscript {
+                    // Inside subscript evaluation (e.g. `a[" "]=18`): show
+                    // just the sub-expression without cmd_prefix (no `let:`
+                    // or `((:`).  This matches bash where subscript errors
+                    // like `" ": arithmetic syntax error` don't include the
+                    // command context.
+                    eprintln!(
+                        "{}: {}: arithmetic syntax error: operand expected (error token is \"{}\")",
+                        self.arith_error_prefix(),
+                        trimmed,
+                        trimmed
+                    );
+                } else {
+                    // Depth > 1 in non-subscript context (e.g. right operand
+                    // of `let '0 - ""'` or `(( 1 - "" ))`): use
+                    // arith_top_expr and cmd_prefix, matching bash which
+                    // shows `let: 0 - "": ...`.
+                    let top_expr = self.arith_top_expr.as_deref().unwrap_or(trimmed);
+                    eprintln!(
+                        "{}: {}{}: arithmetic syntax error: operand expected (error token is \"{}\")",
+                        self.arith_error_prefix(),
+                        self.arith_cmd_prefix(),
+                        top_expr,
+                        trimmed
+                    );
+                }
+                crate::expand::set_arith_error();
+                return 0;
             }
         }
 
@@ -661,7 +782,20 @@ impl Shell {
                     if let Some(bracket) = name.find('[') {
                         let base = &name[..bracket];
                         let idx_str = &name[bracket + 1..name.len() - 1];
-                        if Self::is_empty_arith_subscript(idx_str) {
+                        // When assoc_expand_once is set in let context, the
+                        // subscript may contain literal `"` chars (kept by
+                        // strip_arith_quotes_for_let).  Don't treat `""` as
+                        // an empty subscript — let it flow to recursive eval
+                        // where the `"` detection will produce the proper
+                        // arithmetic syntax error.
+                        let aeo_let_has_quotes = self.arith_is_let
+                            && self
+                                .shopt_options
+                                .get("assoc_expand_once")
+                                .copied()
+                                .unwrap_or(false)
+                            && idx_str.contains('"');
+                        if !aeo_let_has_quotes && Self::is_empty_arith_subscript(idx_str) {
                             // In `let` context, `a[""]=22` has quotes stripped to `a[]=22`
                             // but is valid — the empty subscript evaluates to 0.
                             // Only when `assoc_expand_once` is unset though; when set,
@@ -691,7 +825,7 @@ impl Shell {
                                     self.arith_cmd_prefix(),
                                     base
                                 );
-                                crate::expand::set_arith_error();
+                                crate::expand::set_arith_nonfatal_error();
                                 return 0;
                             }
                         }
@@ -782,7 +916,14 @@ impl Shell {
                     let base = &name[..bracket];
                     let idx_str = &name[bracket + 1..name.len() - 1];
                     // Empty subscript after quote removal: a[""]=N → error (but not in let context)
-                    if Self::is_empty_arith_subscript(idx_str) {
+                    let aeo_let_has_quotes = self.arith_is_let
+                        && self
+                            .shopt_options
+                            .get("assoc_expand_once")
+                            .copied()
+                            .unwrap_or(false)
+                        && idx_str.contains('"');
+                    if !aeo_let_has_quotes && Self::is_empty_arith_subscript(idx_str) {
                         let assoc_expand_once = self
                             .shopt_options
                             .get("assoc_expand_once")
@@ -804,7 +945,7 @@ impl Shell {
                                 self.arith_cmd_prefix(),
                                 base
                             );
-                            crate::expand::set_arith_error();
+                            crate::expand::set_arith_nonfatal_error();
                             return 0;
                         }
                     }
@@ -869,7 +1010,14 @@ impl Shell {
                 {
                     let base = &name[..bracket];
                     let idx_str = &name[bracket + 1..name.len() - 1];
-                    if Self::is_empty_arith_subscript(idx_str) {
+                    let aeo_let_has_quotes = self.arith_is_let
+                        && self
+                            .shopt_options
+                            .get("assoc_expand_once")
+                            .copied()
+                            .unwrap_or(false)
+                        && idx_str.contains('"');
+                    if !aeo_let_has_quotes && Self::is_empty_arith_subscript(idx_str) {
                         let assoc_expand_once = self
                             .shopt_options
                             .get("assoc_expand_once")
@@ -891,7 +1039,7 @@ impl Shell {
                                 self.arith_cmd_prefix(),
                                 base
                             );
-                            crate::expand::set_arith_error();
+                            crate::expand::set_arith_nonfatal_error();
                             return 0;
                         }
                     }
@@ -974,7 +1122,14 @@ impl Shell {
                     let bracket = name.find('[').unwrap();
                     let base = &name[..bracket];
                     let idx_expr = &name[bracket + 1..name.len() - 1];
-                    if Self::is_empty_arith_subscript(idx_expr) {
+                    let aeo_let_has_quotes = self.arith_is_let
+                        && self
+                            .shopt_options
+                            .get("assoc_expand_once")
+                            .copied()
+                            .unwrap_or(false)
+                        && idx_expr.contains('"');
+                    if !aeo_let_has_quotes && Self::is_empty_arith_subscript(idx_expr) {
                         let assoc_expand_once = self
                             .shopt_options
                             .get("assoc_expand_once")
@@ -996,7 +1151,7 @@ impl Shell {
                                 self.arith_cmd_prefix(),
                                 base
                             );
-                            crate::expand::set_arith_error();
+                            crate::expand::set_arith_nonfatal_error();
                             return 0;
                         }
                     }
@@ -1064,7 +1219,14 @@ impl Shell {
                     let bracket = name.find('[').unwrap();
                     let base = &name[..bracket];
                     let idx_expr = &name[bracket + 1..name.len() - 1];
-                    if Self::is_empty_arith_subscript(idx_expr) {
+                    let aeo_let_has_quotes = self.arith_is_let
+                        && self
+                            .shopt_options
+                            .get("assoc_expand_once")
+                            .copied()
+                            .unwrap_or(false)
+                        && idx_expr.contains('"');
+                    if !aeo_let_has_quotes && Self::is_empty_arith_subscript(idx_expr) {
                         let assoc_expand_once = self
                             .shopt_options
                             .get("assoc_expand_once")
@@ -1086,7 +1248,7 @@ impl Shell {
                                 self.arith_cmd_prefix(),
                                 base
                             );
-                            crate::expand::set_arith_error();
+                            crate::expand::set_arith_nonfatal_error();
                             return 0;
                         }
                     }
