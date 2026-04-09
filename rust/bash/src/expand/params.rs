@@ -1404,6 +1404,34 @@ fn push_strftime(out: &mut String, _fmt: &str) {
 }
 
 pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
+    // Pre-expand $(...) command substitutions inside associative array subscripts.
+    // lookup_var doesn't have access to cmd_sub, so we expand comsubs in the
+    // subscript portion of the name here before any lookups.  E.g.
+    // ${A[$(echo Darwin)]} → expand $(echo Darwin) to "Darwin" first.
+    let comsub_expanded: Option<ParamExpr>;
+    let expr = if expr.name.contains("$(") || expr.name.contains('`') {
+        if let Some(bracket) = expr.name.find('[') {
+            let base = &expr.name[..bracket];
+            let subscript = &expr.name[bracket + 1..];
+            // Only expand if the subscript region contains $( or backtick
+            if subscript.contains("$(") || subscript.contains('`') {
+                let expanded_sub = super::expand_comsubs_in_arith_expr(subscript, cmd_sub);
+                let expanded_name = format!("{}[{}", base, expanded_sub);
+                comsub_expanded = Some(ParamExpr {
+                    name: expanded_name,
+                    op: expr.op.clone(),
+                });
+                comsub_expanded.as_ref().unwrap()
+            } else {
+                expr
+            }
+        } else {
+            expr
+        }
+    } else {
+        expr
+    };
+
     // Handle indirect expansion with operators: ${!name+word}, ${!name-word}, etc.
     if expr.name.starts_with('!')
         && expr.name.len() > 1

@@ -801,6 +801,14 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
 // ── declare -f formatting helpers ──────────────────────────────────────────
 
 pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
+    // Use the actual command name (declare/typeset/local) for error messages.
+    // Clone to avoid holding a borrow on shell across mutable operations.
+    let cmd_name = shell
+        .current_builtin
+        .as_deref()
+        .unwrap_or("declare")
+        .to_string();
+    let cmd_name = cmd_name.as_str();
     let mut flag_array = false;
     let mut flag_assoc = false; // -A stub
     let mut flag_print = false;
@@ -850,9 +858,15 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     't' => flag_trace = true,
                     'I' => {} // inherit — accepted but not implemented
                     _ => {
-                        eprintln!("{}: declare: -{}: invalid option", shell.error_prefix(), ch);
                         eprintln!(
-                            "declare: usage: declare [-aAfFgiIlnrtux] [name[=value] ...] or declare -p [-aAfFilnrtux] [name ...]"
+                            "{}: {}: -{}: invalid option",
+                            shell.error_prefix(),
+                            cmd_name,
+                            ch
+                        );
+                        eprintln!(
+                            "{}: usage: {} [-aAfFgiIlnrtux] [name[=value] ...] or {} -p [-aAfFilnrtux] [name ...]",
+                            cmd_name, cmd_name, cmd_name
                         );
                         return 2;
                     }
@@ -898,14 +912,16 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                         // Readonly check takes precedence over "cannot destroy"
                         if shell.readonly_vars.contains(pure) {
                             eprintln!(
-                                "{}: declare: {}: readonly variable",
+                                "{}: {}: {}: readonly variable",
                                 shell.error_prefix(),
+                                cmd_name,
                                 pure
                             );
                         } else {
                             eprintln!(
-                                "{}: declare: {}: cannot destroy array variables in this way",
+                                "{}: {}: {}: cannot destroy array variables in this way",
                                 shell.error_prefix(),
+                                cmd_name,
                                 pure
                             );
                         }
@@ -982,11 +998,11 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
     // Check for -f combined with other attributes (invalid)
     if flag_func_body && !names.is_empty() {
         if flag_array {
-            eprintln!("{}: declare: -a: invalid option", shell.error_prefix());
+            eprintln!("{}: {}: -a: invalid option", shell.error_prefix(), cmd_name);
             return 1;
         }
         if flag_integer {
-            eprintln!("{}: declare: -i: invalid option", shell.error_prefix());
+            eprintln!("{}: {}: -i: invalid option", shell.error_prefix(), cmd_name);
             return 1;
         }
         // Cannot use declare -f to define functions (name=value)
@@ -997,8 +1013,9 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 .any(|n| n.contains('=') && !shell.functions.contains_key(n.as_str()))
         {
             eprintln!(
-                "{}: declare: cannot use `-f' to make functions",
-                shell.error_prefix()
+                "{}: {}: cannot use `-f' to make functions",
+                shell.error_prefix(),
+                cmd_name
             );
             return 1;
         }
@@ -1010,8 +1027,9 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             let pure_name = name.split('=').next().unwrap_or(name);
             if shell.readonly_funcs.contains(pure_name) && !flag_readonly {
                 eprintln!(
-                    "{}: declare: {}: readonly function",
+                    "{}: {}: {}: readonly function",
                     shell.error_prefix(),
+                    cmd_name,
                     pure_name
                 );
                 return 1;
@@ -1039,8 +1057,9 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                         // Stray characters after the closing ']' (e.g. A[]])
                         // Show full argument including =value, matching bash
                         eprintln!(
-                            "{}: declare: `{}': not a valid identifier",
+                            "{}: {}: `{}': not a valid identifier",
                             shell.error_prefix(),
+                            cmd_name,
                             name
                         );
                         status = 1;
@@ -1049,8 +1068,9 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     None => {
                         // No closing ']' at all
                         eprintln!(
-                            "{}: declare: `{}': not a valid identifier",
+                            "{}: {}: `{}': not a valid identifier",
                             shell.error_prefix(),
+                            cmd_name,
                             name
                         );
                         status = 1;
@@ -1072,8 +1092,9 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     .is_some_and(|c| c.is_ascii_digit() || c == '-' || c == '/')
             {
                 eprintln!(
-                    "{}: declare: `{}': not a valid identifier",
+                    "{}: {}: `{}': not a valid identifier",
                     shell.error_prefix(),
+                    cmd_name,
                     pure_name
                 );
                 status = 1;
@@ -1127,7 +1148,12 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     print_func(name, body, shell);
                 } else {
                     if flag_print {
-                        eprintln!("{}: declare: {}: not found", shell.error_prefix(), name);
+                        eprintln!(
+                            "{}: {}: {}: not found",
+                            shell.error_prefix(),
+                            cmd_name,
+                            name
+                        );
                     }
                     status = 1;
                 }
@@ -1430,7 +1456,12 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                         println!("declare {} {}", flags, name);
                     }
                 } else {
-                    eprintln!("{}: declare: {}: not found", shell.error_prefix(), name);
+                    eprintln!(
+                        "{}: {}: {}: not found",
+                        shell.error_prefix(),
+                        cmd_name,
+                        name
+                    );
                     return 1;
                 }
             }
@@ -1595,8 +1626,9 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     let resolved_base = shell.resolve_nameref(stripped_name);
                     if shell.readonly_vars.contains(&resolved_base) {
                         eprintln!(
-                            "{}: declare: {}: readonly variable",
+                            "{}: {}: {}: readonly variable",
                             shell.error_prefix(),
+                            cmd_name,
                             resolved_base
                         );
                         status = 1;
@@ -1650,8 +1682,9 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 // Check readonly on the base name
                 if shell.readonly_vars.contains(&resolved_base) {
                     eprintln!(
-                        "{}: declare: {}: readonly variable",
+                        "{}: {}: {}: readonly variable",
                         shell.error_prefix(),
+                        cmd_name,
                         resolved_base
                     );
                     status = 1;
@@ -1744,8 +1777,9 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     continue;
                 }
                 eprintln!(
-                    "{}: declare: {}: readonly variable",
+                    "{}: {}: {}: readonly variable",
                     shell.error_prefix(),
+                    cmd_name,
                     name
                 );
                 status = 1;
@@ -1766,8 +1800,9 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 };
                 if target_base == name {
                     eprintln!(
-                        "{}: declare: warning: {}: circular name reference",
+                        "{}: {}: warning: {}: circular name reference",
                         shell.error_prefix(),
+                        cmd_name,
                         name
                     );
                 } else {
@@ -1862,8 +1897,9 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             // Can't remove readonly attribute
             if flag_unset_readonly && shell.readonly_vars.contains(name) {
                 eprintln!(
-                    "{}: declare: {}: readonly variable",
+                    "{}: {}: {}: readonly variable",
                     shell.error_prefix(),
+                    cmd_name,
                     name
                 );
                 status = 1;
@@ -1886,8 +1922,9 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 };
                 if !target.is_empty() && target_base == name {
                     eprintln!(
-                        "{}: declare: warning: {}: circular name reference",
+                        "{}: {}: warning: {}: circular name reference",
                         shell.error_prefix(),
+                        cmd_name,
                         name
                     );
                     // Put the value back since we're not creating the nameref
@@ -1899,8 +1936,9 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 // Error if trying to convert an existing indexed array to assoc
                 if shell.arrays.contains_key(name) {
                     eprintln!(
-                        "{}: declare: {}: cannot convert indexed to associative array",
+                        "{}: {}: {}: cannot convert indexed to associative array",
                         shell.error_prefix(),
+                        cmd_name,
                         name
                     );
                     status = 1;
@@ -1918,8 +1956,9 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 // Error if trying to convert an existing assoc array to indexed
                 if shell.assoc_arrays.contains_key(name) {
                     eprintln!(
-                        "{}: declare: {}: cannot convert associative to indexed array",
+                        "{}: {}: {}: cannot convert associative to indexed array",
                         shell.error_prefix(),
+                        cmd_name,
                         name
                     );
                     status = 1;
