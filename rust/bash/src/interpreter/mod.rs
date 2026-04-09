@@ -368,9 +368,13 @@ pub struct Shell {
     /// extracted from the AST go through `dequote_subscript` which converts
     /// `\"` → `"`, so the `"` are literal arithmetic-invalid characters that
     /// must NOT be silently stripped).
-    pub(super) arith_skip_quote_strip: bool,
+    pub arith_skip_quote_strip: bool,
     /// Seed for RANDOM variable (bash-compatible LCRNG)
     random_seed: u32,
+    /// When set, an expansion error (e.g. arithmetic syntax error in `$((...))`)
+    /// occurred on this line.  Subsequent commands on the same line should be
+    /// skipped (matching bash's `DISCARD` longjmp behavior).
+    pub expansion_error_line: Option<usize>,
 
     pub aliases: HashMap<String, String>,
     builtins: HashMap<&'static str, BuiltinFn>,
@@ -566,6 +570,7 @@ impl Shell {
             arith_in_subscript: false,
             arith_skip_quote_strip: false,
             random_seed: std::process::id(),
+            expansion_error_line: None,
             aliases: HashMap::new(),
             builtins: builtins::builtins(),
         };
@@ -1041,6 +1046,17 @@ impl Shell {
                     }
                     if self.opt_noexec {
                         continue;
+                    }
+                    // Skip commands on the same line as a prior expansion error
+                    // (matching bash's DISCARD behavior: `echo $(( bad )) ; echo skip`
+                    // skips everything after `;` on the same line).
+                    if let Some(err_line) = self.expansion_error_line {
+                        if cmd.line == err_line {
+                            // Still on the error line — skip this command
+                            continue;
+                        }
+                        // Moved to a new line — clear the flag
+                        self.expansion_error_line = None;
                     }
                     status = self.run_complete_command(&cmd);
                     // Sync aliases back to parser (alias/unalias may have changed them)

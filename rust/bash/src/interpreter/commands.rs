@@ -1406,6 +1406,15 @@ impl Shell {
             if in_subshell {
                 std::process::exit(1);
             }
+            // Signal that subsequent commands on the same line should be
+            // skipped (matching bash's DISCARD longjmp behavior).
+            if let Some(lineno) = self
+                .vars
+                .get("LINENO")
+                .and_then(|s| s.parse::<usize>().ok())
+            {
+                self.expansion_error_line = Some(lineno);
+            }
             return 1;
         }
 
@@ -1525,6 +1534,15 @@ impl Shell {
                             > 0;
                         if in_subshell {
                             std::process::exit(1);
+                        }
+                        // Signal that subsequent commands on the same line should be
+                        // skipped (matching bash's DISCARD longjmp behavior).
+                        if let Some(lineno) = self
+                            .vars
+                            .get("LINENO")
+                            .and_then(|s| s.parse::<usize>().ok())
+                        {
+                            self.expansion_error_line = Some(lineno);
                         }
                         return 1;
                     }
@@ -4683,14 +4701,31 @@ impl Shell {
         // the closing ']' suffix is in last_lit.
         let after_bracket = &first_lit[bracket_pos + 1..];
         let before_close = &last_lit[..last_lit.len() - 1];
-        // Expand the middle parts to get the full subscript key
+        // Expand the middle parts to get the full subscript key.
+        // Process substitutions (<(cmd) / >(cmd)) inside array subscripts
+        // in [[ ]] context should NOT be expanded as process substitutions —
+        // they are arithmetic operators.  E.g. `[[ index[7<(4+2)] -le 0 ]]`
+        // means subscript `7<(4+2)` = `7 < 6` = 0, not a /dev/fd path.
+        // Convert ProcessSub parts back to literal text.
         let mut sub_parts: Vec<WordPart> = Vec::new();
         if !after_bracket.is_empty() {
             sub_parts.push(WordPart::Literal(after_bracket.to_string()));
         }
         // Add all middle parts (between first and last)
         if word.len() > 2 {
-            sub_parts.extend_from_slice(&word[1..word.len() - 1]);
+            for part in &word[1..word.len() - 1] {
+                match part {
+                    WordPart::ProcessSub(kind, cmd) => {
+                        // Convert back to literal: <(cmd) or >(cmd)
+                        let op = match kind {
+                            crate::ast::ProcessSubKind::Input => "<",
+                            crate::ast::ProcessSubKind::Output => ">",
+                        };
+                        sub_parts.push(WordPart::Literal(format!("{}({})", op, cmd)));
+                    }
+                    _ => sub_parts.push(part.clone()),
+                }
+            }
         }
         if !before_close.is_empty() {
             sub_parts.push(WordPart::Literal(before_close.to_string()));
