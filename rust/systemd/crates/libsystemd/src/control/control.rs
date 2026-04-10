@@ -7800,85 +7800,89 @@ pub fn execute_command(
 
             let run_info = &*run_info.read_poisoned();
             for unit_name in &actual_names {
-                let id = {
+                // Collect unit IDs to stop. For glob patterns, collect all
+                // matches; for exact names, expect at most one.
+                let ids_to_stop: Vec<crate::units::UnitId> = {
                     let units = find_units_with_name(unit_name, &run_info.unit_table);
-                    if units.len() > 1 {
-                        let names: Vec<_> = units.iter().map(|unit| unit.id.name.clone()).collect();
-                        return Err(format!(
-                            "More than one unit found with name: {unit_name}: {names:?}"
-                        ));
-                    }
                     if units.is_empty() {
                         // Silently skip units not found (matches real systemd
                         // behaviour for multi-unit stop).
                         continue;
                     }
-
-                    // Reject stopping a frozen unit (matches real systemd behaviour)
-                    let freezer_state =
-                        crate::control::unit_properties::get_freezer_state_pub(units[0]);
-                    if matches!(
-                        freezer_state,
-                        crate::units::FreezerState::Frozen
-                            | crate::units::FreezerState::FrozenByParent
-                    ) {
-                        return Err(format!("Unit {unit_name} is frozen, cannot stop."));
+                    if units.len() > 1 && !is_glob_pattern(unit_name) {
+                        let names: Vec<_> = units.iter().map(|unit| unit.id.name.clone()).collect();
+                        return Err(format!(
+                            "More than one unit found with name: {unit_name}: {names:?}"
+                        ));
                     }
-
-                    units[0].id.clone()
+                    for u in &units {
+                        let freezer_state =
+                            crate::control::unit_properties::get_freezer_state_pub(u);
+                        if matches!(
+                            freezer_state,
+                            crate::units::FreezerState::Frozen
+                                | crate::units::FreezerState::FrozenByParent
+                        ) {
+                            return Err(format!("Unit {} is frozen, cannot stop.", u.id.name));
+                        }
+                    }
+                    units.iter().map(|u| u.id.clone()).collect()
                 };
 
-                // Set deactivation flags so concurrent StartNoBlock can detect
-                // the conflict (simulates real systemd's job queue behavior).
-                if let Some(unit) = run_info.unit_table.get(&id) {
-                    unit.common
-                        .deactivation_in_progress
-                        .store(true, std::sync::atomic::Ordering::SeqCst);
-                    unit.common
-                        .deactivation_irreversible
-                        .store(irreversible, std::sync::atomic::Ordering::SeqCst);
-                    unit.common
-                        .start_requested_during_deactivation
-                        .store(false, std::sync::atomic::Ordering::SeqCst);
-                }
-
-                let deactivation_result = crate::units::deactivate_unit_recursive(&id, run_info)
-                    .map_err(|e| format!("{e}"));
-
-                // Clear deactivation flags.
-                let restart_requested = if let Some(unit) = run_info.unit_table.get(&id) {
-                    let requested = unit
-                        .common
-                        .start_requested_during_deactivation
-                        .load(std::sync::atomic::Ordering::SeqCst);
-                    unit.common
-                        .deactivation_in_progress
-                        .store(false, std::sync::atomic::Ordering::SeqCst);
-                    unit.common
-                        .deactivation_irreversible
-                        .store(false, std::sync::atomic::Ordering::SeqCst);
-                    unit.common
-                        .start_requested_during_deactivation
-                        .store(false, std::sync::atomic::Ordering::SeqCst);
-                    requested
-                } else {
-                    false
-                };
-
-                deactivation_result?;
-
-                // If a start was requested during a non-irreversible stop,
-                // the stop should fail (the service is "unstoppable").
-                // Restore the unit to Started state since in real systemd
-                // the stop job would have been cancelled (service never stopped).
-                if restart_requested && !irreversible {
-                    if let Some(unit) = run_info.unit_table.get(&id) {
-                        let mut status = unit.common.status.write_poisoned();
-                        *status =
-                            crate::units::UnitStatus::Started(crate::units::StatusStarted::Running);
+                for id in &ids_to_stop {
+                    // Set deactivation flags so concurrent StartNoBlock can detect
+                    // the conflict (simulates real systemd's job queue behavior).
+                    if let Some(unit) = run_info.unit_table.get(id) {
+                        unit.common
+                            .deactivation_in_progress
+                            .store(true, std::sync::atomic::Ordering::SeqCst);
+                        unit.common
+                            .deactivation_irreversible
+                            .store(irreversible, std::sync::atomic::Ordering::SeqCst);
+                        unit.common
+                            .start_requested_during_deactivation
+                            .store(false, std::sync::atomic::Ordering::SeqCst);
                     }
-                    return Err(format!("Job for {} canceled.", id.name,));
-                }
+
+                    let deactivation_result = crate::units::deactivate_unit_recursive(id, run_info)
+                        .map_err(|e| format!("{e}"));
+
+                    // Clear deactivation flags.
+                    let restart_requested = if let Some(unit) = run_info.unit_table.get(id) {
+                        let requested = unit
+                            .common
+                            .start_requested_during_deactivation
+                            .load(std::sync::atomic::Ordering::SeqCst);
+                        unit.common
+                            .deactivation_in_progress
+                            .store(false, std::sync::atomic::Ordering::SeqCst);
+                        unit.common
+                            .deactivation_irreversible
+                            .store(false, std::sync::atomic::Ordering::SeqCst);
+                        unit.common
+                            .start_requested_during_deactivation
+                            .store(false, std::sync::atomic::Ordering::SeqCst);
+                        requested
+                    } else {
+                        false
+                    };
+
+                    deactivation_result?;
+
+                    // If a start was requested during a non-irreversible stop,
+                    // the stop should fail (the service is "unstoppable").
+                    // Restore the unit to Started state since in real systemd
+                    // the stop job would have been cancelled (service never stopped).
+                    if restart_requested && !irreversible {
+                        if let Some(unit) = run_info.unit_table.get(id) {
+                            let mut status = unit.common.status.write_poisoned();
+                            *status = crate::units::UnitStatus::Started(
+                                crate::units::StatusStarted::Running,
+                            );
+                        }
+                        return Err(format!("Job for {} canceled.", id.name,));
+                    }
+                } // end for id in &ids_to_stop
             }
         }
         Command::StopNoBlock(unit_names) => {
