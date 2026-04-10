@@ -1,4 +1,5 @@
 use super::*;
+use crate::interpreter::array_effective_len;
 
 pub(super) fn builtin_export(shell: &mut Shell, args: &[String]) -> i32 {
     if args.is_empty() {
@@ -360,7 +361,7 @@ pub(super) fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
                 }
                 if raw_idx < 0
                     && let Some(arr) = shell.arrays.get(&resolved)
-                    && raw_idx.abs() > arr.len() as i64
+                    && raw_idx.abs() > array_effective_len(arr) as i64
                 {
                     eprintln!(
                         "{}: unset: [{}]: bad array subscript",
@@ -372,7 +373,7 @@ pub(super) fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
                 }
                 if let Some(arr) = shell.arrays.get_mut(&resolved) {
                     let idx = if raw_idx < 0 {
-                        let len = arr.len() as i64;
+                        let len = array_effective_len(arr) as i64;
                         (len + raw_idx).max(0) as usize
                     } else {
                         raw_idx as usize
@@ -1724,7 +1725,7 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                         };
                         let arr = shell.arrays.entry(resolved_base.clone()).or_default();
                         let idx = if raw_idx < 0 {
-                            let len = arr.len() as i64;
+                            let len = array_effective_len(arr) as i64;
                             (len + raw_idx).max(0) as usize
                         } else {
                             raw_idx as usize
@@ -1804,7 +1805,7 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     };
                     let arr = shell.arrays.entry(resolved_base).or_default();
                     let idx = if raw_idx < 0 {
-                        let len = arr.len() as i64;
+                        let len = array_effective_len(arr) as i64;
                         (len + raw_idx).max(0) as usize
                     } else {
                         raw_idx as usize

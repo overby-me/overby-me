@@ -1,6 +1,7 @@
 use super::transform_helpers::{expand_backslash_escapes, shell_quote};
 use super::*;
 use crate::builtins::string_to_raw_bytes;
+use crate::interpreter::array_effective_len;
 
 /// Process `&` in a replacement string for pattern substitution.
 /// When `patsub_replacement` shopt is enabled, unescaped `&` in the
@@ -221,7 +222,7 @@ pub(super) fn get_array_elements(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSub
                 // (highest_index + 1), not from the count of set elements.
                 // e.g., arr=([1]=a [5]=b [7]=c) has length 8, so -2 → index 6.
                 let effective_offset = if offset < 0 {
-                    let arr_len = arr.len() as i64; // highest_index + 1
+                    let arr_len = array_effective_len(arr) as i64; // highest_index + 1
                     (arr_len + offset).max(0)
                 } else {
                     offset
@@ -563,7 +564,7 @@ pub(super) fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
                         };
                         if let Some(arr) = ctx.arrays.get(&resolved) {
                             let idx = if raw_idx < 0 {
-                                let len = arr.len() as i64;
+                                let len = array_effective_len(arr) as i64;
                                 let computed = len + raw_idx;
                                 if computed < 0 {
                                     let prefix = EXPAND_ERROR_PREFIX.with(|p| {
@@ -1666,7 +1667,7 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                     // For negative offsets, compute from the array's total length
                     // (highest_index + 1), not from the count of set elements.
                     let effective_offset = if offset < 0 {
-                        let arr_len = arr.len() as i64;
+                        let arr_len = array_effective_len(arr) as i64;
                         (arr_len + offset).max(0)
                     } else {
                         offset
@@ -2023,7 +2024,7 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                         let arr_len = ctx
                             .arrays
                             .get(&resolved)
-                            .map(|a| a.len() as i64)
+                            .map(|a| array_effective_len(a) as i64)
                             .unwrap_or(0);
                         if arr_len + raw_idx < 0 {
                             let prefix = EXPAND_ERROR_PREFIX.with(|p| {

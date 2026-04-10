@@ -14,6 +14,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 pub use signals::{install_signal_handler, take_pending_signal};
 
+/// Compute the effective length of an indexed array for negative subscript resolution.
+/// Returns max_assigned_index + 1 (ignoring trailing None slots), matching bash behavior.
+pub fn array_effective_len(arr: &[Option<String>]) -> usize {
+    arr.iter().rposition(|e| e.is_some()).map_or(0, |i| i + 1)
+}
+
 /// Check if a string is a valid bash identifier (variable name).
 pub fn is_valid_identifier(s: &str) -> bool {
     let mut chars = s.chars();

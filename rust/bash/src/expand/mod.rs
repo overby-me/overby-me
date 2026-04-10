@@ -11,6 +11,7 @@ pub(crate) use pattern::char_in_class as pattern_char_in_class;
 use pattern::{TrimMode, pattern_replace, shell_pattern_match, trim_pattern};
 
 use crate::ast::*;
+use crate::interpreter::array_effective_len;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -1479,7 +1480,7 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                             .collect();
                         let count = set_elements.len();
                         let effective_offset = if offset < 0 {
-                            let arr_len = raw_arr.len() as i64;
+                            let arr_len = array_effective_len(raw_arr) as i64;
                             (arr_len + offset).max(0)
                         } else {
                             offset
@@ -1589,7 +1590,7 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                         let arr_len = ctx
                             .arrays
                             .get(&resolved)
-                            .map(|a| a.len() as i64)
+                            .map(|a| array_effective_len(a) as i64)
                             .unwrap_or(0);
                         if arr_len + raw_idx < 0 {
                             let prefix = EXPAND_ERROR_PREFIX.with(|p| {

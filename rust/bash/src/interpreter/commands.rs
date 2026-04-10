@@ -2623,7 +2623,7 @@ impl Shell {
                     let arr_len = self
                         .arrays
                         .get(&resolved_base)
-                        .map(|a| a.len() as i64)
+                        .map(|a| crate::interpreter::array_effective_len(a) as i64)
                         .unwrap_or(0);
                     if arr_len + raw_idx < 0 {
                         let name = self
@@ -2755,7 +2755,7 @@ impl Shell {
                             if let Some(arr) = self.arrays.get_mut(&resolved) {
                                 // Handle negative indices
                                 let idx = if raw_idx < 0 {
-                                    let len = arr.len() as i64;
+                                    let len = crate::interpreter::array_effective_len(arr) as i64;
                                     (len + raw_idx).max(0) as usize
                                 } else {
                                     raw_idx as usize
@@ -2952,7 +2952,7 @@ impl Shell {
                                 self.declared_unset.remove(&resolved);
                                 let arr = self.arrays.entry(resolved).or_default();
                                 let idx = if raw_idx < 0 {
-                                    let len = arr.len() as i64;
+                                    let len = crate::interpreter::array_effective_len(arr) as i64;
                                     let computed = len + raw_idx;
                                     if computed < 0 {
                                         eprintln!(
@@ -3097,7 +3097,7 @@ impl Shell {
                         Vec::new()
                     };
                     let is_integer = self.integer_vars.contains(&resolved);
-                    let mut next_idx = arr.len();
+                    let mut next_idx = crate::interpreter::array_effective_len(&arr);
                     let ifs = self
                         .vars
                         .get("IFS")
@@ -3135,16 +3135,21 @@ impl Shell {
                             }
                             let raw_idx = self.eval_arith_expr(&idx_str);
                             if raw_idx < 0 {
-                                // Negative index in compound assignment → bad array subscript
-                                eprintln!(
-                                    "{}: [{}]={}: bad array subscript",
-                                    self.error_prefix(),
-                                    idx_str,
-                                    self.expand_word_single(&elem.value)
-                                );
-                                self.last_status = 1;
-                                self.arrays.insert(resolved, arr);
-                                return;
+                                // Negative index in compound assignment — resolve
+                                // relative to effective array length (max_assigned + 1)
+                                let eff_len = crate::interpreter::array_effective_len(&arr) as i64;
+                                let computed = eff_len + raw_idx;
+                                if computed < 0 {
+                                    eprintln!(
+                                        "{}: [{}]={}: bad array subscript",
+                                        self.error_prefix(),
+                                        idx_str,
+                                        self.expand_word_single(&elem.value)
+                                    );
+                                    self.last_status = 1;
+                                    self.arrays.insert(resolved, arr);
+                                    return;
+                                }
                             }
 
                             let raw = self.expand_word_single(&elem.value);
@@ -3153,7 +3158,12 @@ impl Shell {
                             } else {
                                 raw
                             };
-                            let idx = raw_idx as usize;
+                            let idx = if raw_idx < 0 {
+                                let eff_len = crate::interpreter::array_effective_len(&arr) as i64;
+                                (eff_len + raw_idx) as usize
+                            } else {
+                                raw_idx as usize
+                            };
                             while arr.len() <= idx {
                                 arr.push(None);
                             }
