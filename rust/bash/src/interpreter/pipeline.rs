@@ -343,9 +343,15 @@ impl Shell {
                     self.integer_vars.remove(&var_name);
                 }
                 if saved.was_readonly {
-                    self.readonly_vars.insert(var_name);
+                    self.readonly_vars.insert(var_name.clone());
                 } else {
                     self.readonly_vars.remove(&var_name);
+                }
+                // Restore declared_unset status
+                if saved.was_declared_unset {
+                    self.declared_unset.insert(var_name);
+                } else {
+                    self.declared_unset.remove(&var_name);
                 }
             }
         }

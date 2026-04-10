@@ -38,6 +38,7 @@ pub struct SavedVar {
     pub assoc: Option<AssocArray>,
     pub was_integer: bool,
     pub was_readonly: bool,
+    pub was_declared_unset: bool,
 }
 
 /// Bash-compatible hash function (FNV-1 variant) for associative arrays.
@@ -932,6 +933,7 @@ impl Shell {
                     assoc: self.assoc_arrays.get(name).cloned(),
                     was_integer: self.integer_vars.contains(name),
                     was_readonly: self.readonly_vars.contains(name),
+                    was_declared_unset: self.declared_unset.contains(name),
                 },
             );
             // Remove readonly for the local scope (will be re-applied if -r is used)
@@ -951,6 +953,7 @@ impl Shell {
                             assoc: None,
                             was_integer: false,
                             was_readonly: false,
+                            was_declared_unset: false,
                         },
                     );
                 }

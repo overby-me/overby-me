@@ -618,7 +618,17 @@ impl ExpCtx<'_> {
                 return arr.get(n).is_some_and(|v| v.is_some());
             }
             if let Some(assoc) = self.assoc_arrays.get(&base_resolved) {
-                return assoc.contains_key(idx_str);
+                // Strip surrounding quotes from subscript key, matching lookup_var behavior.
+                // e.g., ${A['key']:-default} → check key "key", not "'key'"
+                let stripped = if idx_str.len() >= 2
+                    && ((idx_str.starts_with('"') && idx_str.ends_with('"'))
+                        || (idx_str.starts_with('\'') && idx_str.ends_with('\'')))
+                {
+                    &idx_str[1..idx_str.len() - 1]
+                } else {
+                    idx_str
+                };
+                return assoc.contains_key(stripped);
             }
             return self.vars.contains_key(&base_resolved);
         }
@@ -1765,7 +1775,20 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                 // lookup and print the error a second time).
                 out.push(Segment::Unquoted(orig_val));
             } else {
-                let mut val = expand_param(expr, ctx, cmd_sub);
+                // If we already pre-expanded comsubs in the subscript for
+                // lookup_var above, pass the expanded name to expand_param
+                // so it doesn't re-execute the command substitution.
+                let expanded_expr;
+                let effective_expr = if lookup_name_ref != expr.name.as_str() {
+                    expanded_expr = crate::ast::ParamExpr {
+                        name: lookup_name_ref.to_string(),
+                        op: expr.op.clone(),
+                    };
+                    &expanded_expr
+                } else {
+                    expr
+                };
+                let mut val = expand_param(effective_expr, ctx, cmd_sub);
                 // Apply tilde expansion for default/assign values
                 if matches!(
                     &expr.op,

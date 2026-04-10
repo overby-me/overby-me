@@ -2318,14 +2318,24 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     }
                     status = 1;
                 } else if !shell.assoc_arrays.contains_key(name) {
-                    let mut new_map = crate::interpreter::AssocArray::default();
-                    // Convert existing scalar value to element [0]
-                    if let Some(val) = shell.vars.remove(name) {
-                        new_map.insert("0".to_string(), val);
-                    } else {
+                    if make_local {
+                        // In a function, `declare -A name` creates a new empty
+                        // local associative array — do NOT carry over the global
+                        // scalar value as element ["0"].
+                        shell.vars.remove(name);
+                        let new_map = crate::interpreter::AssocArray::default();
+                        shell.assoc_arrays.insert(name.to_string(), new_map);
                         shell.declared_unset.insert(name.to_string());
+                    } else {
+                        let mut new_map = crate::interpreter::AssocArray::default();
+                        // Convert existing scalar value to element [0]
+                        if let Some(val) = shell.vars.remove(name) {
+                            new_map.insert("0".to_string(), val);
+                        } else {
+                            shell.declared_unset.insert(name.to_string());
+                        }
+                        shell.assoc_arrays.insert(name.to_string(), new_map);
                     }
-                    shell.assoc_arrays.insert(name.to_string(), new_map);
                 }
             } else if flag_array {
                 // Error if trying to convert an existing assoc array to indexed
@@ -2362,12 +2372,21 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     }
                     status = 1;
                 } else if !shell.arrays.contains_key(name) {
-                    // Convert existing scalar value to array[0]
-                    if let Some(val) = shell.vars.remove(name) {
-                        shell.arrays.insert(name.to_string(), vec![Some(val)]);
-                    } else {
-                        shell.arrays.entry(name.to_string()).or_default();
+                    if make_local {
+                        // In a function, `declare -a name` creates a new empty
+                        // local indexed array — do NOT carry over the global
+                        // scalar value as element [0].
+                        shell.vars.remove(name);
+                        shell.arrays.insert(name.to_string(), vec![]);
                         shell.declared_unset.insert(name.to_string());
+                    } else {
+                        // Convert existing scalar value to array[0]
+                        if let Some(val) = shell.vars.remove(name) {
+                            shell.arrays.insert(name.to_string(), vec![Some(val)]);
+                        } else {
+                            shell.arrays.entry(name.to_string()).or_default();
+                            shell.declared_unset.insert(name.to_string());
+                        }
                     }
                 }
             } else if had_subscript && !shell.arrays.contains_key(name) {
