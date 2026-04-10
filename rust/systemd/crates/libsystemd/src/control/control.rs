@@ -7638,6 +7638,11 @@ pub fn execute_command(
         }
         Command::StartNoBlock(unit_names) => {
             // Like Start but returns immediately — activation runs in background.
+            // Filter out --job-mode= pseudo-params passed by systemctl.
+            let unit_names: Vec<&String> = unit_names
+                .iter()
+                .filter(|n| !n.starts_with("--job-mode="))
+                .collect();
             for unit_name in &unit_names {
                 let id = find_or_load_unit(unit_name, &run_info)?;
 
@@ -7878,6 +7883,11 @@ pub fn execute_command(
         }
         Command::StopNoBlock(unit_names) => {
             // Like Stop but returns immediately — deactivation runs in background.
+            // Filter out --job-mode= pseudo-params passed by systemctl.
+            let unit_names: Vec<&String> = unit_names
+                .iter()
+                .filter(|n| !n.starts_with("--job-mode="))
+                .collect();
             let ri = run_info.read_poisoned();
             let mut ids = Vec::new();
             for unit_name in &unit_names {
