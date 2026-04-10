@@ -1819,6 +1819,16 @@ impl Shell {
                 let has_global_flag = args
                     .iter()
                     .any(|a| a.starts_with('-') && a.len() > 1 && a.contains('g'));
+                // Check case-modification flags for compound array assignments
+                let has_uppercase_flag = args
+                    .iter()
+                    .any(|a| a.starts_with('-') && a.len() > 1 && a.contains('u'));
+                let has_lowercase_flag = args
+                    .iter()
+                    .any(|a| a.starts_with('-') && a.len() > 1 && a.contains('l'));
+                let has_capitalize_flag = args
+                    .iter()
+                    .any(|a| a.starts_with('-') && a.len() > 1 && a.contains('c'));
 
                 let mut new_args = Vec::new();
                 let mut modified = false;
@@ -1992,8 +2002,25 @@ impl Shell {
                                         .unwrap_or_else(|| " \t\n".to_string());
                                     let word = crate::lexer::lex_compound_array_content(inner);
                                     let expanded = self.expand_word_fields(&word, &ifs);
-                                    let arr: Vec<Option<String>> =
+                                    let mut arr: Vec<Option<String>> =
                                         expanded.into_iter().map(Some).collect();
+                                    // Apply case-modification from declare flags
+                                    if has_uppercase_flag
+                                        || has_lowercase_flag
+                                        || has_capitalize_flag
+                                    {
+                                        for val in arr.iter_mut().flatten() {
+                                            *val = if has_uppercase_flag {
+                                                val.to_uppercase()
+                                            } else if has_lowercase_flag {
+                                                val.to_lowercase()
+                                            } else {
+                                                crate::interpreter::capitalize_string(val)
+                                            };
+                                        }
+                                    } else {
+                                        self.apply_case_attrs_to_array(name, &mut arr);
+                                    }
                                     self.arrays.insert(name.to_string(), arr);
                                 } else {
                                     // Re-expand compound assignment elements
@@ -2072,28 +2099,22 @@ impl Shell {
                                                         self.expand_word_fields(&sub_word, &ifs);
                                                     for f in fields {
                                                         // Handle [subscript]=value format
-                                                        if f.starts_with('[') {
-                                                            if let Some(bracket_end) = f.find(']') {
-                                                                if f.as_bytes().get(bracket_end + 1)
-                                                                    == Some(&b'=')
-                                                                {
-                                                                    let subscript =
-                                                                        &f[1..bracket_end];
-                                                                    let value =
-                                                                        &f[bracket_end + 2..];
-                                                                    if let Ok(idx) = subscript
-                                                                        .trim()
-                                                                        .parse::<usize>()
-                                                                    {
-                                                                        while arr.len() <= idx {
-                                                                            arr.push(None);
-                                                                        }
-                                                                        arr[idx] =
-                                                                            Some(value.to_string());
-                                                                        next_idx = idx + 1;
-                                                                        continue;
-                                                                    }
+                                                        if f.starts_with('[')
+                                                            && let Some(bracket_end) = f.find(']')
+                                                            && f.as_bytes().get(bracket_end + 1)
+                                                                == Some(&b'=')
+                                                        {
+                                                            let subscript = &f[1..bracket_end];
+                                                            let value = &f[bracket_end + 2..];
+                                                            if let Ok(idx) =
+                                                                subscript.trim().parse::<usize>()
+                                                            {
+                                                                while arr.len() <= idx {
+                                                                    arr.push(None);
                                                                 }
+                                                                arr[idx] = Some(value.to_string());
+                                                                next_idx = idx + 1;
+                                                                continue;
                                                             }
                                                         }
                                                         while arr.len() <= next_idx {
@@ -2103,16 +2124,52 @@ impl Shell {
                                                         next_idx += 1;
                                                     }
                                                 }
+                                                // Apply case-modification from declare flags
+                                                if has_uppercase_flag
+                                                    || has_lowercase_flag
+                                                    || has_capitalize_flag
+                                                {
+                                                    for val in arr.iter_mut().flatten() {
+                                                        *val = if has_uppercase_flag {
+                                                            val.to_uppercase()
+                                                        } else if has_lowercase_flag {
+                                                            val.to_lowercase()
+                                                        } else {
+                                                            crate::interpreter::capitalize_string(
+                                                                val,
+                                                            )
+                                                        };
+                                                    }
+                                                } else {
+                                                    self.apply_case_attrs_to_array(name, &mut arr);
+                                                }
                                                 self.arrays.insert(name.to_string(), arr);
                                                 used_word_expand = true;
                                             }
                                         }
                                     }
                                     if !used_word_expand {
-                                        let arr =
+                                        let mut arr =
                                             crate::builtins::parse_indexed_compound_assignment(
                                                 value,
                                             );
+                                        // Apply case-modification from declare flags
+                                        if has_uppercase_flag
+                                            || has_lowercase_flag
+                                            || has_capitalize_flag
+                                        {
+                                            for val in arr.iter_mut().flatten() {
+                                                *val = if has_uppercase_flag {
+                                                    val.to_uppercase()
+                                                } else if has_lowercase_flag {
+                                                    val.to_lowercase()
+                                                } else {
+                                                    crate::interpreter::capitalize_string(val)
+                                                };
+                                            }
+                                        } else {
+                                            self.apply_case_attrs_to_array(name, &mut arr);
+                                        }
                                         self.arrays.insert(name.to_string(), arr);
                                     }
                                 }

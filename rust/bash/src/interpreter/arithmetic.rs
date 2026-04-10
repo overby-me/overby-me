@@ -200,11 +200,12 @@ impl Shell {
                     .insert(key.clone(), val.to_string());
             }
             ArithSubscript::Indexed(resolved, idx) => {
+                let val_str = self.apply_case_attrs(resolved, val.to_string());
                 let arr = self.arrays.entry(resolved.clone()).or_default();
                 while arr.len() <= *idx {
                     arr.push(None);
                 }
-                arr[*idx] = Some(val.to_string());
+                arr[*idx] = Some(val_str);
             }
         }
     }

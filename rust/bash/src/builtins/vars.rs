@@ -86,7 +86,9 @@ pub(super) fn builtin_export(shell: &mut Shell, args: &[String]) -> i32 {
             };
             if array_mode && value.starts_with('(') && value.ends_with(')') {
                 // -a flag with (value): parse as array
-                let arr = crate::builtins::parse_indexed_compound_assignment(value);
+                let mut arr = crate::builtins::parse_indexed_compound_assignment(value);
+                // Case attrs should already be in the sets for export context
+                shell.apply_case_attrs_to_array(name, &mut arr);
                 let export_val = arr.iter().find_map(|v| v.clone()).unwrap_or_default();
                 shell.arrays.insert(name.to_string(), arr);
                 shell.exports.insert(name.to_string(), export_val.clone());
@@ -670,7 +672,8 @@ pub(super) fn builtin_readonly(shell: &mut Shell, args: &[String]) -> i32 {
                     status = 1;
                 } else if array_mode && value.starts_with('(') && value.ends_with(')') {
                     // -a flag with (value): parse as array
-                    let arr = crate::builtins::parse_indexed_compound_assignment(value);
+                    let mut arr = crate::builtins::parse_indexed_compound_assignment(value);
+                    shell.apply_case_attrs_to_array(vname, &mut arr);
                     shell.arrays.insert(vname.to_string(), arr);
                 } else if shell.arrays.contains_key(vname) {
                     // Existing array: assign to element 0
@@ -852,7 +855,8 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
                     shell.namerefs.insert(name.to_string(), value.to_string());
                 }
             } else if flag_array {
-                let arr = crate::builtins::parse_indexed_compound_assignment(value);
+                let mut arr = crate::builtins::parse_indexed_compound_assignment(value);
+                shell.apply_case_attrs_to_array(name, &mut arr);
                 shell.arrays.insert(name.to_string(), arr);
             } else if flag_integer {
                 let n = shell.eval_arith_expr(value);
@@ -1311,11 +1315,20 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     if shell.integer_vars.contains(name.as_str()) {
                         flags.push('i');
                     }
+                    if shell.lowercase_vars.contains(name.as_str()) {
+                        flags.push('l');
+                    }
                     if shell.readonly_vars.contains(name.as_str()) {
                         flags.push('r');
                     }
+                    if shell.uppercase_vars.contains(name.as_str()) {
+                        flags.push('u');
+                    }
                     if shell.exports.contains_key(name.as_str()) {
                         flags.push('x');
+                    }
+                    if shell.capitalize_vars.contains(name.as_str()) {
+                        flags.push('c');
                     }
                     let arr = &shell.arrays[name];
                     let has_elements = arr.iter().any(|v| v.is_some());
@@ -1337,11 +1350,20 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     if shell.integer_vars.contains(name) {
                         flags.push('i');
                     }
+                    if shell.lowercase_vars.contains(name) {
+                        flags.push('l');
+                    }
                     if shell.readonly_vars.contains(name) {
                         flags.push('r');
                     }
+                    if shell.uppercase_vars.contains(name) {
+                        flags.push('u');
+                    }
                     if shell.exports.contains_key(name) {
                         flags.push('x');
+                    }
+                    if shell.capitalize_vars.contains(name) {
+                        flags.push('c');
                     }
                     if flags == "-" {
                         flags.push('-');
@@ -1366,19 +1388,43 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     if shell.integer_vars.contains(name) {
                         flags.push('i');
                     }
+                    if shell.lowercase_vars.contains(name) {
+                        flags.push('l');
+                    }
                     if shell.readonly_vars.contains(name) {
                         flags.push('r');
                     }
+                    if shell.uppercase_vars.contains(name) {
+                        flags.push('u');
+                    }
                     if shell.exports.contains_key(name) {
                         flags.push('x');
+                    }
+                    if shell.capitalize_vars.contains(name) {
+                        flags.push('c');
                     }
                     if flags == "-" {
                         flags.push('-');
                     }
                     if shell.arrays.contains_key(name) {
                         let mut aflags = String::from("-a");
+                        if shell.integer_vars.contains(name) {
+                            aflags.push('i');
+                        }
+                        if shell.lowercase_vars.contains(name) {
+                            aflags.push('l');
+                        }
                         if shell.readonly_vars.contains(name) {
                             aflags.push('r');
+                        }
+                        if shell.uppercase_vars.contains(name) {
+                            aflags.push('u');
+                        }
+                        if shell.exports.contains_key(name) {
+                            aflags.push('x');
+                        }
+                        if shell.capitalize_vars.contains(name) {
+                            aflags.push('c');
                         }
                         println!("declare {} {}", aflags, name);
                     } else {
@@ -1395,11 +1441,20 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     if shell.integer_vars.contains(name.as_str()) {
                         flags.push('i');
                     }
+                    if shell.lowercase_vars.contains(name.as_str()) {
+                        flags.push('l');
+                    }
                     if shell.readonly_vars.contains(name.as_str()) {
                         flags.push('r');
                     }
+                    if shell.uppercase_vars.contains(name.as_str()) {
+                        flags.push('u');
+                    }
                     if shell.exports.contains_key(name.as_str()) {
                         flags.push('x');
+                    }
+                    if shell.capitalize_vars.contains(name.as_str()) {
+                        flags.push('c');
                     }
                     let arr = &shell.arrays[name];
                     let has_elements = arr.iter().any(|v| v.is_some());
@@ -1429,8 +1484,20 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 if shell.integer_vars.contains(name.as_str()) {
                     flags.push('i');
                 }
+                if shell.lowercase_vars.contains(name.as_str()) {
+                    flags.push('l');
+                }
                 if shell.readonly_vars.contains(name.as_str()) {
                     flags.push('r');
+                }
+                if shell.uppercase_vars.contains(name.as_str()) {
+                    flags.push('u');
+                }
+                if shell.exports.contains_key(name.as_str()) {
+                    flags.push('x');
+                }
+                if shell.capitalize_vars.contains(name.as_str()) {
+                    flags.push('c');
                 }
                 if assoc.is_empty() && shell.declared_unset.contains(name) {
                     println!("declare {} {}", flags, name);
@@ -1461,11 +1528,20 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     if shell.integer_vars.contains(name.as_str()) {
                         flags.push('i');
                     }
+                    if shell.lowercase_vars.contains(name.as_str()) {
+                        flags.push('l');
+                    }
                     if shell.readonly_vars.contains(name.as_str()) {
                         flags.push('r');
                     }
+                    if shell.uppercase_vars.contains(name.as_str()) {
+                        flags.push('u');
+                    }
                     if shell.exports.contains_key(name.as_str()) {
                         flags.push('x');
+                    }
+                    if shell.capitalize_vars.contains(name.as_str()) {
+                        flags.push('c');
                     }
                     let has_elements = arr.iter().any(|v| v.is_some());
                     if shell.declared_unset.contains(name) && !has_elements {
@@ -1486,8 +1562,20 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     if shell.integer_vars.contains(name.as_str()) {
                         flags.push('i');
                     }
+                    if shell.lowercase_vars.contains(name.as_str()) {
+                        flags.push('l');
+                    }
                     if shell.readonly_vars.contains(name.as_str()) {
                         flags.push('r');
+                    }
+                    if shell.uppercase_vars.contains(name.as_str()) {
+                        flags.push('u');
+                    }
+                    if shell.exports.contains_key(name.as_str()) {
+                        flags.push('x');
+                    }
+                    if shell.capitalize_vars.contains(name.as_str()) {
+                        flags.push('c');
                     }
                     if assoc.is_empty() && shell.declared_unset.contains(name.as_str()) {
                         println!("declare {} {}", flags, name);
@@ -1507,11 +1595,20 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     if shell.integer_vars.contains(name.as_str()) {
                         flags.push('i');
                     }
+                    if shell.lowercase_vars.contains(name.as_str()) {
+                        flags.push('l');
+                    }
                     if shell.readonly_vars.contains(name.as_str()) {
                         flags.push('r');
                     }
+                    if shell.uppercase_vars.contains(name.as_str()) {
+                        flags.push('u');
+                    }
                     if shell.exports.contains_key(name.as_str()) {
                         flags.push('x');
+                    }
+                    if shell.capitalize_vars.contains(name.as_str()) {
+                        flags.push('c');
                     }
                     if flags == "-" {
                         flags.push('-');
@@ -1526,11 +1623,20 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     if shell.integer_vars.contains(name.as_str()) {
                         flags.push('i');
                     }
+                    if shell.lowercase_vars.contains(name.as_str()) {
+                        flags.push('l');
+                    }
                     if shell.readonly_vars.contains(name.as_str()) {
                         flags.push('r');
                     }
+                    if shell.uppercase_vars.contains(name.as_str()) {
+                        flags.push('u');
+                    }
                     if shell.exports.contains_key(name.as_str()) {
                         flags.push('x');
+                    }
+                    if shell.capitalize_vars.contains(name.as_str()) {
+                        flags.push('c');
                     }
                     if flags == "-" {
                         flags.push('-');
@@ -1616,11 +1722,20 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 if shell.integer_vars.contains(name.as_str()) {
                     flags.push('i');
                 }
+                if shell.lowercase_vars.contains(name.as_str()) {
+                    flags.push('l');
+                }
                 if shell.readonly_vars.contains(name.as_str()) {
                     flags.push('r');
                 }
+                if shell.uppercase_vars.contains(name.as_str()) {
+                    flags.push('u');
+                }
                 if shell.exports.contains_key(name.as_str()) {
                     flags.push('x');
+                }
+                if shell.capitalize_vars.contains(name.as_str()) {
+                    flags.push('c');
                 }
                 let has_elements = arr.iter().any(|v| v.is_some());
                 if has_elements {
@@ -1662,8 +1777,20 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 if shell.integer_vars.contains(name.as_str()) {
                     flags.push('i');
                 }
+                if shell.lowercase_vars.contains(name.as_str()) {
+                    flags.push('l');
+                }
                 if shell.readonly_vars.contains(name.as_str()) {
                     flags.push('r');
+                }
+                if shell.uppercase_vars.contains(name.as_str()) {
+                    flags.push('u');
+                }
+                if shell.exports.contains_key(name.as_str()) {
+                    flags.push('x');
+                }
+                if shell.capitalize_vars.contains(name.as_str()) {
+                    flags.push('c');
                 }
                 if assoc.is_empty() && shell.declared_unset.contains(name.as_str()) {
                     println!("declare {} {}", flags, name);
@@ -1726,7 +1853,19 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                         let map = parse_assoc_literal(value);
                         shell.assoc_arrays.insert(resolved_base.clone(), map);
                     } else if value.starts_with('(') && value.ends_with(')') {
-                        let arr = crate::builtins::parse_indexed_compound_assignment(value);
+                        let mut arr = crate::builtins::parse_indexed_compound_assignment(value);
+                        // Apply case transforms using local flags (attrs not yet in sets)
+                        if flag_uppercase || flag_lowercase || flag_capitalize {
+                            for val in arr.iter_mut().flatten() {
+                                *val = if flag_uppercase {
+                                    val.to_uppercase()
+                                } else if flag_lowercase {
+                                    val.to_lowercase()
+                                } else {
+                                    crate::interpreter::capitalize_string(val)
+                                };
+                            }
+                        }
                         shell.arrays.insert(resolved_base.clone(), arr);
                     } else {
                         // Scalar value: assign to element at the given subscript
@@ -1748,6 +1887,15 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                             shell.eval_arith_expr(value).to_string()
                         } else {
                             value.to_string()
+                        };
+                        let val = if flag_uppercase {
+                            val.to_uppercase()
+                        } else if flag_lowercase {
+                            val.to_lowercase()
+                        } else if flag_capitalize {
+                            crate::interpreter::capitalize_string(&val)
+                        } else {
+                            val
                         };
                         let arr = shell.arrays.entry(resolved_base.clone()).or_default();
                         let idx = if raw_idx < 0 {
@@ -1842,6 +1990,15 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     } else {
                         value.to_string()
                     };
+                    let val = if flag_uppercase {
+                        val.to_uppercase()
+                    } else if flag_lowercase {
+                        val.to_lowercase()
+                    } else if flag_capitalize {
+                        crate::interpreter::capitalize_string(&val)
+                    } else {
+                        val
+                    };
                     let arr = shell.arrays.entry(resolved_base).or_default();
                     let idx = if raw_idx < 0 {
                         let len = array_effective_len(arr) as i64;
@@ -1927,7 +2084,7 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     shell.integer_vars.insert(name.to_string());
                 }
             } else if flag_array {
-                let arr = crate::builtins::parse_indexed_compound_assignment(value);
+                let mut arr = crate::builtins::parse_indexed_compound_assignment(value);
                 if flag_integer {
                     // Evaluate each element as arithmetic when -i is set
                     let evaluated: Vec<Option<String>> = arr
@@ -1937,6 +2094,19 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     shell.arrays.insert(name.to_string(), evaluated);
                     shell.integer_vars.insert(name.to_string());
                 } else {
+                    // Apply case transforms directly using local flags, since
+                    // uppercase_vars/lowercase_vars aren't populated yet
+                    if flag_uppercase || flag_lowercase || flag_capitalize {
+                        for val in arr.iter_mut().flatten() {
+                            *val = if flag_uppercase {
+                                val.to_uppercase()
+                            } else if flag_lowercase {
+                                val.to_lowercase()
+                            } else {
+                                crate::interpreter::capitalize_string(val)
+                            };
+                        }
+                    }
                     shell.arrays.insert(name.to_string(), arr);
                 }
             } else if flag_integer {
@@ -1979,9 +2149,15 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             if flag_uppercase {
                 shell.uppercase_vars.insert(name.to_string());
                 shell.lowercase_vars.remove(name);
-                // Apply to current value
+                // Apply to current scalar value
                 if let Some(v) = shell.vars.get(name).cloned() {
                     shell.vars.insert(name.to_string(), v.to_uppercase());
+                }
+                // Apply to array elements
+                if let Some(arr) = shell.arrays.get_mut(name) {
+                    for val in arr.iter_mut().flatten() {
+                        *val = val.to_uppercase();
+                    }
                 }
             }
             if flag_lowercase {
@@ -1991,6 +2167,12 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 if let Some(v) = shell.vars.get(name).cloned() {
                     shell.vars.insert(name.to_string(), v.to_lowercase());
                 }
+                // Apply to array elements
+                if let Some(arr) = shell.arrays.get_mut(name) {
+                    for val in arr.iter_mut().flatten() {
+                        *val = val.to_lowercase();
+                    }
+                }
             }
             if flag_capitalize {
                 shell.capitalize_vars.insert(name.to_string());
@@ -1999,6 +2181,12 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 if let Some(v) = shell.vars.get(name).cloned() {
                     let cap = capitalize_string(&v);
                     shell.vars.insert(name.to_string(), cap);
+                }
+                // Apply to array elements
+                if let Some(arr) = shell.arrays.get_mut(name) {
+                    for val in arr.iter_mut().flatten() {
+                        *val = capitalize_string(val);
+                    }
                 }
             }
         } else {
@@ -2146,14 +2334,12 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 // all elements as arithmetic expressions.  This handles
                 // `declare -ai arr=(1+1 2+2 3+3)` where the compound
                 // assignment was executed before the integer flag was set.
-                if !was_integer {
-                    if let Some(arr) = shell.arrays.get(name).cloned() {
-                        let evaluated: Vec<Option<String>> = arr
-                            .into_iter()
-                            .map(|v| v.map(|s| shell.eval_arith_expr(&s).to_string()))
-                            .collect();
-                        shell.arrays.insert(name.to_string(), evaluated);
-                    }
+                if !was_integer && let Some(arr) = shell.arrays.get(name).cloned() {
+                    let evaluated: Vec<Option<String>> = arr
+                        .into_iter()
+                        .map(|v| v.map(|s| shell.eval_arith_expr(&s).to_string()))
+                        .collect();
+                    shell.arrays.insert(name.to_string(), evaluated);
                 }
             }
             if flag_readonly {

@@ -270,6 +270,7 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                     return result;
                 }
                 shell.declared_unset.remove(&resolved);
+                let output_str = shell.apply_case_attrs(&resolved, output_str);
                 let arr = shell.arrays.entry(resolved).or_default();
                 while arr.len() <= idx {
                     arr.push(None);
@@ -2297,6 +2298,7 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
                         .arrays
                         .insert(resolved_base.clone(), vec![Some(scalar_val)]);
                 }
+                let value = shell.apply_case_attrs(name.as_str(), value);
                 let arr = shell.arrays.entry(resolved_base).or_default();
                 while arr.len() <= idx {
                     arr.push(None);

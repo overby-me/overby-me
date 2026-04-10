@@ -873,6 +873,43 @@ impl Shell {
         }
     }
 
+    /// Apply case-modification attributes (uppercase/lowercase/capitalize) to a value.
+    /// Used for both scalar and array element assignments to ensure `-u`, `-l`, `-c`
+    /// attributes are respected.
+    pub fn apply_case_attrs(&self, name: &str, value: String) -> String {
+        let resolved = self.resolve_nameref(name);
+        if self.uppercase_vars.contains(&resolved) {
+            value.to_uppercase()
+        } else if self.lowercase_vars.contains(&resolved) {
+            value.to_lowercase()
+        } else if self.capitalize_vars.contains(&resolved) {
+            capitalize_string(&value)
+        } else {
+            value
+        }
+    }
+
+    /// Apply case-modification attributes to all elements of an indexed array in-place.
+    /// Called after building the array but before inserting into `self.arrays`.
+    pub fn apply_case_attrs_to_array(&self, name: &str, arr: &mut [Option<String>]) {
+        let resolved = self.resolve_nameref(name);
+        let is_upper = self.uppercase_vars.contains(&resolved);
+        let is_lower = self.lowercase_vars.contains(&resolved);
+        let is_cap = self.capitalize_vars.contains(&resolved);
+        if !is_upper && !is_lower && !is_cap {
+            return;
+        }
+        for val in arr.iter_mut().flatten() {
+            *val = if is_upper {
+                val.to_uppercase()
+            } else if is_lower {
+                val.to_lowercase()
+            } else {
+                capitalize_string(val)
+            };
+        }
+    }
+
     /// Declare a local variable — saves the old value for restoration on function exit.
     pub fn declare_local(&mut self, name: &str) {
         if let Some(scope) = self.local_scopes.last_mut()
