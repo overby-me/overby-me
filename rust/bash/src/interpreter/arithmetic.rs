@@ -487,8 +487,11 @@ impl Shell {
         // Expand command substitutions $(...), parameter expansions ${...},
         // and backtick comsubs `...`
         // BEFORE stripping quotes, since commands inside $() need their quotes preserved
+        // BUT: when arith_skip_comsub_expand is set (array_expand_once mode for
+        // subscript evaluation), do NOT expand $(...) — pass the raw text through
+        // so the arithmetic parser errors on it (preventing injection).
         let expanded_cs: String;
-        let expr = if expr.contains('$') || expr.contains('`') {
+        let expr = if !self.arith_skip_comsub_expand && (expr.contains('$') || expr.contains('`')) {
             expanded_cs = self.expand_comsubs_in_arith(expr);
             // Update top expression with expanded version for error messages
             if self.arith_depth == 1

@@ -319,7 +319,12 @@ pub(super) fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
                     .get_mut(&resolved)
                     .map(|a| a.remove(idx_str));
             } else {
+                let aeo = shell.is_array_expand_once();
+                if aeo {
+                    shell.arith_skip_comsub_expand = true;
+                }
                 let raw_idx = shell.eval_arith_expr(idx_str);
+                shell.arith_skip_comsub_expand = false;
                 // Check if base is a scalar (not an array) — unset scalar[n] where n!=0
                 // should error with "not an array variable", but only if the variable
                 // actually exists as a scalar.  Unsetting a subscript on a completely
@@ -1717,7 +1722,12 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                         shell.arrays.insert(resolved_base.clone(), arr);
                     } else {
                         // Scalar value: assign to element at the given subscript
+                        let aeo = shell.is_array_expand_once();
+                        if aeo {
+                            shell.arith_skip_comsub_expand = true;
+                        }
                         let raw_idx = shell.eval_arith_expr(idx_str);
+                        shell.arith_skip_comsub_expand = false;
                         let val = if flag_integer {
                             shell.eval_arith_expr(value).to_string()
                         } else {
@@ -1796,7 +1806,12 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     }
                 } else {
                     // Indexed array element assignment
+                    let aeo = shell.is_array_expand_once();
+                    if aeo {
+                        shell.arith_skip_comsub_expand = true;
+                    }
                     let raw_idx = shell.eval_arith_expr(idx_str);
+                    shell.arith_skip_comsub_expand = false;
                     let is_int = flag_integer || shell.integer_vars.contains(&resolved_base);
                     let val = if is_int {
                         shell.eval_arith_expr(value).to_string()
@@ -1889,9 +1904,16 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 }
             } else if flag_array {
                 let arr = crate::builtins::parse_indexed_compound_assignment(value);
-                shell.arrays.insert(name.to_string(), arr);
                 if flag_integer {
+                    // Evaluate each element as arithmetic when -i is set
+                    let evaluated: Vec<Option<String>> = arr
+                        .into_iter()
+                        .map(|v| v.map(|s| shell.eval_arith_expr(&s).to_string()))
+                        .collect();
+                    shell.arrays.insert(name.to_string(), evaluated);
                     shell.integer_vars.insert(name.to_string());
+                } else {
+                    shell.arrays.insert(name.to_string(), arr);
                 }
             } else if flag_integer {
                 // Mark as integer and evaluate as arithmetic
@@ -2094,7 +2116,21 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             }
 
             if flag_integer {
+                let was_integer = shell.integer_vars.contains(name);
                 shell.integer_vars.insert(name.to_string());
+                // When -i is newly applied to an existing array, re-evaluate
+                // all elements as arithmetic expressions.  This handles
+                // `declare -ai arr=(1+1 2+2 3+3)` where the compound
+                // assignment was executed before the integer flag was set.
+                if !was_integer {
+                    if let Some(arr) = shell.arrays.get(name).cloned() {
+                        let evaluated: Vec<Option<String>> = arr
+                            .into_iter()
+                            .map(|v| v.map(|s| shell.eval_arith_expr(&s).to_string()))
+                            .collect();
+                        shell.arrays.insert(name.to_string(), evaluated);
+                    }
+                }
             }
             if flag_readonly {
                 shell.readonly_vars.insert(name.to_string());

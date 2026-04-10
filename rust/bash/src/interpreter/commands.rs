@@ -490,6 +490,17 @@ impl Shell {
         crate::expand::set_nullglob(self.shopt_nullglob);
         crate::expand::set_nocasematch(self.shopt_nocasematch);
         crate::expand::set_posix_mode(self.opt_posix);
+        crate::expand::set_array_expand_once(
+            self.shopt_options
+                .get("array_expand_once")
+                .copied()
+                .unwrap_or(false)
+                || self
+                    .shopt_options
+                    .get("assoc_expand_once")
+                    .copied()
+                    .unwrap_or(false),
+        );
         crate::expand::set_patsub_replacement(
             self.shopt_options
                 .get("patsub_replacement")
@@ -710,6 +721,17 @@ impl Shell {
         crate::expand::set_nullglob(self.shopt_nullglob);
         crate::expand::set_nocasematch(self.shopt_nocasematch);
         crate::expand::set_posix_mode(self.opt_posix);
+        crate::expand::set_array_expand_once(
+            self.shopt_options
+                .get("array_expand_once")
+                .copied()
+                .unwrap_or(false)
+                || self
+                    .shopt_options
+                    .get("assoc_expand_once")
+                    .copied()
+                    .unwrap_or(false),
+        );
         crate::expand::set_patsub_replacement(
             self.shopt_options
                 .get("patsub_replacement")
@@ -1792,6 +1814,7 @@ impl Shell {
                 let has_assoc_flag = args
                     .iter()
                     .any(|a| a.starts_with('-') && a.len() > 1 && a.contains('A'));
+
                 let mut new_args = Vec::new();
                 let mut modified = false;
                 for (arg_idx, arg) in args.iter().enumerate() {
@@ -2609,7 +2632,25 @@ impl Shell {
                 if had_single_quotes {
                     self.arith_skip_quote_strip = true;
                 }
-                let raw_idx = self.eval_arith_expr(idx_str);
+                // Pre-expand $(...) and $((...)) in the subscript before
+                // arithmetic evaluation — the arithmetic evaluator doesn't
+                // handle these word-level expansions.
+                // BUT: when array_expand_once (or assoc_expand_once) is set,
+                // do NOT expand $(...) — the subscript should be used as-is
+                // (preventing injection via command substitution in subscripts).
+                let aeo = self.is_array_expand_once();
+                let expanded_idx;
+                let eval_str = if !aeo && (idx_str.contains('$') || idx_str.contains('`')) {
+                    expanded_idx = self.expand_comsubs_in_arith(idx_str);
+                    expanded_idx.as_str()
+                } else {
+                    idx_str
+                };
+                if aeo {
+                    self.arith_skip_comsub_expand = true;
+                }
+                let raw_idx = self.eval_arith_expr(eval_str);
+                self.arith_skip_comsub_expand = false;
                 self.arith_skip_quote_strip = false;
                 // If the subscript itself was a syntax error (e.g. b[c]d),
                 // the error was already printed — bail out to avoid duplicates.
@@ -2736,7 +2777,22 @@ impl Shell {
                             if had_single_quotes {
                                 self.arith_skip_quote_strip = true;
                             }
-                            let raw_idx = self.eval_arith_expr(idx_str);
+                            // Pre-expand $(...) and $((...)) in subscript
+                            // Skip when array_expand_once/assoc_expand_once is set
+                            let aeo = self.is_array_expand_once();
+                            let expanded_idx;
+                            let eval_str =
+                                if !aeo && (idx_str.contains('$') || idx_str.contains('`')) {
+                                    expanded_idx = self.expand_comsubs_in_arith(idx_str);
+                                    expanded_idx.as_str()
+                                } else {
+                                    idx_str
+                                };
+                            if aeo {
+                                self.arith_skip_comsub_expand = true;
+                            }
+                            let raw_idx = self.eval_arith_expr(eval_str);
+                            self.arith_skip_comsub_expand = false;
                             self.arith_skip_quote_strip = false;
                             let is_int = self.integer_vars.contains(&resolved);
                             let addend = if is_int {
@@ -2922,7 +2978,22 @@ impl Shell {
                                 if had_single_quotes {
                                     self.arith_skip_quote_strip = true;
                                 }
-                                let raw_idx = self.eval_arith_expr(idx_str);
+                                // Pre-expand $(...) and $((...)) in subscript
+                                // Skip when array_expand_once/assoc_expand_once is set
+                                let aeo = self.is_array_expand_once();
+                                let expanded_idx;
+                                let eval_str =
+                                    if !aeo && (idx_str.contains('$') || idx_str.contains('`')) {
+                                        expanded_idx = self.expand_comsubs_in_arith(idx_str);
+                                        expanded_idx.as_str()
+                                    } else {
+                                        idx_str
+                                    };
+                                if aeo {
+                                    self.arith_skip_comsub_expand = true;
+                                }
+                                let raw_idx = self.eval_arith_expr(eval_str);
+                                self.arith_skip_comsub_expand = false;
                                 self.arith_skip_quote_strip = false;
                                 if raw_idx < 0 && !self.arrays.contains_key(&resolved) {
                                     eprintln!(
@@ -3133,7 +3204,22 @@ impl Shell {
                                 self.arrays.insert(resolved, arr);
                                 return;
                             }
-                            let raw_idx = self.eval_arith_expr(&idx_str);
+                            // Pre-expand $(...) and $((...)) in subscript
+                            // Skip when array_expand_once/assoc_expand_once is set
+                            let aeo = self.is_array_expand_once();
+                            let expanded_idx;
+                            let eval_str =
+                                if !aeo && (idx_str.contains('$') || idx_str.contains('`')) {
+                                    expanded_idx = self.expand_comsubs_in_arith(&idx_str);
+                                    &expanded_idx
+                                } else {
+                                    &idx_str
+                                };
+                            if aeo {
+                                self.arith_skip_comsub_expand = true;
+                            }
+                            let raw_idx = self.eval_arith_expr(eval_str);
+                            self.arith_skip_comsub_expand = false;
                             if raw_idx < 0 {
                                 // Negative index in compound assignment — resolve
                                 // relative to effective array length (max_assigned + 1)
@@ -4686,9 +4772,19 @@ impl Shell {
                             .is_some_and(|a| a.get(idx).is_some())
                     }
                 } else {
-                    self.vars.contains_key(val)
-                        || self.arrays.contains_key(val)
-                        || self.assoc_arrays.contains_key(val)
+                    // For bare variable names (no subscript), bash checks if
+                    // element [0] is set for arrays — NOT just array existence.
+                    // An array declared but with no element 0 returns false.
+                    if let Some(arr) = self.arrays.get(val) {
+                        arr.first().is_some_and(|v| v.is_some())
+                    } else if self.assoc_arrays.contains_key(val) {
+                        // For assoc arrays, bare name checks key "0"
+                        self.assoc_arrays
+                            .get(val)
+                            .is_some_and(|a| a.contains_key("0"))
+                    } else {
+                        self.vars.contains_key(val)
+                    }
                 }
             }
             "-R" => {

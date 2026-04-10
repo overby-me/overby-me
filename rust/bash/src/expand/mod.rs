@@ -87,6 +87,9 @@ thread_local! {
     static NOCASEMATCH_ENABLED: RefCell<bool> = const { RefCell::new(false) };
     /// Whether POSIX mode is enabled (disables glob expansion in $(< file*) etc.)
     static POSIX_MODE: RefCell<bool> = const { RefCell::new(false) };
+    /// Whether array_expand_once (or assoc_expand_once) is enabled — suppresses
+    /// $(...) expansion in array subscripts to prevent injection.
+    static ARRAY_EXPAND_ONCE: RefCell<bool> = const { RefCell::new(false) };
     /// Whether patsub_replacement shopt is enabled (`&` in replacement = matched text)
     static PATSUB_REPLACEMENT: RefCell<bool> = const { RefCell::new(true) };
     /// GLOBIGNORE patterns (colon-separated, empty = no ignore)
@@ -177,6 +180,14 @@ pub fn set_posix_mode(enabled: bool) {
 
 pub fn get_posix_mode() -> bool {
     POSIX_MODE.with(|d| *d.borrow())
+}
+
+pub fn set_array_expand_once(enabled: bool) {
+    ARRAY_EXPAND_ONCE.with(|d| *d.borrow_mut() = enabled);
+}
+
+pub fn get_array_expand_once() -> bool {
+    ARRAY_EXPAND_ONCE.with(|d| *d.borrow())
 }
 
 pub fn set_patsub_replacement(enabled: bool) {
@@ -1610,10 +1621,61 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
             }
             // For Default/Alt words in unquoted context, check if we should
             // expand per-part for mixed quoting (e.g., ${IFS+foo 'bar' baz})
+            // Pre-expand $(...) and $((...)) in subscripts before lookup_var,
+            // which doesn't have access to cmd_sub for command substitution.
+            // Without this, ${b[$(echo 2)]} fails because lookup_var passes
+            // the unexpanded "$(echo 2)" to arithmetic evaluation.
+            // BUT: when array_expand_once is set, do NOT expand $(...) in
+            // subscripts — the literal text should reach arithmetic evaluation
+            // which will error (preventing injection).
+            let lookup_name;
+            let aeo = get_array_expand_once();
+            let lookup_name_ref = if !aeo
+                && (expr.name.contains("$(") || expr.name.contains('`'))
+                && expr.name.contains('[')
+            {
+                let bracket = expr.name.find('[').unwrap();
+                let base = &expr.name[..bracket];
+                let subscript = &expr.name[bracket + 1..];
+                // Check if the $( or backtick is outside single quotes
+                let has_unquoted_comsub = {
+                    let mut in_sq = false;
+                    let chars: Vec<char> = subscript.chars().collect();
+                    let mut found = false;
+                    let mut j = 0;
+                    while j < chars.len() {
+                        if !in_sq && chars[j] == '\'' {
+                            in_sq = true;
+                            j += 1;
+                        } else if in_sq && chars[j] == '\'' {
+                            in_sq = false;
+                            j += 1;
+                        } else if !in_sq
+                            && ((chars[j] == '$' && j + 1 < chars.len() && chars[j + 1] == '(')
+                                || chars[j] == '`')
+                        {
+                            found = true;
+                            break;
+                        } else {
+                            j += 1;
+                        }
+                    }
+                    found
+                };
+                if has_unquoted_comsub {
+                    let expanded_sub = expand_comsubs_in_arith_expr(subscript, cmd_sub);
+                    lookup_name = format!("{}[{}", base, expanded_sub);
+                    lookup_name.as_str()
+                } else {
+                    expr.name.as_str()
+                }
+            } else {
+                expr.name.as_str()
+            };
             // Clear any pre-existing arith error so we only detect errors
             // from this specific lookup_var call.
             let had_prior_error = take_arith_error();
-            let orig_val = lookup_var(&expr.name, ctx);
+            let orig_val = lookup_var(lookup_name_ref, ctx);
             // If lookup_var triggered a fatal arith error, bail out.
             if get_arith_error() {
                 return;
@@ -1627,7 +1689,7 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
             if had_prior_error {
                 set_arith_error();
             }
-            let orig_set = ctx.is_param_set(&expr.name);
+            let orig_set = ctx.is_param_set(lookup_name_ref);
             let is_default_alt_active = match &expr.op {
                 ParamOp::Default(colon, _) => {
                     let empty = if *colon { orig_val.is_empty() } else { false };

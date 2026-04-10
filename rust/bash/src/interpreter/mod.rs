@@ -375,6 +375,10 @@ pub struct Shell {
     /// `\"` → `"`, so the `"` are literal arithmetic-invalid characters that
     /// must NOT be silently stripped).
     pub arith_skip_quote_strip: bool,
+    /// When true, `eval_arith_expr_inner` skips `expand_comsubs_in_arith` —
+    /// used when `array_expand_once` (or `assoc_expand_once`) is set and
+    /// we're evaluating an array subscript that should NOT have `$(...)` expanded.
+    pub arith_skip_comsub_expand: bool,
     /// Seed for RANDOM variable (bash-compatible LCRNG)
     random_seed: u32,
     /// When set, an expansion error (e.g. arithmetic syntax error in `$((...))`)
@@ -581,6 +585,7 @@ impl Shell {
             arith_is_let: false,
             arith_in_subscript: false,
             arith_skip_quote_strip: false,
+            arith_skip_comsub_expand: false,
             random_seed: std::process::id(),
             expansion_error_line: None,
             unset_quoted_subscript_args: HashSet::new(),
@@ -687,6 +692,20 @@ impl Shell {
         shell.readonly_vars.insert("SHELLOPTS".to_string());
         shell.readonly_vars.insert("BASHOPTS".to_string());
         shell
+    }
+
+    /// Check if array_expand_once or assoc_expand_once is enabled.
+    /// When true, $(...) in array subscripts should NOT be expanded.
+    pub fn is_array_expand_once(&self) -> bool {
+        self.shopt_options
+            .get("array_expand_once")
+            .copied()
+            .unwrap_or(false)
+            || self
+                .shopt_options
+                .get("assoc_expand_once")
+                .copied()
+                .unwrap_or(false)
     }
 
     /// Resolve a variable name through namerefs.

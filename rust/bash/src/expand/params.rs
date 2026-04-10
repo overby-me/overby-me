@@ -1450,7 +1450,7 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                 }
                 found
             };
-            if has_unquoted_comsub {
+            if has_unquoted_comsub && !super::get_array_expand_once() {
                 let expanded_sub = super::expand_comsubs_in_arith_expr(subscript, cmd_sub);
                 let expanded_name = format!("{}[{}", base, expanded_sub);
                 comsub_expanded = Some(ParamExpr {

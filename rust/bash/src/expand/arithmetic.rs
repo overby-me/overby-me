@@ -714,7 +714,7 @@ fn eval_arith(expr: &str) -> Result<i64, String> {
     // Number literal
     let expr = expr.trim();
     if expr.is_empty() {
-        return Err("syntax error: operand expected".to_string());
+        return Err("arithmetic syntax error: operand expected".to_string());
     }
     if let Some(hex) = expr.strip_prefix("0x").or_else(|| expr.strip_prefix("0X")) {
         i64::from_str_radix(hex, 16)
@@ -726,7 +726,7 @@ fn eval_arith(expr: &str) -> Result<i64, String> {
         } else {
             expr.parse::<i64>().map_err(|_| {
                 format!(
-                    "syntax error: operand expected (error token is \"{}\")",
+                    "arithmetic syntax error: operand expected (error token is \"{}\")",
                     expr
                 )
             })
@@ -744,7 +744,7 @@ fn eval_arith(expr: &str) -> Result<i64, String> {
     } else {
         expr.parse::<i64>().map_err(|_| {
             format!(
-                "syntax error: operand expected (error token is \"{}\")",
+                "arithmetic syntax error: operand expected (error token is \"{}\")",
                 expr
             )
         })

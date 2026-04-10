@@ -255,7 +255,12 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                     );
                     return result;
                 }
+                let aeo = shell.is_array_expand_once();
+                if aeo {
+                    shell.arith_skip_comsub_expand = true;
+                }
                 let idx = shell.eval_arith_expr(idx_str) as usize;
+                shell.arith_skip_comsub_expand = false;
                 shell.declared_unset.remove(&resolved);
                 let arr = shell.arrays.entry(resolved).or_default();
                 while arr.len() <= idx {
@@ -2257,7 +2262,12 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
                     .or_default()
                     .insert(idx_str.to_string(), value);
             } else {
+                let aeo = shell.is_array_expand_once();
+                if aeo {
+                    shell.arith_skip_comsub_expand = true;
+                }
                 let raw_idx = shell.eval_arith_expr(idx_str);
+                shell.arith_skip_comsub_expand = false;
                 let idx = if raw_idx < 0 {
                     0usize
                 } else {

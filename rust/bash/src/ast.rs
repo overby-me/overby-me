@@ -434,6 +434,11 @@ pub fn word_to_string(word: &Word) -> String {
                 s.push_str(cmd);
                 s.push(')');
             }
+            WordPart::ArithSub(expr) => {
+                s.push_str("$((");
+                s.push_str(expr);
+                s.push_str("))");
+            }
             WordPart::FunSub(cmd) => {
                 s.push_str("${");
                 s.push_str(cmd);
