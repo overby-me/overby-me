@@ -195,6 +195,19 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
     {
         let status = unit.common.status.read_poisoned();
         insert_status(&mut props, &status);
+
+        // Override ActiveState for completed oneshot services with
+        // RemainAfterExit=no: they are kept as Started for the boot
+        // activation walker, but should report "inactive" (issue #27953).
+        if matches!(&*status, UnitStatus::Started(_))
+            && let Specific::Service(srvc) = &unit.specific
+            && srvc.conf.srcv_type == crate::units::ServiceType::OneShot
+            && !srvc.conf.remain_after_exit
+            && srvc.state.read_poisoned().srvc.pid.is_none()
+        {
+            insert(&mut props, "ActiveState", "inactive");
+            insert(&mut props, "SubState", "dead");
+        }
     }
 
     // ── Lifecycle timestamps ─────────────────────────────────────────

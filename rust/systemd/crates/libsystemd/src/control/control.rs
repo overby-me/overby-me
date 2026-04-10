@@ -7166,7 +7166,22 @@ pub fn execute_command(
                         .ok_or_else(|| format!("Unit {unit_name} not found."))?;
                     let status_locked = unit.common.status.read_poisoned();
                     let state = match &*status_locked {
-                        crate::units::UnitStatus::Started(_) => "active",
+                        crate::units::UnitStatus::Started(_) => {
+                            // Oneshot services with RemainAfterExit=no that
+                            // have no main PID are effectively inactive —
+                            // the main process exited successfully but the
+                            // status is kept as Started for the boot
+                            // activation graph walker (issue #27953).
+                            if let crate::units::Specific::Service(srvc) = &unit.specific
+                                && srvc.conf.srcv_type == crate::units::ServiceType::OneShot
+                                && !srvc.conf.remain_after_exit
+                                && srvc.state.read_poisoned().srvc.pid.is_none()
+                            {
+                                "inactive"
+                            } else {
+                                "active"
+                            }
+                        }
                         crate::units::UnitStatus::Starting => "activating",
                         crate::units::UnitStatus::Stopping => "deactivating",
                         crate::units::UnitStatus::Restarting => "activating",

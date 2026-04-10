@@ -698,15 +698,11 @@ pub(crate) fn service_exit_handler(
 
             let is_success = success_exit_status.is_success(&code);
             if is_success {
-                // Clean oneshot exit: leave status as Started.
-                //
-                // We do NOT set Stopped here because that races with
-                // the boot activation graph walker — fast-exiting
-                // oneshot services would be seen as Stopped before
-                // their dependents have been dispatched.
-                //
-                // The pid/process_group have already been cleared
-                // above so that any future restart can proceed.
+                // Clean oneshot exit: leave status as Started so the boot
+                // activation graph walker can see the unit as completed.
+                // The `is-active` command handles the special case of
+                // oneshot services with RemainAfterExit=no and no PID
+                // by reporting "inactive" (issue #27953).
             } else {
                 // Failed exit: full recursive deactivation including
                 // required_by to propagate the failure.
