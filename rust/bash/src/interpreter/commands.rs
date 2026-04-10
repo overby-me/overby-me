@@ -278,7 +278,7 @@ impl Shell {
                                     arr.get(idx).and_then(|v| v.as_ref()).cloned()
                                 });
                                 let empty = if *colon {
-                                    elem_val.as_deref().map_or(true, |v| v.is_empty())
+                                    elem_val.as_deref().is_none_or(|v| v.is_empty())
                                 } else {
                                     false
                                 };
@@ -318,7 +318,7 @@ impl Shell {
                                     .and_then(|m| m.get(&expanded_key))
                                     .cloned();
                                 let empty = if *colon {
-                                    elem_val.as_deref().map_or(true, |v| v.is_empty())
+                                    elem_val.as_deref().is_none_or(|v| v.is_empty())
                                 } else {
                                     false
                                 };
@@ -2052,7 +2052,14 @@ impl Shell {
                             || var_already_array)
                         && let Some(eq_pos) = arg.find('=')
                     {
-                        let name = &arg[..eq_pos];
+                        let raw_name = &arg[..eq_pos];
+                        // Handle += compound assignments: strip trailing '+'
+                        let (name, _is_append) = if let Some(stripped) = raw_name.strip_suffix('+')
+                        {
+                            (stripped, true)
+                        } else {
+                            (raw_name, false)
+                        };
                         let value = &arg[eq_pos + 1..];
                         if value.starts_with('(')
                             && value.ends_with(')')
@@ -3409,7 +3416,12 @@ impl Shell {
                         } else if let Some(key) = pending_key.take() {
                             // All-bare mode: this element is the value for
                             // the previous bare key.
-                            map.insert(key, value);
+                            if key.is_empty() {
+                                // Bash rejects empty string as assoc array key
+                                eprintln!("{}: \"\": bad array subscript", self.error_prefix());
+                            } else {
+                                map.insert(key, value);
+                            }
                         } else {
                             // All-bare mode: this element is a key — store
                             // it and wait for the next element as its value.
@@ -3418,7 +3430,11 @@ impl Shell {
                     }
                     // If there's a trailing bare key with no value, assign "".
                     if let Some(key) = pending_key.take() {
-                        map.insert(key, String::new());
+                        if key.is_empty() {
+                            eprintln!("{}: \"\": bad array subscript", self.error_prefix());
+                        } else {
+                            map.insert(key, String::new());
+                        }
                     }
                     self.declared_unset.remove(&resolved);
                     self.assoc_arrays.insert(resolved, map);

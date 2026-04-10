@@ -2262,7 +2262,7 @@ impl Parser {
                     self.advance(); // consume (
                     let elements = self.parse_array_elements()?;
                     // For array assignments in command args (declare/local),
-                    // expand each element individually and join with \x01 separator.
+                    // expand each element individually and join with \x1F separator.
                     // This preserves the structure for the builtin to split.
                     let last = words.last_mut().unwrap();
                     last.push(WordPart::Literal("(".to_string()));

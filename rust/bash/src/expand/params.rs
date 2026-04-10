@@ -1777,6 +1777,7 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                                             && c != '-'
                                             && c != '.'
                                             && c != '/'
+                                            && c != '='
                                     });
                                 let qv = v
                                     .replace('\\', "\\\\")
@@ -1805,6 +1806,56 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
 
             // For non-Substring ops on arrays, apply per-element
             // ${arr[@]@A} — full declaration form for arrays
+            #[inline]
+            fn quote_assoc_key_for_at_a(key: &str) -> String {
+                // Quote associative array keys for @A transform output,
+                // matching bash's declare -p format: keys with shell-special
+                // characters are wrapped in "..." with $, `, \, " escaped.
+                let needs_quoting = key.is_empty()
+                    || key.chars().any(|c| {
+                        matches!(
+                            c,
+                            ' ' | '$'
+                                | '!'
+                                | '`'
+                                | '"'
+                                | '\\'
+                                | '\''
+                                | '('
+                                | ')'
+                                | '{'
+                                | '}'
+                                | '<'
+                                | '>'
+                                | '|'
+                                | '&'
+                                | ';'
+                                | '*'
+                                | '?'
+                                | '['
+                                | ']'
+                                | '~'
+                                | '#'
+                                | '@'
+                        )
+                    });
+                if needs_quoting {
+                    let mut out = String::from("\"");
+                    for ch in key.chars() {
+                        match ch {
+                            '$' | '`' | '\\' | '"' => {
+                                out.push('\\');
+                                out.push(ch);
+                            }
+                            _ => out.push(ch),
+                        }
+                    }
+                    out.push('"');
+                    out
+                } else {
+                    key.to_string()
+                }
+            }
             if let ParamOp::Transform('A') = &expr.op {
                 let attrs_key = format!("__ATTRS__{}", resolved);
                 let attrs = ctx.vars.get(&attrs_key).cloned().unwrap_or_default();
@@ -1833,7 +1884,10 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                 } else if let Some(assoc) = ctx.assoc_arrays.get(&resolved) {
                     let elems: Vec<String> = assoc
                         .iter()
-                        .map(|(k, v)| format!("[{}]=\"{}\"", k, v.replace('"', "\\\"")))
+                        .map(|(k, v)| {
+                            let quoted_key = quote_assoc_key_for_at_a(k);
+                            format!("[{}]=\"{}\"", quoted_key, v.replace('"', "\\\""))
+                        })
                         .collect();
                     let flags = if attrs.is_empty() {
                         "A".to_string()

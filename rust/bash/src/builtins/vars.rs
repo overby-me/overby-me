@@ -775,6 +775,7 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
     }
 
     let mut flag_array = false;
+    let mut flag_assoc = false;
     let mut flag_readonly = false;
     let mut flag_nameref = false;
     let mut flag_integer = false;
@@ -815,6 +816,7 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
             for ch in arg[1..].chars() {
                 match ch {
                     'a' => flag_array = true,
+                    'A' => flag_assoc = true,
                     'r' => flag_readonly = true,
                     'n' => flag_nameref = true,
                     'i' => flag_integer = true,
@@ -854,6 +856,9 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
                 } else {
                     shell.namerefs.insert(name.to_string(), value.to_string());
                 }
+            } else if flag_assoc {
+                let map = crate::builtins::parse_assoc_literal(value);
+                shell.assoc_arrays.insert(name.to_string(), map);
             } else if flag_array {
                 let mut arr = crate::builtins::parse_indexed_compound_assignment(value);
                 shell.apply_case_attrs_to_array(name, &mut arr);
@@ -873,6 +878,8 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
             if flag_nameref {
                 // No value provided — just mark as nameref (no circular risk)
                 shell.namerefs.entry(name_arg.clone()).or_default();
+            } else if flag_assoc {
+                shell.assoc_arrays.entry(name_arg.clone()).or_default();
             } else if flag_array {
                 shell.arrays.entry(name_arg.clone()).or_default();
             } else {
@@ -2287,15 +2294,13 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     //   "{prefix}: {cmd_name}: {name}: cannot convert..."
                     // - At top level: one error:
                     //   "{prefix}: {name}: cannot convert..."
-                    if flag_global {
-                        if let Some(func) = shell.func_names.last() {
-                            eprintln!(
-                                "{}: {}: {}: cannot convert indexed to associative array",
-                                shell.error_prefix(),
-                                func,
-                                name
-                            );
-                        }
+                    if flag_global && let Some(func) = shell.func_names.last() {
+                        eprintln!(
+                            "{}: {}: {}: cannot convert indexed to associative array",
+                            shell.error_prefix(),
+                            func,
+                            name
+                        );
                     }
                     if shell.func_names.is_empty() && !flag_global {
                         eprintln!(
@@ -2333,15 +2338,13 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     //   "{prefix}: {cmd_name}: {name}: cannot convert..."
                     // - At top level: one error:
                     //   "{prefix}: {name}: cannot convert..."
-                    if flag_global {
-                        if let Some(func) = shell.func_names.last() {
-                            eprintln!(
-                                "{}: {}: {}: cannot convert associative to indexed array",
-                                shell.error_prefix(),
-                                func,
-                                name
-                            );
-                        }
+                    if flag_global && let Some(func) = shell.func_names.last() {
+                        eprintln!(
+                            "{}: {}: {}: cannot convert associative to indexed array",
+                            shell.error_prefix(),
+                            func,
+                            name
+                        );
                     }
                     if shell.func_names.is_empty() && !flag_global {
                         eprintln!(
@@ -2429,7 +2432,7 @@ pub fn parse_assoc_literal(s: &str) -> crate::interpreter::AssocArray {
     let mut map = crate::interpreter::AssocArray::default();
     // Split on \x1F separator (from inline array parser) or whitespace
     let entries: Vec<&str> = if inner.contains('\x1F') {
-        inner.split('\x1F').collect()
+        inner.split('\x1F').filter(|e| !e.is_empty()).collect()
     } else {
         vec![inner]
     };
@@ -2446,30 +2449,57 @@ pub fn parse_assoc_literal(s: &str) -> crate::interpreter::AssocArray {
         // Implicit key-value pair mode: treat consecutive bare words as
         // alternating key-value pairs.  E.g. `(a 1 b 2)` → a=1, b=2.
         let mut bare_words: Vec<String> = Vec::new();
-        for entry in &entries {
-            let mut rest = entry.trim();
-            while !rest.is_empty() {
-                // Handle quoted words
-                if rest.starts_with('"') {
-                    if let Some(end) = rest[1..].find('"') {
-                        bare_words.push(rest[1..1 + end].to_string());
-                        rest = rest[2 + end..].trim_start();
+        if has_sep {
+            // When entries are \x1F-separated, each entry came from a single
+            // compound assignment element that was already expanded (variable
+            // expansion, etc.).  Bash does NOT word-split inside compound
+            // assignment elements, so each entry is a single word regardless
+            // of whitespace.  E.g. `declare -A v=( $foo 3 )` where foo="1 2"
+            // produces entries ["1 2", "3"] → key "1 2", value "3".
+            for entry in &entries {
+                let trimmed = entry.trim();
+                if !trimmed.is_empty() {
+                    // Strip one level of quotes if present (from quoted elements
+                    // like `"key with spaces"` or `'literal'`)
+                    if (trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2)
+                        || (trimmed.starts_with('\'')
+                            && trimmed.ends_with('\'')
+                            && trimmed.len() >= 2)
+                    {
+                        bare_words.push(trimmed[1..trimmed.len() - 1].to_string());
                     } else {
-                        bare_words.push(rest[1..].to_string());
-                        rest = "";
+                        bare_words.push(trimmed.to_string());
                     }
-                } else if rest.starts_with('\'') {
-                    if let Some(end) = rest[1..].find('\'') {
-                        bare_words.push(rest[1..1 + end].to_string());
-                        rest = rest[2 + end..].trim_start();
+                }
+            }
+        } else {
+            // No \x1F separator — content is a flat string that needs to be
+            // tokenized by whitespace (respecting quotes).
+            for entry in &entries {
+                let mut rest = entry.trim();
+                while !rest.is_empty() {
+                    // Handle quoted words
+                    if rest.starts_with('"') {
+                        if let Some(end) = rest[1..].find('"') {
+                            bare_words.push(rest[1..1 + end].to_string());
+                            rest = rest[2 + end..].trim_start();
+                        } else {
+                            bare_words.push(rest[1..].to_string());
+                            rest = "";
+                        }
+                    } else if rest.starts_with('\'') {
+                        if let Some(end) = rest[1..].find('\'') {
+                            bare_words.push(rest[1..1 + end].to_string());
+                            rest = rest[2 + end..].trim_start();
+                        } else {
+                            bare_words.push(rest[1..].to_string());
+                            rest = "";
+                        }
                     } else {
-                        bare_words.push(rest[1..].to_string());
-                        rest = "";
+                        let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+                        bare_words.push(rest[..end].to_string());
+                        rest = rest[end..].trim_start();
                     }
-                } else {
-                    let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
-                    bare_words.push(rest[..end].to_string());
-                    rest = rest[end..].trim_start();
                 }
             }
         }
@@ -2511,8 +2541,34 @@ pub fn parse_assoc_literal(s: &str) -> crate::interpreter::AssocArray {
                         (after, "")
                     }
                 } else {
-                    let end = after.find(char::is_whitespace).unwrap_or(after.len());
-                    (&after[..end], after[end..].trim_start())
+                    // Unquoted value: scan forward to find the next
+                    // [key]= pattern (which starts a new entry) or the
+                    // end of the string.  This ensures values containing
+                    // spaces from variable expansion are kept whole.
+                    // E.g. `[1 2]=3 4 5` → key="1 2", value="3 4 5"
+                    // But `[a]=1 [b]=2` → key="a", value="1", then key="b", value="2"
+                    let mut end = after.len();
+                    // Look for ` [` followed by `]=` — that indicates
+                    // the start of the next subscripted entry.
+                    let bytes = after.as_bytes();
+                    let mut i = 0;
+                    while i < bytes.len() {
+                        if bytes[i] == b' ' || bytes[i] == b'\t' {
+                            // Found whitespace — check if what follows
+                            // is a `[key]=` pattern.
+                            let rest_after_ws = after[i..].trim_start();
+                            if rest_after_ws.starts_with('[') && rest_after_ws.contains("]=") {
+                                // Next entry starts here — trim trailing
+                                // whitespace from current value.
+                                end = i;
+                                break;
+                            }
+                        }
+                        i += 1;
+                    }
+                    let value_part = after[..end].trim_end();
+                    let remaining = after[end..].trim_start();
+                    (value_part, remaining)
                 };
                 map.insert(key.to_string(), value.to_string());
                 rest = remaining;
