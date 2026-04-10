@@ -90,8 +90,13 @@ impl Shell {
                 let is_last = i == pipeline.commands.len() - 1;
 
                 let (read_fd, write_fd): (Option<RawFd>, Option<RawFd>) = if !is_last {
-                    let (r, w) = safe_pipe().expect("pipe failed");
-                    (Some(r), Some(w))
+                    match safe_pipe() {
+                        Ok((r, w)) => (Some(r), Some(w)),
+                        Err(_) => {
+                            eprintln!("bash: pipe creation failed");
+                            return self.last_status;
+                        }
+                    }
                 } else {
                     (None, None)
                 };

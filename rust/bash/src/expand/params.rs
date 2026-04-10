@@ -1102,7 +1102,8 @@ fn decode_prompt_string(s: &str, ctx: &ExpCtx) -> String {
                         let mut tm: libc::tm = unsafe { std::mem::zeroed() };
                         unsafe { libc::localtime_r(&time, &mut tm) };
                         let mut buf = [0u8; 64];
-                        let fmt = std::ffi::CString::new("%a %b %d").unwrap();
+                        let fmt = std::ffi::CString::new("%a %b %d")
+                            .unwrap_or_else(|_| std::ffi::CString::default());
                         let len = unsafe {
                             libc::strftime(
                                 buf.as_mut_ptr() as *mut libc::c_char,

@@ -311,7 +311,9 @@ pub(super) fn builtin_umask(shell: &mut Shell, args: &[String]) -> i32 {
             return 0;
         }
 
-        let mask_str = mask_arg.unwrap();
+        let Some(mask_str) = mask_arg else {
+            return 0;
+        };
         // Try octal first
         if mask_str.chars().all(|c| c.is_ascii_digit()) {
             if mask_str.chars().any(|c| c == '8' || c == '9') {

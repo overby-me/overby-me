@@ -256,7 +256,38 @@ in {
         name = "deslop";
         entry = "${pkgs.writeShellScript "deslop-precommit" ''
           exit_code=0
+          # Collect unique scan roots: walk up from each file to find a
+          # .deslop.toml; if found, scan the containing directory (once).
+          # Files without a .deslop.toml ancestor are scanned individually.
+          declare -A seen_dirs
+          individual_files=()
           for file in "$@"; do
+            dir="$(dirname "$file")"
+            found=""
+            d="$dir"
+            while true; do
+              if [ -f "$d/.deslop.toml" ]; then
+                found="$d"
+                break
+              fi
+              parent="$(dirname "$d")"
+              if [ "$parent" = "$d" ]; then
+                break
+              fi
+              d="$parent"
+            done
+            if [ -n "$found" ]; then
+              seen_dirs["$found"]=1
+            else
+              individual_files+=("$file")
+            fi
+          done
+          for d in "''${!seen_dirs[@]}"; do
+            if ! ${pkgs.deslop}/bin/deslop scan "$d"; then
+              exit_code=1
+            fi
+          done
+          for file in "''${individual_files[@]}"; do
             if ! ${pkgs.deslop}/bin/deslop scan "$file"; then
               exit_code=1
             fi

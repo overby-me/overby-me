@@ -319,7 +319,23 @@ fn run(sigpipe_was_ignored: bool) -> i32 {
     if let Some(file) = script_file
         && !read_stdin
     {
-        match std::fs::read_to_string(&file) {
+        const MAX_SCRIPT_SIZE: u64 = 1 << 30; // 1 GiB
+        match (|| -> Result<String, std::io::Error> {
+            use std::io::Read;
+            let f = std::fs::File::open(&file)?;
+            let meta = f.metadata()?;
+            let len = meta.len();
+            if len > MAX_SCRIPT_SIZE {
+                return Err(std::io::Error::other(format!(
+                    "file too large ({} bytes)",
+                    len
+                )));
+            }
+            let mut buf = Vec::with_capacity(len as usize);
+            f.take(MAX_SCRIPT_SIZE).read_to_end(&mut buf)?;
+            String::from_utf8(buf)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+        })() {
             Ok(content) => {
                 // Open script file on fd 0 (matching bash behavior).
                 // This makes `read -t 0` work correctly on regular files.
@@ -374,9 +390,11 @@ fn run(sigpipe_was_ignored: bool) -> i32 {
         run_interactive(&mut shell);
         shell.last_status
     } else {
-        // Read all of stdin and execute
-        let mut input = String::new();
-        io::stdin().read_to_string(&mut input).ok();
+        // Read all of stdin and execute (bounded to 1 GiB)
+        let mut buf = Vec::new();
+        io::stdin().take(1 << 30).read_to_end(&mut buf).ok();
+        let input = String::from_utf8(buf)
+            .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned());
         // Save a dup of fd 0 for exec 0< detection (so the shell can detect
         // when exec redirects stdin to a different file)
         #[cfg(unix)]

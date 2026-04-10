@@ -207,10 +207,19 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
         let inner_args: Vec<String> = args[2..].to_vec();
         let (read_fd, write_fd) = {
             use std::os::fd::IntoRawFd;
-            let (r, w) = nix::unistd::pipe().unwrap();
+            let Ok((r, w)) = nix::unistd::pipe() else {
+                eprintln!("{}: printf: pipe creation failed", shell.error_prefix());
+                return 1;
+            };
             (r.into_raw_fd(), w.into_raw_fd())
         };
-        let saved_stdout = nix::fcntl::fcntl(1, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(10)).unwrap();
+        let Ok(saved_stdout) = nix::fcntl::fcntl(1, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(10))
+        else {
+            eprintln!("{}: printf: failed to save stdout", shell.error_prefix());
+            nix::unistd::close(read_fd).ok();
+            nix::unistd::close(write_fd).ok();
+            return 1;
+        };
         nix::unistd::dup2(write_fd, 1).ok();
         // Run printf with remaining args
         let result = builtin_printf(shell, &inner_args);

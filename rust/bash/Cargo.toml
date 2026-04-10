@@ -18,3 +18,4 @@ regex-lite = "0.1"
 [profile.release]
 lto = true
 strip = true
+overflow-checks = true

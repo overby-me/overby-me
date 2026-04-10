@@ -1199,7 +1199,24 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                                 } else {
                                     expanded.clone()
                                 };
-                                match std::fs::read_to_string(&resolved) {
+                                let content_result = (|| -> Result<String, std::io::Error> {
+                                    use std::io::Read;
+                                    let f = std::fs::File::open(&resolved)?;
+                                    let meta = f.metadata()?;
+                                    let len = meta.len();
+                                    if len > 1 << 30 {
+                                        return Err(std::io::Error::other(format!(
+                                            "file too large ({} bytes)",
+                                            len
+                                        )));
+                                    }
+                                    let mut buf = Vec::with_capacity(len as usize);
+                                    f.take(1 << 30).read_to_end(&mut buf)?;
+                                    String::from_utf8(buf).map_err(|e| {
+                                        std::io::Error::new(std::io::ErrorKind::InvalidData, e)
+                                    })
+                                })();
+                                match content_result {
                                     Ok(content) => {
                                         s.push_str(content.trim_end_matches('\n'));
                                     }
@@ -1832,7 +1849,23 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                 } else {
                     expanded.clone()
                 };
-                match std::fs::read_to_string(&resolved) {
+                let read_result = (|| -> Result<String, std::io::Error> {
+                    use std::io::Read;
+                    let f = std::fs::File::open(&resolved)?;
+                    let meta = f.metadata()?;
+                    let len = meta.len();
+                    if len > 1 << 30 {
+                        return Err(std::io::Error::other(format!(
+                            "file too large ({} bytes)",
+                            len
+                        )));
+                    }
+                    let mut buf = Vec::with_capacity(len as usize);
+                    f.take(1 << 30).read_to_end(&mut buf)?;
+                    String::from_utf8(buf)
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+                })();
+                match read_result {
                     Ok(content) => {
                         // Strip trailing newlines (like command substitution)
                         content.trim_end_matches('\n').to_string()
@@ -1889,7 +1922,14 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
             #[cfg(unix)]
             {
                 use std::os::unix::io::AsRawFd;
-                let (pipe_r, pipe_w) = nix::unistd::pipe().expect("pipe failed");
+                let (pipe_r, pipe_w) = match nix::unistd::pipe() {
+                    Ok(fds) => fds,
+                    Err(e) => {
+                        eprintln!("bash: process substitution: pipe: {}", e);
+                        out.push(Segment::Unquoted(String::new()));
+                        return;
+                    }
+                };
                 let r_raw = pipe_r.as_raw_fd();
                 let w_raw = pipe_w.as_raw_fd();
                 // Move procsub pipe fds to high numbers (>=10) to avoid conflicts
@@ -1942,13 +1982,15 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                             unsafe { std::env::set_var(k, v) };
                         }
                         use std::ffi::CString;
-                        let bash = CString::new("/proc/self/exe").unwrap();
-                        let c_flag = CString::new("-c").unwrap();
-                        let c_cmd = CString::new(cmd.as_str()).unwrap();
+                        let bash =
+                            CString::new("/proc/self/exe").unwrap_or_else(|_| CString::default());
+                        let c_flag = CString::new("-c").unwrap_or_else(|_| CString::default());
+                        let c_cmd =
+                            CString::new(cmd.as_str()).unwrap_or_else(|_| CString::default());
                         let script_name =
                             ctx.positional.first().map(|s| s.as_str()).unwrap_or("bash");
-                        let c_name = CString::new(script_name)
-                            .unwrap_or_else(|_| CString::new("bash").unwrap());
+                        let c_name =
+                            CString::new(script_name).unwrap_or_else(|_| CString::default());
                         nix::unistd::execvp(&bash, &[&bash, &c_flag, &c_cmd, &c_name]).ok();
                         std::process::exit(127);
                     }

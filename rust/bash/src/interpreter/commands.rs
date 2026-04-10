@@ -3730,7 +3730,7 @@ impl Shell {
                                 Some(pos) => &raw[..pos],
                                 None => &raw[..],
                             };
-                            CString::new(truncated).unwrap_or_else(|_| CString::new("").unwrap())
+                            CString::new(truncated).unwrap_or_else(|_| CString::default())
                         })
                         .collect();
 

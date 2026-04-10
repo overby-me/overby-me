@@ -66,8 +66,8 @@ fn program_has_incomplete_funsub(program: &Program) -> bool {
 fn fix_scientific_notation(s: &str, uppercase: bool) -> String {
     let marker = if uppercase { 'E' } else { 'e' };
     if let Some(pos) = s.rfind(marker) {
-        let (mantissa, exp_part) = s.split_at(pos);
-        let exp_str = &exp_part[1..]; // skip 'e'/'E'
+        let mantissa = &s[..pos];
+        let exp_str = &s[pos + 1..]; // skip 'e'/'E'
         let exp_val: i32 = exp_str.parse().unwrap_or(0);
         format!("{}{}{:+03}", mantissa, marker, exp_val)
     } else {
@@ -154,8 +154,9 @@ pub fn is_pua_raw_byte(cp: u32) -> bool {
 }
 
 pub fn raw_byte_char(byte: u8) -> char {
-    // Safety: U+E000-U+E0FF are valid Unicode PUA codepoints
-    char::from_u32(RAW_BYTE_BASE + byte as u32).unwrap()
+    // U+E000-U+E0FF are valid Unicode PUA codepoints; byte ≤ 255
+    // so the sum is always in [0xE000, 0xE0FF] — always valid.
+    char::from_u32(RAW_BYTE_BASE + byte as u32).unwrap_or('\u{FFFD}')
 }
 
 pub fn string_to_raw_bytes(s: &str) -> Vec<u8> {

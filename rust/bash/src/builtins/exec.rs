@@ -300,7 +300,22 @@ pub(super) fn builtin_source(shell: &mut Shell, args: &[String]) -> i32 {
     };
 
     shell.source_file_error = false;
-    match std::fs::read_to_string(&path) {
+    let read_result = (|| -> Result<String, std::io::Error> {
+        use std::io::Read;
+        let f = std::fs::File::open(&path)?;
+        let meta = f.metadata()?;
+        let len = meta.len();
+        if len > 1 << 30 {
+            return Err(std::io::Error::other(format!(
+                "file too large ({} bytes)",
+                len
+            )));
+        }
+        let mut buf = Vec::with_capacity(len as usize);
+        f.take(1 << 30).read_to_end(&mut buf)?;
+        String::from_utf8(buf).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    })();
+    match read_result {
         Ok(content) => {
             // Save and set positional parameters for the sourced script
             let saved_positional = shell.positional.clone();

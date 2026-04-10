@@ -1164,9 +1164,12 @@ impl Shell {
                             _ => false,
                         };
                         if changed {
-                            let mut new_content = String::new();
-                            std::io::Read::read_to_string(&mut std::io::stdin(), &mut new_content)
-                                .ok();
+                            use std::io::Read;
+                            let mut buf = Vec::new();
+                            std::io::stdin().take(1 << 30).read_to_end(&mut buf).ok();
+                            let new_content = String::from_utf8(buf).unwrap_or_else(|e| {
+                                String::from_utf8_lossy(e.as_bytes()).into_owned()
+                            });
                             if !new_content.is_empty() {
                                 let saved_script_fd = self.script_fd.take();
                                 status = self.run_string(&new_content);
