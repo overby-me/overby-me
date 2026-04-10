@@ -2,6 +2,24 @@
 
 All notable fixes to the bash test suite are documented here, grouped by phase.
 
+## Phase 60 — Set builtin array output, wait -p, subscript bracket fixes (fixes 226–233)
+
+1. **Fix `set` builtin to output arrays and associative arrays** (`src/builtins/set.rs`) — `set` with no arguments now outputs indexed arrays as `name=([0]="val" [1]="val" ...)` and associative arrays as `name=([key]="val" ...)` alongside scalar variables, all sorted alphabetically by name. Previously `set` only output scalars, so `set | grep ^myarray=` returned nothing for arrays. Declared-but-unset variables (with no elements) are excluded. Uses `quote_for_declare` for value quoting and `quote_assoc_key` for assoc key quoting, matching bash's `set` output format.
+
+2. **Implement `wait -p var` flag** (`src/builtins/trap.rs`) — `wait` now supports `-p var` to store the PID of the completed process in a variable. Supports plain variables, indexed array subscripts (`wait -p arr[0]`), and associative array subscripts (`wait -p A[$key]`). With `assoc_expand_once` ON, uses `rfind(']')` for bracket matching to allow `]` as an assoc key. Fixes assoc18.sub `wait -p A[$rkey] -n %2 %3` (was outputting `bad 1`, now correctly outputs `5: ok 1`).
+
+3. **Implement `wait -n` with specific job specs/PIDs** (`src/builtins/trap.rs`) — `wait -n %2 %3` now waits for the next of the specified jobs to complete (was only waiting for any child). Resolves job specs (`%N`, `%%`, `%+`, `%-`, `%string`) to PIDs via the job table. Uses non-blocking `WNOHANG` polling loop for targeted jobs. Also handles `-f` flag and combined flags like `-fn`, `-np var`. Full rewrite of `builtin_wait` with proper option parsing.
+
+4. **Fix `\]` backslash-escaped `]` in assoc subscript key lookup** (`src/expand/params.rs`) — `${m[\]]}` now correctly strips the backslash escape to look up key `]` in the associative array. After quote stripping and variable expansion, backslash escapes in the expanded key are processed (`\X` → `X`). Fixes assoc5.sub `echo ${myarray[\]]}` producing empty instead of `def`.
+
+5. **Fix single-quote protection of `]` in `${...}` subscript bracket matching** (`src/lexer/dollar.rs`) — In `read_param_name_with_subscript`, single-quoted content inside array subscripts now prevents `]` from closing the bracket. When `'` is encountered (outside double quotes, at depth > 0), everything until the matching closing `'` is consumed as literal subscript text. The quote characters are kept as part of the subscript (they become part of the assoc key). Fixes assoc5.sub `echo "${myarray['a]=test1;#a']}"` which was producing "unexpected EOF while looking for matching `}'" instead of the correct value.
+
+6. **Fix `declare`/`typeset` bracket validation for unbalanced brackets** (`src/builtins/vars.rs`) — `declare myarray["foo[bar"]=bleh` (after quote stripping: `myarray[foo[bar]=bleh`) now correctly reports "not a valid identifier" due to unbalanced brackets. Uses depth-tracking bracket matching: `[` increments depth, `]` decrements; must reach depth 0 for the subscript to be valid, and the closing `]` must be the last character of the name portion. Fixes assoc5.sub line 26.
+
+7. **Fix `declare` bracket matching with `assoc_expand_once` ON** (`src/builtins/vars.rs`) — When AEO is ON and the variable is an existing associative array, `declare` uses first-`]` matching (find the first `]` after `[`, ignoring nested `[`) instead of depth-based matching. This allows keys containing `[` — e.g., `declare myarray["foo[bar"]=bleh` finds the first `]` at the end of the name, accepting key `foo[bar`. But `typeset foo["foo]bar"]=bax` (where first `]` is after `foo`, leaving stray `bar]`) is still correctly rejected. Fixes assoc9.sub line 120.
+
+**Phase 60 summary:** Reduces **assoc** from ~37 to ~20 nix diff lines (46% reduction). Flips assoc5.sub, assoc9.sub, assoc18.sub to 0 diff in nix. Remaining assoc diffs: assoc1/2 hash iteration ordering (~20 lines). Total nix passing: **74/77** (unchanged).
+
 ## Phase 59 — Assoc subscript comsub expansion, bracket parsing, scope restoration (fixes 218–225)
 
 1. **Fix double command substitution execution in assoc subscripts** (`src/expand/mod.rs`) — `$(...)` inside `${A[$(cmd)]...}` was expanded once in `expand_part` (for the `lookup_var` call to get `orig_val` and check `orig_set`) and again in `expand_param` (for the param op handling), producing duplicate stderr output. Fix: when `expand_part` has already pre-expanded comsubs in the subscript (detected by comparing `lookup_name_ref` to `expr.name`), create a new `ParamExpr` with the pre-expanded name and pass it to `expand_param`, avoiding re-execution. Fixes assoc16.sub producing 8 extra `stderr` lines (one per `${A[$(echo Darwin ; echo stderr>&2)]...}` pair).

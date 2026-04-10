@@ -1097,6 +1097,23 @@ fn read_param_name_with_subscript(chars: &[char], i: &mut usize) -> String {
                 *i += 1;
                 continue;
             }
+            // Single-quote handling inside subscripts: '...' protects ]
+            // from closing the bracket.  The quote chars are kept as part
+            // of the subscript text (they become part of the assoc key).
+            if chars[*i] == '\'' && !in_subscript_dquote && depth > 0 {
+                name.push(chars[*i]);
+                *i += 1;
+                // Consume everything until the matching closing single quote
+                while *i < chars.len() && chars[*i] != '\'' {
+                    name.push(chars[*i]);
+                    *i += 1;
+                }
+                if *i < chars.len() && chars[*i] == '\'' {
+                    name.push(chars[*i]);
+                    *i += 1;
+                }
+                continue;
+            }
             if !in_subscript_dquote {
                 if chars[*i] == '[' {
                     depth += 1;

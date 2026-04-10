@@ -2,11 +2,74 @@ use super::*;
 
 pub(super) fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
     if args.is_empty() {
-        // Print all variables with proper quoting (like bash)
-        let mut vars: Vec<_> = shell.vars.iter().collect();
-        vars.sort_by_key(|(k, _)| (*k).clone());
-        for (key, value) in vars {
-            println!("{}={}", key, quote_value_for_set(value));
+        // Print all variables with proper quoting (like bash).
+        // bash's `set` outputs scalars, indexed arrays, and associative arrays
+        // sorted alphabetically by name, followed by functions.
+        // Declared-but-unset variables (declared_unset) are excluded.
+
+        // Collect all variable names and their type
+        enum VarKind<'a> {
+            Scalar(&'a str),
+            Array(&'a Vec<Option<String>>),
+            Assoc(&'a crate::interpreter::AssocArray),
+        }
+
+        let mut all_vars: Vec<(String, VarKind)> = Vec::new();
+
+        for (key, value) in &shell.vars {
+            // Skip variables that are actually arrays/assoc (they'll be added below)
+            if shell.arrays.contains_key(key) || shell.assoc_arrays.contains_key(key) {
+                continue;
+            }
+            // Skip declared-but-unset
+            if shell.declared_unset.contains(key) {
+                continue;
+            }
+            all_vars.push((key.clone(), VarKind::Scalar(value.as_str())));
+        }
+
+        for (key, arr) in &shell.arrays {
+            // Skip declared-but-unset arrays with no elements
+            if shell.declared_unset.contains(key) && !arr.iter().any(|v| v.is_some()) {
+                continue;
+            }
+            all_vars.push((key.clone(), VarKind::Array(arr)));
+        }
+
+        for (key, assoc) in &shell.assoc_arrays {
+            // Skip declared-but-unset assoc arrays with no elements
+            if shell.declared_unset.contains(key) && assoc.is_empty() {
+                continue;
+            }
+            all_vars.push((key.clone(), VarKind::Assoc(assoc)));
+        }
+
+        all_vars.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+        for (key, kind) in &all_vars {
+            match kind {
+                VarKind::Scalar(value) => {
+                    println!("{}={}", key, quote_value_for_set(value));
+                }
+                VarKind::Array(arr) => {
+                    let elements: Vec<String> = arr
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, v)| {
+                            v.as_ref()
+                                .map(|s| format!("[{}]={}", i, quote_for_declare(s)))
+                        })
+                        .collect();
+                    println!("{}=({})", key, elements.join(" "));
+                }
+                VarKind::Assoc(assoc) => {
+                    let mut elements: Vec<String> = Vec::new();
+                    for (k, v) in assoc.iter() {
+                        elements.push(format!("[{}]={}", quote_assoc_key(k), quote_for_declare(v)));
+                    }
+                    println!("{}=({} )", key, elements.join(" "));
+                }
+            }
         }
         return 0;
     }

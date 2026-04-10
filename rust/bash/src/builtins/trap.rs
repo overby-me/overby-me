@@ -348,33 +348,279 @@ pub(super) fn builtin_wait(shell: &mut Shell, args: &[String]) -> i32 {
         use nix::sys::wait::{WaitStatus, waitpid};
         use nix::unistd::Pid;
 
-        // Handle -n flag (wait for any single job)
-        if args.first().map(|s| s.as_str()) == Some("-n") {
-            match waitpid(Pid::from_raw(-1), None) {
-                Ok(WaitStatus::Exited(_, code)) => {
-                    shell.last_status = code;
-                    return code;
+        // Parse flags: -n (wait for next), -f (force wait for terminated),
+        // -p var (store PID in variable)
+        let mut flag_n = false;
+        let mut flag_f = false;
+        let mut p_var: Option<String> = None;
+        let mut id_args: Vec<String> = Vec::new();
+        let mut i = 0;
+        while i < args.len() {
+            match args[i].as_str() {
+                "-n" => flag_n = true,
+                "-f" => flag_f = true,
+                "-p" => {
+                    if i + 1 < args.len() {
+                        i += 1;
+                        p_var = Some(args[i].clone());
+                    } else {
+                        eprintln!("bash: wait: -p: option requires an argument");
+                        return 2;
+                    }
                 }
-                Ok(WaitStatus::Signaled(_, sig, _)) => {
-                    let code = 128 + sig as i32;
-                    shell.last_status = code;
-                    return code;
+                "-fn" | "-nf" => {
+                    flag_f = true;
+                    flag_n = true;
                 }
-                _ => return shell.last_status,
+                arg if arg.starts_with('-')
+                    && arg.len() > 1
+                    && !arg[1..].starts_with(|c: char| c.is_ascii_digit()) =>
+                {
+                    // Parse combined flags like -np var
+                    let flags = &arg[1..];
+                    let mut j = 0;
+                    let chars: Vec<char> = flags.chars().collect();
+                    while j < chars.len() {
+                        match chars[j] {
+                            'n' => flag_n = true,
+                            'f' => flag_f = true,
+                            'p' => {
+                                // Rest of this arg or next arg is the variable name
+                                let rest: String = chars[j + 1..].iter().collect();
+                                if !rest.is_empty() {
+                                    p_var = Some(rest);
+                                } else if i + 1 < args.len() {
+                                    i += 1;
+                                    p_var = Some(args[i].clone());
+                                } else {
+                                    eprintln!("bash: wait: -p: option requires an argument");
+                                    return 2;
+                                }
+                                j = chars.len(); // consumed
+                                continue;
+                            }
+                            _ => {
+                                // Unknown flag — treat entire arg as an id
+                                id_args.push(args[i].clone());
+                                j = chars.len();
+                                continue;
+                            }
+                        }
+                        j += 1;
+                    }
+                    i += 1;
+                    continue;
+                }
+                _ => {
+                    id_args.push(args[i].clone());
+                }
+            }
+            i += 1;
+        }
+
+        // Helper: resolve a job spec like %N to a PID
+        let resolve_job_spec = |spec: &str, jobs: &[crate::interpreter::Job]| -> Option<i32> {
+            if let Some(num_str) = spec.strip_prefix('%') {
+                if let Ok(num) = num_str.parse::<usize>() {
+                    // %N — find job by number
+                    jobs.iter().find(|j| j.number == num).map(|j| j.pid)
+                } else if num_str == "%" || num_str.is_empty() {
+                    // %% or % — current job (last)
+                    jobs.last().map(|j| j.pid)
+                } else if num_str == "+" {
+                    jobs.last().map(|j| j.pid)
+                } else if num_str == "-" {
+                    // Previous job
+                    if jobs.len() >= 2 {
+                        Some(jobs[jobs.len() - 2].pid)
+                    } else {
+                        jobs.last().map(|j| j.pid)
+                    }
+                } else {
+                    // %string — match by command prefix
+                    jobs.iter()
+                        .rev()
+                        .find(|j| j.command.starts_with(num_str))
+                        .map(|j| j.pid)
+                }
+            } else {
+                spec.parse::<i32>().ok()
+            }
+        };
+
+        // Helper: store PID in the -p variable (supports array subscripts like A[$key])
+        let store_pid_var = |shell: &mut Shell, var: &str, pid: i32| {
+            // Check if it's an array subscript like A[key]
+            // When assoc_expand_once is ON, use rfind(']') so that ']' can be a key
+            let aeo = shell.is_array_expand_once();
+            let bracket_open = var.find('[');
+            let bracket_close = if aeo {
+                var.rfind(']')
+            } else {
+                // Find the matching ']' for the first '['
+                bracket_open.and_then(|open| var[open + 1..].find(']').map(|p| open + 1 + p))
+            };
+            if let (Some(open), Some(close)) = (bracket_open, bracket_close) {
+                if close == var.len() - 1 {
+                    let arr_name = &var[..open];
+                    let subscript = &var[open + 1..close];
+                    if shell.assoc_arrays.contains_key(arr_name) {
+                        // Expand the subscript for variable references
+                        let expanded_key = if shell.is_array_expand_once() {
+                            subscript.to_string()
+                        } else {
+                            shell.expand_assoc_subscript(subscript)
+                        };
+                        if let Some(assoc) = shell.assoc_arrays.get_mut(arr_name) {
+                            assoc.insert(expanded_key, pid.to_string());
+                        }
+                        return;
+                    } else if shell.arrays.contains_key(arr_name) {
+                        let idx = shell.eval_arith_expr(subscript) as usize;
+                        let arr = shell.arrays.get_mut(arr_name).unwrap();
+                        while arr.len() <= idx {
+                            arr.push(None);
+                        }
+                        arr[idx] = Some(pid.to_string());
+                        return;
+                    }
+                }
+            }
+            shell.set_var(var, pid.to_string());
+        };
+
+        // Helper: fire CHLD trap if set
+        let fire_chld_trap = |shell: &mut Shell| {
+            if let Some(handler) = shell.traps.get("CHLD").cloned() {
+                if !handler.is_empty() {
+                    crate::interpreter::take_pending_signal(libc::SIGCHLD);
+                    shell.in_trap_handler += 1;
+                    shell.run_string(&handler);
+                    shell.in_trap_handler -= 1;
+                }
+            }
+        };
+
+        let _ = flag_f; // flag_f acknowledged but not changing blocking behavior
+
+        if flag_n {
+            // wait -n: wait for the next child to complete
+            // If id_args are given, wait for next among those specific jobs/PIDs
+            if id_args.is_empty() {
+                // Wait for any child
+                match waitpid(Pid::from_raw(-1), None) {
+                    Ok(WaitStatus::Exited(pid, code)) => {
+                        shell.last_status = code;
+                        if let Some(ref var) = p_var {
+                            store_pid_var(shell, var, pid.as_raw());
+                        }
+                        // Update job status
+                        for job in shell.jobs.iter_mut() {
+                            if job.pid == pid.as_raw() {
+                                job.status = crate::interpreter::JobStatus::Done(code);
+                            }
+                        }
+                        fire_chld_trap(shell);
+                        return code;
+                    }
+                    Ok(WaitStatus::Signaled(pid, sig, _)) => {
+                        let code = 128 + sig as i32;
+                        shell.last_status = code;
+                        if let Some(ref var) = p_var {
+                            store_pid_var(shell, var, pid.as_raw());
+                        }
+                        for job in shell.jobs.iter_mut() {
+                            if job.pid == pid.as_raw() {
+                                job.status = crate::interpreter::JobStatus::Done(code);
+                            }
+                        }
+                        fire_chld_trap(shell);
+                        return code;
+                    }
+                    _ => return 127,
+                }
+            } else {
+                // Wait for next among specific PIDs/job specs
+                // Resolve all to PIDs first
+                let mut target_pids: Vec<i32> = Vec::new();
+                for arg in &id_args {
+                    if let Some(pid) = resolve_job_spec(arg, &shell.jobs) {
+                        target_pids.push(pid);
+                    }
+                }
+
+                if target_pids.is_empty() {
+                    return 127;
+                }
+
+                // Poll in a loop until one of our targets finishes
+                loop {
+                    for &pid in &target_pids {
+                        match waitpid(
+                            Pid::from_raw(pid),
+                            Some(nix::sys::wait::WaitPidFlag::WNOHANG),
+                        ) {
+                            Ok(WaitStatus::Exited(rpid, code)) => {
+                                shell.last_status = code;
+                                if let Some(ref var) = p_var {
+                                    store_pid_var(shell, var, rpid.as_raw());
+                                }
+                                for job in shell.jobs.iter_mut() {
+                                    if job.pid == rpid.as_raw() {
+                                        job.status = crate::interpreter::JobStatus::Done(code);
+                                    }
+                                }
+                                fire_chld_trap(shell);
+                                return code;
+                            }
+                            Ok(WaitStatus::Signaled(rpid, sig, _)) => {
+                                let code = 128 + sig as i32;
+                                shell.last_status = code;
+                                if let Some(ref var) = p_var {
+                                    store_pid_var(shell, var, rpid.as_raw());
+                                }
+                                for job in shell.jobs.iter_mut() {
+                                    if job.pid == rpid.as_raw() {
+                                        job.status = crate::interpreter::JobStatus::Done(code);
+                                    }
+                                }
+                                fire_chld_trap(shell);
+                                return code;
+                            }
+                            Ok(_) => {} // still running or stopped
+                            Err(nix::errno::Errno::ECHILD) => {
+                                // Process already reaped — check job table for saved status
+                                for job in shell.jobs.iter() {
+                                    if job.pid == pid {
+                                        if let crate::interpreter::JobStatus::Done(code) =
+                                            job.status
+                                        {
+                                            shell.last_status = code;
+                                            if let Some(ref var) = p_var {
+                                                store_pid_var(shell, var, pid);
+                                            }
+                                            return code;
+                                        }
+                                    }
+                                }
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                    // Brief sleep to avoid busy-waiting
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
             }
         }
 
-        if args.is_empty() {
+        if id_args.is_empty() {
             // Wait for all background children
-            // Use blocking wait with SIGCHLD trap support
             let has_chld_trap = shell.traps.contains_key("CHLD");
             loop {
                 match waitpid(Pid::from_raw(-1), None) {
                     Ok(WaitStatus::Exited(_, code)) => {
                         shell.last_status = code;
                         if has_chld_trap {
-                            // Clear any pending SIGCHLD from the signal handler
-                            // to avoid double-firing
                             crate::interpreter::take_pending_signal(libc::SIGCHLD);
                             if let Some(handler) = shell.traps.get("CHLD").cloned()
                                 && !handler.is_empty()
@@ -405,18 +651,49 @@ pub(super) fn builtin_wait(shell: &mut Shell, args: &[String]) -> i32 {
             // wait with no arguments returns 0 per POSIX
             return 0;
         } else {
-            // Wait for specific PIDs
-            for arg in args {
-                if let Ok(pid) = arg.parse::<i32>() {
+            // Wait for specific PIDs/job specs
+            for arg in &id_args {
+                if let Some(pid) = resolve_job_spec(arg, &shell.jobs) {
                     match waitpid(Pid::from_raw(pid), None) {
-                        Ok(WaitStatus::Exited(_, code)) => {
+                        Ok(WaitStatus::Exited(rpid, code)) => {
                             shell.last_status = code;
+                            if let Some(ref var) = p_var {
+                                store_pid_var(shell, var, rpid.as_raw());
+                            }
+                            for job in shell.jobs.iter_mut() {
+                                if job.pid == rpid.as_raw() {
+                                    job.status = crate::interpreter::JobStatus::Done(code);
+                                }
+                            }
                         }
-                        Ok(WaitStatus::Signaled(_, sig, _)) => {
-                            shell.last_status = 128 + sig as i32;
+                        Ok(WaitStatus::Signaled(rpid, sig, _)) => {
+                            let sig_code = 128 + sig as i32;
+                            shell.last_status = sig_code;
+                            if let Some(ref var) = p_var {
+                                store_pid_var(shell, var, rpid.as_raw());
+                            }
+                            for job in shell.jobs.iter_mut() {
+                                if job.pid == rpid.as_raw() {
+                                    job.status = crate::interpreter::JobStatus::Done(sig_code);
+                                }
+                            }
+                        }
+                        Err(nix::errno::Errno::ECHILD) => {
+                            // Already reaped — check job table
+                            for job in shell.jobs.iter() {
+                                if job.pid == pid {
+                                    if let crate::interpreter::JobStatus::Done(code) = job.status {
+                                        shell.last_status = code;
+                                        break;
+                                    }
+                                }
+                            }
                         }
                         _ => {}
                     }
+                } else {
+                    eprintln!("bash: wait: {}: no such job", arg);
+                    shell.last_status = 127;
                 }
             }
         }

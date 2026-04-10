@@ -507,6 +507,27 @@ pub(super) fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
                             } else {
                                 stripped_key.to_string()
                             };
+                            // Strip backslash escapes from the key (e.g. \] → ])
+                            // In bash, backslash in an unquoted subscript like ${m[\]]}
+                            // escapes the next character, so \] becomes literal ].
+                            let expanded_key = if expanded_key.contains('\\') {
+                                let mut result = String::new();
+                                let mut chars_iter = expanded_key.chars();
+                                while let Some(c) = chars_iter.next() {
+                                    if c == '\\' {
+                                        if let Some(next) = chars_iter.next() {
+                                            result.push(next);
+                                        } else {
+                                            result.push(c);
+                                        }
+                                    } else {
+                                        result.push(c);
+                                    }
+                                }
+                                result
+                            } else {
+                                expanded_key
+                            };
                             // Empty key after expansion is invalid for associative arrays
                             if expanded_key.is_empty() {
                                 let prefix = EXPAND_ERROR_PREFIX.with(|p| {

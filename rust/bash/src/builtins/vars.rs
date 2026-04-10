@@ -1143,13 +1143,46 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             // Content inside [...] brackets can contain any characters
             // (arithmetic expressions like `a[7 + 8]`, assoc keys, etc.)
             let base_for_check = if let Some(bracket_pos) = pure_name.find('[') {
-                // Use first ']' after '[' for bracket matching — bash parses
-                // A[]] as A[] + stray ']' (invalid), not A with key ']'.
-                let close = pure_name[bracket_pos + 1..]
-                    .find(']')
-                    .map(|p| p + bracket_pos + 1);
-                match close {
-                    Some(close_pos) if close_pos + 1 != pure_name.len() => {
+                // When assoc_expand_once is ON and the variable is an existing
+                // associative array, bash finds the FIRST `]` after `[` without
+                // tracking `[` depth — this allows keys containing `[`
+                // (e.g. "foo[bar") because `m[foo[bar]` finds `]` at the end
+                // as the first `]` seen.  But `foo[foo]bar]` finds the first
+                // `]` after `foo`, leaving stray `bar]` → rejected.
+                //
+                // Without AEO (or for non-assoc variables), use depth-based
+                // bracket tracking: `[` increments, `]` decrements.
+                let base_name = &pure_name[..bracket_pos];
+                let is_existing_assoc = shell.assoc_arrays.contains_key(base_name);
+                let aeo = shell.is_array_expand_once();
+
+                let close_pos = if aeo && is_existing_assoc {
+                    // Find the FIRST `]` after `[`, ignoring nested `[`.
+                    // m[foo[bar] → first `]` at index 10 (end) → valid, key="foo[bar"
+                    // foo[foo]bar] → first `]` at index 7 → stray "bar]" → rejected
+                    pure_name[bracket_pos + 1..]
+                        .find(']')
+                        .map(|p| bracket_pos + 1 + p)
+                } else {
+                    let mut depth: i32 = 1;
+                    let mut found = None;
+                    for (i, ch) in pure_name[bracket_pos + 1..].char_indices() {
+                        match ch {
+                            '[' => depth += 1,
+                            ']' => {
+                                depth -= 1;
+                                if depth == 0 {
+                                    found = Some(bracket_pos + 1 + i);
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    found
+                };
+                match close_pos {
+                    Some(cp) if cp + 1 != pure_name.len() => {
                         // Stray characters after the closing ']' (e.g. A[]])
                         // Show full argument including =value, matching bash
                         eprintln!(
@@ -1162,7 +1195,7 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                         continue;
                     }
                     None => {
-                        // No closing ']' at all
+                        // No matching ']' found (unbalanced brackets)
                         eprintln!(
                             "{}: {}: `{}': not a valid identifier",
                             shell.error_prefix(),
