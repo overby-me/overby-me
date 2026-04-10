@@ -467,7 +467,7 @@ in
       # scripts already set `set -eux` internally.
       # Tee output to /dev/kmsg so it appears on serial console (nix build -L).
       # Use a FIFO to capture the exit code without PIPESTATUS (avoiding Nix escaping).
-      test_cmd = f"cd {units_dir} && {env_prefix}chmod +x ./${testName}.sh && ./${testName}.sh 2>&1 | tee /dev/ttyS0"
+      test_cmd = f"cd {units_dir} && chmod +x *.sh && {env_prefix}./${testName}.sh 2>&1 | tee /dev/ttyS0"
 
       try:
           (rc, output) = machine.execute(test_cmd, timeout=${toString testTimeout})
