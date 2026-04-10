@@ -125,7 +125,6 @@ pub struct ForClause {
     pub words: Option<Vec<Word>>,
     pub body: Program,
     /// Line number of the `for` keyword (for LINENO reset per iteration, matching bash)
-    #[allow(dead_code)]
     pub line: usize,
 }
 

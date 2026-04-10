@@ -294,6 +294,13 @@ pub struct Shell {
     pub continuing: i32,
     pub in_condition: bool,
     pub comsub_line_offset: usize, // line offset for command substitution LINENO
+    /// True when executing inside a funsub (`${ ... }`) or valuesub (`${| ... }`).
+    pub in_funsub: bool,
+    /// Bash's `execute_for_command` resets `line_number = for_command->line`
+    /// before each iteration; combined with YACC look-ahead the net effect is
+    /// +1 on LINENO for body commands.  `run_complete_command` adds this value
+    /// when setting LINENO, and `run_for_inner` sets/clears it.
+    pub for_line_adjust: usize,
     pub in_debug_trap: bool,
     pub in_trap_handler: i32,
     pub errexit_suppressed: bool,
@@ -531,6 +538,8 @@ impl Shell {
             continuing: 0,
             in_condition: false,
             comsub_line_offset: 0,
+            in_funsub: false,
+            for_line_adjust: 0,
             in_debug_trap: false,
             in_trap_handler: 0,
             errexit_suppressed: false,
@@ -1462,7 +1471,9 @@ impl Shell {
 
         // Update LINENO (skip inside trap handlers to preserve calling context)
         if !self.in_debug_trap && self.in_trap_handler == 0 {
-            self.vars.insert("LINENO".to_string(), cmd.line.to_string());
+            let effective_line = cmd.line + self.for_line_adjust;
+            self.vars
+                .insert("LINENO".to_string(), effective_line.to_string());
         }
         // Store end_line for compound redirect error reporting
         self.cmd_end_line = Some(cmd.end_line);

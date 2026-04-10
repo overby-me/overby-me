@@ -4086,6 +4086,22 @@ impl Shell {
                 break;
             }
 
+            // Bash's execute_for_command does `line_number = for_command->line`
+            // before each iteration body.  Combined with YACC look-ahead the
+            // net effect is that LINENO for body commands equals
+            // for_keyword_line + 1.  This only matters inside comsub/funsub
+            // contexts where bash's buffer-refill counting diverges from our
+            // character-level parser.  In regular scripts the parser-assigned
+            // cmd.line is already correct.
+            // `in_comsub` covers regular $(...) comsubs (forked),
+            // `in_funsub` covers funsubs (${ ... }) and valuesubs (${| ... }).
+            let in_substitution = self.in_comsub || self.in_funsub;
+            self.for_line_adjust = if clause.line > 0 && in_substitution {
+                1
+            } else {
+                0
+            };
+
             // Trace for loop iteration
             if self.opt_xtrace
                 && let Some(words) = &clause.words
@@ -4125,6 +4141,7 @@ impl Shell {
             }
         }
 
+        self.for_line_adjust = 0;
         status
     }
 

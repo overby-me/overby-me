@@ -394,6 +394,8 @@ impl Shell {
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(1);
             self.comsub_line_offset = lineno;
+            let saved_in_funsub = self.in_funsub;
+            self.in_funsub = true;
 
             // In non-posix mode, bash disables `set -e` inside funsubs
             // (just like regular command substitutions).  In posix mode,
@@ -405,6 +407,7 @@ impl Shell {
 
             let status = self.run_string(cmd_str);
             self.last_status = status;
+            self.in_funsub = saved_in_funsub;
 
             // Restore errexit (unless the funsub explicitly changed it).
             if !self.opt_posix {
@@ -474,6 +477,8 @@ impl Shell {
             .and_then(|s| s.parse().ok())
             .unwrap_or(1);
         self.comsub_line_offset = lineno;
+        let saved_in_funsub = self.in_funsub;
+        self.in_funsub = true;
 
         // In non-posix mode, bash disables `set -e` inside valuesubs
         // (just like funsubs and regular command substitutions).
@@ -485,6 +490,7 @@ impl Shell {
 
         let status = self.run_string(cmd_str);
         self.last_status = status;
+        self.in_funsub = saved_in_funsub;
 
         // Restore errexit (unless the valuesub explicitly changed it).
         if !self.opt_posix {
