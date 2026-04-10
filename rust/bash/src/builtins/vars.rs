@@ -325,6 +325,14 @@ pub(super) fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
                 }
                 let raw_idx = shell.eval_arith_expr(idx_str);
                 shell.arith_skip_comsub_expand = false;
+                // If subscript evaluation had an arithmetic error, skip the
+                // unset but do NOT propagate the error (don't abort the script).
+                // Bash continues execution after arithmetic errors in unset
+                // subscripts — the variable is left unchanged.
+                if crate::expand::take_arith_error() {
+                    shell.last_status = 1;
+                    continue;
+                }
                 // Check if base is a scalar (not an array) — unset scalar[n] where n!=0
                 // should error with "not an array variable", but only if the variable
                 // actually exists as a scalar.  Unsetting a subscript on a completely
@@ -1728,6 +1736,14 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                         }
                         let raw_idx = shell.eval_arith_expr(idx_str);
                         shell.arith_skip_comsub_expand = false;
+                        // If subscript evaluation had an arithmetic error, skip the
+                        // assignment but do NOT propagate the error (don't abort the
+                        // script). Bash continues execution after arithmetic errors
+                        // in declare subscripts.
+                        if crate::expand::take_arith_error() {
+                            status = 1;
+                            continue;
+                        }
                         let val = if flag_integer {
                             shell.eval_arith_expr(value).to_string()
                         } else {
@@ -1812,6 +1828,14 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     }
                     let raw_idx = shell.eval_arith_expr(idx_str);
                     shell.arith_skip_comsub_expand = false;
+                    // If subscript evaluation had an arithmetic error, skip the
+                    // assignment but do NOT propagate the error (don't abort the
+                    // script). Bash continues execution after arithmetic errors
+                    // in declare subscripts.
+                    if crate::expand::take_arith_error() {
+                        status = 1;
+                        continue;
+                    }
                     let is_int = flag_integer || shell.integer_vars.contains(&resolved_base);
                     let val = if is_int {
                         shell.eval_arith_expr(value).to_string()

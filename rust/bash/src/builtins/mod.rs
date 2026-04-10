@@ -1342,7 +1342,34 @@ pub fn parse_indexed_compound_assignment(s: &str) -> Vec<Option<String>> {
 
     // Check for \x1F separator (from parser's inline array handling)
     if inner.contains('\x1F') {
-        return inner.split('\x1F').map(|s| Some(s.to_string())).collect();
+        let mut result: Vec<Option<String>> = Vec::new();
+        let mut next_idx: usize = 0;
+        for elem in inner.split('\x1F') {
+            // Handle [subscript]=value format within each element
+            if elem.starts_with('[') {
+                if let Some(bracket_end) = elem.find(']') {
+                    if elem.as_bytes().get(bracket_end + 1) == Some(&b'=') {
+                        let subscript = &elem[1..bracket_end];
+                        let value = &elem[bracket_end + 2..];
+                        if let Ok(idx) = subscript.trim().parse::<usize>() {
+                            while result.len() <= idx {
+                                result.push(None);
+                            }
+                            result[idx] = Some(value.to_string());
+                            next_idx = idx + 1;
+                            continue;
+                        }
+                    }
+                }
+            }
+            // No subscript — sequential assignment
+            while result.len() <= next_idx {
+                result.push(None);
+            }
+            result[next_idx] = Some(elem.to_string());
+            next_idx += 1;
+        }
+        return result;
     }
 
     let mut result: Vec<Option<String>> = Vec::new();

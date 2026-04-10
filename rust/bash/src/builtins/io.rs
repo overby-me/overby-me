@@ -261,6 +261,14 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                 }
                 let idx = shell.eval_arith_expr(idx_str) as usize;
                 shell.arith_skip_comsub_expand = false;
+                // If subscript evaluation had an arithmetic error, skip the
+                // assignment but do NOT propagate the error (don't abort the
+                // script). Bash continues execution after arithmetic errors
+                // in printf -v subscripts — the variable is not created.
+                if crate::expand::take_arith_error() {
+                    shell.last_status = 1;
+                    return result;
+                }
                 shell.declared_unset.remove(&resolved);
                 let arr = shell.arrays.entry(resolved).or_default();
                 while arr.len() <= idx {
@@ -2268,6 +2276,14 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
                 }
                 let raw_idx = shell.eval_arith_expr(idx_str);
                 shell.arith_skip_comsub_expand = false;
+                // If subscript evaluation had an arithmetic error, skip the
+                // assignment but do NOT propagate the error (don't abort the
+                // script). Bash continues execution after arithmetic errors
+                // in read subscripts — the variable is not created.
+                if crate::expand::take_arith_error() {
+                    shell.last_status = 1;
+                    break;
+                }
                 let idx = if raw_idx < 0 {
                     0usize
                 } else {

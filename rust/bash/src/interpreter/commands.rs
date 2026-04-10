@@ -1814,6 +1814,11 @@ impl Shell {
                 let has_assoc_flag = args
                     .iter()
                     .any(|a| a.starts_with('-') && a.len() > 1 && a.contains('A'));
+                // Check if -g flag is present — when set, compound assignments
+                // should NOT create local variables (they target the global scope).
+                let has_global_flag = args
+                    .iter()
+                    .any(|a| a.starts_with('-') && a.len() > 1 && a.contains('g'));
 
                 let mut new_args = Vec::new();
                 let mut modified = false;
@@ -1916,7 +1921,8 @@ impl Shell {
                             // that's a no-op because the scope already has it.
                             let make_local_here =
                                 matches!(command_name.as_str(), "local" | "declare" | "typeset")
-                                    && !self.local_scopes.is_empty();
+                                    && !self.local_scopes.is_empty()
+                                    && !has_global_flag;
                             if make_local_here {
                                 self.declare_local(name);
                             }
@@ -2053,6 +2059,7 @@ impl Shell {
                                                     elements.last_mut().unwrap().push(part);
                                                 }
                                                 let mut arr: Vec<Option<String>> = Vec::new();
+                                                let mut next_idx: usize = 0;
                                                 for elem_parts in &elements {
                                                     if elem_parts.is_empty() {
                                                         continue;
@@ -2064,7 +2071,36 @@ impl Shell {
                                                     let fields =
                                                         self.expand_word_fields(&sub_word, &ifs);
                                                     for f in fields {
-                                                        arr.push(Some(f));
+                                                        // Handle [subscript]=value format
+                                                        if f.starts_with('[') {
+                                                            if let Some(bracket_end) = f.find(']') {
+                                                                if f.as_bytes().get(bracket_end + 1)
+                                                                    == Some(&b'=')
+                                                                {
+                                                                    let subscript =
+                                                                        &f[1..bracket_end];
+                                                                    let value =
+                                                                        &f[bracket_end + 2..];
+                                                                    if let Ok(idx) = subscript
+                                                                        .trim()
+                                                                        .parse::<usize>()
+                                                                    {
+                                                                        while arr.len() <= idx {
+                                                                            arr.push(None);
+                                                                        }
+                                                                        arr[idx] =
+                                                                            Some(value.to_string());
+                                                                        next_idx = idx + 1;
+                                                                        continue;
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                        while arr.len() <= next_idx {
+                                                            arr.push(None);
+                                                        }
+                                                        arr[next_idx] = Some(f);
+                                                        next_idx += 1;
                                                     }
                                                 }
                                                 self.arrays.insert(name.to_string(), arr);
