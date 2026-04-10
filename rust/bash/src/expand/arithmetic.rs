@@ -703,6 +703,12 @@ fn eval_arith(expr: &str) -> Result<i64, String> {
         return eval_arith(stripped).map(|n| if n == 0 { 1 } else { 0 });
     }
     if let Some(stripped) = expr.strip_prefix('~') {
+        if stripped.trim().is_empty() {
+            return Err(format!(
+                "arithmetic syntax error: operand expected (error token is \"{}\")",
+                expr
+            ));
+        }
         return eval_arith(stripped).map(|n| !n);
     }
 

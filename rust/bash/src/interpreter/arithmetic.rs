@@ -1793,6 +1793,23 @@ impl Shell {
             };
         }
         if let Some(stripped) = expr.strip_prefix('~') {
+            if stripped.trim().is_empty() {
+                // Bare `~` without an operand — report error like bash does
+                let display = if self.arith_depth == 1 {
+                    self.arith_top_expr.as_deref().unwrap_or(expr)
+                } else {
+                    expr
+                };
+                eprintln!(
+                    "{}: {}{}: arithmetic syntax error: operand expected (error token is \"{}\")",
+                    self.arith_error_prefix(),
+                    self.arith_cmd_prefix(),
+                    display,
+                    expr
+                );
+                crate::expand::set_arith_error();
+                return 0;
+            }
             return !self.eval_arith_expr_impl(stripped);
         }
 

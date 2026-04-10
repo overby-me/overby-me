@@ -255,23 +255,106 @@ impl Shell {
                 WordPart::Param(expr) => {
                     if let ParamOp::Assign(colon, default_word) = &expr.op {
                         let resolved = self.resolve_nameref(&expr.name);
-                        let val = self.vars.get(&resolved).cloned().unwrap_or_default();
-                        let empty = if *colon { val.is_empty() } else { false };
-                        let unset = !self.vars.contains_key(&resolved);
-                        if unset || empty {
-                            let raw_val = self.expand_word_single(default_word);
-                            // Apply tilde expansion for := defaults
-                            let default_val = if let Some(rest) = raw_val.strip_prefix('~') {
-                                let home = self.vars.get("HOME").cloned().unwrap_or_default();
-                                if rest.is_empty() || rest.starts_with('/') {
-                                    format!("{}{}", home, rest)
+                        // Check if this is an array element reference like a[42]
+                        if let Some(bracket) = resolved.find('[') {
+                            let base = resolved[..bracket].to_string();
+                            let idx_str = if resolved.ends_with(']') {
+                                resolved[bracket + 1..resolved.len() - 1].to_string()
+                            } else {
+                                resolved[bracket + 1..].to_string()
+                            };
+                            // Handle indexed array element
+                            if self.arrays.contains_key(&base) {
+                                // Evaluate subscript and look up element value
+                                let raw_idx = self.eval_arith_expr(&idx_str);
+                                let elem_val = self.arrays.get(&base).and_then(|arr| {
+                                    let idx = if raw_idx < 0 {
+                                        let len =
+                                            crate::interpreter::array_effective_len(arr) as i64;
+                                        (len + raw_idx).max(0) as usize
+                                    } else {
+                                        raw_idx as usize
+                                    };
+                                    arr.get(idx).and_then(|v| v.as_ref()).cloned()
+                                });
+                                let empty = if *colon {
+                                    elem_val.as_deref().map_or(true, |v| v.is_empty())
                                 } else {
-                                    raw_val
+                                    false
+                                };
+                                let unset = elem_val.is_none();
+                                if unset || empty {
+                                    let raw_val = self.expand_word_single(default_word);
+                                    let default_val = self.tilde_expand_assign_default(&raw_val);
+                                    // Apply integer attribute if set
+                                    let default_val = if self.integer_vars.contains(&base) {
+                                        self.eval_arith_expr(&default_val).to_string()
+                                    } else {
+                                        default_val
+                                    };
+                                    // Apply case-modification attributes
+                                    let default_val =
+                                        self.apply_case_attrs_to_value(&base, &default_val);
+                                    let arr = self.arrays.entry(base.clone()).or_default();
+                                    let idx = if raw_idx < 0 {
+                                        let len =
+                                            crate::interpreter::array_effective_len(arr) as i64;
+                                        (len + raw_idx).max(0) as usize
+                                    } else {
+                                        raw_idx as usize
+                                    };
+                                    while arr.len() <= idx {
+                                        arr.push(None);
+                                    }
+                                    arr[idx] = Some(default_val);
+                                }
+                            } else if self.assoc_arrays.contains_key(&base) {
+                                // Expand command substitutions and variables in the subscript
+                                // e.g. ${A[$(echo Darwin)]=foo} → key is "Darwin"
+                                let expanded_key = self.expand_assoc_subscript(&idx_str);
+                                let elem_val = self
+                                    .assoc_arrays
+                                    .get(&base)
+                                    .and_then(|m| m.get(&expanded_key))
+                                    .cloned();
+                                let empty = if *colon {
+                                    elem_val.as_deref().map_or(true, |v| v.is_empty())
+                                } else {
+                                    false
+                                };
+                                let unset = elem_val.is_none();
+                                if unset || empty {
+                                    let raw_val = self.expand_word_single(default_word);
+                                    let default_val = self.tilde_expand_assign_default(&raw_val);
+                                    // Apply case-modification attributes
+                                    let default_val =
+                                        self.apply_case_attrs_to_value(&base, &default_val);
+                                    self.assoc_arrays
+                                        .entry(base.clone())
+                                        .or_default()
+                                        .insert(expanded_key, default_val);
                                 }
                             } else {
-                                raw_val
-                            };
-                            self.set_var(&expr.name, default_val);
+                                // Not yet an array — treat as scalar
+                                let val = self.vars.get(&resolved).cloned().unwrap_or_default();
+                                let empty = if *colon { val.is_empty() } else { false };
+                                let unset = !self.vars.contains_key(&resolved);
+                                if unset || empty {
+                                    let raw_val = self.expand_word_single(default_word);
+                                    let default_val = self.tilde_expand_assign_default(&raw_val);
+                                    self.set_var(&expr.name, default_val);
+                                }
+                            }
+                        } else {
+                            // Plain scalar variable
+                            let val = self.vars.get(&resolved).cloned().unwrap_or_default();
+                            let empty = if *colon { val.is_empty() } else { false };
+                            let unset = !self.vars.contains_key(&resolved);
+                            if unset || empty {
+                                let raw_val = self.expand_word_single(default_word);
+                                let default_val = self.tilde_expand_assign_default(&raw_val);
+                                self.set_var(&expr.name, default_val);
+                            }
                         }
                     }
                 }
@@ -281,6 +364,33 @@ impl Shell {
                 }
                 _ => {}
             }
+        }
+    }
+
+    /// Helper: apply tilde expansion to assign-default values.
+    fn tilde_expand_assign_default(&self, raw_val: &str) -> String {
+        if let Some(rest) = raw_val.strip_prefix('~') {
+            let home = self.vars.get("HOME").cloned().unwrap_or_default();
+            if rest.is_empty() || rest.starts_with('/') {
+                format!("{}{}", home, rest)
+            } else {
+                raw_val.to_string()
+            }
+        } else {
+            raw_val.to_string()
+        }
+    }
+
+    /// Helper: apply case-modification attributes (uppercase/lowercase/capitalize) to a value.
+    fn apply_case_attrs_to_value(&self, name: &str, val: &str) -> String {
+        if self.uppercase_vars.contains(name) {
+            val.to_uppercase()
+        } else if self.lowercase_vars.contains(name) {
+            val.to_lowercase()
+        } else if self.capitalize_vars.contains(name) {
+            crate::interpreter::capitalize_string(val)
+        } else {
+            val.to_string()
         }
     }
 
@@ -1906,14 +2016,40 @@ impl Shell {
                     //    that the '(' itself is source-level, not from expansion.
                     //
                     // 2. '(' came from a single-quoted part (e.g. declare -a
-                    //    f='("${d[@]}")') — only treat as compound assignment if
-                    //    -a or -A flag is present (bash behavior: `export r='(5)'`
-                    //    without -a is scalar assignment).
+                    //    f='("${d[@]}")') — treat as compound assignment if
+                    //    -a or -A flag is present, OR if the variable is already
+                    //    an array/assoc (bash behavior: `declare -a a; declare a='(1 2 3)'`
+                    //    treats the value as compound because `a` is already an array,
+                    //    but `export r='(5)'` without -a and not already an array
+                    //    is scalar assignment).
                     //
                     // 3. '(' came from expansion (has_literal_paren is false) —
                     //    never treat as compound assignment.
+                    //
+                    // For case 2, we need to peek at the variable name to check
+                    // if it's already an array.
+                    // Only declare/typeset/local trigger compound re-parsing
+                    // when the variable is already an array.  export/readonly
+                    // should NOT — e.g. `export r='(5)'` on an existing array
+                    // assigns the literal string "(5)" to element [0].
+                    let is_declare_family =
+                        matches!(command_name.as_str(), "declare" | "typeset" | "local");
+                    let var_already_array = if paren_from_single_quote && is_declare_family {
+                        if let Some(eq_pos) = arg.find('=') {
+                            let peek_name = &arg[..eq_pos];
+                            self.arrays.contains_key(peek_name)
+                                || self.assoc_arrays.contains_key(peek_name)
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    };
                     if has_literal_paren
-                        && (!paren_from_single_quote || (has_array_flag || has_assoc_flag))
+                        && (!paren_from_single_quote
+                            || has_array_flag
+                            || has_assoc_flag
+                            || var_already_array)
                         && let Some(eq_pos) = arg.find('=')
                     {
                         let name = &arg[..eq_pos];
@@ -1973,7 +2109,22 @@ impl Shell {
                                     );
                                 }
                                 self.last_status = 1;
-                            } else if has_assoc_flag {
+                            } else if has_array_flag && self.assoc_arrays.contains_key(name) {
+                                // Cannot convert associative to indexed array.
+                                // Don't perform the compound assignment — just
+                                // push the bare name so the builtin can report
+                                // the error and apply any other flags.
+                                new_args.push(name.to_string());
+                                modified = true;
+                                continue;
+                            } else if has_assoc_flag && self.arrays.contains_key(name) {
+                                // Cannot convert indexed to associative array.
+                                new_args.push(name.to_string());
+                                modified = true;
+                                continue;
+                            } else if has_assoc_flag
+                                || (!has_array_flag && self.assoc_arrays.contains_key(name))
+                            {
                                 let map = crate::builtins::parse_assoc_literal(value);
                                 self.assoc_arrays.insert(name.to_string(), map);
                             } else {
@@ -2091,6 +2242,20 @@ impl Shell {
                                                     if elem_parts.is_empty() {
                                                         continue;
                                                     }
+                                                    // Check if this element came entirely from
+                                                    // a quoted context (DoubleQuoted or
+                                                    // SingleQuoted).  If so, don't parse
+                                                    // [idx]=val subscript syntax — the whole
+                                                    // expansion is a single literal value.
+                                                    // e.g. ("$b") where b='[0]=bar' should
+                                                    // store "[0]=bar" literally, not parse as
+                                                    // subscript 0.
+                                                    let from_quoted = elem_parts.len() == 1
+                                                        && matches!(
+                                                            elem_parts[0],
+                                                            WordPart::DoubleQuoted(_)
+                                                                | WordPart::SingleQuoted(_)
+                                                        );
                                                     let sub_word: Vec<WordPart> = elem_parts
                                                         .iter()
                                                         .map(|p| (*p).clone())
@@ -2098,8 +2263,11 @@ impl Shell {
                                                     let fields =
                                                         self.expand_word_fields(&sub_word, &ifs);
                                                     for f in fields {
-                                                        // Handle [subscript]=value format
-                                                        if f.starts_with('[')
+                                                        // Handle [subscript]=value format,
+                                                        // but only when the element is not
+                                                        // from a quoted expansion.
+                                                        if !from_quoted
+                                                            && f.starts_with('[')
                                                             && let Some(bracket_end) = f.find(']')
                                                             && f.as_bytes().get(bracket_end + 1)
                                                                 == Some(&b'=')

@@ -2084,30 +2084,68 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     shell.integer_vars.insert(name.to_string());
                 }
             } else if flag_array {
-                let mut arr = crate::builtins::parse_indexed_compound_assignment(value);
-                if flag_integer {
-                    // Evaluate each element as arithmetic when -i is set
-                    let evaluated: Vec<Option<String>> = arr
-                        .into_iter()
-                        .map(|v| v.map(|s| shell.eval_arith_expr(&s).to_string()))
-                        .collect();
-                    shell.arrays.insert(name.to_string(), evaluated);
-                    shell.integer_vars.insert(name.to_string());
-                } else {
-                    // Apply case transforms directly using local flags, since
-                    // uppercase_vars/lowercase_vars aren't populated yet
-                    if flag_uppercase || flag_lowercase || flag_capitalize {
-                        for val in arr.iter_mut().flatten() {
-                            *val = if flag_uppercase {
-                                val.to_uppercase()
-                            } else if flag_lowercase {
-                                val.to_lowercase()
-                            } else {
-                                crate::interpreter::capitalize_string(val)
-                            };
+                // Only parse as compound assignment if the value is wrapped
+                // in (...).  A bare value like `declare -a foo="[0]=bar"`
+                // (where "[0]=bar" came from expansion) should be treated as
+                // a scalar string assigned to element [0], not as subscript
+                // syntax.  Bash only interprets [idx]=val inside (...).
+                let trimmed_val = value.trim();
+                if trimmed_val.starts_with('(') && trimmed_val.ends_with(')') {
+                    let mut arr = crate::builtins::parse_indexed_compound_assignment(value);
+                    if flag_integer {
+                        // Evaluate each element as arithmetic when -i is set
+                        let evaluated: Vec<Option<String>> = arr
+                            .into_iter()
+                            .map(|v| v.map(|s| shell.eval_arith_expr(&s).to_string()))
+                            .collect();
+                        shell.arrays.insert(name.to_string(), evaluated);
+                        shell.integer_vars.insert(name.to_string());
+                    } else {
+                        // Apply case transforms directly using local flags, since
+                        // uppercase_vars/lowercase_vars aren't populated yet
+                        if flag_uppercase || flag_lowercase || flag_capitalize {
+                            for val in arr.iter_mut().flatten() {
+                                *val = if flag_uppercase {
+                                    val.to_uppercase()
+                                } else if flag_lowercase {
+                                    val.to_lowercase()
+                                } else {
+                                    crate::interpreter::capitalize_string(val)
+                                };
+                            }
                         }
+                        shell.arrays.insert(name.to_string(), arr);
                     }
-                    shell.arrays.insert(name.to_string(), arr);
+                } else {
+                    // Non-compound value: assign as scalar to element [0]
+                    let val = if flag_integer {
+                        shell.integer_vars.insert(name.to_string());
+                        shell.eval_arith_expr(value).to_string()
+                    } else {
+                        let mut v = value.to_string();
+                        if flag_uppercase {
+                            v = v.to_uppercase();
+                        } else if flag_lowercase {
+                            v = v.to_lowercase();
+                        } else if flag_capitalize {
+                            v = crate::interpreter::capitalize_string(&v);
+                        }
+                        v
+                    };
+                    if is_append {
+                        let arr = shell.arrays.entry(name.to_string()).or_default();
+                        if arr.is_empty() {
+                            arr.push(Some(val));
+                        } else {
+                            match &mut arr[0] {
+                                Some(s) => s.push_str(&val),
+                                None => arr[0] = Some(val),
+                            }
+                        }
+                    } else {
+                        let arr = vec![Some(val)];
+                        shell.arrays.insert(name.to_string(), arr);
+                    }
                 }
             } else if flag_integer {
                 // Mark as integer and evaluate as arithmetic
@@ -2242,18 +2280,24 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 // Error if trying to convert an existing indexed array to assoc
                 if shell.arrays.contains_key(name) {
                     // Bash error format for type conversion:
-                    // - Inside function: two errors: "{func}: {name}: cannot convert..."
-                    //   then "{cmd_name}: {name}: cannot convert..."
-                    // - At top level: one error: "{name}: cannot convert..."
-                    if let Some(func) = shell.func_names.last() {
-                        eprintln!(
-                            "{}: {}: {}: cannot convert indexed to associative array",
-                            shell.error_prefix(),
-                            func,
-                            name
-                        );
+                    // - Inside function with -g flag: two errors:
+                    //   "{prefix}: {func}: {name}: cannot convert..."
+                    //   "{prefix}: {cmd_name}: {name}: cannot convert..."
+                    // - Inside function without -g: one error:
+                    //   "{prefix}: {cmd_name}: {name}: cannot convert..."
+                    // - At top level: one error:
+                    //   "{prefix}: {name}: cannot convert..."
+                    if flag_global {
+                        if let Some(func) = shell.func_names.last() {
+                            eprintln!(
+                                "{}: {}: {}: cannot convert indexed to associative array",
+                                shell.error_prefix(),
+                                func,
+                                name
+                            );
+                        }
                     }
-                    if shell.func_names.is_empty() {
+                    if shell.func_names.is_empty() && !flag_global {
                         eprintln!(
                             "{}: {}: cannot convert indexed to associative array",
                             shell.error_prefix(),
@@ -2282,18 +2326,24 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 // Error if trying to convert an existing assoc array to indexed
                 if shell.assoc_arrays.contains_key(name) {
                     // Bash error format for type conversion:
-                    // - Inside function: two errors: "{func}: {name}: cannot convert..."
-                    //   then "{cmd_name}: {name}: cannot convert..."
-                    // - At top level: one error: "{name}: cannot convert..."
-                    if let Some(func) = shell.func_names.last() {
-                        eprintln!(
-                            "{}: {}: {}: cannot convert associative to indexed array",
-                            shell.error_prefix(),
-                            func,
-                            name
-                        );
+                    // - Inside function with -g flag: two errors:
+                    //   "{prefix}: {func}: {name}: cannot convert..."
+                    //   "{prefix}: {cmd_name}: {name}: cannot convert..."
+                    // - Inside function without -g: one error:
+                    //   "{prefix}: {cmd_name}: {name}: cannot convert..."
+                    // - At top level: one error:
+                    //   "{prefix}: {name}: cannot convert..."
+                    if flag_global {
+                        if let Some(func) = shell.func_names.last() {
+                            eprintln!(
+                                "{}: {}: {}: cannot convert associative to indexed array",
+                                shell.error_prefix(),
+                                func,
+                                name
+                            );
+                        }
                     }
-                    if shell.func_names.is_empty() {
+                    if shell.func_names.is_empty() && !flag_global {
                         eprintln!(
                             "{}: {}: cannot convert associative to indexed array",
                             shell.error_prefix(),
