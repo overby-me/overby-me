@@ -988,21 +988,26 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                             if !s.is_empty() {
                                 out.push(Segment::Quoted(std::mem::take(&mut s)));
                             }
-                            let sep = if expr.name == "@" {
-                                None // SplitHere
-                            } else {
-                                ifs_first_char(ctx.vars)
-                            };
+                            // For "@": SplitHere between elements (separate fields).
+                            // For "*": join with IFS[0].  When IFS is empty, "*"
+                            // concatenates with no separator (NOT SplitHere).
+                            let is_at = expr.name == "@";
+                            let ifs_ch = ifs_first_char(ctx.vars);
                             for (i, elem) in ctx.positional[1..].iter().enumerate() {
                                 if i > 0 {
-                                    match sep {
-                                        None => out.push(Segment::SplitHere),
-                                        Some(c) => s.push(c),
+                                    if is_at {
+                                        if !s.is_empty() {
+                                            out.push(Segment::Quoted(std::mem::take(&mut s)));
+                                        }
+                                        out.push(Segment::SplitHere);
+                                    } else if let Some(c) = ifs_ch {
+                                        s.push(c);
                                     }
+                                    // else: $* with empty IFS — concatenate (no separator)
                                 }
                                 let result =
                                     apply_param_op(elem, &expr.op, ctx, cmd_sub, &expr.name);
-                                if sep.is_none() {
+                                if is_at {
                                     out.push(Segment::Quoted(result));
                                 } else {
                                     s.push_str(&result);
@@ -1582,6 +1587,36 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
             }
         }
         WordPart::Param(expr) => {
+            // Handle unquoted ${@} / ${*} with ParamOp::None — produce separate
+            // fields like $@ / $* (Variable handler above).  Without this,
+            // ${@} falls through to lookup_var which space-joins the elements
+            // into a single string, breaking word splitting when IFS != " ".
+            if (expr.name == "@" || expr.name == "*")
+                && matches!(expr.op, ParamOp::None)
+                && ctx.positional.len() > 1
+            {
+                if expr.name == "@" {
+                    for (i, arg) in ctx.positional[1..].iter().enumerate() {
+                        if i > 0 {
+                            out.push(Segment::SplitHere);
+                        }
+                        out.push(Segment::Unquoted(arg.clone()));
+                    }
+                } else if ctx.vars.get("IFS").map(|s| s.is_empty()).unwrap_or(false) {
+                    // ${*} with null IFS — separate fields via SplitHereStar
+                    for (i, arg) in ctx.positional[1..].iter().enumerate() {
+                        if i > 0 {
+                            out.push(Segment::SplitHereStar);
+                        }
+                        out.push(Segment::Unquoted(arg.clone()));
+                    }
+                } else {
+                    // ${*} with normal IFS — join with IFS[0]
+                    let val = lookup_var(&expr.name, ctx);
+                    out.push(Segment::Unquoted(val));
+                }
+                return;
+            }
             // Handle unquoted ${@%pattern}, ${@#pattern}, ${@/pat/rep} etc.
             // Each positional param should be expanded separately
             if (expr.name == "@" || expr.name == "*")
@@ -1686,6 +1721,48 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                 let base = &expr.name[..bracket];
                 let idx = &expr.name[bracket + 1..expr.name.len().saturating_sub(1)];
                 let resolved = ctx.resolve_nameref(base);
+                // Handle unquoted ${arr[@]} / ${arr[*]} with ParamOp::None —
+                // produce separate fields like ${arr[@]:0} does.  Without this,
+                // lookup_var space-joins, breaking splitting when IFS != " ".
+                if (idx == "@" || idx == "*")
+                    && matches!(expr.op, ParamOp::None)
+                    && (ctx.arrays.contains_key(&resolved)
+                        || ctx.assoc_arrays.contains_key(&resolved))
+                {
+                    let mut first = true;
+                    if let Some(arr) = ctx.arrays.get(&resolved) {
+                        for elem in arr.iter().filter_map(|v| v.as_ref()) {
+                            if !first {
+                                out.push(if idx == "@" {
+                                    Segment::SplitHere
+                                } else {
+                                    match ifs_first_char(ctx.vars) {
+                                        Some(c) => Segment::Unquoted(c.to_string()),
+                                        None => Segment::SplitHereStar,
+                                    }
+                                });
+                            }
+                            first = false;
+                            out.push(Segment::Unquoted(elem.clone()));
+                        }
+                    } else if let Some(assoc) = ctx.assoc_arrays.get(&resolved) {
+                        for val in assoc.values() {
+                            if !first {
+                                out.push(if idx == "@" {
+                                    Segment::SplitHere
+                                } else {
+                                    match ifs_first_char(ctx.vars) {
+                                        Some(c) => Segment::Unquoted(c.to_string()),
+                                        None => Segment::SplitHereStar,
+                                    }
+                                });
+                            }
+                            first = false;
+                            out.push(Segment::Unquoted(val.clone()));
+                        }
+                    }
+                    return;
+                }
                 if (idx == "@" || idx == "*")
                     && !matches!(
                         expr.op,
@@ -1762,10 +1839,14 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                         // Default/Assign/Error not active — fall through to normal expansion
                     }
 
-                    let arr = if let Some(a) = ctx.arrays.get(&resolved) {
-                        a
+                    // For indexed arrays, iterate directly; for assoc arrays,
+                    // iterate values (previously delegated to expand_param which
+                    // space-joins, breaking per-element splitting with non-default IFS).
+                    let elements: Vec<String> = if let Some(a) = ctx.arrays.get(&resolved) {
+                        a.iter().filter_map(|v| v.as_ref().cloned()).collect()
+                    } else if let Some(assoc) = ctx.assoc_arrays.get(&resolved) {
+                        assoc.values().cloned().collect()
                     } else {
-                        // For assoc arrays, delegate to expand_param
                         let val = expand_param(expr, ctx, cmd_sub);
                         if !val.is_empty() {
                             out.push(Segment::Unquoted(val));
@@ -1774,7 +1855,7 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                     };
                     // Apply operation to each element separately
                     let mut first = true;
-                    for elem in arr.iter().filter_map(|v| v.as_ref()) {
+                    for elem in &elements {
                         // Create a temporary param expr for this single element
                         let single_expr = ParamExpr {
                             name: elem.clone(),
@@ -2889,8 +2970,15 @@ fn word_split(segments: &[Segment], ifs: &str) -> Vec<String> {
     for segment in segments {
         match segment {
             Segment::SplitHere | Segment::SplitHereStar => {
-                // Force a field break here (for "$@", "${arr[@]}", $* with null IFS)
-                fields.push(std::mem::take(&mut current));
+                // Force a field break here (for "$@", "${arr[@]}", $* with null IFS).
+                // Only push a field if current is non-empty or there was quoted
+                // content — otherwise trailing IFS whitespace from the previous
+                // Unquoted segment already pushed the field and left current
+                // empty, and pushing again would create a spurious empty field
+                // (e.g. mapfile elements with trailing \n).
+                if !current.is_empty() || has_quoted_since_split {
+                    fields.push(std::mem::take(&mut current));
+                }
                 has_quoted_since_split = false;
             }
             Segment::Quoted(s) => {

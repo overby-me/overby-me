@@ -857,8 +857,17 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
                     shell.namerefs.insert(name.to_string(), value.to_string());
                 }
             } else if flag_assoc {
-                let map = crate::builtins::parse_assoc_literal(value);
-                shell.assoc_arrays.insert(name.to_string(), map);
+                let trimmed_val = value.trim();
+                if trimmed_val.starts_with('(') && trimmed_val.ends_with(')') {
+                    let map = crate::builtins::parse_assoc_literal(value);
+                    shell.assoc_arrays.insert(name.to_string(), map);
+                } else {
+                    // Bare value without (): local -A name=value
+                    // Bash assigns the value to key "0", not implicit key-value pairing.
+                    let mut map = crate::interpreter::AssocArray::default();
+                    map.insert("0".to_string(), value.to_string());
+                    shell.assoc_arrays.insert(name.to_string(), map);
+                }
             } else if flag_array {
                 let mut arr = crate::builtins::parse_indexed_compound_assignment(value);
                 shell.apply_case_attrs_to_array(name, &mut arr);
@@ -1892,8 +1901,16 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                         shell.declare_local(stripped_name);
                     }
                     if flag_assoc {
-                        let map = parse_assoc_literal(value);
-                        shell.assoc_arrays.insert(resolved_base.clone(), map);
+                        let trimmed_val = value.trim();
+                        if trimmed_val.starts_with('(') && trimmed_val.ends_with(')') {
+                            let map = parse_assoc_literal(value);
+                            shell.assoc_arrays.insert(resolved_base.clone(), map);
+                        } else {
+                            // Bare value without (): assign to key "0"
+                            let mut map = crate::interpreter::AssocArray::default();
+                            map.insert("0".to_string(), value.to_string());
+                            shell.assoc_arrays.insert(resolved_base.clone(), map);
+                        }
                     } else if value.starts_with('(') && value.ends_with(')') {
                         let mut arr = crate::builtins::parse_indexed_compound_assignment(value);
                         // Apply case transforms using local flags (attrs not yet in sets)
@@ -2120,8 +2137,18 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     shell.namerefs.insert(name.to_string(), value.to_string());
                 }
             } else if flag_assoc {
-                let map = parse_assoc_literal(value);
-                shell.assoc_arrays.insert(name.to_string(), map);
+                let trimmed_val = value.trim();
+                if trimmed_val.starts_with('(') && trimmed_val.ends_with(')') {
+                    // Compound assignment: declare -A name=(...)
+                    let map = parse_assoc_literal(value);
+                    shell.assoc_arrays.insert(name.to_string(), map);
+                } else {
+                    // Bare value without (): declare -A name=value
+                    // Bash assigns the value to key "0", not implicit key-value pairing.
+                    let mut map = crate::interpreter::AssocArray::default();
+                    map.insert("0".to_string(), value.to_string());
+                    shell.assoc_arrays.insert(name.to_string(), map);
+                }
                 if flag_integer {
                     shell.integer_vars.insert(name.to_string());
                 }
