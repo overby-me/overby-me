@@ -2068,8 +2068,25 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                         if trimmed_val.starts_with('(') && trimmed_val.ends_with(')') {
                             let map = parse_assoc_literal(value);
                             shell.assoc_arrays.insert(resolved_base.clone(), map);
+                        } else if !idx_str.is_empty() {
+                            // Subscripted assignment: declare -A arr["key"]=value
+                            // Use the subscript as the associative array key,
+                            // preserving existing entries.
+                            let key = shell.expand_assoc_subscript(idx_str);
+                            if !shell.assoc_arrays.contains_key(&resolved_base) {
+                                shell.assoc_arrays.insert(
+                                    resolved_base.clone(),
+                                    crate::interpreter::AssocArray::default(),
+                                );
+                            }
+                            shell.declared_unset.remove(&resolved_base);
+                            shell
+                                .assoc_arrays
+                                .get_mut(&resolved_base)
+                                .unwrap()
+                                .insert(key, value.to_string());
                         } else {
-                            // Bare value without (): assign to key "0"
+                            // Bare value without () and no subscript: assign to key "0"
                             let mut map = crate::interpreter::AssocArray::default();
                             map.insert("0".to_string(), value.to_string());
                             shell.assoc_arrays.insert(resolved_base.clone(), map);
