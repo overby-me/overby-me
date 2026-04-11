@@ -2140,8 +2140,36 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 let trimmed_val = value.trim();
                 if trimmed_val.starts_with('(') && trimmed_val.ends_with(')') {
                     // Compound assignment: declare -A name=(...)
-                    let map = parse_assoc_literal(value);
-                    shell.assoc_arrays.insert(name.to_string(), map);
+                    // If the compound value contains $ or ` (e.g. from
+                    // declare -A d='($a)'), re-lex and expand so that
+                    // variable/command expansions are evaluated.
+                    let needs_shell_expand = value.contains('$') || value.contains('`');
+                    if needs_shell_expand {
+                        let inner = &trimmed_val[1..trimmed_val.len() - 1];
+                        let word = crate::lexer::lex_compound_array_content(inner);
+                        // Split the lexed word into sub-words on literal
+                        // whitespace boundaries, then expand each individually
+                        // with expand_word_single (no IFS splitting) so that
+                        // e.g. $a where a='x y' stays as one token "x y".
+                        let sub_words = split_word_on_whitespace(&word);
+                        let expanded: Vec<String> = sub_words
+                            .iter()
+                            .map(|w| shell.expand_word_single(w))
+                            .filter(|s| !s.is_empty())
+                            .collect();
+                        // Assoc arrays use alternating key-value pairs for
+                        // bare elements (no [key]=val syntax).
+                        let mut map = crate::interpreter::AssocArray::default();
+                        let mut iter = expanded.into_iter();
+                        while let Some(key) = iter.next() {
+                            let val = iter.next().unwrap_or_default();
+                            map.insert(key, val);
+                        }
+                        shell.assoc_arrays.insert(name.to_string(), map);
+                    } else {
+                        let map = parse_assoc_literal(value);
+                        shell.assoc_arrays.insert(name.to_string(), map);
+                    }
                 } else {
                     // Bare value without (): declare -A name=value
                     // Bash assigns the value to key "0", not implicit key-value pairing.
@@ -2160,30 +2188,69 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 // syntax.  Bash only interprets [idx]=val inside (...).
                 let trimmed_val = value.trim();
                 if trimmed_val.starts_with('(') && trimmed_val.ends_with(')') {
-                    let mut arr = crate::builtins::parse_indexed_compound_assignment(value);
-                    if flag_integer {
-                        // Evaluate each element as arithmetic when -i is set
-                        let evaluated: Vec<Option<String>> = arr
-                            .into_iter()
-                            .map(|v| v.map(|s| shell.eval_arith_expr(&s).to_string()))
-                            .collect();
-                        shell.arrays.insert(name.to_string(), evaluated);
-                        shell.integer_vars.insert(name.to_string());
-                    } else {
-                        // Apply case transforms directly using local flags, since
-                        // uppercase_vars/lowercase_vars aren't populated yet
-                        if flag_uppercase || flag_lowercase || flag_capitalize {
-                            for val in arr.iter_mut().flatten() {
-                                *val = if flag_uppercase {
-                                    val.to_uppercase()
-                                } else if flag_lowercase {
-                                    val.to_lowercase()
-                                } else {
-                                    crate::interpreter::capitalize_string(val)
-                                };
+                    // If the compound value contains $ or ` (e.g. from
+                    // declare -a d='($a)'), re-lex and expand so that
+                    // variable/command expansions are evaluated with the
+                    // current shell state (which includes earlier assignments
+                    // in the same declare command).
+                    let needs_shell_expand = value.contains('$') || value.contains('`');
+                    if needs_shell_expand {
+                        let inner = &trimmed_val[1..trimmed_val.len() - 1];
+                        let ifs = shell
+                            .vars
+                            .get("IFS")
+                            .cloned()
+                            .unwrap_or_else(|| " \t\n".to_string());
+                        let word = crate::lexer::lex_compound_array_content(inner);
+                        let expanded = shell.expand_word_fields(&word, &ifs);
+                        let mut arr: Vec<Option<String>> = expanded.into_iter().map(Some).collect();
+                        if flag_integer {
+                            let evaluated: Vec<Option<String>> = arr
+                                .into_iter()
+                                .map(|v| v.map(|s| shell.eval_arith_expr(&s).to_string()))
+                                .collect();
+                            shell.arrays.insert(name.to_string(), evaluated);
+                            shell.integer_vars.insert(name.to_string());
+                        } else {
+                            if flag_uppercase || flag_lowercase || flag_capitalize {
+                                for val in arr.iter_mut().flatten() {
+                                    *val = if flag_uppercase {
+                                        val.to_uppercase()
+                                    } else if flag_lowercase {
+                                        val.to_lowercase()
+                                    } else {
+                                        crate::interpreter::capitalize_string(val)
+                                    };
+                                }
                             }
+                            shell.arrays.insert(name.to_string(), arr);
                         }
-                        shell.arrays.insert(name.to_string(), arr);
+                    } else {
+                        let mut arr = crate::builtins::parse_indexed_compound_assignment(value);
+                        if flag_integer {
+                            // Evaluate each element as arithmetic when -i is set
+                            let evaluated: Vec<Option<String>> = arr
+                                .into_iter()
+                                .map(|v| v.map(|s| shell.eval_arith_expr(&s).to_string()))
+                                .collect();
+                            shell.arrays.insert(name.to_string(), evaluated);
+                            shell.integer_vars.insert(name.to_string());
+                        } else {
+                            // Apply case transforms directly using local flags, since
+                            // uppercase_vars/lowercase_vars aren't populated yet
+                            if flag_uppercase || flag_lowercase || flag_capitalize {
+                                for val in arr.iter_mut().flatten() {
+                                    *val = if flag_uppercase {
+                                        val.to_uppercase()
+                                    } else if flag_lowercase {
+                                        val.to_lowercase()
+                                    } else {
+                                        crate::interpreter::capitalize_string(val)
+                                    };
+                                }
+                            }
+                            shell.arrays.insert(name.to_string(), arr);
+                        }
                     }
                 } else {
                     // Non-compound value: assign as scalar to element [0]
@@ -2242,7 +2309,79 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     shell.set_var(name, format!("{}{}", existing, value));
                 }
             } else {
-                shell.set_var(name, value.to_string());
+                // If the variable is already an indexed or associative array
+                // and the value looks like a compound assignment (...), treat
+                // it as compound (bash behavior: `a=(1 2 3); declare a='(4 5 6)'`
+                // re-assigns as compound, not scalar).
+                let resolved_for_check = shell.resolve_nameref(name);
+                let trimmed_val = value.trim();
+                let looks_compound = trimmed_val.starts_with('(') && trimmed_val.ends_with(')');
+                if looks_compound && shell.arrays.contains_key(&resolved_for_check) {
+                    let needs_shell_expand = value.contains('$') || value.contains('`');
+                    if needs_shell_expand {
+                        let inner = &trimmed_val[1..trimmed_val.len() - 1];
+                        let ifs = shell
+                            .vars
+                            .get("IFS")
+                            .cloned()
+                            .unwrap_or_else(|| " \t\n".to_string());
+                        let word = crate::lexer::lex_compound_array_content(inner);
+                        let expanded = shell.expand_word_fields(&word, &ifs);
+                        let mut arr: Vec<Option<String>> = expanded.into_iter().map(Some).collect();
+                        if flag_uppercase || flag_lowercase || flag_capitalize {
+                            for val in arr.iter_mut().flatten() {
+                                *val = if flag_uppercase {
+                                    val.to_uppercase()
+                                } else if flag_lowercase {
+                                    val.to_lowercase()
+                                } else {
+                                    crate::interpreter::capitalize_string(val)
+                                };
+                            }
+                        }
+                        shell.arrays.insert(resolved_for_check, arr);
+                    } else {
+                        let mut arr = crate::builtins::parse_indexed_compound_assignment(value);
+                        if flag_uppercase || flag_lowercase || flag_capitalize {
+                            for val in arr.iter_mut().flatten() {
+                                *val = if flag_uppercase {
+                                    val.to_uppercase()
+                                } else if flag_lowercase {
+                                    val.to_lowercase()
+                                } else {
+                                    crate::interpreter::capitalize_string(val)
+                                };
+                            }
+                        }
+                        shell.arrays.insert(resolved_for_check, arr);
+                    }
+                } else if looks_compound && shell.assoc_arrays.contains_key(&resolved_for_check) {
+                    let needs_shell_expand = value.contains('$') || value.contains('`');
+                    if needs_shell_expand {
+                        let inner = &trimmed_val[1..trimmed_val.len() - 1];
+                        let word = crate::lexer::lex_compound_array_content(inner);
+                        // Split into sub-words and expand each individually
+                        // (no IFS splitting) for assoc key-value pairing.
+                        let sub_words = split_word_on_whitespace(&word);
+                        let expanded: Vec<String> = sub_words
+                            .iter()
+                            .map(|w| shell.expand_word_single(w))
+                            .filter(|s| !s.is_empty())
+                            .collect();
+                        let mut map = crate::interpreter::AssocArray::default();
+                        let mut iter = expanded.into_iter();
+                        while let Some(key) = iter.next() {
+                            let val = iter.next().unwrap_or_default();
+                            map.insert(key, val);
+                        }
+                        shell.assoc_arrays.insert(resolved_for_check, map);
+                    } else {
+                        let map = parse_assoc_literal(value);
+                        shell.assoc_arrays.insert(resolved_for_check, map);
+                    }
+                } else {
+                    shell.set_var(name, value.to_string());
+                }
             }
 
             if flag_readonly {
@@ -2661,6 +2800,48 @@ pub fn parse_assoc_literal(s: &str) -> crate::interpreter::AssocArray {
         }
     }
     map
+}
+
+/// Split a lexed Word into sub-words by splitting on whitespace found in
+/// Literal parts.  This is used for assoc compound assignment expansion
+/// where each `$var` should expand as a single token (no IFS splitting).
+fn split_word_on_whitespace(word: &[crate::ast::WordPart]) -> Vec<Vec<crate::ast::WordPart>> {
+    use crate::ast::WordPart;
+    let mut result: Vec<Vec<WordPart>> = vec![vec![]];
+    for part in word {
+        if let WordPart::Literal(s) = part {
+            // Split this literal on whitespace; each piece goes into a
+            // separate sub-word.
+            let mut first = true;
+            for segment in s.split_whitespace() {
+                if !first {
+                    // Start a new sub-word
+                    result.push(vec![]);
+                }
+                first = false;
+                result
+                    .last_mut()
+                    .unwrap()
+                    .push(WordPart::Literal(segment.to_string()));
+            }
+            // If the literal was purely whitespace (or ended with whitespace),
+            // we may need to start a new sub-word for the next non-literal part.
+            if s.ends_with(|c: char| c.is_whitespace()) && !s.trim().is_empty() {
+                result.push(vec![]);
+            } else if s.trim().is_empty() && !s.is_empty() {
+                // Pure whitespace literal — start new sub-word if current is non-empty
+                if !result.last().unwrap().is_empty() {
+                    result.push(vec![]);
+                }
+            }
+        } else {
+            // Non-literal parts (Variable, CommandSub, etc.) go into
+            // the current sub-word as-is.
+            result.last_mut().unwrap().push(part.clone());
+        }
+    }
+    // Filter out empty sub-words
+    result.into_iter().filter(|w| !w.is_empty()).collect()
 }
 
 pub(super) fn builtin_let(shell: &mut Shell, args: &[String]) -> i32 {

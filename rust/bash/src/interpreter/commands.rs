@@ -2134,54 +2134,42 @@ impl Shell {
                             } else if has_assoc_flag
                                 || (!has_array_flag && self.assoc_arrays.contains_key(name))
                             {
+                                // When the compound value came from single quotes
+                                // and contains $/ `, defer to the builtin so that
+                                // earlier scalar assignments in the same command
+                                // are visible during expansion.
+                                let needs_deferred_expand = paren_from_single_quote
+                                    && value.len() > 2
+                                    && value.starts_with('(')
+                                    && value.ends_with(')')
+                                    && (value.contains('$') || value.contains('`'));
+                                if needs_deferred_expand {
+                                    // Pass the full arg through to the builtin
+                                    new_args.push(arg.clone());
+                                    modified = true;
+                                    continue;
+                                }
                                 let map = crate::builtins::parse_assoc_literal(value);
                                 self.assoc_arrays.insert(name.to_string(), map);
                             } else {
                                 // Check if the compound value came from a
                                 // single-quoted word part AND contains shell
-                                // expansions ($, `).  In that case the content
-                                // was never expanded by the outer lexer, so we
-                                // re-parse with full shell quoting and expand.
-                                // e.g. declare -a f='("${d[@]}")'
-                                //
-                                // If the single-quoted value does NOT contain
-                                // expansions (e.g. d='([1]="" [2]="bdef"...)'),
-                                // use the normal compound parser which already
-                                // handles [subscript]=value syntax correctly.
+                                // expansions ($, `).  In that case, defer to the
+                                // builtin so that earlier scalar assignments in
+                                // the same declare command are visible during
+                                // expansion (e.g. declare -a a=$x d='($a)' —
+                                // $a must see the value from a=$x).
                                 let needs_reexpand = paren_from_single_quote
                                     && value.len() > 2
                                     && value.starts_with('(')
                                     && value.ends_with(')')
                                     && (value.contains('$') || value.contains('`'));
                                 if needs_reexpand {
-                                    let inner = &value[1..value.len() - 1];
-                                    let ifs = self
-                                        .vars
-                                        .get("IFS")
-                                        .cloned()
-                                        .unwrap_or_else(|| " \t\n".to_string());
-                                    let word = crate::lexer::lex_compound_array_content(inner);
-                                    let expanded = self.expand_word_fields(&word, &ifs);
-                                    let mut arr: Vec<Option<String>> =
-                                        expanded.into_iter().map(Some).collect();
-                                    // Apply case-modification from declare flags
-                                    if has_uppercase_flag
-                                        || has_lowercase_flag
-                                        || has_capitalize_flag
-                                    {
-                                        for val in arr.iter_mut().flatten() {
-                                            *val = if has_uppercase_flag {
-                                                val.to_uppercase()
-                                            } else if has_lowercase_flag {
-                                                val.to_lowercase()
-                                            } else {
-                                                crate::interpreter::capitalize_string(val)
-                                            };
-                                        }
-                                    } else {
-                                        self.apply_case_attrs_to_array(name, &mut arr);
-                                    }
-                                    self.arrays.insert(name.to_string(), arr);
+                                    // Pass the full arg through to the builtin
+                                    // for deferred expansion.
+                                    new_args.push(arg.clone());
+                                    modified = true;
+                                    continue;
                                 } else {
                                     // Re-expand compound assignment elements
                                     // from the original word parts so that
@@ -2204,19 +2192,12 @@ impl Shell {
                                         if let (Some(start), Some(end)) = (paren_start, paren_end)
                                             && end > start
                                         {
-                                            // Check if the parts between ( and ) contain
-                                            // anything that could produce "$@"-like splitting
-                                            // (DoubleQuoted with Param/Variable/CommandSub).
-                                            // Also check for \x1F element separators from the
-                                            // parser's array element embedding.
                                             let inner_parts = &orig_word[start + 1..end];
-                                            let has_dquoted_expansion = inner_parts
-                                                .iter()
-                                                .any(|p| matches!(p, WordPart::DoubleQuoted(_)));
-                                            let has_element_sep = inner_parts.iter().any(|p| {
-                                                matches!(p, WordPart::Literal(s) if s.contains('\x1F'))
-                                            });
-                                            if has_dquoted_expansion || has_element_sep {
+                                            // Always use word expansion when we have original
+                                            // word parts — this ensures glob expansion, variable
+                                            // expansion, tilde expansion, etc. all work for
+                                            // `declare -a x=(*)` and similar constructs.
+                                            if !inner_parts.is_empty() {
                                                 let ifs = self
                                                     .vars
                                                     .get("IFS")
@@ -2271,11 +2252,27 @@ impl Shell {
                                                         .collect();
                                                     let fields =
                                                         self.expand_word_fields(&sub_word, &ifs);
+                                                    // Check if this element had an explicit
+                                                    // [subscript]= prefix in the source.  When
+                                                    // the parser encounters [idx]=val it embeds
+                                                    // Literal("[") ... Literal("]=") parts.
+                                                    // If the source element is a bare word like
+                                                    // `*`, its expansion results (e.g. a file
+                                                    // named `[3]=abcde`) must NOT be parsed as
+                                                    // subscript assignments.
+                                                    let has_source_subscript = elem_parts
+                                                        .first()
+                                                        .is_some_and(|p| {
+                                                            matches!(p, WordPart::Literal(s) if s == "[" || s.starts_with('['))
+                                                        });
                                                     for f in fields {
                                                         // Handle [subscript]=value format,
-                                                        // but only when the element is not
-                                                        // from a quoted expansion.
+                                                        // but only when:
+                                                        // 1. The element is not from a quoted expansion
+                                                        // 2. The source element had an explicit [idx]=
+                                                        //    prefix (not from glob/variable expansion)
                                                         if !from_quoted
+                                                            && has_source_subscript
                                                             && f.starts_with('[')
                                                             && let Some(bracket_end) = f.find(']')
                                                             && f.as_bytes().get(bracket_end + 1)

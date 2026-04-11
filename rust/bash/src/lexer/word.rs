@@ -199,13 +199,14 @@ pub(super) fn read_param_word_impl(
             }
             '"' if in_squote => {
                 // Inside squote-protects-brace region (e.g. "${dbg-'"'hey}"),
-                // " is literal during the lexing/extraction phase.  Bash's
+                // " is stripped, matching bash's string_extract_double_quoted
+                // with SX_STRIPDQ which strips embedded double quotes.  Bash's
                 // extract_dollar_brace_string calls skip_single_quoted() which
-                // skips everything (including ") between the two '.  The
-                // expansion phase later processes " with its normal quoting
-                // semantics.  We push " as literal here so the dquote parser
-                // doesn't consume the outer closing " as a nested match.
-                literal.push('"');
+                // skips everything (including ") between the two '.  Then the
+                // expansion phase (parameter_brace_expand_rhs) calls
+                // string_extract_double_quoted(SX_STRIPDQ) which strips the ".
+                // We skip " here so the output matches bash:
+                //   "${dbg-'"'hey}" → ''hey  (not '"'hey)
                 *i += 1;
             }
             '"' => {

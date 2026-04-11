@@ -437,6 +437,8 @@ pub fn expand_word(
                 parts.iter().any(|inner| {
                     matches!(inner, WordPart::Variable(n) if n == "@")
                         || matches!(inner, WordPart::Param(expr) if expr.name == "@" && matches!(expr.op, ParamOp::None))
+                        // Also detect "${arr[@]}" where expr.name is "arr[@]"
+                        || matches!(inner, WordPart::Param(expr) if expr.name.ends_with("[@]"))
                 })
             } else {
                 false
@@ -1466,14 +1468,37 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                 }
             }
             // Push Quoted for DoubleQuoted — even empty strings create a field.
-            // EXCEPT when the word contains "$@" or "${@}" that expanded to nothing
-            // (no positional params) AND the accumulated string is empty.
-            // This covers "$@", "${@}", "$xxx${@}" (where $xxx is also empty), etc.
-            let has_at = parts.iter().any(|p| {
+            // EXCEPT when the word contains "$@" / "${@}" / "${arr[@]}" that
+            // expanded to nothing (no positional params / empty array) AND the
+            // accumulated string is empty.
+            // This covers "$@", "${@}", "${arr[@]}", "$xxx${@}", etc.
+            let has_positional_at = parts.iter().any(|p| {
                 matches!(p, WordPart::Variable(n) if n == "@")
                     || matches!(p, WordPart::Param(expr) if expr.name == "@" && matches!(expr.op, ParamOp::None))
             });
-            let at_was_empty = has_at && s.is_empty() && ctx.positional.len() <= 1;
+            let has_array_at = parts
+                .iter()
+                .any(|p| matches!(p, WordPart::Param(expr) if expr.name.ends_with("[@]")));
+            let positional_at_empty = has_positional_at && ctx.positional.len() <= 1;
+            let array_at_empty = has_array_at
+                && parts.iter().any(|p| {
+                    if let WordPart::Param(expr) = p
+                        && let Some(bracket) = expr.name.find('[')
+                    {
+                        let base = &expr.name[..bracket];
+                        let resolved = ctx.resolve_nameref(base);
+                        if let Some(arr) = ctx.arrays.get(&resolved) {
+                            return arr.iter().all(|v| v.is_none());
+                        }
+                        if let Some(assoc) = ctx.assoc_arrays.get(&resolved) {
+                            return assoc.is_empty();
+                        }
+                        // Array not found at all — treat as empty
+                        return !ctx.vars.contains_key(&resolved);
+                    }
+                    false
+                });
+            let at_was_empty = s.is_empty() && (positional_at_empty || array_at_empty);
             if !at_was_empty {
                 out.push(Segment::Quoted(s));
             }
@@ -1696,11 +1721,11 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                 let mut first = true;
                 for elem in &ctx.positional[1..] {
                     let result = apply_param_op(elem, &expr.op, ctx, cmd_sub, &expr.name);
-                    // In unquoted context, skip empty results from per-element
-                    // operations like ${@%%pattern} — bash removes them.
-                    if result.is_empty() {
-                        continue;
-                    }
+                    // Don't skip empty results — they must still produce
+                    // SplitHere separators so that assignment contexts
+                    // (bar=${@#0}) join with spaces and [[ -z ${@#0} ]]
+                    // sees the separators.  Word splitting in command
+                    // context will discard truly empty fields later.
                     if !first {
                         out.push(if expr.name == "@" {
                             Segment::SplitHere
@@ -1864,12 +1889,12 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                         // Apply the operation using the element value directly
                         let result =
                             apply_param_op(elem, &single_expr.op, ctx, cmd_sub, &single_expr.name);
-                        // In unquoted context, skip empty results so they don't
-                        // produce empty fields (e.g. ${arr[@]%%pattern} where
-                        // an element is fully removed).
-                        if result.is_empty() {
-                            continue;
-                        }
+                        // Don't skip empty results — they must still produce
+                        // SplitHere separators so that assignment contexts
+                        // (bar=${arr[@]#0}) join with spaces and
+                        // [[ -z ${arr[@]#0} ]] sees the separators.
+                        // Word splitting in command context will discard
+                        // truly empty fields later.
                         if !first {
                             out.push(if idx == "@" {
                                 Segment::SplitHere
