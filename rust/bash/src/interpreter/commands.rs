@@ -3313,19 +3313,29 @@ impl Shell {
                         // Scalar assignment to assoc array → assign to key "0"
                         let resolved = self.resolve_nameref(&assign.name);
                         if self.assoc_arrays.contains_key(&resolved) {
+                            let final_value = if self.integer_vars.contains(&resolved) {
+                                self.eval_arith_expr(&value).to_string()
+                            } else {
+                                value.clone()
+                            };
                             self.declared_unset.remove(&resolved);
                             self.assoc_arrays
                                 .entry(resolved)
                                 .or_default()
-                                .insert("0".to_string(), value);
+                                .insert("0".to_string(), final_value);
                         } else if self.arrays.contains_key(&resolved) {
                             // Scalar assignment to indexed array → assign to element [0]
+                            let final_value = if self.integer_vars.contains(&resolved) {
+                                self.eval_arith_expr(&value).to_string()
+                            } else {
+                                value
+                            };
                             self.declared_unset.remove(&resolved);
                             let arr = self.arrays.entry(resolved).or_default();
                             if arr.is_empty() {
-                                arr.push(Some(value));
+                                arr.push(Some(final_value));
                             } else {
-                                arr[0] = Some(value);
+                                arr[0] = Some(final_value);
                             }
                         } else {
                             self.set_var(&assign.name, value);
