@@ -1498,6 +1498,74 @@ fn read_compound_value(chars: &[char], pos: &mut usize) -> String {
     value
 }
 
+/// Parse compound assignment text and return raw (Option<subscript_string>, value) pairs.
+/// Unlike `parse_indexed_compound_assignment`, this does NOT resolve subscripts to indices —
+/// it returns the raw subscript strings so the caller can evaluate them with shell expansion
+/// (command substitution, arithmetic, etc.).
+/// Elements without explicit subscripts have `None` as the subscript.
+pub fn parse_compound_assignment_raw(s: &str) -> Vec<(Option<String>, String)> {
+    let trimmed = s.trim();
+    let inner = if trimmed.starts_with('(') && trimmed.ends_with(')') {
+        &trimmed[1..trimmed.len() - 1]
+    } else {
+        trimmed
+    };
+
+    if inner.trim().is_empty() {
+        return Vec::new();
+    }
+
+    let mut result: Vec<(Option<String>, String)> = Vec::new();
+    let chars: Vec<char> = inner.chars().collect();
+    let len = chars.len();
+    let mut pos = 0;
+
+    while pos < len {
+        // Skip whitespace
+        while pos < len && chars[pos].is_whitespace() {
+            pos += 1;
+        }
+        if pos >= len {
+            break;
+        }
+
+        // Check for [subscript]=value
+        if chars[pos] == '[' {
+            let bracket_start = pos + 1;
+            let mut depth = 1;
+            let mut bracket_end = bracket_start;
+            while bracket_end < len && depth > 0 {
+                if chars[bracket_end] == '[' {
+                    depth += 1;
+                } else if chars[bracket_end] == ']' {
+                    depth -= 1;
+                }
+                if depth > 0 {
+                    bracket_end += 1;
+                }
+            }
+            // bracket_end points to the closing ']'
+            if bracket_end < len
+                && chars[bracket_end] == ']'
+                && bracket_end + 1 < len
+                && chars[bracket_end + 1] == '='
+            {
+                let subscript: String = chars[bracket_start..bracket_end].iter().collect();
+                pos = bracket_end + 2; // skip ]=
+                let value = read_compound_value(&chars, &mut pos);
+                result.push((Some(subscript), value));
+                continue;
+            }
+        }
+
+        // No subscript — bare element
+        let value = read_compound_value(&chars, &mut pos);
+        result.push((None, value));
+    }
+
+    result
+}
+
 /// Quote a value for `set` output, matching bash's format.
 /// Values that need quoting are wrapped in $'...' with proper escaping.
 fn quote_value_for_set(value: &str) -> String {

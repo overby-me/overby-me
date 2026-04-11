@@ -2103,6 +2103,28 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
         }
     }
 
+    // For ${#arr[expr]} (Length op) on indexed arrays with no set elements,
+    // return "0" immediately WITHOUT calling lookup_var — lookup_var would
+    // evaluate the subscript through arithmetic, producing spurious errors
+    // (e.g. when array_expand_once prevents $(...) expansion in subscripts).
+    // Bash skips subscript evaluation entirely for empty arrays in this case.
+    if matches!(&expr.op, ParamOp::Length)
+        && let Some(bracket) = expr.name.find('[')
+    {
+        let base = &expr.name[..bracket];
+        let idx_str = &expr.name[bracket + 1..expr.name.len() - 1];
+        let resolved = ctx.resolve_nameref(base);
+        if idx_str != "@" && idx_str != "*" && !ctx.assoc_arrays.contains_key(&resolved) {
+            let has_set_elements = ctx
+                .arrays
+                .get(&resolved)
+                .is_some_and(|a| a.iter().any(|v| v.is_some()));
+            if !has_set_elements {
+                return "0".to_string();
+            }
+        }
+    }
+
     let val = lookup_var(&expr.name, ctx);
 
     // set -u (nounset): error on unset variables, unless operation provides a default
@@ -2200,31 +2222,36 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                     }
                     return "0".to_string();
                 }
-                // ${#arr[N]} with negative N — check bounds and use [-N] error format
+                // ${#arr[N]} — for indexed arrays, check empty-array shortcut
+                // and negative-N bounds.
                 if !ctx.assoc_arrays.contains_key(&resolved) && idx_str != "@" && idx_str != "*" {
-                    let raw_idx: i64 = if idx_str.trim().is_empty() {
-                        0
-                    } else if let Ok(v) = idx_str.trim().parse::<i64>() {
-                        v
-                    } else {
-                        crate::expand::arithmetic::eval_arith_full_with_assoc(
-                            idx_str,
-                            ctx.vars,
-                            ctx.arrays,
-                            ctx.assoc_arrays,
-                            ctx.namerefs,
-                            ctx.positional,
-                            ctx.last_status,
-                            ctx.opt_flags,
-                        )
-                    };
-                    if raw_idx < 0 {
+                    // If the indexed array has no set elements, ${#arr[expr]}
+                    // returns "0" without evaluating the subscript (bash
+                    // optimisation — skips subscript evaluation for empty arrays).
+                    let has_set_elements = ctx
+                        .arrays
+                        .get(&resolved)
+                        .is_some_and(|a| a.iter().any(|v| v.is_some()));
+                    if !has_set_elements {
+                        return "0".to_string();
+                    }
+                    // Don't re-evaluate the subscript here — lookup_var above
+                    // already evaluated it via eval_arith_full_with_assoc.
+                    // Re-evaluating would produce a duplicate error message
+                    // when the subscript is an invalid expression (e.g. with
+                    // array_expand_once preventing $(...) expansion).
+                    // For negative-index bounds checking, parse only simple
+                    // integer literals; complex expressions were already
+                    // validated during the lookup_var call.
+                    if let Ok(v) = idx_str.trim().parse::<i64>()
+                        && v < 0
+                    {
                         let arr_len = ctx
                             .arrays
                             .get(&resolved)
                             .map(|a| array_effective_len(a) as i64)
                             .unwrap_or(0);
-                        if arr_len + raw_idx < 0 {
+                        if arr_len + v < 0 {
                             let prefix = EXPAND_ERROR_PREFIX.with(|p| {
                                 let p = p.borrow();
                                 if p.is_empty() {
@@ -2233,7 +2260,7 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                                     p.clone()
                                 }
                             });
-                            eprintln!("{}: [{}]: bad array subscript", prefix, raw_idx);
+                            eprintln!("{}: [{}]: bad array subscript", prefix, v);
                             crate::expand::set_arith_error();
                             return String::new();
                         }

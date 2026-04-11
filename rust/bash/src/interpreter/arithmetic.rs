@@ -47,6 +47,14 @@ impl Shell {
                 let expanded = self.expand_comsubs_in_arith(idx_str);
                 if expanded.is_empty() {
                     let display_name = format!("{}[]", base);
+                    // Bash prints this error twice for empty subscripts from
+                    // variable expansion (e.g. `(( y[$none] ))` where $none
+                    // is unset), matching the double-print for literal `y[]`.
+                    eprintln!(
+                        "{}: {}: bad array subscript",
+                        self.arith_error_prefix(),
+                        display_name
+                    );
                     eprintln!(
                         "{}: {}: bad array subscript",
                         self.arith_error_prefix(),
@@ -1851,6 +1859,9 @@ impl Shell {
         }
 
         // Variable lookup or number literal
+        // Save pre-trim expression for subscript error messages — bash preserves
+        // trailing whitespace in error tokens like "$( echo >&2 foo ) ".
+        let pre_trim_expr = expr;
         let expr = expr.trim();
         if expr.is_empty() {
             return 0;
@@ -2224,23 +2235,51 @@ impl Shell {
                 rest
             };
             if !rest.is_empty() {
-                let top_expr = self.arith_top_expr.as_deref().unwrap_or(expr);
-                // Find the error token in the top expression (preserves trailing space)
-                let error_token = if let Some(pos) = top_expr.find(rest) {
-                    &top_expr[pos..]
+                if self.arith_in_subscript {
+                    // Inside subscript: show just the sub-expression without
+                    // cmd_prefix (no `let:` or `((:`), matching bash.
+                    let trimmed = expr.trim();
+                    eprintln!(
+                        "{}: {}: arithmetic syntax error in expression (error token is \"{}\")",
+                        self.arith_error_prefix(),
+                        trimmed,
+                        rest
+                    );
                 } else {
-                    rest
-                };
-                eprintln!(
-                    "{}: {}{}: arithmetic syntax error in expression (error token is \"{}\")",
-                    self.arith_error_prefix(),
-                    self.arith_cmd_prefix(),
-                    top_expr,
-                    error_token
-                );
+                    let top_expr = self.arith_top_expr.as_deref().unwrap_or(expr);
+                    // Find the error token in the top expression (preserves trailing space)
+                    let error_token = if let Some(pos) = top_expr.find(rest) {
+                        &top_expr[pos..]
+                    } else {
+                        rest
+                    };
+                    eprintln!(
+                        "{}: {}{}: arithmetic syntax error in expression (error token is \"{}\")",
+                        self.arith_error_prefix(),
+                        self.arith_cmd_prefix(),
+                        top_expr,
+                        error_token
+                    );
+                }
                 crate::expand::set_arith_error();
                 return 0;
             }
+        }
+        if self.arith_in_subscript {
+            // Inside subscript evaluation: show just the sub-expression
+            // without cmd_prefix (no `let:` or `((:`), matching bash.
+            // The expression and error token are the subscript content itself.
+            // Use pre_trim_expr (trim_start only) to preserve trailing whitespace
+            // — bash includes trailing space in error tokens like "$( echo >&2 foo ) ".
+            let display = pre_trim_expr.trim_start().replace("\\$", "$");
+            eprintln!(
+                "{}: {}: arithmetic syntax error: operand expected (error token is \"{}\")",
+                self.arith_error_prefix(),
+                display,
+                display
+            );
+            crate::expand::set_arith_error();
+            return 0;
         }
         let top_expr = self.arith_top_expr.as_deref().unwrap_or(expr);
         // Use the current (inner) expression as error token when it differs
@@ -2250,6 +2289,27 @@ impl Shell {
         // the suffix from the top expression to preserve trailing whitespace
         // (bash includes trailing space in error tokens like "$iv ").
         let trimmed_expr = expr.trim_start().replace("\\$", "$");
+        // When top_expr is a simple $var reference (like "$subscript") and
+        // the inner expression is the expanded value (like "$(echo ...)"),
+        // use the inner expression for BOTH the display prefix and the error
+        // token.  Bash shows the expanded value in this case — the $var was
+        // resolved by the arithmetic evaluator's $name handler, and the
+        // resulting value is what actually failed to parse.
+        let top_is_simple_var_ref = {
+            let t = top_expr.trim();
+            t.starts_with('$')
+                && !t.starts_with("$(")
+                && !t.starts_with("${")
+                && t[1..].chars().all(|c| c.is_alphanumeric() || c == '_')
+        };
+        let display_expr_owned: String;
+        let display_expr =
+            if top_is_simple_var_ref && !trimmed_expr.is_empty() && top_expr != trimmed_expr {
+                display_expr_owned = trimmed_expr.clone();
+                display_expr_owned.as_str()
+            } else {
+                top_expr
+            };
         let error_token_owned: String;
         let error_token = if top_expr != trimmed_expr && !trimmed_expr.is_empty() {
             // Check if the trimmed inner expr is a suffix of the top expr
@@ -2268,7 +2328,7 @@ impl Shell {
             "{}: {}{}: arithmetic syntax error: operand expected (error token is \"{}\")",
             self.arith_error_prefix(),
             self.arith_cmd_prefix(),
-            top_expr,
+            display_expr,
             error_token
         );
         crate::expand::set_arith_error();

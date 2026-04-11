@@ -77,10 +77,42 @@ pub(super) fn eval_test_expr(
                         }
                     } else {
                         // Specific index: check if element exists
-                        if let Some(a) = shell.arrays.get(base) {
-                            idx.parse::<usize>()
-                                .ok()
-                                .is_some_and(|n| a.get(n).is_some_and(|v| v.is_some()))
+                        if shell.arrays.contains_key(base) {
+                            // Use arithmetic evaluation for the subscript,
+                            // matching bash's behavior where `test -v a[expr]`
+                            // evaluates expr through arithmetic.
+                            let aeo = shell
+                                .shopt_options
+                                .get("assoc_expand_once")
+                                .copied()
+                                .unwrap_or(false)
+                                || shell
+                                    .shopt_options
+                                    .get("array_expand_once")
+                                    .copied()
+                                    .unwrap_or(false);
+                            if aeo {
+                                shell.arith_skip_comsub_expand = true;
+                            }
+                            let raw_idx = shell.eval_arith_expr(idx);
+                            shell.arith_skip_comsub_expand = false;
+                            if crate::expand::take_arith_error() {
+                                false
+                            } else {
+                                let n = if raw_idx < 0 {
+                                    let a = shell.arrays.get(base);
+                                    let len = a
+                                        .map(|a| crate::interpreter::array_effective_len(a) as i64)
+                                        .unwrap_or(0);
+                                    (len + raw_idx).max(0) as usize
+                                } else {
+                                    raw_idx as usize
+                                };
+                                shell
+                                    .arrays
+                                    .get(base)
+                                    .is_some_and(|a| a.get(n).is_some_and(|v| v.is_some()))
+                            }
                         } else if shell.assoc_arrays.contains_key(base) {
                             // Re-expand subscript when assoc_expand_once is off,
                             // matching bash's behavior where `test -v aa["$key"]`
@@ -102,7 +134,27 @@ pub(super) fn eval_test_expr(
                         } else if let Some(_val) = shell.vars.get(base) {
                             // Scalar with subscript: [ -v scalar[0] ] → true if set
                             // [ -v scalar[N] ] for N>0 → false
-                            idx.parse::<usize>().ok().is_some_and(|n| n == 0)
+                            // Use arithmetic evaluation for the subscript
+                            let aeo = shell
+                                .shopt_options
+                                .get("assoc_expand_once")
+                                .copied()
+                                .unwrap_or(false)
+                                || shell
+                                    .shopt_options
+                                    .get("array_expand_once")
+                                    .copied()
+                                    .unwrap_or(false);
+                            if aeo {
+                                shell.arith_skip_comsub_expand = true;
+                            }
+                            let raw_idx = shell.eval_arith_expr(idx);
+                            shell.arith_skip_comsub_expand = false;
+                            if crate::expand::take_arith_error() {
+                                false
+                            } else {
+                                raw_idx == 0
+                            }
                         } else {
                             false
                         }

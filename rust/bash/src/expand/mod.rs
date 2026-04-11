@@ -2009,9 +2009,12 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                     }
                 }
             }
-            // For ${#arr[-N]} (Length op with negative out-of-bounds subscript),
-            // check BEFORE calling lookup_var so we use the bash-specific
-            // `[-N]: bad array subscript` error format (not `arr: bad ...`).
+            // For ${#arr[expr]} (Length op) on indexed arrays:
+            // - If the array has no set elements, return "0" immediately
+            //   without evaluating the subscript (matches bash behavior).
+            // - For negative out-of-bounds subscripts, check BEFORE
+            //   calling lookup_var so we use the bash-specific
+            //   `[-N]: bad array subscript` error format (not `arr: bad ...`).
             if matches!(&expr.op, crate::ast::ParamOp::Length)
                 && let Some(bracket) = expr.name.find('[')
             {
@@ -2019,6 +2022,17 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                 let idx_str = &expr.name[bracket + 1..expr.name.len() - 1];
                 let resolved = ctx.resolve_nameref(base);
                 if idx_str != "@" && idx_str != "*" && !ctx.assoc_arrays.contains_key(&resolved) {
+                    // If the indexed array has no set elements, ${#arr[expr]}
+                    // returns "0" without evaluating the subscript at all
+                    // (bash skips subscript evaluation for empty arrays).
+                    let has_set_elements = ctx
+                        .arrays
+                        .get(&resolved)
+                        .is_some_and(|a| a.iter().any(|v| v.is_some()));
+                    if !has_set_elements {
+                        out.push(Segment::Unquoted("0".to_string()));
+                        return;
+                    }
                     let raw_idx: i64 = if idx_str.trim().is_empty() {
                         0
                     } else if let Ok(v) = idx_str.trim().parse::<i64>() {
@@ -2035,6 +2049,12 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                             ctx.opt_flags,
                         )
                     };
+                    if crate::expand::take_arith_error() {
+                        // Subscript evaluation failed — produce empty result
+                        // (the error message was already printed).
+                        crate::expand::set_arith_error();
+                        return;
+                    }
                     if raw_idx < 0 {
                         let arr_len = ctx
                             .arrays

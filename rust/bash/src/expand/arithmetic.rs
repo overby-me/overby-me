@@ -51,8 +51,25 @@ pub fn eval_arith_full_with_assoc(
                 .map(|s| s.as_str())
                 .unwrap_or("bash");
             let lineno = vars.get("LINENO").map(|s| s.as_str()).unwrap_or("0");
-            // Error from eval_arith is already fully formatted with error token
-            eprintln!("{}: line {}: {}: {}", name, lineno, expr.trim(), e);
+            // Use the resolved (expanded) expression in the error message,
+            // matching bash which shows the expanded value of $var references.
+            // e.g. for `${array[$index]}` where index='$( echo foo )',
+            // bash shows `$( echo foo )` not `$index`.
+            // Use trim_start() to preserve trailing whitespace — bash includes
+            // trailing space in error tokens like "$( echo >&2 foo ) ".
+            let display_expr = resolved.trim_start();
+            // Reconstruct error with untrimmed expression for the error token.
+            // eval_arith trims the expression internally, losing trailing space.
+            // Bash preserves trailing whitespace in error tokens.
+            if e.contains("(error token is") {
+                // Replace the error token with the untrimmed resolved expression
+                eprintln!(
+                    "{}: line {}: {}: arithmetic syntax error: operand expected (error token is \"{}\")",
+                    name, lineno, display_expr, display_expr
+                );
+            } else {
+                eprintln!("{}: line {}: {}: {}", name, lineno, display_expr, e);
+            }
             ARITH_ERROR.with(|f| *f.borrow_mut() = true);
             0
         }

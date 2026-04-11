@@ -1380,10 +1380,21 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     v.starts_with('(') && v.ends_with(')')
                 });
                 if has_compound {
-                    eprintln!(
-                        "{}: syntax error near unexpected token `('",
-                        shell.error_prefix(),
-                    );
+                    let prefix = shell.error_prefix();
+                    eprintln!("{}: syntax error near unexpected token `('", prefix,);
+                    // Show the offending source line (matching bash behavior)
+                    if let Some(ref input) = shell.current_execution_input {
+                        let lineno: usize = shell
+                            .vars
+                            .get("LINENO")
+                            .and_then(|s| s.parse().ok())
+                            .unwrap_or(1);
+                        let line = input
+                            .lines()
+                            .nth(lineno.saturating_sub(1))
+                            .unwrap_or(input.lines().next().unwrap_or(input));
+                        eprintln!("{}: `{}'", prefix, line.trim_end());
+                    }
                 } else {
                     eprintln!(
                         "{}: {}: `{}': not a valid identifier",
@@ -2127,6 +2138,20 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                         // script). Bash continues execution after arithmetic errors
                         // in declare subscripts.
                         if crate::expand::take_arith_error() {
+                            // Ensure the array exists (create if needed)
+                            shell.arrays.entry(resolved_base.clone()).or_default();
+                            // Apply flags even though the element assignment is skipped
+                            if flag_integer {
+                                shell.integer_vars.insert(stripped_name.to_string());
+                            }
+                            if flag_readonly {
+                                shell.readonly_vars.insert(stripped_name.to_string());
+                            }
+                            if flag_export {
+                                let val = shell.get_var(stripped_name).unwrap_or_default();
+                                shell.exports.insert(stripped_name.to_string(), val.clone());
+                                unsafe { std::env::set_var(stripped_name, &val) };
+                            }
                             status = 1;
                             continue;
                         }
@@ -2228,6 +2253,20 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     // script). Bash continues execution after arithmetic errors
                     // in declare subscripts.
                     if crate::expand::take_arith_error() {
+                        // Ensure the array exists (create if needed)
+                        shell.arrays.entry(resolved_base.clone()).or_default();
+                        // Apply flags even though the element assignment is skipped
+                        if flag_integer {
+                            shell.integer_vars.insert(base.to_string());
+                        }
+                        if flag_readonly {
+                            shell.readonly_vars.insert(base.to_string());
+                        }
+                        if flag_export {
+                            let val = shell.get_var(base).unwrap_or_default();
+                            shell.exports.insert(base.to_string(), val.clone());
+                            unsafe { std::env::set_var(base, &val) };
+                        }
                         status = 1;
                         continue;
                     }
@@ -2281,6 +2320,9 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     let val = shell.get_var(base).unwrap_or_default();
                     shell.exports.insert(base.to_string(), val.clone());
                     unsafe { std::env::set_var(base, &val) };
+                }
+                if flag_integer {
+                    shell.integer_vars.insert(base.to_string());
                 }
                 continue;
             }
@@ -2389,18 +2431,79 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                             .get("IFS")
                             .cloned()
                             .unwrap_or_else(|| " \t\n".to_string());
-                        let word = crate::lexer::lex_compound_array_content(inner);
-                        let expanded = shell.expand_word_fields(&word, &ifs);
-                        let mut arr: Vec<Option<String>> = expanded.into_iter().map(Some).collect();
-                        if flag_integer {
-                            let evaluated: Vec<Option<String>> = arr
-                                .into_iter()
-                                .map(|v| v.map(|s| shell.eval_arith_expr(&s).to_string()))
-                                .collect();
-                            shell.arrays.insert(name.to_string(), evaluated);
-                            shell.integer_vars.insert(name.to_string());
-                        } else {
-                            if flag_uppercase || flag_lowercase || flag_capitalize {
+                        // Parse compound assignment elements first, respecting
+                        // [subscript]=value syntax with bracket nesting.  This
+                        // handles `declare -a var="($value)"` where the expanded
+                        // text contains `[$(echo total 0)]=1 [2]=2]` — bash
+                        // parses [subscript]=value boundaries BEFORE word-splitting.
+                        let raw_elems = crate::builtins::parse_compound_assignment_raw(inner);
+                        let has_any_subscript = raw_elems.iter().any(|(sub, _)| sub.is_some());
+                        if has_any_subscript {
+                            // Process compound elements with subscript evaluation
+                            let mut arr: Vec<Option<String>> = Vec::new();
+                            let mut next_idx: usize = 0;
+                            let mut had_error = false;
+                            for (sub_opt, val_raw) in &raw_elems {
+                                if had_error {
+                                    break;
+                                }
+                                if let Some(subscript) = sub_opt {
+                                    // Re-lex and expand the subscript to handle $(...) etc.
+                                    let sub_word =
+                                        crate::lexer::lex_compound_array_content(subscript);
+                                    let expanded_sub = shell.expand_word_single(&sub_word);
+                                    let raw_idx = shell.eval_arith_expr(&expanded_sub);
+                                    if crate::expand::take_arith_error() {
+                                        had_error = true;
+                                        arr.clear();
+                                        break;
+                                    }
+                                    // Re-lex and expand the value
+                                    let val_word =
+                                        crate::lexer::lex_compound_array_content(val_raw);
+                                    let expanded_val = shell.expand_word_single(&val_word);
+                                    let final_val = if flag_integer {
+                                        shell.eval_arith_expr(&expanded_val).to_string()
+                                    } else {
+                                        expanded_val
+                                    };
+                                    let idx = if raw_idx < 0 {
+                                        let eff_len =
+                                            crate::interpreter::array_effective_len(&arr) as i64;
+                                        let computed = eff_len + raw_idx;
+                                        if computed < 0 {
+                                            0usize
+                                        } else {
+                                            computed as usize
+                                        }
+                                    } else {
+                                        raw_idx as usize
+                                    };
+                                    while arr.len() <= idx {
+                                        arr.push(None);
+                                    }
+                                    arr[idx] = Some(final_val);
+                                    next_idx = idx + 1;
+                                } else {
+                                    // Bare element — re-lex, expand, and word-split
+                                    let val_word =
+                                        crate::lexer::lex_compound_array_content(val_raw);
+                                    let fields = shell.expand_word_fields(&val_word, &ifs);
+                                    for f in fields {
+                                        let final_val = if flag_integer {
+                                            shell.eval_arith_expr(&f).to_string()
+                                        } else {
+                                            f
+                                        };
+                                        while arr.len() <= next_idx {
+                                            arr.push(None);
+                                        }
+                                        arr[next_idx] = Some(final_val);
+                                        next_idx += 1;
+                                    }
+                                }
+                            }
+                            if !had_error && (flag_uppercase || flag_lowercase || flag_capitalize) {
                                 for val in arr.iter_mut().flatten() {
                                     *val = if flag_uppercase {
                                         val.to_uppercase()
@@ -2411,7 +2514,37 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                                     };
                                 }
                             }
+                            if flag_integer {
+                                shell.integer_vars.insert(name.to_string());
+                            }
                             shell.arrays.insert(name.to_string(), arr);
+                        } else {
+                            // No subscripts — use the original lex+expand+word-split path
+                            let word = crate::lexer::lex_compound_array_content(inner);
+                            let expanded = shell.expand_word_fields(&word, &ifs);
+                            let mut arr: Vec<Option<String>> =
+                                expanded.into_iter().map(Some).collect();
+                            if flag_integer {
+                                let evaluated: Vec<Option<String>> = arr
+                                    .into_iter()
+                                    .map(|v| v.map(|s| shell.eval_arith_expr(&s).to_string()))
+                                    .collect();
+                                shell.arrays.insert(name.to_string(), evaluated);
+                                shell.integer_vars.insert(name.to_string());
+                            } else {
+                                if flag_uppercase || flag_lowercase || flag_capitalize {
+                                    for val in arr.iter_mut().flatten() {
+                                        *val = if flag_uppercase {
+                                            val.to_uppercase()
+                                        } else if flag_lowercase {
+                                            val.to_lowercase()
+                                        } else {
+                                            crate::interpreter::capitalize_string(val)
+                                        };
+                                    }
+                                }
+                                shell.arrays.insert(name.to_string(), arr);
+                            }
                         }
                     } else {
                         let mut arr = crate::builtins::parse_indexed_compound_assignment(value);

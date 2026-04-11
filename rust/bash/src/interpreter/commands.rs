@@ -2023,6 +2023,40 @@ impl Shell {
                     //    an array/assoc (bash behavior: `declare -a a; declare a='(1 2 3)'`
                     //    treats the value as compound because `a` is already an array,
                     //    but `export r='(5)'` without -a and not already an array
+
+                    // Bash 5.3 deprecation warning: when a subscripted variable name
+                    // has a quoted compound assignment value (e.g. `declare a[1]='(var)'`),
+                    // warn about deprecated syntax.  Only warn when the variable is
+                    // NOT already an array and no -a/-A flag is present — if the
+                    // variable is already an array (or being declared as one), the
+                    // quoted compound value is treated as a scalar assignment to the
+                    // subscripted element, which is not deprecated.
+                    if paren_from_single_quote
+                        && !has_array_flag
+                        && !has_assoc_flag
+                        && let Some(eq_pos) = arg.find('=')
+                    {
+                        let lhs = &arg[..eq_pos];
+                        if lhs.contains('[') && lhs.contains(']') {
+                            // Extract the base variable name (before '[')
+                            let base_for_warn = lhs.split('[').next().unwrap_or(lhs);
+                            let resolved_for_warn = self.resolve_nameref(base_for_warn);
+                            let already_array = self.arrays.contains_key(&resolved_for_warn)
+                                || self.assoc_arrays.contains_key(&resolved_for_warn);
+                            if !already_array {
+                                let rhs = &arg[eq_pos + 1..];
+                                let trimmed_rhs = rhs.trim();
+                                if trimmed_rhs.starts_with('(') && trimmed_rhs.ends_with(')') {
+                                    eprintln!(
+                                        "{}: warning: {}={}: quoted compound array assignment deprecated",
+                                        self.error_prefix(),
+                                        lhs,
+                                        trimmed_rhs
+                                    );
+                                }
+                            }
+                        }
+                    }
                     //    is scalar assignment).
                     //
                     // 3. '(' came from expansion (has_literal_paren is false) —
@@ -2250,8 +2284,6 @@ impl Shell {
                                                         .iter()
                                                         .map(|p| (*p).clone())
                                                         .collect();
-                                                    let fields =
-                                                        self.expand_word_fields(&sub_word, &ifs);
                                                     // Check if this element had an explicit
                                                     // [subscript]= prefix in the source.  When
                                                     // the parser encounters [idx]=val it embeds
@@ -2265,6 +2297,8 @@ impl Shell {
                                                         .is_some_and(|p| {
                                                             matches!(p, WordPart::Literal(s) if s == "[" || s.starts_with('['))
                                                         });
+                                                    let fields =
+                                                        self.expand_word_fields(&sub_word, &ifs);
                                                     for f in fields {
                                                         // Handle [subscript]=value format,
                                                         // but only when:

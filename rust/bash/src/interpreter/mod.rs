@@ -286,6 +286,9 @@ pub struct Shell {
     pub lowercase_vars: HashSet<String>,
     pub capitalize_vars: HashSet<String>,
     pub arrays: HashMap<String, Vec<Option<String>>>,
+    /// The source text currently being executed by `run_string`, used to display
+    /// the offending source line after syntax error messages (matching bash).
+    pub current_execution_input: Option<String>,
     pub assoc_arrays: HashMap<String, AssocArray>,
     pub functions: HashMap<String, CompoundCommand>,
     pub func_redirections: HashMap<String, Vec<Redirection>>, // function name → redirects
@@ -619,6 +622,7 @@ impl Shell {
             builtins: builtins::builtins(),
             bash_cmds_dirty: true,
             bash_aliases_dirty: true,
+            current_execution_input: None,
         };
 
         // Set up BASH_VERSINFO array (must be after struct init)
@@ -1064,6 +1068,8 @@ impl Shell {
     }
 
     pub fn run_string(&mut self, input: &str) -> i32 {
+        let saved_execution_input = self.current_execution_input.take();
+        self.current_execution_input = Some(input.to_string());
         let mut parser = Parser::new_with_aliases(
             input,
             self.aliases.clone(),
@@ -1512,6 +1518,7 @@ impl Shell {
             }
         }
         self.in_preparsed_program = saved_preparsed;
+        self.current_execution_input = saved_execution_input;
         status
     }
 
