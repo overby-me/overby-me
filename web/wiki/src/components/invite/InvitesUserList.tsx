@@ -111,7 +111,25 @@ const ListSuspense = () => {
 		},
 	);
 
-	const handleAcceptInvite = (id?: string) => () => {
+	const [acceptExistingMember] = useMutation(
+		(mutation, args: { parentId: string; nodeId: string }) => {
+			mutation.updateMembers({
+				where: {
+					_and: [
+						{ parentId: { _eq: args.parentId } },
+						{ nodeId: { _eq: args.nodeId } },
+					],
+				},
+				_set: { accepted: true },
+			})?.affected_rows;
+		},
+		{
+			refetchQueries: [invites, events, groups],
+			awaitRefetchQueries: true,
+		},
+	);
+
+	const handleAcceptInvite = (id?: string, parentId?: string) => () => {
 		startTransition(async () => {
 			try {
 				await updateMember({
@@ -119,6 +137,11 @@ const ListSuspense = () => {
 				});
 			} catch (_) {
 				await deleteMember({ args: { id } });
+				if (parentId && userId) {
+					await acceptExistingMember({
+						args: { parentId, nodeId: userId },
+					});
+				}
 			}
 
 			// Delete cache
@@ -160,7 +183,7 @@ const ListSuspense = () => {
 						<Tooltip
 							title={t("invite.acceptInvitation", { name: parent?.name })}
 						>
-							<IconButton onClick={handleAcceptInvite(id)}>
+							<IconButton onClick={handleAcceptInvite(id, parent?.id)}>
 								<Add />
 							</IconButton>
 						</Tooltip>
