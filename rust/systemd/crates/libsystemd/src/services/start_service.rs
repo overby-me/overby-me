@@ -10,6 +10,33 @@ use crate::services::Service;
 use crate::units::{CommandlinePrefix, ServiceConfig, StandardInput, StdIoOption};
 
 use std::path::Path;
+use std::sync::atomic::{AtomicU32, Ordering};
+
+/// Dynamic UID range used by systemd: 61184 (0xEF00) to 65519 (0xFFEF).
+const DYNAMIC_UID_MIN: u32 = 61184;
+const DYNAMIC_UID_MAX: u32 = 65519;
+
+/// Next dynamic UID to allocate. Wraps around within the valid range.
+static NEXT_DYNAMIC_UID: AtomicU32 = AtomicU32::new(DYNAMIC_UID_MIN);
+
+/// Allocate a dynamic UID from the systemd dynamic range (61184-65519).
+/// Returns both UID and GID (they are the same value for dynamic users).
+fn allocate_dynamic_uid() -> u32 {
+    loop {
+        let current = NEXT_DYNAMIC_UID.load(Ordering::Relaxed);
+        let next = if current >= DYNAMIC_UID_MAX {
+            DYNAMIC_UID_MIN
+        } else {
+            current + 1
+        };
+        if NEXT_DYNAMIC_UID
+            .compare_exchange(current, next, Ordering::Relaxed, Ordering::Relaxed)
+            .is_ok()
+        {
+            return current;
+        }
+    }
+}
 
 /// Resolve a User= value (name or numeric UID) to a raw `uid_t`.
 /// Falls back to the current process UID if `user` is `None`.
@@ -211,7 +238,7 @@ fn start_service_with_filedescriptors(
 
     // We first exec into our own executable again and apply this config
     // We transfer the config via a anonymous shared memory file
-    let exec_helper_conf = crate::entrypoints::ExecHelperConfig {
+    let mut exec_helper_conf = crate::entrypoints::ExecHelperConfig {
         name: name.to_owned(),
         // Pass the manager's current log level to the exec helper, mirroring
         // real systemd's `--log-level` argument to sd-executor.  The exec
@@ -397,12 +424,24 @@ fn start_service_with_filedescriptors(
 
             env
         },
-        group: resolve_gid_with_user_fallback(&conf.exec_config.group, &conf.exec_config.user)
-            .map_err(|e| RunCmdError::SpawnError(name.to_owned(), e))?,
+        group: if conf.exec_config.dynamic_user
+            && conf.exec_config.user.is_none()
+            && conf.exec_config.group.is_none()
+        {
+            // DynamicUser=yes: UID/GID are set together below
+            0 // placeholder, overwritten below
+        } else {
+            resolve_gid_with_user_fallback(&conf.exec_config.group, &conf.exec_config.user)
+                .map_err(|e| RunCmdError::SpawnError(name.to_owned(), e))?
+        },
         supplementary_groups: resolve_supplementary_gids(&conf.exec_config.supplementary_groups)
             .map_err(|e| RunCmdError::SpawnError(name.to_owned(), e))?,
-        user: resolve_uid(&conf.exec_config.user)
-            .map_err(|e| RunCmdError::SpawnError(name.to_owned(), e))?,
+        user: if conf.exec_config.dynamic_user && conf.exec_config.user.is_none() {
+            0 // placeholder, overwritten below
+        } else {
+            resolve_uid(&conf.exec_config.user)
+                .map_err(|e| RunCmdError::SpawnError(name.to_owned(), e))?
+        },
 
         working_directory: conf.exec_config.working_directory.clone(),
         root_directory: conf.exec_config.root_directory.clone(),
@@ -625,6 +664,32 @@ fn start_service_with_filedescriptors(
         syslog_level_prefix: conf.exec_config.syslog_level_prefix,
         invocation_id: srvc.invocation_id.clone(),
     };
+
+    // DynamicUser=yes: allocate a dynamic UID/GID when no explicit User=/Group= is set.
+    // The UID and GID are the same value, allocated from the 61184-65519 range.
+    // Also apply implied security settings (see systemd.exec(5)).
+    if conf.exec_config.dynamic_user {
+        if conf.exec_config.user.is_none() {
+            let dynamic_id = allocate_dynamic_uid();
+            exec_helper_conf.user = dynamic_id;
+            if conf.exec_config.group.is_none() {
+                exec_helper_conf.group = dynamic_id;
+            }
+            trace!("DynamicUser=yes for {name}: allocated UID/GID {dynamic_id}");
+        }
+        // DynamicUser=yes implies NoNewPrivileges=yes, ProtectSystem=strict,
+        // ProtectHome=yes (see systemd.exec(5) DynamicUser= documentation).
+        // Only apply if not explicitly overridden by the unit configuration.
+        if !exec_helper_conf.no_new_privileges {
+            exec_helper_conf.no_new_privileges = true;
+        }
+        if exec_helper_conf.protect_system == "no" {
+            exec_helper_conf.protect_system = "strict".to_owned();
+        }
+        if exec_helper_conf.protect_home == "no" {
+            exec_helper_conf.protect_home = "yes".to_owned();
+        }
+    }
 
     let marshalled_config = serde_json::to_string(&exec_helper_conf).unwrap();
 

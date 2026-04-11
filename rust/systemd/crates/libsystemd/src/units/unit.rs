@@ -2783,8 +2783,7 @@ pub struct ExecConfig {
     pub log_extra_fields: Vec<String>,
     /// DynamicUser= — if true, a UNIX user and group pair is dynamically
     /// allocated for this unit at runtime and released when the unit is stopped.
-    /// Defaults to false. Parsed and stored; no runtime enforcement yet.
-    /// See systemd.exec(5).
+    /// Defaults to false. See systemd.exec(5).
     pub dynamic_user: bool,
     /// SystemCallFilter= — a list of syscall names or `@group` names for
     /// seccomp-based system-call filtering. Entries prefixed with `~` form a
