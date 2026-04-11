@@ -703,6 +703,24 @@ pub(crate) fn service_exit_handler(
                 // The `is-active` command handles the special case of
                 // oneshot services with RemainAfterExit=no and no PID
                 // by reporting "inactive" (issue #27953).
+
+                // Re-arm associated sockets so socket activation can
+                // re-trigger for future connections.
+                if !srvc.conf.sockets.is_empty() {
+                    for socket_id in &srvc.conf.sockets {
+                        if let Some(sock_unit) = run_info.unit_table.get(socket_id)
+                            && let Specific::Socket(sock) = &sock_unit.specific
+                        {
+                            if sock.state.read_poisoned().result
+                                == crate::units::SocketResult::TriggerLimitHit
+                            {
+                                continue;
+                            }
+                            sock.state.write_poisoned().sock.activated = false;
+                        }
+                    }
+                    run_info.notify_eventfds();
+                }
             } else {
                 // Failed exit: full recursive deactivation including
                 // required_by to propagate the failure.

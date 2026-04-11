@@ -339,11 +339,13 @@ fn handle_accept_no(run_info: &ArcMutRuntimeInfo, info: &SocketActivationInfo) {
         || matches!(srvc_status, UnitStatus::Stopped(..))
     {
         trace!("Start service {} by socket activation", srvc_unit.id.name);
-        match crate::units::activate_unit(
+        let activation_result = crate::units::activate_unit(
             srvc_unit.id.clone(),
             &run_info_locked,
             ActivationSource::SocketActivation,
-        ) {
+        );
+
+        match &activation_result {
             Ok(_) => {
                 trace!(
                     "New status after socket activation: {:?}",
@@ -366,6 +368,34 @@ fn handle_accept_no(run_info: &ArcMutRuntimeInfo, info: &SocketActivationInfo) {
                     error!("Error while starting service from socket activation: {e}");
                 }
             }
+        }
+
+        // Re-arm the socket if the service did not end up running (e.g.
+        // ConditionPathExistsGlob= failed, or activation error). Without
+        // this, the socket stays activated=true and the select() loop
+        // skips it, preventing future trigger events — which means the
+        // trigger rate limit can never be reached (issue #2467).
+        let should_rearm = if activation_result.is_err() {
+            true
+        } else if let Some(srvc) = unit_table.get(service_id) {
+            let status = srvc.common.status.read_poisoned();
+            !status.is_started() && !matches!(&*status, UnitStatus::Starting)
+        } else {
+            false
+        };
+
+        if should_rearm {
+            if let Some(sock_unit) = unit_table.get(&info.socket_id)
+                && let Specific::Socket(specific) = &sock_unit.specific
+                && specific.state.read_poisoned().result != SocketResult::TriggerLimitHit
+            {
+                specific.state.write_poisoned().sock.activated = false;
+                trace!(
+                    "Re-armed socket {:?} after service {:?} failed to start",
+                    info.socket_id.name, service_id.name,
+                );
+            }
+            run_info_locked.notify_eventfds();
         }
     } else {
         trace!("Ignore socket activation. Service has status: {srvc_status:?}");

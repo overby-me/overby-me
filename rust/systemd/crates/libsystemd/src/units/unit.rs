@@ -357,6 +357,26 @@ impl ServiceState {
                     let mut status = status.write_poisoned();
                     *status = UnitStatus::Stopped(StatusStopped::ConditionSkipped, vec![]);
                 }
+                // Re-arm associated sockets so socket activation can
+                // re-trigger. Without this, ConditionSkipped leaves the
+                // socket's activated flag set and the trigger rate limit
+                // is never reached (issue #2467).
+                for socket_id in &conf.sockets {
+                    if let Some(unit) = run_info.unit_table.get(socket_id)
+                        && let Specific::Socket(sock) = &unit.specific
+                    {
+                        if sock.state.read_poisoned().result == SocketResult::TriggerLimitHit {
+                            continue;
+                        }
+                        if sock.conf.flush_pending {
+                            flush_socket_fds(socket_id, run_info);
+                        }
+                        sock.state.write_poisoned().sock.activated = false;
+                    }
+                }
+                if !conf.sockets.is_empty() {
+                    run_info.notify_eventfds();
+                }
                 Ok(UnitStatus::Stopped(StatusStopped::ConditionSkipped, vec![]))
             }
             Ok(crate::services::StartResult::WaitingForSocket) => {
