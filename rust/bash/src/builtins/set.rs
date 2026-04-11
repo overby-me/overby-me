@@ -2,6 +2,8 @@ use super::*;
 
 pub(super) fn builtin_set(shell: &mut Shell, args: &[String]) -> i32 {
     if args.is_empty() {
+        // Rebuild dynamic assoc arrays (BASH_CMDS, BASH_ALIASES) from backing stores
+        shell.sync_dynamic_assoc_arrays();
         // Print all variables with proper quoting (like bash).
         // bash's `set` outputs scalars, indexed arrays, and associative arrays
         // sorted alphabetically by name, followed by functions.

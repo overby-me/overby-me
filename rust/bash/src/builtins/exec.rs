@@ -1337,10 +1337,18 @@ pub(super) fn builtin_hash(shell: &mut Shell, args: &[String]) -> i32 {
             eprintln!("hash: hash table empty");
         } else {
             println!("hits\tcommand");
-            for name in &shell.hash_order {
-                if let Some((path, hits)) = shell.hash_table.get(name) {
-                    println!("   {}\t{}", hits, path);
-                }
+            // Iterate in 256-bucket order (FILENAME_HASH_BUCKETS) to match bash
+            let mut entries: Vec<(usize, &str, &str, u32)> = shell
+                .hash_table
+                .iter()
+                .map(|(name, (path, hits))| {
+                    let bucket = AssocArray::hash_key(name) as usize & 255;
+                    (bucket, name.as_str(), path.as_str(), *hits)
+                })
+                .collect();
+            entries.sort_by_key(|(bucket, _, _, _)| *bucket);
+            for (_, _, path, hits) in &entries {
+                println!("   {}\t{}", hits, path);
             }
         }
         return 0;
@@ -1352,10 +1360,7 @@ pub(super) fn builtin_hash(shell: &mut Shell, args: &[String]) -> i32 {
     if flag_r {
         shell.hash_table.clear();
         shell.hash_order.clear();
-        // Sync: clear BASH_CMDS associative array
-        if let Some(cmds) = shell.assoc_arrays.get_mut("BASH_CMDS") {
-            *cmds = AssocArray::default();
-        }
+        shell.bash_cmds_dirty = true;
     }
 
     // -p path name: set hash entry
@@ -1380,12 +1385,7 @@ pub(super) fn builtin_hash(shell: &mut Shell, args: &[String]) -> i32 {
                 shell.hash_order.push(name.clone());
             }
             shell.hash_table.insert(name.clone(), (path.clone(), 0));
-            // Sync: update BASH_CMDS associative array
-            shell
-                .assoc_arrays
-                .entry("BASH_CMDS".to_string())
-                .or_default()
-                .insert(name, path.clone());
+            shell.bash_cmds_dirty = true;
         }
     }
 
@@ -1401,10 +1401,7 @@ pub(super) fn builtin_hash(shell: &mut Shell, args: &[String]) -> i32 {
         for name in &positional {
             if shell.hash_table.remove(name).is_some() {
                 shell.hash_order.retain(|n| n != name);
-                // Sync: remove from BASH_CMDS associative array
-                if let Some(cmds) = shell.assoc_arrays.get_mut("BASH_CMDS") {
-                    cmds.remove(name);
-                }
+                shell.bash_cmds_dirty = true;
             } else {
                 eprintln!("{}: hash: {}: not found", shell.error_prefix(), name);
                 status = 1;
@@ -1433,10 +1430,17 @@ pub(super) fn builtin_hash(shell: &mut Shell, args: &[String]) -> i32 {
 
     // -l alone (without -t): print all entries in long format
     if flag_l && !flag_t && positional.is_empty() {
-        for name in &shell.hash_order {
-            let Some((path, _)) = shell.hash_table.get(name) else {
-                continue;
-            };
+        // Iterate in 256-bucket order (FILENAME_HASH_BUCKETS) to match bash
+        let mut entries: Vec<(usize, String, String)> = shell
+            .hash_table
+            .iter()
+            .map(|(name, (path, _))| {
+                let bucket = AssocArray::hash_key(name) as usize & 255;
+                (bucket, name.clone(), path.clone())
+            })
+            .collect();
+        entries.sort_by_key(|(bucket, _, _)| *bucket);
+        for (_, name, path) in &entries {
             println!("builtin hash -p {} {}", path, name);
         }
         return status;
@@ -1449,12 +1453,7 @@ pub(super) fn builtin_hash(shell: &mut Shell, args: &[String]) -> i32 {
                 shell.hash_order.push(name.to_string());
             }
             shell.hash_table.insert(name.to_string(), (path.clone(), 0));
-            // Sync: update BASH_CMDS associative array
-            shell
-                .assoc_arrays
-                .entry("BASH_CMDS".to_string())
-                .or_default()
-                .insert(name.to_string(), path);
+            shell.bash_cmds_dirty = true;
         } else {
             eprintln!("{}: hash: {}: not found", shell.error_prefix(), name);
             status = 1;

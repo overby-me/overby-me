@@ -897,6 +897,8 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
 // ── declare -f formatting helpers ──────────────────────────────────────────
 
 pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
+    // Rebuild dynamic assoc arrays (BASH_CMDS, BASH_ALIASES) from backing stores
+    shell.sync_dynamic_assoc_arrays();
     // Use the actual command name (declare/typeset/local) for error messages.
     // Clone to avoid holding a borrow on shell across mutable operations.
     let cmd_name = shell

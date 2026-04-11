@@ -87,28 +87,41 @@ impl std::hash::BuildHasher for BashBuildHasher {
 #[derive(Clone, Debug)]
 pub struct AssocArray {
     buckets: Vec<Vec<(String, String)>>,
+    nbuckets: usize,
     len: usize,
 }
 
 impl Default for AssocArray {
     fn default() -> Self {
-        Self {
-            buckets: (0..1024).map(|_| Vec::new()).collect(),
-            len: 0,
-        }
+        Self::new_with_buckets(1024)
     }
 }
 
 #[allow(dead_code)]
 impl AssocArray {
-    fn bucket_idx(key: &str) -> usize {
+    /// Create an AssocArray with a specific number of buckets (must be power of two).
+    /// Bash uses 1024 for regular assoc arrays, 256 for BASH_CMDS (FILENAME_HASH_BUCKETS),
+    /// and 64 for BASH_ALIASES (ALIAS_HASH_BUCKETS).
+    pub fn new_with_buckets(nbuckets: usize) -> Self {
+        Self {
+            buckets: (0..nbuckets).map(|_| Vec::new()).collect(),
+            nbuckets,
+            len: 0,
+        }
+    }
+
+    pub fn hash_key(key: &str) -> u64 {
         let mut h = BashHasher::new();
         std::hash::Hasher::write(&mut h, key.as_bytes());
-        (std::hash::Hasher::finish(&h) as usize) & 1023
+        std::hash::Hasher::finish(&h)
+    }
+
+    fn bucket_idx(&self, key: &str) -> usize {
+        (Self::hash_key(key) as usize) & (self.nbuckets - 1)
     }
 
     pub fn get(&self, key: &str) -> Option<&String> {
-        let idx = Self::bucket_idx(key);
+        let idx = self.bucket_idx(key);
         self.buckets[idx]
             .iter()
             .find(|(k, _)| k == key)
@@ -116,7 +129,7 @@ impl AssocArray {
     }
 
     pub fn insert(&mut self, key: String, value: String) -> Option<String> {
-        let idx = Self::bucket_idx(&key);
+        let idx = self.bucket_idx(&key);
         if let Some(entry) = self.buckets[idx].iter_mut().find(|(k, _)| *k == key) {
             let old = std::mem::replace(&mut entry.1, value);
             Some(old)
@@ -133,7 +146,7 @@ impl AssocArray {
     }
 
     pub fn remove(&mut self, key: &str) -> Option<String> {
-        let idx = Self::bucket_idx(key);
+        let idx = self.bucket_idx(key);
         if let Some(pos) = self.buckets[idx].iter().position(|(k, _)| k == key) {
             let (_, v) = self.buckets[idx].remove(pos);
             self.len -= 1;
@@ -166,7 +179,7 @@ impl AssocArray {
     }
 
     pub fn entry(&mut self, key: String) -> AssocEntry<'_> {
-        let idx = Self::bucket_idx(&key);
+        let idx = self.bucket_idx(&key);
         if self.buckets[idx].iter().any(|(k, _)| *k == key) {
             AssocEntry::Occupied(AssocOccupiedEntry {
                 buckets: &mut self.buckets[idx],
@@ -402,6 +415,9 @@ pub struct Shell {
 
     pub aliases: HashMap<String, String>,
     builtins: HashMap<&'static str, BuiltinFn>,
+    /// Dirty flags for dynamic assoc arrays — set when backing store changes
+    pub bash_cmds_dirty: bool,
+    pub bash_aliases_dirty: bool,
 }
 
 impl Shell {
@@ -601,6 +617,8 @@ impl Shell {
             unset_quoted_subscript_args: HashSet::new(),
             aliases: HashMap::new(),
             builtins: builtins::builtins(),
+            bash_cmds_dirty: true,
+            bash_aliases_dirty: true,
         };
 
         // Set up BASH_VERSINFO array (must be after struct init)
@@ -716,6 +734,69 @@ impl Shell {
                 .get("assoc_expand_once")
                 .copied()
                 .unwrap_or(false)
+    }
+
+    /// Rebuild BASH_CMDS associative array from the hash table.
+    /// In bash, BASH_CMDS is a dynamic variable — `get_hashcmd` calls `build_hashcmd`
+    /// which destroys the old assoc and rebuilds it from `hashed_filenames` each time.
+    /// The assoc is created with `hashed_filenames->nbuckets` (FILENAME_HASH_BUCKETS = 256),
+    /// so iteration order follows 256-bucket hashing, not the default 1024.
+    pub fn rebuild_bash_cmds(&mut self) {
+        const FILENAME_HASH_BUCKETS: usize = 256;
+        let mut assoc = AssocArray::new_with_buckets(FILENAME_HASH_BUCKETS);
+        // Iterate hash_table entries in 256-bucket order (matching bash's build_hashcmd)
+        // Collect all entries with their bucket index, then insert in bucket order
+        let mut entries: Vec<(usize, String, String)> = self
+            .hash_table
+            .iter()
+            .map(|(name, (path, _))| {
+                let bucket = AssocArray::hash_key(name) as usize & (FILENAME_HASH_BUCKETS - 1);
+                (bucket, name.clone(), path.clone())
+            })
+            .collect();
+        // Sort by bucket index to match bash's iteration of hashed_filenames buckets 0..N
+        // Within the same bucket, bash iterates in LIFO (reverse insertion) order.
+        // Since we can't perfectly replicate LIFO within buckets across HashMap,
+        // we sort by bucket only (entries in same bucket are rare with 256 buckets).
+        entries.sort_by_key(|(bucket, _, _)| *bucket);
+        for (_, name, path) in entries {
+            assoc.insert(name, path);
+        }
+        self.assoc_arrays.insert("BASH_CMDS".to_string(), assoc);
+        self.bash_cmds_dirty = false;
+    }
+
+    /// Rebuild BASH_ALIASES associative array from the aliases HashMap.
+    /// In bash, BASH_ALIASES is a dynamic variable — `get_aliasvar` calls `build_aliasvar`
+    /// which rebuilds the assoc from the alias hash table (ALIAS_HASH_BUCKETS = 64).
+    pub fn rebuild_bash_aliases(&mut self) {
+        const ALIAS_HASH_BUCKETS: usize = 64;
+        let mut assoc = AssocArray::new_with_buckets(ALIAS_HASH_BUCKETS);
+        let mut entries: Vec<(usize, String, String)> = self
+            .aliases
+            .iter()
+            .map(|(name, value)| {
+                let bucket = AssocArray::hash_key(name) as usize & (ALIAS_HASH_BUCKETS - 1);
+                (bucket, name.clone(), value.clone())
+            })
+            .collect();
+        entries.sort_by_key(|(bucket, _, _)| *bucket);
+        for (_, name, value) in entries {
+            assoc.insert(name, value);
+        }
+        self.assoc_arrays.insert("BASH_ALIASES".to_string(), assoc);
+        self.bash_aliases_dirty = false;
+    }
+
+    /// Rebuild dynamic associative arrays (BASH_CMDS, BASH_ALIASES) from their
+    /// backing stores, but only if the backing store has changed since last rebuild.
+    pub fn sync_dynamic_assoc_arrays(&mut self) {
+        if self.bash_cmds_dirty {
+            self.rebuild_bash_cmds();
+        }
+        if self.bash_aliases_dirty {
+            self.rebuild_bash_aliases();
+        }
     }
 
     /// Resolve a variable name through namerefs.

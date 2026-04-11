@@ -645,6 +645,7 @@ pub(super) fn builtin_alias(shell: &mut Shell, args: &[String]) -> i32 {
             shell
                 .aliases
                 .insert(alias_name.to_string(), alias_value.to_string());
+            shell.bash_aliases_dirty = true;
         } else if let Some(value) = shell.aliases.get(name.as_str()) {
             println!("alias {}='{}'", name, value.replace('\'', "'\\''"));
         } else {
@@ -666,6 +667,7 @@ pub(super) fn builtin_unalias(shell: &mut Shell, args: &[String]) -> i32 {
         match arg.as_str() {
             "-a" => {
                 shell.aliases.clear();
+                shell.bash_aliases_dirty = true;
             }
             a if a.starts_with('-') => {
                 eprintln!("{}: unalias: {}: invalid option", shell.error_prefix(), a);
@@ -676,6 +678,8 @@ pub(super) fn builtin_unalias(shell: &mut Shell, args: &[String]) -> i32 {
                 if shell.aliases.remove(arg.as_str()).is_none() {
                     eprintln!("{}: unalias: {}: not found", shell.error_prefix(), arg);
                     status = 1;
+                } else {
+                    shell.bash_aliases_dirty = true;
                 }
             }
         }

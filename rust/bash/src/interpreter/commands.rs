@@ -573,6 +573,7 @@ impl Shell {
     }
 
     pub fn expand_word_fields(&mut self, word: &Word, ifs: &str) -> Vec<String> {
+        self.sync_dynamic_assoc_arrays();
         self.apply_assign_defaults(word);
         let word = self.eval_arith_in_word(word);
         let mut vars = self.vars.clone();
@@ -818,6 +819,7 @@ impl Shell {
     }
 
     pub fn expand_word_single(&mut self, word: &Word) -> String {
+        self.sync_dynamic_assoc_arrays();
         self.apply_assign_defaults(word);
         let word = self.eval_arith_in_word(word);
         crate::expand::set_dotglob(self.shopt_options.get("dotglob").copied().unwrap_or(false));
@@ -3198,20 +3200,17 @@ impl Shell {
                                 );
                             } else {
                                 self.aliases.insert(alias_name, value);
+                                self.bash_aliases_dirty = true;
                             }
                         } else if base == "BASH_CMDS" {
                             // BASH_CMDS[key]=value → hash -p value key
                             let cmd_name = self.expand_assoc_subscript(raw_idx_str);
-                            // Update the assoc array
-                            self.assoc_arrays
-                                .entry("BASH_CMDS".to_string())
-                                .or_default()
-                                .insert(cmd_name.clone(), value.clone());
-                            // Sync to the hash table
+                            // Update the hash table (backing store); assoc rebuilt on access
                             if !self.hash_table.contains_key(&cmd_name) {
                                 self.hash_order.push(cmd_name.clone());
                             }
                             self.hash_table.insert(cmd_name, (value, 0));
+                            self.bash_cmds_dirty = true;
                         } else {
                             let resolved = self.resolve_nameref(base);
                             // Check if it's an associative array
@@ -3835,10 +3834,7 @@ impl Shell {
                         let name_owned = name.to_string();
                         self.hash_table.remove(&name_owned);
                         self.hash_order.retain(|n| n != &name_owned);
-                        // Sync: remove stale entry from BASH_CMDS
-                        if let Some(cmds) = self.assoc_arrays.get_mut("BASH_CMDS") {
-                            cmds.remove(&name_owned);
-                        }
+                        self.bash_cmds_dirty = true;
                         let new_path = builtins::find_executable(name);
                         // Re-add to hash table if found via PATH
                         if !new_path.is_empty() && new_path != name {
@@ -3847,11 +3843,7 @@ impl Shell {
                             }
                             self.hash_table
                                 .insert(name_owned.clone(), (new_path.clone(), 0));
-                            // Sync: update BASH_CMDS with new path
-                            self.assoc_arrays
-                                .entry("BASH_CMDS".to_string())
-                                .or_default()
-                                .insert(name_owned, new_path.clone());
+                            self.bash_cmds_dirty = true;
                         }
                         new_path
                     } else {

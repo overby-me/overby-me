@@ -460,30 +460,30 @@ pub(super) fn builtin_wait(shell: &mut Shell, args: &[String]) -> i32 {
                 // Find the matching ']' for the first '['
                 bracket_open.and_then(|open| var[open + 1..].find(']').map(|p| open + 1 + p))
             };
-            if let (Some(open), Some(close)) = (bracket_open, bracket_close) {
-                if close == var.len() - 1 {
-                    let arr_name = &var[..open];
-                    let subscript = &var[open + 1..close];
-                    if shell.assoc_arrays.contains_key(arr_name) {
-                        // Expand the subscript for variable references
-                        let expanded_key = if shell.is_array_expand_once() {
-                            subscript.to_string()
-                        } else {
-                            shell.expand_assoc_subscript(subscript)
-                        };
-                        if let Some(assoc) = shell.assoc_arrays.get_mut(arr_name) {
-                            assoc.insert(expanded_key, pid.to_string());
-                        }
-                        return;
-                    } else if shell.arrays.contains_key(arr_name) {
-                        let idx = shell.eval_arith_expr(subscript) as usize;
-                        let arr = shell.arrays.get_mut(arr_name).unwrap();
-                        while arr.len() <= idx {
-                            arr.push(None);
-                        }
-                        arr[idx] = Some(pid.to_string());
-                        return;
+            if let (Some(open), Some(close)) = (bracket_open, bracket_close)
+                && close == var.len() - 1
+            {
+                let arr_name = &var[..open];
+                let subscript = &var[open + 1..close];
+                if shell.assoc_arrays.contains_key(arr_name) {
+                    // Expand the subscript for variable references
+                    let expanded_key = if shell.is_array_expand_once() {
+                        subscript.to_string()
+                    } else {
+                        shell.expand_assoc_subscript(subscript)
+                    };
+                    if let Some(assoc) = shell.assoc_arrays.get_mut(arr_name) {
+                        assoc.insert(expanded_key, pid.to_string());
                     }
+                    return;
+                } else if shell.arrays.contains_key(arr_name) {
+                    let idx = shell.eval_arith_expr(subscript) as usize;
+                    let arr = shell.arrays.get_mut(arr_name).unwrap();
+                    while arr.len() <= idx {
+                        arr.push(None);
+                    }
+                    arr[idx] = Some(pid.to_string());
+                    return;
                 }
             }
             shell.set_var(var, pid.to_string());
@@ -491,13 +491,13 @@ pub(super) fn builtin_wait(shell: &mut Shell, args: &[String]) -> i32 {
 
         // Helper: fire CHLD trap if set
         let fire_chld_trap = |shell: &mut Shell| {
-            if let Some(handler) = shell.traps.get("CHLD").cloned() {
-                if !handler.is_empty() {
-                    crate::interpreter::take_pending_signal(libc::SIGCHLD);
-                    shell.in_trap_handler += 1;
-                    shell.run_string(&handler);
-                    shell.in_trap_handler -= 1;
-                }
+            if let Some(handler) = shell.traps.get("CHLD").cloned()
+                && !handler.is_empty()
+            {
+                crate::interpreter::take_pending_signal(libc::SIGCHLD);
+                shell.in_trap_handler += 1;
+                shell.run_string(&handler);
+                shell.in_trap_handler -= 1;
             }
         };
 
@@ -591,16 +591,15 @@ pub(super) fn builtin_wait(shell: &mut Shell, args: &[String]) -> i32 {
                             Err(nix::errno::Errno::ECHILD) => {
                                 // Process already reaped — check job table for saved status
                                 for job in shell.jobs.iter() {
-                                    if job.pid == pid {
-                                        if let crate::interpreter::JobStatus::Done(code) =
+                                    if job.pid == pid
+                                        && let crate::interpreter::JobStatus::Done(code) =
                                             job.status
-                                        {
-                                            shell.last_status = code;
-                                            if let Some(ref var) = p_var {
-                                                store_pid_var(shell, var, pid);
-                                            }
-                                            return code;
+                                    {
+                                        shell.last_status = code;
+                                        if let Some(ref var) = p_var {
+                                            store_pid_var(shell, var, pid);
                                         }
+                                        return code;
                                     }
                                 }
                             }
@@ -681,11 +680,11 @@ pub(super) fn builtin_wait(shell: &mut Shell, args: &[String]) -> i32 {
                         Err(nix::errno::Errno::ECHILD) => {
                             // Already reaped — check job table
                             for job in shell.jobs.iter() {
-                                if job.pid == pid {
-                                    if let crate::interpreter::JobStatus::Done(code) = job.status {
-                                        shell.last_status = code;
-                                        break;
-                                    }
+                                if job.pid == pid
+                                    && let crate::interpreter::JobStatus::Done(code) = job.status
+                                {
+                                    shell.last_status = code;
+                                    break;
                                 }
                             }
                         }
