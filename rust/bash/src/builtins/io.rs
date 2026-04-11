@@ -172,17 +172,13 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
         // subscript syntax (arr[idx], assoc[key], arr[@], arr[*]).
         let is_valid = if let Some(bracket) = var_name.find('[') {
             let base = &var_name[..bracket];
-            // When assoc_expand_once is ON, use rfind(']') for bracket matching.
-            // Bash tracks expansion context: `A[$rkey]` where `rkey=]` expands
-            // to `A[]]` but the structural closing `]` is the last one (from
-            // the original word), not the first (from variable expansion).
-            // When OFF, use first ']' — `A[]]` is A[] + stray ']' (invalid).
-            let aeo = shell.is_array_expand_once();
-            let close = if aeo {
-                var_name.rfind(']')
-            } else {
-                var_name[bracket + 1..].find(']').map(|p| p + bracket + 1)
-            };
+            // Always use forward scan (find) from after '[' to find the
+            // closing ']', matching bash's skipsubscript which scans forward.
+            // When assoc_expand_once is ON and `A[$rkey]` where `rkey=]`
+            // expands to `A[]]`, the forward scan finds the first `]` at
+            // position bracket+1, making the subscript empty with a trailing
+            // `]`, so it's rejected as "not a valid identifier" — same as bash.
+            let close = var_name[bracket + 1..].find(']').map(|p| p + bracket + 1);
             let has_valid_close = matches!(close, Some(pos) if pos + 1 == var_name.len());
             // Check for unbalanced quotes in the subscript (e.g. a[80's]
             // from expansion of a[$b] where b="80's"). Bash's skipsubscript
@@ -266,15 +262,14 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
         nix::unistd::close(read_fd).ok();
         let output_str = String::from_utf8_lossy(&output).to_string();
         // Handle array subscript syntax: arr[idx] or assoc[key]
-        // When assoc_expand_once is ON, use rfind(']') to find the closing
-        // bracket so that keys like ']' work (e.g. A[$rkey] where rkey=]).
+        // Always use forward scan from after '[' to find the closing ']',
+        // matching bash's skipsubscript forward-scanning behavior.
         if let Some(bracket) = var_name.find('[') {
             let base = &var_name[..bracket];
-            let close_pos = if shell.is_array_expand_once() {
-                var_name.rfind(']').unwrap_or(var_name.len() - 1)
-            } else {
-                var_name.len() - 1
-            };
+            let close_pos = var_name[bracket + 1..]
+                .find(']')
+                .map(|p| p + bracket + 1)
+                .unwrap_or(var_name.len() - 1);
             let idx_str = &var_name[bracket + 1..close_pos];
             let resolved = shell.resolve_nameref(base);
             if shell.assoc_arrays.contains_key(&resolved) {
@@ -1575,16 +1570,13 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
                 // Bash's skipsubscript tracks quote state; an unbalanced ' or "
                 // causes it to miss the closing ], so valid_array_reference fails.
                 let base = if let Some(bracket) = arg.find('[') {
-                    // When assoc_expand_once is ON, use rfind(']') so that
-                    // keys like ']' work (e.g. a[$rkey] where rkey=]).
-                    // Bash tracks expansion context: the structural closing
-                    // `]` is the last one, not the first (from expansion).
+                    // Always use forward scan from after '[' to find the
+                    // closing ']', matching bash's skipsubscript behavior.
+                    // When assoc_expand_once is ON and `a[$rkey]` where
+                    // `rkey=]` expands to `a[]]`, forward scan finds first
+                    // `]`, making subscript empty with trailing `]` → invalid.
                     let aeo = shell.is_array_expand_once();
-                    let close = if aeo {
-                        arg.rfind(']')
-                    } else {
-                        arg[bracket + 1..].find(']').map(|p| p + bracket + 1)
-                    };
+                    let close = arg[bracket + 1..].find(']').map(|p| p + bracket + 1);
                     match close {
                         Some(close_pos) if close_pos + 1 != arg.len() => {
                             // Stray characters after the closing ']'
@@ -1674,14 +1666,9 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
     for name in &var_names {
         let base = if let Some(bracket) = name.find('[') {
             // Array subscript: validate the base name, allow any subscript content.
-            // When assoc_expand_once is ON, use rfind(']') so that keys like
-            // ']' work (e.g. a[$rkey] where rkey=]).
-            let aeo = shell.is_array_expand_once();
-            let close = if aeo {
-                name.rfind(']')
-            } else {
-                name[bracket + 1..].find(']').map(|p| p + bracket + 1)
-            };
+            // Always use forward scan from after '[' to find the closing ']',
+            // matching bash's skipsubscript forward-scanning behavior.
+            let close = name[bracket + 1..].find(']').map(|p| p + bracket + 1);
             match close {
                 Some(close_pos) if close_pos + 1 != name.len() => {
                     eprintln!(
@@ -2332,16 +2319,9 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
         // Handle array subscript: read x[1] → set array element x[1]
         if let Some(bracket) = name.find('[') {
             let base = &name[..bracket];
-            // When assoc_expand_once is ON, use rfind(']') so that keys
-            // like ']' work (e.g. a[$rkey] where rkey=]).
-            let aeo = shell.is_array_expand_once();
-            let close_pos = if aeo {
-                name.rfind(']')
-            } else if name.ends_with(']') {
-                Some(name.len() - 1)
-            } else {
-                None
-            };
+            // Always use forward scan from after '[' to find the closing ']',
+            // matching bash's skipsubscript forward-scanning behavior.
+            let close_pos = name[bracket + 1..].find(']').map(|p| p + bracket + 1);
             let idx_str = if let Some(cp) = close_pos {
                 &name[bracket + 1..cp]
             } else {

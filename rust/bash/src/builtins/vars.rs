@@ -1326,13 +1326,66 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                         status = 1;
                         continue;
                     }
-                    _ => {} // valid bracket matching
+                    Some(cp) => {
+                        // Valid bracket matching — check for empty subscript
+                        let subscript = &pure_name[bracket_pos + 1..cp];
+                        if subscript.is_empty() {
+                            // Empty subscript like a[]=value → "bad array subscript"
+                            // But if base name is also empty (e.g. []=value),
+                            // that's "not a valid identifier" instead.
+                            let base_name = &pure_name[..bracket_pos];
+                            if base_name.is_empty() {
+                                eprintln!(
+                                    "{}: {}: `{}': not a valid identifier",
+                                    shell.error_prefix(),
+                                    cmd_name,
+                                    name
+                                );
+                            } else {
+                                eprintln!(
+                                    "{}: {}: bad array subscript",
+                                    shell.error_prefix(),
+                                    pure_name
+                                );
+                            }
+                            status = 1;
+                            continue;
+                        }
+                    }
                 }
                 &pure_name[..bracket_pos]
             } else {
                 pure_name
             };
-            if !pure_name.is_empty()
+            // Reject empty base name: covers both bare empty names and
+            // empty names with compound assignments like ''=(a b).
+            // Also reject names where base_for_check is empty but pure_name
+            // contains '[' (e.g. []=asdf — already caught above, but guard
+            // against fallthrough).
+            if base_for_check.is_empty() {
+                // Empty identifier — if the original arg has '=' with a
+                // compound value, bash reports "syntax error near unexpected
+                // token `('" for the empty-name compound case.  Otherwise
+                // it's "not a valid identifier".
+                let has_compound = name.find('=').is_some_and(|eq| {
+                    let v = &name[eq + 1..];
+                    v.starts_with('(') && v.ends_with(')')
+                });
+                if has_compound {
+                    eprintln!(
+                        "{}: syntax error near unexpected token `('",
+                        shell.error_prefix(),
+                    );
+                } else {
+                    eprintln!(
+                        "{}: {}: `{}': not a valid identifier",
+                        shell.error_prefix(),
+                        cmd_name,
+                        name
+                    );
+                }
+                status = 1;
+            } else if !pure_name.is_empty()
                 && !base_for_check
                     .chars()
                     .all(|c| c.is_alphanumeric() || c == '_')

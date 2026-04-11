@@ -38,6 +38,24 @@ impl Shell {
             };
             ArithSubscript::Assoc(resolved, key)
         } else {
+            // When the subscript contains $var references, expand them first
+            // to detect empty subscripts.  e.g. `(( y[$none] ))` where
+            // `$none` is empty produces `y[]` which bash rejects as
+            // "bad array subscript".  Without this check the empty string
+            // would silently evaluate to 0.
+            if idx_str.contains('$') {
+                let expanded = self.expand_comsubs_in_arith(idx_str);
+                if expanded.is_empty() {
+                    let display_name = format!("{}[]", base);
+                    eprintln!(
+                        "{}: {}: bad array subscript",
+                        self.arith_error_prefix(),
+                        display_name
+                    );
+                    crate::expand::set_arith_error();
+                    return ArithSubscript::Indexed(resolved, 0);
+                }
+            }
             let saved_in_subscript = self.arith_in_subscript;
             self.arith_in_subscript = true;
             let idx = self.eval_arith_expr_impl(idx_str) as usize;

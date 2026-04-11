@@ -2632,6 +2632,48 @@ impl Parser {
                         // assignment — not a compound array.  Reconstruct
                         // the original text as a scalar value.
                         if let Token::Word(trail_parts) = &self.current {
+                            // Check if the trailing word is actually a
+                            // separate assignment like `b=(4+7)` in
+                            // `a=(5+3) b=(4+7)`.  If so, don't merge —
+                            // return the current result as a compound
+                            // array and let the caller parse the next
+                            // assignment separately.
+                            let trail_is_assignment =
+                                if let Some(WordPart::Literal(s)) = trail_parts.first() {
+                                    // Look for `name=` or `name+=` at the start
+                                    if let Some(eq_pos) = s.find('=') {
+                                        let before_eq =
+                                            if eq_pos > 0 && s.as_bytes()[eq_pos - 1] == b'+' {
+                                                &s[..eq_pos - 1]
+                                            } else {
+                                                &s[..eq_pos]
+                                            };
+                                        !before_eq.is_empty() && {
+                                            let mut chars = before_eq.chars();
+                                            match chars.next() {
+                                                Some(c) if c == '_' || c.is_alphabetic() => {
+                                                    chars.all(|c| c == '_' || c.is_alphanumeric())
+                                                }
+                                                _ => false,
+                                            }
+                                        }
+                                    } else {
+                                        false
+                                    }
+                                } else {
+                                    false
+                                };
+
+                            if trail_is_assignment {
+                                // This is a separate assignment — return
+                                // the current result as a compound array.
+                                return Some(Ok(Assignment {
+                                    name: full_name,
+                                    value: AssignValue::Array(elems),
+                                    append,
+                                }));
+                            }
+
                             // Adjacent word after ) — this is a scalar
                             // like a=(4*3)/2.  Reconstruct the value from
                             // the parsed elements + trailing text.
