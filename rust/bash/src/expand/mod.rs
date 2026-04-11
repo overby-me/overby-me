@@ -913,27 +913,100 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                             )
                             && ctx.positional.len() > 1 =>
                     {
-                        // "${@%pattern}" etc. — apply op to each element separately
-                        if !s.is_empty() {
-                            out.push(Segment::Quoted(std::mem::take(&mut s)));
-                        }
-                        let sep = if expr.name == "@" {
-                            None // SplitHere
-                        } else {
-                            ifs_first_char(ctx.vars)
-                        };
-                        for (i, elem) in ctx.positional[1..].iter().enumerate() {
-                            if i > 0 {
-                                match sep {
-                                    None => out.push(Segment::SplitHere),
-                                    Some(c) => s.push(c),
+                        // For Default/Alt/Error/Assign on $@/$*, check if the
+                        // default/alt should kick in before expanding elements.
+                        // Bash checks the space-joined value for :- / :+ variants.
+                        let default_alt_handled = if matches!(
+                            &expr.op,
+                            ParamOp::Default(..)
+                                | ParamOp::Alt(..)
+                                | ParamOp::Error(..)
+                                | ParamOp::Assign(..)
+                        ) {
+                            let val = lookup_var(&expr.name, ctx);
+                            let set = ctx.is_param_set(&expr.name);
+                            let use_default = match &expr.op {
+                                ParamOp::Default(colon, _)
+                                | ParamOp::Assign(colon, _)
+                                | ParamOp::Error(colon, _) => {
+                                    let empty = if *colon { val.is_empty() } else { false };
+                                    !set || empty
                                 }
-                            }
-                            let result = apply_param_op(elem, &expr.op, ctx, cmd_sub, &expr.name);
-                            if sep.is_none() {
-                                out.push(Segment::Quoted(result));
+                                _ => false,
+                            };
+                            let use_alt = match &expr.op {
+                                ParamOp::Alt(colon, _) => {
+                                    let empty = if *colon { val.is_empty() } else { false };
+                                    set && !empty
+                                }
+                                _ => false,
+                            };
+                            if use_default {
+                                if let ParamOp::Error(_, word) = &expr.op {
+                                    let msg = expand_word_nosplit_ctx(word, ctx, cmd_sub);
+                                    let prefix = EXPAND_ERROR_PREFIX.with(|p| {
+                                        let p = p.borrow();
+                                        if p.is_empty() {
+                                            "bash".to_string()
+                                        } else {
+                                            p.clone()
+                                        }
+                                    });
+                                    let error_msg = if msg.is_empty() {
+                                        "parameter null or not set"
+                                    } else {
+                                        &msg
+                                    };
+                                    eprintln!("{}: {}: {}", prefix, expr.name, error_msg);
+                                    std::process::exit(1);
+                                }
+                                if let ParamOp::Default(_, word) | ParamOp::Assign(_, word) =
+                                    &expr.op
+                                {
+                                    let result = expand_word_nosplit_ctx(word, ctx, cmd_sub);
+                                    s.push_str(&result);
+                                }
+                                true
+                            } else if use_alt {
+                                if let ParamOp::Alt(_, word) = &expr.op {
+                                    let result = expand_word_nosplit_ctx(word, ctx, cmd_sub);
+                                    s.push_str(&result);
+                                }
+                                true
+                            } else if matches!(&expr.op, ParamOp::Alt(..)) {
+                                // Alt not active — produce empty
+                                true
                             } else {
-                                s.push_str(&result);
+                                false // Default/Assign/Error not active — expand normally
+                            }
+                        } else {
+                            false
+                        };
+
+                        if !default_alt_handled {
+                            // "${@%pattern}" etc. — apply op to each element separately
+                            if !s.is_empty() {
+                                out.push(Segment::Quoted(std::mem::take(&mut s)));
+                            }
+                            let sep = if expr.name == "@" {
+                                None // SplitHere
+                            } else {
+                                ifs_first_char(ctx.vars)
+                            };
+                            for (i, elem) in ctx.positional[1..].iter().enumerate() {
+                                if i > 0 {
+                                    match sep {
+                                        None => out.push(Segment::SplitHere),
+                                        Some(c) => s.push(c),
+                                    }
+                                }
+                                let result =
+                                    apply_param_op(elem, &expr.op, ctx, cmd_sub, &expr.name);
+                                if sep.is_none() {
+                                    out.push(Segment::Quoted(result));
+                                } else {
+                                    s.push_str(&result);
+                                }
                             }
                         }
                     }
@@ -974,49 +1047,145 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                             }
                         } else {
                             // "${arr[@]}" — each element becomes a separate field
-                            // For Substring, get_array_elements handles index-based slicing
-                            // for all array types (indexed, assoc, and positional @/*)
-                            let elements = get_array_elements(expr, ctx, cmd_sub);
-                            // Determine if this is $* (join with IFS) or $@ (split)
-                            let is_star = if let Some(bracket) = expr.name.find('[') {
-                                &expr.name[bracket + 1..expr.name.len() - 1] == "*"
-                            } else {
-                                expr.name == "*"
-                            };
-                            if is_star {
-                                // "${*:...}" or "${arr[*]:...}" — join with IFS[0]
-                                let ifs_sep = ifs_first_char(ctx.vars);
-                                for (i, elem) in elements.iter().enumerate() {
-                                    if i > 0
-                                        && let Some(c) = ifs_sep
+                            // For Default/Alt/Error/Assign ops on arrays, check if the
+                            // default/alt should kick in BEFORE expanding elements.
+                            // Bash checks if the joined value (space-separated) is empty
+                            // for :- / :+ variants, or if the array is unset for - / +.
+                            if matches!(
+                                &expr.op,
+                                ParamOp::Default(..)
+                                    | ParamOp::Alt(..)
+                                    | ParamOp::Error(..)
+                                    | ParamOp::Assign(..)
+                            ) {
+                                let val = lookup_var(&expr.name, ctx);
+                                let set = ctx.is_param_set(&expr.name);
+                                let use_default = match &expr.op {
+                                    ParamOp::Default(colon, _)
+                                    | ParamOp::Assign(colon, _)
+                                    | ParamOp::Error(colon, _) => {
+                                        let empty = if *colon { val.is_empty() } else { false };
+                                        !set || empty
+                                    }
+                                    _ => false,
+                                };
+                                let use_alt = match &expr.op {
+                                    ParamOp::Alt(colon, _) => {
+                                        let empty = if *colon { val.is_empty() } else { false };
+                                        set && !empty
+                                    }
+                                    _ => false,
+                                };
+                                if use_default {
+                                    if let ParamOp::Error(_, word) = &expr.op {
+                                        let msg = expand_word_nosplit_ctx(word, ctx, cmd_sub);
+                                        let prefix = EXPAND_ERROR_PREFIX.with(|p| {
+                                            let p = p.borrow();
+                                            if p.is_empty() {
+                                                "bash".to_string()
+                                            } else {
+                                                p.clone()
+                                            }
+                                        });
+                                        let error_msg = if msg.is_empty() {
+                                            "parameter null or not set"
+                                        } else {
+                                            &msg
+                                        };
+                                        eprintln!("{}: {}: {}", prefix, expr.name, error_msg);
+                                        std::process::exit(1);
+                                    }
+                                    // Default or Assign: expand the word as the result
+                                    if let ParamOp::Default(_, word) | ParamOp::Assign(_, word) =
+                                        &expr.op
                                     {
-                                        s.push(c);
+                                        let result = expand_word_nosplit_ctx(word, ctx, cmd_sub);
+                                        s.push_str(&result);
                                     }
-                                    let modified = if matches!(&expr.op, ParamOp::Substring(..)) {
-                                        elem.clone()
+                                } else if use_alt {
+                                    if let ParamOp::Alt(_, word) = &expr.op {
+                                        let result = expand_word_nosplit_ctx(word, ctx, cmd_sub);
+                                        s.push_str(&result);
+                                    }
+                                } else if matches!(&expr.op, ParamOp::Alt(..)) {
+                                    // Alt not active — produce empty
+                                } else {
+                                    // Default/Assign/Error not active — expand array elements normally
+                                    let elements = get_array_elements(expr, ctx, cmd_sub);
+                                    let is_star = if let Some(bracket) = expr.name.find('[') {
+                                        &expr.name[bracket + 1..expr.name.len() - 1] == "*"
                                     } else {
-                                        apply_param_op(elem, &expr.op, ctx, cmd_sub, &expr.name)
+                                        expr.name == "*"
                                     };
-                                    s.push_str(&modified);
+                                    if is_star {
+                                        let ifs_sep = ifs_first_char(ctx.vars);
+                                        for (i, elem) in elements.iter().enumerate() {
+                                            if i > 0
+                                                && let Some(c) = ifs_sep
+                                            {
+                                                s.push(c);
+                                            }
+                                            s.push_str(elem);
+                                        }
+                                    } else {
+                                        if !s.is_empty() {
+                                            out.push(Segment::Quoted(std::mem::take(&mut s)));
+                                        }
+                                        for (i, elem) in elements.iter().enumerate() {
+                                            if i > 0 {
+                                                out.push(Segment::SplitHere);
+                                            }
+                                            out.push(Segment::Quoted(elem.clone()));
+                                        }
+                                    }
                                 }
                             } else {
-                                if !s.is_empty() {
-                                    out.push(Segment::Quoted(std::mem::take(&mut s)));
-                                }
-                                for (i, elem) in elements.iter().enumerate() {
-                                    if i > 0 {
-                                        out.push(Segment::SplitHere);
+                                // For Substring, get_array_elements handles index-based slicing
+                                // for all array types (indexed, assoc, and positional @/*)
+                                let elements = get_array_elements(expr, ctx, cmd_sub);
+                                // Determine if this is $* (join with IFS) or $@ (split)
+                                let is_star = if let Some(bracket) = expr.name.find('[') {
+                                    &expr.name[bracket + 1..expr.name.len() - 1] == "*"
+                                } else {
+                                    expr.name == "*"
+                                };
+                                if is_star {
+                                    // "${*:...}" or "${arr[*]:...}" — join with IFS[0]
+                                    let ifs_sep = ifs_first_char(ctx.vars);
+                                    for (i, elem) in elements.iter().enumerate() {
+                                        if i > 0
+                                            && let Some(c) = ifs_sep
+                                        {
+                                            s.push(c);
+                                        }
+                                        let modified = if matches!(&expr.op, ParamOp::Substring(..))
+                                        {
+                                            elem.clone()
+                                        } else {
+                                            apply_param_op(elem, &expr.op, ctx, cmd_sub, &expr.name)
+                                        };
+                                        s.push_str(&modified);
                                     }
-                                    // Apply param operation (^, ^^, ,, etc.) to each element
-                                    // (but not Substring, which was already handled as array slice)
-                                    let modified = if matches!(&expr.op, ParamOp::Substring(..)) {
-                                        elem.clone()
-                                    } else {
-                                        apply_param_op(elem, &expr.op, ctx, cmd_sub, &expr.name)
-                                    };
-                                    out.push(Segment::Quoted(modified));
+                                } else {
+                                    if !s.is_empty() {
+                                        out.push(Segment::Quoted(std::mem::take(&mut s)));
+                                    }
+                                    for (i, elem) in elements.iter().enumerate() {
+                                        if i > 0 {
+                                            out.push(Segment::SplitHere);
+                                        }
+                                        // Apply param operation (^, ^^, ,, etc.) to each element
+                                        // (but not Substring, which was already handled as array slice)
+                                        let modified = if matches!(&expr.op, ParamOp::Substring(..))
+                                        {
+                                            elem.clone()
+                                        } else {
+                                            apply_param_op(elem, &expr.op, ctx, cmd_sub, &expr.name)
+                                        };
+                                        out.push(Segment::Quoted(modified));
+                                    }
                                 }
-                            }
+                            } // end else (non-Default/Alt/Error/Assign)
                         }
                     }
                     WordPart::Param(expr) => {
@@ -1426,6 +1595,69 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                 )
                 && ctx.positional.len() > 1
             {
+                // Handle Default/Alt/Error/Assign — check joined value first
+                if matches!(
+                    &expr.op,
+                    ParamOp::Default(..)
+                        | ParamOp::Alt(..)
+                        | ParamOp::Error(..)
+                        | ParamOp::Assign(..)
+                ) {
+                    let val = lookup_var(&expr.name, ctx);
+                    let set = ctx.is_param_set(&expr.name);
+                    let use_default = match &expr.op {
+                        ParamOp::Default(colon, _)
+                        | ParamOp::Assign(colon, _)
+                        | ParamOp::Error(colon, _) => {
+                            let empty = if *colon { val.is_empty() } else { false };
+                            !set || empty
+                        }
+                        _ => false,
+                    };
+                    let use_alt = match &expr.op {
+                        ParamOp::Alt(colon, _) => {
+                            let empty = if *colon { val.is_empty() } else { false };
+                            set && !empty
+                        }
+                        _ => false,
+                    };
+                    if use_default {
+                        if let ParamOp::Error(_, word) = &expr.op {
+                            let msg = expand_word_nosplit_ctx(word, ctx, cmd_sub);
+                            let prefix = EXPAND_ERROR_PREFIX.with(|p| {
+                                let p = p.borrow();
+                                if p.is_empty() {
+                                    "bash".to_string()
+                                } else {
+                                    p.clone()
+                                }
+                            });
+                            let error_msg = if msg.is_empty() {
+                                "parameter null or not set"
+                            } else {
+                                &msg
+                            };
+                            eprintln!("{}: {}: {}", prefix, expr.name, error_msg);
+                            std::process::exit(1);
+                        }
+                        if let ParamOp::Default(_, word) | ParamOp::Assign(_, word) = &expr.op {
+                            let result = expand_word_nosplit_ctx(word, ctx, cmd_sub);
+                            out.push(Segment::Unquoted(result));
+                        }
+                        return;
+                    } else if use_alt {
+                        if let ParamOp::Alt(_, word) = &expr.op {
+                            let result = expand_word_nosplit_ctx(word, ctx, cmd_sub);
+                            out.push(Segment::Unquoted(result));
+                        }
+                        return;
+                    } else if matches!(&expr.op, ParamOp::Alt(..)) {
+                        // Alt not active — produce empty
+                        return;
+                    }
+                    // Default/Assign/Error not active — fall through to normal expansion
+                }
+
                 let mut first = true;
                 for elem in &ctx.positional[1..] {
                     let result = apply_param_op(elem, &expr.op, ctx, cmd_sub, &expr.name);
@@ -1465,8 +1697,81 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                             | ParamOp::Transform('K')
                             | ParamOp::Transform('k')
                     )
-                    && let Some(arr) = ctx.arrays.get(&resolved)
+                    && (ctx.arrays.contains_key(&resolved)
+                        || ctx.assoc_arrays.contains_key(&resolved))
                 {
+                    // Handle Default/Alt/Error/Assign — check joined value first
+                    if matches!(
+                        &expr.op,
+                        ParamOp::Default(..)
+                            | ParamOp::Alt(..)
+                            | ParamOp::Error(..)
+                            | ParamOp::Assign(..)
+                    ) {
+                        let val = lookup_var(&expr.name, ctx);
+                        let set = ctx.is_param_set(&expr.name);
+                        let use_default = match &expr.op {
+                            ParamOp::Default(colon, _)
+                            | ParamOp::Assign(colon, _)
+                            | ParamOp::Error(colon, _) => {
+                                let empty = if *colon { val.is_empty() } else { false };
+                                !set || empty
+                            }
+                            _ => false,
+                        };
+                        let use_alt = match &expr.op {
+                            ParamOp::Alt(colon, _) => {
+                                let empty = if *colon { val.is_empty() } else { false };
+                                set && !empty
+                            }
+                            _ => false,
+                        };
+                        if use_default {
+                            if let ParamOp::Error(_, word) = &expr.op {
+                                let msg = expand_word_nosplit_ctx(word, ctx, cmd_sub);
+                                let prefix = EXPAND_ERROR_PREFIX.with(|p| {
+                                    let p = p.borrow();
+                                    if p.is_empty() {
+                                        "bash".to_string()
+                                    } else {
+                                        p.clone()
+                                    }
+                                });
+                                let error_msg = if msg.is_empty() {
+                                    "parameter null or not set"
+                                } else {
+                                    &msg
+                                };
+                                eprintln!("{}: {}: {}", prefix, expr.name, error_msg);
+                                std::process::exit(1);
+                            }
+                            if let ParamOp::Default(_, word) | ParamOp::Assign(_, word) = &expr.op {
+                                let result = expand_word_nosplit_ctx(word, ctx, cmd_sub);
+                                out.push(Segment::Unquoted(result));
+                            }
+                            return;
+                        } else if use_alt {
+                            if let ParamOp::Alt(_, word) = &expr.op {
+                                let result = expand_word_nosplit_ctx(word, ctx, cmd_sub);
+                                out.push(Segment::Unquoted(result));
+                            }
+                            return;
+                        } else if matches!(&expr.op, ParamOp::Alt(..)) {
+                            return;
+                        }
+                        // Default/Assign/Error not active — fall through to normal expansion
+                    }
+
+                    let arr = if let Some(a) = ctx.arrays.get(&resolved) {
+                        a
+                    } else {
+                        // For assoc arrays, delegate to expand_param
+                        let val = expand_param(expr, ctx, cmd_sub);
+                        if !val.is_empty() {
+                            out.push(Segment::Unquoted(val));
+                        }
+                        return;
+                    };
                     // Apply operation to each element separately
                     let mut first = true;
                     for elem in arr.iter().filter_map(|v| v.as_ref()) {

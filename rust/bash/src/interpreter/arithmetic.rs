@@ -2065,6 +2065,44 @@ impl Shell {
                 }
             };
             if close <= bracket + 1 {
+                // Subscript is empty in the post-strip expression.  This can be:
+                //  (a) truly empty `y[]` → "bad array subscript"
+                //  (b) `a[\"\"]=20` where strip_arith_quotes removed `\"\"` → valid, index 0
+                // Use pre_strip_expr to distinguish: if the pre-strip subscript
+                // was also empty, it's case (a); if it had content, it's case (b).
+                let pre_sub_empty = if !pre_strip_expr.is_empty() {
+                    // Find the matching bracket in the pre-strip expression
+                    if let Some(pre_bracket) = pre_strip_expr.find('[') {
+                        let pre_rest = &pre_strip_expr[pre_bracket + 1..];
+                        if let Some(pre_close) = pre_rest.find(']') {
+                            pre_rest[..pre_close].trim().is_empty()
+                        } else {
+                            true
+                        }
+                    } else {
+                        true
+                    }
+                } else {
+                    // No pre-strip expression → the original was also empty
+                    true
+                };
+                if pre_sub_empty {
+                    // Case (a): truly empty subscript like `y[]`
+                    let display_name = format!("{}[]", &expr[..bracket]);
+                    eprintln!(
+                        "{}: {}: bad array subscript",
+                        self.arith_error_prefix(),
+                        display_name
+                    );
+                    eprintln!(
+                        "{}: {}: bad array subscript",
+                        self.arith_error_prefix(),
+                        display_name
+                    );
+                    crate::expand::set_arith_error();
+                }
+                // Case (b): subscript was non-empty before stripping (e.g. `\"\"`)
+                // → treat as index 0
                 return 0;
             }
             // Check for extra text after arr[idx] (e.g., b[c]d → "d" is extra)

@@ -1657,6 +1657,66 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
             let sliced: Vec<&str> = params[start..end].iter().map(|s| s.as_str()).collect();
             return sliced.join(&sep);
         }
+        // Handle Default/Alt/Error/Assign for $@/$* with ops.
+        // Bash checks the space-joined value for :- / :+ variants.
+        if matches!(
+            &expr.op,
+            ParamOp::Default(..) | ParamOp::Alt(..) | ParamOp::Error(..) | ParamOp::Assign(..)
+        ) {
+            let val = lookup_var(&expr.name, ctx);
+            let set = ctx.is_param_set(&expr.name);
+            let use_default = match &expr.op {
+                ParamOp::Default(colon, _)
+                | ParamOp::Assign(colon, _)
+                | ParamOp::Error(colon, _) => {
+                    let empty = if *colon { val.is_empty() } else { false };
+                    !set || empty
+                }
+                _ => false,
+            };
+            let use_alt = match &expr.op {
+                ParamOp::Alt(colon, _) => {
+                    let empty = if *colon { val.is_empty() } else { false };
+                    set && !empty
+                }
+                _ => false,
+            };
+            if use_default {
+                if let ParamOp::Error(_, word) = &expr.op {
+                    let msg = expand_word_nosplit_ctx(word, ctx, cmd_sub);
+                    let prefix = EXPAND_ERROR_PREFIX.with(|p| {
+                        let p = p.borrow();
+                        if p.is_empty() {
+                            "bash".to_string()
+                        } else {
+                            p.clone()
+                        }
+                    });
+                    let error_msg = if msg.is_empty() {
+                        "parameter null or not set"
+                    } else {
+                        &msg
+                    };
+                    eprintln!("{}: {}: {}", prefix, expr.name, error_msg);
+                    std::process::exit(1);
+                }
+                return if let ParamOp::Default(_, word) | ParamOp::Assign(_, word) = &expr.op {
+                    expand_word_nosplit_ctx(word, ctx, cmd_sub)
+                } else {
+                    String::new()
+                };
+            } else if use_alt {
+                return if let ParamOp::Alt(_, word) = &expr.op {
+                    expand_word_nosplit_ctx(word, ctx, cmd_sub)
+                } else {
+                    String::new()
+                };
+            } else if matches!(&expr.op, ParamOp::Alt(..)) {
+                return String::new();
+            }
+            // Default/Assign/Error not active — fall through to normal element expansion
+        }
+
         let elements: Vec<String> = ctx.positional[1..]
             .iter()
             .map(|elem| apply_param_op(elem, &expr.op, ctx, cmd_sub, &expr.name))
@@ -1962,6 +2022,68 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                     return repeated.join(&sep);
                 }
                 return attrs;
+            }
+
+            // Handle Default/Alt/Error/Assign for array [@]/[*] expansions.
+            // Bash checks the space-joined value for :- / :+ variants, and
+            // whether the array is set for - / + variants.
+            if matches!(
+                &expr.op,
+                ParamOp::Default(..) | ParamOp::Alt(..) | ParamOp::Error(..) | ParamOp::Assign(..)
+            ) {
+                let val = lookup_var(&expr.name, ctx);
+                let set = ctx.is_param_set(&expr.name);
+                let use_default = match &expr.op {
+                    ParamOp::Default(colon, _)
+                    | ParamOp::Assign(colon, _)
+                    | ParamOp::Error(colon, _) => {
+                        let empty = if *colon { val.is_empty() } else { false };
+                        !set || empty
+                    }
+                    _ => false,
+                };
+                let use_alt = match &expr.op {
+                    ParamOp::Alt(colon, _) => {
+                        let empty = if *colon { val.is_empty() } else { false };
+                        set && !empty
+                    }
+                    _ => false,
+                };
+                if use_default {
+                    if let ParamOp::Error(_, word) = &expr.op {
+                        let msg = expand_word_nosplit_ctx(word, ctx, cmd_sub);
+                        let prefix = EXPAND_ERROR_PREFIX.with(|p| {
+                            let p = p.borrow();
+                            if p.is_empty() {
+                                "bash".to_string()
+                            } else {
+                                p.clone()
+                            }
+                        });
+                        let error_msg = if msg.is_empty() {
+                            "parameter null or not set"
+                        } else {
+                            &msg
+                        };
+                        eprintln!("{}: {}: {}", prefix, expr.name, error_msg);
+                        std::process::exit(1);
+                    }
+                    return if let ParamOp::Default(_, word) | ParamOp::Assign(_, word) = &expr.op {
+                        expand_word_nosplit_ctx(word, ctx, cmd_sub)
+                    } else {
+                        String::new()
+                    };
+                } else if use_alt {
+                    return if let ParamOp::Alt(_, word) = &expr.op {
+                        expand_word_nosplit_ctx(word, ctx, cmd_sub)
+                    } else {
+                        String::new()
+                    };
+                } else if matches!(&expr.op, ParamOp::Alt(..)) {
+                    // Alt not active — produce empty
+                    return String::new();
+                }
+                // Default/Assign/Error not active — fall through to normal element expansion
             }
 
             let elements: Vec<String> = if let Some(arr) = ctx.arrays.get(&resolved) {
