@@ -427,7 +427,7 @@ in
 
       # Give the VM enough resources for tests
       virtualisation = {
-        memorySize = 1024;
+        memorySize = 2048;
         cores = 2;
       };
     };
