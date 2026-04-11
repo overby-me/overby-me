@@ -799,19 +799,129 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
                 ));
             }
         } else if arg == "-p" {
-            // local -p: print all local variables in declare format
-            if let Some(scope) = shell.local_scopes.last() {
-                let mut sorted: Vec<_> = scope.keys().collect();
-                sorted.sort();
-                for name in sorted {
-                    if let Some(val) = shell.vars.get(name.as_str()) {
-                        println!("{}={}", name, val);
+            // local -p [name ...]: print local variables in declare format.
+            // With names: print each named local, error "not found" for non-locals.
+            // Without names: print all local variables.
+            let remaining: Vec<String> = args[i + 1..]
+                .iter()
+                .filter(|a| !a.starts_with('-'))
+                .cloned()
+                .collect();
+            let print_local_declare = |shell: &crate::interpreter::Shell, name: &str| {
+                // Build attribute flags string
+                let mut flags = String::new();
+                if shell.arrays.contains_key(name) {
+                    flags.push('a');
+                } else if shell.assoc_arrays.contains_key(name) {
+                    flags.push('A');
+                }
+                if shell.integer_vars.contains(name) {
+                    flags.push('i');
+                }
+                if shell.readonly_vars.contains(name) {
+                    flags.push('r');
+                }
+                if shell.exports.contains_key(name) {
+                    flags.push('x');
+                }
+                if shell.namerefs.contains_key(name) {
+                    flags.push('n');
+                }
+                if shell.lowercase_vars.contains(name) {
+                    flags.push('l');
+                }
+                if shell.uppercase_vars.contains(name) {
+                    flags.push('u');
+                }
+                if shell.capitalize_vars.contains(name) {
+                    flags.push('c');
+                }
+                let flag_str = if flags.is_empty() {
+                    "--".to_string()
+                } else {
+                    format!("-{}", flags)
+                };
+                if let Some(arr) = shell.arrays.get(name) {
+                    let elems: Vec<String> = arr
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, v)| {
+                            v.as_ref().map(|s| {
+                                format!(
+                                    "[{}]=\"{}\"",
+                                    i,
+                                    s.replace('\\', "\\\\")
+                                        .replace('"', "\\\"")
+                                        .replace('$', "\\$")
+                                        .replace('`', "\\`")
+                                )
+                            })
+                        })
+                        .collect();
+                    if elems.is_empty() && shell.declared_unset.contains(name) {
+                        println!("declare {} {}", flag_str, name);
                     } else {
-                        println!("{}", name);
+                        println!("declare {} {}=({})", flag_str, name, elems.join(" "));
+                    }
+                } else if let Some(assoc) = shell.assoc_arrays.get(name) {
+                    let elems: Vec<String> = assoc
+                        .iter()
+                        .map(|(k, v)| {
+                            format!(
+                                "[\"{}\"]=\"{}\"",
+                                crate::builtins::quote_assoc_key(k),
+                                v.replace('\\', "\\\\")
+                                    .replace('"', "\\\"")
+                                    .replace('$', "\\$")
+                                    .replace('`', "\\`")
+                            )
+                        })
+                        .collect();
+                    println!("declare {} {}=({})", flag_str, name, elems.join(" "));
+                } else if let Some(target) = shell.namerefs.get(name) {
+                    println!("declare {} {}=\"{}\"", flag_str, name, target);
+                } else if let Some(val) = shell.vars.get(name) {
+                    println!(
+                        "declare {} {}=\"{}\"",
+                        flag_str,
+                        name,
+                        val.replace('\\', "\\\\")
+                            .replace('"', "\\\"")
+                            .replace('$', "\\$")
+                            .replace('`', "\\`")
+                    );
+                } else {
+                    // Declared but unset
+                    println!("declare {} {}", flag_str, name);
+                }
+            };
+            let mut status = 0;
+            if remaining.is_empty() {
+                // local -p: print all locals
+                if let Some(scope) = shell.local_scopes.last() {
+                    let mut sorted: Vec<_> = scope.keys().collect();
+                    sorted.sort();
+                    for name in sorted {
+                        print_local_declare(shell, name);
+                    }
+                }
+            } else {
+                // local -p name1 name2 ...: print each named local
+                for name in &remaining {
+                    let is_local = shell
+                        .local_scopes
+                        .last()
+                        .map(|s| s.contains_key(name.as_str()))
+                        .unwrap_or(false);
+                    if is_local {
+                        print_local_declare(shell, name);
+                    } else {
+                        eprintln!("{}: local: {}: not found", shell.error_prefix(), name);
+                        status = 1;
                     }
                 }
             }
-            return 0;
+            return status;
         } else if arg.starts_with('-') && arg.len() > 1 {
             for ch in arg[1..].chars() {
                 match ch {

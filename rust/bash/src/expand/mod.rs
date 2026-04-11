@@ -2236,6 +2236,68 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                         }
                     }
                 }
+                // Unquoted ${@:N} / ${*:N} — slice positional params and
+                // produce SplitHere markers between elements (like unquoted $@).
+                // Without this, expand_param joins them into a single string
+                // which then doesn't split correctly when IFS is non-default.
+                if (expr.name == "@" || expr.name == "*")
+                    && let ParamOp::Substring(ref offset_str, ref length_str) = expr.op
+                    && ctx.positional.len() > 1
+                {
+                    let offset: i64 =
+                        parse_arith_offset(offset_str.trim(), &expr.name, ctx, cmd_sub);
+                    // ${@:0} includes $0, ${@:1} starts at $1
+                    let params = if offset == 0 {
+                        ctx.positional
+                    } else {
+                        &ctx.positional[1..]
+                    };
+                    let count = params.len();
+                    let start = if offset < 0 {
+                        (count as i64 + offset).max(0) as usize
+                    } else if offset == 0 {
+                        0
+                    } else {
+                        ((offset - 1) as usize).min(count)
+                    };
+                    let end = if let Some(len_str) = length_str {
+                        let len: i64 = parse_arith_offset(len_str.trim(), &expr.name, ctx, cmd_sub);
+                        if len < 0 {
+                            let prefix = EXPAND_ERROR_PREFIX.with(|p| {
+                                let p = p.borrow();
+                                if p.is_empty() {
+                                    "bash".to_string()
+                                } else {
+                                    p.clone()
+                                }
+                            });
+                            eprintln!("{}: {}: substring expression < 0", prefix, len_str.trim());
+                            set_arith_error();
+                            return;
+                        } else {
+                            (start + len as usize).min(count)
+                        }
+                    } else {
+                        count
+                    };
+                    let is_at = expr.name == "@";
+                    let mut first = true;
+                    for elem in &params[start..end] {
+                        if !first {
+                            if is_at {
+                                out.push(Segment::SplitHere);
+                            } else {
+                                match ifs_first_char(ctx.vars) {
+                                    Some(c) => out.push(Segment::Unquoted(c.to_string())),
+                                    None => out.push(Segment::SplitHereStar),
+                                }
+                            }
+                        }
+                        first = false;
+                        out.push(Segment::Unquoted(elem.clone()));
+                    }
+                    return;
+                }
                 // If we already pre-expanded comsubs in the subscript for
                 // lookup_var above, pass the expanded name to expand_param
                 // so it doesn't re-execute the command substitution.
