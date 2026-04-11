@@ -213,13 +213,18 @@ const Slate = ({
 	);
 	const validated = validate(value);
 	if (editor) {
-		if (!(Array.isArray(value) && value.length > 0)) {
-			editor.selection = {
-				anchor: { path: [0, 0], offset: 0 },
-				focus: { path: [0, 0], offset: 0 },
-			};
-		}
 		editor.children = validated;
+		if (editor.selection) {
+			try {
+				Editor.node(editor, editor.selection.anchor.path);
+				Editor.node(editor, editor.selection.focus.path);
+			} catch {
+				editor.selection = {
+					anchor: { path: [0, 0], offset: 0 },
+					focus: { path: [0, 0], offset: 0 },
+				};
+			}
+		}
 	} else {
 		return null;
 	}
