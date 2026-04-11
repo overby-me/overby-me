@@ -3503,6 +3503,16 @@ impl Shell {
                             }
                             let raw_idx = self.eval_arith_expr(eval_str);
                             self.arith_skip_comsub_expand = false;
+                            // If the subscript evaluation had an arithmetic error
+                            // (e.g. $(echo ...) with array_expand_once), skip
+                            // this element assignment — bash produces an empty
+                            // array when subscript evaluation fails in compound
+                            // assignments.
+                            if crate::expand::take_arith_error() {
+                                // Don't abort — just skip this element.
+                                // Continue processing remaining elements (if any).
+                                continue;
+                            }
                             if raw_idx < 0 {
                                 // Negative index in compound assignment — resolve
                                 // relative to effective array length (max_assigned + 1)

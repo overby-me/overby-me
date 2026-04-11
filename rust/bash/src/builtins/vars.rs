@@ -321,6 +321,14 @@ pub(super) fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
                     .get_mut(&resolved)
                     .map(|a| a.remove(idx_str));
             } else {
+                // If the variable doesn't exist at all (not as indexed array,
+                // assoc array, or scalar), skip subscript evaluation entirely.
+                // Bash silently ignores `unset nonexistent["$subscript"]`.
+                let is_indexed_array_early = shell.arrays.contains_key(&resolved);
+                let is_scalar_early = shell.vars.contains_key(&resolved);
+                if !is_indexed_array_early && !is_scalar_early {
+                    continue;
+                }
                 let aeo = shell.is_array_expand_once();
                 if aeo {
                     shell.arith_skip_comsub_expand = true;

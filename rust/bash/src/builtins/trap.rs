@@ -477,7 +477,16 @@ pub(super) fn builtin_wait(shell: &mut Shell, args: &[String]) -> i32 {
                     }
                     return;
                 } else if shell.arrays.contains_key(arr_name) {
+                    if aeo {
+                        shell.arith_skip_comsub_expand = true;
+                    }
                     let idx = shell.eval_arith_expr(subscript) as usize;
+                    shell.arith_skip_comsub_expand = false;
+                    if crate::expand::take_arith_error() {
+                        // Subscript evaluation failed (e.g. $(cmd) with
+                        // array_expand_once) — skip the assignment.
+                        return;
+                    }
                     let arr = shell.arrays.get_mut(arr_name).unwrap();
                     while arr.len() <= idx {
                         arr.push(None);
