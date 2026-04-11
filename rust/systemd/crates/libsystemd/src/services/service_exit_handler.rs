@@ -490,6 +490,11 @@ fn handle_pending_restart(restart: PendingRestart, arc_run_info: &ArcMutRuntimeI
         // For RestartMode=normal, re-activate only the BindsTo= deps that
         // were stopped. required_by/part_of_by deps are NOT re-activated
         // because their original start jobs already completed/failed.
+        // Use NonBlocking activation to avoid blocking in wait_for_service
+        // for Type=notify or oneshot deps — holding the RuntimeInfo read
+        // lock during that wait would cause writer-preferring RwLock
+        // starvation (find_or_load_unit needing a write lock, and all
+        // subsequent readers, would block).
         for dep_id in &reactivate_deps {
             if let Some(dep_unit) = run_info.unit_table.get(dep_id) {
                 let dep_status = dep_unit.common.status.read_poisoned().clone();
@@ -506,7 +511,7 @@ fn handle_pending_restart(restart: PendingRestart, arc_run_info: &ArcMutRuntimeI
                     if let Err(e) = crate::units::activate_unit(
                         dep_id.clone(),
                         &run_info,
-                        crate::units::ActivationSource::Regular,
+                        crate::units::ActivationSource::NonBlocking,
                     ) {
                         trace!(
                             "Failed to re-activate {} after RestartMode=normal restart of {name}: {e}",

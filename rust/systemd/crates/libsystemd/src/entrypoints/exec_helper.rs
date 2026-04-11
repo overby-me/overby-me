@@ -2744,10 +2744,12 @@ pub fn run_exec_helper() {
     apply_resource_limit("RLIMIT_RTPRIO", libc::RLIMIT_RTPRIO, &config.limit_rtprio);
     apply_resource_limit("RLIMIT_RTTIME", libc::RLIMIT_RTTIME, &config.limit_rttime);
 
-    match nix::unistd::execv(&cmd, &args) {
+    // Use execvp instead of execv so bare command names (e.g. "sh" from
+    // ExecStart=sh -c ...) are resolved via PATH, matching systemd behavior.
+    match nix::unistd::execvp(&cmd, &args) {
         Ok(_infallible) => unreachable!(),
         Err(e) => {
-            log::error!("execv FAILED for {}: {}", cmd.to_string_lossy(), e,);
+            log::error!("execvp FAILED for {}: {}", cmd.to_string_lossy(), e,);
             // Use EXIT_EXEC (203) so that the Type=exec check in
             // wait_for_service can distinguish exec failures from
             // normal program exits (which forward the program's own
