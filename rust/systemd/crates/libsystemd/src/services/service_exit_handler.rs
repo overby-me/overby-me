@@ -475,28 +475,31 @@ fn handle_pending_restart(restart: PendingRestart, arc_run_info: &ArcMutRuntimeI
         });
     } else {
         // Non-oneshot: clear old PID and reactivate inline.
-        if let Some(unit) = run_info.unit_table.get(&srvc_id)
-            && let Specific::Service(srvc) = &unit.specific
+        // Drop the read lock ASAP after reactivation to avoid blocking
+        // find_or_load_unit (writer-preferring RwLock starvation).
         {
-            let mut state = srvc.state.write_poisoned();
-            state.srvc.pid = None;
-            state.srvc.process_group = None;
+            if let Some(unit) = run_info.unit_table.get(&srvc_id)
+                && let Specific::Service(srvc) = &unit.specific
+            {
+                let mut state = srvc.state.write_poisoned();
+                state.srvc.pid = None;
+                state.srvc.process_group = None;
+            }
+            if let Err(e) = crate::units::reactivate_unit(srvc_id.clone(), &run_info) {
+                error!("Failed to reactivate {name}: {e}");
+                return;
+            }
         }
-        if let Err(e) = crate::units::reactivate_unit(srvc_id.clone(), &run_info) {
-            error!("Failed to reactivate {name}: {e}");
-            return;
-        }
+        // Drop the RuntimeInfo read lock before dep reactivation.
+        drop(run_info);
 
         // For RestartMode=normal, re-activate only the BindsTo= deps that
-        // were stopped. required_by/part_of_by deps are NOT re-activated
-        // because their original start jobs already completed/failed.
-        // Use NonBlocking activation to avoid blocking in wait_for_service
-        // for Type=notify or oneshot deps — holding the RuntimeInfo read
-        // lock during that wait would cause writer-preferring RwLock
-        // starvation (find_or_load_unit needing a write lock, and all
-        // subsequent readers, would block).
+        // were stopped. Each dep re-acquires the read lock briefly to
+        // avoid holding it across the entire loop (which would starve
+        // find_or_load_unit's write lock requests).
         for dep_id in &reactivate_deps {
-            if let Some(dep_unit) = run_info.unit_table.get(dep_id) {
+            let ri = arc_run_info.read_poisoned();
+            if let Some(dep_unit) = ri.unit_table.get(dep_id) {
                 let dep_status = dep_unit.common.status.read_poisoned().clone();
                 if matches!(
                     dep_status,
@@ -510,7 +513,7 @@ fn handle_pending_restart(restart: PendingRestart, arc_run_info: &ArcMutRuntimeI
                     }
                     if let Err(e) = crate::units::activate_unit(
                         dep_id.clone(),
-                        &run_info,
+                        &ri,
                         crate::units::ActivationSource::NonBlocking,
                     ) {
                         trace!(
