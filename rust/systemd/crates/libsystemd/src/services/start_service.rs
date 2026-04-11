@@ -7,7 +7,7 @@ use super::fork_child;
 use crate::fd_store::FDStore;
 use crate::services::RunCmdError;
 use crate::services::Service;
-use crate::units::{CommandlinePrefix, ServiceConfig, StdIoOption};
+use crate::units::{CommandlinePrefix, ServiceConfig, StandardInput, StdIoOption};
 
 use std::path::Path;
 
@@ -466,19 +466,37 @@ fn start_service_with_filedescriptors(
             conf.exec_config.stderr_path,
             Some(StdIoOption::AppendFile(_))
         ),
-        stdout_is_socket: matches!(conf.exec_config.stdout_path, Some(StdIoOption::Socket)),
-        stderr_is_socket: matches!(conf.exec_config.stderr_path, Some(StdIoOption::Socket)),
-        stdout_is_journal: matches!(
-            conf.exec_config.stdout_path,
-            None | Some(StdIoOption::Journal) | Some(StdIoOption::Kmsg)
-        ),
+        // StandardOutput/StandardError=inherit: when not explicitly set,
+        // inherit from stdin. If StandardInput=socket, stdout/stderr also
+        // connect to the socket (matching real systemd behavior).
+        stdout_is_socket: match &conf.exec_config.stdout_path {
+            Some(StdIoOption::Socket) => true,
+            None => conf.exec_config.stdin_option == StandardInput::Socket,
+            _ => false,
+        },
+        stderr_is_socket: match &conf.exec_config.stderr_path {
+            Some(StdIoOption::Socket) => true,
+            // stderr inherits from stdout when not set
+            None => match &conf.exec_config.stdout_path {
+                Some(StdIoOption::Socket) => true,
+                None => conf.exec_config.stdin_option == StandardInput::Socket,
+                _ => false,
+            },
+            _ => false,
+        },
+        stdout_is_journal: match &conf.exec_config.stdout_path {
+            None => conf.exec_config.stdin_option != StandardInput::Socket,
+            Some(StdIoOption::Journal) | Some(StdIoOption::Kmsg) => true,
+            _ => false,
+        },
         stderr_is_journal: match &conf.exec_config.stderr_path {
             // None = StandardError=inherit: stderr inherits from stdout,
             // so stderr_is_journal should match stdout_is_journal.
-            None => matches!(
-                conf.exec_config.stdout_path,
-                None | Some(StdIoOption::Journal) | Some(StdIoOption::Kmsg)
-            ),
+            None => match &conf.exec_config.stdout_path {
+                None => conf.exec_config.stdin_option != StandardInput::Socket,
+                Some(StdIoOption::Journal) | Some(StdIoOption::Kmsg) => true,
+                _ => false,
+            },
             Some(p) => matches!(p, StdIoOption::Journal | StdIoOption::Kmsg),
         },
         ambient_capabilities: conf.exec_config.ambient_capabilities.clone(),
