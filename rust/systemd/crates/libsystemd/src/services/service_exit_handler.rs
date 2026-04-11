@@ -85,6 +85,26 @@ pub(crate) struct PendingTrigger {
     monitor_env: crate::services::MonitorEnv,
 }
 
+/// Info about a pending restart that needs to happen AFTER the RuntimeInfo
+/// read lock is dropped. The RestartSec sleep must not hold any lock to
+/// avoid writer-preferring RwLock starvation (where `find_or_load_unit`
+/// needs a write lock but blocks because a reader is sleeping).
+pub(crate) struct PendingRestart {
+    srvc_id: UnitId,
+    name: String,
+    restart_sec: Option<Timeout>,
+    /// For non-oneshot RestartMode=normal: deps to RE-ACTIVATE after restart.
+    reactivate_deps: Vec<UnitId>,
+    /// For oneshot RestartMode=normal: deps to DEACTIVATE before restart.
+    deactivate_deps: Vec<UnitId>,
+    /// Whether the service is oneshot (reactivation runs on a separate thread
+    /// since it blocks in wait_for_service).
+    is_oneshot: bool,
+    /// Whether the service had start-limit rate limiting propagation needs
+    /// for its required_by deps (oneshot only).
+    required_by_deps: Vec<UnitId>,
+}
+
 /// Trigger OnSuccess= or OnFailure= units for a service that has reached
 /// its final state. This resolves unit names from the config (loading from
 /// disk if necessary), resets them to NeverStarted, and activates them
@@ -290,13 +310,13 @@ pub fn service_exit_handler_new_thread(
     run_info: ArcMutRuntimeInfo,
 ) {
     std::thread::spawn(move || {
-        let pending_trigger = {
+        let (pending_trigger, pending_restart) = {
             let guard = run_info.read_poisoned();
             match service_exit_handler(pid, srvc_id, code, &guard, &run_info) {
-                Ok(trigger) => trigger,
+                Ok(result) => result,
                 Err(e) => {
                     error!("{e}");
-                    None
+                    (None, None)
                 }
             }
         };
@@ -313,7 +333,190 @@ pub fn service_exit_handler_new_thread(
                 trigger.monitor_env,
             );
         }
+        // Handle pending restart AFTER the read lock is dropped.
+        // The RestartSec sleep must not hold any RuntimeInfo lock to avoid
+        // blocking other threads that need write access (e.g. find_or_load_unit
+        // loading a new unit from disk).
+        if let Some(restart) = pending_restart {
+            handle_pending_restart(restart, &run_info);
+        }
     });
+}
+
+/// Handle the RestartSec sleep and reactivation for a service that needs to
+/// restart. This runs OUTSIDE any RuntimeInfo lock to avoid blocking other
+/// threads (especially `find_or_load_unit` which needs a write lock to load
+/// new units from disk).
+fn handle_pending_restart(restart: PendingRestart, arc_run_info: &ArcMutRuntimeInfo) {
+    let PendingRestart {
+        srvc_id,
+        name,
+        restart_sec,
+        reactivate_deps,
+        deactivate_deps,
+        is_oneshot,
+        required_by_deps,
+    } = restart;
+
+    // Sleep for RestartSec WITHOUT holding any RuntimeInfo lock.
+    if let Some(ref timeout) = restart_sec {
+        match timeout {
+            Timeout::Duration(dur) => {
+                trace!(
+                    "Waiting {:?} (RestartSec) before restarting service {name}",
+                    dur
+                );
+                // Sleep in small increments so that an explicit
+                // `systemctl start` can shortcut the pending restart.
+                let deadline = std::time::Instant::now() + *dur;
+                loop {
+                    if std::time::Instant::now() >= deadline {
+                        break;
+                    }
+                    // Briefly acquire a read lock to check the status.
+                    {
+                        let ri = arc_run_info.read_poisoned();
+                        if let Some(unit) = ri.unit_table.get(&srvc_id) {
+                            let st = unit.common.status.read_poisoned();
+                            if !matches!(&*st, crate::units::UnitStatus::Restarting) {
+                                trace!(
+                                    "Restart of {name} shortcut by external start; aborting auto-restart"
+                                );
+                                return;
+                            }
+                        }
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+            }
+            Timeout::Infinity => {
+                trace!("RestartSec=infinity for service {name}, not restarting");
+                return;
+            }
+        }
+    }
+
+    // Re-acquire read lock for the reactivation phase.
+    let run_info = arc_run_info.read_poisoned();
+
+    // Recheck that the unit is still in Restarting state (not shortcut).
+    if let Some(unit) = run_info.unit_table.get(&srvc_id) {
+        let st = unit.common.status.read_poisoned();
+        if !matches!(&*st, crate::units::UnitStatus::Restarting) {
+            return;
+        }
+    }
+
+    // Check start rate limit before automatic restart.
+    if let Some(unit) = run_info.unit_table.get(&srvc_id)
+        && !crate::units::check_start_rate_limit(unit)
+    {
+        warn!("Unit {name} hit start rate limit, refusing automatic restart");
+        let reason = crate::units::UnitOperationErrorReason::GenericStartError(
+            "Start request repeated too quickly".into(),
+        );
+        {
+            let mut status = unit.common.status.write_poisoned();
+            *status = crate::units::UnitStatus::Stopped(
+                crate::units::StatusStopped::StoppedUnexpected,
+                vec![reason],
+            );
+        }
+        let start_limit_action = &unit.common.unit.start_limit_action;
+        if *start_limit_action != UnitAction::None {
+            info!(
+                "Unit {name} hit start limit, triggering StartLimitAction={:?}",
+                start_limit_action
+            );
+            crate::units::execute_unit_action(start_limit_action, &name);
+        }
+        // For oneshot: propagate failure to required_by deps.
+        if is_oneshot {
+            for dep_id in &required_by_deps {
+                if let Some(dep) = run_info.unit_table.get(dep_id)
+                    && dep.common.status.read_poisoned().is_started()
+                {
+                    let mut dep_st = dep.common.status.write_poisoned();
+                    *dep_st = crate::units::UnitStatus::Stopped(
+                        crate::units::StatusStopped::StoppedFinal,
+                        vec![],
+                    );
+                }
+            }
+        }
+        return;
+    }
+
+    trace!("Restart service {name} after it died");
+
+    // For oneshot RestartMode=normal: deactivate deps before restarting.
+    for dep_id in &deactivate_deps {
+        if let Err(e) = crate::units::deactivate_unit_recursive(dep_id, &run_info) {
+            trace!(
+                "Failed to propagate stop to {} during restart of {name}: {e}",
+                dep_id.name
+            );
+        }
+    }
+
+    if is_oneshot {
+        // Oneshot reactivation blocks in wait_for_service until the new
+        // process exits. Spawn on a separate thread so we don't hold
+        // the read lock for the entire duration.
+        info!("Restarting oneshot service {name}");
+        drop(run_info);
+        let arc_ri = arc_run_info.clone();
+        let restart_id = srvc_id.clone();
+        std::thread::spawn(move || {
+            let ri = arc_ri.read_poisoned();
+            if let Err(e) = crate::units::reactivate_unit(restart_id, &ri) {
+                error!("Failed to restart oneshot service: {e}");
+            }
+        });
+    } else {
+        // Non-oneshot: clear old PID and reactivate inline.
+        if let Some(unit) = run_info.unit_table.get(&srvc_id)
+            && let Specific::Service(srvc) = &unit.specific
+        {
+            let mut state = srvc.state.write_poisoned();
+            state.srvc.pid = None;
+            state.srvc.process_group = None;
+        }
+        if let Err(e) = crate::units::reactivate_unit(srvc_id.clone(), &run_info) {
+            error!("Failed to reactivate {name}: {e}");
+            return;
+        }
+
+        // For RestartMode=normal, re-activate only the BindsTo= deps that
+        // were stopped. required_by/part_of_by deps are NOT re-activated
+        // because their original start jobs already completed/failed.
+        for dep_id in &reactivate_deps {
+            if let Some(dep_unit) = run_info.unit_table.get(dep_id) {
+                let dep_status = dep_unit.common.status.read_poisoned().clone();
+                if matches!(
+                    dep_status,
+                    UnitStatus::Stopped(..) | UnitStatus::NeverStarted
+                ) {
+                    {
+                        let mut status = dep_unit.common.status.write_poisoned();
+                        if status.is_stopped() {
+                            *status = UnitStatus::NeverStarted;
+                        }
+                    }
+                    if let Err(e) = crate::units::activate_unit(
+                        dep_id.clone(),
+                        &run_info,
+                        crate::units::ActivationSource::Regular,
+                    ) {
+                        trace!(
+                            "Failed to re-activate {} after RestartMode=normal restart of {name}: {e}",
+                            dep_id.name
+                        );
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Handle the aftermath of a service process exiting.
@@ -327,7 +530,7 @@ pub(crate) fn service_exit_handler(
     code: ChildTermination,
     run_info: &RuntimeInfo,
     arc_run_info: &ArcMutRuntimeInfo,
-) -> Result<Option<PendingTrigger>, String> {
+) -> Result<(Option<PendingTrigger>, Option<PendingRestart>), String> {
     trace!(
         "Exit handler for service {:?} with pid: {pid} code: {code:?}",
         srvc_id.name
@@ -460,7 +663,7 @@ pub(crate) fn service_exit_handler(
                     let _ = std::fs::remove_dir(&cg);
                 }
             });
-            return Ok(None);
+            return Ok((None, None));
         }
     }
 
@@ -490,7 +693,7 @@ pub(crate) fn service_exit_handler(
                     "Oneshot service {} exited cleanly with RemainAfterExit=yes, staying active",
                     unit.id.name
                 );
-                return Ok(None);
+                return Ok((None, None));
             }
 
             // RemainAfterExit=no (default): deactivate the oneshot service
@@ -579,121 +782,45 @@ pub(crate) fn service_exit_handler(
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
 
-                // Sleep for RestartSec, checking for shortcut restart
-                if let Some(ref timeout) = restart_sec {
-                    match timeout {
-                        Timeout::Duration(dur) => {
-                            trace!(
-                                "Waiting {:?} (RestartSec) before restarting oneshot service {name}",
-                                dur
-                            );
-                            let deadline = std::time::Instant::now() + *dur;
-                            loop {
-                                if std::time::Instant::now() >= deadline {
-                                    break;
-                                }
-                                if let Some(unit) = run_info.unit_table.get(&srvc_id) {
-                                    let st = unit.common.status.read_poisoned();
-                                    if !matches!(&*st, crate::units::UnitStatus::Restarting) {
-                                        trace!(
-                                            "Restart of oneshot {name} shortcut by external start"
-                                        );
-                                        return Ok(None);
-                                    }
-                                }
-                                std::thread::sleep(std::time::Duration::from_millis(100));
-                            }
-                        }
-                        Timeout::Infinity => {
-                            trace!(
-                                "RestartSec=infinity for oneshot service {name}, not restarting"
-                            );
-                            return Ok(None);
-                        }
+                // Collect deps for deactivation (RestartMode=normal only).
+                let deactivate_deps = if srvc.conf.restart_mode == RestartMode::Normal {
+                    if let Some(unit) = run_info.unit_table.get(&srvc_id) {
+                        unit.common
+                            .dependencies
+                            .bound_by
+                            .iter()
+                            .chain(unit.common.dependencies.required_by.iter())
+                            .chain(unit.common.dependencies.part_of_by.iter())
+                            .cloned()
+                            .collect()
+                    } else {
+                        Vec::new()
                     }
-                }
+                } else {
+                    Vec::new()
+                };
 
-                // Recheck — may have been shortcut-started
-                if let Some(unit) = run_info.unit_table.get(&srvc_id) {
-                    let st = unit.common.status.read_poisoned();
-                    if !matches!(&*st, crate::units::UnitStatus::Restarting) {
-                        return Ok(None);
-                    }
-                }
+                // Collect required_by deps for rate-limit failure propagation.
+                let required_by_deps = if let Some(unit) = run_info.unit_table.get(&srvc_id) {
+                    unit.common.dependencies.required_by.clone()
+                } else {
+                    Vec::new()
+                };
 
-                // Check start rate limit
-                if let Some(unit) = run_info.unit_table.get(&srvc_id)
-                    && !crate::units::check_start_rate_limit(unit)
-                {
-                    warn!("Oneshot unit {name} hit start rate limit, refusing automatic restart");
-                    let reason = crate::units::UnitOperationErrorReason::GenericStartError(
-                        "Start request repeated too quickly".into(),
-                    );
-                    let mut status = unit.common.status.write_poisoned();
-                    *status = crate::units::UnitStatus::Stopped(
-                        crate::units::StatusStopped::StoppedUnexpected,
-                        vec![reason],
-                    );
-                    drop(status);
-                    // Propagate failure to required_by deps (e.g.
-                    // targets with Requires= on this service).
-                    for dep_id in &unit.common.dependencies.required_by {
-                        if let Some(dep) = run_info.unit_table.get(dep_id)
-                            && dep.common.status.read_poisoned().is_started()
-                        {
-                            let mut dep_st = dep.common.status.write_poisoned();
-                            *dep_st = crate::units::UnitStatus::Stopped(
-                                crate::units::StatusStopped::StoppedFinal,
-                                vec![],
-                            );
-                        }
-                    }
-                    return Ok(None);
-                }
-
-                info!("Restarting oneshot service {name}");
-
-                // With RestartMode=normal, propagate the stop to deps before
-                // restarting, matching real systemd's full deactivation path.
-                // With RestartMode=direct, skip dep propagation.
-                if srvc.conf.restart_mode == RestartMode::Normal
-                    && let Some(unit) = run_info.unit_table.get(&srvc_id)
-                {
-                    for dep_id in unit
-                        .common
-                        .dependencies
-                        .bound_by
-                        .iter()
-                        .chain(unit.common.dependencies.required_by.iter())
-                        .chain(unit.common.dependencies.part_of_by.iter())
-                    {
-                        if let Err(e) = crate::units::deactivate_unit_recursive(dep_id, run_info) {
-                            trace!(
-                                "Failed to propagate stop to {} during RestartMode=normal oneshot restart of {name}: {e}",
-                                dep_id.name
-                            );
-                        }
-                    }
-                }
-
-                // Spawn the restart on a separate thread so that this exit
-                // handler can return and release the RuntimeInfo read lock.
-                // Oneshot reactivation blocks in wait_for_service until the
-                // new process exits, which can take a long time.  Holding
-                // the read lock during that window triggers a priority
-                // inversion with glibc's writer-preferring rwlock: any
-                // pending write lock (e.g. from find_or_load_unit loading a
-                // unit from disk) will block all new readers, deadlocking
-                // control-socket commands like `systemctl show`.
-                let arc_ri = arc_run_info.clone();
-                let restart_id = srvc_id.clone();
-                std::thread::spawn(move || {
-                    let ri = arc_ri.read_poisoned();
-                    if let Err(e) = crate::units::reactivate_unit(restart_id, &ri) {
-                        error!("Failed to restart oneshot service: {e}");
-                    }
-                });
-                return Ok(None);
+                // Return PendingRestart to handle the RestartSec sleep and
+                // reactivation AFTER the RuntimeInfo read lock is dropped.
+                return Ok((
+                    None,
+                    Some(PendingRestart {
+                        srvc_id,
+                        name: name.to_string(),
+                        restart_sec,
+                        reactivate_deps: Vec::new(),
+                        deactivate_deps,
+                        is_oneshot: true,
+                        required_by_deps,
+                    }),
+                ));
             }
 
             let is_success = success_exit_status.is_success(&code);
@@ -769,22 +896,28 @@ pub(crate) fn service_exit_handler(
             // Actual triggering happens after the read lock is dropped.
             if let Some(unit) = run_info.unit_table.get(&srvc_id) {
                 if is_success && !unit.common.unit.on_success.is_empty() {
-                    return Ok(Some(PendingTrigger {
-                        targets: unit.common.unit.on_success.clone(),
-                        source_name: name.to_string(),
-                        kind: "OnSuccess".to_string(),
-                        monitor_env: build_monitor_env(name, &code, true),
-                    }));
+                    return Ok((
+                        Some(PendingTrigger {
+                            targets: unit.common.unit.on_success.clone(),
+                            source_name: name.to_string(),
+                            kind: "OnSuccess".to_string(),
+                            monitor_env: build_monitor_env(name, &code, true),
+                        }),
+                        None,
+                    ));
                 } else if !is_success && !unit.common.unit.on_failure.is_empty() {
-                    return Ok(Some(PendingTrigger {
-                        targets: unit.common.unit.on_failure.clone(),
-                        source_name: name.to_string(),
-                        kind: "OnFailure".to_string(),
-                        monitor_env: build_monitor_env(name, &code, false),
-                    }));
+                    return Ok((
+                        Some(PendingTrigger {
+                            targets: unit.common.unit.on_failure.clone(),
+                            source_name: name.to_string(),
+                            kind: "OnFailure".to_string(),
+                            monitor_env: build_monitor_env(name, &code, false),
+                        }),
+                        None,
+                    ));
                 }
             }
-            return Ok(None);
+            return Ok((None, None));
         }
     }
 
@@ -838,7 +971,7 @@ pub(crate) fn service_exit_handler(
                     "Service {}: manual_stop flag set, suppressing automatic restart",
                     unit.id.name
                 );
-                return Ok(None);
+                return Ok((None, None));
             }
             if watchdog_fired {
                 trace!(
@@ -932,7 +1065,7 @@ pub(crate) fn service_exit_handler(
                 "Exit handler ignores exit of service {}. Its status is not 'Started'/'Starting', it is: {:?}",
                 name, *status_locked
             );
-            return Ok(None);
+            return Ok((None, None));
         }
     }
 
@@ -940,7 +1073,7 @@ pub(crate) fn service_exit_handler(
     // in its current active state — do not restart, do not deactivate.
     if has_remain_after_exit(unit) && success_exit_status.is_success(&code) {
         trace!("Service {name} exited cleanly with RemainAfterExit=yes, staying active");
-        return Ok(None);
+        return Ok((None, None));
     }
 
     // Run ExecStopPost= commands. In real systemd these always run when a
@@ -1035,118 +1168,24 @@ pub(crate) fn service_exit_handler(
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
 
-        if let Some(ref timeout) = restart_sec {
-            match timeout {
-                Timeout::Duration(dur) => {
-                    trace!(
-                        "Waiting {:?} (RestartSec) before restarting service {name}",
-                        dur
-                    );
-                    // Sleep in small increments so that an explicit
-                    // `systemctl start` can shortcut the pending restart.
-                    let deadline = std::time::Instant::now() + *dur;
-                    loop {
-                        if std::time::Instant::now() >= deadline {
-                            break;
-                        }
-                        // Check if another thread (e.g. `systemctl start`)
-                        // has already changed the status away from Restarting.
-                        if let Some(unit) = run_info.unit_table.get(&srvc_id) {
-                            let st = unit.common.status.read_poisoned();
-                            if !matches!(&*st, crate::units::UnitStatus::Restarting) {
-                                trace!(
-                                    "Restart of {name} shortcut by external start; aborting auto-restart"
-                                );
-                                return Ok(None);
-                            }
-                        }
-                        std::thread::sleep(std::time::Duration::from_millis(100));
-                    }
-                }
-                Timeout::Infinity => {
-                    trace!("RestartSec=infinity for service {name}, not restarting");
-                    return Ok(None);
-                }
-            }
-        }
-
-        // Recheck that the unit is still in Restarting state (not shortcut).
-        if let Some(unit) = run_info.unit_table.get(&srvc_id) {
-            let st = unit.common.status.read_poisoned();
-            if !matches!(&*st, crate::units::UnitStatus::Restarting) {
-                return Ok(None);
-            }
-        }
-
-        // Check start rate limit before automatic restart.
-        if let Some(unit) = run_info.unit_table.get(&srvc_id)
-            && !crate::units::check_start_rate_limit(unit)
-        {
-            warn!("Unit {name} hit start rate limit, refusing automatic restart");
-            let reason = crate::units::UnitOperationErrorReason::GenericStartError(
-                "Start request repeated too quickly".into(),
-            );
-            {
-                let mut status = unit.common.status.write_poisoned();
-                *status = crate::units::UnitStatus::Stopped(
-                    crate::units::StatusStopped::StoppedUnexpected,
-                    vec![reason],
-                );
-            }
-            let start_limit_action = &unit.common.unit.start_limit_action;
-            if *start_limit_action != crate::units::UnitAction::None {
-                info!(
-                    "Unit {name} hit start limit, triggering StartLimitAction={:?}",
-                    start_limit_action
-                );
-                crate::units::execute_unit_action(start_limit_action, name);
-            }
-            return Ok(None);
-        }
-        trace!("Restart service {name} after it died");
-        // Clear the old PID and process group so that srvc.start() does not
-        // reject the restart with AlreadyHasPID.  The old process is already
-        // dead (we are in its exit handler).
-        if let Some(unit) = run_info.unit_table.get(&srvc_id)
-            && let Specific::Service(srvc) = &unit.specific
-        {
-            let mut state = srvc.state.write_poisoned();
-            state.srvc.pid = None;
-            state.srvc.process_group = None;
-        }
-        crate::units::reactivate_unit(srvc_id, run_info).map_err(|e| format!("{e}"))?;
-
-        // For RestartMode=normal, re-activate only the BindsTo= deps that
-        // were stopped. required_by/part_of_by deps are NOT re-activated
-        // because their original start jobs already completed/failed.
-        for dep_id in &stopped_deps {
-            if let Some(dep_unit) = run_info.unit_table.get(dep_id) {
-                let dep_status = dep_unit.common.status.read_poisoned().clone();
-                if matches!(
-                    dep_status,
-                    UnitStatus::Stopped(..) | UnitStatus::NeverStarted
-                ) {
-                    // Reset to NeverStarted so activate_unit doesn't skip the
-                    // unit (it returns early for StoppedUnexpected).
-                    {
-                        let mut status = dep_unit.common.status.write_poisoned();
-                        if status.is_stopped() {
-                            *status = UnitStatus::NeverStarted;
-                        }
-                    }
-                    if let Err(e) = crate::units::activate_unit(
-                        dep_id.clone(),
-                        run_info,
-                        crate::units::ActivationSource::Regular,
-                    ) {
-                        trace!(
-                            "Failed to re-activate {} after RestartMode=normal restart of {name}: {e}",
-                            dep_id.name
-                        );
-                    }
-                }
-            }
-        }
+        // Return a PendingRestart so that the RestartSec sleep and
+        // reactivation happen AFTER the RuntimeInfo read lock is dropped.
+        // Holding the read lock during the sleep causes writer-preferring
+        // RwLock starvation: any `find_or_load_unit` needing a write lock
+        // (and all subsequent read lock requests) would block for the
+        // entire RestartSec duration.
+        Ok((
+            None,
+            Some(PendingRestart {
+                srvc_id,
+                name: name.to_string(),
+                restart_sec,
+                reactivate_deps: stopped_deps,
+                deactivate_deps: Vec::new(),
+                is_oneshot: false,
+                required_by_deps: Vec::new(),
+            }),
+        ))
     } else {
         // Detect whether this exit is for a stale process that was replaced
         // by a restart.  If the service already has a different PID (the new
@@ -1357,9 +1396,8 @@ pub(crate) fn service_exit_handler(
             }
         }
 
-        return Ok(pending_trigger);
+        Ok((pending_trigger, None))
     }
-    Ok(None)
 }
 
 #[cfg(test)]

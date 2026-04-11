@@ -3760,6 +3760,7 @@ fn create_transient_unit(
             deactivation_in_progress: std::sync::atomic::AtomicBool::new(false),
             deactivation_irreversible: std::sync::atomic::AtomicBool::new(false),
             start_requested_during_deactivation: std::sync::atomic::AtomicBool::new(false),
+            invocation_id: std::sync::Mutex::new(String::new()),
         },
         specific: Specific::Service(ServiceSpecific {
             conf: service_conf,
@@ -4007,6 +4008,7 @@ fn create_transient_unit(
                 deactivation_in_progress: std::sync::atomic::AtomicBool::new(false),
                 deactivation_irreversible: std::sync::atomic::AtomicBool::new(false),
                 start_requested_during_deactivation: std::sync::atomic::AtomicBool::new(false),
+                invocation_id: std::sync::Mutex::new(String::new()),
             },
             specific: Specific::Timer(crate::units::TimerSpecific {
                 conf: timer_config,
@@ -4158,6 +4160,7 @@ fn create_transient_unit(
                 deactivation_in_progress: std::sync::atomic::AtomicBool::new(false),
                 deactivation_irreversible: std::sync::atomic::AtomicBool::new(false),
                 start_requested_during_deactivation: std::sync::atomic::AtomicBool::new(false),
+                invocation_id: std::sync::Mutex::new(String::new()),
             },
             specific: Specific::Path(crate::units::PathSpecific {
                 conf: path_config,
@@ -8610,6 +8613,7 @@ mod tests {
                 deactivation_in_progress: std::sync::atomic::AtomicBool::new(false),
                 deactivation_irreversible: std::sync::atomic::AtomicBool::new(false),
                 start_requested_during_deactivation: std::sync::atomic::AtomicBool::new(false),
+                invocation_id: std::sync::Mutex::new(String::new()),
             },
             specific: Specific::Target(TargetSpecific {
                 state: RwLock::new(TargetState {

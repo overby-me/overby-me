@@ -453,6 +453,13 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
             } else {
                 insert(&mut props, "StatusErrno", "0");
                 insert(&mut props, "NFileDescriptorStore", "0");
+                // Read InvocationID from the lock-free Common field when the
+                // service state write-lock is contended (e.g. during
+                // wait_for_service for Type=notify services).
+                let inv_id = unit.common.invocation_id.lock().unwrap().clone();
+                if !inv_id.is_empty() {
+                    insert(&mut props, "InvocationID", &inv_id);
+                }
             }
             insert(
                 &mut props,

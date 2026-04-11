@@ -50,6 +50,11 @@ pub struct Common {
     /// Set by StartNoBlock when a start is requested during a non-irreversible
     /// deactivation. The Stop handler checks this after ExecStop to fail the stop.
     pub start_requested_during_deactivation: std::sync::atomic::AtomicBool,
+    /// Lock-free InvocationID readable without the per-service state lock.
+    /// Updated by start_service after generating the UUID, so `systemctl show
+    /// -P InvocationID` can read it even while the service state write-lock
+    /// is held during `activate` → `wait_for_service`.
+    pub invocation_id: std::sync::Mutex<String>,
 }
 
 /// Lifecycle timestamps for a unit, tracking when it transitions between
@@ -309,10 +314,18 @@ impl ServiceState {
         status: &RwLock<UnitStatus>,
         run_info: &RuntimeInfo,
         source: ActivationSource,
+        common_invocation_id: &std::sync::Mutex<String>,
     ) -> Result<UnitStatus, UnitOperationError> {
         let start_res = self
             .srvc
-            .start(conf, id.clone(), &id.name, run_info, source)
+            .start(
+                conf,
+                id.clone(),
+                &id.name,
+                run_info,
+                source,
+                common_invocation_id,
+            )
             .map_err(|e| UnitOperationError {
                 unit_name: id.name.clone(),
                 unit_id: id.clone(),
@@ -522,6 +535,7 @@ impl ServiceState {
         status: &RwLock<UnitStatus>,
         run_info: &RuntimeInfo,
         source: ActivationSource,
+        common_invocation_id: &std::sync::Mutex<String>,
     ) -> Result<(), UnitOperationError> {
         // Mark the unit as Stopping before killing so that the exit handler
         // recognises the SIGKILL as intentional and doesn't flip the status
@@ -612,7 +626,14 @@ impl ServiceState {
         // Restart and set the status according to the result
         let start_res = self
             .srvc
-            .start(conf, id.clone(), &id.name, run_info, source)
+            .start(
+                conf,
+                id.clone(),
+                &id.name,
+                run_info,
+                source,
+                common_invocation_id,
+            )
             .map_err(|e| UnitOperationError {
                 unit_name: id.name.clone(),
                 unit_id: id.clone(),
@@ -1464,7 +1485,14 @@ impl Unit {
                     &self.common.unit.joins_namespace_of,
                     run_info,
                 );
-                state.activate(&self.id, conf, &self.common.status, run_info, source)
+                state.activate(
+                    &self.id,
+                    conf,
+                    &self.common.status,
+                    run_info,
+                    source,
+                    &self.common.invocation_id,
+                )
             }
             LockedState::Mount(_, conf) => activate_mount(&self.id, conf, &self.common.status),
             LockedState::Swap(_, conf) => activate_swap(&self.id, conf, &self.common.status),
@@ -1701,7 +1729,14 @@ impl Unit {
                         &self.common.unit.joins_namespace_of,
                         run_info,
                     );
-                    state.reactivate(&self.id, conf, &self.common.status, run_info, source)
+                    state.reactivate(
+                        &self.id,
+                        conf,
+                        &self.common.status,
+                        run_info,
+                        source,
+                        &self.common.invocation_id,
+                    )
                 }
                 LockedState::Mount(_, conf) => {
                     deactivate_mount(&self.id, conf, &self.common.status).ok();
@@ -1763,7 +1798,14 @@ impl Unit {
                     state.srvc.pid = None;
                     state.srvc.process_group = None;
                     state
-                        .activate(&self.id, conf, &self.common.status, run_info, source)
+                        .activate(
+                            &self.id,
+                            conf,
+                            &self.common.status,
+                            run_info,
+                            source,
+                            &self.common.invocation_id,
+                        )
                         .map(|_| ())
                 }
                 LockedState::Mount(_, conf) => {

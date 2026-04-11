@@ -432,6 +432,7 @@ impl Service {
         name: &str,
         run_info: &RuntimeInfo,
         source: ActivationSource,
+        common_invocation_id: &std::sync::Mutex<String>,
     ) -> Result<StartResult, ServiceErrorReason> {
         if let Some(pid) = self.pid {
             return Err(ServiceErrorReason::AlreadyHasPID(pid));
@@ -583,6 +584,13 @@ impl Service {
                         }
                         Err(e) => return Err(ServiceErrorReason::StartFailed(e)),
                     }
+                }
+
+                // Copy InvocationID to the lock-free Common field so that
+                // `systemctl show -P InvocationID` can read it even while
+                // the service state write-lock is held during wait_for_service.
+                if let Some(ref inv_id) = self.invocation_id {
+                    *common_invocation_id.lock().unwrap() = inv_id.clone();
                 }
 
                 // Only wait for the service if it was actually spawned (has a PID).

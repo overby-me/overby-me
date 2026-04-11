@@ -912,6 +912,7 @@ fn make_common_from_parsed(
         deactivation_in_progress: std::sync::atomic::AtomicBool::new(false),
         deactivation_irreversible: std::sync::atomic::AtomicBool::new(false),
         start_requested_during_deactivation: std::sync::atomic::AtomicBool::new(false),
+        invocation_id: std::sync::Mutex::new(String::new()),
     })
 }
 
