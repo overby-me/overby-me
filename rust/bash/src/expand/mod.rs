@@ -1672,7 +1672,7 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                         } else {
                             match ifs_first_char(ctx.vars) {
                                 Some(c) => Segment::Unquoted(c.to_string()),
-                                None => Segment::Unquoted(String::new()),
+                                None => Segment::SplitHereStar,
                             }
                         });
                     }
@@ -1795,7 +1795,7 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                             } else {
                                 match ifs_first_char(ctx.vars) {
                                     Some(c) => Segment::Unquoted(c.to_string()),
-                                    None => Segment::Unquoted(String::new()),
+                                    None => Segment::SplitHereStar,
                                 }
                             });
                         }
@@ -1854,7 +1854,7 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                                 } else {
                                     match ifs_first_char(ctx.vars) {
                                         Some(c) => Segment::Unquoted(c.to_string()),
-                                        None => Segment::Unquoted(String::new()),
+                                        None => Segment::SplitHereStar,
                                     }
                                 });
                             }
@@ -1892,7 +1892,7 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                                 } else {
                                     match ifs_first_char(ctx.vars) {
                                         Some(c) => Segment::Unquoted(c.to_string()),
-                                        None => Segment::Unquoted(String::new()),
+                                        None => Segment::SplitHereStar,
                                     }
                                 });
                             }
@@ -2047,9 +2047,17 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                 let has_quoted_at = word.iter().any(|p| {
                         matches!(p, WordPart::DoubleQuoted(parts) if parts.iter().any(|ip| matches!(ip, WordPart::Variable(n) if n == "@")))
                     });
-                let has_unquoted_at_or_star = word
-                    .iter()
-                    .any(|p| matches!(p, WordPart::Variable(n) if n == "@" || n == "*"));
+                let has_unquoted_at_or_star = word.iter().any(|p| {
+                    matches!(p, WordPart::Variable(n) if n == "@" || n == "*")
+                        || matches!(p, WordPart::Param(expr) if {
+                            if let Some(bracket) = expr.name.find('[') {
+                                let idx = &expr.name[bracket + 1..expr.name.len().saturating_sub(1)];
+                                idx == "*" || idx == "@"
+                            } else {
+                                expr.name == "@" || expr.name == "*"
+                            }
+                        })
+                });
                 let ifs_is_null = ctx.vars.get("IFS").map(|s| s.is_empty()).unwrap_or(false);
                 // Per-part expansion is needed when:
                 // - mixed literal + quoted content (e.g. ${IFS+foo 'bar' baz})
@@ -2080,6 +2088,48 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                 // lookup and print the error a second time).
                 out.push(Segment::Unquoted(orig_val));
             } else {
+                // Unquoted ${arr[*]} with ParamOp::None and empty IFS should
+                // produce separate fields (like $* with null IFS), not a single
+                // concatenated string.  Bash treats unquoted $* and ${arr[*]}
+                // identically when IFS is null: each element is a separate word.
+                if matches!(expr.op, ParamOp::None)
+                    && let Some(bracket) = expr.name.find('[')
+                {
+                    let idx_str = &expr.name[bracket + 1..expr.name.len() - 1];
+                    if idx_str == "*" {
+                        let ifs_is_null =
+                            ctx.vars.get("IFS").map(|s| s.is_empty()).unwrap_or(false);
+                        if ifs_is_null {
+                            let base = &expr.name[..bracket];
+                            let resolved = ctx.resolve_nameref(base);
+                            let mut did_expand = false;
+                            if let Some(arr) = ctx.arrays.get(&resolved) {
+                                let mut first = true;
+                                for elem in arr.iter().filter_map(|v| v.as_ref()) {
+                                    if !first {
+                                        out.push(Segment::SplitHereStar);
+                                    }
+                                    first = false;
+                                    out.push(Segment::Unquoted(elem.clone()));
+                                }
+                                did_expand = true;
+                            } else if let Some(assoc) = ctx.assoc_arrays.get(&resolved) {
+                                let mut first = true;
+                                for (_k, v) in assoc.iter() {
+                                    if !first {
+                                        out.push(Segment::SplitHereStar);
+                                    }
+                                    first = false;
+                                    out.push(Segment::Unquoted(v.clone()));
+                                }
+                                did_expand = true;
+                            }
+                            if did_expand {
+                                return;
+                            }
+                        }
+                    }
+                }
                 // If we already pre-expanded comsubs in the subscript for
                 // lookup_var above, pass the expanded name to expand_param
                 // so it doesn't re-execute the command substitution.

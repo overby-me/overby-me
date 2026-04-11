@@ -172,9 +172,11 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
         // subscript syntax (arr[idx], assoc[key], arr[@], arr[*]).
         let is_valid = if let Some(bracket) = var_name.find('[') {
             let base = &var_name[..bracket];
-            // When assoc_expand_once is ON, bash's skipsubscript uses the
-            // LAST ']' as the closing bracket, so `A[]]` is valid (key is `]`).
-            // When OFF, use the FIRST ']' — `A[]]` is A[] + stray ']' (invalid).
+            // When assoc_expand_once is ON, use rfind(']') for bracket matching.
+            // Bash tracks expansion context: `A[$rkey]` where `rkey=]` expands
+            // to `A[]]` but the structural closing `]` is the last one (from
+            // the original word), not the first (from variable expansion).
+            // When OFF, use first ']' — `A[]]` is A[] + stray ']' (invalid).
             let aeo = shell.is_array_expand_once();
             let close = if aeo {
                 var_name.rfind(']')
@@ -265,7 +267,7 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
         let output_str = String::from_utf8_lossy(&output).to_string();
         // Handle array subscript syntax: arr[idx] or assoc[key]
         // When assoc_expand_once is ON, use rfind(']') to find the closing
-        // bracket so that keys like ']' work (e.g. A[]] → key is ']').
+        // bracket so that keys like ']' work (e.g. A[$rkey] where rkey=]).
         if let Some(bracket) = var_name.find('[') {
             let base = &var_name[..bracket];
             let close_pos = if shell.is_array_expand_once() {
@@ -1574,7 +1576,9 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
                 // causes it to miss the closing ], so valid_array_reference fails.
                 let base = if let Some(bracket) = arg.find('[') {
                     // When assoc_expand_once is ON, use rfind(']') so that
-                    // keys like ']' work (e.g. a[]] → key is ']').
+                    // keys like ']' work (e.g. a[$rkey] where rkey=]).
+                    // Bash tracks expansion context: the structural closing
+                    // `]` is the last one, not the first (from expansion).
                     let aeo = shell.is_array_expand_once();
                     let close = if aeo {
                         arg.rfind(']')
@@ -1671,7 +1675,7 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
         let base = if let Some(bracket) = name.find('[') {
             // Array subscript: validate the base name, allow any subscript content.
             // When assoc_expand_once is ON, use rfind(']') so that keys like
-            // ']' work (e.g. a[]] → key is ']', closing bracket is last ']').
+            // ']' work (e.g. a[$rkey] where rkey=]).
             let aeo = shell.is_array_expand_once();
             let close = if aeo {
                 name.rfind(']')
@@ -2329,7 +2333,7 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
         if let Some(bracket) = name.find('[') {
             let base = &name[..bracket];
             // When assoc_expand_once is ON, use rfind(']') so that keys
-            // like ']' work (e.g. a[]] → key is ']', closing bracket is last ']').
+            // like ']' work (e.g. a[$rkey] where rkey=]).
             let aeo = shell.is_array_expand_once();
             let close_pos = if aeo {
                 name.rfind(']')

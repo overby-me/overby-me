@@ -23,8 +23,19 @@ impl Shell {
     fn arith_subscript_key(&mut self, base: &str, idx_str: &str) -> ArithSubscript {
         let resolved = self.resolve_nameref(base);
         if self.is_assoc_array(&resolved) {
-            // Expand $var references in the key but don't evaluate as arith
-            let key = self.expand_arith_subscript_key(idx_str);
+            // With assoc_expand_once in `let` context, the subscript is
+            // used literally — no variable expansion, no quote stripping,
+            // no backslash processing.  `let "a[\" \"]=11"` with AEO
+            // keeps `" "` as the 3-char key (quote-space-quote).
+            // In `(( ))` context (not let), $var expansion already
+            // happened via expand_comsubs_in_arith, and quotes inside
+            // brackets are still stripped even with AEO.
+            let aeo = self.is_array_expand_once();
+            let key = if aeo && self.arith_is_let {
+                idx_str.to_string()
+            } else {
+                self.expand_arith_subscript_key(idx_str)
+            };
             ArithSubscript::Assoc(resolved, key)
         } else {
             let saved_in_subscript = self.arith_in_subscript;
@@ -247,6 +258,14 @@ impl Shell {
             } else if bytes[i] == b'\\' && i + 1 < bytes.len() && bytes[i + 1] == b'"' {
                 if bracket_depth > 0 && !keep_inside_brackets {
                     // Inside subscript: `\"` → consume both (strip escapes)
+                    i += 2;
+                } else if bracket_depth > 0 && keep_inside_brackets {
+                    // assoc_expand_once + let: keep `\"` inside brackets as
+                    // literal `\"` — both backslash and quote become part of
+                    // the associative array key (matching bash behavior where
+                    // `let "a[\" \"]=11"` creates key `\" \"`).
+                    result.push('\\');
+                    result.push('"');
                     i += 2;
                 } else {
                     // Outside subscript (or keep_inside_brackets mode):
