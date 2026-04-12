@@ -1297,6 +1297,123 @@ impl Shell {
         }
     }
 
+    /// Set a variable at global scope, bypassing any local scopes.
+    /// Used by `declare -g` to write to the global scope even when
+    /// inside nested function calls with local variables.
+    ///
+    /// Walks `local_scopes` from bottom (oldest) to top looking for the
+    /// first scope that has saved this variable.  If found, updates the
+    /// saved value there (so it will be restored as the new global value
+    /// when all functions return).  If no scope has saved the variable,
+    /// the current maps ARE global, so we write directly.
+    pub fn set_global_var(&mut self, name: &str, value: String) {
+        // Find the first (bottom-most) scope that saved this variable
+        for scope in self.local_scopes.iter_mut() {
+            if let Some(saved) = scope.get_mut(name) {
+                saved.scalar = Some(value.clone());
+                // Also clear array/assoc in the saved state since we're
+                // setting a scalar at global scope
+                saved.array = None;
+                saved.assoc = None;
+                // Sync exports if the variable is exported
+                if self.exports.contains_key(name) {
+                    self.exports.insert(name.to_string(), value.clone());
+                    unsafe { std::env::set_var(name, &value) };
+                }
+                return;
+            }
+        }
+        // No scope has saved this variable — current state IS global
+        self.vars.insert(name.to_string(), value.clone());
+        self.arrays.remove(name);
+        self.assoc_arrays.remove(name);
+        if self.exports.contains_key(name) {
+            self.exports.insert(name.to_string(), value.clone());
+            unsafe { std::env::set_var(name, &value) };
+        }
+    }
+
+    /// Set an array at global scope, bypassing any local scopes.
+    /// Used by `declare -g` / `declare -ga`.
+    pub fn set_global_array(&mut self, name: &str, arr: Vec<Option<String>>) {
+        for scope in self.local_scopes.iter_mut() {
+            if let Some(saved) = scope.get_mut(name) {
+                saved.array = Some(arr);
+                saved.scalar = None;
+                saved.assoc = None;
+                return;
+            }
+        }
+        // No scope has saved this variable — current state IS global
+        self.arrays.insert(name.to_string(), arr);
+        self.vars.remove(name);
+        self.assoc_arrays.remove(name);
+    }
+
+    /// Set an associative array at global scope, bypassing any local scopes.
+    /// Used by `declare -g` / `declare -gA`.
+    pub fn set_global_assoc(&mut self, name: &str, assoc: AssocArray) {
+        for scope in self.local_scopes.iter_mut() {
+            if let Some(saved) = scope.get_mut(name) {
+                saved.assoc = Some(assoc);
+                saved.scalar = None;
+                saved.array = None;
+                return;
+            }
+        }
+        // No scope has saved this variable — current state IS global
+        self.assoc_arrays.insert(name.to_string(), assoc);
+        self.vars.remove(name);
+        self.arrays.remove(name);
+    }
+
+    /// Set an attribute on a variable at global scope.
+    /// Used by `declare -g` with attribute flags like `-i`, `-r`, `-x`.
+    pub fn set_global_attr_integer(&mut self, name: &str, set: bool) {
+        for scope in self.local_scopes.iter_mut() {
+            if let Some(saved) = scope.get_mut(name) {
+                saved.was_integer = set;
+                return;
+            }
+        }
+        if set {
+            self.integer_vars.insert(name.to_string());
+        } else {
+            self.integer_vars.remove(name);
+        }
+    }
+
+    /// Set the readonly attribute on a variable at global scope.
+    #[allow(dead_code)]
+    pub fn set_global_attr_readonly(&mut self, name: &str, set: bool) {
+        for scope in self.local_scopes.iter_mut() {
+            if let Some(saved) = scope.get_mut(name) {
+                saved.was_readonly = set;
+                return;
+            }
+        }
+        if set {
+            self.readonly_vars.insert(name.to_string());
+        } else {
+            self.readonly_vars.remove(name);
+        }
+    }
+
+    /// Set the declared_unset flag on a variable at global scope.
+    pub fn set_global_declared_unset(&mut self, name: &str, set: bool) {
+        for scope in self.local_scopes.iter_mut() {
+            if let Some(saved) = scope.get_mut(name) {
+                saved.was_declared_unset = set;
+                return;
+            }
+        }
+        if set {
+            self.declared_unset.insert(name.to_string());
+        } else {
+            self.declared_unset.remove(name);
+        }
+    }
+
     /// Get an array, resolving namerefs.
     #[allow(dead_code)]
     pub fn get_array(&self, name: &str) -> Option<&Vec<Option<String>>> {

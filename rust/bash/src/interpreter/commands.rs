@@ -2217,7 +2217,14 @@ impl Shell {
                                     continue;
                                 }
                                 let map = crate::builtins::parse_assoc_literal(value);
-                                self.assoc_arrays.insert(name.to_string(), map);
+                                if has_global_flag
+                                    && !self.local_scopes.is_empty()
+                                    && self.local_scopes.iter().any(|s| s.contains_key(name))
+                                {
+                                    self.set_global_assoc(name, map);
+                                } else {
+                                    self.assoc_arrays.insert(name.to_string(), map);
+                                }
                             } else {
                                 // Check if the compound value came from a
                                 // single-quoted word part AND contains shell
@@ -2384,7 +2391,17 @@ impl Shell {
                                                 } else {
                                                     self.apply_case_attrs_to_array(name, &mut arr);
                                                 }
-                                                self.arrays.insert(name.to_string(), arr);
+                                                if has_global_flag
+                                                    && !self.local_scopes.is_empty()
+                                                    && self
+                                                        .local_scopes
+                                                        .iter()
+                                                        .any(|s| s.contains_key(name))
+                                                {
+                                                    self.set_global_array(name, arr);
+                                                } else {
+                                                    self.arrays.insert(name.to_string(), arr);
+                                                }
                                                 used_word_expand = true;
                                             }
                                         }
@@ -2411,7 +2428,17 @@ impl Shell {
                                         } else {
                                             self.apply_case_attrs_to_array(name, &mut arr);
                                         }
-                                        self.arrays.insert(name.to_string(), arr);
+                                        if has_global_flag
+                                            && !self.local_scopes.is_empty()
+                                            && self
+                                                .local_scopes
+                                                .iter()
+                                                .any(|s| s.contains_key(name))
+                                        {
+                                            self.set_global_array(name, arr);
+                                        } else {
+                                            self.arrays.insert(name.to_string(), arr);
+                                        }
                                     }
                                 }
                             }
@@ -2509,6 +2536,31 @@ impl Shell {
                 })
                 .collect();
 
+            // For declaration builtins (declare/typeset/local), add prefix
+            // assignment keys to temp_env_vars so that `local z` / `typeset z`
+            // inside the builtin inherits the prefix assignment value.  E.g.
+            // `z=y typeset z` — the prefix `z=y` is set, then `typeset z`
+            // calls declare_local which would normally clear z.  But
+            // because z is in temp_env_vars, the declare path keeps the
+            // inherited value (matching bash behavior).
+            // We ADD to the existing set (don't replace) because the function
+            // call that contains this builtin may have its own temp_env_vars
+            // (e.g. `x=12 fff4` where fff4 has `typeset x` — x must be in
+            // temp_env_vars from the function call).
+            let added_temp_env_keys: Vec<String> =
+                if matches!(command_name.as_str(), "declare" | "typeset" | "local") {
+                    let mut added = Vec::new();
+                    for (k, _, _) in &saved {
+                        if !k.is_empty() && !self.temp_env_vars.contains(k) {
+                            self.temp_env_vars.insert(k.clone());
+                            added.push(k.clone());
+                        }
+                    }
+                    added
+                } else {
+                    Vec::new()
+                };
+
             // For `unset` builtin: detect which arguments had their `[`
             // inside a quoted context in the AST (SingleQuoted or DoubleQuoted).
             // These "string" arguments need subscript re-expansion inside
@@ -2554,6 +2606,11 @@ impl Shell {
                 self.unset_quoted_subscript_args.clear();
             }
             self.current_builtin = None;
+
+            // Remove the temp_env_vars keys we added for this builtin call
+            for k in &added_temp_env_keys {
+                self.temp_env_vars.remove(k);
+            }
 
             // In POSIX mode, prefix assignments to special builtins persist
             let is_special = matches!(
@@ -2601,15 +2658,105 @@ impl Shell {
             // Prefix assignments to `export`/`readonly` and `declare -x`/`declare -r`
             // always persist (they are assignment-like builtins that absorb prefix
             // assignments). In POSIX mode, all special builtins persist prefix
-            // assignments.
+            // assignments.  Bare `declare`/`typeset`/`local` without -x/-r do NOT
+            // persist prefix assignments (bash behavior: "but not persist after
+            // the command").
             let is_export_like = matches!(command_name.as_str(), "export" | "readonly")
-                || (matches!(command_name.as_str(), "declare" | "typeset")
+                || (matches!(command_name.as_str(), "declare" | "typeset" | "local")
                     && args
                         .iter()
                         .any(|a| a.starts_with('-') && (a.contains('x') || a.contains('r'))));
+            // When prefix assignments persist (declaration builtins), re-apply
+            // them after the builtin completes — but ONLY if the builtin
+            // cleared the variable (via declare_local) without explicitly
+            // setting a new value.  E.g. `z=y typeset z` — the prefix `z=y`
+            // is set, then `typeset z` calls declare_local which saves z=y
+            // and clears z.  We need to re-set z=y so it persists.
+            // But `tempvar=bar declare -r tempvar=qux` — the explicit
+            // assignment `tempvar=qux` inside declare should win over the
+            // prefix `tempvar=bar`.
+            // Re-apply for declaration builtins that persist (export/readonly/
+            // declare -x/-r) where `declare_local` may have cleared the
+            // variable that the prefix assignment set.  E.g. `z=y export z`
+            // inside a function — export creates a local via declare_local
+            // which clears z, but the prefix z=y should persist.
+            // Do NOT re-apply for POSIX special builtins (., eval, unset,
+            // etc.) — their bodies can legitimately modify variables.
+            if is_export_like {
+                for (k, old_var, _) in &saved {
+                    if k.is_empty() {
+                        continue;
+                    }
+                    // Find the prefix value that was set before the builtin ran
+                    if let Some((_, prefix_val)) = prefix_exports.iter().find(|(pk, _)| pk == k) {
+                        let current_val = self.vars.get(k).cloned();
+                        // Only re-apply if the variable was cleared by
+                        // declare_local (current value is None or empty and
+                        // differs from both the prefix value and any value
+                        // the builtin explicitly set).  If the current value
+                        // differs from the prefix value AND is not what was
+                        // there before the prefix was applied, the builtin
+                        // explicitly set it — don't override.
+                        let was_cleared = current_val.is_none()
+                            || (self.declared_unset.contains(k)
+                                && current_val.as_deref() != Some(prefix_val.as_str()));
+                        let builtin_set_new_value = current_val.is_some()
+                            && current_val.as_deref() != Some(prefix_val.as_str())
+                            && current_val != *old_var;
+                        if was_cleared && !builtin_set_new_value {
+                            // Re-apply the prefix assignment value
+                            self.vars.insert(k.clone(), prefix_val.clone());
+                            self.declared_unset.remove(k);
+                            // Keep the export attribute
+                            self.exports.insert(k.clone(), prefix_val.clone());
+                            unsafe { std::env::set_var(k, prefix_val) };
+                        }
+                    }
+                }
+            }
             if !(expanded_words.is_empty() || self.opt_posix && is_special || is_export_like) {
                 for (k, old_var, old_export) in saved {
                     if k.is_empty() {
+                        continue;
+                    }
+                    // If a local variable was declared for this name during a
+                    // declaration builtin execution (e.g. `z=y typeset z` —
+                    // typeset created a local via declare_local), don't restore
+                    // the prefix assignment in the current maps — the local
+                    // should keep whatever value it has (inherited from
+                    // temp_env_vars).
+                    // BUT we must update the saved scope entry to hold the
+                    // PRE-prefix value (old_var) so that when the function
+                    // exits and restores from the scope, the correct global
+                    // state is restored (not the prefix value).
+                    // Only check this for declaration builtins — other builtins
+                    // like `unset` should NOT skip the restore even if the
+                    // variable is localized.
+                    let is_declaration_builtin = matches!(
+                        command_name.as_str(),
+                        "declare" | "typeset" | "local" | "export" | "readonly"
+                    );
+                    let was_localized = is_declaration_builtin
+                        && self.local_scopes.last().is_some_and(|s| s.contains_key(&k));
+                    if was_localized {
+                        // Update the saved scope entry with the pre-prefix value
+                        if let Some(scope) = self.local_scopes.last_mut()
+                            && let Some(saved_entry) = scope.get_mut(&k)
+                        {
+                            saved_entry.scalar = old_var.clone();
+                        }
+                        // Also restore the export attribute in the scope save
+                        // Export attribute cleanup is handled by scope restore
+                        // on function exit — no additional action needed here.
+                        // Remove the export attribute from the current scope
+                        // that was added by the prefix assignment, unless the
+                        // variable was already exported before.
+                        if old_export.is_none() {
+                            self.exports.remove(&k);
+                            if !k.is_empty() {
+                                unsafe { std::env::remove_var(&k) };
+                            }
+                        }
                         continue;
                     }
                     match old_var {

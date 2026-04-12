@@ -824,6 +824,7 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
     let mut flag_readonly = false;
     let mut flag_nameref = false;
     let mut flag_integer = false;
+    let mut flag_inherit = false;
     let mut names = Vec::new();
     let mut i = 0;
 
@@ -975,6 +976,7 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
                     'r' => flag_readonly = true,
                     'n' => flag_nameref = true,
                     'i' => flag_integer = true,
+                    'I' => flag_inherit = true,
                     _ => {}
                 }
             }
@@ -1119,7 +1121,32 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
                 // temp env value.  We detect temp env by checking
                 // `shell.temp_env_vars` which is set by `run_simple_command`
                 // before calling `run_function`.
-                if shell.temp_env_vars.contains(name_arg.as_str()) {
+                //
+                // When `-I` flag is set (or `shopt -s localvar_inherit`),
+                // the local variable inherits its value from the calling
+                // scope instead of being declared-but-unset.
+                let inherit = flag_inherit
+                    || *shell
+                        .shopt_options
+                        .get("localvar_inherit")
+                        .unwrap_or(&false);
+                if inherit {
+                    // Keep the inherited value — don't clear the variable.
+                    // declare_local already saved the old value; the current
+                    // value in shell.vars/arrays/assoc_arrays IS the inherited
+                    // value from the calling scope.
+                    //
+                    // However, if the variable doesn't exist at all (was
+                    // completely unset), we still need to create a
+                    // declared-but-unset entry so that `declare -p var`
+                    // shows "declare -- var" instead of "not found".
+                    if !shell.vars.contains_key(name_arg.as_str())
+                        && !shell.arrays.contains_key(name_arg.as_str())
+                        && !shell.assoc_arrays.contains_key(name_arg.as_str())
+                    {
+                        shell.declared_unset.insert(name_arg.clone());
+                    }
+                } else if shell.temp_env_vars.contains(name_arg.as_str()) {
                     // Temp env variable — keep inherited value
                     // (bash shows `declare -x v="t"`)
                 } else {
@@ -2613,6 +2640,31 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 shell.declare_local(name);
             }
 
+            // When declare -g is used inside a function scope, save the
+            // current (local) state so we can restore it after the assignment.
+            // The assignment will write to the current maps (which hold the
+            // local value), and then we'll propagate the new value to the
+            // global scope and restore the local.
+            let global_fixup = if flag_global && !shell.local_scopes.is_empty() {
+                // Check if any scope has saved this variable (meaning it's been
+                // localized by some enclosing function)
+                let has_saved = shell.local_scopes.iter().any(|s| s.contains_key(name));
+                if has_saved {
+                    Some((
+                        name.to_string(),
+                        shell.vars.get(name).cloned(),
+                        shell.arrays.get(name).cloned(),
+                        shell.assoc_arrays.get(name).cloned(),
+                        shell.integer_vars.contains(name),
+                        shell.declared_unset.contains(name),
+                    ))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
             if flag_nameref {
                 // Namerefs cannot be array elements or replace existing arrays.
                 // Check subscript in name (e.g. `declare -n x[3]=y`) and
@@ -3071,6 +3123,94 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     }
                 }
             }
+
+            // declare -g fixup: propagate the newly-assigned value to the
+            // global scope (the saved value in the first local_scopes entry
+            // that has this variable), then restore the local value that was
+            // in place before the assignment.
+            if let Some((
+                gname,
+                prev_scalar,
+                prev_array,
+                prev_assoc,
+                prev_integer,
+                prev_declared_unset,
+            )) = global_fixup
+            {
+                // Read the new value that was just assigned to the current maps
+                let new_scalar = shell.vars.get(&gname).cloned();
+                let new_array = shell.arrays.get(&gname).cloned();
+                let new_assoc = shell.assoc_arrays.get(&gname).cloned();
+                let new_integer = shell.integer_vars.contains(&gname);
+                let new_declared_unset = shell.declared_unset.contains(&gname);
+
+                // Propagate the new value to the global scope by updating the
+                // saved value in the first (bottom-most) scope that has it.
+                if let Some(assoc) = new_assoc {
+                    shell.set_global_assoc(&gname, assoc);
+                } else if let Some(arr) = new_array {
+                    shell.set_global_array(&gname, arr);
+                } else if let Some(ref val) = new_scalar {
+                    shell.set_global_var(&gname, val.clone());
+                } else {
+                    // Variable was unset or declared-but-unset at current scope;
+                    // propagate declared_unset to global if needed.
+                    // Clear any saved scalar/array/assoc at global scope.
+                    for scope in shell.local_scopes.iter_mut() {
+                        if let Some(saved) = scope.get_mut(&gname) {
+                            saved.scalar = None;
+                            saved.array = None;
+                            saved.assoc = None;
+                            break;
+                        }
+                    }
+                }
+                // Propagate integer attribute to global scope
+                if new_integer {
+                    shell.set_global_attr_integer(&gname, true);
+                }
+                // Propagate declared_unset to global scope
+                if new_declared_unset {
+                    shell.set_global_declared_unset(&gname, true);
+                }
+
+                // Restore the local value (what was in the maps before the
+                // assignment) so that the enclosing function's local is unchanged.
+                match prev_scalar {
+                    Some(val) => {
+                        shell.vars.insert(gname.clone(), val);
+                    }
+                    None => {
+                        shell.vars.remove(&gname);
+                    }
+                }
+                match prev_array {
+                    Some(arr) => {
+                        shell.arrays.insert(gname.clone(), arr);
+                    }
+                    None => {
+                        shell.arrays.remove(&gname);
+                    }
+                }
+                match prev_assoc {
+                    Some(assoc) => {
+                        shell.assoc_arrays.insert(gname.clone(), assoc);
+                    }
+                    None => {
+                        shell.assoc_arrays.remove(&gname);
+                    }
+                }
+                if prev_integer {
+                    shell.integer_vars.insert(gname.clone());
+                } else {
+                    shell.integer_vars.remove(&gname);
+                }
+                if prev_declared_unset {
+                    shell.declared_unset.insert(gname.clone());
+                } else {
+                    shell.declared_unset.remove(&gname);
+                }
+            }
         } else {
             // Strip [subscript] from name in no-value declare.
             // Bash always strips subscripts in this context:
@@ -3121,6 +3261,27 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
 
             if make_local {
                 shell.declare_local(name);
+                // When a prefix assignment set this variable as a temp env
+                // var (e.g. `z=y typeset z`), declare_local just saved the
+                // prefix value and cleared the variable.  Restore the prefix
+                // value so the local inherits it (matching bash behavior
+                // where `z=y typeset z` makes local z have value y).
+                if shell.temp_env_vars.contains(name)
+                    && !shell.vars.contains_key(name)
+                    && !shell.arrays.contains_key(name)
+                    && !shell.assoc_arrays.contains_key(name)
+                {
+                    // The saved value in the scope is what declare_local
+                    // captured (the prefix assignment value).  Restore it
+                    // to the current maps so the local has the value.
+                    if let Some(scope) = shell.local_scopes.last()
+                        && let Some(saved) = scope.get(name)
+                        && let Some(ref val) = saved.scalar
+                    {
+                        shell.vars.insert(name.to_string(), val.clone());
+                        shell.declared_unset.remove(name);
+                    }
+                }
             }
             if flag_nameref && !flag_array && !flag_assoc {
                 // `typeset -n foo` (no value): if foo is already a nameref,

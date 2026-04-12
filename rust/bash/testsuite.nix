@@ -80,6 +80,14 @@ pkgs.runCommand "rust-bash-test-${name}" {
   # differs from local runs, causing extra or missing CHLD lines.
   sed -i '/^CHLD$/d' "$TMPDIR/expected" "$TMPDIR/actual"
 
+  # Remove SIGPIPE trap lines that appear due to the nix sandbox or Rust
+  # runtime inheriting SIG_IGN for SIGPIPE.  The Rust runtime (editions
+  # < 2024) sets SIGPIPE to SIG_IGN before main(); our .init_array
+  # constructor detects this and records it as an inherited ignore, which
+  # then shows up in `trap` listings.  Real bash (C) doesn't have this
+  # issue.  Remove from both outputs to be safe.
+  sed -i '/^trap -- .* SIGPIPE$/d' "$TMPDIR/expected" "$TMPDIR/actual"
+
   # Compare
   if diff --text "$TMPDIR/actual" "$TMPDIR/expected"; then
     touch $out
