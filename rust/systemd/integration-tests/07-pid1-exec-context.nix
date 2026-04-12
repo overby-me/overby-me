@@ -242,13 +242,13 @@
     if mount -t proc -o "hidepid=off" proc "$PROC_TMP" 2>/dev/null; then
         umount "$PROC_TMP"
         systemd-run --wait --pipe -p ProtectProc=noaccess -p User=testuser \
-            bash -xec 'test -e /proc/1; test ! -r /proc/1; test -r /proc/$$/comm'
+            bash -xec 'test -e /proc/1; test ! -r /proc/1; test -r /proc/$$$$/comm'
         systemd-run --wait --pipe -p ProtectProc=invisible -p User=testuser \
-            bash -xec 'test ! -e /proc/1; test -r /proc/$$/comm'
+            bash -xec 'test ! -e /proc/1; test -r /proc/$$$$/comm'
         systemd-run --wait --pipe -p ProtectProc=ptraceable -p User=testuser \
-            bash -xec 'test ! -e /proc/1; test -r /proc/$$/comm'
+            bash -xec 'test ! -e /proc/1; test -r /proc/$$$$/comm'
         systemd-run --wait --pipe -p ProtectProc=default -p User=testuser \
-            bash -xec 'test -r /proc/1; test -r /proc/$$/comm'
+            bash -xec 'test -r /proc/1; test -r /proc/$$$$/comm'
     fi
     if mount -t proc -o "subset=pid" proc "$PROC_TMP" 2>/dev/null; then
         umount "$PROC_TMP"
@@ -275,13 +275,13 @@
 
     : "CapabilityBoundingSet= tests"
     systemd-run --wait --pipe -p CapabilityBoundingSet=CAP_NET_RAW \
-        bash -xec 'CAPBND=$(grep CapBnd /proc/self/status | awk "{print \$2}");
-                   [[ "$CAPBND" != "0000003fffffffff" ]]'
+        bash -xec 'CAPBND=$$(grep CapBnd /proc/self/status | awk "{print \$2}");
+                   [[ "$$CAPBND" != "0000003fffffffff" ]]'
 
     : "AmbientCapabilities= tests"
     systemd-run --wait --pipe -p AmbientCapabilities=CAP_NET_RAW -p User=testuser \
-        bash -xec 'CAPAMB=$(grep CapAmb /proc/self/status | awk "{print \$2}");
-                   [[ "$CAPAMB" != "0000000000000000" ]]'
+        bash -xec 'CAPAMB=$$(grep CapAmb /proc/self/status | awk "{print \$2}");
+                   [[ "$$CAPAMB" != "0000000000000000" ]]'
 
     : "CPUSchedulingPolicy= tests"
     systemd-run --wait --pipe -p CPUSchedulingPolicy=fifo -p CPUSchedulingPriority=10 \
@@ -343,11 +343,11 @@
 
     : "WorkingDirectory= tests"
     systemd-run --wait --pipe -p WorkingDirectory=/tmp \
-        bash -xec '[[ "$PWD" == /tmp ]]'
+        bash -xec '[[ "$$PWD" == /tmp ]]'
 
     : "WorkingDirectory= with User="
     systemd-run --wait --pipe -p WorkingDirectory=/tmp -p User=testuser \
-        bash -xec '[[ "$PWD" == /tmp && "$(id -nu)" == testuser ]]'
+        bash -xec '[[ "$$PWD" == /tmp && "$$(id -nu)" == testuser ]]'
 
     : "StandardOutput=file: tests"
     rm -f /tmp/stdout-test-out
@@ -545,7 +545,7 @@
 
     : "CPUAffinity= pins process to specific CPUs"
     MASK="$(systemd-run --wait --pipe -p CPUAffinity=0 \
-        bash -xec 'taskset -p $$ | sed "s/.*: //"')"
+        bash -xec 'taskset -p $$$$ | sed "s/.*: //"')"
     [[ "$MASK" == "1" ]]
 
     : "PrivateIPC=yes creates IPC namespace isolation"
@@ -689,23 +689,23 @@
 
     : "CPUSchedulingPolicy=rr with CPUSchedulingPriority= sets realtime scheduling"
     systemd-run --wait --pipe -p CPUSchedulingPolicy=rr -p CPUSchedulingPriority=10 \
-        bash -xec 'chrt -p $$ | grep -q "SCHED_RR"'
+        bash -xec 'chrt -p $$$$ | grep -q "SCHED_RR"'
 
     : "CPUSchedulingPolicy=fifo sets FIFO scheduling"
     systemd-run --wait --pipe -p CPUSchedulingPolicy=fifo -p CPUSchedulingPriority=1 \
-        bash -xec 'chrt -p $$ | grep -q "SCHED_FIFO"'
+        bash -xec 'chrt -p $$$$ | grep -q "SCHED_FIFO"'
 
     : "CPUSchedulingPolicy=batch sets batch scheduling"
     systemd-run --wait --pipe -p CPUSchedulingPolicy=batch \
-        bash -xec 'chrt -p $$ | grep -q "SCHED_BATCH"'
+        bash -xec 'chrt -p $$$$ | grep -q "SCHED_BATCH"'
 
     : "IOSchedulingClass=best-effort with IOSchedulingPriority="
     systemd-run --wait --pipe -p IOSchedulingClass=best-effort -p IOSchedulingPriority=3 \
-        bash -xec 'ionice -p $$ | grep -q "best-effort.*prio 3"'
+        bash -xec 'ionice -p $$$$ | grep -q "best-effort.*prio 3"'
 
     : "IOSchedulingClass=idle sets idle I/O scheduling"
     systemd-run --wait --pipe -p IOSchedulingClass=idle \
-        bash -xec 'ionice -p $$ | grep -q idle'
+        bash -xec 'ionice -p $$$$ | grep -q idle'
 
     : "EnvironmentFile= reads env vars from file"
     echo 'ENVFILE_VAR=hello_from_file' > /tmp/test-envfile
@@ -734,7 +734,7 @@
 
     : "IgnoreSIGPIPE=no leaves SIGPIPE default (kills process)"
     (! systemd-run --wait --pipe -p IgnoreSIGPIPE=no \
-        bash -c 'kill -PIPE $$')
+        bash -c 'kill -PIPE $$$$')
 
     : "IgnoreSIGPIPE=yes (default) ignores SIGPIPE"
     systemd-run --wait --pipe -p IgnoreSIGPIPE=yes \
@@ -887,10 +887,10 @@
 
     : "PrivateDevices=yes with PrivateIPC=yes combination"
     systemd-run --wait --pipe -p PrivateDevices=yes -p PrivateIPC=yes \
-        bash -xec 'HOST_IPC=$(readlink /proc/1/ns/ipc);
-                   MY_IPC=$(readlink /proc/self/ns/ipc);
-                   [[ "$HOST_IPC" != "$MY_IPC" ]];
-                   [[ "$(stat -c %t:%T /dev/null)" == "1:3" ]]'
+        bash -xec 'HOST_IPC=$$(readlink /proc/1/ns/ipc);
+                   MY_IPC=$$(readlink /proc/self/ns/ipc);
+                   [[ "$$HOST_IPC" != "$$MY_IPC" ]];
+                   [[ "$$(stat -c %t:%T /dev/null)" == "1:3" ]]'
 
     : "ProtectSystem=full makes /usr, /boot, and /etc read-only"
     systemd-run --wait --pipe -p ProtectSystem=full \
@@ -1125,19 +1125,19 @@
 
     : "Environment= with whitespace in values (issue #31214)"
     systemd-run --wait --pipe -p Environment="FOO='bar4    '" \
-        bash -xec '[[ $FOO == "bar4    " ]]'
+        bash -xec '[[ $$FOO == "bar4    " ]]'
     systemd-run --wait --pipe -p Environment="FOO='bar4    ' BAR='\n\n'" \
-        bash -xec "[[ \$FOO == 'bar4    ' && \$BAR == \$'\n\n' ]]"
+        bash -xec "[[ \$\$FOO == 'bar4    ' && \$\$BAR == \$'\n\n' ]]"
 
     : "Environment= with backslash quoting"
     systemd-run --wait --pipe -p 'Environment=FOO="bar4  \\  "' -p "Environment=BAR='\n\t'" \
-        bash -xec "[[ \$FOO == 'bar4  \\  ' && \$BAR == \$'\n\t' ]]"
+        bash -xec "[[ \$\$FOO == 'bar4  \\  ' && \$\$BAR == \$'\n\t' ]]"
 
     : "EnvironmentFile= with whitespace in path and values"
     TEST_ENV_FILE="/tmp/test-env-file-$$-    "
     printf 'FOO="env file    "\nBAR="\n    "\n' > "$TEST_ENV_FILE"
     systemd-run --wait --pipe -p EnvironmentFile="$TEST_ENV_FILE" \
-        bash -xec "[[ \$FOO == 'env file    ' && \$BAR == \$'\n    ' ]]"
+        bash -xec "[[ \$\$FOO == 'env file    ' && \$\$BAR == \$'\n    ' ]]"
     rm -f "$TEST_ENV_FILE"
 
     : "BindPaths= with spaces in paths"

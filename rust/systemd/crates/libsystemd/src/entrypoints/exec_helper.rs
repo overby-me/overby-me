@@ -2459,7 +2459,7 @@ pub fn run_exec_helper() {
     // When the '|' prefix is used, the original command is wrapped into:
     //   <login-shell> -el -c "<cmd> <args...>"
     // The shell is looked up from the effective user's passwd entry.
-    let (effective_cmd, effective_args);
+    let (mut effective_cmd, mut effective_args);
     if config.login_shell {
         let shell = get_login_shell(config.user);
         let shell_name = Path::new(&shell)
@@ -2491,11 +2491,8 @@ pub fn run_exec_helper() {
         effective_args = config.args.clone();
     }
 
-    let (cmd, args) = prepare_exec_args(
-        &effective_cmd,
-        &effective_args,
-        config.login_shell || config.use_first_arg_as_argv0,
-    );
+    // NOTE: env var expansion and prepare_exec_args are deferred to right
+    // before execvp (below), after all environment variables are set.
 
     // change working directory if configured
     if let Some(ref dir) = config.working_directory {
@@ -2691,7 +2688,7 @@ pub fn run_exec_helper() {
 
     log::trace!(
         "about to execv {} (uid={}, gid={}, env_count={})",
-        cmd.to_string_lossy(),
+        effective_cmd.display(),
         nix::unistd::getuid(),
         nix::unistd::getgid(),
         std::env::vars().count()
@@ -2743,6 +2740,21 @@ pub fn run_exec_helper() {
     apply_resource_limit("RLIMIT_NICE", libc::RLIMIT_NICE, &config.limit_nice);
     apply_resource_limit("RLIMIT_RTPRIO", libc::RLIMIT_RTPRIO, &config.limit_rtprio);
     apply_resource_limit("RLIMIT_RTTIME", libc::RLIMIT_RTTIME, &config.limit_rttime);
+
+    // Perform environment variable expansion on command arguments, matching
+    // real systemd's replace_env_argv() behavior. $FOO and ${FOO} are expanded
+    // using the process environment (which includes CREDENTIALS_DIRECTORY,
+    // STATE_DIRECTORY, EnvironmentFile= vars, etc.). $$ becomes literal $.
+    // This must happen AFTER all env vars are set (config.env, directory vars,
+    // credentials, etc.) so that expansion sees the complete environment.
+    effective_args = expand_env_argv(&effective_args);
+    effective_cmd = PathBuf::from(expand_env_str(&effective_cmd.to_string_lossy()));
+
+    let (cmd, args) = prepare_exec_args(
+        &effective_cmd,
+        &effective_args,
+        config.login_shell || config.use_first_arg_as_argv0,
+    );
 
     // Use execvp instead of execv so bare command names (e.g. "sh" from
     // ExecStart=sh -c ...) are resolved via PATH, matching systemd behavior.
@@ -4420,6 +4432,108 @@ pub fn write_utmp_dead_record(
 }
 
 // ---------------------------------------------------------------------------
+// Environment variable expansion for ExecStart= command lines.
+// Matches systemd's replace_env_argv() / replace_env() from env-util.c.
+// ---------------------------------------------------------------------------
+
+/// Expand environment variables in a single string.
+/// - `$$` → literal `$`
+/// - `${VARNAME}` → value of env var (empty string if unset)
+/// - `$VARNAME` → value of env var (only valid identifiers: [A-Za-z_][A-Za-z0-9_]*)
+/// - Other `$` usage → left as-is
+fn expand_env_str(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let bytes = s.as_bytes();
+    let mut i = 0;
+
+    while i < bytes.len() {
+        if bytes[i] != b'$' {
+            result.push(bytes[i] as char);
+            i += 1;
+            continue;
+        }
+
+        // We found a '$'
+        if i + 1 >= bytes.len() {
+            // Trailing '$' — leave as-is
+            result.push('$');
+            i += 1;
+            continue;
+        }
+
+        if bytes[i + 1] == b'$' {
+            // $$ → literal $
+            result.push('$');
+            i += 2;
+            continue;
+        }
+
+        if bytes[i + 1] == b'{' {
+            // ${VARNAME} form
+            if let Some(close) = bytes[i + 2..].iter().position(|&b| b == b'}') {
+                let var_name = &s[i + 2..i + 2 + close];
+                if is_valid_env_name(var_name) {
+                    if let Ok(val) = std::env::var(var_name) {
+                        result.push_str(&val);
+                    }
+                    // If unset, expand to empty string (matching systemd)
+                    i = i + 2 + close + 1;
+                    continue;
+                }
+            }
+            // Invalid ${...} — leave as-is
+            result.push('$');
+            i += 1;
+            continue;
+        }
+
+        // $VARNAME form (without braces)
+        if is_valid_env_name_start(bytes[i + 1]) {
+            let start = i + 1;
+            let mut end = start + 1;
+            while end < bytes.len() && is_valid_env_name_cont(bytes[end]) {
+                end += 1;
+            }
+            let var_name = &s[start..end];
+            if let Ok(val) = std::env::var(var_name) {
+                result.push_str(&val);
+            }
+            i = end;
+            continue;
+        }
+
+        // $ followed by something that's not a valid identifier start — leave as-is
+        result.push('$');
+        i += 1;
+    }
+
+    result
+}
+
+/// Expand environment variables in an argv list.
+/// Each argument is expanded in-place. If an entire argument is `$VARNAME`
+/// (a single bare variable), systemd would split on whitespace, but we
+/// currently do in-place expansion only for simplicity.
+fn expand_env_argv(argv: &[String]) -> Vec<String> {
+    argv.iter().map(|arg| expand_env_str(arg)).collect()
+}
+
+fn is_valid_env_name(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    !bytes.is_empty()
+        && is_valid_env_name_start(bytes[0])
+        && bytes[1..].iter().all(|&b| is_valid_env_name_cont(b))
+}
+
+fn is_valid_env_name_start(b: u8) -> bool {
+    b.is_ascii_alphabetic() || b == b'_'
+}
+
+fn is_valid_env_name_cont(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
+}
+
+// ---------------------------------------------------------------------------
 // Tests for credential decryption
 // ---------------------------------------------------------------------------
 
@@ -4658,5 +4772,49 @@ mod tests {
         assert!(glob_match("*.service", "sshd.service"));
         assert!(glob_match("my-cred-?", "my-cred-a"));
         assert!(!glob_match("my-cred-?", "my-cred-ab"));
+    }
+
+    #[test]
+    fn test_expand_env_str_dollar_dollar() {
+        assert_eq!(expand_env_str("$$"), "$");
+        assert_eq!(expand_env_str("/proc/$$/comm"), "/proc/$/comm");
+        assert_eq!(expand_env_str("a$$b"), "a$b");
+    }
+
+    #[test]
+    fn test_expand_env_str_braced_var() {
+        // SAFETY: tests run single-threaded via --test-threads=1
+        unsafe { std::env::set_var("TEST_EXPAND_FOO", "/tmp/creds") };
+        assert_eq!(
+            expand_env_str("${TEST_EXPAND_FOO}/passwd"),
+            "/tmp/creds/passwd"
+        );
+        assert_eq!(expand_env_str("${TEST_EXPAND_FOO}"), "/tmp/creds");
+        unsafe { std::env::remove_var("TEST_EXPAND_FOO") };
+    }
+
+    #[test]
+    fn test_expand_env_str_unbraced_var() {
+        unsafe { std::env::set_var("TEST_EXPAND_BAR", "hello") };
+        assert_eq!(expand_env_str("$TEST_EXPAND_BAR"), "hello");
+        assert_eq!(expand_env_str("$TEST_EXPAND_BAR/world"), "hello/world");
+        unsafe { std::env::remove_var("TEST_EXPAND_BAR") };
+    }
+
+    #[test]
+    fn test_expand_env_str_unset_var() {
+        // Unset variables expand to empty string
+        std::env::remove_var("TEST_EXPAND_NONEXISTENT");
+        assert_eq!(expand_env_str("${TEST_EXPAND_NONEXISTENT}"), "");
+        assert_eq!(expand_env_str("$TEST_EXPAND_NONEXISTENT"), "");
+    }
+
+    #[test]
+    fn test_expand_env_str_no_expansion() {
+        // $2, ${FOO[1]}, trailing $ — not expanded
+        assert_eq!(expand_env_str("$2"), "$2");
+        assert_eq!(expand_env_str("${FOO[1]}"), "${FOO[1]}");
+        assert_eq!(expand_env_str("end$"), "end$");
+        assert_eq!(expand_env_str("no vars here"), "no vars here");
     }
 }
