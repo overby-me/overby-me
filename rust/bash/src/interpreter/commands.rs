@@ -4310,12 +4310,46 @@ impl Shell {
                     expanded_items.join(" ")
                 ));
             }
-            // Check for readonly variable
-            if self.readonly_vars.contains(&clause.var) {
-                eprintln!("{}: {}: readonly variable", self.error_prefix(), clause.var);
-                return 1;
+            // Nameref handling: if the for loop variable is a nameref, update
+            // the nameref target (change what it points to) rather than
+            // assigning through the nameref chain. This matches bash's
+            // execute_for_command which does `nameref_cell(v) = savestring(val)`
+            // when the loop variable is a nameref.
+            if self.namerefs.contains_key(&clause.var) {
+                // Check if the nameref itself is readonly
+                if self.readonly_vars.contains(&clause.var) {
+                    eprintln!("{}: {}: readonly variable", self.error_prefix(), clause.var);
+                    return 1;
+                }
+                // Validate that the loop item is a valid nameref target.
+                // Bash checks valid_nameref_value and reports "invalid variable name"
+                // if the item can't be used as a variable name (allowing subscripts
+                // like "arr[0]" as valid nameref targets).
+                let target_name = if item.contains('[') {
+                    // Array subscript reference like "arr[0]" — extract base name
+                    item.split('[').next().unwrap_or(&item)
+                } else {
+                    &item
+                };
+                if !item.is_empty() && !is_valid_identifier(target_name) {
+                    eprintln!("{}: {}: invalid variable name", self.error_prefix(), item);
+                    self.last_status = 1;
+                    continue;
+                }
+                // Update the nameref to point to the new target
+                self.namerefs.insert(clause.var.clone(), item);
+            } else {
+                // Regular (non-nameref) variable: check readonly and assign
+                if self.readonly_vars.contains(&clause.var) {
+                    eprintln!("{}: {}: readonly variable", self.error_prefix(), clause.var);
+                    return 1;
+                }
+                // Use set_var for proper handling of integer attributes, exports,
+                // uppercase/lowercase transforms, array element [0] assignment, etc.
+                // But first check if this would resolve through a nameref chain
+                // (shouldn't happen since we checked namerefs above, but be safe).
+                self.set_var(&clause.var, item);
             }
-            self.vars.insert(clause.var.clone(), item);
             // Loop body commands should not trigger errexit individually
             let saved_condition = self.in_condition;
             self.in_condition = true;

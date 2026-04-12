@@ -2304,23 +2304,35 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
         }
         ParamOp::Indirect => {
             // ${!var} — indirect expansion
-            let target = lookup_var(&expr.name, ctx);
-            if target.is_empty() {
-                String::new()
-            } else if !is_valid_var_ref(&target) {
-                let prefix = EXPAND_ERROR_PREFIX.with(|p| {
-                    let p = p.borrow();
-                    if p.is_empty() {
-                        "bash".to_string()
-                    } else {
-                        p.clone()
-                    }
-                });
-                eprintln!("{}: {}: invalid variable name", prefix, target);
-                set_arith_error();
-                String::new()
+            // For namerefs, ${!var} returns the nameref target name (what var
+            // references), NOT the value of the target variable.  This is
+            // bash's behavior: `declare -n ref=foo; ${!ref}` → "foo".
+            // For non-namerefs, ${!var} does classic indirect expansion:
+            // get the value of var, use that as a variable name, look up its value.
+            if ctx.namerefs.contains_key(&expr.name) {
+                // var is a nameref — return the target name (resolving the
+                // full nameref chain).  If the nameref target is empty
+                // (unbound nameref), return empty.
+                ctx.resolve_nameref(&expr.name)
             } else {
-                lookup_var(&target, ctx)
+                let target = lookup_var(&expr.name, ctx);
+                if target.is_empty() {
+                    String::new()
+                } else if !is_valid_var_ref(&target) {
+                    let prefix = EXPAND_ERROR_PREFIX.with(|p| {
+                        let p = p.borrow();
+                        if p.is_empty() {
+                            "bash".to_string()
+                        } else {
+                            p.clone()
+                        }
+                    });
+                    eprintln!("{}: {}: invalid variable name", prefix, target);
+                    set_arith_error();
+                    String::new()
+                } else {
+                    lookup_var(&target, ctx)
+                }
             }
         }
         ParamOp::NamePrefix(ch) => {

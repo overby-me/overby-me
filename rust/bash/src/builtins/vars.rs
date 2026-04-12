@@ -419,6 +419,8 @@ pub(super) fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
             }
             shell.namerefs.remove(name);
             shell.vars.remove(name);
+            shell.arrays.remove(name);
+            shell.assoc_arrays.remove(name);
             shell.exports.remove(name);
             shell.integer_vars.remove(name);
             shell.uppercase_vars.remove(name);
@@ -434,7 +436,7 @@ pub(super) fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
                 eprintln!(
                     "{}: unset: {}: cannot unset: readonly variable",
                     shell.error_prefix(),
-                    name
+                    resolved
                 );
                 status = 1;
                 continue;
@@ -2057,6 +2059,20 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
 
             // Check for subscripted name: name[key]=value
             if let Some(bracket) = name.find('[') {
+                // Namerefs cannot be array elements — reject immediately.
+                // Bash: "reference variable cannot be an array"
+                if flag_nameref {
+                    let display_name = name;
+                    eprintln!(
+                        "{}: {}: {}: reference variable cannot be an array",
+                        shell.error_prefix(),
+                        cmd_name,
+                        display_name
+                    );
+                    status = 1;
+                    continue;
+                }
+
                 let base = &name[..bracket];
                 let idx_str = if name.ends_with(']') {
                     &name[bracket + 1..name.len() - 1]
@@ -2348,23 +2364,44 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             }
 
             if flag_nameref {
-                // Detect circular nameref: if the target's base name matches
-                // the variable name, it's circular (e.g., declare -n a=a[0])
-                let target_base = if let Some(bracket) = value.find('[') {
-                    &value[..bracket]
-                } else {
-                    value
-                };
-                if target_base == name {
+                // Namerefs cannot be array elements or replace existing arrays.
+                // Check subscript in name (e.g. `declare -n x[3]=y`) and
+                // existing populated arrays (only non-empty to avoid false
+                // positives from mapfile's nameref bug leaving residual arrays).
+                let is_array_conflict = name.contains('[')
+                    || shell
+                        .arrays
+                        .get(name)
+                        .is_some_and(|a| a.iter().any(|e| e.is_some()))
+                    || shell.assoc_arrays.get(name).is_some_and(|a| !a.is_empty());
+                if is_array_conflict {
                     eprintln!(
-                        "{}: {}: warning: {}: circular name reference",
+                        "{}: {}: {}: reference variable cannot be an array",
                         shell.error_prefix(),
                         cmd_name,
                         name
                     );
-                } else {
-                    shell.vars.remove(name);
-                    shell.namerefs.insert(name.to_string(), value.to_string());
+                    status = 1;
+                }
+                // Detect self-reference: if the target's base name matches
+                // the variable name, it's a self-reference (e.g., declare -n x=x)
+                else {
+                    let target_base = if let Some(bracket) = value.find('[') {
+                        &value[..bracket]
+                    } else {
+                        value
+                    };
+                    if target_base == name {
+                        eprintln!(
+                            "{}: {}: {}: nameref variable self references not allowed",
+                            shell.error_prefix(),
+                            cmd_name,
+                            name
+                        );
+                    } else {
+                        shell.vars.remove(name);
+                        shell.namerefs.insert(name.to_string(), value.to_string());
+                    }
                 }
             } else if flag_assoc {
                 let trimmed_val = value.trim();
