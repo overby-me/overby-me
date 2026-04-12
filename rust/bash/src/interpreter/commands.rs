@@ -3782,9 +3782,18 @@ impl Shell {
                 }
                 // Restore declared_unset status
                 if saved.was_declared_unset {
-                    self.declared_unset.insert(var_name);
+                    self.declared_unset.insert(var_name.clone());
                 } else {
                     self.declared_unset.remove(&var_name);
+                }
+                // Restore nameref state
+                match saved.nameref {
+                    Some(target) => {
+                        self.namerefs.insert(var_name, target);
+                    }
+                    None => {
+                        self.namerefs.remove(&var_name);
+                    }
                 }
             }
         }

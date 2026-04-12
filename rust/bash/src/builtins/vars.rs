@@ -636,10 +636,12 @@ pub(super) fn builtin_readonly(shell: &mut Shell, args: &[String]) -> i32 {
             } else if shell.functions.contains_key(name) {
                 shell.readonly_funcs.insert(name.to_string());
             }
-        } else if (shell.readonly_vars.contains(name)
-            || name
-                .find('=')
-                .is_some_and(|eq| shell.readonly_vars.contains(&name[..eq])))
+        } else if (shell.readonly_vars.contains(&shell.resolve_nameref(name))
+            || name.find('=').is_some_and(|eq| {
+                let vname = &name[..eq];
+                let resolved = shell.resolve_nameref(vname);
+                shell.readonly_vars.contains(&resolved)
+            }))
             && !(array_mode
                 && name.find('=').is_some_and(|eq| {
                     let v = &name[eq + 1..];
@@ -650,7 +652,8 @@ pub(super) fn builtin_readonly(shell: &mut Shell, args: &[String]) -> i32 {
             // (but skip when -a flag with (...) value — let it fall through for proper error)
             if name.contains('=') {
                 let vname = name.split('=').next().unwrap();
-                eprintln!("{}: {}: readonly variable", shell.error_prefix(), vname);
+                let resolved = shell.resolve_nameref(vname);
+                eprintln!("{}: {}: readonly variable", shell.error_prefix(), resolved);
                 status = 1;
             }
             // readonly without = on already readonly var is a no-op (not an error)
@@ -673,11 +676,12 @@ pub(super) fn builtin_readonly(shell: &mut Shell, args: &[String]) -> i32 {
             } else {
                 // For quoted args (which reach here after parser-level handles unquoted),
                 // assign as scalar. If the variable is already an array, set array[0].
-                if shell.readonly_vars.contains(vname) {
+                let resolved_vname = shell.resolve_nameref(vname);
+                if shell.readonly_vars.contains(&resolved_vname) {
                     eprintln!(
                         "{}: readonly: {}: readonly variable",
                         shell.error_prefix(),
-                        vname
+                        resolved_vname
                     );
                     status = 1;
                 } else if array_mode && value.starts_with('(') && value.ends_with(')') {
@@ -698,9 +702,13 @@ pub(super) fn builtin_readonly(shell: &mut Shell, args: &[String]) -> i32 {
                     shell.set_var(vname, value.to_string());
                 }
             }
-            shell.readonly_vars.insert(vname.to_string());
+            let resolved = shell.resolve_nameref(vname);
+            shell.readonly_vars.insert(resolved);
         } else {
-            shell.readonly_vars.insert(name.to_string());
+            // readonly ref — if ref is a nameref, resolve through it
+            // and mark the target readonly (bash behavior)
+            let resolved = shell.resolve_nameref(name);
+            shell.readonly_vars.insert(resolved);
         }
     }
     status
@@ -1544,7 +1552,26 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             for name in var_names {
                 let value = shell.vars.get(name).cloned().unwrap_or_default();
                 if shell.namerefs.contains_key(name) {
-                    println!("declare -n {}=\"{}\"", name, shell.namerefs[name]);
+                    let target = &shell.namerefs[name];
+                    let mut flags = String::from("-");
+                    // When nameref has no target (empty), attributes like -i/-x
+                    // apply to the nameref variable itself. When it has a target,
+                    // those attributes apply to the target, not the nameref.
+                    if target.is_empty() && shell.integer_vars.contains(name.as_str()) {
+                        flags.push('i');
+                    }
+                    flags.push('n');
+                    if shell.readonly_vars.contains(name.as_str()) {
+                        flags.push('r');
+                    }
+                    if shell.exports.contains_key(name.as_str()) {
+                        flags.push('x');
+                    }
+                    if target.is_empty() {
+                        println!("declare {} {}", flags, name);
+                    } else {
+                        println!("declare {} {}=\"{}\"", flags, name, target);
+                    }
                 } else if shell.arrays.contains_key(name) {
                     let mut flags = String::from("-a");
                     if shell.integer_vars.contains(name.as_str()) {
@@ -1751,13 +1778,44 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             nref_names.sort();
             for name in nref_names {
                 if !shell.vars.contains_key(name) {
-                    println!("declare -n {}=\"{}\"", name, shell.namerefs[name]);
+                    let target = &shell.namerefs[name];
+                    let mut flags = String::from("-");
+                    if target.is_empty() && shell.integer_vars.contains(name.as_str()) {
+                        flags.push('i');
+                    }
+                    flags.push('n');
+                    if shell.readonly_vars.contains(name.as_str()) {
+                        flags.push('r');
+                    }
+                    if shell.exports.contains_key(name.as_str()) {
+                        flags.push('x');
+                    }
+                    if target.is_empty() {
+                        println!("declare {} {}", flags, name);
+                    } else {
+                        println!("declare {} {}=\"{}\"", flags, name, target);
+                    }
                 }
             }
         } else {
             for name in &names {
                 if let Some(target) = shell.namerefs.get(name) {
-                    println!("declare -n {}=\"{}\"", name, target);
+                    let mut flags = String::from("-");
+                    if target.is_empty() && shell.integer_vars.contains(name.as_str()) {
+                        flags.push('i');
+                    }
+                    flags.push('n');
+                    if shell.readonly_vars.contains(name.as_str()) {
+                        flags.push('r');
+                    }
+                    if shell.exports.contains_key(name.as_str()) {
+                        flags.push('x');
+                    }
+                    if target.is_empty() {
+                        println!("declare {} {}", flags, name);
+                    } else {
+                        println!("declare {} {}=\"{}\"", flags, name, target);
+                    }
                 } else if let Some(arr) = shell.arrays.get(name) {
                     let mut flags = String::from("-a");
                     if shell.integer_vars.contains(name.as_str()) {
@@ -2374,7 +2432,18 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                         .get(name)
                         .is_some_and(|a| a.iter().any(|e| e.is_some()))
                     || shell.assoc_arrays.get(name).is_some_and(|a| !a.is_empty());
-                if is_array_conflict {
+                // Validate that the nameref target is a valid variable name
+                // (optionally with [subscript]). Reject things like `/`, `%`,
+                // `42`, `7*6`, etc. with "invalid variable name for name reference".
+                if !value.is_empty() && !crate::interpreter::is_valid_nameref_target(value) {
+                    eprintln!(
+                        "{}: {}: `{}': invalid variable name for name reference",
+                        shell.error_prefix(),
+                        cmd_name,
+                        value
+                    );
+                    status = 1;
+                } else if is_array_conflict {
                     eprintln!(
                         "{}: {}: {}: reference variable cannot be an array",
                         shell.error_prefix(),
@@ -2392,12 +2461,29 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                         value
                     };
                     if target_base == name {
-                        eprintln!(
-                            "{}: {}: {}: nameref variable self references not allowed",
-                            shell.error_prefix(),
-                            cmd_name,
-                            name
-                        );
+                        // In function scope (local_scopes non-empty), bash treats
+                        // self-reference as a warning ("circular name reference")
+                        // but still creates the nameref. At global scope, it's an
+                        // error ("self references not allowed") and the nameref is
+                        // NOT created.
+                        if !shell.local_scopes.is_empty() {
+                            eprintln!(
+                                "{}: {}: warning: {}: circular name reference",
+                                shell.error_prefix(),
+                                cmd_name,
+                                name
+                            );
+                            // Still create the nameref (bash behavior in function scope)
+                            shell.vars.remove(name);
+                            shell.namerefs.insert(name.to_string(), value.to_string());
+                        } else {
+                            eprintln!(
+                                "{}: {}: {}: nameref variable self references not allowed",
+                                shell.error_prefix(),
+                                cmd_name,
+                                name
+                            );
+                        }
                     } else {
                         shell.vars.remove(name);
                         shell.namerefs.insert(name.to_string(), value.to_string());
@@ -2820,28 +2906,60 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 shell.declare_local(name);
             }
             if flag_nameref {
-                // `typeset -n foo` (no value): use foo's current value as the
-                // nameref target, then remove it from regular vars.  This matches
-                // bash: `foo=bar; typeset -n foo` → foo is a nameref to "bar".
-                let target = shell.vars.remove(name).unwrap_or_default();
-                // Detect circular nameref
-                let target_base = if let Some(bracket) = target.find('[') {
-                    &target[..bracket]
+                // `typeset -n foo` (no value): if foo is already a nameref,
+                // this is a no-op (keep the existing target). Otherwise, use
+                // foo's current value as the nameref target, then remove it
+                // from regular vars.  This matches bash: `foo=bar; typeset -n foo`
+                // → foo is a nameref to "bar".
+                if shell.namerefs.contains_key(name) {
+                    // Already a nameref — no-op (bash behavior)
                 } else {
-                    target.as_str()
-                };
-                if !target.is_empty() && target_base == name {
-                    eprintln!(
-                        "{}: {}: warning: {}: circular name reference",
-                        shell.error_prefix(),
-                        cmd_name,
-                        name
-                    );
-                    // Put the value back since we're not creating the nameref
-                    shell.vars.insert(name.to_string(), target);
-                } else {
-                    shell.namerefs.insert(name.to_string(), target);
-                }
+                    let target = shell.vars.remove(name).unwrap_or_default();
+                    // Validate that the target is a valid variable name (with
+                    // optional subscript). Reject things like `/`, `%`, `42` etc.
+                    // Empty targets are allowed (creates unbound nameref).
+                    if !target.is_empty() && !crate::interpreter::is_valid_nameref_target(&target) {
+                        eprintln!(
+                            "{}: {}: `{}': invalid variable name for name reference",
+                            shell.error_prefix(),
+                            cmd_name,
+                            target
+                        );
+                        // Put the value back since we're not creating the nameref
+                        shell.vars.insert(name.to_string(), target);
+                        status = 1;
+                    } else {
+                        // Detect circular nameref
+                        let target_base = if let Some(bracket) = target.find('[') {
+                            &target[..bracket]
+                        } else {
+                            target.as_str()
+                        };
+                        if !target.is_empty() && target_base == name {
+                            if !shell.local_scopes.is_empty() {
+                                eprintln!(
+                                    "{}: {}: warning: {}: circular name reference",
+                                    shell.error_prefix(),
+                                    cmd_name,
+                                    name
+                                );
+                                // Still create the nameref in function scope
+                                shell.namerefs.insert(name.to_string(), target);
+                            } else {
+                                eprintln!(
+                                    "{}: {}: warning: {}: circular name reference",
+                                    shell.error_prefix(),
+                                    cmd_name,
+                                    name
+                                );
+                                // Put the value back since we're not creating the nameref
+                                shell.vars.insert(name.to_string(), target);
+                            }
+                        } else {
+                            shell.namerefs.insert(name.to_string(), target);
+                        }
+                    }
+                } // end of !already-nameref block
             } else if flag_assoc {
                 // Error if trying to convert an existing indexed array to assoc
                 if shell.arrays.contains_key(name) {

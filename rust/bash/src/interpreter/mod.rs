@@ -30,6 +30,26 @@ pub fn is_valid_identifier(s: &str) -> bool {
     chars.all(|c| c == '_' || c.is_alphanumeric())
 }
 
+/// Check if a string is a valid nameref target: either a valid identifier,
+/// or a valid identifier followed by `[subscript]` (array element reference).
+/// Empty strings are NOT valid nameref targets.
+pub fn is_valid_nameref_target(s: &str) -> bool {
+    if s.is_empty() {
+        return false;
+    }
+    // Check for subscript: name[...]
+    if let Some(bracket) = s.find('[') {
+        // Must end with ]
+        if !s.ends_with(']') {
+            return false;
+        }
+        let base = &s[..bracket];
+        is_valid_identifier(base)
+    } else {
+        is_valid_identifier(s)
+    }
+}
+
 /// Saved variable state for local scope restoration
 #[derive(Clone)]
 pub struct SavedVar {
@@ -39,6 +59,8 @@ pub struct SavedVar {
     pub was_integer: bool,
     pub was_readonly: bool,
     pub was_declared_unset: bool,
+    /// Saved nameref target (Some(target) if was a nameref, None if wasn't)
+    pub nameref: Option<String>,
 }
 
 /// Bash-compatible hash function (FNV-1 variant) for associative arrays.
@@ -823,9 +845,50 @@ impl Shell {
         resolved
     }
 
+    /// Resolve a variable name through namerefs, emitting warnings for
+    /// circular references and maximum depth exceeded (matching bash behavior).
+    /// Bash warns "circular name reference" when it first detects the cycle,
+    /// then "maximum nameref depth (8) exceeded" when depth limit is hit.
+    /// Returns the resolved name (which may be the original if circular).
+    pub fn resolve_nameref_warn(&self, name: &str) -> String {
+        const MAX_NAMEREF_DEPTH: usize = 8;
+        let mut resolved = name.to_string();
+        let mut seen = HashSet::new();
+        let mut depth = 0;
+        let mut warned_circular = false;
+        while let Some(target) = self.namerefs.get(&resolved) {
+            if target.is_empty() {
+                break;
+            }
+            if depth >= MAX_NAMEREF_DEPTH {
+                eprintln!(
+                    "{}: warning: {}: maximum nameref depth ({}) exceeded",
+                    self.error_prefix(),
+                    name,
+                    MAX_NAMEREF_DEPTH
+                );
+                break;
+            }
+            if seen.contains(target) && !warned_circular {
+                eprintln!(
+                    "{}: warning: {}: circular name reference",
+                    self.error_prefix(),
+                    name
+                );
+                warned_circular = true;
+                // Don't break — continue iterating up to MAX_NAMEREF_DEPTH
+                // like bash does, which will then emit "maximum depth exceeded"
+            }
+            seen.insert(target.clone());
+            resolved = target.clone();
+            depth += 1;
+        }
+        resolved
+    }
+
     /// Get a variable value, resolving namerefs.
     pub fn get_var(&mut self, name: &str) -> Option<String> {
-        let resolved = self.resolve_nameref(name);
+        let resolved = self.resolve_nameref_warn(name);
         if resolved == "RANDOM" {
             // Bash-compatible LCRNG: seed = seed * 1103515245 + 12345
             self.random_seed = self
@@ -847,10 +910,23 @@ impl Shell {
         if let Some(target) = self.namerefs.get(name)
             && target.is_empty()
         {
+            // Validate that the new target is a valid variable name
+            // (optionally with [subscript]). Bash rejects invalid names
+            // like `/`, `%`, `42`, empty string, etc. with
+            // "not a valid identifier".
+            if !is_valid_nameref_target(&value) {
+                eprintln!(
+                    "{}: `{}': not a valid identifier",
+                    self.error_prefix(),
+                    value
+                );
+                self.last_status = 1;
+                return;
+            }
             self.namerefs.insert(name.to_string(), value);
             return;
         }
-        let resolved = self.resolve_nameref(name);
+        let resolved = self.resolve_nameref_warn(name);
         if self.readonly_vars.contains(&resolved) {
             if let Some(fname) = self.func_names.last() {
                 eprintln!(
@@ -1019,10 +1095,13 @@ impl Shell {
                     was_integer: self.integer_vars.contains(name),
                     was_readonly: self.readonly_vars.contains(name),
                     was_declared_unset: self.declared_unset.contains(name),
+                    nameref: self.namerefs.get(name).cloned(),
                 },
             );
             // Remove readonly for the local scope (will be re-applied if -r is used)
             self.readonly_vars.remove(name);
+            // Remove nameref for the local scope (will be re-applied if -n is used)
+            self.namerefs.remove(name);
             // When OPTIND is made local, also save/restore the internal
             // getopts character-offset variable so that recursive getopts
             // calls (e.g. inside functions that `typeset OPTIND=1`) don't
@@ -1039,6 +1118,7 @@ impl Shell {
                             was_integer: false,
                             was_readonly: false,
                             was_declared_unset: false,
+                            nameref: None,
                         },
                     );
                 }
