@@ -3468,21 +3468,41 @@ fn make_inaccessible(path: &str, _config: &ExecHelperConfig) {
         }
         log::trace!("make_inaccessible: path={path} tmpfs mount ret={ret}");
     } else {
-        // For files, bind-mount /dev/null over them to make them inaccessible
-        log::trace!("make_inaccessible: path={path} bind-mounting /dev/null...");
+        // For files, bind-mount a zero-permission inaccessible file over
+        // them so that non-root users cannot read the path.  We first try
+        // the systemd-standard inaccessible node; if it doesn't exist we
+        // create a temporary one.
+        log::trace!("make_inaccessible: path={path} creating inaccessible file...");
+        let inaccessible = "/run/systemd/inaccessible/reg";
+        let _ = std::fs::create_dir_all("/run/systemd/inaccessible");
+        if !Path::new(inaccessible).exists()
+            && let Ok(f) = std::fs::File::create(inaccessible)
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = f.set_permissions(std::fs::Permissions::from_mode(0o000));
+        }
+        let source = if Path::new(inaccessible).exists() {
+            inaccessible
+        } else {
+            "/dev/null"
+        };
+        let c_source = match std::ffi::CString::new(source) {
+            Ok(c) => c,
+            Err(_) => return,
+        };
         let ret = unsafe {
             libc::mount(
-                c"/dev/null".as_ptr(),
+                c_source.as_ptr(),
                 c_path.as_ptr(),
                 std::ptr::null(),
                 libc::MS_BIND,
                 std::ptr::null(),
             )
         };
-        log::trace!("make_inaccessible: path={path} bind-mount ret={ret}");
+        log::trace!("make_inaccessible: path={path} bind-mount {source} ret={ret}");
         if ret != 0 {
             log::warn!(
-                "Failed to make {} inaccessible (bind /dev/null): {}",
+                "Failed to make {} inaccessible (bind {source}): {}",
                 path,
                 std::io::Error::last_os_error()
             );

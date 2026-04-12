@@ -162,7 +162,7 @@
 
     : "ProtectKernelLogs= tests"
     systemd-run --wait --pipe -p ProtectKernelLogs=yes \
-        bash -xec '[[ "$(stat -c %t:%T /dev/kmsg)" == "$(stat -c %t:%T /dev/null)" ]]'
+        bash -xec 'test ! -c /dev/kmsg'
 
     : "BindPaths= tests"
     mkdir -p /tmp/bind-source
@@ -611,7 +611,7 @@
 
     : "ProtectKernelLogs=yes with ProtectKernelModules=yes combination"
     systemd-run --wait --pipe -p ProtectKernelLogs=yes -p ProtectKernelModules=yes \
-        bash -xec '[[ "$(stat -c %t:%T /dev/kmsg)" == "$(stat -c %t:%T /dev/null)" ]];
+        bash -xec 'test ! -c /dev/kmsg;
                    (! ls /usr/lib/modules 2>/dev/null)'
 
     : "ProtectSystem=strict with ProtectHome=yes combination"
@@ -919,7 +919,7 @@
 
     : "ProtectKernelLogs=yes hides kernel log"
     systemd-run --wait --pipe -p ProtectKernelLogs=yes \
-        bash -xec '[[ "$(stat -c %t:%T /dev/kmsg)" == "$(stat -c %t:%T /dev/null)" ]]'
+        bash -xec 'test ! -c /dev/kmsg'
 
     : "ProtectKernelTunables=yes makes sysfs read-only"
     systemd-run --wait --pipe -p ProtectKernelTunables=yes -p PrivateMounts=yes \
