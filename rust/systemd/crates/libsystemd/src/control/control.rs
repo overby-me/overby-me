@@ -12,6 +12,39 @@ use std::os::unix::fs::PermissionsExt;
 use log::{info, trace, warn};
 use serde_json::Value;
 
+/// Split a value on whitespace while honouring backslash-escaped spaces.
+/// `"foo\ bar baz"` → `["foo bar", "baz"]`.
+fn split_escaped_whitespace(s: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut current = String::new();
+    let mut chars = s.chars().peekable();
+    // Skip leading whitespace
+    while chars.peek().is_some_and(|c| c.is_ascii_whitespace()) {
+        chars.next();
+    }
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            if let Some(next) = chars.next() {
+                current.push(next);
+            }
+        } else if c.is_ascii_whitespace() {
+            if !current.is_empty() {
+                result.push(std::mem::take(&mut current));
+            }
+            // Skip consecutive whitespace
+            while chars.peek().is_some_and(|c| c.is_ascii_whitespace()) {
+                chars.next();
+            }
+        } else {
+            current.push(c);
+        }
+    }
+    if !current.is_empty() {
+        result.push(current);
+    }
+    result
+}
+
 pub fn open_all_sockets(run_info: ArcMutRuntimeInfo, conf: &crate::config::Config) {
     // TODO make configurable
     let control_sock_path = {
@@ -3378,29 +3411,23 @@ fn create_transient_unit(
                     }
                 }
                 "ReadOnlyPaths" => {
-                    for p in value.split_whitespace() {
-                        service_conf.exec_config.read_only_paths.push(p.to_string());
+                    for p in split_escaped_whitespace(value) {
+                        service_conf.exec_config.read_only_paths.push(p);
                     }
                 }
                 "InaccessiblePaths" => {
-                    for p in value.split_whitespace() {
-                        service_conf
-                            .exec_config
-                            .inaccessible_paths
-                            .push(p.to_string());
+                    for p in split_escaped_whitespace(value) {
+                        service_conf.exec_config.inaccessible_paths.push(p);
                     }
                 }
                 "BindPaths" => {
-                    for p in value.split_whitespace() {
-                        service_conf.exec_config.bind_paths.push(p.to_string());
+                    for p in split_escaped_whitespace(value) {
+                        service_conf.exec_config.bind_paths.push(p);
                     }
                 }
                 "BindReadOnlyPaths" => {
-                    for p in value.split_whitespace() {
-                        service_conf
-                            .exec_config
-                            .bind_read_only_paths
-                            .push(p.to_string());
+                    for p in split_escaped_whitespace(value) {
+                        service_conf.exec_config.bind_read_only_paths.push(p);
                     }
                 }
                 "ProtectKernelTunables" => {

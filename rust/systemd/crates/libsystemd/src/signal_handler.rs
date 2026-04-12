@@ -347,6 +347,20 @@ pub fn daemon_reexec(run_info: &ArcMutRuntimeInfo) {
     // SAFETY: We're about to exec, so the environment modification is fine.
     unsafe { std::env::set_var("SYSTEMD_RS_REEXEC", "1") };
 
+    // Merge manager_environment into the process environment so that
+    // variables set via `systemctl set-environment` survive the re-exec.
+    // The new instance initialises its manager_environment from
+    // std::env::vars(), so anything we set here is picked up.
+    {
+        use crate::lock_ext::MutexExt;
+        let ri = run_info.read_poisoned();
+        let env = ri.manager_environment.lock_poisoned();
+        for (k, v) in env.iter() {
+            // SAFETY: single-threaded at this point (about to exec).
+            unsafe { std::env::set_var(k, v) };
+        }
+    }
+
     info!("Re-executing service manager: {}", self_path.display());
 
     // Build argv: use the same executable path with no extra arguments.
@@ -361,7 +375,7 @@ pub fn daemon_reexec(run_info: &ArcMutRuntimeInfo) {
 
     let c_argv: Vec<std::ffi::CString> = vec![c_path.clone()];
 
-    // Collect current environment.
+    // Collect current environment (now includes manager_environment).
     let c_envp: Vec<std::ffi::CString> = std::env::vars()
         .filter_map(|(k, v)| std::ffi::CString::new(format!("{k}={v}")).ok())
         .collect();

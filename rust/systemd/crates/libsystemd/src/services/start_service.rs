@@ -110,6 +110,146 @@ fn resolve_supplementary_gids(groups: &[String]) -> Result<Vec<libc::gid_t>, Str
         .collect()
 }
 
+/// Parse a systemd-style environment file into (key, value) pairs.
+///
+/// Rules (matching systemd's `load-env-file.c`):
+/// - Lines starting with `#` or `;` (after leading whitespace) are comments.
+/// - Empty lines are skipped.
+/// - Lines have the form `KEY=VALUE` or `export KEY=VALUE`.
+/// - Double-quoted values: C-style escapes are interpreted (`\n`, `\t`, `\\`,
+///   `\"`) and the value may span multiple lines until the closing `"`.
+/// - Single-quoted values: taken literally (no escapes, no multi-line).
+/// - Unquoted values: trailing whitespace and comments are stripped.
+fn parse_environment_file(contents: &str) -> Vec<(String, String)> {
+    let mut result = Vec::new();
+    let mut chars = contents.chars().peekable();
+
+    loop {
+        // Skip leading whitespace on a line
+        while chars.peek().is_some_and(|&c| c == ' ' || c == '\t') {
+            chars.next();
+        }
+
+        match chars.peek() {
+            None => break,
+            Some(&'\n') => {
+                chars.next();
+                continue;
+            }
+            Some(&'#') | Some(&';') => {
+                // Comment line — skip to end of line
+                while chars.peek().is_some_and(|&c| c != '\n') {
+                    chars.next();
+                }
+                continue;
+            }
+            _ => {}
+        }
+
+        // Read key (and optional `export ` prefix)
+        let mut key = String::new();
+        while let Some(&c) = chars.peek() {
+            if c == '=' || c == '\n' {
+                break;
+            }
+            key.push(c);
+            chars.next();
+        }
+
+        // Strip `export ` prefix
+        let key = if let Some(stripped) = key.strip_prefix("export ") {
+            stripped.trim().to_owned()
+        } else {
+            key.trim().to_owned()
+        };
+
+        if key.is_empty() {
+            // Skip to next line
+            while chars.peek().is_some_and(|&c| c != '\n') {
+                chars.next();
+            }
+            continue;
+        }
+
+        // Expect '='
+        if chars.peek() != Some(&'=') {
+            // No '=' found — skip line
+            while chars.peek().is_some_and(|&c| c != '\n') {
+                chars.next();
+            }
+            continue;
+        }
+        chars.next(); // consume '='
+
+        // Parse value
+        let value = match chars.peek() {
+            Some(&'"') => {
+                // Double-quoted value: interpret C-style escapes, allow multi-line
+                chars.next(); // consume opening "
+                let mut val = String::new();
+                loop {
+                    match chars.next() {
+                        None | Some('"') => break,
+                        Some('\\') => match chars.next() {
+                            Some('n') => val.push('\n'),
+                            Some('t') => val.push('\t'),
+                            Some('r') => val.push('\r'),
+                            Some('\\') => val.push('\\'),
+                            Some('"') => val.push('"'),
+                            Some('a') => val.push('\x07'),
+                            Some('b') => val.push('\x08'),
+                            Some('f') => val.push('\x0C'),
+                            Some(c) => {
+                                val.push('\\');
+                                val.push(c);
+                            }
+                            None => {
+                                val.push('\\');
+                                break;
+                            }
+                        },
+                        Some(c) => val.push(c),
+                    }
+                }
+                val
+            }
+            Some(&'\'') => {
+                // Single-quoted value: literal (no escapes)
+                chars.next(); // consume opening '
+                let mut val = String::new();
+                for c in chars.by_ref() {
+                    if c == '\'' {
+                        break;
+                    }
+                    val.push(c);
+                }
+                val
+            }
+            _ => {
+                // Unquoted value: read to end of line, strip trailing whitespace/comments
+                let mut val = String::new();
+                while let Some(&c) = chars.peek() {
+                    if c == '\n' {
+                        break;
+                    }
+                    val.push(c);
+                    chars.next();
+                }
+                val.trim_end().to_owned()
+            }
+        };
+
+        result.push((key, value));
+
+        // Skip to end of line (past any trailing content after closing quote)
+        while chars.peek().is_some_and(|&c| c != '\n') {
+            chars.next();
+        }
+    }
+
+    result
+}
+
 fn start_service_with_filedescriptors(
     self_path: &Path,
     srvc: &mut Service,
@@ -288,30 +428,16 @@ fn start_service_with_filedescriptors(
                 env.push(("SHELL".to_owned(), pwentry.shell.clone()));
             }
             // Load EnvironmentFile= files first (lower priority than Environment=).
-            // Each file contains lines of KEY=VALUE pairs.
+            // Parsing follows systemd's rules: double-quoted values may span
+            // multiple lines, C-style escapes (\n, \t, \\, \") are interpreted
+            // inside double quotes, single-quoted values are literal, and
+            // unquoted values are trimmed.
             for (path, optional) in &conf.exec_config.environment_files {
                 match std::fs::read_to_string(path) {
                     Ok(contents) => {
-                        for line in contents.lines() {
-                            let line = line.trim();
-                            // Skip comments and empty lines
-                            if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
-                                continue;
-                            }
-                            if let Some((key, value)) = line.split_once('=') {
-                                let key = key.trim().to_owned();
-                                // Strip optional surrounding quotes from the value
-                                let value = value.trim();
-                                let value = if (value.starts_with('"') && value.ends_with('"'))
-                                    || (value.starts_with('\'') && value.ends_with('\''))
-                                {
-                                    value[1..value.len() - 1].to_owned()
-                                } else {
-                                    value.to_owned()
-                                };
-                                env.retain(|(ek, _)| *ek != key);
-                                env.push((key, value));
-                            }
+                        for (key, value) in parse_environment_file(&contents) {
+                            env.retain(|(ek, _)| *ek != key);
+                            env.push((key, value));
                         }
                     }
                     Err(e) => {
