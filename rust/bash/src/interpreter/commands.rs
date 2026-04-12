@@ -1387,7 +1387,10 @@ impl Shell {
         };
         let is_assignment_builtin = words_to_expand.first().is_some_and(|&(_, w)| {
             let name = self.expand_word_single(w);
-            matches!(name.as_str(), "export" | "declare" | "typeset" | "local")
+            matches!(
+                name.as_str(),
+                "export" | "declare" | "typeset" | "local" | "readonly"
+            )
         });
         // Expand words, applying assignment-context tilde expansion where appropriate
         let mut expanded_words: Vec<String> = Vec::new();

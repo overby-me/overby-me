@@ -1793,11 +1793,17 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     if target.is_empty() {
                         println!("declare {} {}", flags, name);
                     } else {
-                        println!("declare {} {}=\"{}\"", flags, name, target);
+                        println!(
+                            "declare {} {}=\"{}\"",
+                            flags,
+                            name,
+                            escape_nameref_target(target)
+                        );
                     }
                 }
             }
         } else {
+            let mut status = 0;
             for name in &names {
                 if let Some(target) = shell.namerefs.get(name) {
                     let mut flags = String::from("-");
@@ -1814,7 +1820,12 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     if target.is_empty() {
                         println!("declare {} {}", flags, name);
                     } else {
-                        println!("declare {} {}=\"{}\"", flags, name, target);
+                        println!(
+                            "declare {} {}=\"{}\"",
+                            flags,
+                            name,
+                            escape_nameref_target(target)
+                        );
                     }
                 } else if let Some(arr) = shell.arrays.get(name) {
                     let mut flags = String::from("-a");
@@ -1946,9 +1957,10 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                         cmd_name,
                         name
                     );
-                    return 1;
+                    status = 1;
                 }
             }
+            return status;
         }
         return 0;
     }
@@ -2054,7 +2066,7 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
         let mut sorted: Vec<_> = shell.namerefs.iter().collect();
         sorted.sort_by_key(|(k, _)| k.to_string());
         for (name, target) in sorted {
-            println!("declare -n {}=\"{}\"", name, target);
+            println!("declare -n {}=\"{}\"", name, escape_nameref_target(target));
         }
         return 0;
     }
@@ -2895,6 +2907,8 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             // (not -n itself), resolve through the nameref chain so that
             // attributes like -i, -r, -x, -a, -A are applied to the target.
             // e.g. `declare -n foo=bar; declare -i foo` → applies -i to bar.
+            // But when -n IS set (e.g. `declare -rn foo`), attributes apply
+            // to the nameref variable itself, not the target.
             let has_attr_flags = flag_integer
                 || flag_readonly
                 || flag_export
@@ -2928,14 +2942,18 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             if make_local {
                 shell.declare_local(name);
             }
-            if flag_nameref && !has_attr_flags {
+            if flag_nameref && !flag_array && !flag_assoc {
                 // `typeset -n foo` (no value): if foo is already a nameref,
                 // this is a no-op (keep the existing target). Otherwise, use
                 // foo's current value as the nameref target, then remove it
                 // from regular vars.  This matches bash: `foo=bar; typeset -n foo`
                 // → foo is a nameref to "bar".
+                // When combined with other flags (e.g. `declare -rn foo`),
+                // the nameref is created AND the other attributes are applied
+                // to the nameref variable itself (not the target).
                 if shell.namerefs.contains_key(name) {
-                    // Already a nameref — no-op (bash behavior)
+                    // Already a nameref — no-op for the nameref part (bash behavior)
+                    // Other attribute flags (readonly, etc.) will be applied below.
                 } else {
                     let target = shell.vars.remove(name).unwrap_or_default();
                     // Validate that the target is a valid variable name (with
@@ -2983,7 +3001,11 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                         }
                     }
                 } // end of !already-nameref block
-            } else if flag_assoc {
+                // When -n is combined with other attribute flags like -r, -i, -x,
+                // fall through to apply those attributes below (to `name` itself,
+                // since attr_name == name when flag_nameref is set).
+            }
+            if !flag_nameref && flag_assoc {
                 // Error if trying to convert an existing indexed array to assoc
                 if shell.arrays.contains_key(attr_name) {
                     if flag_global && let Some(func) = shell.func_names.last() {
@@ -3025,7 +3047,7 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                         shell.assoc_arrays.insert(attr_name.to_string(), new_map);
                     }
                 }
-            } else if flag_array {
+            } else if !flag_nameref && flag_array {
                 // Error if trying to convert an existing assoc array to indexed
                 if shell.assoc_arrays.contains_key(attr_name) {
                     if flag_global && let Some(func) = shell.func_names.last() {
@@ -3063,13 +3085,15 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                         shell.declared_unset.insert(attr_name.to_string());
                     }
                 }
-            } else if had_subscript && !shell.arrays.contains_key(attr_name) {
+            } else if !flag_nameref && had_subscript && !shell.arrays.contains_key(attr_name) {
                 // declare -r c[100] (with subscript, no -a flag): create empty array
                 shell.arrays.entry(attr_name.to_string()).or_default();
                 shell.declared_unset.insert(attr_name.to_string());
-            } else if !shell.vars.contains_key(attr_name)
+            } else if !flag_nameref
+                && !shell.vars.contains_key(attr_name)
                 && !shell.arrays.contains_key(attr_name)
                 && !shell.assoc_arrays.contains_key(attr_name)
+                && !shell.namerefs.contains_key(attr_name)
             {
                 // declare without = marks the variable as declared-but-unset
                 // (don't insert into vars — bash distinguishes this from "")
@@ -3137,6 +3161,23 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
         }
     }
     status
+}
+
+/// Escape `$` and backticks in nameref target values for `declare -p` output.
+/// Bash backslash-escapes `$` and `` ` `` in nameref targets so that the output
+/// is re-evaluable (e.g. `declare -n foo="x[\$zero]"` instead of `x[$zero]`).
+fn escape_nameref_target(target: &str) -> String {
+    let mut result = String::with_capacity(target.len());
+    for ch in target.chars() {
+        match ch {
+            '$' | '`' => {
+                result.push('\\');
+                result.push(ch);
+            }
+            _ => result.push(ch),
+        }
+    }
+    result
 }
 
 pub fn parse_assoc_literal(s: &str) -> crate::interpreter::AssocArray {
