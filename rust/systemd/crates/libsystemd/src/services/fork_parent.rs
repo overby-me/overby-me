@@ -160,11 +160,22 @@ pub fn wait_for_service(
                         srvc.notifications_buffer
                     );
                 }
-                crate::notification_handler::handle_notifications_from_buffer(srvc, name);
-                if srvc.signaled_ready {
-                    srvc.signaled_ready = false;
-                    trace!("[FORK_PARENT] Service {name} sent READY=1 notification — proceeding!");
-                    break;
+                // Enforce NotifyAccess= before processing notifications.
+                // With NotifyAccess=none, notifications are consumed from the
+                // socket but not acted upon, so the service times out.
+                let access = crate::services::effective_notify_access(srvc, conf);
+                if !matches!(access, crate::units::NotifyKind::None) {
+                    crate::notification_handler::handle_notifications_from_buffer(srvc, name);
+                    if srvc.signaled_ready {
+                        srvc.signaled_ready = false;
+                        trace!(
+                            "[FORK_PARENT] Service {name} sent READY=1 notification — proceeding!"
+                        );
+                        break;
+                    }
+                } else {
+                    // Drain the buffer so it doesn't grow forever
+                    srvc.notifications_buffer.clear();
                 }
                 trace!(
                     "[FORK_PARENT] Service {name} still not ready (elapsed={:?})",

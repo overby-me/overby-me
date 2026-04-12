@@ -7349,11 +7349,13 @@ pub fn execute_command(
                     .get(&id)
                     .ok_or_else(|| format!("Unit {unit_name} not found."))?;
                 let status_locked = unit.common.status.read_poisoned();
-                let state = match &*status_locked {
-                    crate::units::UnitStatus::Stopped(_, errors) if !errors.is_empty() => "failed",
-                    _ => "inactive",
-                };
-                return Ok(serde_json::json!(state));
+                // Return "true"/"false" — matches the boolean semantics of
+                // `systemctl is-failed`: is the unit in a failed state?
+                let is_failed = matches!(
+                    &*status_locked,
+                    crate::units::UnitStatus::Stopped(_, errors) if !errors.is_empty()
+                );
+                return Ok(serde_json::json!(if is_failed { "true" } else { "false" }));
             }
         },
         Command::Start(unit_names) => {
