@@ -394,137 +394,6 @@ impl Shell {
         }
     }
 
-    /// Pre-evaluate ArithSub expressions that may have side effects (assignments).
-    fn eval_arith_in_word(&mut self, word: &Word) -> Word {
-        word.iter()
-            .map(|part| match part {
-                WordPart::ArithSub(expr) => {
-                    let result = self.eval_arith_expr(expr);
-                    WordPart::Literal(result.to_string())
-                }
-                WordPart::DoubleQuoted(parts) => {
-                    WordPart::DoubleQuoted(self.eval_arith_in_word(parts))
-                }
-                WordPart::Param(expr) if Self::param_subscript_needs_eval(&expr.name) => {
-                    // Pre-expand arithmetic in parameter subscripts so that
-                    // side-effect operators like count++ work correctly.
-                    // e.g. ${days[$((count++))]} or ${days[count++]}
-                    let new_name = self.expand_subscript_arith(&expr.name);
-                    WordPart::Param(ParamExpr {
-                        name: new_name,
-                        op: expr.op.clone(),
-                    })
-                }
-                other => other.clone(),
-            })
-            .collect()
-    }
-
-    /// Check if a Param name contains an array subscript that needs
-    /// pre-evaluation through the shell's arithmetic evaluator (for
-    /// side effects like `count++`, `i+=1`, etc.).
-    fn param_subscript_needs_eval(name: &str) -> bool {
-        // Find subscript content between [ and ]
-        let Some(bracket_start) = name.find('[') else {
-            return false;
-        };
-        let subscript = &name[bracket_start + 1..];
-        // Find matching ]
-        let mut depth = 1i32;
-        let mut end = 0;
-        for (j, ch) in subscript.char_indices() {
-            match ch {
-                '[' => depth += 1,
-                ']' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        end = j;
-                        break;
-                    }
-                }
-                _ => {}
-            }
-        }
-        if depth != 0 {
-            return false;
-        }
-        let sub = &subscript[..end];
-        // Simple cases that don't need eval: @ * simple integers, empty
-        if sub.is_empty() || sub == "@" || sub == "*" || sub.trim().parse::<i64>().is_ok() {
-            return false;
-        }
-        // Contains $((expr)) — needs eval for side effects
-        if sub.contains("$((") {
-            return true;
-        }
-        // Contains ++ or -- (pre/post increment/decrement)
-        if sub.contains("++") || sub.contains("--") {
-            return true;
-        }
-        // Contains compound assignment operators
-        if sub.contains("+=")
-            || sub.contains("-=")
-            || sub.contains("*=")
-            || sub.contains("/=")
-            || sub.contains("%=")
-        {
-            return true;
-        }
-        // Contains arithmetic operators with variable names — could have
-        // side effects through variable resolution or complex expressions.
-        // Only trigger for non-trivial expressions: if it contains letters
-        // (variable names) AND operators beyond simple subscript access.
-        // A bare variable name like `i` is fine for the expansion evaluator,
-        // but `count++` or `i+1` with side effects needs the shell evaluator.
-        false
-    }
-
-    /// Pre-expand arithmetic in a Param name's subscript using the shell's
-    /// arithmetic evaluator (which supports side effects like `count++`).
-    fn expand_subscript_arith(&mut self, name: &str) -> String {
-        let Some(bracket_start) = name.find('[') else {
-            return name.to_string();
-        };
-        let base = &name[..bracket_start];
-        let after_bracket = &name[bracket_start + 1..];
-
-        // Find matching ]
-        let mut depth = 1i32;
-        let mut bracket_end = after_bracket.len();
-        for (j, ch) in after_bracket.char_indices() {
-            match ch {
-                '[' => depth += 1,
-                ']' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        bracket_end = j;
-                        break;
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        let subscript = &after_bracket[..bracket_end];
-        let rest = if bracket_end < after_bracket.len() {
-            &after_bracket[bracket_end..] // includes the ]
-        } else {
-            ""
-        };
-
-        // If subscript contains $((expr)), expand those first
-        if subscript.contains("$((") {
-            let expanded = self.expand_dollar_paren_paren(subscript);
-            // Now evaluate the fully expanded subscript as arithmetic
-            let val = self.eval_arith_expr(&expanded);
-            return format!("{}[{}{}", base, val, rest);
-        }
-
-        // Bare arithmetic subscript (e.g., count++, i+=1)
-        let val = self.eval_arith_expr(subscript);
-        format!("{}[{}{}", base, val, rest)
-    }
-
     /// Expand `$((expr))` patterns within a string using the shell's
     /// arithmetic evaluator (which supports side effects like `count++`).
     fn expand_dollar_paren_paren(&mut self, s: &str) -> String {
@@ -575,7 +444,7 @@ impl Shell {
     pub fn expand_word_fields(&mut self, word: &Word, ifs: &str) -> Vec<String> {
         self.sync_dynamic_assoc_arrays();
         self.apply_assign_defaults(word);
-        let word = self.eval_arith_in_word(word);
+        let word = word.clone();
         let mut vars = self.vars.clone();
         self.inject_transform_attrs(&word, &mut vars);
         let assoc_arrays = self.assoc_arrays.clone();
@@ -642,7 +511,41 @@ impl Shell {
         crate::expand::set_procsub_runner(&mut procsub_runner as *mut dyn FnMut(&str) -> i32);
         let arrays = self.arrays.clone();
         let mut cmd_sub = |cmd: &str| -> String {
-            if let Some(rest) = cmd.strip_prefix("\x01FUNSUB:") {
+            if let Some(rest) = cmd.strip_prefix("\x01ARITH:") {
+                let result = self.eval_arith_expr(rest);
+                // Arithmetic with side effects (e.g. count++) modifies shell
+                // variables — publish refreshed state so subsequent word parts
+                // in the same expansion see the updated values.
+                crate::expand::set_funsub_state(crate::expand::FunsubState {
+                    vars: self.vars.clone(),
+                    arrays: self.arrays.clone(),
+                    assoc_arrays: self.assoc_arrays.clone(),
+                    namerefs: self.namerefs.clone(),
+                    positional: self.positional.clone(),
+                    last_status: self.last_status,
+                    opt_flags: self.get_opt_flags(),
+                });
+                result.to_string()
+            } else if let Some(rest) = cmd.strip_prefix("\x01ARITH_SUB:") {
+                // Subscript arithmetic: may contain $((expr)) wrappers that
+                // need expanding before evaluation (e.g. $((count++))).
+                let expanded = if rest.contains("$((") {
+                    self.expand_dollar_paren_paren(rest)
+                } else {
+                    rest.to_string()
+                };
+                let result = self.eval_arith_expr(&expanded);
+                crate::expand::set_funsub_state(crate::expand::FunsubState {
+                    vars: self.vars.clone(),
+                    arrays: self.arrays.clone(),
+                    assoc_arrays: self.assoc_arrays.clone(),
+                    namerefs: self.namerefs.clone(),
+                    positional: self.positional.clone(),
+                    last_status: self.last_status,
+                    opt_flags: self.get_opt_flags(),
+                });
+                result.to_string()
+            } else if let Some(rest) = cmd.strip_prefix("\x01FUNSUB:") {
                 let result = self.capture_output_nofork(rest);
                 // Funsub runs in current shell — publish refreshed state so
                 // subsequent word parts in the same expansion see changes
@@ -821,7 +724,7 @@ impl Shell {
     pub fn expand_word_single(&mut self, word: &Word) -> String {
         self.sync_dynamic_assoc_arrays();
         self.apply_assign_defaults(word);
-        let word = self.eval_arith_in_word(word);
+        let word = word.clone();
         crate::expand::set_dotglob(self.shopt_options.get("dotglob").copied().unwrap_or(false));
         crate::expand::set_globskipdots(
             self.shopt_options
@@ -884,7 +787,36 @@ impl Shell {
         crate::expand::set_procsub_runner(&mut procsub_runner as *mut dyn FnMut(&str) -> i32);
         let arrays = self.arrays.clone();
         let mut cmd_sub = |cmd: &str| -> String {
-            if let Some(rest) = cmd.strip_prefix("\x01FUNSUB:") {
+            if let Some(rest) = cmd.strip_prefix("\x01ARITH:") {
+                let result = self.eval_arith_expr(rest);
+                crate::expand::set_funsub_state(crate::expand::FunsubState {
+                    vars: self.vars.clone(),
+                    arrays: self.arrays.clone(),
+                    assoc_arrays: self.assoc_arrays.clone(),
+                    namerefs: self.namerefs.clone(),
+                    positional: self.positional.clone(),
+                    last_status: self.last_status,
+                    opt_flags: self.get_opt_flags(),
+                });
+                result.to_string()
+            } else if let Some(rest) = cmd.strip_prefix("\x01ARITH_SUB:") {
+                let expanded = if rest.contains("$((") {
+                    self.expand_dollar_paren_paren(rest)
+                } else {
+                    rest.to_string()
+                };
+                let result = self.eval_arith_expr(&expanded);
+                crate::expand::set_funsub_state(crate::expand::FunsubState {
+                    vars: self.vars.clone(),
+                    arrays: self.arrays.clone(),
+                    assoc_arrays: self.assoc_arrays.clone(),
+                    namerefs: self.namerefs.clone(),
+                    positional: self.positional.clone(),
+                    last_status: self.last_status,
+                    opt_flags: self.get_opt_flags(),
+                });
+                result.to_string()
+            } else if let Some(rest) = cmd.strip_prefix("\x01FUNSUB:") {
                 let result = self.capture_output_nofork(rest);
                 crate::expand::set_funsub_state(crate::expand::FunsubState {
                     vars: self.vars.clone(),
@@ -932,7 +864,7 @@ impl Shell {
     /// Expand a word as a pattern (for case, [[ = ]]). Quoted glob chars are escaped.
     pub fn expand_word_pattern(&mut self, word: &Word) -> String {
         self.apply_assign_defaults(word);
-        let word = self.eval_arith_in_word(word);
+        let word = word.clone();
         let vars = self.vars.clone();
         let assoc_arrays = self.assoc_arrays.clone();
         let namerefs = self.namerefs.clone();
@@ -943,7 +875,36 @@ impl Shell {
         let opt_flags = self.get_opt_flags();
         let arrays = self.arrays.clone();
         let mut cmd_sub = |cmd: &str| -> String {
-            if let Some(rest) = cmd.strip_prefix("\x01FUNSUB:") {
+            if let Some(rest) = cmd.strip_prefix("\x01ARITH:") {
+                let result = self.eval_arith_expr(rest);
+                crate::expand::set_funsub_state(crate::expand::FunsubState {
+                    vars: self.vars.clone(),
+                    arrays: self.arrays.clone(),
+                    assoc_arrays: self.assoc_arrays.clone(),
+                    namerefs: self.namerefs.clone(),
+                    positional: self.positional.clone(),
+                    last_status: self.last_status,
+                    opt_flags: self.get_opt_flags(),
+                });
+                result.to_string()
+            } else if let Some(rest) = cmd.strip_prefix("\x01ARITH_SUB:") {
+                let expanded = if rest.contains("$((") {
+                    self.expand_dollar_paren_paren(rest)
+                } else {
+                    rest.to_string()
+                };
+                let result = self.eval_arith_expr(&expanded);
+                crate::expand::set_funsub_state(crate::expand::FunsubState {
+                    vars: self.vars.clone(),
+                    arrays: self.arrays.clone(),
+                    assoc_arrays: self.assoc_arrays.clone(),
+                    namerefs: self.namerefs.clone(),
+                    positional: self.positional.clone(),
+                    last_status: self.last_status,
+                    opt_flags: self.get_opt_flags(),
+                });
+                result.to_string()
+            } else if let Some(rest) = cmd.strip_prefix("\x01FUNSUB:") {
                 let result = self.capture_output_nofork(rest);
                 crate::expand::set_funsub_state(crate::expand::FunsubState {
                     vars: self.vars.clone(),

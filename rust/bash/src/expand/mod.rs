@@ -648,6 +648,102 @@ impl ExpCtx<'_> {
     }
 }
 
+/// Check if a parameter subscript contains arithmetic with side effects
+/// (e.g. `count++`, `$((count++))`, `i+=1`) that must be evaluated through
+/// the shell's arithmetic evaluator rather than the pure expand-layer evaluator.
+fn subscript_has_side_effects(name: &str) -> bool {
+    let Some(bracket_start) = name.find('[') else {
+        return false;
+    };
+    let subscript = &name[bracket_start + 1..];
+    // Find matching ]
+    let mut depth = 1i32;
+    let mut end = 0;
+    for (j, ch) in subscript.char_indices() {
+        match ch {
+            '[' => depth += 1,
+            ']' => {
+                depth -= 1;
+                if depth == 0 {
+                    end = j;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    if depth != 0 {
+        return false;
+    }
+    let sub = &subscript[..end];
+    // Simple cases that don't need shell eval: @ * simple integers, empty
+    if sub.is_empty() || sub == "@" || sub == "*" || sub.trim().parse::<i64>().is_ok() {
+        return false;
+    }
+    // Contains $((expr)) — needs eval for side effects
+    if sub.contains("$((") {
+        return true;
+    }
+    // Contains ++ or -- (pre/post increment/decrement)
+    if sub.contains("++") || sub.contains("--") {
+        return true;
+    }
+    // Contains compound assignment operators
+    if sub.contains("+=")
+        || sub.contains("-=")
+        || sub.contains("*=")
+        || sub.contains("/=")
+        || sub.contains("%=")
+    {
+        return true;
+    }
+    false
+}
+
+/// Evaluate a subscript expression through the shell's arithmetic evaluator
+/// (via cmd_sub with \x01ARITH_SUB: prefix) and return the param name with the
+/// subscript replaced by its numeric result.  Returns None if the subscript
+/// doesn't need side-effect evaluation.
+fn eval_subscript_via_shell(name: &str, cmd_sub: CmdSubFn) -> Option<String> {
+    if !subscript_has_side_effects(name) {
+        return None;
+    }
+    let bracket_start = name.find('[')?;
+    let base = &name[..bracket_start];
+    let after_bracket = &name[bracket_start + 1..];
+
+    // Find matching ]
+    let mut depth = 1i32;
+    let mut bracket_end = after_bracket.len();
+    for (j, ch) in after_bracket.char_indices() {
+        match ch {
+            '[' => depth += 1,
+            ']' => {
+                depth -= 1;
+                if depth == 0 {
+                    bracket_end = j;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let subscript = &after_bracket[..bracket_end];
+    let rest = if bracket_end < after_bracket.len() {
+        &after_bracket[bracket_end..] // includes the ]
+    } else {
+        ""
+    };
+
+    // Send the subscript to the shell's arithmetic evaluator via cmd_sub.
+    // Use ARITH_SUB prefix so the shell knows to handle $((..)) expansion
+    // within the subscript before arithmetic evaluation.
+    let val_str = cmd_sub(&format!("\x01ARITH_SUB:{}", subscript));
+
+    Some(format!("{}[{}{}", base, val_str, rest))
+}
+
 fn expand_word_to_segments(word: &Word, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> Vec<Segment> {
     let mut segments = Vec::new();
     // After a funsub/valuesub executes, the shell state may have changed.
@@ -1329,6 +1425,46 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                                         }
                                     }
                                 }
+                            } else if subscript_has_side_effects(&expr.name) {
+                                // Evaluate side-effectful subscript through the shell
+                                // so count++ etc. are applied left-to-right.
+                                if let Some(new_name) =
+                                    eval_subscript_via_shell(&expr.name, cmd_sub)
+                                {
+                                    // Take the refreshed state into a local so we can
+                                    // build an ExpCtx without borrowing dq_funsub_owned
+                                    // (which is already borrowed by `ctx` from the loop top).
+                                    let local_state = take_funsub_state();
+                                    let rewritten = crate::ast::ParamExpr {
+                                        name: new_name,
+                                        op: expr.op.clone(),
+                                    };
+                                    let fresh;
+                                    let ectx = if let Some(ref st) = local_state {
+                                        fresh = ExpCtx {
+                                            vars: &st.vars,
+                                            arrays: &st.arrays,
+                                            assoc_arrays: &st.assoc_arrays,
+                                            namerefs: &st.namerefs,
+                                            positional: &st.positional,
+                                            last_status: st.last_status,
+                                            last_bg_pid: ctx.last_bg_pid,
+                                            top_level_pid: ctx.top_level_pid,
+                                            opt_flags: &st.opt_flags,
+                                        };
+                                        &fresh
+                                    } else {
+                                        ctx
+                                    };
+                                    s.push_str(&expand_param(&rewritten, ectx, cmd_sub));
+                                    // Now that ctx/ectx are no longer used, propagate
+                                    // the state for subsequent loop iterations.
+                                    if local_state.is_some() {
+                                        dq_funsub_owned = local_state;
+                                    }
+                                } else {
+                                    s.push_str(&expand_param(expr, ctx, cmd_sub));
+                                }
                             } else {
                                 s.push_str(&expand_param(expr, ctx, cmd_sub));
                             }
@@ -1448,11 +1584,66 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                         s.push_str(&cmd_sub(cmd));
                     }
                     WordPart::ArithSub(expr) => {
-                        s.push_str(&expand_arith(expr, ctx, cmd_sub));
+                        // Route through shell for side effects (count++, etc.)
+                        let val = cmd_sub(&format!("\x01ARITH:{}", expr));
+                        s.push_str(&val);
+                        // Pick up refreshed state from the shell so subsequent
+                        // parts in this double-quoted word see updated variables.
+                        if let Some(new_state) = take_funsub_state() {
+                            dq_funsub_owned = Some(new_state);
+                        }
                     }
                     _ => {
                         let mut inner = Vec::new();
-                        expand_part(p, ctx, &mut inner, cmd_sub);
+                        // For Param parts with side-effectful subscripts inside
+                        // double quotes, evaluate the subscript through the shell
+                        // first, then expand with the rewritten name.
+                        let rewritten_part;
+                        let effective_p = if let WordPart::Param(pexpr) = p
+                            && subscript_has_side_effects(&pexpr.name)
+                        {
+                            if let Some(new_name) = eval_subscript_via_shell(&pexpr.name, cmd_sub) {
+                                // Pick up refreshed state after side-effectful eval
+                                rewritten_part = WordPart::Param(crate::ast::ParamExpr {
+                                    name: new_name,
+                                    op: pexpr.op.clone(),
+                                });
+                                &rewritten_part
+                            } else {
+                                p
+                            }
+                        } else {
+                            p
+                        };
+                        // If we rewrote the subscript, pick up the fresh state
+                        // into a local to build ExpCtx without conflicting borrows.
+                        let local_state2 = if !std::ptr::eq(effective_p, p) {
+                            take_funsub_state()
+                        } else {
+                            None
+                        };
+                        let dq_fresh_ctx2;
+                        #[allow(unused_assignments)]
+                        let mut ctx = ctx;
+                        if let Some(ref state) = local_state2 {
+                            dq_fresh_ctx2 = ExpCtx {
+                                vars: &state.vars,
+                                arrays: &state.arrays,
+                                assoc_arrays: &state.assoc_arrays,
+                                namerefs: &state.namerefs,
+                                positional: &state.positional,
+                                last_status: state.last_status,
+                                last_bg_pid: ctx.last_bg_pid,
+                                top_level_pid: ctx.top_level_pid,
+                                opt_flags: &state.opt_flags,
+                            };
+                            ctx = &dq_fresh_ctx2;
+                        }
+                        expand_part(effective_p, ctx, &mut inner, cmd_sub);
+                        // Propagate state for subsequent loop iterations
+                        if local_state2.is_some() {
+                            dq_funsub_owned = local_state2;
+                        }
                         for seg in inner {
                             match seg {
                                 Segment::Quoted(t) | Segment::Unquoted(t) | Segment::Literal(t) => {
@@ -2022,16 +2213,24 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                 let idx_str = &expr.name[bracket + 1..expr.name.len() - 1];
                 let resolved = ctx.resolve_nameref(base);
                 if idx_str != "@" && idx_str != "*" && !ctx.assoc_arrays.contains_key(&resolved) {
-                    // If the indexed array has no set elements, ${#arr[expr]}
-                    // returns "0" without evaluating the subscript at all
-                    // (bash skips subscript evaluation for empty arrays).
-                    let has_set_elements = ctx
-                        .arrays
-                        .get(&resolved)
-                        .is_some_and(|a| a.iter().any(|v| v.is_some()));
-                    if !has_set_elements {
-                        out.push(Segment::Unquoted("0".to_string()));
-                        return;
+                    // If the variable exists as an indexed array but has no
+                    // set elements, ${#arr[expr]} returns "0" without
+                    // evaluating the subscript (bash optimisation).
+                    //
+                    // Skip this shortcut when:
+                    // - The variable is a scalar (e.g. x=hello) — scalars are
+                    //   treated as single-element arrays, so ${#x[0]} must
+                    //   return the string length, not 0.
+                    // - The variable doesn't exist at all — we must NOT
+                    //   return "0" here because `set -u` (nounset) should
+                    //   produce an "unbound variable" error for completely
+                    //   unset variables, even with ${#var[N]} syntax.
+                    if let Some(arr) = ctx.arrays.get(&resolved) {
+                        let has_set_elements = arr.iter().any(|v| v.is_some());
+                        if !has_set_elements {
+                            out.push(Segment::Unquoted("0".to_string()));
+                            return;
+                        }
                     }
                     let raw_idx: i64 = if idx_str.trim().is_empty() {
                         0
@@ -2077,6 +2276,25 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                     }
                 }
             }
+            // Evaluate subscripts with side effects (count++, $((count++)))
+            // through the shell's arithmetic evaluator so that side effects
+            // are applied left-to-right during expansion (not in a pre-pass).
+            let side_effect_name;
+            let expr_for_lookup;
+            if subscript_has_side_effects(&expr.name) {
+                if let Some(new_name) = eval_subscript_via_shell(&expr.name, cmd_sub) {
+                    side_effect_name = new_name;
+                    expr_for_lookup = std::borrow::Cow::Owned(crate::ast::ParamExpr {
+                        name: side_effect_name.clone(),
+                        op: expr.op.clone(),
+                    });
+                } else {
+                    expr_for_lookup = std::borrow::Cow::Borrowed(expr);
+                }
+            } else {
+                expr_for_lookup = std::borrow::Cow::Borrowed(expr);
+            }
+            let expr = &*expr_for_lookup;
             // For Default/Alt words in unquoted context, check if we should
             // expand per-part for mixed quoting (e.g., ${IFS+foo 'bar' baz})
             // Pre-expand $(...) and $((...)) in subscripts before lookup_var,
@@ -2481,7 +2699,8 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
             out.push(Segment::Unquoted(val));
         }
         WordPart::ArithSub(expr) => {
-            let val = expand_arith(expr, ctx, cmd_sub);
+            // Route through shell for side effects (count++, etc.)
+            let val = cmd_sub(&format!("\x01ARITH:{}", expr));
             out.push(Segment::Unquoted(val));
         }
         WordPart::ProcessSub(kind, cmd) => {
@@ -2819,6 +3038,7 @@ fn apply_tilde_in_replacement(val: &str, tilde_home: Option<&str>) -> String {
     val.to_string()
 }
 
+#[allow(dead_code)]
 fn expand_arith(expr: &str, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
     // Pre-expand command substitutions ($(...) and ${ ...; }) in the
     // arithmetic expression before evaluating it.  eval_arith_full only

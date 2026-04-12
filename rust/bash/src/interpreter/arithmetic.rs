@@ -38,30 +38,65 @@ impl Shell {
             };
             ArithSubscript::Assoc(resolved, key)
         } else {
-            // When the subscript contains $var references, expand them first
-            // to detect empty subscripts.  e.g. `(( y[$none] ))` where
-            // `$none` is empty produces `y[]` which bash rejects as
-            // "bad array subscript".  Without this check the empty string
-            // would silently evaluate to 0.
+            // When the subscript contains $var references, check if ALL of
+            // them resolve to empty — e.g. `(( y[$none] ))` where `$none`
+            // is empty/unset produces `y[]` which bash rejects as
+            // "bad array subscript".
+            //
+            // IMPORTANT: We must NOT use expand_comsubs_in_arith here for
+            // the empty check because eval_arith_expr_impl (below) will
+            // call expand_comsubs_in_arith again on the same idx_str.
+            // That double-expansion would consume dynamic variables like
+            // $RANDOM twice, causing $RANDOM sequences to diverge from
+            // bare RANDOM sequences (arith3.sub regression).
+            //
+            // Instead, do a lightweight check: if the subscript is purely
+            // a single $varname reference and that variable is empty/unset,
+            // report the error.  This catches the common `y[$none]` case
+            // without side effects.
             if idx_str.contains('$') {
-                let expanded = self.expand_comsubs_in_arith(idx_str);
-                if expanded.is_empty() {
-                    let display_name = format!("{}[]", base);
-                    // Bash prints this error twice for empty subscripts from
-                    // variable expansion (e.g. `(( y[$none] ))` where $none
-                    // is unset), matching the double-print for literal `y[]`.
-                    eprintln!(
-                        "{}: {}: bad array subscript",
-                        self.arith_error_prefix(),
-                        display_name
-                    );
-                    eprintln!(
-                        "{}: {}: bad array subscript",
-                        self.arith_error_prefix(),
-                        display_name
-                    );
-                    crate::expand::set_arith_error();
-                    return ArithSubscript::Indexed(resolved, 0);
+                let trimmed = idx_str.trim();
+                // Check for simple $varname pattern (the most common case
+                // for the empty-subscript error).
+                if let Some(rest) = trimmed.strip_prefix('$')
+                    && !rest.is_empty()
+                    && !rest.starts_with('(')
+                    && !rest.starts_with('{')
+                    && rest.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                {
+                    let val = self
+                        .vars
+                        .get(rest)
+                        .cloned()
+                        .or_else(|| {
+                            // Also check arrays — `declare -a index`
+                            // stores the value in arrays, not vars.
+                            self.arrays
+                                .get(rest)
+                                .and_then(|a| a.first().and_then(|v| v.clone()))
+                        })
+                        .or_else(|| {
+                            self.assoc_arrays
+                                .get(rest)
+                                .and_then(|a| a.get("0").cloned())
+                        })
+                        .or_else(|| std::env::var(rest).ok())
+                        .unwrap_or_default();
+                    if val.is_empty() {
+                        let display_name = format!("{}[]", base);
+                        eprintln!(
+                            "{}: {}: bad array subscript",
+                            self.arith_error_prefix(),
+                            display_name
+                        );
+                        eprintln!(
+                            "{}: {}: bad array subscript",
+                            self.arith_error_prefix(),
+                            display_name
+                        );
+                        crate::expand::set_arith_error();
+                        return ArithSubscript::Indexed(resolved, 0);
+                    }
                 }
             }
             let saved_in_subscript = self.arith_in_subscript;

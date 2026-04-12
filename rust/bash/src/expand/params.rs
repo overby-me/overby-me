@@ -2115,12 +2115,23 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
         let idx_str = &expr.name[bracket + 1..expr.name.len() - 1];
         let resolved = ctx.resolve_nameref(base);
         if idx_str != "@" && idx_str != "*" && !ctx.assoc_arrays.contains_key(&resolved) {
-            let has_set_elements = ctx
-                .arrays
-                .get(&resolved)
-                .is_some_and(|a| a.iter().any(|v| v.is_some()));
-            if !has_set_elements {
-                return "0".to_string();
+            // If the variable exists as an indexed array but has no
+            // set elements, ${#arr[expr]} returns "0" without
+            // evaluating the subscript (bash optimisation).
+            //
+            // Skip this shortcut when:
+            // - The variable is a scalar (e.g. x=hello) — scalars are
+            //   treated as single-element arrays, so ${#x[0]} must
+            //   return the string length, not 0.
+            // - The variable doesn't exist at all — we must NOT
+            //   return "0" here because `set -u` (nounset) should
+            //   produce an "unbound variable" error for completely
+            //   unset variables, even with ${#var[N]} syntax.
+            if let Some(arr) = ctx.arrays.get(&resolved) {
+                let has_set_elements = arr.iter().any(|v| v.is_some());
+                if !has_set_elements {
+                    return "0".to_string();
+                }
             }
         }
     }
@@ -2137,18 +2148,39 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
         false
     };
 
-    if val.is_empty()
-        && ctx.opt_flags.contains('u')
-        && !matches!(
+    // For ${#arr[N]} (Length with subscript), bash exempts from nounset
+    // when the array base name exists and has at least one set element —
+    // the length of a missing element is simply 0, not an error.
+    // Only completely unset arrays/variables trigger nounset for ${#var[N]}.
+    let length_subscript_exempt = if matches!(&expr.op, ParamOp::Length)
+        && let Some(bracket) = expr.name.find('[')
+    {
+        let base = &expr.name[..bracket];
+        let resolved_base = ctx.resolve_nameref(base);
+        ctx.arrays
+            .get(&resolved_base)
+            .is_some_and(|a| a.iter().any(|v| v.is_some()))
+            || ctx
+                .assoc_arrays
+                .get(&resolved_base)
+                .is_some_and(|a| !a.is_empty())
+    } else {
+        false
+    };
+
+    if !(!val.is_empty()
+        || !ctx.opt_flags.contains('u')
+        || length_subscript_exempt
+        || matches!(
             expr.op,
             ParamOp::Default(..) | ParamOp::Assign(..) | ParamOp::Alt(..) | ParamOp::Error(..)
         )
-        && !matches!(
+        || matches!(
             expr.name.as_str(),
             "?" | "$" | "#" | "@" | "*" | "-" | "0"
         )
         // $! is only exempt from nounset if a background job has been started
-        && !(expr.name == "!" && ctx.last_bg_pid != 0)
+        || expr.name == "!" && ctx.last_bg_pid != 0)
         && (is_positional_unbound
             || (expr.name.parse::<usize>().is_err()
                 && !ctx.vars.contains_key(&expr.name)
@@ -2225,15 +2257,16 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
                 // ${#arr[N]} — for indexed arrays, check empty-array shortcut
                 // and negative-N bounds.
                 if !ctx.assoc_arrays.contains_key(&resolved) && idx_str != "@" && idx_str != "*" {
-                    // If the indexed array has no set elements, ${#arr[expr]}
-                    // returns "0" without evaluating the subscript (bash
-                    // optimisation — skips subscript evaluation for empty arrays).
-                    let has_set_elements = ctx
-                        .arrays
-                        .get(&resolved)
-                        .is_some_and(|a| a.iter().any(|v| v.is_some()));
-                    if !has_set_elements {
-                        return "0".to_string();
+                    // If the variable exists as an indexed array but has
+                    // no set elements, ${#arr[expr]} returns "0" without
+                    // evaluating the subscript (bash optimisation).
+                    // Skip for scalars (${#x[0]} → string length) and
+                    // completely unset variables (nounset should fire).
+                    if let Some(arr) = ctx.arrays.get(&resolved) {
+                        let has_set_elements = arr.iter().any(|v| v.is_some());
+                        if !has_set_elements {
+                            return "0".to_string();
+                        }
                     }
                     // Don't re-evaluate the subscript here — lookup_var above
                     // already evaluated it via eval_arith_full_with_assoc.
