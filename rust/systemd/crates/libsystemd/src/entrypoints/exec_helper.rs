@@ -3075,160 +3075,79 @@ fn setup_mount_namespace(config: &ExecHelperConfig) {
         }
     }
 
-    // ── BindPaths= ───────────────────────────────────────────────────
-    // Format: SOURCE[:DEST[:OPTIONS]]
-    // If DEST is omitted, SOURCE is used as both source and destination.
-    if !config.bind_paths.is_empty() {
-        log::trace!(
-            "mount_ns: BindPaths ({} entries)...",
-            config.bind_paths.len()
-        );
-        for entry in &config.bind_paths {
-            // A leading '-' means the path is optional (no error if missing)
-            let (entry, optional) = if let Some(stripped) = entry.strip_prefix('-') {
-                (stripped, true)
-            } else {
-                (entry.as_str(), false)
-            };
-            let parts: Vec<&str> = entry.splitn(3, ':').collect();
-            let source = parts[0];
-            let dest = if parts.len() > 1 { parts[1] } else { source };
-            let recursive = parts.len() > 2 && parts[2].contains("rbind");
-            if Path::new(source).exists() {
-                // Ensure the destination mount point exists
-                if !Path::new(dest).exists() {
-                    if Path::new(source).is_dir() {
-                        let _ = std::fs::create_dir_all(dest);
-                    } else {
-                        // Create parent dirs and touch the file
-                        if let Some(parent) = Path::new(dest).parent() {
-                            let _ = std::fs::create_dir_all(parent);
-                        }
-                        let _ = std::fs::File::create(dest);
-                    }
-                }
-                let c_src = match std::ffi::CString::new(source) {
-                    Ok(c) => c,
-                    Err(_) => continue,
-                };
-                let c_dest = match std::ffi::CString::new(dest) {
-                    Ok(c) => c,
-                    Err(_) => continue,
-                };
-                let flags = if recursive {
-                    libc::MS_BIND | libc::MS_REC
+    // ── BindPaths= / BindReadOnlyPaths= / TemporaryFileSystem= ────────
+    //
+    // These three directives interact: TemporaryFileSystem mounts tmpfs over
+    // a path (hiding original files), then BindPaths can re-expose specific
+    // files on top.  To allow BindPaths sources that live under a
+    // TemporaryFileSystem path we open O_PATH file descriptors to sources
+    // BEFORE the tmpfs mounts, then use /proc/self/fd/N as the mount source.
+    //
+    // Order: 1) open source FDs, 2) mount tmpfs, 3) bind-mount via FDs.
+
+    // Collect bind-path entries with pre-opened source FDs.
+    struct BindEntry {
+        source_fd: Option<std::os::unix::io::RawFd>,
+        source_path: String,
+        dest: String,
+        recursive: bool,
+        is_dir: bool,
+        read_only: bool,
+    }
+
+    let mut bind_entries: Vec<BindEntry> = Vec::new();
+
+    // Helper: parse a bind-path spec and open source FD
+    let parse_bind = |entry: &str, read_only: bool| -> Option<BindEntry> {
+        let (entry, optional) = if let Some(stripped) = entry.strip_prefix('-') {
+            (stripped, true)
+        } else {
+            (entry, false)
+        };
+        let parts: Vec<&str> = entry.splitn(3, ':').collect();
+        let source = parts[0];
+        let dest = if parts.len() > 1 { parts[1] } else { source };
+        let recursive = parts.len() > 2 && parts[2].contains("rbind");
+
+        let source_path = Path::new(source);
+        if !source_path.exists() {
+            if !optional {
+                let kind = if read_only {
+                    "BindReadOnlyPaths"
                 } else {
-                    libc::MS_BIND
+                    "BindPaths"
                 };
-                let ret = unsafe {
-                    libc::mount(
-                        c_src.as_ptr(),
-                        c_dest.as_ptr(),
-                        std::ptr::null(),
-                        flags,
-                        std::ptr::null(),
-                    )
-                };
-                if ret != 0 {
-                    log::warn!(
-                        "Failed to bind-mount {} -> {}: {}",
-                        source,
-                        dest,
-                        std::io::Error::last_os_error()
-                    );
-                }
-            } else if !optional {
-                log::warn!("BindPaths= source does not exist: {}", source);
+                log::warn!("{kind}= source does not exist: {source}");
             }
+            return None;
+        }
+        let is_dir = source_path.is_dir();
+        // Open an O_PATH fd so we can reference this source after tmpfs mounts.
+        let c_src = std::ffi::CString::new(source).ok()?;
+        let fd = unsafe { libc::open(c_src.as_ptr(), libc::O_PATH | libc::O_CLOEXEC) };
+        Some(BindEntry {
+            source_fd: if fd >= 0 { Some(fd) } else { None },
+            source_path: source.to_string(),
+            dest: dest.to_string(),
+            recursive,
+            is_dir,
+            read_only,
+        })
+    };
+
+    // Step 1: open FDs for all bind sources
+    for entry in &config.bind_paths {
+        if let Some(be) = parse_bind(entry, false) {
+            bind_entries.push(be);
+        }
+    }
+    for entry in &config.bind_read_only_paths {
+        if let Some(be) = parse_bind(entry, true) {
+            bind_entries.push(be);
         }
     }
 
-    // ── BindReadOnlyPaths= ───────────────────────────────────────────
-    // Same as BindPaths= but the destination is remounted read-only.
-    if !config.bind_read_only_paths.is_empty() {
-        log::trace!(
-            "mount_ns: BindReadOnlyPaths ({} entries)...",
-            config.bind_read_only_paths.len()
-        );
-        for entry in &config.bind_read_only_paths {
-            // A leading '-' means the path is optional (no error if missing)
-            let (entry, optional) = if let Some(stripped) = entry.strip_prefix('-') {
-                (stripped, true)
-            } else {
-                (entry.as_str(), false)
-            };
-            let parts: Vec<&str> = entry.splitn(3, ':').collect();
-            let source = parts[0];
-            let dest = if parts.len() > 1 { parts[1] } else { source };
-            let recursive = parts.len() > 2 && parts[2].contains("rbind");
-            if Path::new(source).exists() {
-                if !Path::new(dest).exists() {
-                    if Path::new(source).is_dir() {
-                        let _ = std::fs::create_dir_all(dest);
-                    } else {
-                        if let Some(parent) = Path::new(dest).parent() {
-                            let _ = std::fs::create_dir_all(parent);
-                        }
-                        let _ = std::fs::File::create(dest);
-                    }
-                }
-                let c_src = match std::ffi::CString::new(source) {
-                    Ok(c) => c,
-                    Err(_) => continue,
-                };
-                let c_dest = match std::ffi::CString::new(dest) {
-                    Ok(c) => c,
-                    Err(_) => continue,
-                };
-                let flags = if recursive {
-                    libc::MS_BIND | libc::MS_REC
-                } else {
-                    libc::MS_BIND
-                };
-                // First: bind-mount
-                let ret = unsafe {
-                    libc::mount(
-                        c_src.as_ptr(),
-                        c_dest.as_ptr(),
-                        std::ptr::null(),
-                        flags,
-                        std::ptr::null(),
-                    )
-                };
-                if ret != 0 {
-                    log::warn!(
-                        "Failed to bind-mount {} -> {}: {}",
-                        source,
-                        dest,
-                        std::io::Error::last_os_error()
-                    );
-                    continue;
-                }
-                // Second: remount read-only
-                let ret = unsafe {
-                    libc::mount(
-                        std::ptr::null(),
-                        c_dest.as_ptr(),
-                        std::ptr::null(),
-                        libc::MS_BIND | libc::MS_REMOUNT | libc::MS_RDONLY | libc::MS_REC,
-                        std::ptr::null(),
-                    )
-                };
-                if ret != 0 {
-                    log::warn!(
-                        "Failed to remount {} read-only: {}",
-                        dest,
-                        std::io::Error::last_os_error()
-                    );
-                }
-            } else if !optional {
-                log::warn!("BindReadOnlyPaths= source does not exist: {}", source);
-            }
-        }
-    }
-
-    // ── TemporaryFileSystem= ──────────────────────────────────────────
-    // Format: PATH[:OPTIONS]
+    // Step 2: mount TemporaryFileSystem
     if !config.temporary_file_system.is_empty() {
         log::trace!(
             "mount_ns: TemporaryFileSystem ({} entries)...",
@@ -3247,8 +3166,6 @@ fn setup_mount_namespace(config: &ExecHelperConfig) {
                 Ok(c) => c,
                 Err(_) => continue,
             };
-            // Build mount options: always include mode=0755 as default,
-            // then append user-specified options
             let opts = if options.is_empty() {
                 "mode=0755".to_string()
             } else {
@@ -3274,6 +3191,87 @@ fn setup_mount_namespace(config: &ExecHelperConfig) {
                     std::io::Error::last_os_error()
                 );
             }
+        }
+    }
+
+    // Step 3: bind-mount using saved FDs (or original paths if no tmpfs involved)
+    if !bind_entries.is_empty() {
+        log::trace!(
+            "mount_ns: BindPaths/BindReadOnlyPaths ({} entries)...",
+            bind_entries.len()
+        );
+    }
+    for be in &bind_entries {
+        // Determine source path: use /proc/self/fd/N if we have an FD
+        let effective_source = if let Some(fd) = be.source_fd {
+            format!("/proc/self/fd/{fd}")
+        } else {
+            be.source_path.clone()
+        };
+
+        // Ensure destination mount point exists
+        if !Path::new(&be.dest).exists() {
+            if be.is_dir {
+                let _ = std::fs::create_dir_all(&be.dest);
+            } else {
+                if let Some(parent) = Path::new(&be.dest).parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                let _ = std::fs::File::create(&be.dest);
+            }
+        }
+
+        let c_src = match std::ffi::CString::new(effective_source.as_str()) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        let c_dest = match std::ffi::CString::new(be.dest.as_str()) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        let flags = if be.recursive {
+            libc::MS_BIND | libc::MS_REC
+        } else {
+            libc::MS_BIND
+        };
+        let ret = unsafe {
+            libc::mount(
+                c_src.as_ptr(),
+                c_dest.as_ptr(),
+                std::ptr::null(),
+                flags,
+                std::ptr::null(),
+            )
+        };
+        if ret != 0 {
+            log::warn!(
+                "Failed to bind-mount {} -> {}: {}",
+                be.source_path,
+                be.dest,
+                std::io::Error::last_os_error()
+            );
+        } else if be.read_only {
+            // Remount read-only
+            let ret = unsafe {
+                libc::mount(
+                    std::ptr::null(),
+                    c_dest.as_ptr(),
+                    std::ptr::null(),
+                    libc::MS_BIND | libc::MS_REMOUNT | libc::MS_RDONLY | libc::MS_REC,
+                    std::ptr::null(),
+                )
+            };
+            if ret != 0 {
+                log::warn!(
+                    "Failed to remount {} read-only: {}",
+                    be.dest,
+                    std::io::Error::last_os_error()
+                );
+            }
+        }
+        // Close the O_PATH fd now that the bind mount is done
+        if let Some(fd) = be.source_fd {
+            unsafe { libc::close(fd) };
         }
     }
 
