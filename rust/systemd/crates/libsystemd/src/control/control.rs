@@ -2810,6 +2810,7 @@ fn create_transient_unit(
     let mut dep_requires: Vec<String> = vec![];
     let mut dep_after: Vec<String> = vec![];
     let mut dep_before: Vec<String> = vec![];
+    let mut notify_access_explicitly_set = false;
     for prop in &params.properties {
         if let Some((key, value)) = prop.split_once('=') {
             match key {
@@ -2846,6 +2847,7 @@ fn create_transient_unit(
                     service_conf.exec_config.dynamic_user = matches!(value, "yes" | "true" | "1");
                 }
                 "NotifyAccess" => {
+                    notify_access_explicitly_set = true;
                     service_conf.notifyaccess = match value {
                         "all" => NotifyKind::All,
                         "main" => NotifyKind::Main,
@@ -3766,6 +3768,18 @@ fn create_transient_unit(
                 }
             }
         }
+    }
+
+    // In C systemd, Type=notify/notify-reload imply NotifyAccess=main.
+    // When Type is set via -p in the property loop, we need to apply
+    // this default after the loop (unless NotifyAccess was explicitly set).
+    if !notify_access_explicitly_set
+        && matches!(
+            service_conf.srcv_type,
+            ServiceType::Notify | ServiceType::NotifyReload
+        )
+    {
+        service_conf.notifyaccess = NotifyKind::Main;
     }
 
     // Inherit DefaultLimitNOFILE from manager defaults if not explicitly set.
