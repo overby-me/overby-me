@@ -2841,7 +2841,45 @@ impl Shell {
         } else {
             &assign.name
         };
-        let resolved_base = self.resolve_nameref(base_name);
+        let resolved_base_raw = self.resolve_nameref(base_name);
+        // When the resolved name contains a subscript (from a nameref target
+        // like `declare -n b='a[0]'`), decompose it: the real base is the
+        // part before `[` and the subscript comes from the nameref target.
+        // This allows assignments through subscripted namerefs to correctly
+        // modify array elements instead of creating scalars named "a[0]".
+        let nameref_subscript: Option<String>;
+        let resolved_base: String;
+        if assign.name.find('[').is_none() {
+            // The original assignment has no subscript — check if the nameref
+            // target introduced one.
+            if let Some(bracket) = resolved_base_raw.find('[') {
+                if resolved_base_raw.ends_with(']') {
+                    let rb = resolved_base_raw[..bracket].to_string();
+                    let sub =
+                        resolved_base_raw[bracket + 1..resolved_base_raw.len() - 1].to_string();
+                    // Only decompose when the base actually exists as an array
+                    // or assoc array. Otherwise, fall through so that bash
+                    // creates a scalar named "var[123]" (matching nix bash
+                    // behavior for non-existent array targets).
+                    if self.arrays.contains_key(&rb) || self.assoc_arrays.contains_key(&rb) {
+                        nameref_subscript = Some(sub);
+                        resolved_base = rb;
+                    } else {
+                        nameref_subscript = None;
+                        resolved_base = resolved_base_raw;
+                    }
+                } else {
+                    nameref_subscript = None;
+                    resolved_base = resolved_base_raw;
+                }
+            } else {
+                nameref_subscript = None;
+                resolved_base = resolved_base_raw;
+            }
+        } else {
+            nameref_subscript = None;
+            resolved_base = resolved_base_raw;
+        }
         // Noassign variables: silently ignore assignments
         if matches!(resolved_base.as_str(), "GROUPS" | "FUNCNAME") {
             return;
@@ -2870,7 +2908,10 @@ impl Shell {
         }
         // For array assignments with negative subscripts, check bounds BEFORE
         // the readonly check — bash reports "bad array subscript" first.
-        if let Some(bracket) = assign.name.find('[') {
+        if nameref_subscript.is_some() {
+            // Subscript comes from nameref target — bounds checking will be
+            // done during actual assignment below.
+        } else if let Some(bracket) = assign.name.find('[') {
             let raw_idx_str = &assign.name[bracket + 1..assign.name.len() - 1];
             // Dequote the subscript: the AST stores shell-level quoting
             // (e.g. `'\"' \"` for source `\" \"`), but arithmetic evaluation
@@ -2961,8 +3002,36 @@ impl Shell {
         }
         match &assign.value {
             AssignValue::None => {
-                let resolved = self.resolve_nameref(&assign.name);
-                self.vars.entry(resolved).or_default();
+                if let Some(ref sub) = nameref_subscript {
+                    // Nameref target has subscript — ensure array element exists
+                    if self.assoc_arrays.contains_key(&resolved_base) {
+                        self.assoc_arrays
+                            .entry(resolved_base.clone())
+                            .or_default()
+                            .entry(sub.clone())
+                            .or_default();
+                    } else {
+                        let aeo = self.is_array_expand_once();
+                        let expanded_sub;
+                        let eval_str = if !aeo && (sub.contains('$') || sub.contains('`')) {
+                            expanded_sub = self.expand_comsubs_in_arith(sub);
+                            expanded_sub.as_str()
+                        } else {
+                            sub.as_str()
+                        };
+                        let idx = self.eval_arith_expr(eval_str) as usize;
+                        let arr = self.arrays.entry(resolved_base.clone()).or_default();
+                        while arr.len() <= idx {
+                            arr.push(None);
+                        }
+                        if arr[idx].is_none() {
+                            arr[idx] = Some(String::new());
+                        }
+                    }
+                } else {
+                    let resolved = self.resolve_nameref(&assign.name);
+                    self.vars.entry(resolved).or_default();
+                }
             }
             AssignValue::Scalar(w) => {
                 let raw_value = self.expand_word_single(w);
@@ -2978,8 +3047,82 @@ impl Shell {
                 };
                 if assign.append {
                     let resolved = self.resolve_nameref(base_name);
+                    // Check if nameref target has subscript (e.g. b+=1 where b -> a[0])
+                    if let Some(ref nref_sub) = nameref_subscript {
+                        // Append through subscripted nameref target
+                        if self.assoc_arrays.contains_key(&resolved_base) {
+                            let is_int = self.integer_vars.contains(&resolved_base);
+                            if is_int {
+                                let addend = self.eval_arith_expr(&value);
+                                let default_val = addend.to_string();
+                                self.declared_unset.remove(&resolved_base);
+                                self.assoc_arrays
+                                    .entry(resolved_base.clone())
+                                    .or_default()
+                                    .entry(nref_sub.clone())
+                                    .and_modify(|v| {
+                                        let existing: i64 = v.parse().unwrap_or(0);
+                                        *v = (existing + addend).to_string();
+                                    })
+                                    .or_insert(default_val);
+                            } else {
+                                self.declared_unset.remove(&resolved_base);
+                                self.assoc_arrays
+                                    .entry(resolved_base.clone())
+                                    .or_default()
+                                    .entry(nref_sub.clone())
+                                    .and_modify(|v| v.push_str(&value))
+                                    .or_insert(value.clone());
+                            }
+                        } else {
+                            // Indexed array
+                            let aeo = self.is_array_expand_once();
+                            let expanded_sub;
+                            let eval_str =
+                                if !aeo && (nref_sub.contains('$') || nref_sub.contains('`')) {
+                                    expanded_sub = self.expand_comsubs_in_arith(nref_sub);
+                                    expanded_sub.as_str()
+                                } else {
+                                    nref_sub.as_str()
+                                };
+                            let raw_idx = self.eval_arith_expr(eval_str);
+                            if crate::expand::take_arith_error() {
+                                crate::expand::set_arith_error();
+                                return;
+                            }
+                            let is_int = self.integer_vars.contains(&resolved_base);
+                            self.declared_unset.remove(&resolved_base);
+                            let addend = if is_int {
+                                self.eval_arith_expr(&value)
+                            } else {
+                                0
+                            };
+                            let arr = self.arrays.entry(resolved_base.clone()).or_default();
+                            let idx = if raw_idx < 0 {
+                                let len = crate::interpreter::array_effective_len(arr) as i64;
+                                (len + raw_idx).max(0) as usize
+                            } else {
+                                raw_idx as usize
+                            };
+                            while arr.len() <= idx {
+                                arr.push(None);
+                            }
+                            if is_int {
+                                let existing: i64 = arr[idx]
+                                    .as_deref()
+                                    .and_then(|v| v.parse().ok())
+                                    .unwrap_or(0);
+                                arr[idx] = Some((existing + addend).to_string());
+                            } else {
+                                match &mut arr[idx] {
+                                    Some(s) => s.push_str(&value),
+                                    None => arr[idx] = Some(value.clone()),
+                                }
+                            }
+                        }
+                    }
                     // Check if it's an array element append (x[n]+=val)
-                    if let Some(bracket) = assign.name.find('[') {
+                    else if let Some(bracket) = assign.name.find('[') {
                         let raw_idx_str = &assign.name[bracket + 1..assign.name.len() - 1];
                         let had_single_quotes = raw_idx_str.contains('\'');
                         let idx_str_owned = Self::dequote_subscript(raw_idx_str);
@@ -3148,6 +3291,56 @@ impl Shell {
                     } else {
                         let existing = self.vars.get(&resolved).cloned().unwrap_or_default();
                         self.set_var(&assign.name, format!("{}{}", existing, value));
+                    }
+                } else if let Some(ref nref_sub) = nameref_subscript {
+                    // Non-append assignment through subscripted nameref target
+                    // (e.g. `b=X` where `declare -n b='a[0]'`)
+                    if self.assoc_arrays.contains_key(&resolved_base) {
+                        let is_int = self.integer_vars.contains(&resolved_base);
+                        let final_val = if is_int {
+                            self.eval_arith_expr(&value).to_string()
+                        } else {
+                            value.clone()
+                        };
+                        self.declared_unset.remove(&resolved_base);
+                        self.assoc_arrays
+                            .entry(resolved_base.clone())
+                            .or_default()
+                            .insert(nref_sub.clone(), final_val);
+                    } else {
+                        // Indexed array
+                        let aeo = self.is_array_expand_once();
+                        let expanded_sub;
+                        let eval_str = if !aeo && (nref_sub.contains('$') || nref_sub.contains('`'))
+                        {
+                            expanded_sub = self.expand_comsubs_in_arith(nref_sub);
+                            expanded_sub.as_str()
+                        } else {
+                            nref_sub.as_str()
+                        };
+                        let raw_idx = self.eval_arith_expr(eval_str);
+                        if crate::expand::take_arith_error() {
+                            crate::expand::set_arith_error();
+                            return;
+                        }
+                        let is_int = self.integer_vars.contains(&resolved_base);
+                        let final_val = if is_int {
+                            self.eval_arith_expr(&value).to_string()
+                        } else {
+                            value.clone()
+                        };
+                        self.declared_unset.remove(&resolved_base);
+                        let arr = self.arrays.entry(resolved_base.clone()).or_default();
+                        let idx = if raw_idx < 0 {
+                            let len = crate::interpreter::array_effective_len(arr) as i64;
+                            (len + raw_idx).max(0) as usize
+                        } else {
+                            raw_idx as usize
+                        };
+                        while arr.len() <= idx {
+                            arr.push(None);
+                        }
+                        arr[idx] = Some(final_val);
                     }
                 } else {
                     // Check for arr[n]=value or map[key]=value

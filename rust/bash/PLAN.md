@@ -2,7 +2,7 @@
 
 ## Current State
 
-**74/77 nix tests consistently passing** (Phase 71), ~69/83 local tests passing (0 diff, sequential). Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available). **Phase 71** reduced **nameref** from ~445→~347 nix diff (~22% reduction) with six fixes: (1) `readonly` now resolves through namerefs — `readonly ref` where `ref` is a nameref marks the *target* variable readonly (matching bash behavior where `declare -n ref=foo; readonly ref` makes `foo` readonly); (2) `declare -p` for namerefs now includes all attribute flags (`-nr`, `-nx`, etc.) and omits `=""` for empty namerefs (was always showing just `declare -n`); (3) self-reference handling distinguishes function scope from global scope — `typeset -n v=$1` where `$1=v` inside a function now warns "circular name reference" but still creates the nameref (matching bash), while `declare -n x=x` at global scope still errors "self references not allowed"; (4) `resolve_nameref_warn` emits "circular name reference" and "maximum nameref depth (8) exceeded" warnings on actual variable access (get/set), matching bash's warning behavior; (5) nameref target validation — `declare -n r=/`, `declare -n r=42`, `r=^` on empty nameref etc. now correctly reject invalid variable names with "invalid variable name for name reference" or "not a valid identifier"; (6) nameref local scope save/restore — `SavedVar` now includes nameref state, so `declare -n var` inside functions is properly cleaned up on return (was leaking namerefs into global scope). Also fixed: nameref2 (readonly through nameref), nameref5 (readonly for-loop), nameref7 (local nameref cleanup), nameref24 (invalid nameref target validation). **array** ~4 (array27.sub only), **nameref** ~347, **varenv** ~260.
+**74/77 nix tests consistently passing** (Phase 72), ~69/83 local tests passing (0 diff, sequential). Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available). **Phase 72** fixed **subscripted nameref target assignment** — `declare -n b='a[0]'; b+=1` now correctly modifies `a[0]` through the nameref instead of creating a separate scalar `b`. Two-pronged fix: (1) `execute_assignment` decomposes subscripted nameref targets (e.g. `a[0]`) into base name (`a`) and subscript (`0`) when the base exists as an array or assoc array, then performs element-level assignment (including append `+=` with integer arithmetic and string concatenation); (2) `set_var` similarly handles subscripted resolved names from nameref chains, assigning to array elements when the base array exists. nameref23.sub reduced from ~31→~13 nix diff lines (integer append through subscripted namerefs, string append through subscripted namerefs, `declare -p` through namerefs). nameref21.sub reduced by 2 lines, nameref3.sub reduced by 2 lines, nameref15.sub reduced by 2 lines. **array** ~6, **nameref** ~347 (sub-test improvements offset by diff alignment shifts from `local` output dumps), **varenv** ~260.
 
 See `CHANGELOG.md` for full fix history (240+ fixes across 71 phases).
 
@@ -273,6 +273,10 @@ Suggested nix timeout: 30s for most tests, 120s for trap.
 - ~~**array4.sub**~~ ✅ — `a=(5+3) b=(4+7)` compound assignment parsing; `a=(4*3)/2` integer array scalar evaluation
 - ~~**array11.sub**~~ ✅ — `declare -A array2["foo[bar]"]=bleh` subscripted assignment to assoc key
 
+### Now passing locally (Phase 72 reduced sub-tests)
+
+- **nameref23.sub** reduced 31→13 nix diff lines (subscripted nameref target assignment: `declare -n b='a[0]'; b+=1` now correctly increments `a[0]` through integer array nameref; string append through subscripted namerefs; `declare -p` output for namerefs with subscripted targets)
+
 ### Now passing locally (Phase 71 reduced sub-tests)
 
 - ~~**nameref2.sub**~~ ✅ — readonly through nameref: `readonly ref` marks target readonly
@@ -383,6 +387,14 @@ These exist in `/tmp/bash-5.3/tests/` but not in the nix test list:
 11. **Performance: optimize hot loops** — `ifs-posix` takes ~4 minutes vs bash's ~1s. `arith` takes ~2s vs bash's 0.035s. Profiling needed.
 
 12. ~~**Fix `help` builtin output**~~ ✅ **Implemented in Phase 38.** ~~**Fix `ulimit` flags**~~ ✅ **Fixed in Phase 39.** Full ulimit rewrite with all resource flags (`-abcdefiklmnpqrstuvxPRT`), `-S`/`-H` soft/hard, `soft`/`hard`/`unlimited` keywords, `+N` rejection, proper error messages. ~~**Implement `BASH_CMDS` hash table sync**~~ ✅ **Fixed in Phase 40.** Bidirectional sync between `BASH_CMDS` assoc array and hash table.
+
+## Recent Fixes (Phase 72)
+
+- **Subscripted nameref target assignment in `execute_assignment`** — When a nameref target contains a subscript (e.g. `declare -n b='a[0]'`), assignments like `b=X`, `b+=1`, `b+=" bar"` now correctly modify the array element `a[0]` instead of creating a separate scalar variable. The fix decomposes the resolved name into base and subscript when the base exists as an array or assoc array. Handles both indexed arrays (arithmetic subscript evaluation) and associative arrays (string key lookup). Supports integer arithmetic append (`declare -ai a; b+=1` increments through nameref), string append (`b+=" bar"` concatenates through nameref), and plain assignment (`b=X` sets element through nameref). Fixes nameref23.sub (`declare -ai a; declare -n b='a[0]'; b+=1` now increments `a[0]`), reduces diff from ~31 to ~13 lines.
+- **Subscripted nameref target assignment in `set_var`** — `set_var` now handles resolved names with subscripts (from nameref chains like `b` → `a[0]`) by assigning to array elements when the base array exists. This covers assignments from contexts other than `execute_assignment` (e.g. arithmetic evaluator `((b=5))`, for-loop iteration variables, etc.). Both indexed arrays (with arithmetic subscript evaluation including negative indices) and associative arrays are supported.
+- **No-value assignment through subscripted namerefs** — `b=` (AssignValue::None) through a subscripted nameref now creates/initializes the array element instead of creating a scalar.
+
+**Phase 72 summary:** Fixes subscripted nameref target assignment. nameref23.sub reduced 31→13 diff lines. nameref21.sub, nameref3.sub, nameref15.sub each reduced by 2 lines. Total nix passing: **74/77** (unchanged). No previously passing tests regressed.
 
 ## Recent Fixes (Phase 71)
 

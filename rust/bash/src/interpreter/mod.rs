@@ -1028,6 +1028,60 @@ impl Shell {
                 unsafe { std::env::set_var(&resolved, &value) };
             }
         }
+        // If the resolved name contains a subscript (e.g. nameref target is
+        // "var[0]"), parse it and assign to the array element — but ONLY when
+        // the base variable already exists as an array or assoc array.
+        // When the base doesn't exist as an array, fall through to create a
+        // scalar named "var[123]" (matching nix bash behavior).
+        if let Some(bracket) = resolved.find('[')
+            && resolved.ends_with(']')
+        {
+            let base = &resolved[..bracket];
+            let subscript = &resolved[bracket + 1..resolved.len() - 1];
+            if self.assoc_arrays.contains_key(base) {
+                let key = subscript.to_string();
+                self.declared_unset.remove(base);
+                self.assoc_arrays
+                    .entry(base.to_string())
+                    .or_default()
+                    .insert(key, value);
+                return;
+            } else if self.arrays.contains_key(base) {
+                // Base exists as an indexed array — assign to element.
+                self.declared_unset.remove(base);
+                let aeo = self.is_array_expand_once();
+                let expanded_sub;
+                let eval_str = if !aeo && (subscript.contains('$') || subscript.contains('`')) {
+                    expanded_sub = self.expand_comsubs_in_arith(subscript);
+                    expanded_sub.as_str()
+                } else {
+                    subscript
+                };
+                let idx = self.eval_arith_expr(eval_str);
+                if crate::expand::take_arith_error() {
+                    return;
+                }
+                let arr = self.arrays.entry(base.to_string()).or_default();
+                let eff_len = array_effective_len(arr) as i64;
+                let actual_idx = if idx < 0 {
+                    let computed = eff_len + idx;
+                    if computed < 0 {
+                        0usize
+                    } else {
+                        computed as usize
+                    }
+                } else {
+                    idx as usize
+                };
+                while arr.len() <= actual_idx {
+                    arr.push(None);
+                }
+                arr[actual_idx] = Some(value);
+                return;
+            }
+            // Base is not an array — fall through to create scalar
+            // named "var[123]"
+        }
         self.declared_unset.remove(&resolved);
         // If the variable is an existing indexed array, assign to element [0]
         // instead of creating a separate scalar entry (bash behavior:
