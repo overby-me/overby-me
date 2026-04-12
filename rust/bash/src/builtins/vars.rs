@@ -957,12 +957,53 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
         i += 1;
     }
 
+    let mut status = 0;
     for name_arg in &names {
         let var_name;
         if let Some(eq_pos) = name_arg.find('=') {
             let name = &name_arg[..eq_pos];
             let value = &name_arg[eq_pos + 1..];
             var_name = name.to_string();
+            // Check readonly BEFORE assignment — `local var=value` should
+            // error if:
+            //   (a) var is globally readonly (not saved in ANY local scope), OR
+            //   (b) var is readonly in the CURRENT function's local scope
+            // But if var is readonly from an OUTER function scope (saved in
+            // a scope that is not the current one), bash allows shadowing —
+            // `declare_local` will save the old value and remove readonly.
+            let is_readonly_and_blocking = if shell.readonly_vars.contains(name) {
+                // Check if the readonly comes from an outer local scope
+                // (i.e., saved in some scope below the top).  If so, allow.
+                let in_current_scope = shell
+                    .local_scopes
+                    .last()
+                    .is_some_and(|s| s.contains_key(name));
+                let in_any_outer_scope = shell.local_scopes.len() >= 2
+                    && shell.local_scopes[..shell.local_scopes.len() - 1]
+                        .iter()
+                        .any(|s| s.contains_key(name));
+                if in_current_scope {
+                    // Already declared local in THIS function and readonly → error
+                    true
+                } else if in_any_outer_scope {
+                    // Readonly from an outer function scope → allow shadowing
+                    false
+                } else {
+                    // Globally readonly (not in any local scope) → error
+                    true
+                }
+            } else {
+                false
+            };
+            if is_readonly_and_blocking {
+                eprintln!(
+                    "{}: local: {}: readonly variable",
+                    shell.error_prefix(),
+                    name
+                );
+                status = 1;
+                continue;
+            }
             shell.declare_local(name);
             if flag_integer {
                 shell.integer_vars.insert(name.to_string());
@@ -1023,27 +1064,39 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
                 // `local v` without `=`: creates a declared-but-unset local
                 // that shadows any outer/global value.  However, if the
                 // variable was set via temp env (`v=t f`), bash inherits the
-                // exported value — temp env vars are already in the function's
-                // local scope.  We detect temp env by checking the export
-                // attribute: prefix assignments (`v=t f`) add the variable to
-                // both vars and exports before the function body runs.
-                if shell.exports.contains_key(name_arg.as_str()) {
-                    // Temp env / exported variable — keep inherited value
+                // temp env value.  We detect temp env by checking
+                // `shell.temp_env_vars` which is set by `run_simple_command`
+                // before calling `run_function`.
+                if shell.temp_env_vars.contains(name_arg.as_str()) {
+                    // Temp env variable — keep inherited value
                     // (bash shows `declare -x v="t"`)
                 } else {
                     // Regular global or unset — shadow with declared-but-unset
                     // (bash shows `declare -- v` with no value)
                     shell.vars.remove(name_arg.as_str());
                     shell.declared_unset.insert(name_arg.clone());
+                    // Also remove from process environment so that the
+                    // expansion fallback (`std::env::var`) doesn't leak the
+                    // exported value.  The scope restore on function exit
+                    // will re-export it if needed.
+                    if shell.exports.contains_key(name_arg.as_str()) {
+                        unsafe { std::env::remove_var(name_arg.as_str()) };
+                    }
                 }
             }
         }
-        // Apply readonly attribute
+        // Check readonly BEFORE applying attributes — if the variable is
+        // readonly (from outer scope or current scope), `local name=value`
+        // should fail with "readonly variable" error.  But `local name`
+        // (no `=`) without -r flag is allowed to shadow readonly globals
+        // in bash... actually no: bash rejects `local var=value` when var
+        // is readonly, but the declare_local above already ran.  We need
+        // to check readonly BEFORE the assignment.
         if flag_readonly {
             shell.readonly_vars.insert(var_name);
         }
     }
-    0
+    status
 }
 
 // ── declare -f formatting helpers ──────────────────────────────────────────
@@ -3174,11 +3227,18 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 if make_local && shell.vars.contains_key(attr_name) {
                     // In function scope: `declare v` (no =) creates a local
                     // declared-but-unset variable that shadows the global.
-                    // Exception: if the variable is exported (temp env from
-                    // `v=t f`), bash inherits the value.
-                    if !shell.exports.contains_key(attr_name) {
+                    // Exception: if the variable was set via temp env prefix
+                    // (`v=t f`), bash inherits the value.
+                    if !shell.temp_env_vars.contains(attr_name) {
                         shell.vars.remove(attr_name);
                         shell.declared_unset.insert(attr_name.to_string());
+                        // Also remove from process environment so that the
+                        // expansion fallback (`std::env::var`) doesn't leak
+                        // the exported value.  The scope restore on function
+                        // exit will re-export it if needed.
+                        if shell.exports.contains_key(attr_name) {
+                            unsafe { std::env::remove_var(attr_name) };
+                        }
                     }
                 } else if !shell.vars.contains_key(attr_name) {
                     shell.declared_unset.insert(attr_name.to_string());

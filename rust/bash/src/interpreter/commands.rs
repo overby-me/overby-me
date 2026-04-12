@@ -1831,7 +1831,20 @@ impl Shell {
                 })
                 .collect();
 
+            // Track which variables were set as temp env prefixes so that
+            // `local VAR` (no `=`) inside the function inherits the value
+            // instead of becoming declared-but-unset.
+            let old_temp_env = std::mem::take(&mut self.temp_env_vars);
+            for (k, _, _, _) in &prefix_saves {
+                if !k.is_empty() {
+                    self.temp_env_vars.insert(k.clone());
+                }
+            }
+
             let result = self.run_function(&func_body, command_name, args);
+
+            // Restore previous temp_env_vars
+            self.temp_env_vars = old_temp_env;
 
             // Restore prefix assignments (vars + exports)
             for (k, set_val, old_var, old_export) in &prefix_saves {
@@ -2529,12 +2542,15 @@ impl Shell {
                     std::process::exit(result);
                 }
             }
-            // Prefix assignments to `export` and `declare -x` always persist
-            // (they are equivalent to export). In POSIX mode, all special
-            // builtins persist prefix assignments.
-            let is_export_like = matches!(command_name.as_str(), "export")
+            // Prefix assignments to `export`/`readonly` and `declare -x`/`declare -r`
+            // always persist (they are assignment-like builtins that absorb prefix
+            // assignments). In POSIX mode, all special builtins persist prefix
+            // assignments.
+            let is_export_like = matches!(command_name.as_str(), "export" | "readonly")
                 || (matches!(command_name.as_str(), "declare" | "typeset")
-                    && args.iter().any(|a| a.starts_with('-') && a.contains('x')));
+                    && args
+                        .iter()
+                        .any(|a| a.starts_with('-') && (a.contains('x') || a.contains('r'))));
             if !(expanded_words.is_empty() || self.opt_posix && is_special || is_export_like) {
                 for (k, old_var, old_export) in saved {
                     if k.is_empty() {
@@ -3985,11 +4001,23 @@ impl Shell {
                 // Restore nameref state
                 match saved.nameref {
                     Some(target) => {
-                        self.namerefs.insert(var_name, target);
+                        self.namerefs.insert(var_name.clone(), target);
                     }
                     None => {
                         self.namerefs.remove(&var_name);
                     }
+                }
+                // Re-sync process environment for exported variables.
+                // When `local VAR` (no `=`) created a declared-but-unset
+                // local for an exported variable, we removed the var from
+                // the process env to prevent the expansion fallback
+                // (`std::env::var`) from leaking the value.  Now that the
+                // scope is being restored, re-export the value if it's
+                // still in `self.exports`.
+                if let Some(export_val) = self.exports.get(&var_name)
+                    && self.vars.contains_key(&var_name)
+                {
+                    unsafe { std::env::set_var(&var_name, export_val) };
                 }
             }
         }

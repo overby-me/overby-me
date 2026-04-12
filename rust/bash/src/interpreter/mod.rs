@@ -443,6 +443,11 @@ pub struct Shell {
     /// Dirty flags for dynamic assoc arrays — set when backing store changes
     pub bash_cmds_dirty: bool,
     pub bash_aliases_dirty: bool,
+    /// Variables set as prefix assignments for the current function call
+    /// (e.g., `VAR=val func`). These are tracked so that `local VAR` (no `=`)
+    /// inside the function inherits the temp env value instead of becoming
+    /// declared-but-unset.
+    pub temp_env_vars: HashSet<String>,
 }
 
 impl Shell {
@@ -644,6 +649,7 @@ impl Shell {
             builtins: builtins::builtins(),
             bash_cmds_dirty: true,
             bash_aliases_dirty: true,
+            temp_env_vars: HashSet::new(),
             current_execution_input: None,
         };
 
