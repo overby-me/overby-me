@@ -1353,14 +1353,21 @@ pub fn parse_indexed_compound_assignment(s: &str) -> Vec<Option<String>> {
             {
                 let subscript = &elem[1..bracket_end];
                 let value = &elem[bracket_end + 2..];
-                if let Ok(idx) = subscript.trim().parse::<usize>() {
-                    while result.len() <= idx {
-                        result.push(None);
-                    }
-                    result[idx] = Some(value.to_string());
-                    next_idx = idx + 1;
+                // Parse subscript as integer; for non-numeric subscripts
+                // (e.g. [foo]) default to 0, matching bash's arithmetic
+                // evaluation where an unset variable evaluates to 0.
+                let idx = subscript.trim().parse::<i64>().unwrap_or(0);
+                if idx < 0 {
+                    // Negative indices — skip for now (would need array length context)
                     continue;
                 }
+                let idx = idx as usize;
+                while result.len() <= idx {
+                    result.push(None);
+                }
+                result[idx] = Some(value.to_string());
+                next_idx = idx + 1;
+                continue;
             }
             // No subscript — sequential assignment
             while result.len() <= next_idx {

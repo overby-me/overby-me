@@ -2354,9 +2354,24 @@ impl Shell {
                                                         {
                                                             let subscript = &f[1..bracket_end];
                                                             let value = &f[bracket_end + 2..];
-                                                            if let Ok(idx) =
-                                                                subscript.trim().parse::<usize>()
-                                                            {
+                                                            // Evaluate subscript as arithmetic
+                                                            // so that [foo] (undefined var) → 0,
+                                                            // [1+2] → 3, etc., matching bash.
+                                                            let raw_idx = self
+                                                                .eval_arith_expr(subscript.trim());
+                                                            if !crate::expand::take_arith_error() {
+                                                                let idx = if raw_idx < 0 {
+                                                                    let eff_len = crate::interpreter::array_effective_len(&arr) as i64;
+                                                                    let computed =
+                                                                        eff_len + raw_idx;
+                                                                    if computed < 0 {
+                                                                        0usize
+                                                                    } else {
+                                                                        computed as usize
+                                                                    }
+                                                                } else {
+                                                                    raw_idx as usize
+                                                                };
                                                                 while arr.len() <= idx {
                                                                     arr.push(None);
                                                                 }
@@ -2521,8 +2536,20 @@ impl Shell {
                     return 1;
                 }
             }
-            // Save old vars AND exports, then set prefix assignments in both
-            // so that builtins like `declare -p` see the -x flag during execution.
+            // Save old vars AND exports, then set prefix assignments.
+            // For declaration builtins (declare/typeset/local) inside a function
+            // scope, do NOT export — they create local variables and the prefix
+            // should only affect the local scope.  For all other commands
+            // (external commands, non-declaration builtins, export/readonly,
+            // and declare at global scope), export so child processes / builtins
+            // like `declare -p` see the -x flag during execution.
+            //
+            // EXCEPTION: if the declare has -x flag, the prefix SHOULD be
+            // exported (the user explicitly requested export via declare -x).
+            let has_export_flag = args.iter().any(|a| a.starts_with('-') && a.contains('x'));
+            let is_declaration_in_func = !self.local_scopes.is_empty()
+                && matches!(command_name.as_str(), "declare" | "typeset" | "local")
+                && !has_export_flag;
             let saved: Vec<(String, Option<String>, Option<String>)> = prefix_exports
                 .iter()
                 .filter(|(k, _)| !k.is_empty())
@@ -2530,8 +2557,10 @@ impl Shell {
                     let old_var = self.vars.get(k).cloned();
                     let old_export = self.exports.get(k).cloned();
                     self.vars.insert(k.clone(), v.clone());
-                    self.exports.insert(k.clone(), v.clone());
-                    unsafe { std::env::set_var(k, v) };
+                    if !is_declaration_in_func {
+                        self.exports.insert(k.clone(), v.clone());
+                        unsafe { std::env::set_var(k, v) };
+                    }
                     (k.clone(), old_var, old_export)
                 })
                 .collect();
@@ -2661,8 +2690,17 @@ impl Shell {
             // assignments.  Bare `declare`/`typeset`/`local` without -x/-r do NOT
             // persist prefix assignments (bash behavior: "but not persist after
             // the command").
+            //
+            // IMPORTANT: `declare -r`/`declare -x`/`local -r`/`local -x` inside
+            // a function scope create LOCAL variables.  Prefix assignments affect
+            // the local only and should NOT persist to the global scope.  Only
+            // `export`/`readonly` (which don't create locals) and `declare -r`/
+            // `declare -x` at GLOBAL scope (no local_scopes) persist prefix
+            // assignments and export them.
+            let in_function_scope = !self.local_scopes.is_empty();
             let is_export_like = matches!(command_name.as_str(), "export" | "readonly")
-                || (matches!(command_name.as_str(), "declare" | "typeset" | "local")
+                || (!in_function_scope
+                    && matches!(command_name.as_str(), "declare" | "typeset")
                     && args
                         .iter()
                         .any(|a| a.starts_with('-') && (a.contains('x') || a.contains('r'))));

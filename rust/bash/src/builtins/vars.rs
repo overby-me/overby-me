@@ -2914,19 +2914,63 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                             }
                         }
                     } else {
-                        let mut arr = crate::builtins::parse_indexed_compound_assignment(value);
-                        if flag_integer {
-                            // Evaluate each element as arithmetic when -i is set
-                            let evaluated: Vec<Option<String>> = arr
-                                .into_iter()
-                                .map(|v| v.map(|s| shell.eval_arith_expr(&s).to_string()))
-                                .collect();
-                            shell.arrays.insert(name.to_string(), evaluated);
-                            shell.integer_vars.insert(name.to_string());
-                        } else {
-                            // Apply case transforms directly using local flags, since
-                            // uppercase_vars/lowercase_vars aren't populated yet
-                            if flag_uppercase || flag_lowercase || flag_capitalize {
+                        // Use parse_compound_assignment_raw + arithmetic eval
+                        // so that subscripts like [foo] are evaluated as
+                        // arithmetic (foo → 0) instead of being treated as
+                        // literal text via parse::<usize>().
+                        let raw_elems = crate::builtins::parse_compound_assignment_raw(value);
+                        let has_any_subscript = raw_elems.iter().any(|(sub, _)| sub.is_some());
+                        if has_any_subscript {
+                            let mut arr: Vec<Option<String>> = Vec::new();
+                            let mut next_idx: usize = 0;
+                            let mut had_error = false;
+                            for (sub_opt, val_raw) in &raw_elems {
+                                if had_error {
+                                    break;
+                                }
+                                if let Some(subscript) = sub_opt {
+                                    let raw_idx = shell.eval_arith_expr(subscript);
+                                    if crate::expand::take_arith_error() {
+                                        had_error = true;
+                                        arr.clear();
+                                        break;
+                                    }
+                                    let final_val = if flag_integer {
+                                        shell.eval_arith_expr(val_raw).to_string()
+                                    } else {
+                                        val_raw.clone()
+                                    };
+                                    let idx = if raw_idx < 0 {
+                                        let eff_len =
+                                            crate::interpreter::array_effective_len(&arr) as i64;
+                                        let computed = eff_len + raw_idx;
+                                        if computed < 0 {
+                                            0usize
+                                        } else {
+                                            computed as usize
+                                        }
+                                    } else {
+                                        raw_idx as usize
+                                    };
+                                    while arr.len() <= idx {
+                                        arr.push(None);
+                                    }
+                                    arr[idx] = Some(final_val);
+                                    next_idx = idx + 1;
+                                } else {
+                                    let final_val = if flag_integer {
+                                        shell.eval_arith_expr(val_raw).to_string()
+                                    } else {
+                                        val_raw.clone()
+                                    };
+                                    while arr.len() <= next_idx {
+                                        arr.push(None);
+                                    }
+                                    arr[next_idx] = Some(final_val);
+                                    next_idx += 1;
+                                }
+                            }
+                            if !had_error && (flag_uppercase || flag_lowercase || flag_capitalize) {
                                 for val in arr.iter_mut().flatten() {
                                     *val = if flag_uppercase {
                                         val.to_uppercase()
@@ -2937,7 +2981,36 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                                     };
                                 }
                             }
+                            if flag_integer {
+                                shell.integer_vars.insert(name.to_string());
+                            }
                             shell.arrays.insert(name.to_string(), arr);
+                        } else {
+                            let mut arr = crate::builtins::parse_indexed_compound_assignment(value);
+                            if flag_integer {
+                                // Evaluate each element as arithmetic when -i is set
+                                let evaluated: Vec<Option<String>> = arr
+                                    .into_iter()
+                                    .map(|v| v.map(|s| shell.eval_arith_expr(&s).to_string()))
+                                    .collect();
+                                shell.arrays.insert(name.to_string(), evaluated);
+                                shell.integer_vars.insert(name.to_string());
+                            } else {
+                                // Apply case transforms directly using local flags, since
+                                // uppercase_vars/lowercase_vars aren't populated yet
+                                if flag_uppercase || flag_lowercase || flag_capitalize {
+                                    for val in arr.iter_mut().flatten() {
+                                        *val = if flag_uppercase {
+                                            val.to_uppercase()
+                                        } else if flag_lowercase {
+                                            val.to_lowercase()
+                                        } else {
+                                            crate::interpreter::capitalize_string(val)
+                                        };
+                                    }
+                                }
+                                shell.arrays.insert(name.to_string(), arr);
+                            }
                         }
                     }
                 } else {
