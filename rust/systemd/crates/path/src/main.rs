@@ -547,7 +547,7 @@ mod tests {
     #[test]
     fn test_get_home_absolute() {
         // If HOME is set to an absolute path, it should be used
-        std::env::set_var("HOME", "/test/home");
+        unsafe { std::env::set_var("HOME", "/test/home") };
         assert_eq!(get_home(), "/test/home");
     }
 }

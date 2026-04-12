@@ -4419,12 +4419,31 @@ pub fn execute_command(
             let unit_name = params.unit_name.clone();
             let do_wait = params.wait;
             let do_pipe = params.pipe;
+
+            // Check if this transient unit has a companion timer/path/socket
+            // that will trigger the service. In that case, we should NOT
+            // activate the service immediately — the timer/path/socket unit
+            // is already created in Running state and will activate the
+            // service when its trigger condition is met.
+            let has_trigger = params.on_calendar.is_some()
+                || !params.on_active.is_empty()
+                || params.on_boot.is_some()
+                || params.on_startup.is_some()
+                || params.on_unit_active.is_some()
+                || params.on_unit_inactive.is_some()
+                || params.on_clock_change
+                || params.on_timezone_change
+                || !params.timer_properties.is_empty()
+                || !params.path_properties.is_empty()
+                || !params.socket_properties.is_empty();
+
             let id = create_transient_unit(&params, &run_info)?;
             // Load dependency units (Wants=, Requires=, After=) from disk
             // so the full dependency graph is available for activation.
             load_dependency_units(&id, &run_info);
-            // Now start the unit and all its dependencies.
-            {
+
+            if !has_trigger {
+                // No companion trigger unit — start the service directly.
                 let errs = crate::units::activate_needed_units(id.clone(), run_info.clone());
                 if !errs.is_empty() {
                     let mut errstr = format!("Failed to start transient unit {unit_name}:");
@@ -8648,6 +8667,7 @@ mod tests {
                         up_since: None,
                         restart_count: 0,
                         start_timestamps: Vec::new(),
+                        freezer_state: crate::units::FreezerState::Running,
                     },
                 }),
             }),
@@ -10417,10 +10437,20 @@ mod tests {
             environment: Vec::new(),
             scope: false,
             wait: false,
+            pipe: false,
             slice: None,
             on_calendar: None,
-            on_active: None,
+            on_active: vec![],
             on_boot: None,
+            on_startup: None,
+            on_unit_active: None,
+            on_unit_inactive: None,
+            on_clock_change: false,
+            on_timezone_change: false,
+            timer_properties: Vec::new(),
+            path_properties: Vec::new(),
+            socket_properties: Vec::new(),
+            nice: None,
         };
         let debug = format!("{params:?}");
         assert!(debug.contains("run-test.service"));
@@ -10442,10 +10472,20 @@ mod tests {
             environment: Vec::new(),
             scope: false,
             wait: false,
+            pipe: false,
             slice: None,
             on_calendar: None,
-            on_active: None,
+            on_active: vec![],
             on_boot: None,
+            on_startup: None,
+            on_unit_active: None,
+            on_unit_inactive: None,
+            on_clock_change: false,
+            on_timezone_change: false,
+            timer_properties: Vec::new(),
+            path_properties: Vec::new(),
+            socket_properties: Vec::new(),
+            nice: None,
         };
         let cloned = params.clone();
         assert_eq!(cloned.unit_name, params.unit_name);

@@ -1020,6 +1020,7 @@ mod tests {
             notifications_path: None,
             stdout: None,
             stderr: None,
+            journal_stream: None,
             notifications_buffer: String::new(),
             stdout_buffer: Vec::new(),
             stderr_buffer: Vec::new(),
@@ -1033,6 +1034,12 @@ mod tests {
             trigger_timer_realtime_usec: None,
             trigger_timer_monotonic_usec: None,
             monitor_env: None,
+            exec_main_start_timestamp: None,
+            exec_main_handoff_timestamp: None,
+            exec_main_exit_timestamp: None,
+            extend_timeout_usec: None,
+            extend_timeout_timestamp: None,
+            join_namespace_pid: None,
             manual_stop: false,
         }
     }

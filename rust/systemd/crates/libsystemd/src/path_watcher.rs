@@ -1319,10 +1319,10 @@ mod tests {
         };
         let mut history = HashMap::new();
         let mut state = HashMap::new();
-        assert!(
-            should_trigger_path(&conf, "test.path", Instant::now(), &mut history, &mut state)
-                .is_none()
-        );
+        assert!(matches!(
+            should_trigger_path(&conf, "test.path", Instant::now(), &mut history, &mut state),
+            TriggerResult::NoMatch
+        ));
     }
 
     #[test]
@@ -1341,10 +1341,10 @@ mod tests {
         };
         let mut history = HashMap::new();
         let mut state = HashMap::new();
-        assert!(
-            should_trigger_path(&conf, "test.path", Instant::now(), &mut history, &mut state)
-                .is_some()
-        );
+        assert!(matches!(
+            should_trigger_path(&conf, "test.path", Instant::now(), &mut history, &mut state),
+            TriggerResult::Fire(_)
+        ));
     }
 
     #[test]
@@ -1361,10 +1361,10 @@ mod tests {
         };
         let mut history = HashMap::new();
         let mut state = HashMap::new();
-        assert!(
-            should_trigger_path(&conf, "test.path", Instant::now(), &mut history, &mut state)
-                .is_none()
-        );
+        assert!(matches!(
+            should_trigger_path(&conf, "test.path", Instant::now(), &mut history, &mut state),
+            TriggerResult::NoMatch
+        ));
     }
 
     // -- Inotify-specific tests ----------------------------------------------

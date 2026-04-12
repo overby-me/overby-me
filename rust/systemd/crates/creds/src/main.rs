@@ -1842,7 +1842,7 @@ mod tests {
     #[test]
     fn test_hex_decode() {
         assert_eq!(hex_decode("00ffab").unwrap(), vec![0x00, 0xFF, 0xAB]);
-        assert_eq!(hex_decode("").unwrap(), vec![]);
+        assert_eq!(hex_decode("").unwrap(), Vec::<u8>::new());
         assert!(hex_decode("0").is_err()); // odd length
         assert!(hex_decode("gg").is_err()); // invalid hex
     }

@@ -2650,6 +2650,7 @@ mod tests {
                         up_since: None,
                         restart_count: 0,
                         start_timestamps: Vec::new(),
+                        freezer_state: crate::units::FreezerState::Running,
                     },
                 }),
             }),

@@ -1479,7 +1479,7 @@ mod tests {
 
     #[test]
     fn test_header_roundtrip() {
-        let header = FileHeader::new();
+        let header = FileHeader::new(JournalCompress::None);
         let bytes = header.serialize();
         let header2 = FileHeader::deserialize(&bytes).unwrap();
 
@@ -1611,7 +1611,7 @@ mod tests {
         let dir = temp_dir("file_create");
         let path = dir.join("test.journal");
 
-        let mut jf = JournalFile::create(&path).unwrap();
+        let mut jf = JournalFile::create(&path, JournalCompress::None).unwrap();
         assert_eq!(jf.header.entry_count, 0);
 
         let entry1 = make_test_entry("first entry", 6, 1);
@@ -1640,7 +1640,7 @@ mod tests {
 
         // Create and write
         {
-            let mut jf = JournalFile::create(&path).unwrap();
+            let mut jf = JournalFile::create(&path, JournalCompress::None).unwrap();
             let entry = make_test_entry("persisted entry", 6, 1);
             jf.append(&entry, 1).unwrap();
         }
@@ -1667,7 +1667,7 @@ mod tests {
 
         // Create and write one entry
         {
-            let mut jf = JournalFile::create(&path).unwrap();
+            let mut jf = JournalFile::create(&path, JournalCompress::None).unwrap();
             jf.append(&make_test_entry("entry 1", 6, 1), 1).unwrap();
         }
 
@@ -1700,6 +1700,9 @@ mod tests {
             persistent: false,
             keep_free: 0,
             direct_directory: false,
+            compress: JournalCompress::None,
+            file_filter: Vec::new(),
+            active_filename: None,
         };
 
         let mut storage = JournalStorage::new(config).unwrap();
@@ -1733,6 +1736,9 @@ mod tests {
             persistent: false,
             keep_free: 0,
             direct_directory: false,
+            compress: JournalCompress::None,
+            file_filter: Vec::new(),
+            active_filename: None,
         };
 
         let mut storage = JournalStorage::new(config).unwrap();
@@ -1769,6 +1775,9 @@ mod tests {
             persistent: false,
             keep_free: 0,
             direct_directory: false,
+            compress: JournalCompress::None,
+            file_filter: Vec::new(),
+            active_filename: None,
         };
 
         let mut storage = JournalStorage::new(config).unwrap();
@@ -1801,6 +1810,9 @@ mod tests {
             persistent: false,
             keep_free: 0,
             direct_directory: false,
+            compress: JournalCompress::None,
+            file_filter: Vec::new(),
+            active_filename: None,
         };
 
         let mut storage = JournalStorage::new(config).unwrap();
@@ -1969,6 +1981,9 @@ mod tests {
             persistent: false,
             keep_free: 0,
             direct_directory: false,
+            compress: JournalCompress::None,
+            file_filter: Vec::new(),
+            active_filename: None,
         };
         let storage = JournalStorage::new(config).unwrap();
         (dir, storage)

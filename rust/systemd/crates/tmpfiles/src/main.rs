@@ -3537,7 +3537,7 @@ mod tests {
         fs::write(src.join("file1.txt"), "hello").unwrap();
         fs::write(src.join("subdir/file2.txt"), "world").unwrap();
 
-        copy_dir_recursive(&src, &dst).unwrap();
+        copy_dir_recursive_with_owner(&src, &dst, true, None).unwrap();
 
         assert!(dst.join("file1.txt").is_file());
         assert!(dst.join("subdir/file2.txt").is_file());

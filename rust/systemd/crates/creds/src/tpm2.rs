@@ -1350,7 +1350,7 @@ mod tests {
     #[test]
     fn test_hex_to_bytes() {
         assert_eq!(hex_to_bytes("00ff").unwrap(), vec![0x00, 0xFF]);
-        assert_eq!(hex_to_bytes("").unwrap(), vec![]);
+        assert_eq!(hex_to_bytes("").unwrap(), Vec::<u8>::new());
         assert!(hex_to_bytes("0").is_err()); // odd length
     }
 

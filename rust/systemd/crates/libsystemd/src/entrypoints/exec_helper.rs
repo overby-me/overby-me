@@ -4804,7 +4804,7 @@ mod tests {
     #[test]
     fn test_expand_env_str_unset_var() {
         // Unset variables expand to empty string
-        std::env::remove_var("TEST_EXPAND_NONEXISTENT");
+        unsafe { std::env::remove_var("TEST_EXPAND_NONEXISTENT") };
         assert_eq!(expand_env_str("${TEST_EXPAND_NONEXISTENT}"), "");
         assert_eq!(expand_env_str("$TEST_EXPAND_NONEXISTENT"), "");
     }
