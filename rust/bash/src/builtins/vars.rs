@@ -2890,6 +2890,29 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             } else {
                 (name_arg.as_str(), false)
             };
+
+            // When the variable is a nameref and we're applying attributes
+            // (not -n itself), resolve through the nameref chain so that
+            // attributes like -i, -r, -x, -a, -A are applied to the target.
+            // e.g. `declare -n foo=bar; declare -i foo` → applies -i to bar.
+            let has_attr_flags = flag_integer
+                || flag_readonly
+                || flag_export
+                || flag_array
+                || flag_assoc
+                || flag_uppercase
+                || flag_lowercase
+                || flag_capitalize
+                || flag_trace;
+            let resolved_name: String;
+            let attr_name: &str =
+                if !flag_nameref && has_attr_flags && shell.namerefs.contains_key(name) {
+                    resolved_name = shell.resolve_nameref(name);
+                    &resolved_name
+                } else {
+                    name
+                };
+
             // Can't remove readonly attribute
             if flag_unset_readonly && shell.readonly_vars.contains(name) {
                 eprintln!(
@@ -2905,7 +2928,7 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             if make_local {
                 shell.declare_local(name);
             }
-            if flag_nameref {
+            if flag_nameref && !has_attr_flags {
                 // `typeset -n foo` (no value): if foo is already a nameref,
                 // this is a no-op (keep the existing target). Otherwise, use
                 // foo's current value as the nameref target, then remove it
@@ -2962,156 +2985,154 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 } // end of !already-nameref block
             } else if flag_assoc {
                 // Error if trying to convert an existing indexed array to assoc
-                if shell.arrays.contains_key(name) {
-                    // Bash error format for type conversion:
-                    // - Inside function with -g flag: two errors:
-                    //   "{prefix}: {func}: {name}: cannot convert..."
-                    //   "{prefix}: {cmd_name}: {name}: cannot convert..."
-                    // - Inside function without -g: one error:
-                    //   "{prefix}: {cmd_name}: {name}: cannot convert..."
-                    // - At top level: one error:
-                    //   "{prefix}: {name}: cannot convert..."
+                if shell.arrays.contains_key(attr_name) {
                     if flag_global && let Some(func) = shell.func_names.last() {
                         eprintln!(
                             "{}: {}: {}: cannot convert indexed to associative array",
                             shell.error_prefix(),
                             func,
-                            name
+                            attr_name
                         );
                     }
                     if shell.func_names.is_empty() && !flag_global {
                         eprintln!(
                             "{}: {}: cannot convert indexed to associative array",
                             shell.error_prefix(),
-                            name
+                            attr_name
                         );
                     } else {
                         eprintln!(
                             "{}: {}: {}: cannot convert indexed to associative array",
                             shell.error_prefix(),
                             cmd_name,
-                            name
+                            attr_name
                         );
                     }
                     status = 1;
-                } else if !shell.assoc_arrays.contains_key(name) {
+                } else if !shell.assoc_arrays.contains_key(attr_name) {
                     if make_local {
-                        // In a function, `declare -A name` creates a new empty
-                        // local associative array — do NOT carry over the global
-                        // scalar value as element ["0"].
-                        shell.vars.remove(name);
+                        shell.vars.remove(attr_name);
                         let new_map = crate::interpreter::AssocArray::default();
-                        shell.assoc_arrays.insert(name.to_string(), new_map);
-                        shell.declared_unset.insert(name.to_string());
+                        shell.assoc_arrays.insert(attr_name.to_string(), new_map);
+                        shell.declared_unset.insert(attr_name.to_string());
                     } else {
                         let mut new_map = crate::interpreter::AssocArray::default();
-                        // Convert existing scalar value to element [0]
-                        if let Some(val) = shell.vars.remove(name) {
+                        if let Some(val) = shell.vars.remove(attr_name) {
                             new_map.insert("0".to_string(), val);
                         } else {
-                            shell.declared_unset.insert(name.to_string());
+                            shell.declared_unset.insert(attr_name.to_string());
                         }
-                        shell.assoc_arrays.insert(name.to_string(), new_map);
+                        shell.assoc_arrays.insert(attr_name.to_string(), new_map);
                     }
                 }
             } else if flag_array {
                 // Error if trying to convert an existing assoc array to indexed
-                if shell.assoc_arrays.contains_key(name) {
-                    // Bash error format for type conversion:
-                    // - Inside function with -g flag: two errors:
-                    //   "{prefix}: {func}: {name}: cannot convert..."
-                    //   "{prefix}: {cmd_name}: {name}: cannot convert..."
-                    // - Inside function without -g: one error:
-                    //   "{prefix}: {cmd_name}: {name}: cannot convert..."
-                    // - At top level: one error:
-                    //   "{prefix}: {name}: cannot convert..."
+                if shell.assoc_arrays.contains_key(attr_name) {
                     if flag_global && let Some(func) = shell.func_names.last() {
                         eprintln!(
                             "{}: {}: {}: cannot convert associative to indexed array",
                             shell.error_prefix(),
                             func,
-                            name
+                            attr_name
                         );
                     }
                     if shell.func_names.is_empty() && !flag_global {
                         eprintln!(
                             "{}: {}: cannot convert associative to indexed array",
                             shell.error_prefix(),
-                            name
+                            attr_name
                         );
                     } else {
                         eprintln!(
                             "{}: {}: {}: cannot convert associative to indexed array",
                             shell.error_prefix(),
                             cmd_name,
-                            name
+                            attr_name
                         );
                     }
                     status = 1;
-                } else if !shell.arrays.contains_key(name) {
+                } else if !shell.arrays.contains_key(attr_name) {
                     if make_local {
-                        // In a function, `declare -a name` creates a new empty
-                        // local indexed array — do NOT carry over the global
-                        // scalar value as element [0].
-                        shell.vars.remove(name);
-                        shell.arrays.insert(name.to_string(), vec![]);
-                        shell.declared_unset.insert(name.to_string());
+                        shell.vars.remove(attr_name);
+                        shell.arrays.insert(attr_name.to_string(), vec![]);
+                        shell.declared_unset.insert(attr_name.to_string());
+                    } else if let Some(val) = shell.vars.remove(attr_name) {
+                        shell.arrays.insert(attr_name.to_string(), vec![Some(val)]);
                     } else {
-                        // Convert existing scalar value to array[0]
-                        if let Some(val) = shell.vars.remove(name) {
-                            shell.arrays.insert(name.to_string(), vec![Some(val)]);
-                        } else {
-                            shell.arrays.entry(name.to_string()).or_default();
-                            shell.declared_unset.insert(name.to_string());
-                        }
+                        shell.arrays.entry(attr_name.to_string()).or_default();
+                        shell.declared_unset.insert(attr_name.to_string());
                     }
                 }
-            } else if had_subscript && !shell.arrays.contains_key(name) {
+            } else if had_subscript && !shell.arrays.contains_key(attr_name) {
                 // declare -r c[100] (with subscript, no -a flag): create empty array
-                shell.arrays.entry(name.to_string()).or_default();
-                shell.declared_unset.insert(name.to_string());
-            } else if !shell.vars.contains_key(name) {
+                shell.arrays.entry(attr_name.to_string()).or_default();
+                shell.declared_unset.insert(attr_name.to_string());
+            } else if !shell.vars.contains_key(attr_name)
+                && !shell.arrays.contains_key(attr_name)
+                && !shell.assoc_arrays.contains_key(attr_name)
+            {
                 // declare without = marks the variable as declared-but-unset
                 // (don't insert into vars — bash distinguishes this from "")
-                shell.declared_unset.insert(name.to_string());
+                shell.declared_unset.insert(attr_name.to_string());
             }
 
             if flag_integer {
-                let was_integer = shell.integer_vars.contains(name);
-                shell.integer_vars.insert(name.to_string());
-                // When -i is newly applied to an existing array, re-evaluate
-                // all elements as arithmetic expressions.  This handles
-                // `declare -ai arr=(1+1 2+2 3+3)` where the compound
-                // assignment was executed before the integer flag was set.
-                if !was_integer && let Some(arr) = shell.arrays.get(name).cloned() {
+                let was_integer = shell.integer_vars.contains(attr_name);
+                shell.integer_vars.insert(attr_name.to_string());
+                if !was_integer && let Some(arr) = shell.arrays.get(attr_name).cloned() {
                     let evaluated: Vec<Option<String>> = arr
                         .into_iter()
                         .map(|v| v.map(|s| shell.eval_arith_expr(&s).to_string()))
                         .collect();
-                    shell.arrays.insert(name.to_string(), evaluated);
+                    shell.arrays.insert(attr_name.to_string(), evaluated);
                 }
             }
             if flag_readonly {
-                shell.readonly_vars.insert(name.to_string());
+                shell.readonly_vars.insert(attr_name.to_string());
             }
             if flag_export {
-                let val = shell.get_var(name).unwrap_or_default();
-                shell.exports.insert(name.to_string(), val.clone());
-                unsafe { std::env::set_var(name, &val) };
+                let val = shell.get_var(attr_name).unwrap_or_default();
+                shell.exports.insert(attr_name.to_string(), val.clone());
+                unsafe { std::env::set_var(attr_name, &val) };
             }
             if flag_uppercase {
-                shell.uppercase_vars.insert(name.to_string());
-                shell.lowercase_vars.remove(name);
+                shell.uppercase_vars.insert(attr_name.to_string());
+                shell.lowercase_vars.remove(attr_name);
+                if let Some(v) = shell.vars.get(attr_name).cloned() {
+                    shell.vars.insert(attr_name.to_string(), v.to_uppercase());
+                }
+                if let Some(arr) = shell.arrays.get_mut(attr_name) {
+                    for val in arr.iter_mut().flatten() {
+                        *val = val.to_uppercase();
+                    }
+                }
             }
             if flag_lowercase {
-                shell.lowercase_vars.insert(name.to_string());
-                shell.uppercase_vars.remove(name);
-                shell.capitalize_vars.remove(name);
+                shell.lowercase_vars.insert(attr_name.to_string());
+                shell.uppercase_vars.remove(attr_name);
+                shell.capitalize_vars.remove(attr_name);
+                if let Some(v) = shell.vars.get(attr_name).cloned() {
+                    shell.vars.insert(attr_name.to_string(), v.to_lowercase());
+                }
+                if let Some(arr) = shell.arrays.get_mut(attr_name) {
+                    for val in arr.iter_mut().flatten() {
+                        *val = val.to_lowercase();
+                    }
+                }
             }
             if flag_capitalize {
-                shell.capitalize_vars.insert(name.to_string());
-                shell.uppercase_vars.remove(name);
-                shell.lowercase_vars.remove(name);
+                shell.capitalize_vars.insert(attr_name.to_string());
+                shell.uppercase_vars.remove(attr_name);
+                shell.lowercase_vars.remove(attr_name);
+                if let Some(v) = shell.vars.get(attr_name).cloned() {
+                    let cap = capitalize_string(&v);
+                    shell.vars.insert(attr_name.to_string(), cap);
+                }
+                if let Some(arr) = shell.arrays.get_mut(attr_name) {
+                    for val in arr.iter_mut().flatten() {
+                        *val = capitalize_string(val);
+                    }
+                }
             }
         }
     }

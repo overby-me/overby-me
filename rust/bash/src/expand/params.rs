@@ -178,14 +178,23 @@ pub(super) fn get_array_elements(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSub
     // ${!prefix@} — return matching variable names as separate elements
     if let ParamOp::NamePrefix('@') = &expr.op {
         let prefix = &expr.name;
-        let mut names: Vec<String> = ctx
-            .vars
-            .keys()
-            .filter(|k| k.starts_with(prefix.as_str()))
-            .cloned()
-            .collect();
-        names.sort();
-        return names;
+        let mut name_set: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for k in ctx.vars.keys() {
+            if k.starts_with(prefix.as_str()) {
+                name_set.insert(k.clone());
+            }
+        }
+        for k in ctx.arrays.keys() {
+            if k.starts_with(prefix.as_str()) {
+                name_set.insert(k.clone());
+            }
+        }
+        for k in ctx.assoc_arrays.keys() {
+            if k.starts_with(prefix.as_str()) {
+                name_set.insert(k.clone());
+            }
+        }
+        return name_set.into_iter().collect();
     }
     // ${!arr[@]} — return indices/keys as elements
     if let ParamOp::ArrayIndices(_, _) = &expr.op {
@@ -2337,13 +2346,26 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
         }
         ParamOp::NamePrefix(ch) => {
             // ${!prefix@} or ${!prefix*} — variable names matching prefix
+            // Must include scalars, indexed arrays, and associative arrays
             let prefix = &expr.name;
-            let mut names: Vec<&String> = ctx
-                .vars
-                .keys()
-                .filter(|k| k.starts_with(prefix.as_str()))
-                .collect();
-            names.sort();
+            let mut name_set: std::collections::BTreeSet<&String> =
+                std::collections::BTreeSet::new();
+            for k in ctx.vars.keys() {
+                if k.starts_with(prefix.as_str()) {
+                    name_set.insert(k);
+                }
+            }
+            for k in ctx.arrays.keys() {
+                if k.starts_with(prefix.as_str()) {
+                    name_set.insert(k);
+                }
+            }
+            for k in ctx.assoc_arrays.keys() {
+                if k.starts_with(prefix.as_str()) {
+                    name_set.insert(k);
+                }
+            }
+            let names: Vec<&str> = name_set.iter().map(|s| s.as_str()).collect();
             // ${!prefix*} joins with first char of IFS (like "$*");
             // ${!prefix@} always joins with space (like "$@" in double quotes).
             let sep = if *ch == '*' {
@@ -2354,11 +2376,7 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
             } else {
                 " ".to_string()
             };
-            names
-                .iter()
-                .map(|s| s.as_str())
-                .collect::<Vec<_>>()
-                .join(&sep)
+            names.join(&sep)
         }
         ParamOp::ArrayIndices(_ch, transform) => {
             // ${!arr[@]} or ${!arr[*]} — array indices/keys
