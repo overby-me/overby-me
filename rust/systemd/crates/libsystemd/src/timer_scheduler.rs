@@ -24,55 +24,113 @@ use crate::units::{ActivationSource, Specific, StatusStarted, TimerConfig, UnitI
 /// we consider it a clock change event (OnClockChange=).
 const CLOCK_JUMP_THRESHOLD_SECS: i64 = 2;
 
+/// Tracked state for a single localtime path (mtime + symlink target).
+struct LocaltimeState {
+    path: std::path::PathBuf,
+    last_mtime: Option<std::time::SystemTime>,
+    last_target: Option<std::path::PathBuf>,
+}
+
+impl LocaltimeState {
+    fn new(path: std::path::PathBuf) -> Self {
+        let last_mtime = std::fs::symlink_metadata(&path)
+            .and_then(|m| m.modified())
+            .ok();
+        let last_target = std::fs::read_link(&path).ok();
+        Self {
+            path,
+            last_mtime,
+            last_target,
+        }
+    }
+
+    fn changed(&mut self) -> bool {
+        let current_mtime = std::fs::symlink_metadata(&self.path)
+            .and_then(|m| m.modified())
+            .ok();
+        let current_target = std::fs::read_link(&self.path).ok();
+        let mtime_changed = match (&self.last_mtime, &current_mtime) {
+            (Some(old), Some(new)) => old != new,
+            (None, Some(_)) => true,
+            (Some(_), None) => true,
+            (None, None) => false,
+        };
+        let target_changed = self.last_target != current_target;
+        let changed = mtime_changed || target_changed;
+        if changed {
+            self.last_mtime = current_mtime;
+            self.last_target = current_target;
+        }
+        changed
+    }
+}
+
 /// State for detecting clock and timezone changes between scheduler ticks.
 struct ChangeDetector {
-    /// Last known mtime of /etc/localtime symlink (for timezone change detection).
-    last_localtime_mtime: Option<std::time::SystemTime>,
-    /// Last known symlink target of /etc/localtime.
-    last_localtime_target: Option<std::path::PathBuf>,
+    /// Tracked localtime paths — always includes `/etc/localtime`, plus any
+    /// `SYSTEMD_ETC_LOCALTIME` override from the manager environment.
+    localtime_states: Vec<LocaltimeState>,
     /// Last wall-clock reading (for clock jump detection).
     last_wallclock: Option<SystemTime>,
     /// Last monotonic reading corresponding to last_wallclock.
     last_monotonic: Option<Instant>,
 }
 
+/// Get the `SYSTEMD_ETC_LOCALTIME` override from the manager environment, if set.
+fn manager_localtime_override(run_info: &ArcMutRuntimeInfo) -> Option<std::path::PathBuf> {
+    let ri = run_info.read_poisoned();
+    if let Ok(env) = ri.manager_environment.lock()
+        && let Some(path) = env.get("SYSTEMD_ETC_LOCALTIME")
+    {
+        let p = std::path::PathBuf::from(path);
+        if p != std::path::Path::new("/etc/localtime") {
+            return Some(p);
+        }
+    }
+    None
+}
+
 impl ChangeDetector {
-    fn new() -> Self {
-        let localtime_mtime = std::fs::symlink_metadata("/etc/localtime")
-            .and_then(|m| m.modified())
-            .ok();
-        let localtime_target = std::fs::read_link("/etc/localtime").ok();
+    fn new(run_info: &ArcMutRuntimeInfo) -> Self {
+        let mut states = vec![LocaltimeState::new("/etc/localtime".into())];
+        if let Some(alt) = manager_localtime_override(run_info) {
+            states.push(LocaltimeState::new(alt));
+        }
         Self {
-            last_localtime_mtime: localtime_mtime,
-            last_localtime_target: localtime_target,
+            localtime_states: states,
             last_wallclock: Some(SystemTime::now()),
             last_monotonic: Some(Instant::now()),
         }
     }
 
     /// Check if the timezone has changed since the last call.
-    /// Detects changes by comparing both the mtime and symlink target of
-    /// /etc/localtime. Using symlink_metadata avoids following the symlink,
-    /// so we detect when the symlink itself is replaced (even if the target
-    /// zoneinfo files have identical mtimes).
-    fn timezone_changed(&mut self) -> bool {
-        let current_mtime = std::fs::symlink_metadata("/etc/localtime")
-            .and_then(|m| m.modified())
-            .ok();
-        let current_target = std::fs::read_link("/etc/localtime").ok();
-        let mtime_changed = match (&self.last_localtime_mtime, &current_mtime) {
-            (Some(old), Some(new)) => old != new,
-            (None, Some(_)) => true,
-            (Some(_), None) => true,
-            (None, None) => false,
-        };
-        let target_changed = self.last_localtime_target != current_target;
-        let changed = mtime_changed || target_changed;
-        if changed {
-            self.last_localtime_mtime = current_mtime;
-            self.last_localtime_target = current_target;
+    /// Monitors both `/etc/localtime` and any `SYSTEMD_ETC_LOCALTIME` override.
+    /// Using symlink_metadata avoids following symlinks, so we detect when
+    /// the symlink itself is replaced (even if target zoneinfo files have
+    /// identical mtimes).
+    fn timezone_changed(&mut self, run_info: &ArcMutRuntimeInfo) -> bool {
+        // Check if the override path changed (e.g. after daemon-reload)
+        let current_override = manager_localtime_override(run_info);
+        let have_override = self.localtime_states.len() > 1;
+        match (&current_override, have_override) {
+            (Some(new_path), false) => {
+                // New override appeared — start tracking it
+                self.localtime_states
+                    .push(LocaltimeState::new(new_path.clone()));
+            }
+            (Some(new_path), true) if *new_path != self.localtime_states[1].path => {
+                // Override path changed — replace tracker
+                self.localtime_states[1] = LocaltimeState::new(new_path.clone());
+            }
+            (None, true) => {
+                // Override removed
+                self.localtime_states.truncate(1);
+            }
+            _ => {}
         }
-        changed
+
+        // Check all tracked paths
+        self.localtime_states.iter_mut().any(|s| s.changed())
     }
 
     /// Check if the system clock has jumped since the last call.
@@ -145,6 +203,11 @@ pub fn start_timer_scheduler_thread(run_info: ArcMutRuntimeInfo) {
         .spawn(move || {
             info!("Timer scheduler started");
 
+            // Initialize the change detector BEFORE the initial sleep so it
+            // captures the pre-sleep timezone/clock state. This way, changes
+            // that occur during the initial sleep are detected on the first tick.
+            let mut change_detector = ChangeDetector::new(&run_info);
+
             // Give the system a moment to finish initial activation before
             // checking timers for the first time.  This avoids firing
             // OnBootSec=0 timers before their target services are loaded.
@@ -155,17 +218,9 @@ pub fn start_timer_scheduler_thread(run_info: ArcMutRuntimeInfo) {
             let mut last_fired: std::collections::HashMap<String, Instant> =
                 std::collections::HashMap::new();
 
-            let mut change_detector = ChangeDetector::new();
-
-            // Track which timers we've seen before. Timers first seen on a tick
-            // where OnClockChange/OnTimezoneChange fires are excluded from
-            // firing, because the change predates their creation.
-            let mut known_timers: std::collections::HashSet<String> =
-                std::collections::HashSet::new();
-
             loop {
                 // Detect clock/timezone changes before checking timers
-                let tz_changed = change_detector.timezone_changed();
+                let tz_changed = change_detector.timezone_changed(&run_info);
                 let (clock_changed, pre_jump_wallclock) = change_detector.clock_changed();
 
                 if tz_changed {
@@ -182,7 +237,6 @@ pub fn start_timer_scheduler_thread(run_info: ArcMutRuntimeInfo) {
                     tz_changed,
                     clock_changed,
                     pre_jump_wallclock,
-                    &mut known_timers,
                 );
                 // Use a short interval (250ms) to detect clock/timezone changes
                 // promptly. The original 15s interval is too slow for tests that
@@ -201,7 +255,6 @@ fn check_and_fire_timers(
     timezone_changed: bool,
     clock_changed: bool,
     pre_jump_wallclock: Option<SystemTime>,
-    known_timers: &mut std::collections::HashSet<String>,
 ) {
     let now = Instant::now();
     let elapsed_since_boot = now.duration_since(boot_instant);
@@ -224,23 +277,14 @@ fn check_and_fire_timers(
                 let timer_name = &unit.id.name;
                 let target_unit = &conf.unit;
 
-                // Track newly-seen timers. Timers first seen on a tick where
-                // OnClockChange/OnTimezoneChange is detected must NOT fire for
-                // that change, since the change predated the timer's creation.
-                // This prevents a race where changes are detected on the same
-                // scheduler tick that a new timer appears.
-                let is_new = known_timers.insert(timer_name.clone());
-                let effective_tz_changed = timezone_changed && !is_new;
-                let effective_clock_changed = clock_changed && !is_new;
-
                 if should_fire_timer(
                     conf,
                     timer_name,
                     elapsed_since_boot,
                     now,
                     last_fired,
-                    effective_tz_changed,
-                    effective_clock_changed,
+                    timezone_changed,
+                    clock_changed,
                     pre_jump_wallclock,
                 ) {
                     timers_to_fire.push((unit.id.clone(), target_unit.clone()));

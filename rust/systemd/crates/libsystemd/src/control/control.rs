@@ -2142,6 +2142,72 @@ fn unit_id_from_name(name: &str) -> UnitId {
     }
 }
 
+/// Parse ManagerEnvironment= from system.conf and drop-ins, updating the
+/// manager environment. Called during daemon-reload to pick up changes to
+/// /run/systemd/system.conf or /etc/systemd/system.conf.
+fn parse_manager_environment(run_info: &ArcMutRuntimeInfo) {
+    let mut env_vars: Vec<(String, String)> = Vec::new();
+
+    // Read from main system.conf files (in priority order, last wins)
+    for path in &[
+        "/usr/lib/systemd/system.conf",
+        "/etc/systemd/system.conf",
+        "/run/systemd/system.conf",
+    ] {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            for line in content.lines() {
+                let line = line.trim();
+                if let Some(val) = line.strip_prefix("ManagerEnvironment=") {
+                    // Parse space-separated KEY=VALUE pairs
+                    for pair in val.split_whitespace() {
+                        if let Some((k, v)) = pair.split_once('=') {
+                            env_vars.push((k.to_owned(), v.to_owned()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Read from system.conf.d drop-ins
+    for dir in &[
+        "/usr/lib/systemd/system.conf.d",
+        "/etc/systemd/system.conf.d",
+        "/run/systemd/system.conf.d",
+    ] {
+        let dir = std::path::Path::new(dir);
+        if !dir.is_dir() {
+            continue;
+        }
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            let mut files: Vec<_> = entries.flatten().collect();
+            files.sort_by_key(|e| e.file_name());
+            for entry in files {
+                if let Ok(content) = std::fs::read_to_string(entry.path()) {
+                    for line in content.lines() {
+                        let line = line.trim();
+                        if let Some(val) = line.strip_prefix("ManagerEnvironment=") {
+                            for pair in val.split_whitespace() {
+                                if let Some((k, v)) = pair.split_once('=') {
+                                    env_vars.push((k.to_owned(), v.to_owned()));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if !env_vars.is_empty() {
+        let ri = run_info.read_poisoned();
+        let mut env = ri.manager_environment.lock().unwrap();
+        for (k, v) in env_vars {
+            env.insert(k, v);
+        }
+    }
+}
+
 /// Read the DefaultLimitNOFILE setting from system.conf.d drop-ins.
 /// Returns `None` if no default is configured.
 fn read_default_limit_nofile() -> Option<crate::units::ResourceLimit> {
@@ -8194,6 +8260,11 @@ pub fn execute_command(
             }
         }
         Command::LoadAllNew => {
+            // Re-read ManagerEnvironment= from system.conf and drop-ins.
+            // This allows `systemctl daemon-reload` to pick up changes to
+            // /run/systemd/system.conf or /etc/systemd/system.conf.
+            parse_manager_environment(&run_info);
+
             let run_info = &mut *run_info.write_poisoned();
             let unit_table = &run_info.unit_table;
             // Load all units without pruning so that standalone units
