@@ -5,11 +5,12 @@
 //! print them (one `Key=Value` per line, lists space-separated, booleans as
 //! `yes`/`no`, timestamps as `n/a` when unavailable).
 
+use crate::calendar_spec::CalendarSpec;
 use crate::lock_ext::RwLockExt;
 use crate::units::{
     Commandline, CommandlinePrefix, ExecConfig, FreezerState, KillMode, MountConfig, NotifyKind,
     ServiceConfig, ServiceRestart, ServiceType, SliceConfig, SocketConfig, Specific, SwapConfig,
-    Timeout, Unit, UnitConfig, UnitStatus,
+    Timeout, TimerConfig, Unit, UnitConfig, UnitStatus,
 };
 
 /// Insertion-order-preserving property map.
@@ -553,10 +554,14 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
                 "WakeSystem",
                 if tmr.conf.wake_system { "yes" } else { "no" },
             );
-            // NextElapseUSecRealtime — compute next calendar trigger time
+            // NextElapseUSecRealtime — compute next calendar event including
+            // RandomizedDelaySec. Find the first event T where T + random_delay > now,
+            // then report T + random_delay.
             if !tmr.conf.on_calendar.is_empty() {
-                if let Some(next) = compute_next_calendar_elapse(&tmr.conf.on_calendar) {
-                    insert(&mut props, "NextElapseUSecRealtime", &next);
+                if let Some(next_str) =
+                    compute_next_calendar_elapse_with_delay(&tmr.conf, &unit.id.name)
+                {
+                    insert(&mut props, "NextElapseUSecRealtime", &next_str);
                 } else {
                     insert(&mut props, "NextElapseUSecRealtime", "n/a");
                 }
@@ -769,205 +774,58 @@ pub fn need_daemon_reload(unit: &Unit, unit_dirs: &[std::path::PathBuf]) -> bool
     false
 }
 
-/// Compute the next calendar elapse time from a list of OnCalendar= specs.
-/// Returns a human-readable timestamp like "Mon 2026-03-24 12:15:00 UTC".
-fn compute_next_calendar_elapse(specs: &[String]) -> Option<String> {
+/// Compute the next calendar elapse time including RandomizedDelaySec.
+/// Finds the first calendar event T where T + random_delay > now,
+/// then returns a formatted timestamp for T + random_delay.
+fn compute_next_calendar_elapse_with_delay(conf: &TimerConfig, timer_name: &str) -> Option<String> {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
+    let now_secs = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
+
+    // Compute the stable randomized delay (same logic as timer_scheduler.rs).
+    let random_delay_secs = if conf.randomized_delay_sec.is_zero() {
+        0u64
+    } else {
+        let max_micros = conf.randomized_delay_sec.as_micros() as u64;
+        if max_micros == 0 {
+            0
+        } else {
+            let mut hasher = DefaultHasher::new();
+            timer_name.hash(&mut hasher);
+            if !conf.fixed_random_delay
+                && let Some(boot) = crate::timer_scheduler::BOOT_INSTANT.get()
+            {
+                format!("{:?}", boot).hash(&mut hasher);
+            }
+            let hash_val = hasher.finish();
+            let delay_micros = hash_val % max_micros;
+            delay_micros / 1_000_000 // convert to seconds
+        }
+    };
+
+    // Find the first calendar event T where T + random_delay > now.
+    // Reference = now - random_delay so next_elapse returns events > that point.
+    let ref_unix = now_secs as i64 - random_delay_secs as i64;
+    let ref_dt = crate::calendar_spec::unix_to_datetime(ref_unix);
 
     let mut earliest: Option<u64> = None;
-
-    for spec in specs {
-        if let Some(next) = next_calendar_event(spec, now) {
+    for spec_str in &conf.on_calendar {
+        if let Ok(spec) = CalendarSpec::parse(spec_str)
+            && let Some(next) = spec.next_elapse(ref_dt)
+        {
+            let next_unix = CalendarSpec::datetime_to_unix(&next) as u64;
             earliest = Some(match earliest {
-                Some(e) => e.min(next),
-                None => next,
+                Some(e) => e.min(next_unix),
+                None => next_unix,
             });
         }
     }
 
-    let next = earliest?;
-    // Format as "Day YYYY-MM-DD HH:MM:SS UTC" using libc gmtime_r
-    let ts = next as libc::time_t;
-    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    unsafe {
-        libc::gmtime_r(&ts, &mut tm);
-    }
-    let weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    let wday = weekdays.get(tm.tm_wday as usize).unwrap_or(&"???");
-    Some(format!(
-        "{} {:04}-{:02}-{:02} {:02}:{:02}:{:02} UTC",
-        wday,
-        tm.tm_year + 1900,
-        tm.tm_mon + 1,
-        tm.tm_mday,
-        tm.tm_hour,
-        tm.tm_min,
-        tm.tm_sec,
-    ))
-}
-
-/// Parse a calendar event spec and find the next trigger time after `now` (unix seconds).
-/// Supports a subset of systemd calendar event syntax:
-///   - `*:0/15:0` — every 15 minutes
-///   - `*-*-* HH:MM:SS` — daily at specific time
-///   - `daily`, `weekly`, `monthly`, etc.
-fn next_calendar_event(spec: &str, now: u64) -> Option<u64> {
-    // Parse the spec: format is [DOW] [YYYY-MM-DD] [HH:MM:SS]
-    // The most common pattern we need: `*:M/S:S` or `*:0/N:0`
-    let spec = spec.trim();
-
-    // Get current time components via gmtime_r
-    let ts = now as libc::time_t;
-    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    unsafe {
-        libc::gmtime_r(&ts, &mut tm);
-    }
-
-    // Simple pattern: try to parse the time part as H:M:S
-    // The spec format varies: could be just time ("*:0/15:0") or date+time
-    // For the test, we need to handle "*:0/15:0" which means every 15 min at second 0
-
-    // Split by spaces — last part should be time
-    let parts: Vec<&str> = spec.split_whitespace().collect();
-    let time_part = parts.last()?;
-
-    // Split time by ':'
-    let time_fields: Vec<&str> = time_part.split(':').collect();
-    if time_fields.len() != 3 {
-        return None;
-    }
-
-    let (hour_spec, min_spec, sec_spec) = (time_fields[0], time_fields[1], time_fields[2]);
-
-    // Parse second — typically "0" or "*"
-    let sec: u32 = if sec_spec == "*" {
-        0
-    } else {
-        sec_spec.parse().ok()?
-    };
-
-    // Parse minute — may be "0/15" meaning every 15 starting at 0
-    let (min_start, min_step) = if let Some((start, step)) = min_spec.split_once('/') {
-        let s = if start.is_empty() || start == "*" {
-            0
-        } else {
-            start.parse::<u32>().ok()?
-        };
-        (s, step.parse::<u32>().ok()?)
-    } else if min_spec == "*" {
-        (0, 1) // every minute
-    } else {
-        let m = min_spec.parse::<u32>().ok()?;
-        (m, 0) // exact minute, no repetition within the hour
-    };
-
-    // Parse hour — "*" means every hour
-    let hour_any = hour_spec == "*";
-    let hour_exact: Option<u32> = if hour_any {
-        None
-    } else {
-        Some(hour_spec.parse().ok()?)
-    };
-
-    // Find the next occurrence
-    let current_hour = tm.tm_hour as u32;
-    let current_min = tm.tm_min as u32;
-    let current_sec = tm.tm_sec as u32;
-
-    // Try to find the next trigger within the next 24 hours
-    for hour_offset in 0..25u32 {
-        let h = if hour_any {
-            (current_hour + hour_offset) % 24
-        } else {
-            let eh = hour_exact.unwrap();
-            if hour_offset <= 1 {
-                eh
-            } else {
-                break;
-            }
-        };
-
-        if !hour_any && h != hour_exact.unwrap() {
-            continue;
-        }
-
-        // Find the first minute that matches
-        if min_step > 0 {
-            let mut m = min_start;
-            while m < 60 {
-                let candidate_total = h * 3600 + m * 60 + sec;
-                let current_total = if hour_offset > 0 && hour_any {
-                    0 // past the current hour, any time is fine
-                } else {
-                    current_hour * 3600 + current_min * 60 + current_sec
-                };
-                let day_offset = if hour_any {
-                    hour_offset / 24
-                } else if hour_offset > 0 {
-                    1
-                } else {
-                    0
-                };
-                let actual_current = if hour_any && hour_offset > 0 {
-                    // We're in a future hour
-                    let actual_h = (current_hour + hour_offset) % 24;
-                    if actual_h < current_hour || (actual_h == current_hour && hour_offset > 0) {
-                        // Wrapped to next day — any time works
-                        0
-                    } else {
-                        current_hour * 3600 + current_min * 60 + current_sec
-                    }
-                } else {
-                    current_total
-                };
-
-                if candidate_total > actual_current || day_offset > 0 {
-                    // Build the unix timestamp
-                    let mut next_tm = tm;
-                    next_tm.tm_hour = h as libc::c_int;
-                    next_tm.tm_min = m as libc::c_int;
-                    next_tm.tm_sec = sec as libc::c_int;
-                    // Add day offset
-                    next_tm.tm_mday += day_offset as libc::c_int;
-                    let result = unsafe { libc::timegm(&mut next_tm) };
-                    if result >= 0 {
-                        return Some(result as u64);
-                    }
-                }
-                m += min_step;
-            }
-        } else {
-            // Exact minute
-            let candidate_total = h * 3600 + min_start * 60 + sec;
-            let current_total = current_hour * 3600 + current_min * 60 + current_sec;
-            let day_offset = if hour_any {
-                if (current_hour + hour_offset) >= 24 {
-                    1
-                } else {
-                    0
-                }
-            } else if hour_offset > 0 {
-                1
-            } else {
-                0
-            };
-            if candidate_total > current_total || day_offset > 0 {
-                let mut next_tm = tm;
-                next_tm.tm_hour = h as libc::c_int;
-                next_tm.tm_min = min_start as libc::c_int;
-                next_tm.tm_sec = sec as libc::c_int;
-                next_tm.tm_mday += day_offset as libc::c_int;
-                let result = unsafe { libc::timegm(&mut next_tm) };
-                if result >= 0 {
-                    return Some(result as u64);
-                }
-            }
-        }
-    }
-
-    None
+    let next_secs = earliest?;
+    let total_secs = next_secs + random_delay_secs;
+    Some(format_usec_timestamp(total_secs * 1_000_000))
 }
 
 /// Format properties as `Key=Value\n` lines, optionally filtered to a set of

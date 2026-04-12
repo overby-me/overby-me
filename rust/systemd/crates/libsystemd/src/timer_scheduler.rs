@@ -189,7 +189,7 @@ fn compute_randomized_delay(
 
 /// Boot instant — captured once when the scheduler starts.
 /// Used for OnBootSec= / OnStartupSec= calculations.
-static BOOT_INSTANT: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+pub static BOOT_INSTANT: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
 
 /// Start the background timer scheduler thread.
 ///

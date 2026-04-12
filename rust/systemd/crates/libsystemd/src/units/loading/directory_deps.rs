@@ -1139,6 +1139,10 @@ pub fn apply_dropins(
         } else if unit_name.ends_with(".slice") {
             parse_slice(parsed_file, &base_path)
                 .and_then(|p| TryInto::<Unit>::try_into(p).map_err(ParsingErrorReason::Generic))
+        } else if unit_name.ends_with(".timer") {
+            use crate::units::parse_timer;
+            parse_timer(parsed_file, &base_path)
+                .and_then(|p| TryInto::<Unit>::try_into(p).map_err(ParsingErrorReason::Generic))
         } else {
             continue;
         };
@@ -2168,6 +2172,13 @@ fn is_list_setting(key: &str) -> bool {
             | "AssertControlGroupController"
             | "AssertMemory"
             | "AssertCPUs"
+            // Timer list settings
+            | "OnCalendar"
+            | "OnBootSec"
+            | "OnStartupSec"
+            | "OnActiveSec"
+            | "OnUnitActiveSec"
+            | "OnUnitInactiveSec"
             // Install section lists
             | "Alias"
             // State/runtime directory lists
