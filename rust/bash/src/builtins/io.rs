@@ -172,13 +172,20 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
         // subscript syntax (arr[idx], assoc[key], arr[@], arr[*]).
         let is_valid = if let Some(bracket) = var_name.find('[') {
             let base = &var_name[..bracket];
-            // When assoc_expand_once is ON, use rfind(']') for bracket matching.
-            // Bash tracks expansion context: `A[$rkey]` where `rkey=]` expands
-            // to `A[]]` but the structural closing `]` is the last one (from
-            // the original word), not the first (from variable expansion).
-            // When OFF, use first ']' — `A[]]` is A[] + stray ']' (invalid).
+            // When AEO is on AND the base is a known associative array, use
+            // rfind(']') so that keys like ']' work (unquoted `A[$rkey]` where
+            // rkey=] expands to `A[]]` — the last `]` is the structural close).
+            // Otherwise use first-']' forward scan matching bash's
+            // valid_array_reference → skipsubscript (rejects double-quoted
+            // `"A[$k]"` → `A[]]` since first `]` leaves stray char).
             let aeo = shell.is_array_expand_once();
-            let close = if aeo {
+            let base_is_assoc = shell.assoc_arrays.contains_key(base)
+                || shell
+                    .namerefs
+                    .get(base)
+                    .map(|t| shell.assoc_arrays.contains_key(t.as_str()))
+                    .unwrap_or(false);
+            let close = if aeo && base_is_assoc {
                 var_name.rfind(']')
             } else {
                 var_name[bracket + 1..].find(']').map(|p| p + bracket + 1)
@@ -190,7 +197,7 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
             // the closing ], making valid_array_reference return false.
             // Only reject when assoc_expand_once is OFF — when ON, bash
             // accepts quotes as literal key characters.
-            let has_balanced_quotes = if !shell.is_array_expand_once() {
+            let has_balanced_quotes = if !aeo {
                 if let Some(close_pos) = close {
                     let subscript = &var_name[bracket + 1..close_pos];
                     let sq_count = subscript.chars().filter(|&c| c == '\'').count();
@@ -266,14 +273,20 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
         nix::unistd::close(read_fd).ok();
         let output_str = String::from_utf8_lossy(&output).to_string();
         // Handle array subscript syntax: arr[idx] or assoc[key]
-        // When assoc_expand_once is ON, use rfind(']') to find the closing
-        // bracket so that keys like ']' work (e.g. A[$rkey] where rkey=]).
+        // When AEO is on and base is a known assoc array, use rfind(']')
+        // so that ']' keys work. Otherwise use first-']' forward scan.
         if let Some(bracket) = var_name.find('[') {
             let base = &var_name[..bracket];
-            let close_pos = if shell.is_array_expand_once() {
+            let aeo = shell.is_array_expand_once();
+            let resolved_base = shell.resolve_nameref(base);
+            let base_is_assoc = shell.assoc_arrays.contains_key(&resolved_base);
+            let close_pos = if aeo && base_is_assoc {
                 var_name.rfind(']').unwrap_or(var_name.len() - 1)
             } else {
-                var_name.len() - 1
+                var_name[bracket + 1..]
+                    .find(']')
+                    .map(|p| p + bracket + 1)
+                    .unwrap_or(var_name.len() - 1)
             };
             let idx_str = &var_name[bracket + 1..close_pos];
             let resolved = shell.resolve_nameref(base);
@@ -1575,12 +1588,15 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
                 // Bash's skipsubscript tracks quote state; an unbalanced ' or "
                 // causes it to miss the closing ], so valid_array_reference fails.
                 let base = if let Some(bracket) = arg.find('[') {
-                    // When assoc_expand_once is ON, use rfind(']') so that
-                    // keys like ']' work (e.g. a[$rkey] where rkey=]).
-                    // Bash tracks expansion context: the structural closing
-                    // `]` is the last one, not the first (from expansion).
+                    // When AEO is on AND the base is a known associative array,
+                    // use rfind(']') so that ']' keys work (unquoted expansion).
+                    // Otherwise use first-']' forward scan matching bash's
+                    // valid_array_reference → skipsubscript behavior.
                     let aeo = shell.is_array_expand_once();
-                    let close = if aeo {
+                    let base_name = &arg[..bracket];
+                    let resolved_base = shell.resolve_nameref(base_name);
+                    let base_is_assoc = shell.assoc_arrays.contains_key(resolved_base.as_str());
+                    let close = if aeo && base_is_assoc {
                         arg.rfind(']')
                     } else {
                         arg[bracket + 1..].find(']').map(|p| p + bracket + 1)
@@ -1674,10 +1690,12 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
     for name in &var_names {
         let base = if let Some(bracket) = name.find('[') {
             // Array subscript: validate the base name, allow any subscript content.
-            // When assoc_expand_once is ON, use rfind(']') so that keys like
-            // ']' work (e.g. a[$rkey] where rkey=]).
+            // When AEO is on and base is a known assoc array, use rfind(']').
             let aeo = shell.is_array_expand_once();
-            let close = if aeo {
+            let base_name = &name[..bracket];
+            let resolved_base = shell.resolve_nameref(base_name);
+            let base_is_assoc = shell.assoc_arrays.contains_key(resolved_base.as_str());
+            let close = if aeo && base_is_assoc {
                 name.rfind(']')
             } else {
                 name[bracket + 1..].find(']').map(|p| p + bracket + 1)
@@ -2332,15 +2350,15 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
         // Handle array subscript: read x[1] → set array element x[1]
         if let Some(bracket) = name.find('[') {
             let base = &name[..bracket];
-            // When assoc_expand_once is ON, use rfind(']') so that keys
-            // like ']' work (e.g. a[$rkey] where rkey=]).
+            // When AEO is on and base is a known assoc array, use rfind(']')
+            // so that ']' keys work. Otherwise first-']' forward scan.
             let aeo = shell.is_array_expand_once();
-            let close_pos = if aeo {
+            let resolved_base = shell.resolve_nameref(base);
+            let base_is_assoc = shell.assoc_arrays.contains_key(resolved_base.as_str());
+            let close_pos = if aeo && base_is_assoc {
                 name.rfind(']')
-            } else if name.ends_with(']') {
-                Some(name.len() - 1)
             } else {
-                None
+                name[bracket + 1..].find(']').map(|p| p + bracket + 1)
             };
             let idx_str = if let Some(cp) = close_pos {
                 &name[bracket + 1..cp]

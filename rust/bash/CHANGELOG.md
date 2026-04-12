@@ -2,6 +2,22 @@
 
 All notable fixes to the bash test suite are documented here, grouped by phase.
 
+## Phase 75 — Bracket matching for assoc `]` keys, deferred +n nameref removal, local/declare declared-but-unset (fixes 245–250)
+
+1. **`read`/`printf -v` bracket matching for assoc arrays with `]` key** (`src/builtins/io.rs`) — When `assoc_expand_once` is ON and the base variable name is a known associative array (or nameref to one), use `rfind(']')` for bracket matching so that unquoted `A[$rkey]` where `rkey=]` correctly treats the last `]` as the structural close. For non-assoc arrays or AEO-off, use first-`]` forward scan matching bash's `valid_array_reference` → `skipsubscript`. Applied to all six bracket-matching paths: `printf -v` validation, `printf -v` assignment, `read` argument parsing (two locations), `read` second-pass validation, and `read` assignment. Fixes assoc18.sub (was regressed by naive first-`]`-only approach). array27.sub remains ~4 nix diff — double-quoted `"A[$k]"` where the base IS assoc still uses `rfind` (can't distinguish quoting context at builtin level).
+
+2. **Deferred `+n` nameref removal with attribute propagation** (`src/builtins/vars.rs`) — `declare +n -i foo=7+4` now correctly applies the `-i` attribute to the nameref target variable `bar` and evaluates `7+4` as integer `11`. Previously, `+n` processing was inline during the flag-parsing loop, so `-i` (which appears later in the argument list) wasn't yet set when the nameref was removed. Fix: record `flag_unset_nameref_global` during parsing and defer all nameref removal to a new block after the flag-parsing loop completes, when all attribute flags (`-i`, `-x`, `-r`, `-u`, `-l`, `-c`) are available. Also applies those flags to the nameref's target. Added `nameref_consumed.is_empty()` guards to `declare -i`, `declare -x`, `declare -r` listing paths to prevent spurious "list all" output when names were consumed by `+n` processing. Fixes nameref19.sub `declare -- bar="7+4"` → `declare -i bar="11"`.
+
+3. **Empty nameref `+n` creates declared-but-unset** (`src/builtins/vars.rs`) — `declare +n foo5` where `foo5` was a nameref with no target (empty string) now marks `foo5` as `declared_unset` instead of inserting an empty string into `shell.vars`. Applied to both the value and no-value branches of the deferred `+n` processing. Fixes nameref17.sub `declare -r foo5=""` → `declare -r foo5`.
+
+4. **`local v` (no `=`) creates declared-but-unset local** (`src/builtins/vars.rs`) — `local v` without an assignment now creates a declared-but-unset local variable that shadows any outer/global value, matching bash's `declare -- v` output. Exception: if the variable was set via temp env (`v=t f`), the exported value is inherited (detected by checking `shell.exports`). Previously, `shell.vars.entry().or_default()` kept the inherited global value. Reduces varenv20.sub diffs.
+
+5. **`declare v` in function scope creates declared-but-unset** (`src/builtins/vars.rs`) — Same fix as `local v` applied to the `declare` builtin's no-value path when `make_local` is true. `declare v` inside a function now removes the inherited global from `vars` and marks as `declared_unset`, unless the variable is exported (temp env).
+
+6. **`declare -ix foo6` on declared-but-unset nameref** (`src/builtins/vars.rs`) — Export flag on declared-but-unset variables no longer forces an env var with empty value. When the variable is in `declared_unset` and not in `vars`, the export is recorded in `shell.exports` but `std::env::set_var` is skipped. Fixes nameref19.sub `declare -ix foo6=""` → `declare -ix foo6`.
+
+**Phase 75 summary:** Reduces **varenv** from ~127 to ~121 nix diff lines. **nameref** nameref19.sub flipped to 0 diff locally (was ~4 lines for `+n -i` and `foo5`/`foo6` issues). **array** unchanged at ~4 nix diff. Total nix passing: **74/77** (unchanged). No previously passing tests regressed.
+
 ## Phase 71 — Readonly through namerefs, declare -p flags, target validation, scope restore (fixes 239–244)
 
 1. **`readonly` resolves through namerefs** (`src/builtins/vars.rs`) — `readonly ref` where `ref` is a nameref now marks the *target* variable readonly (not the nameref itself), matching bash behavior where `declare -n ref=foo; readonly ref` makes `foo` readonly. `builtin_readonly` now calls `shell.resolve_nameref(name)` before inserting into `readonly_vars`. The already-readonly check also resolves through namerefs. Error messages use the resolved target name. Fixes nameref2.sub (was 5 diff lines, now 0) and nameref5.sub (was 8 diff lines, now 0).

@@ -1020,7 +1020,22 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
             } else if flag_array {
                 shell.arrays.entry(name_arg.clone()).or_default();
             } else {
-                shell.vars.entry(name_arg.clone()).or_default();
+                // `local v` without `=`: creates a declared-but-unset local
+                // that shadows any outer/global value.  However, if the
+                // variable was set via temp env (`v=t f`), bash inherits the
+                // exported value — temp env vars are already in the function's
+                // local scope.  We detect temp env by checking the export
+                // attribute: prefix assignments (`v=t f`) add the variable to
+                // both vars and exports before the function body runs.
+                if shell.exports.contains_key(name_arg.as_str()) {
+                    // Temp env / exported variable — keep inherited value
+                    // (bash shows `declare -x v="t"`)
+                } else {
+                    // Regular global or unset — shadow with declared-but-unset
+                    // (bash shows `declare -- v` with no value)
+                    shell.vars.remove(name_arg.as_str());
+                    shell.declared_unset.insert(name_arg.clone());
+                }
             }
         }
         // Apply readonly attribute
@@ -1056,6 +1071,7 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
     let mut flag_integer = false;
     // Names already consumed by +n processing (should not be re-processed)
     let mut nameref_consumed: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut flag_unset_nameref_global = false; // +n seen anywhere in args
     let mut flag_uppercase = false;
     let mut flag_lowercase = false;
     let mut flag_capitalize = false;
@@ -1194,38 +1210,91 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     shell.traced_funcs.remove(pure);
                 }
                 if unset_nameref {
-                    // typeset +n foo=value: first assign value through the
-                    // nameref (to the target variable), then remove the
-                    // nameref attribute.  foo retains the target name as its
-                    // plain string value.
-                    if let Some(eq) = rname.find('=') {
-                        let val = &rname[eq + 1..];
-                        if let Some(target) = shell.namerefs.get(pure).cloned() {
-                            // Assign through nameref to the target variable
-                            shell.set_var(&target, val.to_string());
-                        }
-                        // After removing nameref, foo's value is the old
-                        // target name (not the assigned value)
-                        if let Some(target) = shell.namerefs.remove(pure) {
-                            shell.vars.insert(pure.to_string(), target);
-                        }
-                        // Mark as consumed so the main declare body doesn't
-                        // re-process this name=value and overwrite our result
-                        nameref_consumed.insert(rname.clone());
-                    } else {
-                        // typeset +n foo (no value): just remove nameref,
-                        // set foo to the old target name
-                        if let Some(target) = shell.namerefs.remove(pure) {
-                            shell.vars.insert(pure.to_string(), target);
-                        }
-                        nameref_consumed.insert(rname.clone());
-                    }
+                    // Record that +n was seen — actual nameref removal is
+                    // deferred until after all flags are parsed so that
+                    // attribute flags like -i/-x/-r that appear in later
+                    // arguments are available when processing the target.
+                    flag_unset_nameref_global = true;
                 }
             }
         } else if !nameref_consumed.contains(arg) {
             names.push(arg.clone());
         }
         i += 1;
+    }
+
+    // Deferred +n nameref removal: now all flags (-i, -x, -r, etc.) have
+    // been parsed, so we can correctly apply them to the nameref target.
+    if flag_unset_nameref_global {
+        // Re-scan names to find nameref variables that need +n processing
+        let all_name_args: Vec<String> = args
+            .iter()
+            .filter(|a| !a.starts_with('-') && !a.starts_with('+') && *a != "--")
+            .cloned()
+            .collect();
+        for rname in &all_name_args {
+            let pure = rname.split('=').next().unwrap_or(rname);
+            if !shell.namerefs.contains_key(pure) {
+                continue; // not a nameref, skip
+            }
+            if let Some(eq) = rname.find('=') {
+                let val = &rname[eq + 1..];
+                if let Some(target) = shell.namerefs.get(pure).cloned() {
+                    // Apply attribute flags to the TARGET variable
+                    if flag_integer {
+                        shell.integer_vars.insert(target.clone());
+                        // Evaluate value as arithmetic for integer vars
+                        let int_val = shell.eval_arith_expr(val);
+                        shell.set_var(&target, int_val.to_string());
+                    } else {
+                        shell.set_var(&target, val.to_string());
+                    }
+                    if flag_export {
+                        let v = shell.get_var(&target).unwrap_or_default();
+                        shell.exports.insert(target.clone(), v.clone());
+                        unsafe { std::env::set_var(&target, &v) };
+                    }
+                    if flag_readonly {
+                        shell.readonly_vars.insert(target.clone());
+                    }
+                    if flag_uppercase {
+                        shell.uppercase_vars.insert(target.clone());
+                    }
+                    if flag_lowercase {
+                        shell.lowercase_vars.insert(target.clone());
+                    }
+                    if flag_capitalize {
+                        shell.capitalize_vars.insert(target.clone());
+                    }
+                }
+                // After removing nameref, foo's value is the old
+                // target name (not the assigned value)
+                if let Some(target) = shell.namerefs.remove(pure) {
+                    if target.is_empty() {
+                        // Nameref had no target — variable becomes declared-but-unset
+                        shell.declared_unset.insert(pure.to_string());
+                    } else {
+                        shell.vars.insert(pure.to_string(), target);
+                    }
+                }
+                nameref_consumed.insert(rname.clone());
+                // Remove from names so the main declare body doesn't re-process
+                names.retain(|n| n != rname);
+            } else {
+                // typeset +n foo (no value): just remove nameref,
+                // set foo to the old target name
+                if let Some(target) = shell.namerefs.remove(pure) {
+                    if target.is_empty() {
+                        // Nameref had no target — variable becomes declared-but-unset
+                        shell.declared_unset.insert(pure.to_string());
+                    } else {
+                        shell.vars.insert(pure.to_string(), target);
+                    }
+                }
+                nameref_consumed.insert(rname.clone());
+                names.retain(|n| n != rname);
+            }
+        }
     }
 
     let _ = flag_global; // stub
@@ -1966,7 +2035,7 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
     }
 
     // declare -x with no names: list exports
-    if flag_export && names.is_empty() {
+    if flag_export && names.is_empty() && nameref_consumed.is_empty() {
         let mut sorted: Vec<_> = shell.exports.iter().collect();
         sorted.sort_by_key(|(k, _)| k.to_string());
         for (name, value) in sorted {
@@ -1983,7 +2052,12 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
 
     // declare -r with no names: list readonly variables
     // Skip when -a or -A is also set — let the array listing sections handle it
-    if flag_readonly && names.is_empty() && !flag_array && !flag_assoc {
+    if flag_readonly
+        && names.is_empty()
+        && nameref_consumed.is_empty()
+        && !flag_array
+        && !flag_assoc
+    {
         let mut sorted: Vec<_> = shell.readonly_vars.iter().collect();
         sorted.sort();
         for name in sorted {
@@ -2001,7 +2075,8 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
     }
 
     // declare -i with no names: list integer variables
-    if flag_integer && names.is_empty() {
+    // (but not when names were consumed by +n nameref removal)
+    if flag_integer && names.is_empty() && nameref_consumed.is_empty() {
         let mut sorted: Vec<_> = shell.integer_vars.iter().collect();
         sorted.sort();
         for name in sorted {
@@ -3090,14 +3165,24 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 shell.arrays.entry(attr_name.to_string()).or_default();
                 shell.declared_unset.insert(attr_name.to_string());
             } else if !flag_nameref
-                && !shell.vars.contains_key(attr_name)
                 && !shell.arrays.contains_key(attr_name)
                 && !shell.assoc_arrays.contains_key(attr_name)
                 && !shell.namerefs.contains_key(attr_name)
             {
                 // declare without = marks the variable as declared-but-unset
                 // (don't insert into vars — bash distinguishes this from "")
-                shell.declared_unset.insert(attr_name.to_string());
+                if make_local && shell.vars.contains_key(attr_name) {
+                    // In function scope: `declare v` (no =) creates a local
+                    // declared-but-unset variable that shadows the global.
+                    // Exception: if the variable is exported (temp env from
+                    // `v=t f`), bash inherits the value.
+                    if !shell.exports.contains_key(attr_name) {
+                        shell.vars.remove(attr_name);
+                        shell.declared_unset.insert(attr_name.to_string());
+                    }
+                } else if !shell.vars.contains_key(attr_name) {
+                    shell.declared_unset.insert(attr_name.to_string());
+                }
             }
 
             if flag_integer {
@@ -3115,9 +3200,17 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 shell.readonly_vars.insert(attr_name.to_string());
             }
             if flag_export {
-                let val = shell.get_var(attr_name).unwrap_or_default();
-                shell.exports.insert(attr_name.to_string(), val.clone());
-                unsafe { std::env::set_var(attr_name, &val) };
+                // For declared-but-unset variables, mark as exported without
+                // storing an empty value (bash shows `declare -ix foo6` not
+                // `declare -ix foo6=""`).
+                if shell.declared_unset.contains(attr_name) && !shell.vars.contains_key(attr_name) {
+                    shell.exports.insert(attr_name.to_string(), String::new());
+                    // Don't set env var — variable is unset
+                } else {
+                    let val = shell.get_var(attr_name).unwrap_or_default();
+                    shell.exports.insert(attr_name.to_string(), val.clone());
+                    unsafe { std::env::set_var(attr_name, &val) };
+                }
             }
             if flag_uppercase {
                 shell.uppercase_vars.insert(attr_name.to_string());
