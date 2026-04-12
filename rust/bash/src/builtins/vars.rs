@@ -470,6 +470,16 @@ pub(super) fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
                 || shell.arrays.contains_key(name)
                 || shell.assoc_arrays.contains_key(name)
                 || shell.namerefs.contains_key(name);
+            // Check if this variable is a local in the current function scope.
+            // In bash, unsetting a local variable leaves it in a "declared but
+            // unset" state — `declare -p v` still shows `declare -- v`.
+            let is_local = shell
+                .local_scopes
+                .last()
+                .is_some_and(|s| s.contains_key(name));
+            // Remember if it was exported before we remove it, so we can
+            // preserve the export attribute on declared-but-unset locals.
+            let was_exported = is_local && shell.exports.contains_key(name);
             shell.vars.remove(name);
             shell.exports.remove(name);
             shell.arrays.remove(name);
@@ -479,8 +489,25 @@ pub(super) fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
             shell.uppercase_vars.remove(name);
             shell.lowercase_vars.remove(name);
             shell.capitalize_vars.remove(name);
+            // Unsetting IGNOREEOF disables the ignoreeof option (matching bash).
+            if name == "IGNOREEOF" {
+                shell.shopt_options.insert("ignoreeof".to_string(), false);
+            }
             if !name.is_empty() {
                 unsafe { std::env::remove_var(name) };
+            }
+            // If the variable was a local, mark it as declared-but-unset
+            // so that `declare -p` still shows it (bash behavior).
+            // Also preserve the export attribute if the variable came from
+            // temp env — bash shows `declare -x v` after unsetting a local
+            // that was created from a temp env prefix assignment.
+            if is_local && had_var {
+                shell.declared_unset.insert(name.to_string());
+                // If the variable was exported (e.g. from temp env `v=t f`),
+                // re-add the export so `declare -p` shows `-x`.
+                if was_exported {
+                    shell.exports.insert(name.to_string(), String::new());
+                }
             }
             // If no variable existed AND -v was not explicitly given,
             // fall through to unset the function (bash default behavior).
@@ -804,17 +831,13 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
         let arg = &args[i];
         if arg == "-" {
             // local - : save shell options for restoration on function return
-            if let Some(last) = shell.saved_opts_stack.last_mut()
-                && last.is_none()
-            {
-                *last = Some((
-                    shell.opt_errexit,
-                    shell.opt_nounset,
-                    shell.opt_xtrace,
-                    shell.opt_noclobber,
-                    shell.opt_noglob,
-                    shell.opt_pipefail,
-                ));
+            // Capture options before taking mutable ref to avoid borrow conflict.
+            let needs_save = shell.saved_opts_stack.last().is_some_and(|o| o.is_none());
+            if needs_save {
+                let saved = crate::interpreter::SavedOpts::capture(shell);
+                if let Some(last) = shell.saved_opts_stack.last_mut() {
+                    *last = Some(saved);
+                }
             }
         } else if arg == "-p" {
             // local -p [name ...]: print local variables in declare format.
@@ -922,6 +945,10 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
                     for name in sorted {
                         print_local_declare(shell, name);
                     }
+                }
+                // If `local -` was used in this function, print it
+                if shell.saved_opts_stack.last().is_some_and(|o| o.is_some()) {
+                    println!("local -");
                 }
             } else {
                 // local -p name1 name2 ...: print each named local
@@ -1049,6 +1076,31 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
             }
         } else {
             var_name = name_arg.clone();
+            // Check readonly BEFORE declare_local — `local name` (bare, no =)
+            // on a globally readonly variable should error, not shadow.
+            // Same logic as the name=value path: error if globally readonly
+            // (not saved in any local scope) or readonly in current scope.
+            // Allow shadowing if readonly comes from an outer function scope.
+            if shell.readonly_vars.contains(name_arg.as_str()) {
+                let in_current_scope = shell
+                    .local_scopes
+                    .last()
+                    .is_some_and(|s| s.contains_key(name_arg.as_str()));
+                let in_any_outer_scope = shell.local_scopes.len() >= 2
+                    && shell.local_scopes[..shell.local_scopes.len() - 1]
+                        .iter()
+                        .any(|s| s.contains_key(name_arg.as_str()));
+                if in_current_scope || !in_any_outer_scope {
+                    // Globally readonly or readonly in current scope → error
+                    eprintln!(
+                        "{}: local: {}: readonly variable",
+                        shell.error_prefix(),
+                        name_arg
+                    );
+                    status = 1;
+                    continue;
+                }
+            }
             shell.declare_local(name_arg);
             if flag_integer {
                 shell.integer_vars.insert(name_arg.clone());

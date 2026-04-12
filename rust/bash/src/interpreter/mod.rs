@@ -273,8 +273,114 @@ impl<'a> AssocEntry<'a> {
 }
 use std::io::Write;
 
-/// Saved shell options: (errexit, nounset, xtrace, noclobber, noglob, pipefail)
-type SavedOpts = (bool, bool, bool, bool, bool, bool);
+/// Saved shell options for `local -`: saves ALL `set -o` and `shopt -o` options
+/// so they can be restored on function return.
+#[derive(Debug, Clone)]
+pub struct SavedOpts {
+    pub opt_errexit: bool,
+    pub opt_nounset: bool,
+    pub opt_xtrace: bool,
+    pub opt_noclobber: bool,
+    pub opt_noglob: bool,
+    pub opt_pipefail: bool,
+    pub opt_keyword: bool,
+    pub opt_hashall: bool,
+    pub opt_allexport: bool,
+    pub opt_monitor: bool,
+    pub opt_physical: bool,
+    pub opt_posix: bool,
+    pub opt_noexec: bool,
+    /// All shopt options (including `-o` aliases like ignoreeof, braceexpand, etc.)
+    pub shopt_options: HashMap<String, bool>,
+    // Dedicated shopt fields
+    pub shopt_nullglob: bool,
+    pub shopt_extglob: bool,
+    pub shopt_globstar: bool,
+    pub shopt_inherit_errexit: bool,
+    pub shopt_nocasematch: bool,
+    pub shopt_lastpipe: bool,
+    pub shopt_expand_aliases: bool,
+}
+
+impl SavedOpts {
+    /// Capture all current shell options.
+    pub fn capture(shell: &Shell) -> Self {
+        SavedOpts {
+            opt_errexit: shell.opt_errexit,
+            opt_nounset: shell.opt_nounset,
+            opt_xtrace: shell.opt_xtrace,
+            opt_noclobber: shell.opt_noclobber,
+            opt_noglob: shell.opt_noglob,
+            opt_pipefail: shell.opt_pipefail,
+            opt_keyword: shell.opt_keyword,
+            opt_hashall: shell.opt_hashall,
+            opt_allexport: shell.opt_allexport,
+            opt_monitor: shell.opt_monitor,
+            opt_physical: shell.opt_physical,
+            opt_posix: shell.opt_posix,
+            opt_noexec: shell.opt_noexec,
+            shopt_options: shell.shopt_options.clone(),
+            shopt_nullglob: shell.shopt_nullglob,
+            shopt_extglob: shell.shopt_extglob,
+            shopt_globstar: shell.shopt_globstar,
+            shopt_inherit_errexit: shell.shopt_inherit_errexit,
+            shopt_nocasematch: shell.shopt_nocasematch,
+            shopt_lastpipe: shell.shopt_lastpipe,
+            shopt_expand_aliases: shell.shopt_expand_aliases,
+        }
+    }
+
+    /// Restore all saved shell options.
+    pub fn restore(self, shell: &mut Shell) {
+        shell.opt_errexit = self.opt_errexit;
+        shell.opt_nounset = self.opt_nounset;
+        shell.opt_xtrace = self.opt_xtrace;
+        shell.opt_noclobber = self.opt_noclobber;
+        shell.opt_noglob = self.opt_noglob;
+        shell.opt_pipefail = self.opt_pipefail;
+        shell.opt_keyword = self.opt_keyword;
+        shell.opt_hashall = self.opt_hashall;
+        shell.opt_allexport = self.opt_allexport;
+        shell.opt_monitor = self.opt_monitor;
+        shell.opt_physical = self.opt_physical;
+        shell.opt_posix = self.opt_posix;
+        shell.opt_noexec = self.opt_noexec;
+        shell.shopt_options = self.shopt_options;
+        shell.shopt_nullglob = self.shopt_nullglob;
+        shell.shopt_extglob = self.shopt_extglob;
+        shell.shopt_globstar = self.shopt_globstar;
+        shell.shopt_inherit_errexit = self.shopt_inherit_errexit;
+        shell.shopt_nocasematch = self.shopt_nocasematch;
+        shell.shopt_lastpipe = self.shopt_lastpipe;
+        shell.shopt_expand_aliases = self.shopt_expand_aliases;
+
+        // Update SHELLOPTS and BASHOPTS to reflect restored options.
+        shell.update_shellopts();
+
+        // Sync IGNOREEOF variable with ignoreeof shopt state.
+        // When `set -o ignoreeof` is active, bash sets IGNOREEOF=10;
+        // when disabled, bash removes IGNOREEOF.  Restoring via `local -`
+        // must trigger the same side effects.
+        let ignoreeof_on = shell
+            .shopt_options
+            .get("ignoreeof")
+            .copied()
+            .unwrap_or(false);
+        if ignoreeof_on {
+            shell.vars.insert("IGNOREEOF".to_string(), "10".to_string());
+            if shell.exports.contains_key("IGNOREEOF") {
+                shell
+                    .exports
+                    .insert("IGNOREEOF".to_string(), "10".to_string());
+                unsafe { std::env::set_var("IGNOREEOF", "10") };
+            }
+        } else {
+            shell.vars.remove("IGNOREEOF");
+            shell.exports.remove("IGNOREEOF");
+            unsafe { std::env::remove_var("IGNOREEOF") };
+        }
+    }
+}
 
 /// A tracked background job.
 #[derive(Debug, Clone)]
@@ -1026,6 +1132,11 @@ impl Shell {
         // POSIXLY_CORRECT enables POSIX mode
         if resolved == "POSIXLY_CORRECT" {
             self.opt_posix = true;
+        }
+        // IGNOREEOF: setting this variable enables the ignoreeof option
+        // (matching bash behavior where `IGNOREEOF=N` enables ignoreeof).
+        if resolved == "IGNOREEOF" {
+            self.shopt_options.insert("ignoreeof".to_string(), true);
         }
         // Auto-export when set -a (allexport) is active
         if self.opt_allexport && !self.exports.contains_key(&resolved) {

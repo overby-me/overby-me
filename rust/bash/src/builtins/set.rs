@@ -507,7 +507,7 @@ pub(super) fn builtin_shopt(shell: &mut Shell, args: &[String]) -> i32 {
                     if print_mode {
                         println!("set {}o {}", if *val { "-" } else { "+" }, opt);
                     } else {
-                        println!("{:<15}\t{}", opt, if *val { "on" } else { "off" });
+                        println!("{:<20}\t{}", opt, if *val { "on" } else { "off" });
                     }
                 } else if !*val {
                     status = 1;

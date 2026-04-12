@@ -299,15 +299,8 @@ impl Shell {
         self.return_explicit_arg = false;
 
         // Restore shell options if `local -` was used.
-        if let Some(Some((errexit, nounset, xtrace, noclobber, noglob, pipefail))) =
-            self.saved_opts_stack.pop()
-        {
-            self.opt_errexit = errexit;
-            self.opt_nounset = nounset;
-            self.opt_xtrace = xtrace;
-            self.opt_noclobber = noclobber;
-            self.opt_noglob = noglob;
-            self.opt_pipefail = pipefail;
+        if let Some(Some(saved_opts)) = self.saved_opts_stack.pop() {
+            saved_opts.restore(self);
         }
 
         // Restore local variables from the scope we pushed.

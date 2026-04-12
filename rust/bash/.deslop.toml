@@ -20,6 +20,10 @@ disabled_rules = [
   # string handling, not a credential-equality bug.
   "rust_secret_equality_compare",
 
+  # SavedOpts carries shell option booleans (errexit, nounset, etc.), not
+  # secrets. The field-name heuristic fires on "opt_*" names.
+  "rust_debug_secret",
+
   # ── Unsafe FFI ────────────────────────────────────────────────────────
   # Signal handling, libc calls (setrlimit, getrusage, execvp, chdir, …),
   # and raw fd manipulation require pervasive unsafe blocks. Each call site

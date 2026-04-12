@@ -1798,9 +1798,23 @@ impl Shell {
             // Save: (resolved_name, set_value, old_var, old_export)
             // Resolve namerefs so that `foo=two eval ...` where foo is a
             // nameref to bar temporarily sets bar=two.
+            //
+            // Validate prefix assignment names first: subscripted names like
+            // `var[0]=X` are not valid as temporary environment variables.
+            // Bash rejects them with "not a valid identifier".
+            for a in &cmd.assignments {
+                if a.name.contains('[') {
+                    eprintln!(
+                        "{}: `{}': not a valid identifier",
+                        self.error_prefix(),
+                        a.name
+                    );
+                }
+            }
             let prefix_saves: Vec<(String, String, Option<String>, Option<String>)> = cmd
                 .assignments
                 .iter()
+                .filter(|a| !a.name.contains('['))
                 .map(|a| {
                     let resolved = self.resolve_nameref(&a.name);
                     let v = match &a.value {
@@ -2089,11 +2103,39 @@ impl Shell {
                                 matches!(command_name.as_str(), "local" | "declare" | "typeset")
                                     && !self.local_scopes.is_empty()
                                     && !has_global_flag;
-                            if make_local_here {
+                            // Check readonly BEFORE declare_local removes the
+                            // readonly flag.  This ensures `local qux=(one two)`
+                            // when qux is globally readonly still errors.
+                            // Use scope-aware check: allow shadowing when readonly
+                            // comes from an outer function scope (not global, not
+                            // current scope).  Same logic as builtin_local.
+                            let is_readonly_blocking = if self.readonly_vars.contains(name) {
+                                let in_current_scope = self
+                                    .local_scopes
+                                    .last()
+                                    .is_some_and(|s| s.contains_key(name));
+                                let in_any_outer_scope = self.local_scopes.len() >= 2
+                                    && self.local_scopes[..self.local_scopes.len() - 1]
+                                        .iter()
+                                        .any(|s| s.contains_key(name));
+                                if in_current_scope {
+                                    // Already declared local in THIS function and readonly → error
+                                    true
+                                } else if in_any_outer_scope {
+                                    // Readonly from an outer function scope → allow shadowing
+                                    false
+                                } else {
+                                    // Globally readonly (not in any local scope) → error
+                                    true
+                                }
+                            } else {
+                                false
+                            };
+                            if make_local_here && !is_readonly_blocking {
                                 self.declare_local(name);
                             }
                             // Perform the array assignment
-                            if self.readonly_vars.contains(name) {
+                            if is_readonly_blocking {
                                 if paren_from_single_quote && has_array_flag {
                                     // Quoted compound like `readonly -a r='(7)'`
                                     // uses builtin name as error context (bash behavior)
@@ -2129,6 +2171,20 @@ impl Shell {
                                     );
                                 }
                                 self.last_status = 1;
+                                // For `local` compound assignments that hit readonly,
+                                // push the bare name so builtin_local can also report
+                                // its own error (bash prints two errors:
+                                // "qux: readonly variable" + "local: qux: readonly variable").
+                                // Since we skipped declare_local above, the readonly
+                                // flag is still set and builtin_local will see it.
+                                if make_local_here && matches!(command_name.as_str(), "local") {
+                                    new_args.push(name.to_string());
+                                    modified = true;
+                                    continue;
+                                }
+                                // For declare/typeset (not local): fall through to
+                                // push bare name below, matching old behavior where
+                                // only ONE error is printed (from commands.rs).
                             } else if has_array_flag && self.assoc_arrays.contains_key(name) {
                                 // Cannot convert associative to indexed array.
                                 // Don't perform the compound assignment — just
@@ -3939,15 +3995,8 @@ impl Shell {
         }
 
         // Restore shell options if `local -` was used
-        if let Some(Some((errexit, nounset, xtrace, noclobber, noglob, pipefail))) =
-            self.saved_opts_stack.pop()
-        {
-            self.opt_errexit = errexit;
-            self.opt_nounset = nounset;
-            self.opt_xtrace = xtrace;
-            self.opt_noclobber = noclobber;
-            self.opt_noglob = noglob;
-            self.opt_pipefail = pipefail;
+        if let Some(Some(saved_opts)) = self.saved_opts_stack.pop() {
+            saved_opts.restore(self);
         }
 
         // Restore local variables
