@@ -473,40 +473,175 @@ pub(super) fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
             // Check if this variable is a local in the current function scope.
             // In bash, unsetting a local variable leaves it in a "declared but
             // unset" state — `declare -p v` still shows `declare -- v`.
-            let is_local = shell
+            let is_local_current = shell
                 .local_scopes
                 .last()
                 .is_some_and(|s| s.contains_key(name));
+
+            // Check if the variable is a local in a PARENT function scope
+            // (not the current one).  In bash, `unset` from a child function
+            // "peels" one scope layer: it removes the parent's local and
+            // restores the saved value from before that local was created,
+            // revealing the enclosing scope's variable.
+            //
+            // With `localvar_unset` shopt enabled, the behavior changes:
+            // unset from a child function marks the parent's local as
+            // declared-but-unset instead of peeling the scope.
+            let is_local_parent = if !is_local_current && shell.local_scopes.len() >= 2 {
+                // Find the innermost parent scope that has this variable saved
+                let scopes_len = shell.local_scopes.len();
+                // Search from the second-to-last (innermost parent) outward
+                let mut found_idx = None;
+                for i in (0..scopes_len - 1).rev() {
+                    if shell.local_scopes[i].contains_key(name) {
+                        found_idx = Some(i);
+                        break;
+                    }
+                }
+                found_idx
+            } else if !is_local_current && shell.local_scopes.len() == 1 {
+                // Only one scope and the variable isn't in it as a current-scope local,
+                // but check if it's saved in this scope (meaning we're in a nested call
+                // within the same function scope)
+                if shell.local_scopes[0].contains_key(name) {
+                    Some(0)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
             // Remember if it was exported before we remove it, so we can
             // preserve the export attribute on declared-but-unset locals.
-            let was_exported = is_local && shell.exports.contains_key(name);
-            shell.vars.remove(name);
-            shell.exports.remove(name);
-            shell.arrays.remove(name);
-            shell.assoc_arrays.remove(name);
-            shell.namerefs.remove(name);
-            shell.integer_vars.remove(name);
-            shell.uppercase_vars.remove(name);
-            shell.lowercase_vars.remove(name);
-            shell.capitalize_vars.remove(name);
-            // Unsetting IGNOREEOF disables the ignoreeof option (matching bash).
-            if name == "IGNOREEOF" {
-                shell.shopt_options.insert("ignoreeof".to_string(), false);
-            }
-            if !name.is_empty() {
-                unsafe { std::env::remove_var(name) };
-            }
-            // If the variable was a local, mark it as declared-but-unset
-            // so that `declare -p` still shows it (bash behavior).
-            // Also preserve the export attribute if the variable came from
-            // temp env — bash shows `declare -x v` after unsetting a local
-            // that was created from a temp env prefix assignment.
-            if is_local && had_var {
-                shell.declared_unset.insert(name.to_string());
-                // If the variable was exported (e.g. from temp env `v=t f`),
-                // re-add the export so `declare -p` shows `-x`.
-                if was_exported {
-                    shell.exports.insert(name.to_string(), String::new());
+            let was_exported = is_local_current && shell.exports.contains_key(name);
+
+            let localvar_unset = shell
+                .shopt_options
+                .get("localvar_unset")
+                .copied()
+                .unwrap_or(false);
+
+            if let Some(parent_idx) = is_local_parent {
+                if !localvar_unset {
+                    // Default behavior: peel one scope layer.
+                    // Remove the saved entry from the parent scope and restore
+                    // the saved value to the flat maps, revealing the enclosing
+                    // scope's variable.
+                    if let Some(saved) = shell.local_scopes[parent_idx].remove(name) {
+                        // First, remove current state
+                        shell.vars.remove(name);
+                        shell.arrays.remove(name);
+                        shell.assoc_arrays.remove(name);
+                        shell.namerefs.remove(name);
+                        shell.integer_vars.remove(name);
+                        shell.uppercase_vars.remove(name);
+                        shell.lowercase_vars.remove(name);
+                        shell.capitalize_vars.remove(name);
+                        shell.declared_unset.remove(name);
+                        shell.exports.remove(name);
+
+                        // Restore the saved state (from before the local was created)
+                        match saved.scalar {
+                            Some(val) => {
+                                shell.vars.insert(name.to_string(), val);
+                            }
+                            None => {
+                                shell.vars.remove(name);
+                            }
+                        }
+                        match saved.array {
+                            Some(arr) => {
+                                shell.arrays.insert(name.to_string(), arr);
+                            }
+                            None => {
+                                shell.arrays.remove(name);
+                            }
+                        }
+                        match saved.assoc {
+                            Some(assoc) => {
+                                shell.assoc_arrays.insert(name.to_string(), assoc);
+                            }
+                            None => {
+                                shell.assoc_arrays.remove(name);
+                            }
+                        }
+                        if saved.was_integer {
+                            shell.integer_vars.insert(name.to_string());
+                        }
+                        if saved.was_readonly {
+                            shell.readonly_vars.insert(name.to_string());
+                        }
+                        if saved.was_declared_unset {
+                            shell.declared_unset.insert(name.to_string());
+                        }
+                        match saved.nameref {
+                            Some(target) => {
+                                shell.namerefs.insert(name.to_string(), target);
+                            }
+                            None => {
+                                shell.namerefs.remove(name);
+                            }
+                        }
+                        // Re-sync process environment
+                        if let Some(export_val) = shell.exports.get(name) {
+                            if shell.vars.contains_key(name) {
+                                unsafe { std::env::set_var(name, export_val) };
+                            }
+                        } else if !name.is_empty() {
+                            unsafe { std::env::remove_var(name) };
+                        }
+                    }
+                } else {
+                    // localvar_unset behavior: mark the parent's local as
+                    // declared-but-unset without peeling the scope.
+                    shell.vars.remove(name);
+                    shell.exports.remove(name);
+                    shell.arrays.remove(name);
+                    shell.assoc_arrays.remove(name);
+                    shell.namerefs.remove(name);
+                    shell.integer_vars.remove(name);
+                    shell.uppercase_vars.remove(name);
+                    shell.lowercase_vars.remove(name);
+                    shell.capitalize_vars.remove(name);
+                    if name == "IGNOREEOF" {
+                        shell.shopt_options.insert("ignoreeof".to_string(), false);
+                    }
+                    if !name.is_empty() {
+                        unsafe { std::env::remove_var(name) };
+                    }
+                    shell.declared_unset.insert(name.to_string());
+                }
+            } else {
+                // Variable is either in the current scope or not in any scope
+                shell.vars.remove(name);
+                shell.exports.remove(name);
+                shell.arrays.remove(name);
+                shell.assoc_arrays.remove(name);
+                shell.namerefs.remove(name);
+                shell.integer_vars.remove(name);
+                shell.uppercase_vars.remove(name);
+                shell.lowercase_vars.remove(name);
+                shell.capitalize_vars.remove(name);
+                // Unsetting IGNOREEOF disables the ignoreeof option (matching bash).
+                if name == "IGNOREEOF" {
+                    shell.shopt_options.insert("ignoreeof".to_string(), false);
+                }
+                if !name.is_empty() {
+                    unsafe { std::env::remove_var(name) };
+                }
+                // If the variable was a local in the current scope, mark it as
+                // declared-but-unset so that `declare -p` still shows it (bash behavior).
+                // Also preserve the export attribute if the variable came from
+                // temp env — bash shows `declare -x v` after unsetting a local
+                // that was created from a temp env prefix assignment.
+                if is_local_current && had_var {
+                    shell.declared_unset.insert(name.to_string());
+                    // If the variable was exported (e.g. from temp env `v=t f`),
+                    // re-add the export so `declare -p` shows `-x`.
+                    if was_exported {
+                        shell.exports.insert(name.to_string(), String::new());
+                    }
                 }
             }
             // If no variable existed AND -v was not explicitly given,
@@ -3153,7 +3288,24 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                         shell.assoc_arrays.insert(resolved_for_check, map);
                     }
                 } else {
-                    shell.set_var(name, value.to_string());
+                    // When assigning through a nameref with an empty target
+                    // (e.g. `typeset -n foo; typeset foo=12345`), validate
+                    // the value as a nameref target and produce the
+                    // nameref-specific error message with the command name.
+                    if let Some(target) = shell.namerefs.get(name)
+                        && target.is_empty()
+                        && !crate::interpreter::is_valid_nameref_target(value)
+                    {
+                        eprintln!(
+                            "{}: {}: `{}': invalid variable name for name reference",
+                            shell.error_prefix(),
+                            cmd_name,
+                            value
+                        );
+                        status = 1;
+                    } else {
+                        shell.set_var(name, value.to_string());
+                    }
                 }
             }
 

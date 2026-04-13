@@ -1505,6 +1505,45 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
         && !matches!(expr.op, ParamOp::None | ParamOp::Indirect)
     {
         let real_name = &expr.name[1..];
+
+        // Check if the indirect variable is completely unset.
+        // In bash, ${!name-word}, ${!name+word}, ${!name:-word}, etc. all
+        // produce "invalid indirect expansion" when `name` itself is unset
+        // (not found in vars, arrays, assoc_arrays, positional params,
+        // special variables, or process env).
+        //
+        // When real_name contains a subscript (e.g. "varname[@]"),
+        // check the base name before the bracket.
+        let base_for_check = if let Some(bracket) = real_name.find('[') {
+            &real_name[..bracket]
+        } else {
+            real_name
+        };
+        let var_exists = ctx.vars.contains_key(base_for_check)
+            || ctx.arrays.contains_key(base_for_check)
+            || ctx.assoc_arrays.contains_key(base_for_check)
+            || ctx.namerefs.contains_key(base_for_check)
+            || std::env::var(base_for_check).is_ok()
+            // Positional parameters: any non-negative integer is a valid
+            // positional param name (even if beyond current $# — it's just
+            // unset, not nonexistent).
+            || base_for_check.parse::<usize>().is_ok()
+            // Special variables: @, *, #, ?, -, !, $, 0, _
+            || matches!(base_for_check, "@" | "*" | "#" | "?" | "-" | "!" | "$" | "0" | "_");
+        if !var_exists {
+            let prefix = EXPAND_ERROR_PREFIX.with(|p| {
+                let p = p.borrow();
+                if p.is_empty() {
+                    "bash".to_string()
+                } else {
+                    p.clone()
+                }
+            });
+            eprintln!("{}: {}: invalid indirect expansion", prefix, real_name);
+            set_arith_error();
+            return String::new();
+        }
+
         // First resolve the indirect: get the value of real_name, use as variable name
         let target = lookup_var(real_name, ctx);
         // Check if the resolved target is a valid variable name.
