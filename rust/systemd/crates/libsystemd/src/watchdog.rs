@@ -152,36 +152,12 @@ fn check_watchdog_timeouts(run_info: &ArcMutRuntimeInfo) {
                 continue; // no watchdog configured or infinity
             };
 
-            // The service must have signaled ready (for Type=notify) or at
-            // least been started (for other types) before we enforce the
-            // watchdog.  During startup the service has not had a chance to
-            // ping yet.
-            if !srvc.signaled_ready
-                && crate::services::effective_notify_access(srvc, &srvc_specific.conf)
-                    != crate::units::NotifyKind::None
-            {
-                // For notify-type services, wait until READY=1 before
-                // enforcing the watchdog.
-                continue;
-            }
-
             // Determine the reference point for the timeout.
-            let reference = if let Some(last_ping) = srvc.watchdog_last_ping {
-                // The service has pinged before — measure from the last ping.
-                last_ping
-            } else {
-                // The service has never pinged.  For Type=notify services
-                // that have signaled ready, use the time they signaled ready
-                // as a proxy (we don't currently store that timestamp, so we
-                // give them one full timeout from now on the first check and
-                // record that we've started the clock).
-                //
-                // For non-notify services, the watchdog starts ticking from
-                // service start.  Since we don't store the start timestamp
-                // either, we skip this service on the *first* pass (giving
-                // it one full timeout period), and on subsequent passes we
-                // will have set `watchdog_last_ping` via the initialization
-                // below.
+            // If the service has pinged (WATCHDOG=1) or sent READY=1
+            // (which initializes watchdog_last_ping in the notification
+            // handler), measure from that timestamp.  Otherwise skip —
+            // the service hasn't set up its watchdog reference yet.
+            let Some(reference) = srvc.watchdog_last_ping else {
                 continue;
             };
 
