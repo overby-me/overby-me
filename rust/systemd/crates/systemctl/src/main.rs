@@ -156,6 +156,7 @@ fn main() {
 
     let mut no_legend = false;
     let mut force = false;
+    let mut full = false;
     let mut wait = false;
     let mut root_path: Option<String> = None;
     let mut runtime = false;
@@ -343,6 +344,9 @@ fn main() {
             }
             if arg == "--no-legend" {
                 no_legend = true;
+            }
+            if arg == "--full" {
+                full = true;
             }
             if arg == "--failed" {
                 state_filter = Some("failed".to_string());
@@ -536,17 +540,6 @@ fn main() {
     positional.retain(|arg| {
         if arg == "--marked" {
             marked = true;
-            false
-        } else {
-            true
-        }
-    });
-
-    // Extract --full flag for edit
-    let mut full = false;
-    positional.retain(|arg| {
-        if arg == "--full" {
-            full = true;
             false
         } else {
             true
