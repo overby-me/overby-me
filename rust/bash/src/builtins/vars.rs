@@ -2228,10 +2228,7 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 if shell.namerefs.contains_key(name) {
                     let target = &shell.namerefs[name];
                     let mut flags = String::from("-");
-                    // When nameref has no target (empty), attributes like -i/-x
-                    // apply to the nameref variable itself. When it has a target,
-                    // those attributes apply to the target, not the nameref.
-                    if target.is_empty() && shell.integer_vars.contains(name.as_str()) {
+                    if shell.integer_vars.contains(name.as_str()) {
                         flags.push('i');
                     }
                     flags.push('n');
@@ -2454,7 +2451,7 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 if !shell.vars.contains_key(name) {
                     let target = &shell.namerefs[name];
                     let mut flags = String::from("-");
-                    if target.is_empty() && shell.integer_vars.contains(name.as_str()) {
+                    if shell.integer_vars.contains(name.as_str()) {
                         flags.push('i');
                     }
                     flags.push('n');
@@ -2481,7 +2478,7 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             for name in &names {
                 if let Some(target) = shell.namerefs.get(name) {
                     let mut flags = String::from("-");
-                    if target.is_empty() && shell.integer_vars.contains(name.as_str()) {
+                    if shell.integer_vars.contains(name.as_str()) {
                         flags.push('i');
                     }
                     flags.push('n');
@@ -3150,6 +3147,14 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             };
 
             if flag_nameref {
+                // When both -i and -n are set with a value, bash silently
+                // fails (exit 1) and does NOT create the variable.
+                // `-i` and `-n` are incompatible because `-i` requires
+                // arithmetic evaluation while `-n` requires a variable name.
+                if flag_integer {
+                    status = 1;
+                    continue;
+                }
                 // Validate the nameref target FIRST — bash checks target validity
                 // before checking array conflicts, so `declare -n array='(bad)'`
                 // reports "invalid variable name for name reference" even when
@@ -3209,6 +3214,9 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                             );
                             // Still create the nameref (bash behavior in function scope)
                             shell.vars.remove(name);
+                            if !flag_integer {
+                                shell.integer_vars.remove(name);
+                            }
                             shell.namerefs.insert(name.to_string(), value.to_string());
                         } else {
                             eprintln!(
@@ -3220,6 +3228,12 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                         }
                     } else {
                         shell.vars.remove(name);
+                        // When converting a non-nameref variable to a nameref,
+                        // remove the integer attribute (bash behavior:
+                        // `declare -i x; declare -n x=foo` removes -i from x).
+                        if !flag_integer {
+                            shell.integer_vars.remove(name);
+                        }
                         shell.namerefs.insert(name.to_string(), value.to_string());
                     }
                 }
@@ -3578,10 +3592,19 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     }
                 }
             } else if is_append {
-                // Check if variable already has integer attribute
+                // Check if variable already has integer attribute.
+                // When name is a nameref to a subscripted target like "a[0]",
+                // resolve_nameref returns "a[0]" — we need to check the BASE
+                // name ("a") for the integer attribute, not "a[0]".
                 let resolved_for_int = shell.resolve_nameref(name);
+                let resolved_base_for_int = if let Some(bracket) = resolved_for_int.find('[') {
+                    &resolved_for_int[..bracket]
+                } else {
+                    resolved_for_int.as_str()
+                };
                 if shell.integer_vars.contains(name)
                     || shell.integer_vars.contains(&resolved_for_int)
+                    || shell.integer_vars.contains(resolved_base_for_int)
                 {
                     let existing_str =
                         get_existing_through_nameref(shell, name).unwrap_or_default();
@@ -4001,6 +4024,9 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                                     name
                                 );
                                 // Still create the nameref in function scope
+                                if !flag_integer {
+                                    shell.integer_vars.remove(name);
+                                }
                                 shell.namerefs.insert(name.to_string(), target);
                             } else {
                                 eprintln!(
@@ -4013,6 +4039,12 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                                 shell.vars.insert(name.to_string(), target);
                             }
                         } else {
+                            // When converting a non-nameref variable to a nameref,
+                            // remove the integer attribute (bash behavior:
+                            // `declare -i x; declare -n x=foo` removes -i from x).
+                            if !flag_integer {
+                                shell.integer_vars.remove(name);
+                            }
                             shell.namerefs.insert(name.to_string(), target);
                         }
                     }
