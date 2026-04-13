@@ -1298,6 +1298,14 @@ impl Shell {
             // No saved scope entry — fall through to normal assignment
             // (this shouldn't normally happen for circular namerefs in
             // function scope, but handle it gracefully).
+        } else if resolved == name
+            && self.namerefs.contains_key(name)
+            && self.is_circular_nameref(name)
+        {
+            // Circular nameref at global scope — assignment fails silently
+            // (bash emits the warning from resolve_nameref_warn but does
+            // not perform the assignment).
+            return;
         }
         if self.readonly_vars.contains(&resolved) {
             if let Some(fname) = self.func_names.last() {
