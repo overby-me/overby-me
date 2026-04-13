@@ -124,20 +124,26 @@ pub(super) fn builtin_export(shell: &mut Shell, args: &[String]) -> i32 {
             }
         } else {
             // Export existing variable (or mark unset variable for export)
+            // If the name is a nameref, follow it and export the target.
+            let export_name = if shell.namerefs.contains_key(arg.as_str()) {
+                shell.resolve_nameref(arg)
+            } else {
+                arg.clone()
+            };
             if let Some(value) = shell
                 .vars
-                .get(arg.as_str())
+                .get(export_name.as_str())
                 .cloned()
-                .or_else(|| std::env::var(arg).ok())
+                .or_else(|| std::env::var(&export_name).ok())
             {
-                shell.exports.insert(arg.clone(), value.clone());
-                unsafe { std::env::set_var(arg, &value) };
+                shell.exports.insert(export_name.clone(), value.clone());
+                unsafe { std::env::set_var(&export_name, &value) };
             } else {
                 // Variable is unset — mark it for export without setting a value.
                 // Use declared_unset + exports so the export attribute persists
                 // and takes effect when the variable is later assigned.
-                shell.declared_unset.insert(arg.clone());
-                shell.exports.insert(arg.clone(), String::new());
+                shell.declared_unset.insert(export_name.clone());
+                shell.exports.insert(export_name.clone(), String::new());
             }
         }
     }
@@ -884,7 +890,19 @@ pub(super) fn builtin_readonly(shell: &mut Shell, args: &[String]) -> i32 {
             // readonly ref — if ref is a nameref, resolve through it
             // and mark the target readonly (bash behavior)
             let resolved = shell.resolve_nameref(name);
-            shell.readonly_vars.insert(resolved);
+            // If the resolved target contains a subscript (e.g. var[0]),
+            // bash rejects it with "not a valid identifier" because
+            // readonly operates on whole variables, not array elements.
+            if resolved.contains('[') && resolved.ends_with(']') {
+                eprintln!(
+                    "{}: readonly: `{}': not a valid identifier",
+                    shell.error_prefix(),
+                    resolved
+                );
+                status = 1;
+            } else {
+                shell.readonly_vars.insert(resolved);
+            }
         }
     }
     status
@@ -3498,16 +3516,47 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     }
                 }
             } else if flag_integer {
-                // Mark as integer and evaluate as arithmetic
-                shell.integer_vars.insert(name.to_string());
-                let n = shell.eval_arith_expr(value);
-                if is_append {
-                    let existing = get_existing_through_nameref(shell, name)
-                        .and_then(|v| v.parse::<i64>().ok())
-                        .unwrap_or(0);
-                    shell.set_var(name, (existing + n).to_string());
+                // When the name is a nameref with an empty target, validate
+                // the RAW value as a nameref target BEFORE arithmetic evaluation.
+                // At global scope, bash uses "not a valid identifier" and removes
+                // the nameref. In function scope, bash uses "invalid variable name
+                // for name reference" and preserves the nameref.
+                if let Some(target) = shell.namerefs.get(name)
+                    && target.is_empty()
+                    && !crate::interpreter::is_valid_nameref_target(value)
+                {
+                    if shell.local_scopes.is_empty() {
+                        eprintln!(
+                            "{}: {}: `{}': not a valid identifier",
+                            shell.error_prefix(),
+                            cmd_name,
+                            value
+                        );
+                        // Remove the nameref entirely (bash behavior at global scope:
+                        // variable becomes "not found" after this error)
+                        shell.namerefs.remove(name);
+                    } else {
+                        eprintln!(
+                            "{}: {}: `{}': invalid variable name for name reference",
+                            shell.error_prefix(),
+                            cmd_name,
+                            value
+                        );
+                        // In function scope, bash preserves the nameref
+                    }
+                    status = 1;
                 } else {
-                    shell.set_var(name, n.to_string());
+                    // Mark as integer and evaluate as arithmetic
+                    shell.integer_vars.insert(name.to_string());
+                    let n = shell.eval_arith_expr(value);
+                    if is_append {
+                        let existing = get_existing_through_nameref(shell, name)
+                            .and_then(|v| v.parse::<i64>().ok())
+                            .unwrap_or(0);
+                        shell.set_var(name, (existing + n).to_string());
+                    } else {
+                        shell.set_var(name, n.to_string());
+                    }
                 }
             } else if is_append {
                 // Check if variable already has integer attribute
@@ -3598,18 +3647,33 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 } else {
                     // When assigning through a nameref with an empty target
                     // (e.g. `typeset -n foo; typeset foo=12345`), validate
-                    // the value as a nameref target and produce the
-                    // nameref-specific error message with the command name.
+                    // the value as a nameref target. At global scope, bash uses
+                    // "not a valid identifier" and removes the nameref. In
+                    // function scope, bash uses "invalid variable name for name
+                    // reference" and preserves the nameref.
                     if let Some(target) = shell.namerefs.get(name)
                         && target.is_empty()
                         && !crate::interpreter::is_valid_nameref_target(value)
                     {
-                        eprintln!(
-                            "{}: {}: `{}': invalid variable name for name reference",
-                            shell.error_prefix(),
-                            cmd_name,
-                            value
-                        );
+                        if shell.local_scopes.is_empty() {
+                            eprintln!(
+                                "{}: {}: `{}': not a valid identifier",
+                                shell.error_prefix(),
+                                cmd_name,
+                                value
+                            );
+                            // Remove the nameref entirely (bash behavior at global
+                            // scope: variable becomes "not found" after this error)
+                            shell.namerefs.remove(name);
+                        } else {
+                            eprintln!(
+                                "{}: {}: `{}': invalid variable name for name reference",
+                                shell.error_prefix(),
+                                cmd_name,
+                                value
+                            );
+                            // In function scope, bash preserves the nameref
+                        }
                         status = 1;
                     } else {
                         shell.set_var(name, value.to_string());
@@ -3621,9 +3685,17 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 shell.readonly_vars.insert(name.to_string());
             }
             if flag_export {
-                let val = shell.get_var(name).unwrap_or_default();
-                shell.exports.insert(name.to_string(), val.clone());
-                unsafe { std::env::set_var(name, &val) };
+                if shell.namerefs.contains_key(name) {
+                    // Exported namerefs: export the nameref variable itself with
+                    // the target name as the environment value (bash behavior).
+                    let target = shell.namerefs.get(name).cloned().unwrap_or_default();
+                    shell.exports.insert(name.to_string(), target.clone());
+                    unsafe { std::env::set_var(name, &target) };
+                } else {
+                    let val = shell.get_var(name).unwrap_or_default();
+                    shell.exports.insert(name.to_string(), val.clone());
+                    unsafe { std::env::set_var(name, &val) };
+                }
             }
             if flag_uppercase {
                 shell.uppercase_vars.insert(name.to_string());

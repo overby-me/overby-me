@@ -2122,7 +2122,7 @@ impl Shell {
                         false
                     };
                     if has_literal_paren
-                        && !has_nameref_flag
+                        && (!has_nameref_flag || !paren_from_single_quote)
                         && (!paren_from_single_quote
                             || has_array_flag
                             || has_assoc_flag
@@ -3311,6 +3311,23 @@ impl Shell {
             &assign.name
         };
         let resolved_base_raw = self.resolve_nameref(base_name);
+        // When the name is a nameref with an empty target and the assignment
+        // has a subscript (e.g. `ref[0]=foo` where ref is an empty nameref),
+        // bash errors with "`': not a valid identifier".  Note: resolve_nameref
+        // returns the original name (not empty) when the target is empty, so
+        // we check the target directly via namerefs.get().
+        if let Some(target) = self.namerefs.get(base_name)
+            && target.is_empty()
+            && assign.name.contains('[')
+        {
+            eprintln!(
+                "{}: `{}': not a valid identifier",
+                self.error_prefix(),
+                target
+            );
+            self.last_status = 1;
+            return;
+        }
         // When the resolved name contains a subscript (from a nameref target
         // like `declare -n b='a[0]'`), decompose it: the real base is the
         // part before `[` and the subscript comes from the nameref target.
@@ -4587,6 +4604,10 @@ impl Shell {
                     // Apply prefix assignments AFTER exports so they take
                     // precedence over any exported values
                     for assign in assignments {
+                        // Resolve namerefs so that `ref=foo printenv ref`
+                        // where ref is a nameref to var sets env var `var=foo`
+                        // without overwriting the exported nameref `ref=var`.
+                        let resolved = self.resolve_nameref(&assign.name);
                         let v = match &assign.value {
                             AssignValue::Scalar(w) => self.expand_word_single(w),
                             _ => String::new(),
@@ -4594,11 +4615,11 @@ impl Shell {
                         let value = if assign.append {
                             let existing_str = self
                                 .vars
-                                .get(&assign.name)
+                                .get(&resolved)
                                 .cloned()
-                                .or_else(|| std::env::var(&assign.name).ok())
+                                .or_else(|| std::env::var(&resolved).ok())
                                 .unwrap_or_default();
-                            if self.integer_vars.contains(&assign.name) {
+                            if self.integer_vars.contains(&resolved) {
                                 let existing = self.eval_arith_expr(&existing_str);
                                 let addend = self.eval_arith_expr(&v);
                                 (existing + addend).to_string()
@@ -4608,7 +4629,7 @@ impl Shell {
                         } else {
                             v
                         };
-                        unsafe { std::env::set_var(&assign.name, &value) };
+                        unsafe { std::env::set_var(&resolved, &value) };
                     }
 
                     let c_prog = match CString::new(path.as_bytes()) {
