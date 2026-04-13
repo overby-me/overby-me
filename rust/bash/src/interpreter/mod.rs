@@ -409,6 +409,21 @@ pub enum JobStatus {
     Stopped,
 }
 
+/// Result of resolving a nameref chain for assignment, distinguishing
+/// between different kinds of circularity.
+#[allow(dead_code)]
+pub enum NamerefResolveResult {
+    /// Normal resolution — the nameref chain resolved to a final target.
+    Resolved,
+    /// Exact circular reference (e.g. a→b→a) — caller should assign to
+    /// the enclosing scope.
+    CircularExact,
+    /// Circular through subscript (e.g. a→b→a[1]) — caller should remove
+    /// the nameref attribute from the original variable and assign to the
+    /// contained target string.
+    CircularSubscript(String),
+}
+
 pub struct Shell {
     pub vars: HashMap<String, String>,
     pub exports: HashMap<String, String>,
@@ -945,24 +960,91 @@ impl Shell {
 
     /// Check if a nameref resolution is circular (the name resolves back to itself).
     /// Returns true if the nameref chain for `name` leads to a cycle.
+    /// Also detects circularity through subscripted references: a→b→a[1] is
+    /// circular because the base name of the target "a[1]" matches "a".
     pub fn is_circular_nameref(&self, name: &str) -> bool {
         const MAX_NAMEREF_DEPTH: usize = 8;
         let mut resolved = name.to_string();
         let mut seen = HashSet::new();
+        let mut seen_bases = HashSet::new();
         seen.insert(name.to_string());
+        seen_bases.insert(name.to_string());
         let mut depth = 0;
         while let Some(target) = self.namerefs.get(&resolved) {
             if target.is_empty() || depth >= MAX_NAMEREF_DEPTH {
                 return false;
             }
-            if seen.contains(target) {
+            // Check both the full target and its base name (before '[')
+            let target_base = if let Some(bracket) = target.find('[') {
+                &target[..bracket]
+            } else {
+                target.as_str()
+            };
+            if seen.contains(target) || seen_bases.contains(target_base) {
                 return true;
             }
             seen.insert(target.clone());
+            seen_bases.insert(target_base.to_string());
             resolved = target.clone();
             depth += 1;
         }
         false
+    }
+
+    /// Resolve a nameref chain for assignment, detecting two kinds of circularity:
+    /// 1. Exact circular (a→b→a): returns `CircularExact` — caller should assign
+    ///    to enclosing scope.
+    /// 2. Subscript circular (a→b→a[1]): returns `CircularSubscript(target)` —
+    ///    caller should remove the nameref attribute and assign to `target`.
+    /// 3. Normal resolution: returns `Resolved(target)`.
+    pub fn resolve_nameref_for_assign(&self, name: &str) -> NamerefResolveResult {
+        const MAX_NAMEREF_DEPTH: usize = 8;
+        let mut resolved = name.to_string();
+        let mut seen = HashSet::new();
+        let mut seen_bases = HashSet::new();
+        seen.insert(name.to_string());
+        seen_bases.insert(name.to_string());
+        let mut depth = 0;
+        while let Some(target) = self.namerefs.get(&resolved) {
+            if target.is_empty() {
+                break;
+            }
+            if depth >= MAX_NAMEREF_DEPTH {
+                eprintln!(
+                    "{}: warning: {}: maximum nameref depth ({}) exceeded",
+                    self.error_prefix(),
+                    name,
+                    MAX_NAMEREF_DEPTH
+                );
+                break;
+            }
+            let target_base = if let Some(bracket) = target.find('[') {
+                &target[..bracket]
+            } else {
+                target.as_str()
+            };
+            // Exact circular: target is exactly in seen (e.g. a→b→a)
+            if seen.contains(target) {
+                eprintln!(
+                    "{}: warning: {}: circular name reference",
+                    self.error_prefix(),
+                    name
+                );
+                return NamerefResolveResult::CircularExact;
+            }
+            // Subscript circular: target's base name matches a variable
+            // in the chain (e.g. a→b→a[1]) but full target is different
+            if seen_bases.contains(target_base) && !seen.contains(target) {
+                // Don't print "circular name reference" — the caller will
+                // print "removing nameref attribute" instead.
+                return NamerefResolveResult::CircularSubscript(target.clone());
+            }
+            seen.insert(target.clone());
+            seen_bases.insert(target_base.to_string());
+            resolved = target.clone();
+            depth += 1;
+        }
+        NamerefResolveResult::Resolved
     }
 
     /// Resolve a variable name through namerefs.
@@ -987,15 +1069,18 @@ impl Shell {
 
     /// Resolve a variable name through namerefs, emitting warnings for
     /// circular references and maximum depth exceeded (matching bash behavior).
-    /// Bash warns "circular name reference" when it first detects the cycle,
-    /// then "maximum nameref depth (8) exceeded" when depth limit is hit.
+    /// Bash warns "circular name reference" when it first detects the cycle.
+    /// Also detects circularity through subscripted references: a→b→a[1] is
+    /// circular because the base name of the target matches a variable in the chain.
     /// Returns the resolved name (which may be the original if circular).
     pub fn resolve_nameref_warn(&self, name: &str) -> String {
         const MAX_NAMEREF_DEPTH: usize = 8;
         let mut resolved = name.to_string();
         let mut seen = HashSet::new();
+        let mut seen_bases = HashSet::new();
         let mut depth = 0;
-        let mut warned_circular = false;
+        // Track the base name of the initial variable
+        seen_bases.insert(name.to_string());
         while let Some(target) = self.namerefs.get(&resolved) {
             if target.is_empty() {
                 break;
@@ -1009,17 +1094,22 @@ impl Shell {
                 );
                 break;
             }
-            if seen.contains(target) && !warned_circular {
+            // Check both full target name and base name (before '[') for cycles
+            let target_base = if let Some(bracket) = target.find('[') {
+                &target[..bracket]
+            } else {
+                target.as_str()
+            };
+            if seen.contains(target) || seen_bases.contains(target_base) {
                 eprintln!(
                     "{}: warning: {}: circular name reference",
                     self.error_prefix(),
                     name
                 );
-                warned_circular = true;
-                // Don't break — continue iterating up to MAX_NAMEREF_DEPTH
-                // like bash does, which will then emit "maximum depth exceeded"
+                break;
             }
             seen.insert(target.clone());
+            seen_bases.insert(target_base.to_string());
             resolved = target.clone();
             depth += 1;
         }
@@ -1061,6 +1151,65 @@ impl Shell {
 
     /// Set a variable value, resolving namerefs.
     pub fn set_var(&mut self, name: &str, value: String) {
+        // Check for subscript-circular namerefs BEFORE the empty-target check.
+        // E.g. a→b→a[1]: bash removes the nameref attribute from `a` with a
+        // warning and assigns to the resolved target `a[1]`.
+        if self.namerefs.contains_key(name) {
+            match self.resolve_nameref_for_assign(name) {
+                NamerefResolveResult::CircularSubscript(target) => {
+                    eprintln!(
+                        "{}: warning: {}: removing nameref attribute",
+                        self.error_prefix(),
+                        name
+                    );
+                    self.namerefs.remove(name);
+                    // Now assign to the resolved target (e.g. a[1]).
+                    // Since the nameref was removed, this can proceed normally
+                    // through the subscript handling in set_var's later code.
+                    // We call set_var recursively — the nameref is gone so
+                    // the chain won't be followed again.
+                    if target.contains('[') && target.ends_with(']') {
+                        // Target is subscripted (e.g. "a[1]") — assign to
+                        // the array element directly via set_var on the base.
+                        let bracket = target.find('[').unwrap();
+                        let base = &target[..bracket];
+                        let subscript = &target[bracket + 1..target.len() - 1];
+                        if subscript != "@" && subscript != "*" {
+                            self.declared_unset.remove(base);
+                            let aeo = self.is_array_expand_once();
+                            let expanded_sub;
+                            let eval_str =
+                                if !aeo && (subscript.contains('$') || subscript.contains('`')) {
+                                    expanded_sub = self.expand_comsubs_in_arith(subscript);
+                                    expanded_sub.as_str()
+                                } else {
+                                    subscript
+                                };
+                            let idx = self.eval_arith_expr(eval_str);
+                            if crate::expand::take_arith_error() {
+                                return;
+                            }
+                            let arr = self.arrays.entry(base.to_string()).or_default();
+                            let actual_idx = if idx < 0 { 0usize } else { idx as usize };
+                            while arr.len() <= actual_idx {
+                                arr.push(None);
+                            }
+                            arr[actual_idx] = Some(value);
+                            self.vars.remove(base);
+                        }
+                    } else {
+                        // Non-subscripted target — just assign as scalar
+                        self.vars.insert(target, value);
+                    }
+                    return;
+                }
+                _ => {
+                    // Fall through to normal processing (exact circular and
+                    // normal resolution handled below).
+                }
+            }
+        }
+
         // If name is a nameref with an empty target, rebind the nameref
         // to point to `value` instead of assigning through it.
         // This matches bash: `declare -n ref; ref=x` sets ref's target to "x".

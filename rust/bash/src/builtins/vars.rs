@@ -4234,9 +4234,21 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     }
                 }
             } else if !flag_nameref && had_subscript && !shell.arrays.contains_key(attr_name) {
-                // declare -r c[100] (with subscript, no -a flag): create empty array
-                shell.arrays.entry(attr_name.to_string()).or_default();
-                shell.declared_unset.insert(attr_name.to_string());
+                // declare -r c[100] (with subscript, no -a flag): create array
+                // If the variable was previously a scalar, preserve its value as [0]
+                // (bash behavior: `array=one; declare -i array[64]` → array[0]="one")
+                // The preserved value should NOT be re-evaluated as arithmetic even
+                // when -i is set — only future assignments go through arithmetic eval.
+                if let Some(val) = shell.vars.remove(attr_name) {
+                    shell.arrays.insert(attr_name.to_string(), vec![Some(val)]);
+                    // Mark as already-integer so the re-evaluation below is skipped
+                    if flag_integer {
+                        shell.integer_vars.insert(attr_name.to_string());
+                    }
+                } else {
+                    shell.arrays.entry(attr_name.to_string()).or_default();
+                    shell.declared_unset.insert(attr_name.to_string());
+                }
             } else if !flag_nameref
                 && !shell.arrays.contains_key(attr_name)
                 && !shell.assoc_arrays.contains_key(attr_name)
