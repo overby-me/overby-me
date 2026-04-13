@@ -1084,6 +1084,10 @@ fn main() {
             if full {
                 // --full mode: write a full copy of the unit file.
                 let dest_path = std::path::Path::new(base_dir).join(unit_name);
+                // Ensure the parent directory exists
+                if let Some(parent) = dest_path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
 
                 if let Some(ref content) = stdin_content {
                     // --stdin --full: write content directly
