@@ -200,6 +200,10 @@ impl AssocArray {
         self.len
     }
 
+    pub fn nbuckets(&self) -> usize {
+        self.nbuckets
+    }
+
     pub fn entry(&mut self, key: String) -> AssocEntry<'_> {
         let idx = self.bucket_idx(&key);
         if self.buckets[idx].iter().any(|(k, _)| *k == key) {

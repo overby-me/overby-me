@@ -2679,7 +2679,19 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 // Validate that the nameref target is a valid variable name
                 // (optionally with [subscript]). Reject things like `/`, `%`,
                 // `42`, `7*6`, etc. with "invalid variable name for name reference".
-                if !value.is_empty() && !crate::interpreter::is_valid_nameref_target(value) {
+                if value.is_empty() {
+                    // `declare -n name=` with empty target — bash reports
+                    // "not a valid identifier" (not the nameref-specific message)
+                    // and does NOT create the variable at all.
+                    eprintln!(
+                        "{}: {}: `{}': not a valid identifier",
+                        shell.error_prefix(),
+                        cmd_name,
+                        value
+                    );
+                    status = 1;
+                    continue;
+                } else if !crate::interpreter::is_valid_nameref_target(value) {
                     eprintln!(
                         "{}: {}: `{}': invalid variable name for name reference",
                         shell.error_prefix(),
@@ -3620,13 +3632,25 @@ fn escape_nameref_target(target: &str) -> String {
 }
 
 pub fn parse_assoc_literal(s: &str) -> crate::interpreter::AssocArray {
+    parse_assoc_literal_with_buckets(s, 1024)
+}
+
+/// Like `parse_assoc_literal` but with a configurable number of hash buckets.
+/// Bash uses 128 buckets when converting an existing variable to assoc
+/// (`convert_var_to_assoc` → `assoc_create(0)` → `DEFAULT_HASH_BUCKETS`),
+/// and 1024 buckets when creating a brand-new assoc variable
+/// (`make_new_assoc_variable` → `assoc_create(ASSOC_HASH_BUCKETS)`).
+pub fn parse_assoc_literal_with_buckets(
+    s: &str,
+    nbuckets: usize,
+) -> crate::interpreter::AssocArray {
     let trimmed = s.trim();
     let inner = if trimmed.starts_with('(') && trimmed.ends_with(')') {
         &trimmed[1..trimmed.len() - 1]
     } else {
         trimmed
     };
-    let mut map = crate::interpreter::AssocArray::default();
+    let mut map = crate::interpreter::AssocArray::new_with_buckets(nbuckets);
     // Split on \x1F separator (from inline array parser) or whitespace
     let entries: Vec<&str> = if inner.contains('\x1F') {
         inner.split('\x1F').filter(|e| !e.is_empty()).collect()

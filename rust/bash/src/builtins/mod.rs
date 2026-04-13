@@ -1323,6 +1323,7 @@ fn format_compound_command_indent(cmd: &CompoundCommand, indent: usize) -> Strin
 }
 
 pub use vars::parse_assoc_literal;
+pub use vars::parse_assoc_literal_with_buckets;
 
 /// Parse an indexed array compound assignment that may contain `[n]=value` subscript syntax.
 /// Returns a sparse `Vec<Option<String>>` where the index corresponds to the array index.

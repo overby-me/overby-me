@@ -1811,7 +1811,16 @@ impl Shell {
                     );
                 }
             }
-            let prefix_saves: Vec<(String, String, Option<String>, Option<String>)> = cmd
+            #[allow(clippy::type_complexity)]
+            let prefix_saves: Vec<(
+                String,
+                String,
+                Option<String>,
+                Option<String>,
+                bool,
+                bool,
+                bool,
+            )> = cmd
                 .assignments
                 .iter()
                 .filter(|a| !a.name.contains('['))
@@ -1823,6 +1832,9 @@ impl Shell {
                     };
                     let old_var = self.vars.get(&resolved).cloned();
                     let old_export = self.exports.get(&resolved).cloned();
+                    let old_readonly = self.readonly_vars.contains(&resolved);
+                    let old_integer = self.integer_vars.contains(&resolved);
+                    let old_declared_unset = self.declared_unset.contains(&resolved);
                     let final_val = if a.append {
                         if self.integer_vars.contains(&resolved) {
                             let existing = self.eval_arith_expr(old_var.as_deref().unwrap_or("0"));
@@ -1841,7 +1853,15 @@ impl Shell {
                         self.exports.insert(resolved.clone(), final_val.clone());
                         unsafe { std::env::set_var(&resolved, &final_val) };
                     }
-                    (resolved, final_val, old_var, old_export)
+                    (
+                        resolved,
+                        final_val,
+                        old_var,
+                        old_export,
+                        old_readonly,
+                        old_integer,
+                        old_declared_unset,
+                    )
                 })
                 .collect();
 
@@ -1849,7 +1869,7 @@ impl Shell {
             // `local VAR` (no `=`) inside the function inherits the value
             // instead of becoming declared-but-unset.
             let old_temp_env = std::mem::take(&mut self.temp_env_vars);
-            for (k, _, _, _) in &prefix_saves {
+            for (k, _, _, _, _, _, _) in &prefix_saves {
                 if !k.is_empty() {
                     self.temp_env_vars.insert(k.clone());
                 }
@@ -1860,8 +1880,10 @@ impl Shell {
             // Restore previous temp_env_vars
             self.temp_env_vars = old_temp_env;
 
-            // Restore prefix assignments (vars + exports)
-            for (k, set_val, old_var, old_export) in &prefix_saves {
+            // Restore prefix assignments (vars + exports + attributes)
+            for (k, set_val, old_var, old_export, old_readonly, old_integer, old_declared_unset) in
+                &prefix_saves
+            {
                 // In POSIX mode, if the variable was modified inside the function
                 // (e.g., by special builtin prefix assignments that persist),
                 // don't restore it
@@ -1893,6 +1915,25 @@ impl Shell {
                             unsafe { std::env::remove_var(k) };
                         }
                     }
+                }
+                // Restore variable attributes that may have been changed
+                // inside the function (e.g., `readonly` applied to a temp
+                // env variable should be undone when the function returns
+                // in non-POSIX mode).
+                if *old_readonly {
+                    self.readonly_vars.insert(k.clone());
+                } else {
+                    self.readonly_vars.remove(k);
+                }
+                if *old_integer {
+                    self.integer_vars.insert(k.clone());
+                } else {
+                    self.integer_vars.remove(k);
+                }
+                if *old_declared_unset {
+                    self.declared_unset.insert(k.clone());
+                } else {
+                    self.declared_unset.remove(k);
                 }
             }
             result
@@ -2216,7 +2257,58 @@ impl Shell {
                                     modified = true;
                                     continue;
                                 }
-                                let map = crate::builtins::parse_assoc_literal(value);
+                                // Bash uses different hash bucket counts depending
+                                // on how the assoc array is created:
+                                // - 1024 (ASSOC_HASH_BUCKETS) for brand-new assoc
+                                //   variables (make_new_assoc_variable)
+                                // - 128 (DEFAULT_HASH_BUCKETS) when converting an
+                                //   existing scalar/array to assoc
+                                //   (convert_var_to_assoc → assoc_create(0))
+                                // - existing nbuckets when re-assigning to an
+                                //   already-assoc variable (bash flushes & reuses
+                                //   the same hash table)
+                                let nbuckets = if has_global_flag && !self.local_scopes.is_empty() {
+                                    // For -g: check saved scope state for the
+                                    // variable's type at global scope.
+                                    let saved_is_assoc = self
+                                        .local_scopes
+                                        .iter()
+                                        .find_map(|s| s.get(name))
+                                        .is_some_and(|sv| sv.assoc.is_some());
+                                    let saved_is_scalar_or_array = self
+                                        .local_scopes
+                                        .iter()
+                                        .find_map(|s| s.get(name))
+                                        .is_some_and(|sv| {
+                                            sv.scalar.is_some() || sv.array.is_some()
+                                        });
+                                    if saved_is_assoc {
+                                        // Re-assignment: use saved assoc's bucket count
+                                        self.local_scopes
+                                            .iter()
+                                            .find_map(|s| s.get(name))
+                                            .and_then(|sv| sv.assoc.as_ref().map(|a| a.nbuckets()))
+                                            .unwrap_or(1024)
+                                    } else if saved_is_scalar_or_array
+                                        || self.vars.contains_key(name)
+                                        || self.arrays.contains_key(name)
+                                    {
+                                        128 // conversion from scalar/array
+                                    } else {
+                                        1024 // brand new
+                                    }
+                                } else if let Some(existing) = self.assoc_arrays.get(name) {
+                                    existing.nbuckets() // re-assignment: keep existing bucket count
+                                } else if self.vars.contains_key(name)
+                                    || self.arrays.contains_key(name)
+                                {
+                                    128 // conversion from scalar/array
+                                } else {
+                                    1024 // brand new
+                                };
+                                let map = crate::builtins::parse_assoc_literal_with_buckets(
+                                    value, nbuckets,
+                                );
                                 if has_global_flag
                                     && !self.local_scopes.is_empty()
                                     && self.local_scopes.iter().any(|s| s.contains_key(name))
