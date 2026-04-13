@@ -3476,6 +3476,21 @@ impl Shell {
                 resolved_base = resolved_base_raw;
             }
         } else {
+            // When the original assignment has a subscript AND the nameref
+            // target is also subscripted, reject: `ref[foo]=bar` where
+            // ref→XXX[0] would produce `XXX[0][foo]` which is invalid.
+            if self.namerefs.contains_key(base_name)
+                && resolved_base_raw.contains('[')
+                && resolved_base_raw.ends_with(']')
+            {
+                eprintln!(
+                    "{}: `{}': not a valid identifier",
+                    self.error_prefix(),
+                    resolved_base_raw
+                );
+                self.last_status = 1;
+                return;
+            }
             nameref_subscript = None;
             resolved_base = resolved_base_raw;
         }

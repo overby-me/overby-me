@@ -1674,6 +1674,22 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
         return 1;
     }
 
+    // Reject subscripted nameref targets for -a (e.g. ref→XXX[0])
+    if let Some(ref name) = array_name {
+        let resolved = shell.resolve_nameref(name);
+        if shell.namerefs.contains_key(name.as_str())
+            && resolved.contains('[')
+            && resolved.ends_with(']')
+        {
+            eprintln!(
+                "{}: read: `{}': not a valid identifier",
+                shell.error_prefix(),
+                resolved
+            );
+            return 1;
+        }
+    }
+
     // Check that -a target is not an associative array
     if let Some(ref name) = array_name
         && shell.assoc_arrays.contains_key(name.as_str())
