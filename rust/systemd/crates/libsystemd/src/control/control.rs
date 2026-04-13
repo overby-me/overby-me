@@ -2741,7 +2741,19 @@ fn create_transient_unit(
         platform_specific,
         dbus_name: None,
         pid_file: None,
-        sockets: vec![],
+        sockets: if !params.socket_properties.is_empty() {
+            let sock_name = if unit_name.ends_with(".service") {
+                format!("{}.socket", unit_name.strip_suffix(".service").unwrap())
+            } else {
+                format!("{unit_name}.socket")
+            };
+            vec![UnitId {
+                kind: UnitIdKind::Socket,
+                name: sock_name,
+            }]
+        } else {
+            vec![]
+        },
         slice: effective_slice,
         remain_after_exit: params.remain_after_exit,
         success_exit_status: SuccessExitStatus::default(),
@@ -4320,7 +4332,8 @@ fn create_transient_unit(
         crate::units::insert_new_unit_lenient(path_unit, &mut ri);
     }
 
-    // If socket properties are set, write a companion .socket transient file
+    // If socket properties are set, write a companion .socket transient file,
+    // load it into the unit table, and mark it for activation.
     if has_socket {
         let socket_name = if unit_name.ends_with(".service") {
             format!("{}.socket", unit_name.strip_suffix(".service").unwrap())
@@ -4328,12 +4341,43 @@ fn create_transient_unit(
             format!("{unit_name}.socket")
         };
         let socket_file = transient_dir.join(&socket_name);
-        let _ = write_transient_auxiliary_file(
-            &socket_file,
-            "Socket",
-            &params.socket_properties,
-            params,
-        );
+        if write_transient_auxiliary_file(&socket_file, "Socket", &params.socket_properties, params)
+            .is_ok()
+        {
+            // Load the socket unit from the file we just wrote and insert it
+            // into the unit table so it can be activated.
+            match load_new_unit(&ri.config.unit_dirs, &socket_name) {
+                Ok(mut socket_unit) => {
+                    // Link socket to the transient service so socket
+                    // activation can find the service to start.
+                    if let Specific::Socket(ref mut sock_specific) = socket_unit.specific
+                        && sock_specific.conf.services.is_empty()
+                    {
+                        sock_specific.conf.services.push(unit_id.clone());
+                    }
+                    // Remove existing socket if stopped
+                    let existing_socket = ri
+                        .unit_table
+                        .values()
+                        .find(|u| u.id.name == socket_name)
+                        .map(|u| {
+                            let status = u.common.status.read_poisoned();
+                            let is_done = matches!(
+                                &*status,
+                                UnitStatus::NeverStarted | UnitStatus::Stopped(..)
+                            );
+                            (u.id.clone(), is_done)
+                        });
+                    if let Some((id, true)) = existing_socket {
+                        ri.unit_table.remove(&id);
+                    }
+                    crate::units::insert_new_unit_lenient(socket_unit, &mut ri);
+                }
+                Err(e) => {
+                    warn!("Failed to load transient socket unit {socket_name}: {e}");
+                }
+            }
+        }
     }
 
     Ok(unit_id)
@@ -4556,6 +4600,29 @@ pub fn execute_command(
                         let _ = write!(errstr, "\n{err:?}");
                     }
                     return Err(errstr);
+                }
+            } else if !params.socket_properties.is_empty() {
+                // Socket-activated transient: start the socket unit so it
+                // begins listening.  The service will be activated on the
+                // first incoming connection.
+                let socket_name = if unit_name.ends_with(".service") {
+                    format!("{}.socket", unit_name.strip_suffix(".service").unwrap())
+                } else {
+                    format!("{unit_name}.socket")
+                };
+                let socket_id = {
+                    let ri = run_info.read_poisoned();
+                    ri.unit_table
+                        .values()
+                        .find(|u| u.id.name == socket_name)
+                        .map(|u| u.id.clone())
+                };
+                if let Some(sid) = socket_id {
+                    load_dependency_units(&sid, &run_info);
+                    let errs = crate::units::activate_needed_units(sid, run_info.clone());
+                    if !errs.is_empty() {
+                        warn!("Failed to start transient socket {socket_name}: {errs:?}");
+                    }
                 }
             }
 
