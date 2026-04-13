@@ -329,6 +329,11 @@ pub fn set_nounset_error() {
     NOUNSET_ERROR.with(|f| *f.borrow_mut() = true);
 }
 
+/// Check if a nounset error is pending (without clearing it).
+pub fn is_nounset_error() -> bool {
+    NOUNSET_ERROR.with(|f| *f.borrow())
+}
+
 /// Take all pending process substitution fds (draining the list).
 /// Get the PID of the last process substitution child (for $!)
 pub fn take_last_procsub_pid() -> Option<i32> {
@@ -967,6 +972,9 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                                 && ctx.opt_flags.contains('u')
                                 && !matches!(name.as_str(), "?" | "$" | "#" | "@" | "*" | "-" | "0")
                                 && !(name == "!" && ctx.last_bg_pid != 0)
+                                // Skip if nounset error was already reported (e.g. from
+                                // subscript eval when name is a nameref to `a[k]` and `k` is unbound)
+                                && !is_nounset_error()
                                 && (is_pos_unbound
                                     || (name.parse::<usize>().is_err()
                                         && !ctx.vars.contains_key(name.as_str())
@@ -1748,6 +1756,9 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                 && !matches!(name.as_str(), "?" | "$" | "#" | "@" | "*" | "-" | "0")
                 // $! is unbound when no background job has been started
                 && !(name == "!" && ctx.last_bg_pid != 0)
+                // Skip if nounset error was already reported (e.g. from subscript
+                // evaluation when name is a nameref to `a[k]` and `k` is unbound)
+                && !is_nounset_error()
                 && (is_pos_unbound
                     || (name.parse::<usize>().is_err()
                         && !ctx.vars.contains_key(name.as_str())

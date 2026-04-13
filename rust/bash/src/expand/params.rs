@@ -2219,6 +2219,9 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
     if !(!val.is_empty()
         || !ctx.opt_flags.contains('u')
         || length_subscript_exempt
+        // Skip if nounset error was already reported (e.g. from subscript
+        // evaluation when name is a nameref to `a[k]` and `k` is unbound)
+        || is_nounset_error()
         || matches!(
             expr.op,
             ParamOp::Default(..) | ParamOp::Assign(..) | ParamOp::Alt(..) | ParamOp::Error(..)
