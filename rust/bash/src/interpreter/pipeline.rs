@@ -342,9 +342,40 @@ impl Shell {
                 }
                 // Restore declared_unset status
                 if saved.was_declared_unset {
-                    self.declared_unset.insert(var_name);
+                    self.declared_unset.insert(var_name.clone());
                 } else {
                     self.declared_unset.remove(&var_name);
+                }
+                // Restore nameref state
+                match saved.nameref {
+                    Some(target) => {
+                        self.namerefs.insert(var_name.clone(), target);
+                    }
+                    None => {
+                        self.namerefs.remove(&var_name);
+                    }
+                }
+                // Restore export state
+                match &saved.was_exported {
+                    Some(export_val) => {
+                        let env_val = self
+                            .vars
+                            .get(&var_name)
+                            .cloned()
+                            .unwrap_or_else(|| export_val.clone());
+                        self.exports.insert(var_name.clone(), env_val.clone());
+                        if !var_name.is_empty() {
+                            unsafe { std::env::set_var(&var_name, &env_val) };
+                        }
+                    }
+                    None => {
+                        if self.exports.contains_key(&var_name) {
+                            self.exports.remove(&var_name);
+                            if !var_name.is_empty() {
+                                unsafe { std::env::remove_var(&var_name) };
+                            }
+                        }
+                    }
                 }
             }
         }

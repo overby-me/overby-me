@@ -61,6 +61,8 @@ pub struct SavedVar {
     pub was_declared_unset: bool,
     /// Saved nameref target (Some(target) if was a nameref, None if wasn't)
     pub nameref: Option<String>,
+    /// Saved export value (Some(value) if was exported, None if wasn't)
+    pub was_exported: Option<String>,
 }
 
 /// Bash-compatible hash function (FNV-1 variant) for associative arrays.
@@ -1271,6 +1273,7 @@ impl Shell {
                     was_readonly: self.readonly_vars.contains(name),
                     was_declared_unset: self.declared_unset.contains(name),
                     nameref: self.namerefs.get(name).cloned(),
+                    was_exported: self.exports.get(name).cloned(),
                 },
             );
             // Remove readonly for the local scope (will be re-applied if -r is used)
@@ -1294,6 +1297,7 @@ impl Shell {
                             was_readonly: false,
                             was_declared_unset: false,
                             nameref: None,
+                            was_exported: None,
                         },
                     );
                 }

@@ -583,13 +583,27 @@ pub(super) fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
                                 shell.namerefs.remove(name);
                             }
                         }
-                        // Re-sync process environment
-                        if let Some(export_val) = shell.exports.get(name) {
-                            if shell.vars.contains_key(name) {
-                                unsafe { std::env::set_var(name, export_val) };
+                        // Restore export state from saved scope
+                        match &saved.was_exported {
+                            Some(export_val) => {
+                                let env_val = shell
+                                    .vars
+                                    .get(name)
+                                    .cloned()
+                                    .unwrap_or_else(|| export_val.clone());
+                                shell.exports.insert(name.to_string(), env_val.clone());
+                                if !name.is_empty() {
+                                    unsafe { std::env::set_var(name, &env_val) };
+                                }
                             }
-                        } else if !name.is_empty() {
-                            unsafe { std::env::remove_var(name) };
+                            None => {
+                                if shell.exports.contains_key(name) {
+                                    shell.exports.remove(name);
+                                    if !name.is_empty() {
+                                        unsafe { std::env::remove_var(name) };
+                                    }
+                                }
+                            }
                         }
                     }
                 } else {
@@ -1125,8 +1139,13 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
     for name_arg in &names {
         let var_name;
         if let Some(eq_pos) = name_arg.find('=') {
-            let name = &name_arg[..eq_pos];
-            let value = &name_arg[eq_pos + 1..];
+            // Detect += append syntax: name ends with '+' before '='
+            let (name, value, is_append) = if eq_pos > 0 && name_arg.as_bytes()[eq_pos - 1] == b'+'
+            {
+                (&name_arg[..eq_pos - 1], &name_arg[eq_pos + 1..], true)
+            } else {
+                (&name_arg[..eq_pos], &name_arg[eq_pos + 1..], false)
+            };
             var_name = name.to_string();
             // Check readonly BEFORE assignment — `local var=value` should
             // error if:
@@ -1168,6 +1187,43 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
                 status = 1;
                 continue;
             }
+            // When using += with localvar_inherit (or -I flag), we need to
+            // inherit the current value BEFORE declare_local saves and
+            // potentially clears it.  For += with compound assignment on
+            // arrays, the inherited value is the base that gets appended to.
+            // For plain = (no append), declare_local saves the old value
+            // and the new assignment overwrites it completely.
+            //
+            // For += WITHOUT localvar_inherit, declare_local still saves
+            // the old value, but the local starts empty and we just assign
+            // the compound value (no inheritance, no append to old).
+            let inherit = flag_inherit
+                || *shell
+                    .shopt_options
+                    .get("localvar_inherit")
+                    .unwrap_or(&false);
+
+            // Snapshot inherited state before declare_local clears it.
+            // We need the inherited arrays/assoc/scalar for += append.
+            let inherited_array = if is_append && inherit {
+                shell.arrays.get(name).cloned()
+            } else {
+                None
+            };
+            let inherited_assoc = if is_append && inherit {
+                shell.assoc_arrays.get(name).cloned()
+            } else {
+                None
+            };
+            let inherited_scalar = if is_append && inherit {
+                shell.vars.get(name).cloned()
+            } else {
+                None
+            };
+            // Check if variable is currently an array/assoc (before declare_local)
+            let was_array = shell.arrays.contains_key(name);
+            let was_assoc = shell.assoc_arrays.contains_key(name);
+
             shell.declare_local(name);
             if flag_integer {
                 shell.integer_vars.insert(name.to_string());
@@ -1192,24 +1248,203 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
             } else if flag_assoc {
                 let trimmed_val = value.trim();
                 if trimmed_val.starts_with('(') && trimmed_val.ends_with(')') {
-                    let map = crate::builtins::parse_assoc_literal(value);
-                    shell.assoc_arrays.insert(name.to_string(), map);
+                    if is_append {
+                        // Append to inherited assoc array
+                        let mut map = if inherit {
+                            inherited_assoc.unwrap_or_default()
+                        } else {
+                            crate::interpreter::AssocArray::default()
+                        };
+                        let new_map = crate::builtins::parse_assoc_literal(value);
+                        for (k, v) in new_map.iter() {
+                            map.insert(k.clone(), v.clone());
+                        }
+                        shell.assoc_arrays.insert(name.to_string(), map);
+                    } else {
+                        let map = crate::builtins::parse_assoc_literal(value);
+                        shell.assoc_arrays.insert(name.to_string(), map);
+                    }
                 } else {
                     // Bare value without (): local -A name=value
                     // Bash assigns the value to key "0", not implicit key-value pairing.
-                    let mut map = crate::interpreter::AssocArray::default();
+                    let mut map = if is_append && inherit {
+                        inherited_assoc.unwrap_or_default()
+                    } else {
+                        crate::interpreter::AssocArray::default()
+                    };
                     map.insert("0".to_string(), value.to_string());
                     shell.assoc_arrays.insert(name.to_string(), map);
                 }
             } else if flag_array {
-                let mut arr = crate::builtins::parse_indexed_compound_assignment(value);
-                shell.apply_case_attrs_to_array(name, &mut arr);
-                shell.arrays.insert(name.to_string(), arr);
+                let trimmed_val = value.trim();
+                let is_compound = trimmed_val.starts_with('(') && trimmed_val.ends_with(')');
+                if is_compound {
+                    let new_arr = crate::builtins::parse_indexed_compound_assignment(value);
+                    if is_append {
+                        let mut arr = if inherit {
+                            inherited_array.unwrap_or_default()
+                        } else {
+                            Vec::new()
+                        };
+                        // Compound append: add new elements after the last existing one
+                        let start_idx = crate::interpreter::array_effective_len(&arr);
+                        for (i, elem) in new_arr.into_iter().enumerate() {
+                            let idx = start_idx + i;
+                            while arr.len() <= idx {
+                                arr.push(None);
+                            }
+                            arr[idx] = elem;
+                        }
+                        shell.apply_case_attrs_to_array(name, &mut arr);
+                        shell.arrays.insert(name.to_string(), arr);
+                    } else {
+                        let mut arr = new_arr;
+                        shell.apply_case_attrs_to_array(name, &mut arr);
+                        shell.arrays.insert(name.to_string(), arr);
+                    }
+                } else if is_append {
+                    // Bare value append: `local -a a+=Y` appends string Y
+                    // to element [0] of the inherited array (not a new element).
+                    // If the inherited value is a scalar (not an array),
+                    // convert it to an array with element [0] = scalar.
+                    let mut arr = if inherit {
+                        if let Some(a) = inherited_array.clone() {
+                            a
+                        } else if let Some(s) = inherited_scalar.clone() {
+                            // Scalar → array conversion for +=
+                            vec![Some(s)]
+                        } else {
+                            Vec::new()
+                        }
+                    } else {
+                        Vec::new()
+                    };
+                    if arr.is_empty() {
+                        arr.push(Some(value.to_string()));
+                    } else {
+                        let existing = arr[0].clone().unwrap_or_default();
+                        arr[0] = Some(format!("{}{}", existing, value));
+                    }
+                    // Remove scalar since we're now an array
+                    shell.vars.remove(name);
+                    shell.apply_case_attrs_to_array(name, &mut arr);
+                    shell.arrays.insert(name.to_string(), arr);
+                } else {
+                    // Bare value without (): assign as scalar to element [0]
+                    let mut arr = crate::builtins::parse_indexed_compound_assignment(value);
+                    shell.apply_case_attrs_to_array(name, &mut arr);
+                    shell.arrays.insert(name.to_string(), arr);
+                }
             } else if flag_integer {
                 let n = shell.eval_arith_expr(value);
-                shell.set_var(name, n.to_string());
+                if is_append {
+                    let existing = if inherit {
+                        inherited_scalar
+                            .as_deref()
+                            .and_then(|v| v.parse::<i64>().ok())
+                            .unwrap_or(0)
+                    } else {
+                        0
+                    };
+                    shell.set_var(name, (existing + n).to_string());
+                } else {
+                    shell.set_var(name, n.to_string());
+                }
             } else {
-                shell.set_var(name, value.to_string());
+                // Scalar or compound assignment without explicit -a/-A flag.
+                // If the value looks like a compound assignment (...)  and
+                // the variable was an array/assoc, treat as compound.
+                let trimmed_val = value.trim();
+                let looks_compound = trimmed_val.starts_with('(') && trimmed_val.ends_with(')');
+                if looks_compound && (was_assoc || flag_assoc) {
+                    // Associative array compound assignment
+                    if is_append {
+                        let mut map = if inherit {
+                            inherited_assoc.unwrap_or_default()
+                        } else {
+                            crate::interpreter::AssocArray::default()
+                        };
+                        let new_map = crate::builtins::parse_assoc_literal(value);
+                        for (k, v) in new_map.iter() {
+                            map.insert(k.clone(), v.clone());
+                        }
+                        shell.assoc_arrays.insert(name.to_string(), map);
+                    } else {
+                        let map = crate::builtins::parse_assoc_literal(value);
+                        shell.assoc_arrays.insert(name.to_string(), map);
+                    }
+                } else if looks_compound && (was_array || inherit && inherited_array.is_some()) {
+                    // Indexed array compound assignment
+                    let new_arr = crate::builtins::parse_indexed_compound_assignment(value);
+                    if is_append {
+                        let mut arr = if inherit {
+                            inherited_array.unwrap_or_default()
+                        } else {
+                            Vec::new()
+                        };
+                        let start_idx = crate::interpreter::array_effective_len(&arr);
+                        for (i, elem) in new_arr.into_iter().enumerate() {
+                            let idx = start_idx + i;
+                            while arr.len() <= idx {
+                                arr.push(None);
+                            }
+                            arr[idx] = elem;
+                        }
+                        shell.apply_case_attrs_to_array(name, &mut arr);
+                        shell.arrays.insert(name.to_string(), arr);
+                    } else {
+                        let mut arr = new_arr;
+                        shell.apply_case_attrs_to_array(name, &mut arr);
+                        shell.arrays.insert(name.to_string(), arr);
+                    }
+                } else if looks_compound && is_append && inherit && inherited_scalar.is_some() {
+                    // Scalar with += and compound value: convert scalar to
+                    // array and append (bash behavior for `local s+=(Y)`
+                    // where s was a scalar).
+                    let mut arr: Vec<Option<String>> = vec![inherited_scalar.clone()];
+                    let new_arr = crate::builtins::parse_indexed_compound_assignment(value);
+                    let start_idx = crate::interpreter::array_effective_len(&arr);
+                    for (i, elem) in new_arr.into_iter().enumerate() {
+                        let idx = start_idx + i;
+                        while arr.len() <= idx {
+                            arr.push(None);
+                        }
+                        arr[idx] = elem;
+                    }
+                    shell.apply_case_attrs_to_array(name, &mut arr);
+                    shell.arrays.insert(name.to_string(), arr);
+                    // Remove scalar since we converted to array
+                    shell.vars.remove(name);
+                } else if looks_compound {
+                    // Compound assignment on a non-array variable without
+                    // inheritance — just parse as indexed array
+                    let mut arr = crate::builtins::parse_indexed_compound_assignment(value);
+                    shell.apply_case_attrs_to_array(name, &mut arr);
+                    shell.arrays.insert(name.to_string(), arr);
+                } else if is_append {
+                    // Scalar append
+                    if shell.integer_vars.contains(name) {
+                        let existing = if inherit {
+                            inherited_scalar
+                                .as_deref()
+                                .and_then(|v| v.parse::<i64>().ok())
+                                .unwrap_or(0)
+                        } else {
+                            0
+                        };
+                        let addend = shell.eval_arith_expr(value);
+                        shell.set_var(name, (existing + addend).to_string());
+                    } else {
+                        let existing = if inherit {
+                            inherited_scalar.unwrap_or_default()
+                        } else {
+                            String::new()
+                        };
+                        shell.set_var(name, format!("{}{}", existing, value));
+                    }
+                } else {
+                    shell.set_var(name, value.to_string());
+                }
             }
         } else {
             var_name = name_arg.clone();
@@ -1246,9 +1481,63 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
                 // No value provided — just mark as nameref (no circular risk)
                 shell.namerefs.entry(name_arg.clone()).or_default();
             } else if flag_assoc {
-                shell.assoc_arrays.entry(name_arg.clone()).or_default();
+                let inherit = flag_inherit
+                    || *shell
+                        .shopt_options
+                        .get("localvar_inherit")
+                        .unwrap_or(&false);
+                if inherit {
+                    // With localvar_inherit, inherit the current value.
+                    // If the variable is a scalar, convert to assoc with
+                    // key "0" = scalar_value.  If already assoc, keep it.
+                    // If indexed array, convert: [idx] → key "idx".
+                    if shell.assoc_arrays.contains_key(name_arg.as_str()) {
+                        // Already an assoc — keep inherited value
+                    } else if let Some(val) = shell.vars.get(name_arg.as_str()).cloned() {
+                        let mut map = crate::interpreter::AssocArray::default();
+                        map.insert("0".to_string(), val);
+                        shell.assoc_arrays.insert(name_arg.clone(), map);
+                        shell.vars.remove(name_arg.as_str());
+                        shell.declared_unset.remove(name_arg.as_str());
+                    } else if let Some(arr) = shell.arrays.get(name_arg.as_str()).cloned() {
+                        let mut map = crate::interpreter::AssocArray::default();
+                        for (i, v) in arr.iter().enumerate() {
+                            if let Some(s) = v {
+                                map.insert(i.to_string(), s.clone());
+                            }
+                        }
+                        shell.assoc_arrays.insert(name_arg.clone(), map);
+                        shell.arrays.remove(name_arg.as_str());
+                        shell.declared_unset.remove(name_arg.as_str());
+                    } else {
+                        shell.assoc_arrays.entry(name_arg.clone()).or_default();
+                    }
+                } else {
+                    shell.assoc_arrays.entry(name_arg.clone()).or_default();
+                }
             } else if flag_array {
-                shell.arrays.entry(name_arg.clone()).or_default();
+                let inherit = flag_inherit
+                    || *shell
+                        .shopt_options
+                        .get("localvar_inherit")
+                        .unwrap_or(&false);
+                if inherit {
+                    // With localvar_inherit, inherit the current value.
+                    // If the variable is a scalar, convert to array with
+                    // element [0] = scalar_value.  If already an array, keep it.
+                    if shell.arrays.contains_key(name_arg.as_str()) {
+                        // Already an array — keep inherited value
+                        shell.declared_unset.remove(name_arg.as_str());
+                    } else if let Some(val) = shell.vars.get(name_arg.as_str()).cloned() {
+                        shell.arrays.insert(name_arg.clone(), vec![Some(val)]);
+                        shell.vars.remove(name_arg.as_str());
+                        shell.declared_unset.remove(name_arg.as_str());
+                    } else {
+                        shell.arrays.entry(name_arg.clone()).or_default();
+                    }
+                } else {
+                    shell.arrays.entry(name_arg.clone()).or_default();
+                }
             } else {
                 // `local v` without `=`: creates a declared-but-unset local
                 // that shadows any outer/global value.  However, if the
@@ -1459,8 +1748,20 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     shell.integer_vars.remove(pure);
                 }
                 if unset_export {
+                    // When inside a function scope, `typeset +x var`
+                    // creates a local that shadows the export attribute.
+                    // Don't remove from the process environment here —
+                    // the scope restore on function exit will re-sync
+                    // the process env based on the saved export state.
+                    // Only declare_local the variable so the saved state
+                    // captures the current export attribute for later
+                    // restoration.
+                    if !shell.local_scopes.is_empty() {
+                        shell.declare_local(pure);
+                    }
                     shell.exports.remove(pure);
-                    if !pure.is_empty() {
+                    if shell.local_scopes.is_empty() && !pure.is_empty() {
+                        // At global scope, immediately remove from process env
                         unsafe { std::env::remove_var(pure) };
                     }
                 }
@@ -3611,10 +3912,24 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     status = 1;
                 } else if !shell.assoc_arrays.contains_key(attr_name) {
                     if make_local {
-                        shell.vars.remove(attr_name);
-                        let new_map = crate::interpreter::AssocArray::default();
+                        let inherit_enabled = *shell
+                            .shopt_options
+                            .get("localvar_inherit")
+                            .unwrap_or(&false);
+                        let mut new_map = crate::interpreter::AssocArray::default();
+                        if inherit_enabled {
+                            // With localvar_inherit, convert inherited scalar
+                            // to assoc key "0" = value (bash behavior).
+                            if let Some(val) = shell.vars.remove(attr_name) {
+                                new_map.insert("0".to_string(), val);
+                            } else {
+                                shell.declared_unset.insert(attr_name.to_string());
+                            }
+                        } else {
+                            shell.vars.remove(attr_name);
+                            shell.declared_unset.insert(attr_name.to_string());
+                        }
                         shell.assoc_arrays.insert(attr_name.to_string(), new_map);
-                        shell.declared_unset.insert(attr_name.to_string());
                     } else {
                         let mut new_map = crate::interpreter::AssocArray::default();
                         if let Some(val) = shell.vars.remove(attr_name) {
@@ -3653,9 +3968,24 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     status = 1;
                 } else if !shell.arrays.contains_key(attr_name) {
                     if make_local {
-                        shell.vars.remove(attr_name);
-                        shell.arrays.insert(attr_name.to_string(), vec![]);
-                        shell.declared_unset.insert(attr_name.to_string());
+                        let inherit_enabled = *shell
+                            .shopt_options
+                            .get("localvar_inherit")
+                            .unwrap_or(&false);
+                        if inherit_enabled {
+                            // With localvar_inherit, convert inherited scalar
+                            // to array element [0] = value (bash behavior).
+                            if let Some(val) = shell.vars.remove(attr_name) {
+                                shell.arrays.insert(attr_name.to_string(), vec![Some(val)]);
+                            } else {
+                                shell.arrays.insert(attr_name.to_string(), vec![]);
+                                shell.declared_unset.insert(attr_name.to_string());
+                            }
+                        } else {
+                            shell.vars.remove(attr_name);
+                            shell.arrays.insert(attr_name.to_string(), vec![]);
+                            shell.declared_unset.insert(attr_name.to_string());
+                        }
                     } else if let Some(val) = shell.vars.remove(attr_name) {
                         shell.arrays.insert(attr_name.to_string(), vec![Some(val)]);
                     } else {

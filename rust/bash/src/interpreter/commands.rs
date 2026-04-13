@@ -2122,8 +2122,7 @@ impl Shell {
                     {
                         let raw_name = &arg[..eq_pos];
                         // Handle += compound assignments: strip trailing '+'
-                        let (name, _is_append) = if let Some(stripped) = raw_name.strip_suffix('+')
-                        {
+                        let (name, is_append) = if let Some(stripped) = raw_name.strip_suffix('+') {
                             (stripped, true)
                         } else {
                             (raw_name, false)
@@ -2144,6 +2143,29 @@ impl Shell {
                                 matches!(command_name.as_str(), "local" | "declare" | "typeset")
                                     && !self.local_scopes.is_empty()
                                     && !has_global_flag;
+                            // For += with localvar_inherit, snapshot the
+                            // inherited array/assoc BEFORE declare_local
+                            // saves and potentially clears it, so that we
+                            // can start the append from the inherited state.
+                            let inherit_enabled =
+                                *self.shopt_options.get("localvar_inherit").unwrap_or(&false);
+                            let inherited_arr = if is_append && make_local_here && inherit_enabled {
+                                self.arrays.get(name).cloned()
+                            } else {
+                                None
+                            };
+                            let inherited_assoc = if is_append && make_local_here && inherit_enabled
+                            {
+                                self.assoc_arrays.get(name).cloned()
+                            } else {
+                                None
+                            };
+                            let inherited_scalar =
+                                if is_append && make_local_here && inherit_enabled {
+                                    self.vars.get(name).cloned()
+                                } else {
+                                    None
+                                };
                             // Check readonly BEFORE declare_local removes the
                             // readonly flag.  This ensures `local qux=(one two)`
                             // when qux is globally readonly still errors.
@@ -2236,6 +2258,21 @@ impl Shell {
                                 continue;
                             } else if has_assoc_flag && self.arrays.contains_key(name) {
                                 // Cannot convert indexed to associative array.
+                                // For LOCAL declarations (not -g), bash prints an
+                                // error with the function name as context (e.g.
+                                // "f: var: cannot convert ...") in addition to
+                                // the builtin's own error later.  For -g (global),
+                                // only the builtin prints the error.
+                                if make_local_here && let Some(func) = self.func_names.last() {
+                                    eprintln!(
+                                        "{}: {}: {}: cannot convert indexed to associative array",
+                                        self.error_prefix(),
+                                        func,
+                                        name
+                                    );
+                                }
+                                // Push the bare name so the builtin can report
+                                // the error and apply any other flags.
                                 new_args.push(name.to_string());
                                 modified = true;
                                 continue;
@@ -2315,7 +2352,21 @@ impl Shell {
                                 {
                                     self.set_global_assoc(name, map);
                                 } else {
-                                    self.assoc_arrays.insert(name.to_string(), map);
+                                    if is_append {
+                                        if let Some(mut existing) = inherited_assoc.clone() {
+                                            for (k, v) in map.iter() {
+                                                existing.insert(k.clone(), v.clone());
+                                            }
+                                            self.assoc_arrays.insert(name.to_string(), existing);
+                                        } else {
+                                            self.assoc_arrays.insert(name.to_string(), map);
+                                        }
+                                    } else {
+                                        self.assoc_arrays.insert(name.to_string(), map);
+                                    }
+                                    // An explicit compound assignment (even empty)
+                                    // means the variable is no longer declared-but-unset.
+                                    self.declared_unset.remove(name);
                                 }
                             } else {
                                 // Check if the compound value came from a
@@ -2392,8 +2443,24 @@ impl Shell {
                                                     }
                                                     elements.last_mut().unwrap().push(part);
                                                 }
-                                                let mut arr: Vec<Option<String>> = Vec::new();
-                                                let mut next_idx: usize = 0;
+                                                let mut arr: Vec<Option<String>> = if is_append
+                                                    && inherited_arr.is_some()
+                                                {
+                                                    inherited_arr.clone().unwrap()
+                                                } else if is_append && inherited_scalar.is_some() {
+                                                    // Scalar → array conversion for +=
+                                                    vec![inherited_scalar.clone()]
+                                                } else {
+                                                    Vec::new()
+                                                };
+                                                let mut next_idx: usize = if is_append
+                                                    && (inherited_arr.is_some()
+                                                        || inherited_scalar.is_some())
+                                                {
+                                                    crate::interpreter::array_effective_len(&arr)
+                                                } else {
+                                                    0
+                                                };
                                                 for elem_parts in &elements {
                                                     if elem_parts.is_empty() {
                                                         continue;
@@ -2509,15 +2576,46 @@ impl Shell {
                                                 } else {
                                                     self.arrays.insert(name.to_string(), arr);
                                                 }
+                                                // An explicit compound assignment (even empty)
+                                                // means the variable is no longer declared-but-unset.
+                                                self.declared_unset.remove(name);
                                                 used_word_expand = true;
                                             }
                                         }
                                     }
                                     if !used_word_expand {
-                                        let mut arr =
+                                        let new_elems =
                                             crate::builtins::parse_indexed_compound_assignment(
                                                 value,
                                             );
+                                        let mut arr = if is_append && inherited_arr.is_some() {
+                                            let mut base = inherited_arr.clone().unwrap();
+                                            let start =
+                                                crate::interpreter::array_effective_len(&base);
+                                            for (i, elem) in new_elems.into_iter().enumerate() {
+                                                let idx = start + i;
+                                                while base.len() <= idx {
+                                                    base.push(None);
+                                                }
+                                                base[idx] = elem;
+                                            }
+                                            base
+                                        } else if is_append && inherited_scalar.is_some() {
+                                            let mut base: Vec<Option<String>> =
+                                                vec![inherited_scalar.clone()];
+                                            let start =
+                                                crate::interpreter::array_effective_len(&base);
+                                            for (i, elem) in new_elems.into_iter().enumerate() {
+                                                let idx = start + i;
+                                                while base.len() <= idx {
+                                                    base.push(None);
+                                                }
+                                                base[idx] = elem;
+                                            }
+                                            base
+                                        } else {
+                                            new_elems
+                                        };
                                         // Apply case-modification from declare flags
                                         if has_uppercase_flag
                                             || has_lowercase_flag
@@ -2546,6 +2644,9 @@ impl Shell {
                                         } else {
                                             self.arrays.insert(name.to_string(), arr);
                                         }
+                                        // An explicit compound assignment (even empty)
+                                        // means the variable is no longer declared-but-unset.
+                                        self.declared_unset.remove(name);
                                     }
                                 }
                             }
@@ -2870,18 +2971,25 @@ impl Shell {
                         && self.local_scopes.last().is_some_and(|s| s.contains_key(&k));
                     if was_localized {
                         // Update the saved scope entry with the pre-prefix value
+                        // AND the pre-prefix export state.  declare_local captured
+                        // the state AFTER the prefix assignment was applied (which
+                        // may have temporarily exported the variable).  We need
+                        // the saved scope entry to reflect the state from BEFORE
+                        // the prefix assignment so that when the function returns,
+                        // the global state is correctly restored.
                         if let Some(scope) = self.local_scopes.last_mut()
                             && let Some(saved_entry) = scope.get_mut(&k)
                         {
                             saved_entry.scalar = old_var.clone();
+                            saved_entry.was_exported = old_export.clone();
                         }
-                        // Also restore the export attribute in the scope save
-                        // Export attribute cleanup is handled by scope restore
-                        // on function exit — no additional action needed here.
                         // Remove the export attribute from the current scope
-                        // that was added by the prefix assignment, unless the
-                        // variable was already exported before.
-                        if old_export.is_none() {
+                        // that was added by the prefix assignment, unless:
+                        //   (a) the variable was already exported before, OR
+                        //   (b) the builtin explicitly set -x (e.g. `declare -x var`)
+                        //       — in that case the export is from the builtin,
+                        //       not just from the prefix assignment.
+                        if old_export.is_none() && !has_export_flag {
                             self.exports.remove(&k);
                             if !k.is_empty() {
                                 unsafe { std::env::remove_var(&k) };
@@ -4333,17 +4441,39 @@ impl Shell {
                         self.namerefs.remove(&var_name);
                     }
                 }
-                // Re-sync process environment for exported variables.
-                // When `local VAR` (no `=`) created a declared-but-unset
-                // local for an exported variable, we removed the var from
-                // the process env to prevent the expansion fallback
-                // (`std::env::var`) from leaking the value.  Now that the
-                // scope is being restored, re-export the value if it's
-                // still in `self.exports`.
-                if let Some(export_val) = self.exports.get(&var_name)
-                    && self.vars.contains_key(&var_name)
-                {
-                    unsafe { std::env::set_var(&var_name, export_val) };
+                // Restore export state from saved scope.
+                // When `typeset +x var` or similar removed the export
+                // attribute locally, the saved state records that the
+                // variable WAS exported before the local was created.
+                // Restore the export attribute and re-sync the process
+                // environment so that the global state is correct after
+                // the function returns.
+                match &saved.was_exported {
+                    Some(export_val) => {
+                        // Variable was exported before the local — restore it.
+                        // Use the restored scalar value for the export/env.
+                        let env_val = self
+                            .vars
+                            .get(&var_name)
+                            .cloned()
+                            .unwrap_or_else(|| export_val.clone());
+                        self.exports.insert(var_name.clone(), env_val.clone());
+                        if !var_name.is_empty() {
+                            unsafe { std::env::set_var(&var_name, &env_val) };
+                        }
+                    }
+                    None => {
+                        // Variable was NOT exported before the local.
+                        // If the function added an export on the local
+                        // variable, remove it now so the global state
+                        // is restored to non-exported.
+                        if self.exports.contains_key(&var_name) {
+                            self.exports.remove(&var_name);
+                            if !var_name.is_empty() {
+                                unsafe { std::env::remove_var(&var_name) };
+                            }
+                        }
+                    }
                 }
             }
         }
