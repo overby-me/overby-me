@@ -2797,6 +2797,17 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 // e.g., `declare -a e[10]="(test)"` → treat as `declare -a e="(test)"`
                 if flag_array || flag_assoc {
                     let stripped_name = base;
+                    // If the base name is a nameref, remove the nameref attribute
+                    // and use the variable itself (matching bash's "removing nameref
+                    // attribute" behavior for declare -a/-A on namerefs).
+                    if shell.namerefs.contains_key(stripped_name) {
+                        eprintln!(
+                            "{}: warning: {}: removing nameref attribute",
+                            shell.error_prefix(),
+                            stripped_name
+                        );
+                        shell.namerefs.remove(stripped_name);
+                    }
                     let resolved_base = shell.resolve_nameref(stripped_name);
                     if shell.readonly_vars.contains(&resolved_base) {
                         eprintln!(
@@ -3102,19 +3113,13 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             };
 
             if flag_nameref {
-                // Namerefs cannot be array elements or replace existing arrays.
-                // Check subscript in name (e.g. `declare -n x[3]=y`) and
-                // existing populated arrays (only non-empty to avoid false
-                // positives from mapfile's nameref bug leaving residual arrays).
+                // Validate the nameref target FIRST — bash checks target validity
+                // before checking array conflicts, so `declare -n array='(bad)'`
+                // reports "invalid variable name for name reference" even when
+                // `array` is already an array.
                 let is_array_conflict = name.contains('[')
-                    || shell
-                        .arrays
-                        .get(name)
-                        .is_some_and(|a| a.iter().any(|e| e.is_some()))
-                    || shell.assoc_arrays.get(name).is_some_and(|a| !a.is_empty());
-                // Validate that the nameref target is a valid variable name
-                // (optionally with [subscript]). Reject things like `/`, `%`,
-                // `42`, `7*6`, etc. with "invalid variable name for name reference".
+                    || shell.arrays.contains_key(name)
+                    || shell.assoc_arrays.contains_key(name);
                 if value.is_empty() {
                     // `declare -n name=` with empty target — bash reports
                     // "not a valid identifier" (not the nameref-specific message)
@@ -3767,6 +3772,13 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             // e.g. `declare -n foo=bar; declare -i foo` → applies -i to bar.
             // But when -n IS set (e.g. `declare -rn foo`), attributes apply
             // to the nameref variable itself, not the target.
+            //
+            // Special case: when -a or -A is set (array/assoc) and the nameref
+            // has NO target (empty), bash silently removes the nameref attribute
+            // and creates the array on the variable itself. When the nameref HAS
+            // a target, bash resolves through it (applies -a/-A to the target).
+            // The "warning: removing nameref attribute" is only emitted when
+            // there's a subscript assignment (handled in the subscripted path above).
             let has_attr_flags = flag_integer
                 || flag_readonly
                 || flag_export
@@ -3779,8 +3791,17 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             let resolved_name: String;
             let attr_name: &str =
                 if !flag_nameref && has_attr_flags && shell.namerefs.contains_key(name) {
-                    resolved_name = shell.resolve_nameref(name);
-                    &resolved_name
+                    if (flag_array || flag_assoc)
+                        && shell.namerefs.get(name).is_none_or(|t| t.is_empty())
+                    {
+                        // Nameref with no target — silently remove nameref
+                        // and use the variable itself for array creation.
+                        shell.namerefs.remove(name);
+                        name
+                    } else {
+                        resolved_name = shell.resolve_nameref(name);
+                        &resolved_name
+                    }
                 } else {
                     name
                 };
@@ -3829,8 +3850,31 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 // → foo is a nameref to "bar".
                 // When combined with other flags (e.g. `declare -rn foo`),
                 // the nameref is created AND the other attributes are applied
-                // to the nameref variable itself (not the target).
-                if shell.namerefs.contains_key(name) {
+                // to the nameref variable itself, not the target.
+                //
+                // Reject if the original name had a subscript (e.g.
+                // `declare -n array[128]`) — namerefs cannot be array elements.
+                // Also reject if the variable is already an array or assoc array.
+                let is_subscripted_nameref = had_subscript;
+                let is_existing_array =
+                    shell.arrays.contains_key(name) || shell.assoc_arrays.contains_key(name);
+                if is_subscripted_nameref {
+                    eprintln!(
+                        "{}: {}: {}: reference variable cannot be an array",
+                        shell.error_prefix(),
+                        cmd_name,
+                        name_arg
+                    );
+                    status = 1;
+                } else if is_existing_array && !shell.namerefs.contains_key(name) {
+                    eprintln!(
+                        "{}: {}: {}: reference variable cannot be an array",
+                        shell.error_prefix(),
+                        cmd_name,
+                        name
+                    );
+                    status = 1;
+                } else if shell.namerefs.contains_key(name) {
                     // Already a nameref — no-op for the nameref part (bash behavior)
                     // Other attribute flags (readonly, etc.) will be applied below.
                 } else {

@@ -5021,7 +5021,11 @@ impl Shell {
                     &item
                 };
                 if !item.is_empty() && !is_valid_identifier(target_name) {
-                    eprintln!("{}: {}: invalid variable name", self.error_prefix(), item);
+                    eprintln!(
+                        "{}: `{}': not a valid identifier",
+                        self.error_prefix(),
+                        item
+                    );
                     self.last_status = 1;
                     continue;
                 }

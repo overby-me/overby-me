@@ -2552,6 +2552,29 @@ pub(super) fn builtin_mapfile(shell: &mut Shell, args: &[String]) -> i32 {
         return 1;
     }
 
+    // Handle nameref: if varname is a nameref, check whether the target has
+    // a subscript (like `XXX[0]`).  If it does, that's an invalid identifier
+    // for mapfile.  If not, remove the nameref attribute and use the variable
+    // itself as the array (matching bash's "removing nameref attribute" behavior).
+    if shell.namerefs.contains_key(&varname) {
+        let target = shell.namerefs.get(&varname).cloned().unwrap_or_default();
+        if target.contains('[') {
+            // Subscripted nameref target — not valid for mapfile
+            eprintln!(
+                "{}: mapfile: `{}': not a valid identifier",
+                shell.error_prefix(),
+                target
+            );
+            return 1;
+        }
+        eprintln!(
+            "{}: warning: {}: removing nameref attribute",
+            shell.error_prefix(),
+            varname
+        );
+        shell.namerefs.remove(&varname);
+    }
+
     // Read lines from stdin or specified fd
     let mut lines = Vec::new();
     use std::io::Read;
