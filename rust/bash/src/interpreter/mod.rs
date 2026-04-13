@@ -1231,6 +1231,21 @@ impl Shell {
             return;
         }
         let resolved = self.resolve_nameref_warn(name);
+        // Reject assignment through nameref to var[@] or var[*]
+        if self.namerefs.contains_key(name) && resolved.contains('[') && resolved.ends_with(']') {
+            let bracket = resolved.find('[').unwrap();
+            let subscript = &resolved[bracket + 1..resolved.len() - 1];
+            if subscript == "@" || subscript == "*" {
+                eprintln!(
+                    "{}: {}[{}]: bad array subscript",
+                    self.error_prefix(),
+                    &resolved[..bracket],
+                    subscript
+                );
+                self.last_status = 1;
+                return;
+            }
+        }
         // When a nameref is circular (resolves back to itself) and we're
         // inside a function scope, bash assigns to the variable at the
         // enclosing scope rather than the local nameref variable.

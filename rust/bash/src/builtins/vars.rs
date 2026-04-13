@@ -3376,6 +3376,13 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                                 shell.integer_vars.remove(name);
                             }
                             shell.namerefs.insert(name.to_string(), value.to_string());
+                        } else if is_append {
+                            // Append case (ref+=f): bash omits command name
+                            eprintln!(
+                                "{}: {}: nameref variable self references not allowed",
+                                shell.error_prefix(),
+                                name
+                            );
                         } else {
                             eprintln!(
                                 "{}: {}: {}: nameref variable self references not allowed",
