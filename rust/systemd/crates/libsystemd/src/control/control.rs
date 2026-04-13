@@ -7363,13 +7363,18 @@ pub fn execute_command(
                     .get(&id)
                     .ok_or_else(|| format!("Unit {unit_name} not found."))?;
                 let status_locked = unit.common.status.read_poisoned();
-                // Return "true"/"false" — matches the boolean semantics of
-                // `systemctl is-failed`: is the unit in a failed state?
-                let is_failed = matches!(
-                    &*status_locked,
-                    crate::units::UnitStatus::Stopped(_, errors) if !errors.is_empty()
-                );
-                return Ok(serde_json::json!(if is_failed { "true" } else { "false" }));
+                // Return the ActiveState string (matching C systemd's
+                // `systemctl is-failed` output). The client uses this to
+                // decide the exit code: "failed" → 0, anything else → 1.
+                let active_state = match &*status_locked {
+                    crate::units::UnitStatus::Stopped(_, errors) if !errors.is_empty() => "failed",
+                    crate::units::UnitStatus::Started(_) => "active",
+                    crate::units::UnitStatus::Starting => "activating",
+                    crate::units::UnitStatus::Stopping => "deactivating",
+                    crate::units::UnitStatus::Restarting => "activating",
+                    _ => "inactive",
+                };
+                return Ok(serde_json::json!(active_state));
             }
         },
         Command::Start(unit_names) => {
