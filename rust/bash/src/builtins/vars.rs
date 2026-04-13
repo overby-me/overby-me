@@ -3502,9 +3502,7 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 shell.integer_vars.insert(name.to_string());
                 let n = shell.eval_arith_expr(value);
                 if is_append {
-                    let existing = shell
-                        .vars
-                        .get(name)
+                    let existing = get_existing_through_nameref(shell, name)
                         .and_then(|v| v.parse::<i64>().ok())
                         .unwrap_or(0);
                     shell.set_var(name, (existing + n).to_string());
@@ -3513,13 +3511,17 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 }
             } else if is_append {
                 // Check if variable already has integer attribute
-                if shell.integer_vars.contains(name) {
-                    let existing_str = shell.vars.get(name).cloned().unwrap_or_default();
+                let resolved_for_int = shell.resolve_nameref(name);
+                if shell.integer_vars.contains(name)
+                    || shell.integer_vars.contains(&resolved_for_int)
+                {
+                    let existing_str =
+                        get_existing_through_nameref(shell, name).unwrap_or_default();
                     let existing = shell.eval_arith_expr(&existing_str);
                     let addend = shell.eval_arith_expr(value);
                     shell.set_var(name, (existing + addend).to_string());
                 } else {
-                    let existing = shell.vars.get(name).cloned().unwrap_or_default();
+                    let existing = get_existing_through_nameref(shell, name).unwrap_or_default();
                     shell.set_var(name, format!("{}{}", existing, value));
                 }
             } else {
@@ -4143,9 +4145,57 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
 /// Escape `$` and backticks in nameref target values for `declare -p` output.
 /// Bash backslash-escapes `$` and `` ` `` in nameref targets so that the output
 /// is re-evaluable (e.g. `declare -n foo="x[\$zero]"` instead of `x[$zero]`).
-fn escape_nameref_target(target: &str) -> String {
-    let mut result = String::with_capacity(target.len());
-    for ch in target.chars() {
+/// Get the existing value of a variable, resolving through namerefs.
+/// Handles nameref targets that are array elements (e.g. "bar[0]").
+fn get_existing_through_nameref(
+    shell: &mut crate::interpreter::Shell,
+    name: &str,
+) -> Option<String> {
+    let resolved = shell.resolve_nameref(name);
+    // If the resolved name contains a subscript (e.g. "bar[0]"), look up
+    // the array element value.
+    if let Some(bracket) = resolved.find('[')
+        && resolved.ends_with(']')
+    {
+        let base = &resolved[..bracket];
+        let subscript = &resolved[bracket + 1..resolved.len() - 1];
+        if shell.assoc_arrays.contains_key(base) {
+            return shell
+                .assoc_arrays
+                .get(base)
+                .and_then(|m| m.get(subscript))
+                .cloned();
+        } else if shell.arrays.contains_key(base) {
+            let idx = shell.eval_arith_expr(subscript);
+            let arr = shell.arrays.get(base)?;
+            let eff_len = crate::interpreter::array_effective_len(arr) as i64;
+            let actual_idx = if idx < 0 {
+                let computed = eff_len + idx;
+                if computed < 0 {
+                    0usize
+                } else {
+                    computed as usize
+                }
+            } else {
+                idx as usize
+            };
+            return arr.get(actual_idx).and_then(|v| v.clone());
+        }
+    }
+    // Check if resolved name is an array — get element [0]
+    if shell.arrays.contains_key(&resolved) {
+        return shell
+            .arrays
+            .get(&resolved)
+            .and_then(|a| a.first())
+            .and_then(|v| v.clone());
+    }
+    shell.vars.get(&resolved).cloned()
+}
+
+fn escape_nameref_target(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    for ch in s.chars() {
         match ch {
             '$' | '`' => {
                 result.push('\\');

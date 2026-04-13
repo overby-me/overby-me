@@ -1933,14 +1933,46 @@ impl Shell {
                     .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
                 && name.chars().all(|c| c.is_alphanumeric() || c == '_')
             {
-                let val = self.vars.get(name).cloned().unwrap_or_else(|| {
-                    // For array variables, bare name resolves to element [0]
-                    self.arrays
-                        .get(name)
-                        .and_then(|a| a.first())
-                        .and_then(|v| v.clone())
-                        .unwrap_or_default()
-                });
+                // Resolve namerefs before looking up the variable value
+                let resolved = self.resolve_nameref(name);
+                // If the resolved name contains a subscript (e.g. nameref target is
+                // "var[0]"), look up the array element.
+                let val = if let Some(bracket) = resolved.find('[')
+                    && resolved.ends_with(']')
+                {
+                    let base = &resolved[..bracket];
+                    let subscript = &resolved[bracket + 1..resolved.len() - 1];
+                    if self.is_assoc_array(base) {
+                        self.assoc_arrays
+                            .get(base)
+                            .and_then(|m| m.get(subscript))
+                            .cloned()
+                            .unwrap_or_default()
+                    } else {
+                        let idx = self.eval_arith_expr(subscript);
+                        self.arrays
+                            .get(base)
+                            .and_then(|a| {
+                                let i = if idx < 0 {
+                                    let eff = crate::interpreter::array_effective_len(a) as i64;
+                                    (eff + idx).max(0) as usize
+                                } else {
+                                    idx as usize
+                                };
+                                a.get(i).and_then(|v| v.clone())
+                            })
+                            .unwrap_or_default()
+                    }
+                } else {
+                    self.vars.get(&resolved).cloned().unwrap_or_else(|| {
+                        // For array variables, bare name resolves to element [0]
+                        self.arrays
+                            .get(&resolved)
+                            .and_then(|a| a.first())
+                            .and_then(|v| v.clone())
+                            .unwrap_or_default()
+                    })
+                };
                 if val.is_empty() {
                     return 0;
                 }
@@ -1962,8 +1994,19 @@ impl Shell {
             if expr == "RANDOM" {
                 return crate::expand::next_random() as i64;
             }
+            // Resolve namerefs before looking up the variable value
+            let resolved_expr = self.resolve_nameref(expr);
             // Check for nounset (-u): unset variables in arithmetic are errors
-            if self.opt_nounset && !self.vars.contains_key(expr) && std::env::var(expr).is_err() {
+            // Check the resolved name, not the nameref name itself
+            // A nameref itself doesn't count as "existing" — we need to check
+            // if the resolved target actually exists as a variable/array/env var.
+            // E.g. `declare -n r=k; set -u; echo $(( r ))` should error
+            // because `k` is unset, even though `r` exists as a nameref.
+            let resolved_exists = self.vars.contains_key(&resolved_expr)
+                || self.arrays.contains_key(&resolved_expr)
+                || self.assoc_arrays.contains_key(&resolved_expr)
+                || std::env::var(&resolved_expr).is_ok();
+            if self.opt_nounset && !resolved_exists {
                 let name = self
                     .vars
                     .get("_BASH_SOURCE_FILE")
@@ -1975,18 +2018,51 @@ impl Shell {
                     .get("LINENO")
                     .and_then(|s| s.parse::<i64>().ok())
                     .unwrap_or(0);
-                eprintln!("{}: line {}: {}: unbound variable", name, lineno, expr);
+                eprintln!(
+                    "{}: line {}: {}: unbound variable",
+                    name, lineno, resolved_expr
+                );
                 // nounset errors cause the shell/subshell to exit
                 std::process::exit(1);
             }
-            let val = self.vars.get(expr).cloned().unwrap_or_else(|| {
-                // For array variables, bare name resolves to element [0]
-                self.arrays
-                    .get(expr)
-                    .and_then(|a| a.first())
-                    .and_then(|v| v.clone())
-                    .unwrap_or_default()
-            });
+            // If the resolved name contains a subscript (e.g. nameref target is
+            // "var[0]"), look up the array element.
+            let val = if let Some(bracket) = resolved_expr.find('[')
+                && resolved_expr.ends_with(']')
+            {
+                let base = &resolved_expr[..bracket];
+                let subscript = &resolved_expr[bracket + 1..resolved_expr.len() - 1];
+                if self.is_assoc_array(base) {
+                    self.assoc_arrays
+                        .get(base)
+                        .and_then(|m| m.get(subscript))
+                        .cloned()
+                        .unwrap_or_default()
+                } else {
+                    let idx = self.eval_arith_expr(subscript);
+                    self.arrays
+                        .get(base)
+                        .and_then(|a| {
+                            let i = if idx < 0 {
+                                let eff = crate::interpreter::array_effective_len(a) as i64;
+                                (eff + idx).max(0) as usize
+                            } else {
+                                idx as usize
+                            };
+                            a.get(i).and_then(|v| v.clone())
+                        })
+                        .unwrap_or_default()
+                }
+            } else {
+                self.vars.get(&resolved_expr).cloned().unwrap_or_else(|| {
+                    // For array variables, bare name resolves to element [0]
+                    self.arrays
+                        .get(&resolved_expr)
+                        .and_then(|a| a.first())
+                        .and_then(|v| v.clone())
+                        .unwrap_or_default()
+                })
+            };
             if val.is_empty() {
                 return 0;
             }

@@ -1973,6 +1973,14 @@ impl Shell {
                 let has_capitalize_flag = args
                     .iter()
                     .any(|a| a.starts_with('-') && a.len() > 1 && a.contains('c'));
+                // Check if -n (nameref) flag is present — when set, compound
+                // assignment syntax like `declare -n array='(one two three)'`
+                // should NOT be pre-processed as an array assignment. Instead,
+                // the whole value `(one two three)` is passed to the builtin
+                // as the nameref target (which will fail validation there).
+                let has_nameref_flag = args.iter().any(|a| {
+                    a.starts_with('-') && a.len() > 1 && !a.contains('=') && a.contains('n')
+                });
 
                 let mut new_args = Vec::new();
                 let mut modified = false;
@@ -2114,6 +2122,7 @@ impl Shell {
                         false
                     };
                     if has_literal_paren
+                        && !has_nameref_flag
                         && (!paren_from_single_quote
                             || has_array_flag
                             || has_assoc_flag
@@ -4091,6 +4100,9 @@ impl Shell {
                         }
                     }
                     self.declared_unset.remove(&resolved);
+                    // Remove any scalar entry so that `$var` resolves through
+                    // the assoc array, not a stale scalar value.
+                    self.vars.remove(&resolved);
                     self.assoc_arrays.insert(resolved, map);
                 } else {
                     let mut arr = if assign.append {
@@ -4231,6 +4243,10 @@ impl Shell {
                         }
                     }
                     self.declared_unset.remove(&resolved);
+                    // Remove any scalar entry so that `$var` (without subscript)
+                    // resolves to element [0] of the array, not the stale scalar.
+                    // E.g. `bar=4; bar=(one two three)` — `$bar` should give "one".
+                    self.vars.remove(&resolved);
                     self.arrays.insert(resolved, arr);
                 }
             }
