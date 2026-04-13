@@ -1305,8 +1305,38 @@ impl Shell {
                 arr[actual_idx] = Some(value);
                 return;
             }
-            // Base is not an array — fall through to create scalar
-            // named "var[123]"
+            // Base is not an array — create an indexed array and assign
+            // to the specified element (matching bash behavior where
+            // nameref targets like "var[123]" auto-create arrays).
+            // Skip for @ and * subscripts — these are special array
+            // references, not element indices.
+            // Also skip when the base name is itself a nameref — this
+            // indicates a circular nameref (e.g. a→b→a[1]) and creating
+            // an array would conflict with the nameref attribute.
+            if subscript != "@" && subscript != "*" && !self.namerefs.contains_key(base) {
+                self.declared_unset.remove(base);
+                let aeo = self.is_array_expand_once();
+                let expanded_sub;
+                let eval_str = if !aeo && (subscript.contains('$') || subscript.contains('`')) {
+                    expanded_sub = self.expand_comsubs_in_arith(subscript);
+                    expanded_sub.as_str()
+                } else {
+                    subscript
+                };
+                let idx = self.eval_arith_expr(eval_str);
+                if crate::expand::take_arith_error() {
+                    return;
+                }
+                let arr = self.arrays.entry(base.to_string()).or_default();
+                let actual_idx = if idx < 0 { 0usize } else { idx as usize };
+                while arr.len() <= actual_idx {
+                    arr.push(None);
+                }
+                arr[actual_idx] = Some(value);
+                // Remove any scalar with the same base name
+                self.vars.remove(base);
+                return;
+            }
         }
         self.declared_unset.remove(&resolved);
         // If the variable is an existing indexed array, assign to element [0]

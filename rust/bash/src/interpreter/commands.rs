@@ -1385,12 +1385,19 @@ impl Shell {
         } else {
             cmd.words.iter().enumerate().collect()
         };
-        let is_assignment_builtin = words_to_expand.first().is_some_and(|&(_, w)| {
-            let name = self.expand_word_single(w);
-            matches!(
-                name.as_str(),
-                "export" | "declare" | "typeset" | "local" | "readonly"
-            )
+        // Cache the first word expansion to avoid expanding it twice (which would
+        // duplicate side effects like nounset error messages).
+        let first_word_idx = words_to_expand.first().map(|&(i, _)| i);
+        let first_word_expanded: Option<Vec<String>> = words_to_expand
+            .first()
+            .map(|&(_, w)| self.expand_word_fields(w, &ifs));
+        let is_assignment_builtin = first_word_expanded.as_ref().is_some_and(|fields| {
+            fields.first().is_some_and(|name| {
+                matches!(
+                    name.as_str(),
+                    "export" | "declare" | "typeset" | "local" | "readonly"
+                )
+            })
         });
         // Expand words, applying assignment-context tilde expansion where appropriate
         let mut expanded_words: Vec<String> = Vec::new();
@@ -1400,7 +1407,16 @@ impl Shell {
                 let raw = crate::ast::word_to_string(word);
                 raw.contains('=') || raw.starts_with('-') || raw.starts_with('+')
             };
-            let fields = if is_assign_arg {
+            // Use cached expansion for the first word to avoid duplicate side effects
+            let fields = if Some(idx) == first_word_idx {
+                if let Some(ref cached) = first_word_expanded {
+                    cached.clone()
+                } else if is_assign_arg {
+                    vec![self.expand_word_single(word)]
+                } else {
+                    self.expand_word_fields(word, &ifs)
+                }
+            } else if is_assign_arg {
                 vec![self.expand_word_single(word)]
             } else {
                 self.expand_word_fields(word, &ifs)

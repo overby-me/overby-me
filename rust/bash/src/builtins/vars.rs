@@ -438,26 +438,72 @@ pub(super) fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
         } else if shell.namerefs.contains_key(name) {
             // unset through nameref: unset the target variable, keep the nameref
             let resolved = shell.resolve_nameref(name);
-            if shell.readonly_vars.contains(&resolved) {
-                eprintln!(
-                    "{}: unset: {}: cannot unset: readonly variable",
-                    shell.error_prefix(),
-                    resolved
-                );
-                status = 1;
-                continue;
-            }
-            shell.vars.remove(&resolved);
-            shell.exports.remove(&resolved);
-            shell.arrays.remove(&resolved);
-            shell.assoc_arrays.remove(&resolved);
-            shell.integer_vars.remove(&resolved);
-            shell.uppercase_vars.remove(&resolved);
-            shell.lowercase_vars.remove(&resolved);
-            shell.capitalize_vars.remove(&resolved);
-            // Don't remove the nameref itself — it stays
-            if !resolved.is_empty() {
-                unsafe { std::env::remove_var(&resolved) };
+            // Check if the resolved target is a subscripted reference like v[1]
+            if let Some(bracket) = resolved.find('[') {
+                let base = &resolved[..bracket];
+                let idx_str = &resolved[bracket + 1..resolved.len().saturating_sub(1)];
+                // Check readonly on the base variable
+                if shell.readonly_vars.contains(base) {
+                    eprintln!(
+                        "{}: unset: {}: cannot unset: readonly variable",
+                        shell.error_prefix(),
+                        base
+                    );
+                    status = 1;
+                    continue;
+                }
+                // Unset the specific array element through the nameref
+                if shell.assoc_arrays.contains_key(base) {
+                    if let Some(assoc) = shell.assoc_arrays.get_mut(base) {
+                        assoc.remove(idx_str);
+                    }
+                } else if shell.arrays.contains_key(base) {
+                    let raw_idx = shell.eval_arith_expr(idx_str);
+                    if crate::expand::take_arith_error() {
+                        shell.last_status = 1;
+                        continue;
+                    }
+                    if let Some(arr) = shell.arrays.get_mut(base) {
+                        let idx = if raw_idx < 0 {
+                            let len = array_effective_len(arr) as i64;
+                            (len + raw_idx).max(0) as usize
+                        } else {
+                            raw_idx as usize
+                        };
+                        if idx < arr.len() {
+                            arr[idx] = None;
+                        }
+                    }
+                } else {
+                    // Target is a scalar — remove it entirely
+                    shell.vars.remove(base);
+                    shell.exports.remove(base);
+                    if !base.is_empty() {
+                        unsafe { std::env::remove_var(base) };
+                    }
+                }
+            } else {
+                if shell.readonly_vars.contains(&resolved) {
+                    eprintln!(
+                        "{}: unset: {}: cannot unset: readonly variable",
+                        shell.error_prefix(),
+                        resolved
+                    );
+                    status = 1;
+                    continue;
+                }
+                shell.vars.remove(&resolved);
+                shell.exports.remove(&resolved);
+                shell.arrays.remove(&resolved);
+                shell.assoc_arrays.remove(&resolved);
+                shell.integer_vars.remove(&resolved);
+                shell.uppercase_vars.remove(&resolved);
+                shell.lowercase_vars.remove(&resolved);
+                shell.capitalize_vars.remove(&resolved);
+                // Don't remove the nameref itself — it stays
+                if !resolved.is_empty() {
+                    unsafe { std::env::remove_var(&resolved) };
+                }
             }
         } else {
             // Regular variable unset (no -f or -v flag)
@@ -1811,6 +1857,7 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
 
     // Deferred +n nameref removal: now all flags (-i, -x, -r, etc.) have
     // been parsed, so we can correctly apply them to the nameref target.
+    let mut early_status = 0;
     if flag_unset_nameref_global {
         // Re-scan names to find nameref variables that need +n processing
         let all_name_args: Vec<String> = args
@@ -1836,6 +1883,7 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                         cmd_name,
                         pure
                     );
+                    early_status = 1;
                     shell.last_status = 1;
                     nameref_consumed.insert(rname.clone());
                     names.retain(|n| n != rname);
@@ -2794,7 +2842,7 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
     // In a function context, declare/typeset creates local variables (unless -g)
     let make_local = !flag_global && !shell.local_scopes.is_empty();
 
-    let mut status = 0;
+    let mut status = early_status;
     for name_arg in &names {
         if let Some(eq_pos) = name_arg.find('=') {
             let (name, value, is_append) = if eq_pos > 0 && name_arg.as_bytes()[eq_pos - 1] == b'+'
@@ -3903,7 +3951,8 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 || flag_uppercase
                 || flag_lowercase
                 || flag_capitalize
-                || flag_trace;
+                || flag_trace
+                || flag_unset_readonly;
             let resolved_name: String;
             let attr_name: &str =
                 if !flag_nameref && has_attr_flags && shell.namerefs.contains_key(name) {
@@ -3922,13 +3971,23 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     name
                 };
 
-            // Can't remove readonly attribute
-            if flag_unset_readonly && shell.readonly_vars.contains(name) {
+            // Can't remove readonly attribute — check on the resolved target
+            // (for namerefs, `declare +r ref` follows the nameref to the target;
+            // if the target isn't readonly, no error even if the nameref itself is).
+            // When a nameref has no target (resolves to itself), `+r` is a no-op.
+            // Exception: when `-n` is also specified (`declare +r -n ref`), we're
+            // operating on the nameref itself, so check readonly on the nameref.
+            let nameref_resolved_to_self =
+                !flag_nameref && shell.namerefs.contains_key(name) && attr_name == name;
+            if flag_unset_readonly
+                && shell.readonly_vars.contains(attr_name)
+                && !nameref_resolved_to_self
+            {
                 eprintln!(
                     "{}: {}: {}: readonly variable",
                     shell.error_prefix(),
                     cmd_name,
-                    name
+                    attr_name
                 );
                 status = 1;
                 continue;
