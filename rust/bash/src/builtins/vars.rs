@@ -3203,6 +3203,18 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     status = 1;
                     continue;
                 }
+                // Handle += append for namerefs: if the variable is already
+                // a nameref and is_append is true, prepend the existing target
+                // to the value. E.g. `declare -n ref=re ref+=f` → target
+                // becomes "re"+"f"="ref" (then self-reference check applies).
+                let effective_value: String;
+                let value = if is_append && shell.namerefs.contains_key(name) {
+                    let existing = shell.namerefs.get(name).cloned().unwrap_or_default();
+                    effective_value = format!("{}{}", existing, value);
+                    effective_value.as_str()
+                } else {
+                    value
+                };
                 // Validate the nameref target FIRST — bash checks target validity
                 // before checking array conflicts, so `declare -n array='(bad)'`
                 // reports "invalid variable name for name reference" even when
