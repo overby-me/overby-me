@@ -2752,12 +2752,30 @@ impl Shell {
             let is_declaration_in_func = !self.local_scopes.is_empty()
                 && matches!(command_name.as_str(), "declare" | "typeset" | "local")
                 && !has_export_flag;
+            // When multiple prefix assignments resolve to the same key
+            // (e.g. `var= ref=5 cmd` where ref is nameref to var), we must
+            // save the ORIGINAL pre-prefix value for restore, not the value
+            // set by an earlier prefix assignment.  Track which keys we've
+            // already saved so duplicates reuse the first saved value.
+            let mut prefix_seen: std::collections::HashMap<
+                String,
+                (Option<String>, Option<String>),
+            > = std::collections::HashMap::new();
             let saved: Vec<(String, Option<String>, Option<String>)> = prefix_exports
                 .iter()
                 .filter(|(k, _)| !k.is_empty())
                 .map(|(k, v)| {
-                    let old_var = self.vars.get(k).cloned();
-                    let old_export = self.exports.get(k).cloned();
+                    let (old_var, old_export) = if let Some((ov, oe)) = prefix_seen.get(k) {
+                        // Already saved the original value for this key;
+                        // reuse it so the restore goes back to the true
+                        // pre-prefix state.
+                        (ov.clone(), oe.clone())
+                    } else {
+                        let ov = self.vars.get(k).cloned();
+                        let oe = self.exports.get(k).cloned();
+                        prefix_seen.insert(k.clone(), (ov.clone(), oe.clone()));
+                        (ov, oe)
+                    };
                     self.vars.insert(k.clone(), v.clone());
                     if !is_declaration_in_func {
                         self.exports.insert(k.clone(), v.clone());

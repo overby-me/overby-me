@@ -943,6 +943,28 @@ impl Shell {
         }
     }
 
+    /// Check if a nameref resolution is circular (the name resolves back to itself).
+    /// Returns true if the nameref chain for `name` leads to a cycle.
+    pub fn is_circular_nameref(&self, name: &str) -> bool {
+        const MAX_NAMEREF_DEPTH: usize = 8;
+        let mut resolved = name.to_string();
+        let mut seen = HashSet::new();
+        seen.insert(name.to_string());
+        let mut depth = 0;
+        while let Some(target) = self.namerefs.get(&resolved) {
+            if target.is_empty() || depth >= MAX_NAMEREF_DEPTH {
+                return false;
+            }
+            if seen.contains(target) {
+                return true;
+            }
+            seen.insert(target.clone());
+            resolved = target.clone();
+            depth += 1;
+        }
+        false
+    }
+
     /// Resolve a variable name through namerefs.
     /// Bash limits nameref resolution depth to 8 to prevent infinite loops.
     pub fn resolve_nameref(&self, name: &str) -> String {
@@ -1045,6 +1067,55 @@ impl Shell {
             return;
         }
         let resolved = self.resolve_nameref_warn(name);
+        // When a nameref is circular (resolves back to itself) and we're
+        // inside a function scope, bash assigns to the variable at the
+        // enclosing scope rather than the local nameref variable.
+        // E.g. `function f { typeset -n v=$1; v=inside; }; v=global; f v`
+        // — the local nameref `v` points to `v` (circular), so bash
+        // assigns `inside` to the global `v`.
+        if resolved == name
+            && self.namerefs.contains_key(name)
+            && self.is_circular_nameref(name)
+            && !self.local_scopes.is_empty()
+        {
+            // Compute the final value BEFORE iterating over scopes to
+            // avoid borrow-checker conflicts with `self`.
+            let final_value = if self.integer_vars.contains(name) {
+                self.eval_arith_expr(&value).to_string()
+            } else if self.uppercase_vars.contains(name) {
+                value.to_uppercase()
+            } else if self.lowercase_vars.contains(name) {
+                value.to_lowercase()
+            } else {
+                value.clone()
+            };
+            let has_export = self.exports.contains_key(name);
+            // Find the saved scope entry for this variable and update it
+            // so the value propagates to the enclosing scope on function exit.
+            // Walk scopes from innermost to outermost looking for a saved entry.
+            let mut found_scope = false;
+            for scope in self.local_scopes.iter_mut().rev() {
+                if let Some(saved) = scope.get_mut(name) {
+                    saved.scalar = Some(final_value.clone());
+                    // Also update exports if the variable was exported
+                    if saved.was_exported.is_some() {
+                        saved.was_exported = Some(final_value.clone());
+                    }
+                    found_scope = true;
+                    break;
+                }
+            }
+            if found_scope {
+                if has_export {
+                    self.exports.insert(name.to_string(), final_value.clone());
+                    unsafe { std::env::set_var(name, &final_value) };
+                }
+                return;
+            }
+            // No saved scope entry — fall through to normal assignment
+            // (this shouldn't normally happen for circular namerefs in
+            // function scope, but handle it gracefully).
+        }
         if self.readonly_vars.contains(&resolved) {
             if let Some(fname) = self.func_names.last() {
                 eprintln!(

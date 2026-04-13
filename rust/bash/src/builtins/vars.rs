@@ -1823,6 +1823,25 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
             if !shell.namerefs.contains_key(pure) {
                 continue; // not a nameref, skip
             }
+            // Cannot remove nameref attribute from a readonly variable that
+            // has a non-empty target.  Readonly namerefs with empty targets
+            // (e.g. `declare -r -n foo5` with no value) CAN have their
+            // nameref attribute removed — bash allows this.
+            if shell.readonly_vars.contains(pure) {
+                let has_target = shell.namerefs.get(pure).is_some_and(|t| !t.is_empty());
+                if has_target {
+                    eprintln!(
+                        "{}: {}: {}: readonly variable",
+                        shell.error_prefix(),
+                        cmd_name,
+                        pure
+                    );
+                    shell.last_status = 1;
+                    nameref_consumed.insert(rname.clone());
+                    names.retain(|n| n != rname);
+                    continue;
+                }
+            }
             if let Some(eq) = rname.find('=') {
                 let val = &rname[eq + 1..];
                 if let Some(target) = shell.namerefs.get(pure).cloned() {
