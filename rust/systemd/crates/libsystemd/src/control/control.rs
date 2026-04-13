@@ -2,7 +2,7 @@ use crate::control::unit_properties;
 use crate::lock_ext::RwLockExt;
 use crate::runtime_info::{ArcMutRuntimeInfo, UnitTable};
 use crate::units::{
-    Specific, Unit, UnitId, UnitIdKind, UnitStatus, find_symlink_aliases, insert_new_units,
+    Specific, Unit, UnitId, UnitStatus, find_symlink_aliases, insert_new_units,
     load_all_units_no_prune, load_new_unit,
 };
 
@@ -81,11 +81,11 @@ pub fn open_all_sockets(run_info: ArcMutRuntimeInfo, conf: &crate::config::Confi
 
 #[derive(Debug)]
 pub enum Command {
-    ListUnits(Option<UnitIdKind>, Option<String>),
+    ListUnits(Vec<String>, Option<String>, Option<String>),
     /// `list-unit-files [--type=TYPE]` — list all unit files on disk with their state.
     ListUnitFiles(Option<String>),
     /// `list-dependencies <unit> [--reverse]` — show the dependency tree.
-    ListDependencies(String, bool),
+    ListDependencies(String, bool, bool, bool, bool),
     Status(Option<String>),
     /// `show <unit> [property,...]` — return all (or filtered) properties as key=value.
     Show(String, Option<Vec<String>>),
@@ -505,39 +505,32 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
         }
 
         "list-units" => {
-            let mut kind = None;
+            let mut types: Vec<String> = Vec::new();
             let mut state_filter = None;
+            let mut pattern = None;
             match &call.params {
                 Some(Value::String(s)) => {
-                    kind = match s.as_str() {
-                        "target" => Some(UnitIdKind::Target),
-                        "socket" => Some(UnitIdKind::Socket),
-                        "service" => Some(UnitIdKind::Service),
-                        "slice" => Some(UnitIdKind::Slice),
-                        "mount" => Some(UnitIdKind::Mount),
-                        "device" => Some(UnitIdKind::Device),
-                        _ => None,
-                    };
+                    types.push(s.clone());
                 }
                 Some(Value::Object(obj)) => {
                     if let Some(Value::String(t)) = obj.get("type") {
-                        kind = match t.as_str() {
-                            "target" => Some(UnitIdKind::Target),
-                            "socket" => Some(UnitIdKind::Socket),
-                            "service" => Some(UnitIdKind::Service),
-                            "slice" => Some(UnitIdKind::Slice),
-                            "mount" => Some(UnitIdKind::Mount),
-                            "device" => Some(UnitIdKind::Device),
-                            _ => None,
-                        };
+                        for part in t.split(',') {
+                            let part = part.trim();
+                            if !part.is_empty() {
+                                types.push(part.to_string());
+                            }
+                        }
                     }
                     if let Some(Value::String(s)) = obj.get("state") {
                         state_filter = Some(s.clone());
                     }
+                    if let Some(Value::String(p)) = obj.get("pattern") {
+                        pattern = Some(p.clone());
+                    }
                 }
                 _ => {}
             }
-            Command::ListUnits(kind, state_filter)
+            Command::ListUnits(types, state_filter, pattern)
         }
         "shutdown" => {
             let action = match &call.params {
@@ -876,11 +869,16 @@ fn parse_command(call: &super::jsonrpc2::Call) -> Result<Command, ParseError> {
         "list-dependencies" => {
             // Params: String (unit name) or Array [unit_name, "--reverse"]
             match &call.params {
-                Some(Value::String(s)) => Command::ListDependencies(s.clone(), false),
+                Some(Value::String(s)) => {
+                    Command::ListDependencies(s.clone(), false, false, false, false)
+                }
                 Some(Value::Array(arr)) if !arr.is_empty() => {
                     let name = arr[0].as_str().unwrap_or("").to_owned();
                     let reverse = arr.iter().skip(1).any(|v| v.as_str() == Some("--reverse"));
-                    Command::ListDependencies(name, reverse)
+                    let after = arr.iter().skip(1).any(|v| v.as_str() == Some("--after"));
+                    let before = arr.iter().skip(1).any(|v| v.as_str() == Some("--before"));
+                    let plain = arr.iter().skip(1).any(|v| v.as_str() == Some("--plain"));
+                    Command::ListDependencies(name, reverse, after, before, plain)
                 }
                 Some(_) | None => {
                     return Err(ParseError::ParamsInvalid(
@@ -1768,6 +1766,18 @@ fn unit_file_state(
 ///
 /// `visited` tracks already-printed units to avoid infinite loops in cyclic graphs.
 #[allow(clippy::too_many_arguments)]
+/// Dependency mode for list-dependencies
+#[derive(Clone, Copy)]
+enum DepMode {
+    /// Default: Wants/Requires (forward) or WantedBy/RequiredBy (reverse)
+    WantsRequires,
+    /// --after: After= (forward) or Before= (reverse)
+    After,
+    /// --before: Before= (forward) or After= (reverse)
+    Before,
+}
+
+#[allow(clippy::too_many_arguments)]
 fn format_dep_tree(
     unit_name: &str,
     unit_table: &UnitTable,
@@ -1777,10 +1787,13 @@ fn format_dep_tree(
     visited: &mut std::collections::HashSet<String>,
     out: &mut String,
     depth: usize,
+    mode: DepMode,
+    plain: bool,
 ) {
     // Print this node
-    if depth == 0 {
-        // Root node — no prefix/connector
+    if plain {
+        let _ = writeln!(out, "{unit_name}");
+    } else if depth == 0 {
         let status_marker = unit_status_marker(unit_name, unit_table);
         let _ = writeln!(out, "{status_marker}{unit_name}");
     } else {
@@ -1799,50 +1812,60 @@ fn format_dep_tree(
         return;
     }
 
-    // Find children (forward deps = wants+requires, reverse deps = wanted_by+required_by)
+    // Find children based on dependency mode and direction
     let children: Vec<String> =
         if let Some(unit) = unit_table.values().find(|u| u.id.name == unit_name) {
             let deps = &unit.common.dependencies;
-            if reverse {
-                let mut c: Vec<String> = Vec::new();
-                for id in &deps.wanted_by {
-                    c.push(id.name.clone());
+            let mut c: Vec<String> = Vec::new();
+            match (mode, reverse) {
+                (DepMode::WantsRequires, false) => {
+                    for id in &deps.wants {
+                        c.push(id.name.clone());
+                    }
+                    for id in &deps.requires {
+                        if !c.contains(&id.name) {
+                            c.push(id.name.clone());
+                        }
+                    }
+                    for id in &deps.binds_to {
+                        if !c.contains(&id.name) {
+                            c.push(id.name.clone());
+                        }
+                    }
                 }
-                for id in &deps.required_by {
-                    if !c.contains(&id.name) {
+                (DepMode::WantsRequires, true) => {
+                    for id in &deps.wanted_by {
+                        c.push(id.name.clone());
+                    }
+                    for id in &deps.required_by {
+                        if !c.contains(&id.name) {
+                            c.push(id.name.clone());
+                        }
+                    }
+                    for id in &deps.bound_by {
+                        if !c.contains(&id.name) {
+                            c.push(id.name.clone());
+                        }
+                    }
+                }
+                (DepMode::After, false) | (DepMode::Before, true) => {
+                    for id in &deps.after {
                         c.push(id.name.clone());
                     }
                 }
-                for id in &deps.bound_by {
-                    if !c.contains(&id.name) {
+                (DepMode::Before, false) | (DepMode::After, true) => {
+                    for id in &deps.before {
                         c.push(id.name.clone());
                     }
                 }
-                c.sort();
-                c
-            } else {
-                let mut c: Vec<String> = Vec::new();
-                for id in &deps.wants {
-                    c.push(id.name.clone());
-                }
-                for id in &deps.requires {
-                    if !c.contains(&id.name) {
-                        c.push(id.name.clone());
-                    }
-                }
-                for id in &deps.binds_to {
-                    if !c.contains(&id.name) {
-                        c.push(id.name.clone());
-                    }
-                }
-                c.sort();
-                c
             }
+            c.sort();
+            c
         } else {
             Vec::new()
         };
 
-    let child_prefix = if depth == 0 {
+    let child_prefix = if plain || depth == 0 {
         String::new()
     } else if is_last {
         format!("{prefix}  ")
@@ -1861,11 +1884,12 @@ fn format_dep_tree(
             visited,
             out,
             depth + 1,
+            mode,
+            plain,
         );
     }
 
     // Remove from visited so the same unit can appear in other branches
-    // (but the recursion guard above prevents infinite loops within a single branch)
     visited.remove(unit_name);
 }
 
@@ -4764,16 +4788,12 @@ pub fn execute_command(
                     let _ = std::fs::remove_file(&stderr_path);
                 }
             }
-            // Remove the transient unit from the table (--collect behavior)
-            // so that the same unit name can be reused by subsequent
-            // systemd-run invocations.
-            {
-                let mut ri = run_info.write_poisoned();
-                ri.unit_table.remove(&id);
-                // Also remove the transient unit file on disk.
-                let transient_path = format!("/run/systemd/transient/{}", unit_name);
-                let _ = std::fs::remove_file(&transient_path);
-            }
+            // Keep the transient unit in the unit table so that
+            // `systemctl is-failed` / `systemctl --state=failed` can
+            // query it after `systemd-run --wait` returns.  The unit
+            // will be replaced the next time a transient with the same
+            // name is created (see create_transient_unit) or cleaned up
+            // via `systemctl reset-failed`.
             return Ok(resp);
         }
         Command::Enable(names) => {
@@ -6332,13 +6352,20 @@ pub fn execute_command(
 
             return Ok(serde_json::json!({ "list-unit-files": out }));
         }
-        Command::ListDependencies(unit_name, reverse) => {
+        Command::ListDependencies(unit_name, reverse, after, before, plain) => {
             let ri = run_info.read_poisoned();
             let units = find_units_with_name(&unit_name, &ri.unit_table);
             if units.is_empty() {
                 return Err(format!("Unit {unit_name} not found."));
             }
             let name = units[0].id.name.clone();
+            let mode = if after {
+                DepMode::After
+            } else if before {
+                DepMode::Before
+            } else {
+                DepMode::WantsRequires
+            };
             let mut out = String::new();
             let mut visited = std::collections::HashSet::new();
             format_dep_tree(
@@ -6350,6 +6377,8 @@ pub fn execute_command(
                 &mut visited,
                 &mut out,
                 0,
+                mode,
+                plain,
             );
             return Ok(serde_json::json!({ "list-dependencies": out }));
         }
@@ -8217,14 +8246,50 @@ pub fn execute_command(
                 }
             }
         }
-        Command::ListUnits(kind, state_filter) => {
+        Command::ListUnits(types, state_filter, pattern) => {
             let run_info = &*run_info.read_poisoned();
             let unit_table = &run_info.unit_table;
-            for (id, unit) in unit_table {
-                let kind_match = if let Some(kind) = kind {
-                    id.kind == kind
-                } else {
+
+            // Separate types into unit-kind types and load-state types
+            let unit_types: Vec<&str> = [
+                "service",
+                "socket",
+                "target",
+                "device",
+                "mount",
+                "automount",
+                "swap",
+                "timer",
+                "path",
+                "slice",
+                "scope",
+            ]
+            .into();
+            let load_state_types: Vec<&str> = types
+                .iter()
+                .filter(|t| !unit_types.contains(&t.as_str()))
+                .map(|t| t.as_str())
+                .collect();
+            let kind_types: Vec<&str> = types
+                .iter()
+                .filter(|t| unit_types.contains(&t.as_str()))
+                .map(|t| t.as_str())
+                .collect();
+
+            for unit in unit_table.values() {
+                // Type filter: if any unit types specified, unit must match one
+                let kind_match = if kind_types.is_empty() {
                     true
+                } else {
+                    let unit_kind = unit.id.name.rsplit('.').next().unwrap_or("");
+                    kind_types.contains(&unit_kind)
+                };
+                // Load-state filter: "loaded" means unit is loaded (always true here)
+                let load_match = if load_state_types.is_empty() {
+                    true
+                } else {
+                    // All units in unit_table are loaded
+                    load_state_types.contains(&"loaded")
                 };
                 let state_match = if let Some(ref state) = state_filter {
                     let status = unit.common.status.read_poisoned();
@@ -8246,7 +8311,13 @@ pub fn execute_command(
                 } else {
                     true
                 };
-                if kind_match && state_match {
+                // Pattern filter (glob)
+                let pattern_match = if let Some(ref pat) = pattern {
+                    unit_name_glob_match(pat, &unit.id.name)
+                } else {
+                    true
+                };
+                if kind_match && load_match && state_match && pattern_match {
                     result_vec
                         .as_array_mut()
                         .unwrap()
@@ -8785,7 +8856,7 @@ mod tests {
         };
         let cmd = parse_command(&call).unwrap();
         match cmd {
-            Command::ListDependencies(name, reverse) => {
+            Command::ListDependencies(name, reverse, ..) => {
                 assert_eq!(name, "multi-user.target");
                 assert!(!reverse);
             }
@@ -8805,7 +8876,7 @@ mod tests {
         };
         let cmd = parse_command(&call).unwrap();
         match cmd {
-            Command::ListDependencies(name, reverse) => {
+            Command::ListDependencies(name, reverse, ..) => {
                 assert_eq!(name, "sshd.service");
                 assert!(reverse);
             }
@@ -8912,6 +8983,8 @@ mod tests {
             &mut visited,
             &mut out,
             0,
+            DepMode::WantsRequires,
+            false,
         );
 
         assert!(out.contains("test.target"));
@@ -8941,6 +9014,8 @@ mod tests {
             &mut visited,
             &mut out,
             0,
+            DepMode::WantsRequires,
+            false,
         );
 
         assert!(out.contains("multi-user.target"));
@@ -8970,6 +9045,8 @@ mod tests {
             &mut visited,
             &mut out,
             0,
+            DepMode::WantsRequires,
+            false,
         );
 
         assert!(out.contains("network.target"));
@@ -8998,6 +9075,8 @@ mod tests {
             &mut visited,
             &mut out,
             0,
+            DepMode::WantsRequires,
+            false,
         );
 
         // Count occurrences of "dup.service" in lines (should be 1)
@@ -9025,6 +9104,8 @@ mod tests {
             &mut visited,
             &mut out,
             0,
+            DepMode::WantsRequires,
+            false,
         );
 
         assert!(out.contains("sshd.service"));
@@ -9051,6 +9132,8 @@ mod tests {
             &mut visited,
             &mut out,
             0,
+            DepMode::WantsRequires,
+            false,
         );
 
         assert!(out.contains("multi-user.target"));
@@ -9078,6 +9161,8 @@ mod tests {
             &mut visited,
             &mut out,
             0,
+            DepMode::WantsRequires,
+            false,
         );
 
         // Should not infinite loop — just check it terminates and contains both
@@ -9115,6 +9200,8 @@ mod tests {
             &mut visited,
             &mut out,
             0,
+            DepMode::WantsRequires,
+            false,
         );
 
         assert!(out.contains("test.target"));
@@ -9146,6 +9233,8 @@ mod tests {
             &mut visited,
             &mut out,
             0,
+            DepMode::WantsRequires,
+            false,
         );
 
         let lines: Vec<&str> = out.lines().collect();
@@ -9183,6 +9272,8 @@ mod tests {
             &mut visited,
             &mut out,
             0,
+            DepMode::WantsRequires,
+            false,
         );
 
         let lines: Vec<&str> = out.lines().collect();
@@ -9222,6 +9313,8 @@ mod tests {
             &mut visited,
             &mut out,
             0,
+            DepMode::WantsRequires,
+            false,
         );
 
         let child_names: Vec<&str> = out
@@ -9273,6 +9366,8 @@ mod tests {
             &mut visited,
             &mut out,
             0,
+            DepMode::WantsRequires,
+            false,
         );
 
         // Should print the name but with no children
@@ -9300,6 +9395,8 @@ mod tests {
             &mut visited,
             &mut out,
             0,
+            DepMode::WantsRequires,
+            false,
         );
 
         assert!(out.contains("b.service"));
@@ -9325,6 +9422,8 @@ mod tests {
             &mut visited,
             &mut out,
             0,
+            DepMode::WantsRequires,
+            false,
         );
 
         assert!(out.contains("b.service"));
@@ -9565,7 +9664,7 @@ mod tests {
         };
         let cmd = parse_command(&call).unwrap();
         match cmd {
-            Command::ListDependencies(name, reverse) => {
+            Command::ListDependencies(name, reverse, ..) => {
                 assert_eq!(name, "default.target");
                 assert!(!reverse);
             }
@@ -9628,6 +9727,8 @@ mod tests {
             &mut visited,
             &mut out,
             0,
+            DepMode::WantsRequires,
+            false,
         );
 
         // active.service should have ● marker
@@ -9685,6 +9786,8 @@ mod tests {
             &mut visited,
             &mut out,
             0,
+            DepMode::WantsRequires,
+            false,
         );
 
         // c.service should appear under both a and b branches
