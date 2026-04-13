@@ -7583,6 +7583,34 @@ pub fn execute_command(
                 } else {
                     crate::units::activate_needed_units(id.clone(), run_info.clone())
                 };
+
+                // Wait for the target unit to finish starting.  With
+                // DeferNotifyWait, Type=notify services stay in Starting
+                // state until their background thread detects READY=1.
+                // Poll here so `systemctl start` blocks until the unit
+                // is actually active (matching real systemd behavior).
+                {
+                    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(90);
+                    loop {
+                        let still_starting = {
+                            let ri = run_info.read_poisoned();
+                            ri.unit_table
+                                .get(&id)
+                                .map(|u| {
+                                    matches!(
+                                        &*u.common.status.read_poisoned(),
+                                        UnitStatus::Starting
+                                    )
+                                })
+                                .unwrap_or(false)
+                        };
+                        if !still_starting || std::time::Instant::now() > deadline {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                    }
+                }
+
                 let mut activation_failed = !errs.is_empty();
                 if activation_failed {
                     // Check if any units are in Restarting state (auto-restart

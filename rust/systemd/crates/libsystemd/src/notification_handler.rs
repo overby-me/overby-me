@@ -74,10 +74,12 @@ fn check_notify_access(
             // Accept from processes in the service's process group.
             // This covers child processes like systemd-notify (for Main)
             // and all exec'd processes (for Exec).
+            // Note: process_group is stored as negative (for kill(-pgid, sig)
+            // convention), so compare absolute values.
             if let Some(pgid) = srvc.process_group
                 && let Ok(sender_pgid) =
                     nix::unistd::getpgid(Some(nix::unistd::Pid::from_raw(sender)))
-                && sender_pgid == pgid
+                && sender_pgid.as_raw().abs() == pgid.as_raw().abs()
             {
                 return true;
             }

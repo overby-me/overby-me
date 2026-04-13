@@ -364,6 +364,9 @@ pub enum StartResult {
     WaitingForSocket,
     /// ExecCondition= command exited with 1-254; service is skipped (not failed).
     ConditionSkipped,
+    /// Process started but READY=1 wait deferred to a background thread.
+    /// Only returned for Type=notify/NotifyReload services with DeferNotifyWait source.
+    DeferredNotifyWait,
 }
 
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
@@ -599,6 +602,20 @@ impl Service {
                 // started (InvocationID set) but Type=notify services remain
                 // in Starting state instead of transitioning to Started.
                 if self.pid.is_some() && !matches!(source, ActivationSource::NonBlocking) {
+                    // DeferNotifyWait: for Type=notify/NotifyReload services,
+                    // defer the READY=1 wait to a background thread so the
+                    // calling thread (in the activation thread pool) releases
+                    // the RuntimeInfo read lock immediately.  The global
+                    // notification handler will process READY=1 and set
+                    // signaled_ready; a background thread polls for it.
+                    if matches!(source, ActivationSource::DeferNotifyWait)
+                        && matches!(
+                            conf.srcv_type,
+                            ServiceType::Notify | ServiceType::NotifyReload
+                        )
+                    {
+                        return Ok(StartResult::DeferredNotifyWait);
+                    }
                     super::fork_parent::wait_for_service(self, conf, name, run_info).map_err(
                         |start_err| match self.run_poststop(conf, id.clone(), name, run_info) {
                             Ok(()) => ServiceErrorReason::StartFailed(start_err),

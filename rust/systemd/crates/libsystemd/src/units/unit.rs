@@ -418,6 +418,12 @@ impl ServiceState {
                 run_info.notify_eventfds();
                 Ok(UnitStatus::Started(StatusStarted::WaitingForSocket))
             }
+            Ok(crate::services::StartResult::DeferredNotifyWait) => {
+                // Process started but READY=1 wait deferred.  Status stays as
+                // Starting (set by state_transition_starting).  A background
+                // thread will poll signaled_ready and transition to Started.
+                Ok(UnitStatus::Starting)
+            }
             Err(e) => {
                 let mut status = status.write_poisoned();
                 // Always set StoppedUnexpected on failure.  The service
@@ -679,6 +685,10 @@ impl ServiceState {
                     }
                 }
                 run_info.notify_eventfds();
+                Ok(())
+            }
+            Ok(crate::services::StartResult::DeferredNotifyWait) => {
+                // Reactivation with deferred notify wait — keep Starting status.
                 Ok(())
             }
             Err(e) => {

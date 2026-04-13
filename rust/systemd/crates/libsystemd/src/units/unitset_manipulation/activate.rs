@@ -317,6 +317,14 @@ pub enum ActivationSource {
     /// deadlock write-lock requests (e.g. loading new unit files) due to
     /// glibc's writer-preferring RwLock.
     NonBlocking,
+    /// Deferred notify wait: like Regular, but for Type=notify/NotifyReload
+    /// services, the READY=1 wait is deferred to a background thread.
+    /// The service process is forked and started, but the calling thread
+    /// returns immediately.  A background thread polls `signaled_ready`
+    /// (set by the global notification handler) and transitions the unit
+    /// to Started when READY=1 is received.  This prevents thread-pool
+    /// threads from holding the RuntimeInfo read lock indefinitely.
+    DeferNotifyWait,
 }
 
 impl ActivationSource {
@@ -381,8 +389,16 @@ pub fn activate_unit(
                 // Already failed — don't retry during initial activation
                 return Ok(StartResult::Started(vec![]));
             }
+            UnitStatus::Starting => {
+                // Already being started (e.g. DeferNotifyWait deferred the
+                // READY=1 wait).  Don't try to activate (fork) again — the
+                // process is already running.  Return empty before-chain
+                // because the deferred wait thread already holds it and will
+                // dispatch when READY=1 is received.
+                return Ok(StartResult::Started(vec![]));
+            }
             _ => {
-                // NeverStarted, Starting, Stopping, Restarting — proceed.
+                // NeverStarted, Stopping, Restarting — proceed.
                 // Also: Stopped + SocketActivation — restart via socket traffic.
             }
         }
@@ -522,6 +538,15 @@ pub fn activate_unit(
                     id_to_start.name
                 );
                 return Ok(StartResult::Started(vec![]));
+            }
+
+            // Deferred notify wait: the service process is started but the
+            // READY=1 wait is deferred.  Return the before-chain so the
+            // caller can dispatch it from a background thread after READY=1.
+            // Skip Started-only steps (timestamps, slice activation) — the
+            // background thread will handle them.
+            if matches!(status, UnitStatus::Starting) {
+                return Ok(StartResult::Started(next_services_ids));
             }
 
             // Record lifecycle timestamp: entered active state
@@ -961,12 +986,21 @@ fn activate_units_recursive(
             let unit_name = id.name.clone();
             let id_saved = id.clone();
 
+            // Use DeferNotifyWait to prevent Type=notify services from
+            // blocking the thread pool thread while holding the RuntimeInfo
+            // read lock.  For non-notify services, DeferNotifyWait behaves
+            // identically to Regular.
+            let effective_source = match source {
+                ActivationSource::Regular => ActivationSource::DeferNotifyWait,
+                other => other,
+            };
+
             // Hold the RuntimeInfo read lock in a named variable so we can
             // reuse it for the post-activation status check without acquiring
             // a second read lock (which would deadlock on glibc's
             // writer-preferring rwlock if a writer is pending).
             let ri_guard = run_info_copy.read_poisoned();
-            let result = activate_unit(id, &ri_guard, source);
+            let result = activate_unit(id, &ri_guard, effective_source);
 
             match result {
                 Ok(StartResult::Started(next_services_ids)) => {
@@ -984,6 +1018,19 @@ fn activate_units_recursive(
                     } else {
                         false
                     };
+
+                    // Check if READY=1 wait was deferred (unit still Starting).
+                    let is_deferred = if let Some(unit) =
+                        ri_guard.unit_table.get(&id_saved)
+                    {
+                        matches!(
+                            &*unit.common.status.read_poisoned(),
+                            UnitStatus::Starting
+                        )
+                    } else {
+                        false
+                    };
+
                     // Drop the read lock before triggering OnFailure= (which
                     // may need a write lock via find_or_load_unit).
                     drop(ri_guard);
@@ -991,41 +1038,78 @@ fn activate_units_recursive(
                         trigger_on_failure_units(&id_saved, &run_info_copy);
                     }
 
-                    if !next_services_ids.is_empty() {
-                        let next_names: Vec<&str> = next_services_ids
-                            .iter()
-                            .map(|id| id.name.as_str())
-                            .collect();
+                    if is_deferred {
+                        // Wake the global notification handler so it re-collects
+                        // sockets (including the new service's notification
+                        // socket) and can process READY=1 notifications.
+                        {
+                            let ri = run_info_copy.read_poisoned();
+                            ri.notify_eventfds();
+                        }
+
+                        // Type=notify service with deferred READY=1 wait.
+                        // Spawn a background thread (NOT in the thread pool,
+                        // so tpool.join() won't wait for it) to poll for
+                        // signaled_ready and dispatch the before-chain.
                         info!(
-                            "activate_units_recursive: {} completed, dispatching {} next: {:?}",
-                            unit_name,
-                            next_services_ids.len(),
-                            next_names
-                        );
-                    } else {
-                        info!(
-                            "activate_units_recursive: {} completed with empty before-chain",
+                            "activate_units_recursive: {} deferred notify wait, spawning background thread",
                             unit_name
                         );
+                        let run_info_bg = run_info_copy;
+                        let id_bg = id_saved;
+                        let filter_ids_bg = filter_ids_copy;
+                        let errors_bg = errors_copy;
+                        std::thread::Builder::new()
+                            .name(format!("notify-wait-{}", unit_name))
+                            .spawn(move || {
+                                deferred_notify_wait_and_dispatch(
+                                    id_bg,
+                                    next_services_ids,
+                                    filter_ids_bg,
+                                    run_info_bg,
+                                    errors_bg,
+                                    source,
+                                );
+                            })
+                            .expect("Failed to spawn deferred notify wait thread");
+                    } else {
+                        // Normal path: dispatch before-chain immediately.
+                        if !next_services_ids.is_empty() {
+                            let next_names: Vec<&str> = next_services_ids
+                                .iter()
+                                .map(|id| id.name.as_str())
+                                .collect();
+                            info!(
+                                "activate_units_recursive: {} completed, dispatching {} next: {:?}",
+                                unit_name,
+                                next_services_ids.len(),
+                                next_names
+                            );
+                        } else {
+                            info!(
+                                "activate_units_recursive: {} completed with empty before-chain",
+                                unit_name
+                            );
+                        }
+
+                        // make copies to move into the closure
+                        let run_info_copy2 = run_info_copy.clone();
+                        let tpool_copy2 = tpool_copy.clone();
+                        let errors_copy2 = errors_copy.clone();
+                        let filter_ids_copy2 = filter_ids_copy.clone();
+
+                        let next_services_job = move || {
+                            activate_units_recursive(
+                                next_services_ids,
+                                filter_ids_copy2,
+                                run_info_copy2,
+                                tpool_copy2,
+                                errors_copy2,
+                                source,
+                            );
+                        };
+                        tpool_copy.execute(next_services_job);
                     }
-
-                    // make copies to move into the closure
-                    let run_info_copy2 = run_info_copy.clone();
-                    let tpool_copy2 = tpool_copy.clone();
-                    let errors_copy2 = errors_copy.clone();
-                    let filter_ids_copy2 = filter_ids_copy.clone();
-
-                    let next_services_job = move || {
-                        activate_units_recursive(
-                            next_services_ids,
-                            filter_ids_copy2,
-                            run_info_copy2,
-                            tpool_copy2,
-                            errors_copy2,
-                            source,
-                        );
-                    };
-                    tpool_copy.execute(next_services_job);
                 }
                 Err(e) => {
                     // Drop the read lock before triggering OnFailure= (which
@@ -1046,6 +1130,165 @@ fn activate_units_recursive(
                 }
             }
         });
+    }
+}
+
+/// Background thread for deferred Type=notify READY=1 wait.
+///
+/// Polls `signaled_ready` (set by the global notification handler when
+/// READY=1 is received on the service's notification socket) and transitions
+/// the unit from Starting → Started.  Then dispatches the before-chain so
+/// dependent units can proceed.
+///
+/// This runs outside the activation thread pool so that `tpool.join()` can
+/// complete without waiting for potentially-infinite READY=1 waits.
+fn deferred_notify_wait_and_dispatch(
+    id: UnitId,
+    next_services_ids: Vec<UnitId>,
+    filter_ids: Arc<Vec<UnitId>>,
+    run_info: ArcMutRuntimeInfo,
+    errors: Arc<Mutex<Vec<UnitOperationError>>>,
+    source: ActivationSource,
+) {
+    let name = id.name.clone();
+
+    // Extract the start timeout from the service config.
+    let timeout = {
+        let ri = run_info.read_poisoned();
+        if let Some(unit) = ri.unit_table.get(&id)
+            && let Specific::Service(svc) = &unit.specific
+        {
+            let state = svc.state.read_poisoned();
+            state.srvc.get_start_timeout(&svc.conf)
+        } else {
+            None
+        }
+    };
+
+    let start_time = std::time::Instant::now();
+
+    // Poll until READY=1 is received, the unit leaves Starting state
+    // (e.g. process exited / was killed), or the start timeout expires.
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        // Check timeout
+        if let Some(timeout) = timeout
+            && start_time.elapsed() > timeout
+        {
+            warn!(
+                "deferred_notify_wait: {} timed out after {:?}",
+                name, timeout
+            );
+            // The exit handler / watchdog will handle the timeout kill.
+            // Just stop polling — the unit stays in Starting state and
+            // the normal timeout machinery will transition it to failed.
+            return;
+        }
+
+        let ri = run_info.read_poisoned();
+        let Some(unit) = ri.unit_table.get(&id) else {
+            return;
+        };
+
+        // If the unit is no longer Starting, something else handled it
+        // (e.g. SIGCHLD exit handler transitioned it to Stopped/Failed).
+        {
+            let status = unit.common.status.read_poisoned();
+            if !matches!(&*status, UnitStatus::Starting) {
+                trace!(
+                    "deferred_notify_wait: {} left Starting state ({:?}), stopping poll",
+                    name, &*status
+                );
+                return;
+            }
+        }
+
+        // Check if the global notification handler has set signaled_ready.
+        let ready = if let Specific::Service(svc) = &unit.specific {
+            svc.state.read_poisoned().srvc.signaled_ready
+        } else {
+            return;
+        };
+
+        if ready {
+            info!(
+                "deferred_notify_wait: {} received READY=1, transitioning to Started",
+                name
+            );
+
+            // Update service state and unit status under brief locks.
+            if let Specific::Service(svc) = &unit.specific {
+                let mut state = svc.state.write_poisoned();
+                state.srvc.signaled_ready = false;
+                state.srvc.runtime_started_at = Some(std::time::Instant::now());
+                // Initialize watchdog reference timestamp from READY=1 moment.
+                if svc.conf.watchdog_sec.is_some() && state.srvc.watchdog_last_ping.is_none() {
+                    state.srvc.watchdog_last_ping = Some(std::time::Instant::now());
+                }
+            }
+
+            // Transition unit status to Started.
+            {
+                let mut status = unit.common.status.write_poisoned();
+                if matches!(&*status, UnitStatus::Starting) {
+                    *status = UnitStatus::Started(StatusStarted::Running);
+                }
+            }
+
+            // Record lifecycle timestamps.
+            unit.common
+                .timestamps
+                .write_poisoned()
+                .record_active_enter();
+
+            // Activate slice hierarchy.
+            activate_slice_hierarchy(unit, &ri);
+
+            // Log the lifecycle event.
+            let desc = unit.common.unit.description.clone();
+            let log_level_max = unit.log_level_max();
+            let msg = if desc.is_empty() {
+                format!("Started {}.", name)
+            } else {
+                format!("Started {desc}.")
+            };
+            crate::control::varlink::journal_log_unit_lifecycle(
+                &msg,
+                &name,
+                log_level_max.as_deref(),
+            );
+
+            drop(ri);
+
+            // Dispatch the before-chain so dependent units can start.
+            if !next_services_ids.is_empty() {
+                let next_names: Vec<&str> = next_services_ids
+                    .iter()
+                    .map(|id| id.name.as_str())
+                    .collect();
+                info!(
+                    "deferred_notify_wait: {} dispatching {} dependents: {:?}",
+                    name,
+                    next_services_ids.len(),
+                    next_names
+                );
+
+                let tpool = ThreadPool::new(8);
+                activate_units_recursive(
+                    next_services_ids,
+                    filter_ids,
+                    run_info,
+                    tpool.clone(),
+                    errors,
+                    source,
+                );
+                tpool.join();
+            }
+            return;
+        }
+
+        drop(ri);
     }
 }
 
