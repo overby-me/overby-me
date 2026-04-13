@@ -3551,8 +3551,54 @@ impl Shell {
                 };
                 if assign.append {
                     let resolved = self.resolve_nameref(base_name);
+                    // When appending through a circular nameref in function scope,
+                    // read the existing value from the enclosing scope, append,
+                    // and write the result back to the enclosing scope.
+                    // E.g. `function f { typeset -n ref=$1; ref+=X; }; ref=; f ref`
+                    // should append X to the enclosing scope's ref variable.
+                    if resolved == base_name
+                        && self.namerefs.contains_key(base_name)
+                        && self.is_circular_nameref(base_name)
+                        && !self.local_scopes.is_empty()
+                    {
+                        // Compute final value with integer/case transforms
+                        let mut existing = String::new();
+                        for scope in self.local_scopes.iter().rev() {
+                            if let Some(saved) = scope.get(base_name) {
+                                existing = saved.scalar.clone().unwrap_or_default();
+                                break;
+                            }
+                        }
+                        let final_value = if self.integer_vars.contains(base_name) {
+                            let e = self.eval_arith_expr(&existing);
+                            let a = self.eval_arith_expr(&value);
+                            (e + a).to_string()
+                        } else {
+                            format!("{}{}", existing, value)
+                        };
+                        // Write back to enclosing scope
+                        let has_export = self.exports.contains_key(base_name);
+                        for scope in self.local_scopes.iter_mut().rev() {
+                            if let Some(saved) = scope.get_mut(base_name) {
+                                saved.scalar = Some(final_value.clone());
+                                if saved.was_exported.is_some() {
+                                    saved.was_exported = Some(final_value.clone());
+                                }
+                                break;
+                            }
+                        }
+                        // Also update self.vars so that reads within the
+                        // function (via ctx.vars.get in expansion code) see
+                        // the updated value immediately.
+                        self.vars.insert(base_name.to_string(), final_value.clone());
+                        if has_export {
+                            self.exports
+                                .insert(base_name.to_string(), final_value.clone());
+                            unsafe { std::env::set_var(base_name, &final_value) };
+                        }
+                    }
                     // Check if nameref target has subscript (e.g. b+=1 where b -> a[0])
-                    if let Some(ref nref_sub) = nameref_subscript {
+                    else if let Some(ref nref_sub) = nameref_subscript {
                         // Append through subscripted nameref target
                         if self.assoc_arrays.contains_key(&resolved_base) {
                             let is_int = self.integer_vars.contains(&resolved_base);

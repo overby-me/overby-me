@@ -1029,6 +1029,23 @@ impl Shell {
     /// Get a variable value, resolving namerefs.
     pub fn get_var(&mut self, name: &str) -> Option<String> {
         let resolved = self.resolve_nameref_warn(name);
+        // When a nameref is circular (resolves back to itself) and we're
+        // inside a function scope, read the value from the enclosing scope's
+        // saved variable rather than the local nameref variable.
+        // E.g. `function f { typeset -n ref=$1; echo $ref; }; ref=hello; f ref`
+        // — the local nameref `ref` is circular, so $ref should read the
+        // enclosing scope's `ref` value ("hello").
+        if resolved == name
+            && self.namerefs.contains_key(name)
+            && self.is_circular_nameref(name)
+            && !self.local_scopes.is_empty()
+        {
+            for scope in self.local_scopes.iter().rev() {
+                if let Some(saved) = scope.get(name) {
+                    return saved.scalar.clone();
+                }
+            }
+        }
         if resolved == "RANDOM" {
             // Bash-compatible LCRNG: seed = seed * 1103515245 + 12345
             self.random_seed = self
@@ -1055,9 +1072,20 @@ impl Shell {
             // like `/`, `%`, `42`, empty string, etc. with
             // "not a valid identifier".
             if !is_valid_nameref_target(&value) {
+                // Include context prefix: arithmetic ((:, let:) or builtin name
+                let prefix = if self.arith_is_command {
+                    "((: ".to_string()
+                } else if self.arith_is_let {
+                    "let: ".to_string()
+                } else if let Some(ref builtin) = self.current_builtin {
+                    format!("{}: ", builtin)
+                } else {
+                    String::new()
+                };
                 eprintln!(
-                    "{}: `{}': not a valid identifier",
+                    "{}: {}`{}': not a valid identifier",
                     self.error_prefix(),
+                    prefix,
                     value
                 );
                 self.last_status = 1;
@@ -1106,6 +1134,10 @@ impl Shell {
                 }
             }
             if found_scope {
+                // Also update self.vars so that reads within the function
+                // (via ctx.vars.get in expansion code) see the updated
+                // value immediately.
+                self.vars.insert(name.to_string(), final_value.clone());
                 if has_export {
                     self.exports.insert(name.to_string(), final_value.clone());
                     unsafe { std::env::set_var(name, &final_value) };
