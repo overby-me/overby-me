@@ -1288,8 +1288,37 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
             let was_array = shell.arrays.contains_key(name);
             let was_assoc = shell.assoc_arrays.contains_key(name);
 
+            // When the variable is already a nameref in the CURRENT local
+            // scope and we're not setting -n, resolve through the nameref
+            // so that -A/-a/compound assignments operate on the TARGET.
+            // e.g. `local -n ref=var; local -A ref=([1]=)` should create
+            // `var` as an associative array, not `ref`.
+            //
+            // Important: only treat as existing nameref if the nameref is
+            // already in the current local scope (from a previous `local -n`).
+            // If the nameref is inherited from global scope, `declare_local`
+            // will save and remove it, so we should NOT resolve through it
+            // (the intent is to shadow the global nameref with a local scalar).
+            let nameref_is_already_local = shell
+                .local_scopes
+                .last()
+                .is_some_and(|s| s.contains_key(name));
+            let is_existing_nameref =
+                !flag_nameref && shell.namerefs.contains_key(name) && nameref_is_already_local;
+            let assign_target = if is_existing_nameref {
+                shell.resolve_nameref(name).to_string()
+            } else {
+                name.to_string()
+            };
+            let assign_target_name = assign_target.as_str();
+
             shell.declare_local(name);
-            if flag_integer {
+            // When assigning through a nameref, also declare_local the
+            // target so it gets saved/restored properly on scope exit.
+            if is_existing_nameref && assign_target_name != name {
+                shell.declare_local(assign_target_name);
+            }
+            if flag_integer && !is_existing_nameref {
                 shell.integer_vars.insert(name.to_string());
             }
             if flag_nameref {
@@ -1310,6 +1339,7 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
                     shell.namerefs.insert(name.to_string(), value.to_string());
                 }
             } else if flag_assoc {
+                let target = assign_target_name;
                 let trimmed_val = value.trim();
                 if trimmed_val.starts_with('(') && trimmed_val.ends_with(')') {
                     if is_append {
@@ -1323,10 +1353,10 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
                         for (k, v) in new_map.iter() {
                             map.insert(k.clone(), v.clone());
                         }
-                        shell.assoc_arrays.insert(name.to_string(), map);
+                        shell.assoc_arrays.insert(target.to_string(), map);
                     } else {
                         let map = crate::builtins::parse_assoc_literal(value);
-                        shell.assoc_arrays.insert(name.to_string(), map);
+                        shell.assoc_arrays.insert(target.to_string(), map);
                     }
                 } else {
                     // Bare value without (): local -A name=value
@@ -1337,9 +1367,12 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
                         crate::interpreter::AssocArray::default()
                     };
                     map.insert("0".to_string(), value.to_string());
-                    shell.assoc_arrays.insert(name.to_string(), map);
+                    shell.assoc_arrays.insert(target.to_string(), map);
                 }
+                // Remove any scalar on the target
+                shell.vars.remove(target);
             } else if flag_array {
+                let target = assign_target_name;
                 let trimmed_val = value.trim();
                 let is_compound = trimmed_val.starts_with('(') && trimmed_val.ends_with(')');
                 if is_compound {
@@ -1359,12 +1392,12 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
                             }
                             arr[idx] = elem;
                         }
-                        shell.apply_case_attrs_to_array(name, &mut arr);
-                        shell.arrays.insert(name.to_string(), arr);
+                        shell.apply_case_attrs_to_array(target, &mut arr);
+                        shell.arrays.insert(target.to_string(), arr);
                     } else {
                         let mut arr = new_arr;
-                        shell.apply_case_attrs_to_array(name, &mut arr);
-                        shell.arrays.insert(name.to_string(), arr);
+                        shell.apply_case_attrs_to_array(target, &mut arr);
+                        shell.arrays.insert(target.to_string(), arr);
                     }
                 } else if is_append {
                     // Bare value append: `local -a a+=Y` appends string Y
@@ -1390,16 +1423,21 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
                         arr[0] = Some(format!("{}{}", existing, value));
                     }
                     // Remove scalar since we're now an array
-                    shell.vars.remove(name);
-                    shell.apply_case_attrs_to_array(name, &mut arr);
-                    shell.arrays.insert(name.to_string(), arr);
+                    shell.vars.remove(target);
+                    shell.apply_case_attrs_to_array(target, &mut arr);
+                    shell.arrays.insert(target.to_string(), arr);
                 } else {
                     // Bare value without (): assign as scalar to element [0]
                     let mut arr = crate::builtins::parse_indexed_compound_assignment(value);
-                    shell.apply_case_attrs_to_array(name, &mut arr);
-                    shell.arrays.insert(name.to_string(), arr);
+                    shell.apply_case_attrs_to_array(target, &mut arr);
+                    shell.arrays.insert(target.to_string(), arr);
                 }
+                // Remove any scalar on the target
+                shell.vars.remove(target);
             } else if flag_integer {
+                if is_existing_nameref {
+                    shell.integer_vars.insert(assign_target_name.to_string());
+                }
                 let n = shell.eval_arith_expr(value);
                 if is_append {
                     let existing = if inherit {
@@ -1418,9 +1456,15 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
                 // Scalar or compound assignment without explicit -a/-A flag.
                 // If the value looks like a compound assignment (...)  and
                 // the variable was an array/assoc, treat as compound.
+                let target = assign_target_name;
                 let trimmed_val = value.trim();
                 let looks_compound = trimmed_val.starts_with('(') && trimmed_val.ends_with(')');
-                if looks_compound && (was_assoc || flag_assoc) {
+                // Check was_array/was_assoc on the target (not the nameref)
+                let target_was_assoc =
+                    was_assoc || (is_existing_nameref && shell.assoc_arrays.contains_key(target));
+                let target_was_array =
+                    was_array || (is_existing_nameref && shell.arrays.contains_key(target));
+                if looks_compound && (target_was_assoc || flag_assoc) {
                     // Associative array compound assignment
                     if is_append {
                         let mut map = if inherit {
@@ -1432,12 +1476,14 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
                         for (k, v) in new_map.iter() {
                             map.insert(k.clone(), v.clone());
                         }
-                        shell.assoc_arrays.insert(name.to_string(), map);
+                        shell.assoc_arrays.insert(target.to_string(), map);
                     } else {
                         let map = crate::builtins::parse_assoc_literal(value);
-                        shell.assoc_arrays.insert(name.to_string(), map);
+                        shell.assoc_arrays.insert(target.to_string(), map);
                     }
-                } else if looks_compound && (was_array || inherit && inherited_array.is_some()) {
+                } else if looks_compound
+                    && (target_was_array || inherit && inherited_array.is_some())
+                {
                     // Indexed array compound assignment
                     let new_arr = crate::builtins::parse_indexed_compound_assignment(value);
                     if is_append {
@@ -1454,12 +1500,12 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
                             }
                             arr[idx] = elem;
                         }
-                        shell.apply_case_attrs_to_array(name, &mut arr);
-                        shell.arrays.insert(name.to_string(), arr);
+                        shell.apply_case_attrs_to_array(target, &mut arr);
+                        shell.arrays.insert(target.to_string(), arr);
                     } else {
                         let mut arr = new_arr;
-                        shell.apply_case_attrs_to_array(name, &mut arr);
-                        shell.arrays.insert(name.to_string(), arr);
+                        shell.apply_case_attrs_to_array(target, &mut arr);
+                        shell.arrays.insert(target.to_string(), arr);
                     }
                 } else if looks_compound && is_append && inherit && inherited_scalar.is_some() {
                     // Scalar with += and compound value: convert scalar to
@@ -1475,10 +1521,19 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
                         }
                         arr[idx] = elem;
                     }
-                    shell.apply_case_attrs_to_array(name, &mut arr);
-                    shell.arrays.insert(name.to_string(), arr);
+                    shell.apply_case_attrs_to_array(target, &mut arr);
+                    shell.arrays.insert(target.to_string(), arr);
                     // Remove scalar since we converted to array
-                    shell.vars.remove(name);
+                    shell.vars.remove(target);
+                } else if looks_compound && is_existing_nameref {
+                    // Compound assignment through a nameref to a target that
+                    // doesn't exist yet — create indexed array on the target
+                    // (bash behavior: `local -n ref=var; local ref=(X)` creates
+                    // `var` as indexed array).
+                    let mut arr = crate::builtins::parse_indexed_compound_assignment(value);
+                    shell.apply_case_attrs_to_array(target, &mut arr);
+                    shell.arrays.insert(target.to_string(), arr);
+                    shell.vars.remove(target);
                 } else if looks_compound {
                     // Compound assignment on a non-array variable without
                     // inheritance — just parse as indexed array
@@ -3683,7 +3738,18 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 let resolved_for_check = shell.resolve_nameref(name);
                 let trimmed_val = value.trim();
                 let looks_compound = trimmed_val.starts_with('(') && trimmed_val.ends_with(')');
-                if looks_compound && shell.arrays.contains_key(&resolved_for_check) {
+                // When a compound assignment goes through a nameref to a target
+                // that doesn't exist yet (not an array or assoc), create an
+                // indexed array on the target (bash behavior: `declare -n ref=var;
+                // declare ref=(X)` creates `var` as indexed array).
+                let target_is_new_through_nameref = looks_compound
+                    && resolved_for_check != name
+                    && !shell.arrays.contains_key(&resolved_for_check)
+                    && !shell.assoc_arrays.contains_key(&resolved_for_check);
+                if looks_compound
+                    && (shell.arrays.contains_key(&resolved_for_check)
+                        || target_is_new_through_nameref)
+                {
                     let needs_shell_expand = value.contains('$') || value.contains('`');
                     if needs_shell_expand {
                         let inner = &trimmed_val[1..trimmed_val.len() - 1];
@@ -3706,6 +3772,8 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                                 };
                             }
                         }
+                        // Remove any scalar value on the target so it becomes a pure array
+                        shell.vars.remove(&resolved_for_check);
                         shell.arrays.insert(resolved_for_check, arr);
                     } else {
                         let mut arr = crate::builtins::parse_indexed_compound_assignment(value);
@@ -3720,6 +3788,8 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                                 };
                             }
                         }
+                        // Remove any scalar value on the target so it becomes a pure array
+                        shell.vars.remove(&resolved_for_check);
                         shell.arrays.insert(resolved_for_check, arr);
                     }
                 } else if looks_compound && shell.assoc_arrays.contains_key(&resolved_for_check) {
@@ -4007,6 +4077,26 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
 
             if make_local {
                 shell.declare_local(name);
+                // When attributes are applied through a nameref (attr_name
+                // differs from name), also declare_local the target so it
+                // gets saved/restored on scope exit.  Without this, the
+                // target variable leaks out of the function scope.
+                // e.g. `declare -n ref=var; declare -a ref` should make
+                // `var` local too, not just `ref`.
+                if attr_name != name {
+                    shell.declare_local(attr_name);
+                }
+                // When `declare ref` (no flags) is called on a nameref,
+                // attr_name == name because has_attr_flags is false.
+                // But the nameref target should still be declared local
+                // so that assignments through the nameref (e.g. `ref=X`)
+                // don't leak to the global scope.
+                if !has_attr_flags && shell.namerefs.contains_key(name) {
+                    let resolved = shell.resolve_nameref(name);
+                    if resolved != name {
+                        shell.declare_local(&resolved);
+                    }
+                }
                 // When a prefix assignment set this variable as a temp env
                 // var (e.g. `z=y typeset z`), declare_local just saved the
                 // prefix value and cleared the variable.  Restore the prefix

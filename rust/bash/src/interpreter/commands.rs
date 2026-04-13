@@ -2159,6 +2159,45 @@ impl Shell {
                             && name.chars().all(|c| c.is_alphanumeric() || c == '_')
                             && !name.starts_with(|c: char| c.is_ascii_digit())
                         {
+                            // When the variable is a nameref (and -n flag is NOT
+                            // being set), resolve through the nameref so the
+                            // compound assignment targets the nameref's target.
+                            // e.g. `declare -n ref=var; declare ref=(X)` should
+                            // create `var` as indexed array, not `ref`.
+                            //
+                            // When -g is set, use the GLOBAL scope's nameref
+                            // (saved in local_scopes) instead of the local one.
+                            // e.g. `declare -n ref=foo` (global); inside function
+                            // `declare -n ref=var; declare -g ref=(X)` should
+                            // resolve through the GLOBAL ref→foo, not local ref→var.
+                            let resolved_through_nameref = if !has_nameref_flag
+                                && self.namerefs.contains_key(name)
+                            {
+                                if has_global_flag && !self.local_scopes.is_empty() {
+                                    // Look for the saved nameref in outer scopes
+                                    // (the global value before it was localized).
+                                    let saved_nameref = self
+                                        .local_scopes
+                                        .iter()
+                                        .find_map(|s| s.get(name).and_then(|sv| sv.nameref.clone()))
+                                        .and_then(|t| if t.is_empty() { None } else { Some(t) });
+                                    saved_nameref
+                                } else {
+                                    Some(self.resolve_nameref(name))
+                                }
+                            } else if !has_nameref_flag && has_global_flag {
+                                // No local nameref, but -g is set — check if
+                                // a global nameref was saved in scopes.
+                                let saved_nameref = self
+                                    .local_scopes
+                                    .iter()
+                                    .find_map(|s| s.get(name).and_then(|sv| sv.nameref.clone()))
+                                    .and_then(|t| if t.is_empty() { None } else { Some(t) });
+                                saved_nameref
+                            } else {
+                                None
+                            };
+                            let assign_target = resolved_through_nameref.as_deref().unwrap_or(name);
                             // For local/declare in function context, save the
                             // old value BEFORE we overwrite the array.  The
                             // builtin_local call later will see the name
@@ -2175,19 +2214,19 @@ impl Shell {
                             let inherit_enabled =
                                 *self.shopt_options.get("localvar_inherit").unwrap_or(&false);
                             let inherited_arr = if is_append && make_local_here && inherit_enabled {
-                                self.arrays.get(name).cloned()
+                                self.arrays.get(assign_target).cloned()
                             } else {
                                 None
                             };
                             let inherited_assoc = if is_append && make_local_here && inherit_enabled
                             {
-                                self.assoc_arrays.get(name).cloned()
+                                self.assoc_arrays.get(assign_target).cloned()
                             } else {
                                 None
                             };
                             let inherited_scalar =
                                 if is_append && make_local_here && inherit_enabled {
-                                    self.vars.get(name).cloned()
+                                    self.vars.get(assign_target).cloned()
                                 } else {
                                     None
                                 };
@@ -2197,15 +2236,16 @@ impl Shell {
                             // Use scope-aware check: allow shadowing when readonly
                             // comes from an outer function scope (not global, not
                             // current scope).  Same logic as builtin_local.
-                            let is_readonly_blocking = if self.readonly_vars.contains(name) {
+                            let is_readonly_blocking = if self.readonly_vars.contains(assign_target)
+                            {
                                 let in_current_scope = self
                                     .local_scopes
                                     .last()
-                                    .is_some_and(|s| s.contains_key(name));
+                                    .is_some_and(|s| s.contains_key(assign_target));
                                 let in_any_outer_scope = self.local_scopes.len() >= 2
                                     && self.local_scopes[..self.local_scopes.len() - 1]
                                         .iter()
-                                        .any(|s| s.contains_key(name));
+                                        .any(|s| s.contains_key(assign_target));
                                 if in_current_scope {
                                     // Already declared local in THIS function and readonly → error
                                     true
@@ -2221,6 +2261,12 @@ impl Shell {
                             };
                             if make_local_here && !is_readonly_blocking {
                                 self.declare_local(name);
+                                // When assigning through a nameref, also
+                                // declare_local the target so it gets
+                                // saved/restored on scope exit.
+                                if assign_target != name {
+                                    self.declare_local(assign_target);
+                                }
                             }
                             // Perform the array assignment
                             if is_readonly_blocking {
@@ -2231,7 +2277,7 @@ impl Shell {
                                         "{}: {}: {}: readonly variable",
                                         self.error_prefix(),
                                         command_name,
-                                        name
+                                        assign_target
                                     );
                                 } else if !paren_from_single_quote && has_array_flag {
                                     // Unquoted compound assignment like `readonly -a r=(6)`
@@ -2241,13 +2287,13 @@ impl Shell {
                                             "{}: {}: {}: readonly variable",
                                             self.error_prefix(),
                                             fname,
-                                            name
+                                            assign_target
                                         );
                                     } else {
                                         eprintln!(
                                             "{}: {}: readonly variable",
                                             self.error_prefix(),
-                                            name
+                                            assign_target
                                         );
                                     }
                                 } else {
@@ -2255,7 +2301,7 @@ impl Shell {
                                     eprintln!(
                                         "{}: {}: readonly variable",
                                         self.error_prefix(),
-                                        name
+                                        assign_target
                                     );
                                 }
                                 self.last_status = 1;
@@ -2273,7 +2319,9 @@ impl Shell {
                                 // For declare/typeset (not local): fall through to
                                 // push bare name below, matching old behavior where
                                 // only ONE error is printed (from commands.rs).
-                            } else if has_array_flag && self.assoc_arrays.contains_key(name) {
+                            } else if has_array_flag
+                                && self.assoc_arrays.contains_key(assign_target)
+                            {
                                 // Cannot convert associative to indexed array.
                                 // Don't perform the compound assignment — just
                                 // push the bare name so the builtin can report
@@ -2281,7 +2329,7 @@ impl Shell {
                                 new_args.push(name.to_string());
                                 modified = true;
                                 continue;
-                            } else if has_assoc_flag && self.arrays.contains_key(name) {
+                            } else if has_assoc_flag && self.arrays.contains_key(assign_target) {
                                 // Cannot convert indexed to associative array.
                                 // For LOCAL declarations (not -g), bash prints an
                                 // error with the function name as context (e.g.
@@ -2302,7 +2350,8 @@ impl Shell {
                                 modified = true;
                                 continue;
                             } else if has_assoc_flag
-                                || (!has_array_flag && self.assoc_arrays.contains_key(name))
+                                || (!has_array_flag
+                                    && self.assoc_arrays.contains_key(assign_target))
                             {
                                 // When the compound value came from single quotes
                                 // and contains $/ `, defer to the builtin so that
@@ -2335,12 +2384,12 @@ impl Shell {
                                     let saved_is_assoc = self
                                         .local_scopes
                                         .iter()
-                                        .find_map(|s| s.get(name))
+                                        .find_map(|s| s.get(assign_target))
                                         .is_some_and(|sv| sv.assoc.is_some());
                                     let saved_is_scalar_or_array = self
                                         .local_scopes
                                         .iter()
-                                        .find_map(|s| s.get(name))
+                                        .find_map(|s| s.get(assign_target))
                                         .is_some_and(|sv| {
                                             sv.scalar.is_some() || sv.array.is_some()
                                         });
@@ -2348,21 +2397,22 @@ impl Shell {
                                         // Re-assignment: use saved assoc's bucket count
                                         self.local_scopes
                                             .iter()
-                                            .find_map(|s| s.get(name))
+                                            .find_map(|s| s.get(assign_target))
                                             .and_then(|sv| sv.assoc.as_ref().map(|a| a.nbuckets()))
                                             .unwrap_or(1024)
                                     } else if saved_is_scalar_or_array
-                                        || self.vars.contains_key(name)
-                                        || self.arrays.contains_key(name)
+                                        || self.vars.contains_key(assign_target)
+                                        || self.arrays.contains_key(assign_target)
                                     {
                                         128 // conversion from scalar/array
                                     } else {
                                         1024 // brand new
                                     }
-                                } else if let Some(existing) = self.assoc_arrays.get(name) {
+                                } else if let Some(existing) = self.assoc_arrays.get(assign_target)
+                                {
                                     existing.nbuckets() // re-assignment: keep existing bucket count
-                                } else if self.vars.contains_key(name)
-                                    || self.arrays.contains_key(name)
+                                } else if self.vars.contains_key(assign_target)
+                                    || self.arrays.contains_key(assign_target)
                                 {
                                     128 // conversion from scalar/array
                                 } else {
@@ -2373,25 +2423,30 @@ impl Shell {
                                 );
                                 if has_global_flag
                                     && !self.local_scopes.is_empty()
-                                    && self.local_scopes.iter().any(|s| s.contains_key(name))
+                                    && self
+                                        .local_scopes
+                                        .iter()
+                                        .any(|s| s.contains_key(assign_target))
                                 {
-                                    self.set_global_assoc(name, map);
+                                    self.set_global_assoc(assign_target, map);
                                 } else {
                                     if is_append {
                                         if let Some(mut existing) = inherited_assoc.clone() {
                                             for (k, v) in map.iter() {
                                                 existing.insert(k.clone(), v.clone());
                                             }
-                                            self.assoc_arrays.insert(name.to_string(), existing);
+                                            self.assoc_arrays
+                                                .insert(assign_target.to_string(), existing);
                                         } else {
-                                            self.assoc_arrays.insert(name.to_string(), map);
+                                            self.assoc_arrays
+                                                .insert(assign_target.to_string(), map);
                                         }
                                     } else {
-                                        self.assoc_arrays.insert(name.to_string(), map);
+                                        self.assoc_arrays.insert(assign_target.to_string(), map);
                                     }
                                     // An explicit compound assignment (even empty)
                                     // means the variable is no longer declared-but-unset.
-                                    self.declared_unset.remove(name);
+                                    self.declared_unset.remove(assign_target);
                                 }
                             } else {
                                 // Check if the compound value came from a
@@ -2588,22 +2643,26 @@ impl Shell {
                                                         };
                                                     }
                                                 } else {
-                                                    self.apply_case_attrs_to_array(name, &mut arr);
+                                                    self.apply_case_attrs_to_array(
+                                                        assign_target,
+                                                        &mut arr,
+                                                    );
                                                 }
                                                 if has_global_flag
                                                     && !self.local_scopes.is_empty()
                                                     && self
                                                         .local_scopes
                                                         .iter()
-                                                        .any(|s| s.contains_key(name))
+                                                        .any(|s| s.contains_key(assign_target))
                                                 {
-                                                    self.set_global_array(name, arr);
+                                                    self.set_global_array(assign_target, arr);
                                                 } else {
-                                                    self.arrays.insert(name.to_string(), arr);
+                                                    self.arrays
+                                                        .insert(assign_target.to_string(), arr);
                                                 }
                                                 // An explicit compound assignment (even empty)
                                                 // means the variable is no longer declared-but-unset.
-                                                self.declared_unset.remove(name);
+                                                self.declared_unset.remove(assign_target);
                                                 used_word_expand = true;
                                             }
                                         }
@@ -2656,22 +2715,22 @@ impl Shell {
                                                 };
                                             }
                                         } else {
-                                            self.apply_case_attrs_to_array(name, &mut arr);
+                                            self.apply_case_attrs_to_array(assign_target, &mut arr);
                                         }
                                         if has_global_flag
                                             && !self.local_scopes.is_empty()
                                             && self
                                                 .local_scopes
                                                 .iter()
-                                                .any(|s| s.contains_key(name))
+                                                .any(|s| s.contains_key(assign_target))
                                         {
-                                            self.set_global_array(name, arr);
+                                            self.set_global_array(assign_target, arr);
                                         } else {
-                                            self.arrays.insert(name.to_string(), arr);
+                                            self.arrays.insert(assign_target.to_string(), arr);
                                         }
                                         // An explicit compound assignment (even empty)
                                         // means the variable is no longer declared-but-unset.
-                                        self.declared_unset.remove(name);
+                                        self.declared_unset.remove(assign_target);
                                     }
                                 }
                             }
