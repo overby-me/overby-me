@@ -1006,16 +1006,7 @@ impl Shell {
         seen_bases.insert(name.to_string());
         let mut depth = 0;
         while let Some(target) = self.namerefs.get(&resolved) {
-            if target.is_empty() {
-                break;
-            }
-            if depth >= MAX_NAMEREF_DEPTH {
-                eprintln!(
-                    "{}: warning: {}: maximum nameref depth ({}) exceeded",
-                    self.error_prefix(),
-                    name,
-                    MAX_NAMEREF_DEPTH
-                );
+            if target.is_empty() || depth >= MAX_NAMEREF_DEPTH {
                 break;
             }
             let target_base = if let Some(bracket) = target.find('[') {
@@ -1024,19 +1015,16 @@ impl Shell {
                 target.as_str()
             };
             // Exact circular: target is exactly in seen (e.g. a→b→a)
+            // Don't emit warnings here — let the caller fall through to
+            // resolve_nameref_warn which handles warnings correctly.
             if seen.contains(target) {
-                eprintln!(
-                    "{}: warning: {}: circular name reference",
-                    self.error_prefix(),
-                    name
-                );
                 return NamerefResolveResult::CircularExact;
             }
             // Subscript circular: target's base name matches a variable
-            // in the chain (e.g. a→b→a[1]) but full target is different
+            // in the chain (e.g. a→b→a[1]) but full target is different.
+            // Don't print "circular name reference" — the caller will
+            // print "removing nameref attribute" instead.
             if seen_bases.contains(target_base) && !seen.contains(target) {
-                // Don't print "circular name reference" — the caller will
-                // print "removing nameref attribute" instead.
                 return NamerefResolveResult::CircularSubscript(target.clone());
             }
             seen.insert(target.clone());
@@ -1069,18 +1057,15 @@ impl Shell {
 
     /// Resolve a variable name through namerefs, emitting warnings for
     /// circular references and maximum depth exceeded (matching bash behavior).
-    /// Bash warns "circular name reference" when it first detects the cycle.
-    /// Also detects circularity through subscripted references: a→b→a[1] is
-    /// circular because the base name of the target matches a variable in the chain.
+    /// Bash warns "circular name reference" when it first detects the cycle,
+    /// then "maximum nameref depth (8) exceeded" when depth limit is hit.
     /// Returns the resolved name (which may be the original if circular).
     pub fn resolve_nameref_warn(&self, name: &str) -> String {
         const MAX_NAMEREF_DEPTH: usize = 8;
         let mut resolved = name.to_string();
         let mut seen = HashSet::new();
-        let mut seen_bases = HashSet::new();
         let mut depth = 0;
-        // Track the base name of the initial variable
-        seen_bases.insert(name.to_string());
+        let mut warned_circular = false;
         while let Some(target) = self.namerefs.get(&resolved) {
             if target.is_empty() {
                 break;
@@ -1094,22 +1079,24 @@ impl Shell {
                 );
                 break;
             }
-            // Check both full target name and base name (before '[') for cycles
-            let target_base = if let Some(bracket) = target.find('[') {
-                &target[..bracket]
-            } else {
-                target.as_str()
-            };
-            if seen.contains(target) || seen_bases.contains(target_base) {
+            if seen.contains(target) && !warned_circular {
                 eprintln!(
                     "{}: warning: {}: circular name reference",
                     self.error_prefix(),
                     name
                 );
-                break;
+                warned_circular = true;
+                // For self-references (target == resolved, e.g. v→v),
+                // continue iterating up to MAX_NAMEREF_DEPTH like bash does,
+                // which will then emit "maximum depth exceeded".
+                // For multi-node cycles (target != resolved, e.g. v→w→x→v),
+                // break immediately — bash only emits "circular name reference"
+                // without continuing to max depth.
+                if target != &resolved {
+                    break;
+                }
             }
             seen.insert(target.clone());
-            seen_bases.insert(target_base.to_string());
             resolved = target.clone();
             depth += 1;
         }
