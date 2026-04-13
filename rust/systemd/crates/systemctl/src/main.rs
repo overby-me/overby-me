@@ -1698,6 +1698,7 @@ fn main() {
                         no_legend,
                         output_format.as_deref(),
                         &property_filter,
+                        true,
                     );
                 }
                 Err(e) => {
@@ -1736,6 +1737,7 @@ fn main() {
 
     match result {
         Ok(resp) => {
+            let has_unit_args = positional.len() >= 2;
             handle_response(
                 &positional[0],
                 &resp,
@@ -1745,6 +1747,7 @@ fn main() {
                 no_legend,
                 output_format.as_deref(),
                 &property_filter,
+                has_unit_args,
             );
             // --now: after enable → start units, after disable → stop units
             if now
@@ -1846,6 +1849,7 @@ fn handle_response(
     no_legend: bool,
     output_format: Option<&str>,
     property_filter: &[String],
+    has_unit_args: bool,
 ) {
     // Check for JSON-RPC error responses.
     if let Some(error) = resp.get("error") {
@@ -2211,18 +2215,17 @@ fn handle_response(
                     println!("{}", serde_json::to_string_pretty(result).unwrap());
                 }
             }
-            // Exit 3 if the service is not active (matching C systemd behavior)
-            if let Some(result) = result {
-                let is_active = if let Some(arr) = result.as_array() {
-                    arr.iter().all(|entry| {
-                        entry
-                            .get("Status")
-                            .and_then(|v| v.as_str())
-                            .is_some_and(|s| s.starts_with("Started(Running"))
-                    })
-                } else {
-                    true
-                };
+            // Exit 3 if the service is not active (matching C systemd behavior).
+            // Only check when a single specific unit was requested (no globs, not bare status).
+            if has_unit_args
+                && let Some(result) = result
+                && let Some(arr) = result.as_array()
+                && arr.len() == 1
+            {
+                let is_active = arr[0]
+                    .get("Status")
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|s| s.starts_with("Started("));
                 if !is_active {
                     std::process::exit(3);
                 }

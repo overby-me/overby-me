@@ -1682,14 +1682,14 @@ fn find_units_with_pattern<'a>(
     let units: Vec<_> = unit_table_locked
         .values()
         .filter(|unit| {
-            let name = unit.id.name.clone();
-            name.starts_with(name_pattern)
+            let name = &unit.id.name;
+            unit_name_glob_match(name_pattern, name)
                 || unit
                     .common
                     .unit
                     .aliases
                     .iter()
-                    .any(|alias| alias.starts_with(name_pattern))
+                    .any(|alias| unit_name_glob_match(name_pattern, alias))
         })
         .collect();
     units
@@ -2227,7 +2227,8 @@ fn parse_manager_environment(run_info: &ArcMutRuntimeInfo) {
         let ri = run_info.read_poisoned();
         let mut env = ri.manager_environment.lock().unwrap();
         for (k, v) in env_vars {
-            env.insert(k, v);
+            // Only insert if not already set (preserves user-set values from set-environment)
+            env.entry(k).or_insert(v);
         }
     }
 }
