@@ -1989,6 +1989,11 @@ impl Shell {
                 let has_capitalize_flag = args
                     .iter()
                     .any(|a| a.starts_with('-') && a.len() > 1 && a.contains('c'));
+                // Check if -i flag is present (integer attribute — affects
+                // compound assignment element evaluation)
+                let has_integer_flag = args
+                    .iter()
+                    .any(|a| a.starts_with('-') && a.len() > 1 && a.contains('i'));
                 // Check if -n (nameref) flag is present — when set, compound
                 // assignment syntax like `declare -n array='(one two three)'`
                 // should NOT be pre-processed as an array assignment. Instead,
@@ -2732,6 +2737,21 @@ impl Shell {
                                         // means the variable is no longer declared-but-unset.
                                         self.declared_unset.remove(assign_target);
                                     }
+                                }
+                            }
+                            // When -i flag is present, apply integer attribute
+                            // to the target and evaluate array elements as arithmetic
+                            if has_integer_flag {
+                                self.integer_vars.insert(assign_target.to_string());
+                                if let Some(arr) = self.arrays.get(assign_target).cloned() {
+                                    let evaluated: Vec<Option<String>> = arr
+                                        .into_iter()
+                                        .map(|v| {
+                                            v.map(|s| self.eval_arith_expr(&s).to_string())
+                                        })
+                                        .collect();
+                                    self.arrays
+                                        .insert(assign_target.to_string(), evaluated);
                                 }
                             }
                             new_args.push(name.to_string());

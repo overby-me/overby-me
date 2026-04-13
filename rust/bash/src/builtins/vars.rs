@@ -1435,22 +1435,51 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
                 // Remove any scalar on the target
                 shell.vars.remove(target);
             } else if flag_integer {
-                if is_existing_nameref {
+                let target_for_int = if is_existing_nameref {
                     shell.integer_vars.insert(assign_target_name.to_string());
-                }
-                let n = shell.eval_arith_expr(value);
-                if is_append {
-                    let existing = if inherit {
-                        inherited_scalar
-                            .as_deref()
-                            .and_then(|v| v.parse::<i64>().ok())
-                            .unwrap_or(0)
-                    } else {
-                        0
-                    };
-                    shell.set_var(name, (existing + n).to_string());
+                    assign_target_name
                 } else {
-                    shell.set_var(name, n.to_string());
+                    name
+                };
+                let trimmed_val = value.trim();
+                let looks_compound_int =
+                    trimmed_val.starts_with('(') && trimmed_val.ends_with(')');
+                if looks_compound_int {
+                    // Compound assignment with integer attribute — create array
+                    // and evaluate each element as arithmetic
+                    let arr = crate::builtins::parse_indexed_compound_assignment(value);
+                    let evaluated: Vec<Option<String>> = arr
+                        .into_iter()
+                        .map(|v| {
+                            Some(
+                                v.map(|s| shell.eval_arith_expr(&s).to_string())
+                                    .unwrap_or_else(|| "0".to_string()),
+                            )
+                        })
+                        .collect();
+                    shell.arrays.insert(target_for_int.to_string(), evaluated);
+                    shell.vars.remove(target_for_int);
+                } else if value.is_empty()
+                    && shell.arrays.contains_key(target_for_int)
+                {
+                    // Target already has an array (from pre-processing compound
+                    // assignment) — just ensure integer attribute is applied,
+                    // don't overwrite with scalar.
+                } else {
+                    let n = shell.eval_arith_expr(value);
+                    if is_append {
+                        let existing = if inherit {
+                            inherited_scalar
+                                .as_deref()
+                                .and_then(|v| v.parse::<i64>().ok())
+                                .unwrap_or(0)
+                        } else {
+                            0
+                        };
+                        shell.set_var(name, (existing + n).to_string());
+                    } else {
+                        shell.set_var(name, n.to_string());
+                    }
                 }
             } else {
                 // Scalar or compound assignment without explicit -a/-A flag.
@@ -1594,7 +1623,21 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
             }
             shell.declare_local(name_arg);
             if flag_integer {
-                shell.integer_vars.insert(name_arg.clone());
+                // When the name is a nameref, apply integer attribute to the
+                // target, not the nameref itself
+                let nameref_already_local = shell
+                    .local_scopes
+                    .last()
+                    .is_some_and(|s| s.contains_key(name_arg));
+                if !flag_nameref
+                    && shell.namerefs.contains_key(name_arg)
+                    && nameref_already_local
+                {
+                    let target = shell.resolve_nameref(name_arg);
+                    shell.integer_vars.insert(target);
+                } else {
+                    shell.integer_vars.insert(name_arg.clone());
+                }
             }
             if flag_nameref {
                 // No value provided — just mark as nameref (no circular risk)
