@@ -4097,7 +4097,14 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                         name
                     } else {
                         resolved_name = shell.resolve_nameref(name);
-                        &resolved_name
+                        // If the resolved nameref target contains a subscript
+                        // (e.g. XXX[0]), use the base name for attribute
+                        // application (e.g. XXX), matching bash behavior.
+                        if let Some(bracket) = resolved_name.find('[') {
+                            &resolved_name[..bracket]
+                        } else {
+                            &resolved_name
+                        }
                     }
                 } else {
                     name

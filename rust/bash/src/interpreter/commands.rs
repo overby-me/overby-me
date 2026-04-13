@@ -2203,6 +2203,22 @@ impl Shell {
                                 None
                             };
                             let assign_target = resolved_through_nameref.as_deref().unwrap_or(name);
+                            // Reject compound assignment through subscripted
+                            // nameref targets (e.g. ref→XXX[0])
+                            if let Some(ref target) = resolved_through_nameref
+                                && target.contains('[')
+                                && target.ends_with(']')
+                            {
+                                eprintln!(
+                                    "{}: `{}': not a valid identifier",
+                                    self.error_prefix(),
+                                    target
+                                );
+                                self.last_status = 1;
+                                new_args.push(name.to_string());
+                                modified = true;
+                                continue;
+                            }
                             // For local/declare in function context, save the
                             // old value BEFORE we overwrite the array.  The
                             // builtin_local call later will see the name
@@ -3614,6 +3630,22 @@ impl Shell {
             );
             return;
         }
+        // Reject compound assignment through subscripted nameref targets
+        // (e.g. ref+=([2]=x) where ref→XXX[0])
+        if matches!(&assign.value, AssignValue::Array(_))
+            && self.namerefs.contains_key(base_name)
+            && resolved_base.contains('[')
+            && resolved_base.ends_with(']')
+        {
+            eprintln!(
+                "{}: `{}': not a valid identifier",
+                self.error_prefix(),
+                resolved_base
+            );
+            self.last_status = 1;
+            return;
+        }
+
         match &assign.value {
             AssignValue::None => {
                 if let Some(ref sub) = nameref_subscript {
