@@ -608,6 +608,13 @@ impl Shell {
                     self.resolve_nameref(name)
                 };
 
+                // Check for nameref with empty target: if name is a nameref but
+                // resolve_nameref returned the same name (empty target), then there
+                // is no valid variable to assign to — emit exec error.
+                let is_empty_nameref = self.namerefs.get(name.as_str())
+                    .map(|t| t.is_empty())
+                    .unwrap_or(false);
+
                 // For array subscripts like fd[0], check readonly on the base name
                 let base_name = if let Some(bracket) = resolved_name.find('[') {
                     &resolved_name[..bracket]
@@ -624,6 +631,19 @@ impl Shell {
                         // open/dup2 will happen in the caller.
                         nix::unistd::close(candidate).ok();
 
+                        if is_empty_nameref {
+                            eprintln!(
+                                "{}: exec: `{}': not a valid identifier",
+                                self.error_prefix(),
+                                candidate
+                            );
+                            eprintln!(
+                                "{}: {}: cannot assign fd to variable",
+                                self.error_prefix(),
+                                name
+                            );
+                            return Err(candidate);
+                        }
                         if is_readonly {
                             eprintln!("{}: {}: readonly variable", self.error_prefix(), name);
                             eprintln!(

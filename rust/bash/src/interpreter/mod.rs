@@ -1208,8 +1208,7 @@ impl Shell {
             // like `/`, `%`, `42`, empty string, etc. with
             // "not a valid identifier".
             if !is_valid_nameref_target(&value) {
-                // Include context prefix: arithmetic ((:, let:) or builtin name
-                let prefix = if self.arith_is_command {
+                let cmd_prefix = if self.arith_is_command {
                     "((: ".to_string()
                 } else if self.arith_is_let {
                     "let: ".to_string()
@@ -1221,7 +1220,7 @@ impl Shell {
                 eprintln!(
                     "{}: {}`{}': not a valid identifier",
                     self.error_prefix(),
-                    prefix,
+                    cmd_prefix,
                     value
                 );
                 self.last_status = 1;

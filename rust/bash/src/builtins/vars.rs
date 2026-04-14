@@ -4183,10 +4183,23 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 // Reject if the original name had a subscript (e.g.
                 // `declare -n array[128]`) — namerefs cannot be array elements.
                 // Also reject if the variable is already an array or assoc array.
+                // Also reject if the variable is already readonly.
                 let is_subscripted_nameref = had_subscript;
                 let is_existing_array =
                     shell.arrays.contains_key(name) || shell.assoc_arrays.contains_key(name);
-                if is_subscripted_nameref {
+                let is_existing_readonly = !shell.namerefs.contains_key(name)
+                    && shell.readonly_vars.contains(name);
+                if is_existing_readonly {
+                    eprintln!(
+                        "{}: {}: {}: readonly variable",
+                        shell.error_prefix(),
+                        cmd_name,
+                        name
+                    );
+                    eprintln!("{}: readonly variable", name);
+                    status = 1;
+                    continue;
+                } else if is_subscripted_nameref {
                     eprintln!(
                         "{}: {}: {}: reference variable cannot be an array",
                         shell.error_prefix(),
