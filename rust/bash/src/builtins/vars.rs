@@ -1340,6 +1340,8 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
                         shell.error_prefix(),
                         name
                     );
+                    // Still create the nameref in function scope (bash behavior)
+                    shell.namerefs.insert(name.to_string(), value.to_string());
                 } else {
                     shell.namerefs.insert(name.to_string(), value.to_string());
                 }

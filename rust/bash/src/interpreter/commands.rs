@@ -4039,6 +4039,23 @@ impl Shell {
                 } else if let Some(ref nref_sub) = nameref_subscript {
                     // Non-append assignment through subscripted nameref target
                     // (e.g. `b=X` where `declare -n b='a[0]'`)
+                    // Check for subscript-circular namerefs in function scope
+                    if self.namerefs.contains_key(&assign.name)
+                        && !self.local_scopes.is_empty()
+                        && matches!(
+                            self.resolve_nameref_for_assign(&assign.name),
+                            NamerefResolveResult::CircularSubscript(_)
+                        )
+                    {
+                        let target = self.namerefs.get(&assign.name).cloned().unwrap_or_default();
+                        eprintln!(
+                            "{}: `{}': not a valid identifier",
+                            self.error_prefix(),
+                            target
+                        );
+                        self.last_status = 1;
+                        return;
+                    }
                     if self.assoc_arrays.contains_key(&resolved_base) {
                         let is_int = self.integer_vars.contains(&resolved_base);
                         let final_val = if is_int {
@@ -4257,6 +4274,30 @@ impl Shell {
                                 .insert("0".to_string(), final_value);
                         } else if self.arrays.contains_key(&resolved) {
                             // Scalar assignment to indexed array → assign to element [0]
+                            // Check for circular namerefs in function scope
+                            if self.namerefs.contains_key(&assign.name)
+                                && !self.local_scopes.is_empty()
+                            {
+                                match self.resolve_nameref_for_assign(&assign.name) {
+                                    NamerefResolveResult::CircularSubscript(target) => {
+                                        // Subscript-circular (e.g. local -n a=a[0]; a=X)
+                                        // Reject with "not a valid identifier"
+                                        eprintln!(
+                                            "{}: `{}': not a valid identifier",
+                                            self.error_prefix(),
+                                            target
+                                        );
+                                        self.last_status = 1;
+                                        return;
+                                    }
+                                    NamerefResolveResult::CircularExact => {
+                                        // Self-referential (e.g. local -n a=a; a=X)
+                                        // Emit depth-exceeded warning and continue
+                                        self.resolve_nameref_warn_depth_only(&assign.name);
+                                    }
+                                    NamerefResolveResult::Resolved => {}
+                                }
+                            }
                             let final_value = if self.integer_vars.contains(&resolved) {
                                 self.eval_arith_expr(&value).to_string()
                             } else {

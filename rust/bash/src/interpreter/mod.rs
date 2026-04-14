@@ -1151,6 +1151,17 @@ impl Shell {
         if self.namerefs.contains_key(name) {
             match self.resolve_nameref_for_assign(name) {
                 NamerefResolveResult::CircularSubscript(target) => {
+                    // In function scope with a self-referential nameref
+                    // (e.g. `local -n a=a[0]`), reject with "not a valid identifier"
+                    if !self.local_scopes.is_empty() && self.is_circular_nameref(name) {
+                        eprintln!(
+                            "{}: `{}': not a valid identifier",
+                            self.error_prefix(),
+                            target
+                        );
+                        self.last_status = 1;
+                        return;
+                    }
                     eprintln!(
                         "{}: warning: {}: removing nameref attribute",
                         self.error_prefix(),
