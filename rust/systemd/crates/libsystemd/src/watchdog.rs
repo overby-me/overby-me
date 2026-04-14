@@ -90,7 +90,11 @@ fn check_watchdog_timeouts(run_info: &ArcMutRuntimeInfo) {
     let mut runtime_max_timed_out: Vec<RuntimeMaxTimeout> = Vec::new();
 
     {
-        let ri = run_info.read_poisoned();
+        let ri = match run_info.try_read() {
+            Ok(g) => g,
+            Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => return, // retry next cycle
+        };
         for unit in ri.unit_table.values() {
             let Specific::Service(srvc_specific) = &unit.specific else {
                 continue;

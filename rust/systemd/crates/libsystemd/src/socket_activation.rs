@@ -63,9 +63,17 @@ pub fn start_socketactivation_thread(run_info: ArcMutRuntimeInfo) {
                         return;
                     }
 
-                    // Phase 1: Gather info about each triggered socket with a read lock.
+                    // Phase 1: Gather info about each triggered socket.
+                    // Use try_read() to yield to pending writers.
                     let infos: Vec<SocketActivationInfo> = {
-                        let run_info_locked = run_info.read_poisoned();
+                        let run_info_locked = match run_info.try_read() {
+                            Ok(g) => g,
+                            Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+                            Err(std::sync::TryLockError::WouldBlock) => {
+                                std::thread::sleep(std::time::Duration::from_millis(10));
+                                continue;
+                            }
+                        };
                         let unit_table = &run_info_locked.unit_table;
                         ids.into_iter()
                             .filter_map(|socket_id| {
@@ -637,7 +645,14 @@ fn count_connections_per_source(run_info: &ArcMutRuntimeInfo, socket_name: &str,
 pub fn wait_for_socket(run_info: ArcMutRuntimeInfo) -> Result<Vec<UnitId>, String> {
     let eventfd = { run_info.read_poisoned().socket_activation_eventfd };
     let (mut fdset, fd_to_sock_id, mut select_timeout) = {
-        let run_info_locked = &*run_info.read_poisoned();
+        // Use try_read() to yield to pending writers (e.g., find_or_load_unit).
+        let run_info_locked = match run_info.try_read() {
+            Ok(g) => g,
+            Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                return Ok(Vec::new());
+            }
+        };
         let now = Instant::now();
 
         let fd_to_sock_id = run_info_locked.fd_store.read_poisoned().global_fds_to_ids();

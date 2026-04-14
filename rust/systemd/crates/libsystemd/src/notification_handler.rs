@@ -23,21 +23,31 @@ unsafe fn borrow_fd(fd: i32) -> BorrowedFd<'static> {
     unsafe { BorrowedFd::borrow_raw(fd) }
 }
 
-fn collect_from_srvc<F>(run_info: ArcMutRuntimeInfo, f: F) -> HashMap<i32, UnitId>
+fn collect_from_srvc<F>(run_info: ArcMutRuntimeInfo, f: F) -> Option<HashMap<i32, UnitId>>
 where
     F: Fn(&mut HashMap<i32, UnitId>, &Service, UnitId),
 {
-    let run_info_locked = run_info.read_poisoned();
+    // Use try_read() to yield to pending writers. When find_or_load_unit
+    // needs a write lock, it sets the writer-pending flag. try_read() fails
+    // when a writer is pending, so this thread yields instead of blocking
+    // the writer indefinitely.
+    let run_info_locked = match run_info.try_read() {
+        Ok(g) => g,
+        Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+        Err(std::sync::TryLockError::WouldBlock) => return None,
+    };
     let unit_table = &run_info_locked.unit_table;
-    unit_table
-        .iter()
-        .fold(HashMap::new(), |mut map, (id, srvc_unit)| {
-            if let Specific::Service(srvc) = &srvc_unit.specific {
-                let state = &*srvc.state.read_poisoned();
-                f(&mut map, &state.srvc, id.clone());
-            }
-            map
-        })
+    Some(
+        unit_table
+            .iter()
+            .fold(HashMap::new(), |mut map, (id, srvc_unit)| {
+                if let Specific::Service(srvc) = &srvc_unit.specific {
+                    let state = &*srvc.state.read_poisoned();
+                    f(&mut map, &state.srvc, id.clone());
+                }
+                map
+            }),
+    )
 }
 
 /// Check whether a notification from `sender_pid` is allowed by the service's
@@ -74,8 +84,6 @@ fn check_notify_access(
             // Accept from processes in the service's process group.
             // This covers child processes like systemd-notify (for Main)
             // and all exec'd processes (for Exec).
-            // Note: process_group is stored as negative (for kill(-pgid, sig)
-            // convention), so compare absolute values.
             if let Some(pgid) = srvc.process_group
                 && let Ok(sender_pgid) =
                     nix::unistd::getpgid(Some(nix::unistd::Pid::from_raw(sender)))
@@ -104,11 +112,15 @@ pub fn handle_all_streams(run_info: ArcMutRuntimeInfo) {
             trace!("Notification handler exiting: shutdown in progress");
             return;
         }
-        let fd_to_srvc_id = collect_from_srvc(run_info.clone(), |map, srvc, id| {
+        let Some(fd_to_srvc_id) = collect_from_srvc(run_info.clone(), |map, srvc, id| {
             if let Some(socket) = &srvc.notifications {
                 map.insert(socket.as_raw_fd(), id);
             }
-        });
+        }) else {
+            // A writer is pending — yield to let it complete.
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            continue;
+        };
 
         let mut fdset = nix::sys::select::FdSet::new();
         for fd in fd_to_srvc_id.keys() {
@@ -118,8 +130,6 @@ pub fn handle_all_streams(run_info: ArcMutRuntimeInfo) {
 
         let result = nix::sys::select::select(None, Some(&mut fdset), None, None, None);
 
-        let run_info_locked = run_info.read_poisoned();
-        let unit_table = &run_info_locked.unit_table;
         match result {
             Ok(_) => {
                 if fdset.contains(unsafe { borrow_fd(eventfd.read_end()) }) {
@@ -127,141 +137,162 @@ pub fn handle_all_streams(run_info: ArcMutRuntimeInfo) {
                     reset_event_fd(eventfd);
                     trace!("Reset eventfd value");
                 }
+                // Collect ready FDs without holding the run_info lock.
+                let ready_fds: Vec<(i32, UnitId)> = fd_to_srvc_id
+                    .iter()
+                    .filter(|(fd, _)| fdset.contains(unsafe { borrow_fd(**fd) }))
+                    .map(|(fd, id)| (*fd, id.clone()))
+                    .collect();
+
+                // Process each ready FD individually, acquiring the run_info
+                // READ lock briefly for each one. This prevents the notification
+                // handler from blocking write lock acquisition for extended periods
+                // when many services have active notification sockets.
                 let mut buf = [0u8; 4096];
-                // Space for SCM_RIGHTS (up to 8 fds) and SCM_CREDENTIALS (sender PID/UID/GID).
-                // nix::cmsg_space! computes the correct buffer size.
                 let mut cmsg_buf = nix::cmsg_space!([RawFd; 8], libc::ucred);
-                for (fd, id) in &fd_to_srvc_id {
-                    if fdset.contains(unsafe { borrow_fd(*fd) })
-                        && let Some(srvc_unit) = unit_table.get(id)
-                        && let Specific::Service(srvc) = &srvc_unit.specific
-                    {
-                        let mut_state = &mut *srvc.state.write_poisoned();
-                        if mut_state.srvc.notifications.is_some() {
-                            let old_flags = nix::fcntl::fcntl(
-                                unsafe { borrow_fd(*fd) },
-                                nix::fcntl::FcntlArg::F_GETFL,
-                            )
+                for (fd, id) in &ready_fds {
+                    // Use try_read() to yield to pending writers.
+                    let run_info_locked = match run_info.try_read() {
+                        Ok(g) => g,
+                        Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+                        Err(std::sync::TryLockError::WouldBlock) => {
+                            // Writer is pending — yield. The notification will be
+                            // picked up on the next select() iteration.
+                            std::thread::sleep(std::time::Duration::from_millis(5));
+                            continue;
+                        }
+                    };
+                    let unit_table = &run_info_locked.unit_table;
+                    let Some(srvc_unit) = unit_table.get(id) else {
+                        continue;
+                    };
+                    let Specific::Service(srvc) = &srvc_unit.specific else {
+                        continue;
+                    };
+                    let mut_state = &mut *srvc.state.write_poisoned();
+                    if mut_state.srvc.notifications.is_none() {
+                        continue;
+                    }
+                    let old_flags =
+                        nix::fcntl::fcntl(unsafe { borrow_fd(*fd) }, nix::fcntl::FcntlArg::F_GETFL)
                             .unwrap();
 
-                            let old_flags = nix::fcntl::OFlag::from_bits(old_flags).unwrap();
-                            let mut new_flags = old_flags;
-                            new_flags.insert(nix::fcntl::OFlag::O_NONBLOCK);
-                            nix::fcntl::fcntl(
-                                unsafe { borrow_fd(*fd) },
-                                nix::fcntl::FcntlArg::F_SETFL(new_flags),
-                            )
-                            .unwrap();
+                    let old_flags = nix::fcntl::OFlag::from_bits(old_flags).unwrap();
+                    let mut new_flags = old_flags;
+                    new_flags.insert(nix::fcntl::OFlag::O_NONBLOCK);
+                    nix::fcntl::fcntl(
+                        unsafe { borrow_fd(*fd) },
+                        nix::fcntl::FcntlArg::F_SETFL(new_flags),
+                    )
+                    .unwrap();
 
-                            // Use recvmsg() instead of recv() to capture
-                            // SCM_RIGHTS ancillary data (file descriptors)
-                            // sent alongside sd_notify messages for FDSTORE=1.
-                            let mut iov = [std::io::IoSliceMut::new(&mut buf[..])];
-                            let recv_result = nix::sys::socket::recvmsg::<()>(
-                                *fd,
-                                &mut iov,
-                                Some(&mut cmsg_buf),
-                                nix::sys::socket::MsgFlags::MSG_CMSG_CLOEXEC
-                                    | nix::sys::socket::MsgFlags::MSG_DONTWAIT,
-                            );
+                    // Use recvmsg() instead of recv() to capture
+                    // SCM_RIGHTS ancillary data (file descriptors)
+                    // sent alongside sd_notify messages for FDSTORE=1.
+                    let mut iov = [std::io::IoSliceMut::new(&mut buf[..])];
+                    let recv_result = nix::sys::socket::recvmsg::<()>(
+                        *fd,
+                        &mut iov,
+                        Some(&mut cmsg_buf),
+                        nix::sys::socket::MsgFlags::MSG_CMSG_CLOEXEC
+                            | nix::sys::socket::MsgFlags::MSG_DONTWAIT,
+                    );
 
-                            nix::fcntl::fcntl(
-                                unsafe { borrow_fd(*fd) },
-                                nix::fcntl::FcntlArg::F_SETFL(old_flags),
-                            )
-                            .unwrap();
+                    nix::fcntl::fcntl(
+                        unsafe { borrow_fd(*fd) },
+                        nix::fcntl::FcntlArg::F_SETFL(old_flags),
+                    )
+                    .unwrap();
 
-                            match recv_result {
-                                Ok(msg) => {
-                                    let bytes = msg.bytes;
-                                    if bytes == 0 {
-                                        continue;
-                                    }
+                    match recv_result {
+                        Ok(msg) => {
+                            let bytes = msg.bytes;
+                            if bytes == 0 {
+                                continue;
+                            }
 
-                                    // Collect SCM_RIGHTS fds and SCM_CREDENTIALS sender PID.
-                                    let mut received_fds: Vec<RawFd> = Vec::new();
-                                    let mut sender_pid: Option<libc::pid_t> = None;
-                                    if let Ok(cmsgs) = msg.cmsgs() {
-                                        for cmsg in cmsgs {
-                                            match cmsg {
-                                                nix::sys::socket::ControlMessageOwned::ScmRights(
-                                                    fds,
-                                                ) => {
-                                                    received_fds.extend_from_slice(&fds);
-                                                }
-                                                nix::sys::socket::ControlMessageOwned::ScmCredentials(
-                                                    cred,
-                                                ) => {
-                                                    sender_pid = Some(cred.pid());
-                                                }
-                                                _ => {}
-                                            }
+                            // Collect SCM_RIGHTS fds and SCM_CREDENTIALS sender PID.
+                            let mut received_fds: Vec<RawFd> = Vec::new();
+                            let mut sender_pid: Option<libc::pid_t> = None;
+                            if let Ok(cmsgs) = msg.cmsgs() {
+                                for cmsg in cmsgs {
+                                    match cmsg {
+                                        nix::sys::socket::ControlMessageOwned::ScmRights(fds) => {
+                                            received_fds.extend_from_slice(&fds);
                                         }
-                                    }
-
-                                    // Enforce NotifyAccess= — check if the sender PID
-                                    // is authorized to send notifications to this service.
-                                    let effective_access = crate::services::effective_notify_access(
-                                        &mut_state.srvc,
-                                        &srvc.conf,
-                                    );
-                                    if !check_notify_access(
-                                        effective_access,
-                                        sender_pid,
-                                        &mut_state.srvc,
-                                        &srvc_unit.id.name,
-                                    ) {
-                                        // Close any received fds to avoid leaks
-                                        for fd in received_fds {
-                                            let _ = nix::unistd::close(fd);
+                                        nix::sys::socket::ControlMessageOwned::ScmCredentials(
+                                            cred,
+                                        ) => {
+                                            sender_pid = Some(cred.pid());
                                         }
-                                        continue;
+                                        _ => {}
                                     }
-
-                                    let note_str =
-                                        String::from_utf8_lossy(&buf[..bytes]).to_string();
-                                    mut_state.srvc.notifications_buffer.push_str(&note_str);
-                                    // Each recv() returns a complete datagram from sd_notify.
-                                    // Datagrams use '\n' to separate key=value pairs internally,
-                                    // but may not end with '\n'.  If we don't add a separator,
-                                    // the last key=value of one datagram merges with the first
-                                    // key=value of the next (e.g. "FDNAME=inotifyREADY=1"),
-                                    // causing READY=1 to never be parsed.
-                                    if !note_str.ends_with('\n') {
-                                        mut_state.srvc.notifications_buffer.push('\n');
-                                    }
-
-                                    // Process text notifications first so FDNAME= is parsed
-                                    // before we handle the received FDs.
-                                    crate::notification_handler::handle_notifications_from_buffer(
-                                        &mut mut_state.srvc,
-                                        &srvc_unit.id.name,
-                                    );
-
-                                    // Now handle FDSTORE with any received file descriptors.
-                                    if !received_fds.is_empty() {
-                                        handle_received_fds(
-                                            &note_str,
-                                            received_fds,
-                                            &mut mut_state.srvc,
-                                            &srvc_unit.id.name,
-                                            &srvc_unit.specific,
-                                        );
-                                    }
-                                }
-                                Err(nix::errno::Errno::EAGAIN) => {
-                                    // No data available — normal for non-blocking.
-                                    // (EWOULDBLOCK is the same value as EAGAIN on Linux.)
-                                }
-                                Err(e) => {
-                                    warn!(
-                                        "Error receiving notification for {}: {e}",
-                                        srvc_unit.id.name
-                                    );
                                 }
                             }
+
+                            // Enforce NotifyAccess= — check if the sender PID
+                            // is authorized to send notifications to this service.
+                            let effective_access = crate::services::effective_notify_access(
+                                &mut_state.srvc,
+                                &srvc.conf,
+                            );
+                            if !check_notify_access(
+                                effective_access,
+                                sender_pid,
+                                &mut_state.srvc,
+                                &srvc_unit.id.name,
+                            ) {
+                                // Close any received fds to avoid leaks
+                                for fd in received_fds {
+                                    let _ = nix::unistd::close(fd);
+                                }
+                                continue;
+                            }
+
+                            let note_str = String::from_utf8_lossy(&buf[..bytes]).to_string();
+                            mut_state.srvc.notifications_buffer.push_str(&note_str);
+                            // Each recv() returns a complete datagram from sd_notify.
+                            // Datagrams use '\n' to separate key=value pairs internally,
+                            // but may not end with '\n'.  If we don't add a separator,
+                            // the last key=value of one datagram merges with the first
+                            // key=value of the next (e.g. "FDNAME=inotifyREADY=1"),
+                            // causing READY=1 to never be parsed.
+                            if !note_str.ends_with('\n') {
+                                mut_state.srvc.notifications_buffer.push('\n');
+                            }
+
+                            // Process text notifications first so FDNAME= is parsed
+                            // before we handle the received FDs.
+                            crate::notification_handler::handle_notifications_from_buffer(
+                                &mut mut_state.srvc,
+                                &srvc_unit.id.name,
+                            );
+
+                            // Now handle FDSTORE with any received file descriptors.
+                            if !received_fds.is_empty() {
+                                handle_received_fds(
+                                    &note_str,
+                                    received_fds,
+                                    &mut mut_state.srvc,
+                                    &srvc_unit.id.name,
+                                    &srvc_unit.specific,
+                                );
+                            }
+                        }
+                        Err(nix::errno::Errno::EAGAIN) => {
+                            // No data available — normal for non-blocking.
+                            // (EWOULDBLOCK is the same value as EAGAIN on Linux.)
+                        }
+                        Err(e) => {
+                            warn!(
+                                "Error receiving notification for {}: {e}",
+                                srvc_unit.id.name
+                            );
                         }
                     }
+                    // run_info_locked is dropped here, releasing the READ lock
+                    // before processing the next service. This gives pending writers
+                    // a chance to acquire the write lock between iterations.
                 }
             }
             Err(e) => {
@@ -450,11 +481,14 @@ pub fn handle_all_std_out(run_info: ArcMutRuntimeInfo) {
             trace!("Stdout handler exiting: shutdown in progress");
             return;
         }
-        let fd_to_srvc_id = collect_from_srvc(run_info.clone(), |map, srvc, id| {
+        let Some(fd_to_srvc_id) = collect_from_srvc(run_info.clone(), |map, srvc, id| {
             if let Some(StdIo::Piped(r, _w)) = &srvc.stdout {
                 map.insert(*r, id);
             }
-        });
+        }) else {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            continue;
+        };
 
         let mut fdset = nix::sys::select::FdSet::new();
         for fd in fd_to_srvc_id.keys() {
@@ -464,7 +498,15 @@ pub fn handle_all_std_out(run_info: ArcMutRuntimeInfo) {
 
         let result = nix::sys::select::select(None, Some(&mut fdset), None, None, None);
 
-        let run_info_locked = run_info.read_poisoned();
+        // Use try_read() to yield to pending writers.
+        let run_info_locked = match run_info.try_read() {
+            Ok(g) => g,
+            Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                continue;
+            }
+        };
         let unit_table = &run_info_locked.unit_table;
         match result {
             Ok(_) => {
@@ -605,11 +647,14 @@ pub fn handle_all_std_err(run_info: ArcMutRuntimeInfo) {
             trace!("Stderr handler exiting: shutdown in progress");
             return;
         }
-        let fd_to_srvc_id = collect_from_srvc(run_info.clone(), |map, srvc, id| {
+        let Some(fd_to_srvc_id) = collect_from_srvc(run_info.clone(), |map, srvc, id| {
             if let Some(StdIo::Piped(r, _w)) = &srvc.stderr {
                 map.insert(*r, id);
             }
-        });
+        }) else {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            continue;
+        };
 
         let mut fdset = nix::sys::select::FdSet::new();
         for fd in fd_to_srvc_id.keys() {
@@ -618,7 +663,15 @@ pub fn handle_all_std_err(run_info: ArcMutRuntimeInfo) {
         fdset.insert(unsafe { borrow_fd(eventfd.read_end()) });
 
         let result = nix::sys::select::select(None, Some(&mut fdset), None, None, None);
-        let run_info_locked = run_info.read_poisoned();
+        // Use try_read() to yield to pending writers.
+        let run_info_locked = match run_info.try_read() {
+            Ok(g) => g,
+            Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                continue;
+            }
+        };
         let unit_table = &run_info_locked.unit_table;
 
         match result {

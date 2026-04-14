@@ -78,7 +78,11 @@ struct ChangeDetector {
 
 /// Get the `SYSTEMD_ETC_LOCALTIME` override from the manager environment, if set.
 fn manager_localtime_override(run_info: &ArcMutRuntimeInfo) -> Option<std::path::PathBuf> {
-    let ri = run_info.read_poisoned();
+    let ri = match run_info.try_read() {
+        Ok(g) => g,
+        Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+        Err(std::sync::TryLockError::WouldBlock) => return None,
+    };
     if let Ok(env) = ri.manager_environment.lock()
         && let Some(path) = env.get("SYSTEMD_ETC_LOCALTIME")
     {
@@ -264,7 +268,11 @@ fn check_and_fire_timers(
     let mut timers_to_fire: Vec<(UnitId, String)> = Vec::new();
 
     {
-        let ri = run_info.read_poisoned();
+        let ri = match run_info.try_read() {
+            Ok(g) => g,
+            Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => return, // retry next tick
+        };
         for unit in ri.unit_table.values() {
             if let Specific::Timer(timer_specific) = &unit.specific {
                 // Only check timers that are started/running
@@ -541,7 +549,11 @@ fn set_timer_trigger_info(unit: &crate::units::Unit, timer_name: &str) {
 }
 
 fn fire_timer_target(run_info: &ArcMutRuntimeInfo, target_unit_name: &str, timer_name: &str) {
-    let ri = run_info.read_poisoned();
+    let ri = match run_info.try_read() {
+        Ok(g) => g,
+        Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+        Err(std::sync::TryLockError::WouldBlock) => return, // retry on next timer tick
+    };
 
     // Find the target unit
     let target_unit = ri

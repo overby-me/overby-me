@@ -311,7 +311,16 @@ pub fn service_exit_handler_new_thread(
 ) {
     std::thread::spawn(move || {
         let (pending_trigger, pending_restart) = {
-            let guard = run_info.read_poisoned();
+            // Use try_read() with retry to yield to pending writers.
+            let guard = loop {
+                match run_info.try_read() {
+                    Ok(g) => break g,
+                    Err(std::sync::TryLockError::Poisoned(p)) => break p.into_inner(),
+                    Err(std::sync::TryLockError::WouldBlock) => {
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                    }
+                }
+            };
             match service_exit_handler(pid, srvc_id, code, &guard, &run_info) {
                 Ok(result) => result,
                 Err(e) => {
@@ -375,7 +384,14 @@ fn handle_pending_restart(restart: PendingRestart, arc_run_info: &ArcMutRuntimeI
                     }
                     // Briefly acquire a read lock to check the status.
                     {
-                        let ri = arc_run_info.read_poisoned();
+                        let ri = match arc_run_info.try_read() {
+                            Ok(g) => g,
+                            Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+                            Err(std::sync::TryLockError::WouldBlock) => {
+                                std::thread::sleep(std::time::Duration::from_millis(100));
+                                continue;
+                            }
+                        };
                         if let Some(unit) = ri.unit_table.get(&srvc_id) {
                             let st = unit.common.status.read_poisoned();
                             if !matches!(&*st, crate::units::UnitStatus::Restarting) {
@@ -397,7 +413,16 @@ fn handle_pending_restart(restart: PendingRestart, arc_run_info: &ArcMutRuntimeI
     }
 
     // Re-acquire read lock for the reactivation phase.
-    let run_info = arc_run_info.read_poisoned();
+    // Use try_read with retry to yield to pending writers.
+    let run_info = loop {
+        match arc_run_info.try_read() {
+            Ok(g) => break g,
+            Err(std::sync::TryLockError::Poisoned(p)) => break p.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        }
+    };
 
     // Recheck that the unit is still in Restarting state (not shortcut).
     if let Some(unit) = run_info.unit_table.get(&srvc_id) {
@@ -468,7 +493,15 @@ fn handle_pending_restart(restart: PendingRestart, arc_run_info: &ArcMutRuntimeI
         let arc_ri = arc_run_info.clone();
         let restart_id = srvc_id.clone();
         std::thread::spawn(move || {
-            let ri = arc_ri.read_poisoned();
+            let ri = loop {
+                match arc_ri.try_read() {
+                    Ok(g) => break g,
+                    Err(std::sync::TryLockError::Poisoned(p)) => break p.into_inner(),
+                    Err(std::sync::TryLockError::WouldBlock) => {
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                    }
+                }
+            };
             if let Err(e) = crate::units::reactivate_unit(restart_id, &ri) {
                 error!("Failed to restart oneshot service: {e}");
             }
@@ -498,7 +531,15 @@ fn handle_pending_restart(restart: PendingRestart, arc_run_info: &ArcMutRuntimeI
         // avoid holding it across the entire loop (which would starve
         // find_or_load_unit's write lock requests).
         for dep_id in &reactivate_deps {
-            let ri = arc_run_info.read_poisoned();
+            let ri = loop {
+                match arc_run_info.try_read() {
+                    Ok(g) => break g,
+                    Err(std::sync::TryLockError::Poisoned(p)) => break p.into_inner(),
+                    Err(std::sync::TryLockError::WouldBlock) => {
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                    }
+                }
+            };
             if let Some(dep_unit) = ri.unit_table.get(dep_id) {
                 let dep_status = dep_unit.common.status.read_poisoned().clone();
                 if matches!(

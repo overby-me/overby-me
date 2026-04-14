@@ -503,9 +503,16 @@ pub fn start_path_watcher_thread(run_info: ArcMutRuntimeInfo) {
                     || inotify_state.is_none();
 
                 if do_full_poll {
-                    last_full_poll = now;
                     // Add all active path units to the check set.
-                    let ri = run_info.read_poisoned();
+                    let ri = match run_info.try_read() {
+                        Ok(g) => g,
+                        Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+                        Err(std::sync::TryLockError::WouldBlock) => {
+                            // Skip full poll; don't update last_full_poll so we retry next cycle.
+                            continue;
+                        }
+                    };
+                    last_full_poll = now;
                     for unit in ri.unit_table.values() {
                         if let Specific::Path(path_specific) = &unit.specific {
                             let status = unit.common.status.read_poisoned().clone();
@@ -523,12 +530,19 @@ pub fn start_path_watcher_thread(run_info: ArcMutRuntimeInfo) {
                 // Also refresh watches for inotify-triggered units (parent
                 // watch may need upgrading to direct watch).
                 if let Some(ref mut ino) = inotify_state {
-                    let ri = run_info.read_poisoned();
-                    for unit_name in inotify_triggered.keys() {
-                        if let Some(unit) = ri.unit_table.values().find(|u| u.id.name == *unit_name)
-                            && let Specific::Path(path_specific) = &unit.specific
-                        {
-                            ino.refresh_watches(unit_name, &path_specific.conf);
+                    let ri_opt = match run_info.try_read() {
+                        Ok(g) => Some(g),
+                        Err(std::sync::TryLockError::Poisoned(p)) => Some(p.into_inner()),
+                        Err(std::sync::TryLockError::WouldBlock) => None,
+                    };
+                    if let Some(ri) = ri_opt {
+                        for unit_name in inotify_triggered.keys() {
+                            if let Some(unit) =
+                                ri.unit_table.values().find(|u| u.id.name == *unit_name)
+                                && let Specific::Path(path_specific) = &unit.specific
+                            {
+                                ino.refresh_watches(unit_name, &path_specific.conf);
+                            }
                         }
                     }
                 }
@@ -566,7 +580,11 @@ fn sync_inotify_watches(
     run_info: &ArcMutRuntimeInfo,
     watched_units: &mut HashMap<String, bool>,
 ) -> Vec<String> {
-    let ri = run_info.read_poisoned();
+    let ri = match run_info.try_read() {
+        Ok(g) => g,
+        Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+        Err(std::sync::TryLockError::WouldBlock) => return Vec::new(),
+    };
     let mut current_units: HashMap<String, bool> = HashMap::new();
     let mut newly_watched: Vec<String> = Vec::new();
 
@@ -619,7 +637,11 @@ fn check_and_trigger_paths(
     let mut paths_to_trigger: Vec<(UnitId, String, String)> = Vec::new();
 
     {
-        let ri = run_info.read_poisoned();
+        let ri = match run_info.try_read() {
+            Ok(g) => g,
+            Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => return fired, // retry next cycle
+        };
         for unit in ri.unit_table.values() {
             if !units_to_check.contains_key(&unit.id.name) {
                 continue;
@@ -913,7 +935,11 @@ fn fire_path_target(
     path_unit_name: &str,
     trigger_path: &str,
 ) {
-    let ri = run_info.read_poisoned();
+    let ri = match run_info.try_read() {
+        Ok(g) => g,
+        Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+        Err(std::sync::TryLockError::WouldBlock) => return, // retry next cycle
+    };
 
     let target_unit = ri
         .unit_table

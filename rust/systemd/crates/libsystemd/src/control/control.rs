@@ -1344,7 +1344,23 @@ pub fn find_or_load_unit(
     }
     // Not found — try to load from disk under a write lock.
     {
-        let mut ri = run_info.write_poisoned();
+        let mut ri = {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            loop {
+                match run_info.try_write() {
+                    Ok(g) => break g,
+                    Err(std::sync::TryLockError::Poisoned(p)) => break p.into_inner(),
+                    Err(std::sync::TryLockError::WouldBlock) => {
+                        if std::time::Instant::now() > deadline {
+                            return Err(format!(
+                                "Timed out waiting for write lock to load unit: {unit_name}"
+                            ));
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                }
+            }
+        };
         // Re-check after acquiring write lock (another thread may have loaded it).
         let already = find_units_with_name(unit_name, &ri.unit_table);
         if let Some(unit) = already.first() {
@@ -1553,6 +1569,110 @@ pub fn find_or_load_unit(
     }
 }
 
+/// Non-blocking variant of [`find_or_load_unit`] for use in read-only paths
+/// like `Command::Show`. Uses `try_write()` instead of blocking `write_poisoned()`
+/// so it never stalls the control socket when background threads hold READ locks.
+/// Returns `Err` if the unit is not loaded and the WRITE lock is contended.
+pub fn try_find_or_load_unit(
+    unit_name: &str,
+    run_info: &ArcMutRuntimeInfo,
+) -> Result<crate::units::UnitId, String> {
+    // First, try to find under a read lock.
+    {
+        let ri = run_info.read_poisoned();
+        let units = find_units_with_name(unit_name, &ri.unit_table);
+        if units.len() > 1 {
+            if !unit_name.contains('.') {
+                let service_name = format!("{unit_name}.service");
+                if let Some(unit) = units.iter().find(|u| u.id.name == service_name) {
+                    return Ok(unit.id.clone());
+                }
+            }
+            let names: Vec<_> = units.iter().map(|unit| unit.id.name.clone()).collect();
+            return Err(format!(
+                "More than one unit found with name: {unit_name}: {names:?}"
+            ));
+        }
+        if let Some(unit) = units.first() {
+            return Ok(unit.id.clone());
+        }
+    }
+    // Not found — try to load from disk, but don't block if the write lock
+    // is held. This prevents Command::Show from causing cascading deadlocks.
+    let maybe_guard = match run_info.try_write() {
+        Ok(g) => Some(g),
+        Err(std::sync::TryLockError::Poisoned(p)) => Some(p.into_inner()),
+        Err(std::sync::TryLockError::WouldBlock) => {
+            trace!("try_find_or_load_unit({unit_name}): WRITE lock contended, skipping load");
+            None
+        }
+    };
+    let Some(mut ri) = maybe_guard else {
+        return Err(format!(
+            "Unit {unit_name} not loaded and write lock contended"
+        ));
+    };
+    // Re-check after acquiring write lock (another thread may have loaded it).
+    let already = find_units_with_name(unit_name, &ri.unit_table);
+    if let Some(unit) = already.first() {
+        return Ok(unit.id.clone());
+    }
+
+    let load_name = if unit_name.contains('.') {
+        unit_name.to_string()
+    } else {
+        format!("{unit_name}.service")
+    };
+
+    // Resolve symlinks to canonical name
+    let canonical_name = {
+        let mut resolved = load_name.clone();
+        for dir in &ri.config.unit_dirs {
+            let candidate = dir.join(&load_name);
+            if candidate
+                .symlink_metadata()
+                .map(|m| m.file_type().is_symlink())
+                .unwrap_or(false)
+                && let Ok(target) = std::fs::canonicalize(&candidate)
+                && let Some(name) = target.file_name().map(|f| f.to_string_lossy().to_string())
+            {
+                if let Some((_, instance)) =
+                    crate::units::loading::directory_deps::parse_template_instance(&load_name)
+                    && name.contains("@.")
+                {
+                    resolved = name.replace("@.", &format!("@{instance}."));
+                    break;
+                }
+                resolved = name;
+                break;
+            }
+        }
+        resolved
+    };
+
+    if canonical_name != load_name {
+        let found = find_units_with_name(&canonical_name, &ri.unit_table);
+        if let Some(unit) = found.first() {
+            return Ok(unit.id.clone());
+        }
+    }
+
+    let actual_load_name = if canonical_name != load_name {
+        &canonical_name
+    } else {
+        &load_name
+    };
+    match load_new_unit(&ri.config.unit_dirs, actual_load_name) {
+        Ok(unit) => {
+            let id = unit.id.clone();
+            crate::units::insert_new_unit_lenient(unit, &mut ri);
+            trace!("Auto-loaded unit {unit_name} from disk (non-blocking)");
+            Ok(id)
+        }
+        Err(_) => Err(format!("No unit found with name: {unit_name}")),
+    }
+}
+
 /// Refresh a unit's in-memory Wants/Requires dependencies by scanning
 /// on-disk `.wants/` and `.requires/` directories across all unit search paths.
 /// This matches real systemd behaviour where directory dependencies are
@@ -1594,8 +1714,24 @@ fn refresh_directory_deps(unit_name: &str, run_info: &ArcMutRuntimeInfo) {
                     continue;
                 }
 
-                // Add the dependency to the parent unit's in-memory deps
-                let mut ri = run_info.write_poisoned();
+                // Add the dependency to the parent unit's in-memory deps.
+                // Use try_write() with retries to avoid blocking the control
+                // socket thread when background threads hold READ locks.
+                let mut ri = {
+                    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+                    loop {
+                        match run_info.try_write() {
+                            Ok(g) => break g,
+                            Err(std::sync::TryLockError::Poisoned(p)) => break p.into_inner(),
+                            Err(std::sync::TryLockError::WouldBlock) => {
+                                if std::time::Instant::now() > deadline {
+                                    break run_info.write_poisoned();
+                                }
+                                std::thread::sleep(std::time::Duration::from_millis(10));
+                            }
+                        }
+                    }
+                };
                 let parent_id = ri
                     .unit_table
                     .keys()
@@ -6523,26 +6659,36 @@ pub fn execute_command(
             // Try to load the unit from disk if not already in memory.
             // This matches real systemd behaviour where `systemctl show` can
             // display units that haven't been explicitly loaded yet.
-            let _unit_id = find_or_load_unit(&unit_name, &run_info);
+            // Use non-blocking try_write to avoid cascading deadlocks when
+            // background threads hold READ locks — if the lock is contended,
+            // skip loading and return stub "not-found" properties instead.
+            let _unit_id = try_find_or_load_unit(&unit_name, &run_info);
 
             // If the name ends with .slice, create/update the implicit slice unit.
             // In systemd, slice units exist implicitly to form the cgroup hierarchy.
             // We always re-apply drop-ins to pick up changes since last query.
             if unit_name.ends_with(".slice") {
-                let mut ri_mut = run_info.write_poisoned();
-                // Only create implicit slice if it doesn't already exist in the
-                // unit table AND there's no fragment file on disk.  Re-creating
-                // an existing slice would reset runtime state (e.g. FreezerState).
-                let already_loaded =
-                    !find_units_with_name(&unit_name, &ri_mut.unit_table).is_empty();
-                if !already_loaded {
-                    let has_file = ri_mut
-                        .config
-                        .unit_dirs
-                        .iter()
-                        .any(|d| d.join(&unit_name).exists());
-                    if !has_file {
-                        create_or_update_implicit_slice(&unit_name, &mut ri_mut);
+                // Use try_write to avoid blocking — same rationale as above.
+                let maybe_guard = match run_info.try_write() {
+                    Ok(g) => Some(g),
+                    Err(std::sync::TryLockError::Poisoned(p)) => Some(p.into_inner()),
+                    Err(std::sync::TryLockError::WouldBlock) => None,
+                };
+                if let Some(mut ri_mut) = maybe_guard {
+                    // Only create implicit slice if it doesn't already exist in the
+                    // unit table AND there's no fragment file on disk.  Re-creating
+                    // an existing slice would reset runtime state (e.g. FreezerState).
+                    let already_loaded =
+                        !find_units_with_name(&unit_name, &ri_mut.unit_table).is_empty();
+                    if !already_loaded {
+                        let has_file = ri_mut
+                            .config
+                            .unit_dirs
+                            .iter()
+                            .any(|d| d.join(&unit_name).exists());
+                        if !has_file {
+                            create_or_update_implicit_slice(&unit_name, &mut ri_mut);
+                        }
                     }
                 }
             }
@@ -7583,34 +7729,6 @@ pub fn execute_command(
                 } else {
                     crate::units::activate_needed_units(id.clone(), run_info.clone())
                 };
-
-                // Wait for the target unit to finish starting.  With
-                // DeferNotifyWait, Type=notify services stay in Starting
-                // state until their background thread detects READY=1.
-                // Poll here so `systemctl start` blocks until the unit
-                // is actually active (matching real systemd behavior).
-                {
-                    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(90);
-                    loop {
-                        let still_starting = {
-                            let ri = run_info.read_poisoned();
-                            ri.unit_table
-                                .get(&id)
-                                .map(|u| {
-                                    matches!(
-                                        &*u.common.status.read_poisoned(),
-                                        UnitStatus::Starting
-                                    )
-                                })
-                                .unwrap_or(false)
-                        };
-                        if !still_starting || std::time::Instant::now() > deadline {
-                            break;
-                        }
-                        std::thread::sleep(std::time::Duration::from_millis(100));
-                    }
-                }
-
                 let mut activation_failed = !errs.is_empty();
                 if activation_failed {
                     // Check if any units are in Restarting state (auto-restart
@@ -7777,11 +7895,17 @@ pub fn execute_command(
                 // the exit handler propagates the failure to required_by
                 // units (deactivating this target). We just need to
                 // wait for the cycle to complete before checking.
+                let is_notify = matches!(&post_check, PostCheck::Notify);
                 if let PostCheck::Target { req_dep_ids } = post_check
                     && !req_dep_ids.is_empty()
                 {
                     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+                    // Give exit handlers a moment to fire before first check.
+                    // Oneshot services with RestartMode=direct can complete their
+                    // entire restart cycle asynchronously in the exit handler.
+                    std::thread::sleep(std::time::Duration::from_millis(200));
                     loop {
+                        // Check if any required dep is still transitioning
                         let any_transitioning = {
                             let ri = run_info.read_poisoned();
                             req_dep_ids.iter().any(|dep_id| {
@@ -7799,6 +7923,21 @@ pub fn execute_command(
                                     .unwrap_or(false)
                             })
                         };
+                        // Also check if the target itself was already
+                        // deactivated by failure propagation.
+                        let target_stopped = {
+                            let ri = run_info.read_poisoned();
+                            ri.unit_table
+                                .get(&id)
+                                .map(|u| u.common.status.read_poisoned().is_stopped())
+                                .unwrap_or(false)
+                        };
+                        if target_stopped {
+                            return Err(format!(
+                                "Unit {} failed: a required dependency failed",
+                                id.name
+                            ));
+                        }
                         if !any_transitioning {
                             break;
                         }
@@ -7807,7 +7946,7 @@ pub fn execute_command(
                         }
                         std::thread::sleep(std::time::Duration::from_millis(50));
                     }
-                    // Check if the target was deactivated by an
+                    // Final check if the target was deactivated by an
                     // exit handler (e.g. rate limit propagation).
                     let ri = run_info.read_poisoned();
                     if let Some(unit) = ri.unit_table.get(&id) {
@@ -7817,6 +7956,41 @@ pub fn execute_command(
                                 "Unit {} failed: a required dependency failed",
                                 id.name
                             ));
+                        }
+                    }
+                }
+                // For Type=notify/NotifyReload services: DeferNotifyWait
+                // returns before READY=1 is received, so the service may
+                // still be in Starting state.  Poll until it leaves Starting
+                // (either becomes Started after READY=1 or fails/stops).
+                if is_notify {
+                    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(90);
+                    loop {
+                        let still_starting = {
+                            let ri = run_info.read_poisoned();
+                            ri.unit_table
+                                .get(&id)
+                                .map(|u| {
+                                    matches!(
+                                        &*u.common.status.read_poisoned(),
+                                        UnitStatus::Starting
+                                    )
+                                })
+                                .unwrap_or(false)
+                        };
+                        if !still_starting || std::time::Instant::now() > deadline {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                    }
+                    // Check if the service ended up in a failed state
+                    let ri = run_info.read_poisoned();
+                    if let Some(unit) = ri.unit_table.get(&id) {
+                        let st = unit.common.status.read_poisoned();
+                        if let UnitStatus::Stopped(_, errors) = &*st
+                            && !errors.is_empty()
+                        {
+                            return Err(format!("Unit {} failed to start", id.name));
                         }
                     }
                 }
@@ -8776,7 +8950,6 @@ pub fn listen_on_commands<T: 'static + Read + IoWrite + Send>(
                                     source.write_all(response_string.as_bytes()).unwrap();
                                 }
                                 Ok(cmd) => {
-                                    trace!("Execute command: {cmd:?}");
                                     let msg = match execute_command(cmd, run_info.clone()) {
                                         Err(e) => {
                                             let err = super::jsonrpc2::make_error(

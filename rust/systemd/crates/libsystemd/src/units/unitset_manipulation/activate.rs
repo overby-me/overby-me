@@ -1186,7 +1186,13 @@ fn deferred_notify_wait_and_dispatch(
             return;
         }
 
-        let ri = run_info.read_poisoned();
+        // Use try_read() to yield to pending writers (e.g., find_or_load_unit
+        // needing a write lock to load a new unit from disk).
+        let ri = match run_info.try_read() {
+            Ok(g) => g,
+            Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => continue, // retry next iteration
+        };
         let Some(unit) = ri.unit_table.get(&id) else {
             return;
         };
