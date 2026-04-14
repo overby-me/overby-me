@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**135/241 tests passing** (56%) — BASIC_TESTS from the GNU gawk 5.3.2 test suite.
+**142/241 tests passing** (59%) — BASIC_TESTS from the GNU gawk 5.3.2 test suite.
 
 ### Recent fixes
 
@@ -22,6 +22,11 @@
 - Fixed `split()` with regex third argument
 - Fixed awk regex semantics: quantifiers after anchors treated as literals
 - Regex pattern preprocessing for awk compatibility
+- Function name pre-scan for forward references (avoids false "unknown function" on `a (b)` concatenation)
+- Range pattern same-line end detection (`/foo/,/bar/` on line containing both)
+- Single-char RS splitting (RS != "\n" now reads full input and splits)
+- String patterns treated as regex in sub/gsub (not escaped)
+- Fix split() anchor edge cases (empty leading/trailing elements from `^`/`$`)
 
 Tests compare rust-awk output against reference gawk output in a Nix sandbox.
 
