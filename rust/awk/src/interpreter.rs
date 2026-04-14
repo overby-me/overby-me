@@ -656,7 +656,7 @@ impl Interpreter {
                             line.pop();
                         }
                         if let Some(var_expr) = var {
-                            self.assign_to(var_expr, Value::Str(line.clone()));
+                            self.assign_to(var_expr, Value::StrNum(line.clone()));
                         } else {
                             self.set_record(&line);
                         }
@@ -696,7 +696,7 @@ impl Interpreter {
                                 line.pop();
                             }
                             if let Some(var_expr) = var {
-                                self.assign_to(var_expr, Value::Str(line.clone()));
+                                self.assign_to(var_expr, Value::StrNum(line.clone()));
                             } else {
                                 self.set_record(&line);
                             }
@@ -743,7 +743,7 @@ impl Interpreter {
                                 line.pop();
                             }
                             if let Some(var_expr) = var {
-                                self.assign_to(var_expr, Value::Str(line.clone()));
+                                self.assign_to(var_expr, Value::StrNum(line.clone()));
                             } else {
                                 self.set_record(&line);
                                 self.nr += 1;
@@ -866,8 +866,8 @@ impl Interpreter {
             Expr::FieldRef(idx_expr) => {
                 let idx = self.eval_expr(idx_expr).to_num() as usize;
                 let field = self.get_field(idx);
-                // Return as string that may be numeric
-                Value::Str(field)
+                // Return as input string (StrNum) — uses numeric comparison/boolean
+                Value::StrNum(field)
             }
             Expr::ArrayRef(name, indices) => {
                 let vals: Vec<Value> = indices.iter().map(|i| self.eval_expr(i)).collect();

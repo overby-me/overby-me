@@ -12,6 +12,9 @@ pub enum ControlFlow {
 pub enum Value {
     Num(f64),
     Str(String),
+    /// String from input (fields, getline, FILENAME) that may be numeric.
+    /// In boolean/comparison context, uses numeric value if parseable.
+    StrNum(String),
     Uninitialized,
 }
 
@@ -19,7 +22,7 @@ impl Value {
     pub fn to_num(&self) -> f64 {
         match self {
             Value::Num(n) => *n,
-            Value::Str(s) => parse_num(s),
+            Value::Str(s) | Value::StrNum(s) => parse_num(s),
             Value::Uninitialized => 0.0,
         }
     }
@@ -27,7 +30,7 @@ impl Value {
     pub fn to_string_val(&self) -> String {
         match self {
             Value::Num(n) => format_number(*n),
-            Value::Str(s) => s.clone(),
+            Value::Str(s) | Value::StrNum(s) => s.clone(),
             Value::Uninitialized => String::new(),
         }
     }
@@ -45,7 +48,7 @@ impl Value {
                     sprintf_impl(&[Value::Str(fmt.to_string()), Value::Num(n)])
                 }
             }
-            Value::Str(s) => s.clone(),
+            Value::Str(s) | Value::StrNum(s) => s.clone(),
             Value::Uninitialized => String::new(),
         }
     }
@@ -54,6 +57,18 @@ impl Value {
         match self {
             Value::Num(n) => *n != 0.0,
             Value::Str(s) => !s.is_empty(),
+            Value::StrNum(s) => {
+                // Input strings: if numeric, use numeric truth; otherwise non-empty
+                let s_trimmed = s.trim();
+                if s_trimmed.is_empty() {
+                    return false;
+                }
+                if s_trimmed.parse::<f64>().is_ok() {
+                    parse_num(s) != 0.0
+                } else {
+                    true
+                }
+            }
             Value::Uninitialized => false,
         }
     }
@@ -61,6 +76,7 @@ impl Value {
     pub fn is_numeric_string(&self) -> bool {
         match self {
             Value::Num(_) => true,
+            Value::StrNum(_) => true,
             Value::Str(s) => {
                 let s = s.trim();
                 if s.is_empty() {
