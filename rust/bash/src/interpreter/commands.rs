@@ -272,19 +272,21 @@ impl Shell {
                     );
                 }
 
-                // Set COPROC_PID
+                // Set COPROC_PID (skip if coproc name was readonly —
+                // bash doesn't try to set _PID when the main var failed)
                 let pid = child.as_raw();
-                let pid_key = format!("{}_PID", coproc_name);
-                // Check if PID variable (or its nameref target) is readonly
-                let pid_resolved = self.resolve_nameref(&pid_key);
-                if self.readonly_vars.contains(pid_resolved.as_str()) {
-                    eprintln!(
-                        "{}: {}: readonly variable",
-                        self.error_prefix(),
-                        pid_resolved
-                    );
-                } else {
-                    self.vars.insert(pid_key, pid.to_string());
+                if !coproc_readonly {
+                    let pid_key = format!("{}_PID", coproc_name);
+                    let pid_resolved = self.resolve_nameref(&pid_key);
+                    if self.readonly_vars.contains(pid_resolved.as_str()) {
+                        eprintln!(
+                            "{}: {}: readonly variable",
+                            self.error_prefix(),
+                            pid_resolved
+                        );
+                    } else {
+                        self.vars.insert(pid_key, pid.to_string());
+                    }
                 }
 
                 // Track the background job
