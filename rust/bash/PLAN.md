@@ -2,13 +2,13 @@
 
 ## Current State
 
-**75/77 nix tests consistently passing** (Phase 112), ~69/83 local tests passing (0 diff, sequential). Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available). **array** ~6 nix diff (array27.sub only), **nameref** ~11 nix diff (reduced from ~76 via Phases 99-112). See `CHANGELOG.md` for full fix history (300+ fixes across 112 phases).
+**76/77 nix tests consistently passing** (Phase 116), ~69/83 local tests passing (0 diff, sequential). Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available). **array** ~6 nix diff (array27.sub only), **nameref** ✅ 0 nix diff (fixed in Phase 116, was ~76 before Phase 99). See `CHANGELOG.md` for full fix history (300+ fixes across 116 phases).
 
-### Nix test results (75/77 consistently passing — Phase 112)
+### Nix test results (76/77 consistently passing — Phase 116)
 
-Verified passing (75/77): alias, appendop, arith, arith-for, array2, assoc, attr, braces, builtins, case, casemod, comsub, comsub-eof, comsub-posix, comsub2, cond, coproc, cprint, dirstack, dollars, dynvar, errors, execscript, exp-tests, exportfunc, extglob, extglob2, extglob3, func, getopts, glob-bracket, glob-test, globstar, heredoc, herestr, ifs, ifs-posix, input-test, invert, iquote, lastpipe, mapfile, more-exp, new-exp, nquote, nquote1, nquote2, nquote3, nquote4, nquote5, parser, posix2, posixexp, posixexp2, posixpat, posixpipe, precedence, printf, procsub, quote, quotearray, read, redir, rhs-exp, set-e, set-x, shopt, strip, test, tilde, tilde2, trap, type, varenv, vredir.
+Verified passing (76/77): alias, appendop, arith, arith-for, array2, assoc, attr, braces, builtins, case, casemod, comsub, comsub-eof, comsub-posix, comsub2, cond, coproc, cprint, dirstack, dollars, dynvar, errors, execscript, exp-tests, exportfunc, extglob, extglob2, extglob3, func, getopts, glob-bracket, glob-test, globstar, heredoc, herestr, ifs, ifs-posix, input-test, invert, iquote, lastpipe, mapfile, more-exp, **nameref** ✅, new-exp, nquote, nquote1, nquote2, nquote3, nquote4, nquote5, parser, posix2, posixexp, posixexp2, posixpat, posixpipe, precedence, printf, procsub, quote, quotearray, read, redir, rhs-exp, set-e, set-x, shopt, strip, test, tilde, tilde2, trap, type, varenv, vredir.
 
-Verified failing (2/77): array (~6 nix diff), nameref (~11 nix diff).
+Verified failing (1/77): array (~6 nix diff).
 
 ### Local test results (~69/83 passing, 0 diff sequential — Phase 98)
 
@@ -68,21 +68,9 @@ Suggested nix timeout: 30s for most tests, 120s for trap.
 
 Passes locally (0 diff). Only array27.sub remains — `A[]]` bracket handling for double-quoted `"A[$k]"` where `k=]`; bash uses `W_ARRAYREF` pre-expansion flag to distinguish unquoted `A[$rkey]` (works via `rfind(']')`) from double-quoted `"A[$k]"` (fails with first-`]` matching); we lack quoting context at builtin level. Would need `W_ARRAYREF`-like quoting context threading to fix.
 
-### nameref (~11 nix diff)
+### ~~nameref~~ ✅ (0 nix diff — Fixed in Phase 116)
 
-PID-only locally. All remaining diffs are in nameref11 (~9) and nameref12 (~1).
-
-Remaining open issues (all bash 5.3 edge cases, resistant to fix due to accumulated test state):
-
-- nameref11 line 28: `declare -n RO` on readonly — extra `declare -p`/`echo` output after errors (2 lines)
-- nameref11 line 30: error message format — `"not a valid identifier"` vs `"declare: invalid variable name for name reference"` (1 line, bash 5.3 uses builtin prefix for chain namerefs only)
-- nameref11 line 52: `declare -r RO_PID` vs `"declare: RO_PID: not found"` (1 line, accumulated coproc state)
-- nameref11 lines 70-71: error on line 71 vs line 70 — `"not a valid identifier"` vs `"typeset: invalid variable name"` + `echo` output `2` vs blank (2 lines, `unset -n` accumulated state)
-- nameref12 line 60: extra `declare -in foo` after failed nameref target (1 line)
-- ~~nameref15 value diff~~ ✅ **Fixed in Phase 112** (circular nameref array assignment to saved scope)
-- ~~(o) command substitution in nameref subscript targets~~ ✅ **Fixed in Phase 99**
-- ~~(i) circular nameref line number tracking~~ ✅ **Fixed in Phase 104**
-- ~~nameref18 coproc subscripted nameref~~ ✅ **Fixed in Phase 111**
+Reduced from ~76 nix diff lines to 0 across Phases 99-116. Key fixes: command substitution in nameref subscripts (Phase 99), circular nameref warnings at declaration time (Phase 104), subscript-circular rejection in function scope (Phase 105-106), select loop implementation (Phase 100), coproc readonly protection (Phase 108-110), `unset -n` no-op on non-namerefs (Phase 113), readonly/nameref DISCARD behavior (Phase 114-115), coproc PID cleanup (Phase 116).
 
 ### Local-only failing tests (not in nix harness)
 
@@ -130,9 +118,9 @@ These exist in `/tmp/bash-5.3/tests/` but not in the nix test list:
 
 ### Nix test improvements
 
-1. **Continue reducing nameref nix diffs (~11 lines)** — See remaining open issues above. All remaining issues are bash 5.3 edge cases involving error message format differences and accumulated test state. Each fix risks regressions due to shared nameref variable names across sub-tests.
+1. ~~**Continue reducing nameref nix diffs**~~ ✅ **Fixed in Phase 116** — nameref now passes (0 diff).
 
-2. **Fix remaining array nix diffs (~6 lines)** — Only array27.sub. Would need `W_ARRAYREF`-like quoting context threading from word expansion into builtins. Low priority since it's a narrow edge case.
+2. **Fix remaining array nix diffs (~6 lines)** — Only array27.sub. `read "A[$k]"` / `printf -v "A[$k]"` where `k=]` — bash uses first-`]` bracket matching (rejects `A[]]`), we use `rfind(']')` (accepts). Would need `W_ARRAYREF`-like quoting context threading from word expansion into builtins, or first-`]` matching with special-case for the `]` key.
 
 3. **Fix `unset` assoc subscript expansion** — `unset 'assoc[$var]'` (single-quoted) with `assoc_expand_once` OFF needs `$var` expanded in the builtin. Complex because quoting context is lost in string-based argument passing. Also affects quotearray5.sub `@` key handling.
 
@@ -143,6 +131,26 @@ These exist in `/tmp/bash-5.3/tests/` but not in the nix test list:
 5. **Implement restricted shell mode (`-r` flag)** — Needed for rsh tests (local-only). (~26 diff lines)
 
 6. **Performance: optimize hot loops** — `ifs-posix` takes ~4 minutes vs bash's ~1s. `arith` takes ~2s vs bash's 0.035s. Profiling needed.
+
+## Recent Fixes (Phase 116)
+
+- **Coproc _PID cleanup on reap** — Force-remove the `_PID` variable (including readonly) when the coproc process is reaped. Fixes `declare -p RO_PID` showing stale value after coproc cleanup. **nameref test now passes (0 nix diff).**
+
+## Recent Fixes (Phase 115)
+
+- **DISCARD for invalid nameref target** — `foo=7*6` through a nameref with empty target now skips remaining `;`-separated commands on the same line (matching bash's DISCARD). Only fires for simple assignments, not arithmetic `(( ))` or expansion `${=}` contexts.
+
+## Recent Fixes (Phase 114)
+
+- **Readonly assignment DISCARD** — Assigning to a readonly variable (`X=2` when `X` is readonly) now skips remaining commands on the same `;`-separated line, matching bash's `jump_to_top_level(DISCARD)` behavior.
+
+## Recent Fixes (Phase 113)
+
+- **`unset -n` on non-nameref is a no-op** — `unset -n y` when `y` is NOT a nameref now preserves the variable (bash behavior). Previously it fully unset the variable. This fixed the `typeset -n y; y=2` error format issue (error now appears on the `typeset` line, not the `y=2` line) and several other accumulated-state issues.
+
+## Recent Fixes (Phase 112)
+
+- **Circular nameref array assignment to saved scope** — `local -n a=a; a=X` where `a` is an outer array now correctly assigns `X` to the outer array element [0] by updating the saved scope entry during the circular nameref assignment.
 
 ## Recent Fixes (Phase 103)
 
