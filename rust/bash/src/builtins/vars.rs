@@ -4206,11 +4206,17 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                     // Already a nameref — no-op for the nameref part (bash behavior)
                     // Other attribute flags (readonly, etc.) will be applied below.
                 } else {
-                    let target = shell.vars.remove(name).unwrap_or_default();
-                    // Validate that the target is a valid variable name (with
-                    // optional subscript). Reject things like `/`, `%`, `42` etc.
-                    // Empty targets are allowed (creates unbound nameref).
-                    if !target.is_empty() && !crate::interpreter::is_valid_nameref_target(&target) {
+                    let target_opt = shell.vars.remove(name);
+                    let target = target_opt.clone().unwrap_or_default();
+                    // Validate that the target is a valid variable name.
+                    // If the variable had an explicit value (even empty string),
+                    // validate it. `r=""; declare -n r` → bash rejects empty as
+                    // invalid nameref target. Truly unset → creates unbound nameref.
+                    let had_explicit_value = target_opt.is_some();
+                    if had_explicit_value
+                        && (target.is_empty()
+                            || !crate::interpreter::is_valid_nameref_target(&target))
+                    {
                         eprintln!(
                             "{}: {}: `{}': invalid variable name for name reference",
                             shell.error_prefix(),

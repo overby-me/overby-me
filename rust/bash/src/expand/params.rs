@@ -2395,14 +2395,58 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
             // bash's behavior: `declare -n ref=foo; ${!ref}` → "foo".
             // For non-namerefs, ${!var} does classic indirect expansion:
             // get the value of var, use that as a variable name, look up its value.
-            if ctx.namerefs.contains_key(&expr.name) {
-                // var is a nameref — return the target name (resolving the
-                // full nameref chain).  If the nameref target is empty
-                // (unbound nameref), return empty.
-                ctx.resolve_nameref(&expr.name)
+            let base_name = if let Some(bracket) = expr.name.find('[') {
+                &expr.name[..bracket]
+            } else {
+                expr.name.as_str()
+            };
+            if ctx.namerefs.contains_key(base_name) {
+                if expr.name.contains('[') {
+                    // ${!nameref[N]} — invalid indirect expansion through nameref
+                    let prefix = EXPAND_ERROR_PREFIX.with(|p| {
+                        let p = p.borrow();
+                        if p.is_empty() {
+                            "bash".to_string()
+                        } else {
+                            p.clone()
+                        }
+                    });
+                    eprintln!("{}: {}: invalid indirect expansion", prefix, expr.name);
+                    set_arith_error();
+                    String::new()
+                } else {
+                    // var is a nameref — return the target name (resolving the
+                    // full nameref chain).  If the nameref target is empty
+                    // (unbound nameref), return empty.
+                    ctx.resolve_nameref(&expr.name)
+                }
             } else {
                 let target = lookup_var(&expr.name, ctx);
                 if target.is_empty() {
+                    // Check if this is an unset variable (not just empty) —
+                    // bash reports "invalid indirect expansion" for truly unset vars
+                    let is_truly_unset = !ctx.vars.contains_key(&expr.name)
+                        && !ctx.arrays.contains_key(&expr.name)
+                        && !ctx.assoc_arrays.contains_key(&expr.name)
+                        && !ctx.namerefs.contains_key(&expr.name)
+                        && std::env::var(&expr.name).is_err()
+                        && expr.name.parse::<usize>().is_err()
+                        && !matches!(
+                            expr.name.as_str(),
+                            "@" | "*" | "#" | "?" | "-" | "!" | "$" | "0" | "_"
+                        );
+                    if is_truly_unset {
+                        let prefix = EXPAND_ERROR_PREFIX.with(|p| {
+                            let p = p.borrow();
+                            if p.is_empty() {
+                                "bash".to_string()
+                            } else {
+                                p.clone()
+                            }
+                        });
+                        eprintln!("{}: {}: invalid indirect expansion", prefix, expr.name);
+                        set_arith_error();
+                    }
                     String::new()
                 } else if !is_valid_var_ref(&target) {
                     let prefix = EXPAND_ERROR_PREFIX.with(|p| {

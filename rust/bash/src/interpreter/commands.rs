@@ -121,6 +121,23 @@ impl Shell {
 
         let coproc_name = name.unwrap_or("COPROC");
 
+        // Check if coproc name is readonly — bash emits two errors:
+        // "readonly variable" (can't create array) and "cannot unset"
+        // (can't clear existing readonly value to make room)
+        let coproc_readonly = self.readonly_vars.contains(coproc_name);
+        if coproc_readonly {
+            eprintln!(
+                "{}: {}: readonly variable",
+                self.error_prefix(),
+                coproc_name
+            );
+            eprintln!(
+                "{}: {}: cannot unset: readonly variable",
+                self.error_prefix(),
+                coproc_name
+            );
+        }
+
         // Close ALL previous coproc fds — bash only allows one active coproc
         // Collect all coproc-related array names and their fds
         let coproc_arrays: Vec<(String, Vec<i32>)> = self
@@ -150,8 +167,21 @@ impl Shell {
                     libc::close(*fd);
                 }
             }
-            self.arrays.remove(name);
-            self.vars.remove(&format!("{}_PID", name));
+            if self.readonly_vars.contains(name.as_str()) {
+                eprintln!(
+                    "{}: {}: cannot unset: readonly variable",
+                    self.error_prefix(),
+                    name
+                );
+            } else {
+                self.arrays.remove(name);
+            }
+            let pid_key = format!("{}_PID", name);
+            if self.readonly_vars.contains(pid_key.as_str()) {
+                // Don't try to remove readonly PID var
+            } else {
+                self.vars.remove(&pid_key);
+            }
         }
 
         // Create two pipes and move all fds to high numbers BEFORE fork,
@@ -214,18 +244,22 @@ impl Shell {
                 }
 
                 // Set COPROC array: [0]=read_fd, [1]=write_fd
-                self.arrays.insert(
-                    coproc_name.to_string(),
-                    vec![
-                        Some(parent_read.to_string()),
-                        Some(parent_write.to_string()),
-                    ],
-                );
+                if !self.readonly_vars.contains(coproc_name) {
+                    self.arrays.insert(
+                        coproc_name.to_string(),
+                        vec![
+                            Some(parent_read.to_string()),
+                            Some(parent_write.to_string()),
+                        ],
+                    );
+                }
 
                 // Set COPROC_PID
                 let pid = child.as_raw();
-                self.vars
-                    .insert(format!("{}_PID", coproc_name), pid.to_string());
+                let pid_key = format!("{}_PID", coproc_name);
+                if !self.readonly_vars.contains(pid_key.as_str()) {
+                    self.vars.insert(pid_key, pid.to_string());
+                }
 
                 // Track the background job
                 self.last_bg_pid = pid;
@@ -5195,6 +5229,106 @@ impl Shell {
         status
     }
 
+    fn run_select_inner(&mut self, clause: &ForClause, items: &[String]) -> i32 {
+        use std::io::Write;
+
+        if items.is_empty() {
+            return 0;
+        }
+
+        let ps3 = self
+            .vars
+            .get("PS3")
+            .cloned()
+            .unwrap_or_else(|| "#? ".to_string());
+
+        let mut status = 0;
+        let mut print_menu = true;
+
+        loop {
+            if self.breaking > 0 {
+                self.breaking -= 1;
+                break;
+            }
+
+            if print_menu {
+                // Print numbered menu to stderr
+                for (i, item) in items.iter().enumerate() {
+                    eprint!("{}) {}\n", i + 1, item);
+                }
+                print_menu = false;
+            }
+
+            // Print prompt to stderr
+            eprint!("{}", ps3);
+            let _ = std::io::stderr().flush();
+
+            // Read a line from stdin using raw read (fd 0) to avoid
+            // buffering issues with stdin lock across iterations
+            let mut line = String::new();
+            let mut buf = [0u8; 1];
+            loop {
+                let n = unsafe { libc::read(0, buf.as_mut_ptr() as *mut _, 1) };
+                if n <= 0 {
+                    // EOF
+                    return status;
+                }
+                let ch = buf[0] as char;
+                if ch == '\n' {
+                    break;
+                }
+                line.push(ch);
+            }
+
+            // Set REPLY to the input line
+            self.set_var("REPLY", line.trim().to_string());
+
+            // Determine which item was selected
+            let selected = if let Ok(n) = line.trim().parse::<usize>() {
+                if n >= 1 && n <= items.len() {
+                    items[n - 1].clone()
+                } else {
+                    String::new()
+                }
+            } else if line.trim().is_empty() {
+                // Empty line: reprint menu
+                print_menu = true;
+                continue;
+            } else {
+                String::new()
+            };
+
+            // Set the loop variable
+            if self.namerefs.contains_key(&clause.var) {
+                if self.readonly_vars.contains(&clause.var) {
+                    eprintln!("{}: {}: readonly variable", self.error_prefix(), clause.var);
+                    return 1;
+                }
+                if !selected.is_empty() && !is_valid_identifier(&selected) {
+                    eprintln!(
+                        "{}: `{}': not a valid identifier",
+                        self.error_prefix(),
+                        selected
+                    );
+                    self.last_status = 1;
+                    continue;
+                }
+                self.namerefs.insert(clause.var.clone(), selected);
+            } else {
+                self.set_var(&clause.var, selected);
+            }
+
+            // Run the body
+            status = self.run_program(&clause.body);
+
+            if self.continuing > 0 {
+                self.continuing -= 1;
+                continue;
+            }
+        }
+        status
+    }
+
     fn run_for_inner(&mut self, clause: &ForClause) -> i32 {
         let ifs = self
             .vars
@@ -5215,6 +5349,12 @@ impl Shell {
         };
 
         let mut status = 0;
+
+        // Select loop: print menu, read selection from stdin, loop
+        if clause.is_select {
+            return self.run_select_inner(clause, &items);
+        }
+
         for item in items {
             if self.breaking > 0 {
                 self.breaking -= 1;
@@ -5729,7 +5869,7 @@ impl Shell {
 
     /// Check if any coproc process has exited and clean up its fds/variables
     #[cfg(unix)]
-    pub(super) fn reap_coprocs(&mut self) {
+    pub fn reap_coprocs(&mut self) {
         use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
         use nix::unistd::Pid;
 
@@ -5755,12 +5895,18 @@ impl Shell {
                 );
                 if exited {
                     // Process has exited — clean up array and PID.
-                    // Don't close fds here — they may have been moved by exec
-                    // to other fd numbers (e.g. exec 4<&${COPROC[0]}-).
-                    // The fds will be closed when the shell exits or when
-                    // explicitly closed by the script.
-                    self.arrays.remove(&name);
-                    self.vars.remove(&pid_key);
+                    if self.readonly_vars.contains(name.as_str()) {
+                        eprintln!(
+                            "{}: {}: cannot unset: readonly variable",
+                            self.error_prefix(),
+                            name
+                        );
+                    } else {
+                        self.arrays.remove(&name);
+                    }
+                    if !self.readonly_vars.contains(pid_key.as_str()) {
+                        self.vars.remove(&pid_key);
+                    }
                 }
             }
         }

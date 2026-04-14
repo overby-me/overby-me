@@ -126,6 +126,8 @@ pub struct ForClause {
     pub body: Program,
     /// Line number of the `for` keyword (for LINENO reset per iteration, matching bash)
     pub line: usize,
+    /// True if this was a `select` statement (not `for`)
+    pub is_select: bool,
 }
 
 /// C-style for loop: `for (( init; cond; step )) do body done`

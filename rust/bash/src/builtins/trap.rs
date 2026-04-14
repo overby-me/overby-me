@@ -706,7 +706,54 @@ pub(super) fn builtin_wait(shell: &mut Shell, args: &[String]) -> i32 {
             }
         }
     }
+    // Clean up any coprocs whose PIDs were reaped by wait
+    cleanup_reaped_coprocs(shell);
     shell.last_status
+}
+
+/// Clean up coproc arrays/PIDs after wait has reaped their processes.
+/// Unlike reap_coprocs (which uses waitpid), this checks if the PID
+/// process no longer exists (already reaped by wait) and cleans up.
+fn cleanup_reaped_coprocs(shell: &mut crate::interpreter::Shell) {
+    use nix::sys::signal::kill;
+    use nix::unistd::Pid;
+
+    let coproc_names: Vec<(String, i32)> = shell
+        .vars
+        .iter()
+        .filter(|(k, _)| k.ends_with("_PID"))
+        .filter_map(|(k, v)| {
+            let name = k.strip_suffix("_PID")?;
+            let pid: i32 = v.parse().ok()?;
+            // Check if this is actually a coproc (has matching array)
+            if shell.arrays.contains_key(name) {
+                Some((name.to_string(), pid))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    for (name, pid) in coproc_names {
+        // Check if process is still alive
+        let alive = kill(Pid::from_raw(pid), None).is_ok();
+        if !alive {
+            // Process was reaped — clean up
+            let pid_key = format!("{}_PID", name);
+            if shell.readonly_vars.contains(name.as_str()) {
+                eprintln!(
+                    "{}: {}: cannot unset: readonly variable",
+                    shell.error_prefix(),
+                    name
+                );
+            } else {
+                shell.arrays.remove(&name);
+            }
+            if !shell.readonly_vars.contains(pid_key.as_str()) {
+                shell.vars.remove(&pid_key);
+            }
+        }
+    }
 }
 
 pub(super) fn builtin_kill(shell: &mut Shell, args: &[String]) -> i32 {
