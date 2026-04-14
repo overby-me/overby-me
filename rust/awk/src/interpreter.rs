@@ -242,24 +242,18 @@ impl Interpreter {
             .map(|v| v.to_string_val())
             .unwrap_or("\n".to_string());
 
-        if rs == "\n" || rs.len() == 1 {
-            // Line-by-line reading
-            let sep = if rs == "\n" {
-                '\n'
-            } else {
-                rs.chars().next().unwrap_or('\n')
-            };
+        if rs == "\n" {
+            // Line-by-line reading (default RS)
             let mut buf = String::new();
             loop {
                 buf.clear();
                 match reader.read_line(&mut buf) {
                     Ok(0) => break,
                     Ok(_) => {
-                        // Remove the trailing RS
-                        if buf.ends_with(sep) {
+                        if buf.ends_with('\n') {
                             buf.pop();
                         }
-                        if sep == '\n' && buf.ends_with('\r') {
+                        if buf.ends_with('\r') {
                             buf.pop();
                         }
                         self.nr += 1;
@@ -276,6 +270,33 @@ impl Interpreter {
                         }
                     }
                     Err(_) => break,
+                }
+            }
+        } else if rs.len() == 1 {
+            // Single-char RS (not newline) — read all and split
+            let sep = rs.chars().next().unwrap();
+            let mut all = String::new();
+            reader.read_to_string(&mut all).ok();
+            // Remove trailing newline if present
+            if all.ends_with('\n') {
+                all.pop();
+            }
+            let records: Vec<&str> = all.split(sep).collect();
+            for rec in &records {
+                if rec.is_empty() && records.len() > 1 {
+                    continue;
+                }
+                self.nr += 1;
+                self.fnr += 1;
+                self.globals
+                    .insert("NR".to_string(), Value::Num(self.nr as f64));
+                self.globals
+                    .insert("FNR".to_string(), Value::Num(self.fnr as f64));
+                self.set_record(rec);
+
+                if let ControlFlow::Exit(code) = self.process_rules(program) {
+                    self.exit_code = code;
+                    return;
                 }
             }
         } else if rs.is_empty() {
@@ -351,7 +372,14 @@ impl Interpreter {
                     } else {
                         let start_val = self.eval_expr(start);
                         if start_val.to_bool() {
-                            self.range_active.insert(idx, true);
+                            // Check end pattern on same line
+                            let end_val = self.eval_expr(end);
+                            if end_val.to_bool() {
+                                // Range starts and ends on same line
+                                self.range_active.insert(idx, false);
+                            } else {
+                                self.range_active.insert(idx, true);
+                            }
                             true
                         } else {
                             false

@@ -4,11 +4,35 @@ use crate::lexer::Token;
 pub struct Parser {
     tokens: Vec<Token>,
     pos: usize,
+    function_names: std::collections::HashSet<String>,
 }
+
+const BUILTIN_FUNCTIONS: &[&str] = &[
+    "length", "substr", "index", "split", "sub", "gsub", "gensub", "match", "sprintf",
+    "tolower", "toupper", "sin", "cos", "atan2", "exp", "log", "sqrt", "int", "rand",
+    "srand", "system", "close", "mktime", "systime", "strftime", "typeof", "asort",
+    "asorti", "patsplit",
+];
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
-        Parser { tokens, pos: 0 }
+        // Pre-scan for function definitions to enable forward references
+        let mut function_names: std::collections::HashSet<String> =
+            BUILTIN_FUNCTIONS.iter().map(|s| s.to_string()).collect();
+        let mut i = 0;
+        while i < tokens.len() {
+            if matches!(tokens[i], Token::Function) {
+                if let Some(Token::Ident(name)) = tokens.get(i + 1) {
+                    function_names.insert(name.clone());
+                }
+            }
+            i += 1;
+        }
+        Parser {
+            tokens,
+            pos: 0,
+            function_names,
+        }
     }
 
     fn peek(&self) -> &Token {
@@ -773,8 +797,10 @@ impl Parser {
             }
             Token::Ident(name) => {
                 self.advance();
-                if matches!(self.peek(), Token::LParen) {
-                    // Function call
+                if matches!(self.peek(), Token::LParen)
+                    && self.function_names.contains(&name)
+                {
+                    // Function call (only if name is a known function)
                     self.advance();
                     let mut args = Vec::new();
                     while !matches!(self.peek(), Token::RParen | Token::Eof) {
