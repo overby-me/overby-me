@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**~110/241 tests passing** (46%) — BASIC_TESTS from the GNU gawk 5.3.2 test suite.
+**135/241 tests passing** (56%) — BASIC_TESTS from the GNU gawk 5.3.2 test suite.
 
 ### Recent fixes
 
@@ -12,6 +12,16 @@
 - Fixed zero-flag ignored when precision given for integers (POSIX)
 - Fixed `%c` to prefer string's first char over numeric conversion
 - Fixed array auto-vivification on element read
+- OFMT support in `print`, CONVFMT in string concatenation
+- Unary plus operator, hex parsing in `parse_num`
+- Infinity/NaN formatting in printf `%f`/`%e`/`%g`
+- `#` flag for floats (`%#g` keeps trailing zeros, `%#f` forces decimal point)
+- Dynamic width with `*` (negative = left-align)
+- Fixed regex literal extraction from `Expr::Match` wrapper in function args
+- Split `awk_replace` (sub/gsub) from `gensub_replace` (gensub with backrefs)
+- Fixed `split()` with regex third argument
+- Fixed awk regex semantics: quantifiers after anchors treated as literals
+- Regex pattern preprocessing for awk compatibility
 
 Tests compare rust-awk output against reference gawk output in a Nix sandbox.
 
@@ -309,36 +319,37 @@ Fix all getline forms:
 
 ## Test Inventory
 
-### Passing (104 tests)
+### Passing (135 tests)
 
-anchor, arrayind3, arrayprm2, aryprm9, arysubnm, aryunasgn, asgext, assignnumfield,
-assignnumfield2, childin, closebad, compare2, concat1, concat2, concat5, datanonl,
-delarprm, dfacheck2, dfastress, divzero2, eofsplit, exit2, exitval2, exitval3,
-fcall_exit, fcall_exit2, fldchg, fldchgnf, fldterm, fordel, forref, forsimp, fsbs,
-fscaret, fsrs, fstabplus, funsemnl, getline4, gsubtst8, hex2, inputred, intest,
-iobug1, leaddig, leadnl, manglprm, math, membug1, minusstr, mmap8k, nasty, negexp,
-nested, nfloop, nfset, nlinstr, nlstrina, noloop1, noloop2, nulrsend, numindex,
-numstr1, numsubstr, octsub, ofmtfidl, ofmts, ofmtstrnum, ofs1, onlynl, paramtyp,
-paramuninitglobal, pcntplus, prdupval, prec, prmreuse, prt1eval, prtoeval, range2,
-resplit, rri1, rs, rsnul1nl, rstest1, rstest2, rstest3, setrec0, setrec1, sigpipe1,
-sortglos, splitargv, splitarr, splitdef, splitvar, splitwht2, strcat1, strfieldnum,
-strnum2, subamp, subsepnm, subslash, uparrfs, widesub3, zero2, zeroe0
+anchor, arrayind3, arrayprm2, arynasty, aryprm9, aryprm8, arysubnm, arrymem1, asgext,
+assignnumfield, assignnumfield2, back89, childin, closebad, compare2, concat1, concat2,
+concat5, datanonl, delarprm, dfacheck2, dfastress, divzero2, dynlj, eofsplit, exit2,
+exitval2, exitval3, fcall_exit, fcall_exit2, fldchg, fldchgnf, fldterm, fordel, forref,
+forsimp, fsbs, fscaret, fsrs, fstabplus, funsemnl, getline4, getnr2tb, gsubnulli18n,
+gsubtst2, gsubtst4, gsubtst6, gsubtst8, hex2, inputred, intest, intprec, iobug1,
+leaddig, leadnl, manglprm, match4, matchuninitialized, math, membug1, minusstr, mmap8k,
+nasty, nasty2, negexp, negrange, nested, nfloop, nfset, nlinstr, nlstrina, noloop1,
+noloop2, nulrsend, numindex, numstr1, numsubstr, octsub, ofmt, ofmtbig, ofmtfidl, ofmts,
+ofmtstrnum, ofs1, onlynl, paramtyp, paramuninitglobal, pcntplus, prdupval, prec, printf1,
+printfchar, prmreuse, prt1eval, prtoeval, range2, regeq, reindops, reparse, resplit,
+rri1, rs, rsnul1nl, rstest1, rstest2, rstest3, rswhite, setrec0, setrec1, sigpipe1,
+sortglos, splitargv, splitarr, splitdef, splitvar, splitwht, splitwht2, strcat1,
+strfieldnum, strnum1, strnum2, subamp, subback, subi18n, subsepnm, subslash, substr,
+uparrfs, uplus, wideidx, wideidx2, widesub, widesub2, widesub3, wjposer1, zero2, zeroe0,
+zeroflag
 
-### Failing (137 tests)
+### Failing (106 tests)
 
-addcomma, anchgsub, arrayind1, arrayind2, arrayparm, arrayprm3, arrayref, arrymem1,
-arryref2, arryref3, arryref4, arryref5, arynasty, aryprm1, aryprm2, aryprm3, aryprm4,
-aryprm5, aryprm6, aryprm7, aryprm8, back89, backgsub, badassign1, badbuild, callparam,
-close_status, clsflnam, concat3, concat4, convfmt, delargv, delarpm2, delfunc, dfamb1,
-divzero, dynlj, fieldassign, fnamedat, fnarray, fnarray2, fnaryscl, fnasgnm, fnmisc,
-fsnul1, funsmnam, funstack, getline, getline3, getline5, getlnfa, getnr2tb, getnr2tm,
-gsubasgn, gsubnulli18n, gsubtest, gsubtst2, gsubtst4, gsubtst5, gsubtst6, gsubtst7,
-hex, hsprint, inpref, intprec, longsub, match4, matchuninitialized, memleak, nasty2,
-negrange, nfldstr, nfneg, nlfldsep, noparms, nulinsrc, numrange, ofmt, ofmta, ofmtbig,
-opasnidx, opasnslf, paramdup, paramres, parse1, parsefld, parseme, printf-corners,
-printf1, printfchar, prmarscl, rand, range1, readbuf, rebrackloc, rebt8b1, rebuild,
-regeq, regex3minus, regexpbad, regexpbrack2, regexprange, regrange, reindops, reparse,
-rsnullre, rsnulw, rstest4, rstest5, rswhite, scalar, sclforin, sclifin, sortempty,
-splitwht, status-close, strnum1, strsubscript, strtod, subback, subi18n, substr,
-swaplns, synerr1, synerr2, synerr3, tailrecurse, trailbs, unterm, uplus, wideidx,
-wideidx2, widesub, widesub2, widesub4, wjposer1, zeroflag
+arrayind1, arrayind2, arrayparm, arrayprm3, arrayref, arryref2, arryref3, arryref4,
+arryref5, aryprm1, aryprm2, aryprm3, aryprm4, aryprm5, aryprm6, aryprm7, aryprm8,
+aryunasgn, back89, backgsub, badassign1, badbuild, callparam, close_status, clsflnam,
+concat3, concat4, convfmt, delargv, delarpm2, delfunc, dfamb1, divzero, fieldassign,
+fnamedat, fnarray, fnarray2, fnaryscl, fnasgnm, fnmisc, fsnul1, funsmnam, funstack,
+getline, getline3, getline5, getlnfa, getnr2tm, gsubasgn, gsubnulli18n, gsubtest,
+gsubtst5, gsubtst7, hex, hex2, hsprint, inpref, longsub, memleak, nfldstr, nfneg,
+nlfldsep, noparms, nulinsrc, numrange, ofmta, opasnidx, opasnslf, paramdup, paramres,
+parse1, parsefld, parseme, printf-corners, prmarscl, rand, range1, readbuf, rebrackloc,
+rebt8b1, rebuild, regex3minus, regexpbad, regexprange, regrange, rsnullre, rsnulw,
+rstest4, rstest5, scalar, sclforin, sclifin, sortempty, splitwht2, status-close,
+strsubscript, strtod, swaplns, synerr1, synerr2, synerr3, tailrecurse, trailbs, unterm,
+wideidx, widesub4
