@@ -58,15 +58,11 @@ impl Value {
             Value::Num(n) => *n != 0.0,
             Value::Str(s) => !s.is_empty(),
             Value::StrNum(s) => {
-                // Input strings: if numeric, use numeric truth; otherwise non-empty
-                let s_trimmed = s.trim();
-                if s_trimmed.is_empty() {
-                    return false;
-                }
-                if s_trimmed.parse::<f64>().is_ok() {
-                    parse_num(s) != 0.0
+                // Input strings use numeric comparison for boolean
+                if s.is_empty() {
+                    false
                 } else {
-                    true
+                    parse_num(s) != 0.0
                 }
             }
             Value::Uninitialized => false,
@@ -94,34 +90,9 @@ pub fn parse_num(s: &str) -> f64 {
     if s.is_empty() {
         return 0.0;
     }
+    // Note: hex (0x...) is NOT parsed here — only in lexer for numeric literals.
+    // POSIX awk does not convert hex strings to numbers (gawk requires --non-decimal-data).
     let chars: Vec<char> = s.chars().collect();
-
-    // Check for hex: 0x or 0X
-    let mut start = 0;
-    let neg = if !chars.is_empty() && chars[0] == '-' {
-        start = 1;
-        true
-    } else if !chars.is_empty() && chars[0] == '+' {
-        start = 1;
-        false
-    } else {
-        false
-    };
-
-    if start + 1 < chars.len()
-        && chars[start] == '0'
-        && (chars[start + 1] == 'x' || chars[start + 1] == 'X')
-    {
-        let mut end = start + 2;
-        while end < chars.len() && chars[end].is_ascii_hexdigit() {
-            end += 1;
-        }
-        if end > start + 2 {
-            let hex_str: String = chars[start + 2..end].iter().collect();
-            let val = i64::from_str_radix(&hex_str, 16).unwrap_or(0) as f64;
-            return if neg { -val } else { val };
-        }
-    }
 
     // Parse as much of the leading part as possible
     let mut end = 0;

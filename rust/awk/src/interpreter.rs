@@ -11,7 +11,7 @@ use crate::value::{compare_values, ControlFlow, Value};
 pub struct Interpreter {
     pub globals: HashMap<String, Value>,
     pub arrays: HashMap<String, HashMap<String, Value>>,
-    pub fields: Vec<String>,
+    pub fields: Vec<Value>,
     pub functions: HashMap<String, FuncDef>,
     open_files: HashMap<String, Box<dyn Write>>,
     open_read_files: HashMap<String, Box<dyn BufRead>>,
@@ -48,7 +48,7 @@ impl Interpreter {
         Interpreter {
             globals,
             arrays: HashMap::new(),
-            fields: vec![String::new()],
+            fields: vec![Value::Str(String::new())],
             functions: HashMap::new(),
             open_files: HashMap::new(),
             open_read_files: HashMap::new(),
@@ -70,7 +70,7 @@ impl Interpreter {
             .get("FS")
             .map(|v| v.to_string_val())
             .unwrap_or(" ".to_string());
-        self.fields = vec![line.to_string()];
+        self.fields = vec![Value::StrNum(line.to_string())];
         let parts: Vec<String> = if fs == " " {
             line.split_whitespace().map(|s| s.to_string()).collect()
         } else if fs.len() == 1 {
@@ -83,7 +83,9 @@ impl Interpreter {
                 Err(_) => vec![line.to_string()],
             }
         };
-        self.fields.extend(parts);
+        // Fields from input splitting are StrNum
+        self.fields
+            .extend(parts.into_iter().map(Value::StrNum));
         let nf = (self.fields.len() - 1) as f64;
         self.globals.insert("NF".to_string(), Value::Num(nf));
     }
@@ -95,22 +97,28 @@ impl Interpreter {
             .map(|v| v.to_string_val())
             .unwrap_or(" ".to_string());
         if self.fields.len() > 1 {
-            self.fields[0] = self.fields[1..].join(&ofs);
+            let joined = self.fields[1..]
+                .iter()
+                .map(|v| v.to_string_val())
+                .collect::<Vec<_>>()
+                .join(&ofs);
+            self.fields[0] = Value::StrNum(joined);
         }
     }
 
-    fn get_field(&self, idx: usize) -> String {
+    fn get_field(&self, idx: usize) -> Value {
         if idx < self.fields.len() {
             self.fields[idx].clone()
         } else {
-            String::new()
+            Value::StrNum(String::new())
         }
     }
 
-    fn set_field(&mut self, idx: usize, val: String) {
+    fn set_field(&mut self, idx: usize, val: Value) {
         while self.fields.len() <= idx {
-            self.fields.push(String::new());
+            self.fields.push(Value::StrNum(String::new()));
         }
+        let is_str = matches!(val, Value::Str(_));
         self.fields[idx] = val;
         let nf = (self.fields.len() - 1) as f64;
         self.globals.insert("NF".to_string(), Value::Num(nf));
@@ -118,8 +126,13 @@ impl Interpreter {
             self.rebuild_record();
         } else {
             // Re-split if $0 was assigned
-            let line = self.fields[0].clone();
+            let line = self.fields[0].to_string_val();
             self.set_record(&line);
+            // If $0 was assigned from a string literal, keep $0 as Str
+            // (not StrNum) so boolean context uses string rules
+            if is_str {
+                self.fields[0] = Value::Str(line);
+            }
         }
     }
 
@@ -142,7 +155,7 @@ impl Interpreter {
             "NF" => {
                 let nf = val.to_num() as usize;
                 while self.fields.len() <= nf {
-                    self.fields.push(String::new());
+                    self.fields.push(Value::StrNum(String::new()));
                 }
                 self.fields.truncate(nf + 1);
                 self.globals.insert("NF".to_string(), val);
@@ -401,7 +414,7 @@ impl Interpreter {
                     .unwrap_or("%.6g".to_string());
 
                 let output = if args.is_empty() {
-                    self.get_field(0)
+                    self.get_field(0).to_string_val()
                 } else {
                     args.iter()
                         .map(|a| self.eval_expr(a).to_string_with_fmt(&ofmt))
@@ -831,7 +844,7 @@ impl Interpreter {
             Expr::Var(name) => self.set_var(name, val),
             Expr::FieldRef(idx_expr) => {
                 let idx = self.eval_expr(idx_expr).to_num() as usize;
-                self.set_field(idx, val.to_string_val());
+                self.set_field(idx, val);
             }
             Expr::ArrayRef(name, indices) => {
                 let vals: Vec<Value> = indices.iter().map(|i| self.eval_expr(i)).collect();
@@ -853,9 +866,7 @@ impl Interpreter {
             Expr::Var(name) => self.get_var(name),
             Expr::FieldRef(idx_expr) => {
                 let idx = self.eval_expr(idx_expr).to_num() as usize;
-                let field = self.get_field(idx);
-                // Return as input string (StrNum) — uses numeric comparison/boolean
-                Value::StrNum(field)
+                self.get_field(idx)
             }
             Expr::ArrayRef(name, indices) => {
                 let vals: Vec<Value> = indices.iter().map(|i| self.eval_expr(i)).collect();
@@ -1112,7 +1123,7 @@ impl Interpreter {
         match name {
             "length" => {
                 if args.is_empty() {
-                    return Value::Num(self.get_field(0).len() as f64);
+                    return Value::Num(self.get_field(0).to_string_val().len() as f64);
                 }
                 // Check if argument is an array name
                 if let Some(Expr::Var(arr_name)) = args.first()
@@ -1277,7 +1288,7 @@ impl Interpreter {
                 let target = if args.len() >= 4 {
                     self.eval_expr(&args[3]).to_string_val()
                 } else {
-                    self.get_field(0)
+                    self.get_field(0).to_string_val()
                 };
 
                 let is_global = how == "g" || how == "G";
