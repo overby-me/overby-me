@@ -3711,6 +3711,11 @@ impl Shell {
                 "{}: line {}: {}: readonly variable",
                 name, lineno, resolved_base
             );
+            self.last_status = 1;
+            // DISCARD: skip remaining commands on this line
+            if let Ok(ln) = lineno.parse::<usize>() {
+                self.expansion_error_line = Some(ln);
+            }
             return;
         }
         // Reject compound assignment through subscripted nameref targets

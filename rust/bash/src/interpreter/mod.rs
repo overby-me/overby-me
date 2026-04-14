@@ -1350,6 +1350,11 @@ impl Shell {
                 eprintln!("{}: {}: readonly variable", self.error_prefix(), resolved);
             }
             self.last_status = 1;
+            // Signal DISCARD: skip remaining commands on this line
+            // (matches bash's jump_to_top_level(DISCARD) for readonly errors)
+            if let Some(lineno) = self.vars.get("LINENO").and_then(|s| s.parse().ok()) {
+                self.expansion_error_line = Some(lineno);
+            }
             return;
         }
         // Setting RANDOM sets the seed
