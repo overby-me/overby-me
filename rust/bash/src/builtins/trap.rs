@@ -754,6 +754,19 @@ fn cleanup_reaped_coprocs(shell: &mut crate::interpreter::Shell) {
             }
         }
     }
+
+    // Also check coproc_info for cases where readonly prevented storing
+    // the PID variable (so coproc_names above is empty)
+    if let Some((name, pid)) = shell.coproc_info.take() {
+        let alive = kill(Pid::from_raw(pid), None).is_ok();
+        if !alive && shell.readonly_vars.contains(name.as_str()) {
+            eprintln!(
+                "{}: {}: cannot unset: readonly variable",
+                shell.error_prefix(),
+                name
+            );
+        }
+    }
 }
 
 pub(super) fn builtin_kill(shell: &mut Shell, args: &[String]) -> i32 {

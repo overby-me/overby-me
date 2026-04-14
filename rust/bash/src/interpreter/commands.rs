@@ -289,6 +289,9 @@ impl Shell {
 
                 // Track the background job
                 self.last_bg_pid = pid;
+                // Track coproc info for cleanup (even when readonly prevents
+                // storing PID variable)
+                self.coproc_info = Some((coproc_name.to_string(), pid));
 
                 0
             }
@@ -6004,6 +6007,25 @@ impl Shell {
                         self.vars.remove(&pid_key);
                     }
                 }
+            }
+        }
+
+        // Also check coproc_info for cases where readonly prevented
+        // storing the PID variable
+        if let Some((ref name, pid)) = self.coproc_info {
+            let exited = matches!(
+                waitpid(Pid::from_raw(pid), Some(WaitPidFlag::WNOHANG)),
+                Ok(WaitStatus::Exited(_, _)) | Ok(WaitStatus::Signaled(_, _, _))
+            ) || nix::sys::signal::kill(Pid::from_raw(pid), None).is_err();
+            if exited && self.readonly_vars.contains(name.as_str()) {
+                eprintln!(
+                    "{}: {}: cannot unset: readonly variable",
+                    self.error_prefix(),
+                    name
+                );
+            }
+            if exited {
+                self.coproc_info = None;
             }
         }
     }

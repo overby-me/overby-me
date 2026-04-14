@@ -485,6 +485,9 @@ pub struct Shell {
     /// Signals that were ignored (SIG_IGN) at shell startup — cannot be trapped
     pub original_ignored_signals: HashSet<String>,
     pub namerefs: HashMap<String, String>,
+    /// Active coproc: (name, pid) — tracked even when readonly prevents
+    /// storing the PID variable, so cleanup can emit proper errors.
+    pub coproc_info: Option<(String, i32)>,
     /// Stack of local variable scopes. Each scope maps variable names to their
     /// saved values (None if the variable didn't exist before).
     pub local_scopes: Vec<HashMap<String, SavedVar>>,
@@ -729,6 +732,7 @@ impl Shell {
             in_comsub: false,
             original_ignored_signals: HashSet::new(),
             namerefs: HashMap::new(),
+            coproc_info: None,
             local_scopes: Vec::new(),
             saved_opts_stack: Vec::new(),
             opt_errexit: false,
