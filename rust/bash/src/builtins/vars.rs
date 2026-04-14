@@ -4209,7 +4209,6 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                         cmd_name,
                         name
                     );
-                    eprintln!("{}: readonly variable", name);
                     status = 1;
                     continue;
                 } else if is_subscripted_nameref {

@@ -130,18 +130,27 @@ impl Shell {
             );
         }
 
-        // Check if coproc name is readonly — bash emits two errors:
-        // "readonly variable" (can't create array) and "cannot unset"
-        // (can't clear existing readonly value to make room)
+        // If coproc name is a nameref with empty target, remove nameref
+        // attribute — coproc needs to create an array variable.
+        // Only for empty/unbound namerefs; namerefs with real targets
+        // (like `ref=x`) should resolve through the nameref for coproc name.
+        if let Some(target) = self.namerefs.get(coproc_name) {
+            if target.is_empty() {
+                eprintln!(
+                    "{}: warning: {}: removing nameref attribute",
+                    self.error_prefix(),
+                    coproc_name
+                );
+                self.namerefs.remove(coproc_name);
+            }
+        }
+
+        // Check if coproc name is readonly — bash emits "readonly variable"
+        // at startup and "cannot unset" later during cleanup/reap.
         let coproc_readonly = self.readonly_vars.contains(coproc_name);
         if coproc_readonly {
             eprintln!(
                 "{}: {}: readonly variable",
-                self.error_prefix(),
-                coproc_name
-            );
-            eprintln!(
-                "{}: {}: cannot unset: readonly variable",
                 self.error_prefix(),
                 coproc_name
             );
@@ -266,7 +275,15 @@ impl Shell {
                 // Set COPROC_PID
                 let pid = child.as_raw();
                 let pid_key = format!("{}_PID", coproc_name);
-                if !self.readonly_vars.contains(pid_key.as_str()) {
+                // Check if PID variable (or its nameref target) is readonly
+                let pid_resolved = self.resolve_nameref(&pid_key);
+                if self.readonly_vars.contains(pid_resolved.as_str()) {
+                    eprintln!(
+                        "{}: {}: readonly variable",
+                        self.error_prefix(),
+                        pid_resolved
+                    );
+                } else {
                     self.vars.insert(pid_key, pid.to_string());
                 }
 
