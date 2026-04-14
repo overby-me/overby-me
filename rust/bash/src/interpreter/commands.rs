@@ -5254,7 +5254,7 @@ impl Shell {
             if print_menu {
                 // Print numbered menu to stderr
                 for (i, item) in items.iter().enumerate() {
-                    eprint!("{}) {}\n", i + 1, item);
+                    eprintln!("{}) {}", i + 1, item);
                 }
                 print_menu = false;
             }

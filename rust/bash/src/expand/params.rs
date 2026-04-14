@@ -2402,17 +2402,27 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
             };
             if ctx.namerefs.contains_key(base_name) {
                 if expr.name.contains('[') {
-                    // ${!nameref[N]} — invalid indirect expansion through nameref
-                    let prefix = EXPAND_ERROR_PREFIX.with(|p| {
-                        let p = p.borrow();
-                        if p.is_empty() {
-                            "bash".to_string()
-                        } else {
-                            p.clone()
-                        }
-                    });
-                    eprintln!("{}: {}: invalid indirect expansion", prefix, expr.name);
-                    set_arith_error();
+                    // ${!nameref[N]} — resolve through nameref, then do
+                    // indirect expansion on the resolved target with subscript.
+                    // If the resolved target variable doesn't exist at all,
+                    // bash reports "invalid indirect expansion".
+                    let resolved_target = ctx.resolve_nameref(base_name);
+                    let target_exists = ctx.vars.contains_key(&resolved_target)
+                        || ctx.arrays.contains_key(&resolved_target)
+                        || ctx.assoc_arrays.contains_key(&resolved_target)
+                        || std::env::var(&resolved_target).is_ok();
+                    if !target_exists {
+                        let prefix = EXPAND_ERROR_PREFIX.with(|p| {
+                            let p = p.borrow();
+                            if p.is_empty() {
+                                "bash".to_string()
+                            } else {
+                                p.clone()
+                            }
+                        });
+                        eprintln!("{}: {}: invalid indirect expansion", prefix, expr.name);
+                        set_arith_error();
+                    }
                     String::new()
                 } else {
                     // var is a nameref — return the target name (resolving the
