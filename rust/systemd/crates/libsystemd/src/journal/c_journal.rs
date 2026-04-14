@@ -119,14 +119,20 @@ fn read_object_header(data: &[u8], offset: u64) -> io::Result<(u8, u8, u64)> {
 /// Follows the linked list of entry array objects.
 fn collect_entry_offsets(data: &[u8], mut ea_offset: u64, compact: bool) -> io::Result<Vec<u64>> {
     let mut offsets = Vec::new();
+    let mut visited = std::collections::HashSet::new();
 
     while ea_offset != 0 {
-        let (obj_type, _flags, size) = read_object_header(data, ea_offset)?;
+        if !visited.insert(ea_offset) {
+            // Cycle detected in entry array linked list — corrupt journal.
+            break;
+        }
+        let (obj_type, _flags, size) = match read_object_header(data, ea_offset) {
+            Ok(v) => v,
+            Err(_) => break, // corrupt header — stop traversal
+        };
         if obj_type != OBJECT_ENTRY_ARRAY {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("expected entry array object at {ea_offset}, got type {obj_type}"),
-            ));
+            // Corrupt pointer — stop traversal instead of failing entirely.
+            break;
         }
 
         let base = ea_offset as usize + OBJECT_HEADER_SIZE;
@@ -387,16 +393,29 @@ pub fn read_c_journal(path: &Path) -> io::Result<Vec<JournalEntry>> {
     let entry_offsets = collect_entry_offsets(&data, header.entry_array_offset, compact)?;
 
     let mut entries = Vec::with_capacity(entry_offsets.len());
+    let mut parse_errors = 0u32;
+    let mut seen_offsets = std::collections::HashSet::with_capacity(entry_offsets.len());
     for &offset in &entry_offsets {
+        if !seen_offsets.insert(offset) {
+            continue; // skip duplicate offsets from corrupt entry arrays
+        }
         match parse_entry(&data, offset, compact) {
             Ok(entry) => entries.push(entry),
             Err(e) => {
-                eprintln!(
-                    "journald: Warning: could not parse entry at offset {} in {}: {}",
-                    offset,
-                    path.display(),
-                    e
-                );
+                parse_errors += 1;
+                if parse_errors <= 10 {
+                    eprintln!(
+                        "journald: Warning: could not parse entry at offset {} in {}: {}",
+                        offset,
+                        path.display(),
+                        e
+                    );
+                } else if parse_errors == 11 {
+                    eprintln!(
+                        "journald: Warning: suppressing further parse errors for {}",
+                        path.display()
+                    );
+                }
             }
         }
     }
