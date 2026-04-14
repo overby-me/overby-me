@@ -353,32 +353,6 @@ impl Parser {
         self.advance(); // print
         let mut args = Vec::new();
 
-        // Handle print(args) — parenthesized form
-        if matches!(self.peek(), Token::LParen) {
-            let saved = self.pos;
-            self.advance(); // skip (
-            let first = self.parse_expr();
-            if matches!(self.peek(), Token::RParen) {
-                // print(expr) — single arg in parens
-                self.advance();
-                args.push(first);
-                let dest = self.parse_output_dest();
-                return Stmt::Print(args, dest);
-            } else if matches!(self.peek(), Token::Comma) {
-                // print(expr, expr, ...) — multiple args in parens
-                args.push(first);
-                while matches!(self.peek(), Token::Comma) {
-                    self.advance();
-                    args.push(self.parse_expr());
-                }
-                self.expect(&Token::RParen);
-                let dest = self.parse_output_dest();
-                return Stmt::Print(args, dest);
-            }
-            // Not a parenthesized call, backtrack
-            self.pos = saved;
-        }
-
         if !matches!(
             self.peek(),
             Token::Newline
