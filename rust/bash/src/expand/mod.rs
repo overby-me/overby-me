@@ -92,6 +92,10 @@ thread_local! {
     static ARRAY_EXPAND_ONCE: RefCell<bool> = const { RefCell::new(false) };
     /// Whether patsub_replacement shopt is enabled (`&` in replacement = matched text)
     static PATSUB_REPLACEMENT: RefCell<bool> = const { RefCell::new(true) };
+    /// Set when word expansion produces a result from an unquoted word that
+    /// contained a literal `[`. Used by read/printf -v to decide bracket
+    /// matching strategy (rfind for unquoted array refs, first-] for quoted).
+    static UNQUOTED_ARRAYREF: RefCell<bool> = const { RefCell::new(false) };
     /// GLOBIGNORE patterns (colon-separated, empty = no ignore)
     static GLOBIGNORE: RefCell<String> = const { RefCell::new(String::new()) };
     /// Callback for running process substitution commands inline (instead of exec'ing
@@ -219,6 +223,14 @@ pub fn get_posix_mode() -> bool {
 
 pub fn set_array_expand_once(enabled: bool) {
     ARRAY_EXPAND_ONCE.with(|d| *d.borrow_mut() = enabled);
+}
+
+pub fn set_unquoted_arrayref(val: bool) {
+    UNQUOTED_ARRAYREF.with(|d| *d.borrow_mut() = val);
+}
+
+pub fn get_unquoted_arrayref() -> bool {
+    UNQUOTED_ARRAYREF.with(|d| *d.borrow())
 }
 
 pub fn get_array_expand_once() -> bool {

@@ -1489,6 +1489,15 @@ impl Shell {
                 )
             })
         });
+        // Track whether any command word has an unquoted `[` — used by
+        // read/printf -v to decide bracket matching (rfind vs first-]).
+        // This mimics bash's W_ARRAYREF flag set during word expansion.
+        let has_unquoted_arrayref = words_to_expand.iter().any(|(_, word)| {
+            word.iter().any(|part| {
+                matches!(part, crate::ast::WordPart::Literal(s) if s.contains('['))
+            })
+        });
+        crate::expand::set_unquoted_arrayref(has_unquoted_arrayref);
         // Expand words, applying assignment-context tilde expansion where appropriate
         let mut expanded_words: Vec<String> = Vec::new();
         for (idx, word) in words_to_expand {

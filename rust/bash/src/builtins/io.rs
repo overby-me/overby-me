@@ -185,7 +185,11 @@ pub(super) fn builtin_printf(shell: &mut Shell, args: &[String]) -> i32 {
                     .get(base)
                     .map(|t| shell.assoc_arrays.contains_key(t.as_str()))
                     .unwrap_or(false);
-            let close = if aeo && base_is_assoc {
+            // Use rfind only when AEO is on, base is assoc, AND the word
+            // had an unquoted `[` (W_ARRAYREF equivalent). For quoted
+            // `"A[$k]"` → `A[]]`, use first-`]` to reject.
+            let unquoted_ref = crate::expand::get_unquoted_arrayref();
+            let close = if aeo && base_is_assoc && unquoted_ref {
                 var_name.rfind(']')
             } else {
                 var_name[bracket + 1..].find(']').map(|p| p + bracket + 1)
@@ -1596,7 +1600,8 @@ pub(super) fn builtin_read(shell: &mut Shell, args: &[String]) -> i32 {
                     let base_name = &arg[..bracket];
                     let resolved_base = shell.resolve_nameref(base_name);
                     let base_is_assoc = shell.assoc_arrays.contains_key(resolved_base.as_str());
-                    let close = if aeo && base_is_assoc {
+                    let unquoted_ref = crate::expand::get_unquoted_arrayref();
+                    let close = if aeo && base_is_assoc && unquoted_ref {
                         arg.rfind(']')
                     } else {
                         arg[bracket + 1..].find(']').map(|p| p + bracket + 1)
