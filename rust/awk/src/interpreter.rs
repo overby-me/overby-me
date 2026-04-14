@@ -1089,21 +1089,29 @@ impl Interpreter {
                     Expr::ArrayRef(n, _) => n.clone(),
                     _ => return Value::Num(0.0),
                 };
-                let fs = if args.len() >= 3 {
-                    self.eval_expr(&args[2]).to_string_val()
+                // Check if third arg is a regex literal
+                let (fs, is_regex) = if args.len() >= 3 {
+                    if let Some(r) = self.extract_regex_pattern(&args[2]) {
+                        (r, true)
+                    } else {
+                        (self.eval_expr(&args[2]).to_string_val(), false)
+                    }
                 } else {
-                    self.globals
-                        .get("FS")
-                        .map(|v| v.to_string_val())
-                        .unwrap_or(" ".to_string())
+                    (
+                        self.globals
+                            .get("FS")
+                            .map(|v| v.to_string_val())
+                            .unwrap_or(" ".to_string()),
+                        false,
+                    )
                 };
 
                 // Clear the array
                 self.arrays.remove(&arr_name);
 
-                let parts: Vec<String> = if fs == " " {
+                let parts: Vec<String> = if !is_regex && fs == " " {
                     s.split_whitespace().map(|p| p.to_string()).collect()
-                } else if fs.len() == 1 {
+                } else if !is_regex && fs.len() == 1 {
                     s.split(fs.chars().next().unwrap())
                         .map(|p| p.to_string())
                         .collect()
