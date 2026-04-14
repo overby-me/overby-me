@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**142/241 tests passing** (59%) — BASIC_TESTS from the GNU gawk 5.3.2 test suite.
+**147/241 tests passing** (61%) — BASIC_TESTS from the GNU gawk 5.3.2 test suite.
 
 ### Recent fixes
 
@@ -27,6 +27,12 @@
 - Single-char RS splitting (RS != "\n" now reads full input and splits)
 - String patterns treated as regex in sub/gsub (not escaped)
 - Fix split() anchor edge cases (empty leading/trailing elements from `^`/`$`)
+- StrNum value type for input strings (numeric boolean/comparison semantics)
+- Fields stored as Value (preserves Str vs StrNum from assignment vs input)
+- Bare getline reads from current input stream (pre-read all records)
+- Remove hex from parse_num (only in lexer literals per POSIX)
+- $0 assignment from string literal preserves Str type for boolean
+- Single-char RS splitting reads all input then splits
 
 Tests compare rust-awk output against reference gawk output in a Nix sandbox.
 
