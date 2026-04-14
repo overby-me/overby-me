@@ -5,7 +5,7 @@ use std::process::{Command, Stdio};
 use std::fs;
 
 use crate::ast::*;
-use crate::format::{awk_replace, sprintf_impl};
+use crate::format::{awk_replace, gensub_replace, sprintf_impl};
 use crate::value::{compare_values, ControlFlow, Value};
 
 pub struct Interpreter {
@@ -733,6 +733,23 @@ impl Interpreter {
         }
     }
 
+    /// Extract a regex pattern from an expression.
+    /// Handles both Expr::Regex(r) and Expr::Match($0, Regex(r)) which is
+    /// how the parser wraps bare /regex/ literals.
+    fn extract_regex_pattern(&mut self, expr: &Expr) -> Option<String> {
+        match expr {
+            Expr::Regex(r) => Some(r.clone()),
+            Expr::Match(_, right) => {
+                if let Expr::Regex(r) = right.as_ref() {
+                    Some(r.clone())
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
     fn assign_to(&mut self, expr: &Expr, val: Value) {
         match expr {
             Expr::Var(name) => self.set_var(name, val),
@@ -1107,12 +1124,11 @@ impl Interpreter {
                 if args.len() < 2 {
                     return Value::Num(0.0);
                 }
-                let pattern = match &args[0] {
-                    Expr::Regex(r) => r.clone(),
-                    _ => {
-                        let v = self.eval_expr(&args[0]);
-                        regex::escape(&v.to_string_val())
-                    }
+                let pattern = if let Some(r) = self.extract_regex_pattern(&args[0]) {
+                    r
+                } else {
+                    let v = self.eval_expr(&args[0]);
+                    regex::escape(&v.to_string_val())
                 };
                 let replacement = self.eval_expr(&args[1]).to_string_val();
 
@@ -1132,13 +1148,13 @@ impl Interpreter {
                         let result = if is_global {
                             let r = re.replace_all(&target_val, |caps: &regex::Captures| {
                                 count += 1;
-                                awk_replace(&replacement, caps)
+                                awk_replace(&replacement, &caps[0])
                             });
                             r.to_string()
                         } else {
                             let r = re.replace(&target_val, |caps: &regex::Captures| {
                                 count += 1;
-                                awk_replace(&replacement, caps)
+                                awk_replace(&replacement, &caps[0])
                             });
                             r.to_string()
                         };
@@ -1152,9 +1168,10 @@ impl Interpreter {
                 if args.len() < 3 {
                     return Value::Str(String::new());
                 }
-                let pattern = match &args[0] {
-                    Expr::Regex(r) => r.clone(),
-                    _ => self.eval_expr(&args[0]).to_string_val(),
+                let pattern = if let Some(r) = self.extract_regex_pattern(&args[0]) {
+                    r
+                } else {
+                    self.eval_expr(&args[0]).to_string_val()
                 };
                 let replacement = self.eval_expr(&args[1]).to_string_val();
                 let how = self.eval_expr(&args[2]).to_string_val();
@@ -1171,7 +1188,7 @@ impl Interpreter {
                     Ok(re) => {
                         let result = if is_global {
                             re.replace_all(&target, |caps: &regex::Captures| {
-                                awk_replace(&replacement, caps)
+                                gensub_replace(&replacement, caps)
                             })
                             .to_string()
                         } else {
@@ -1180,7 +1197,7 @@ impl Interpreter {
                             re.replace_all(&target, |caps: &regex::Captures| {
                                 count += 1;
                                 if count == n {
-                                    awk_replace(&replacement, caps)
+                                    gensub_replace(&replacement, caps)
                                 } else {
                                     caps[0].to_string()
                                 }
@@ -1197,9 +1214,10 @@ impl Interpreter {
                     return Value::Num(0.0);
                 }
                 let s = self.eval_expr(&args[0]).to_string_val();
-                let pattern = match &args[1] {
-                    Expr::Regex(r) => r.clone(),
-                    _ => self.eval_expr(&args[1]).to_string_val(),
+                let pattern = if let Some(r) = self.extract_regex_pattern(&args[1]) {
+                    r
+                } else {
+                    self.eval_expr(&args[1]).to_string_val()
                 };
                 match Regex::new(&pattern) {
                     Ok(re) => {

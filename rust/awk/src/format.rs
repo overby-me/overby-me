@@ -316,7 +316,41 @@ pub fn sprintf_impl(vals: &[Value]) -> String {
     result
 }
 
-pub fn awk_replace(replacement: &str, caps: &regex::Captures) -> String {
+/// Replacement for sub/gsub: only & and \\ and \& are special
+pub fn awk_replace(replacement: &str, matched: &str) -> String {
+    let mut result = String::new();
+    let chars: Vec<char> = replacement.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '\\' {
+            i += 1;
+            if i < chars.len() {
+                if chars[i] == '&' {
+                    result.push('&');
+                } else if chars[i] == '\\' {
+                    result.push('\\');
+                } else {
+                    // In POSIX sub/gsub, \x where x is not & or \ produces \x
+                    result.push('\\');
+                    result.push(chars[i]);
+                }
+            } else {
+                result.push('\\');
+            }
+            i += 1;
+        } else if chars[i] == '&' {
+            result.push_str(matched);
+            i += 1;
+        } else {
+            result.push(chars[i]);
+            i += 1;
+        }
+    }
+    result
+}
+
+/// Replacement for gensub: supports & \\ \& and \1..\9 backreferences
+pub fn gensub_replace(replacement: &str, caps: &regex::Captures) -> String {
     let mut result = String::new();
     let chars: Vec<char> = replacement.chars().collect();
     let mut i = 0;
