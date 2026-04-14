@@ -81,36 +81,99 @@ pub fn sprintf_impl(vals: &[Value]) -> String {
             let width_num: usize = width.parse().unwrap_or(0);
             let prec_num: usize = precision.parse().unwrap_or(6);
             let left_align = flags.contains('-');
-            let zero_pad = flags.contains('0') && !left_align;
+            // Zero flag is ignored when precision is given for integer conversions
+            let zero_pad = flags.contains('0')
+                && !left_align
+                && !(has_precision && matches!(conv, 'd' | 'i' | 'o' | 'x' | 'X' | 'u'));
             let plus_sign = flags.contains('+');
             let space_sign = flags.contains(' ');
 
             let formatted = match conv {
                 'd' | 'i' => {
                     let n = val.to_num() as i64;
-
-                    if plus_sign && n >= 0 {
-                        format!("+{n}")
-                    } else if space_sign && n >= 0 {
-                        format!(" {n}")
+                    // Handle precision: %.0d with 0 produces empty string
+                    if has_precision && prec_num == 0 && n == 0 {
+                        String::new()
                     } else {
-                        format!("{n}")
+                        let abs_str = if has_precision {
+                            let s = format!("{}", n.unsigned_abs());
+                            if s.len() < prec_num {
+                                format!("{:0>width$}", s, width = prec_num)
+                            } else {
+                                s
+                            }
+                        } else {
+                            format!("{}", n.unsigned_abs())
+                        };
+                        if n < 0 {
+                            format!("-{abs_str}")
+                        } else if plus_sign {
+                            format!("+{abs_str}")
+                        } else if space_sign {
+                            format!(" {abs_str}")
+                        } else {
+                            abs_str
+                        }
                     }
                 }
-                'o' => format!("{:o}", val.to_num() as u64),
-                'x' => format!("{:x}", val.to_num() as u64),
-                'X' => format!("{:X}", val.to_num() as u64),
+                'o' => {
+                    let n = val.to_num() as u64;
+                    let s = format!("{n:o}");
+                    let s = if has_precision && s.len() < prec_num {
+                        format!("{s:0>width$}", width = prec_num)
+                    } else {
+                        s
+                    };
+                    if flags.contains('#') && !s.starts_with('0') && n != 0 {
+                        format!("0{s}")
+                    } else {
+                        s
+                    }
+                }
+                'x' => {
+                    let n = val.to_num() as u64;
+                    let s = format!("{n:x}");
+                    let s = if has_precision && s.len() < prec_num {
+                        format!("{s:0>width$}", width = prec_num)
+                    } else {
+                        s
+                    };
+                    if flags.contains('#') && n != 0 {
+                        format!("0x{s}")
+                    } else {
+                        s
+                    }
+                }
+                'X' => {
+                    let n = val.to_num() as u64;
+                    let s = format!("{n:X}");
+                    let s = if has_precision && s.len() < prec_num {
+                        format!("{s:0>width$}", width = prec_num)
+                    } else {
+                        s
+                    };
+                    if flags.contains('#') && n != 0 {
+                        format!("0X{s}")
+                    } else {
+                        s
+                    }
+                }
                 'u' => format!("{}", val.to_num() as u64),
                 'c' => {
-                    let n = val.to_num() as u32;
-                    if let Some(c) = char::from_u32(n) {
-                        c.to_string()
-                    } else {
-                        let s = val.to_string_val();
-                        if let Some(c) = s.chars().next() {
-                            c.to_string()
-                        } else {
-                            "\0".to_string()
+                    // If the value is a string, use first character
+                    match val {
+                        Value::Str(s) if !s.is_empty() => {
+                            s.chars().next().unwrap().to_string()
+                        }
+                        _ => {
+                            let n = val.to_num() as u32;
+                            if n == 0 {
+                                "\0".to_string()
+                            } else if let Some(c) = char::from_u32(n) {
+                                c.to_string()
+                            } else {
+                                "\0".to_string()
+                            }
                         }
                     }
                 }
@@ -162,7 +225,7 @@ pub fn sprintf_impl(vals: &[Value]) -> String {
                         result.push(' ');
                     }
                 } else if zero_pad
-                    && matches!(conv, 'd' | 'i' | 'f' | 'e' | 'E' | 'g' | 'G')
+                    && matches!(conv, 'd' | 'i' | 'o' | 'x' | 'X' | 'u' | 'f' | 'e' | 'E' | 'g' | 'G')
                 {
                     // Put sign before zeros
                     if formatted.starts_with('-') || formatted.starts_with('+') {

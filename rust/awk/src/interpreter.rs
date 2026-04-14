@@ -762,7 +762,12 @@ impl Interpreter {
             Expr::ArrayRef(name, indices) => {
                 let vals: Vec<Value> = indices.iter().map(|i| self.eval_expr(i)).collect();
                 let key = self.array_key(&vals);
-                self.get_array(name, &key)
+                // Auto-vivify: reading an array element creates it
+                let val = self.get_array(name, &key);
+                if !self.arrays.get(name).is_some_and(|a| a.contains_key(&key)) {
+                    self.set_array(name, &key, Value::Uninitialized);
+                }
+                val
             }
             Expr::Binop(left, op, right) => match op {
                 BinOp::And => {
