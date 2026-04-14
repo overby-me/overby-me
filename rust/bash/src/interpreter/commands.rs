@@ -509,6 +509,14 @@ impl Shell {
             shell.run_string(cmd)
         };
         crate::expand::set_procsub_runner(&mut procsub_runner as *mut dyn FnMut(&str) -> i32);
+        // Register a command substitution runner for lookup_var to use when
+        // expanding $(...) in nameref subscript targets.
+        let self_ptr2 = self as *mut Shell;
+        let mut cmd_sub_runner = move |cmd: &str| -> String {
+            let shell = unsafe { &mut *self_ptr2 };
+            shell.capture_output(cmd)
+        };
+        crate::expand::set_cmd_sub_runner(&mut cmd_sub_runner as *mut dyn FnMut(&str) -> String);
         let arrays = self.arrays.clone();
         let mut cmd_sub = |cmd: &str| -> String {
             if let Some(rest) = cmd.strip_prefix("\x01ARITH:") {
@@ -591,6 +599,7 @@ impl Shell {
             &mut cmd_sub,
         );
         crate::expand::clear_procsub_runner();
+        crate::expand::clear_cmd_sub_runner();
         result
     }
 
@@ -785,6 +794,12 @@ impl Shell {
             shell.run_string(cmd)
         };
         crate::expand::set_procsub_runner(&mut procsub_runner as *mut dyn FnMut(&str) -> i32);
+        let self_ptr2 = self as *mut Shell;
+        let mut cmd_sub_runner = move |cmd: &str| -> String {
+            let shell = unsafe { &mut *self_ptr2 };
+            shell.capture_output(cmd)
+        };
+        crate::expand::set_cmd_sub_runner(&mut cmd_sub_runner as *mut dyn FnMut(&str) -> String);
         let arrays = self.arrays.clone();
         let mut cmd_sub = |cmd: &str| -> String {
             if let Some(rest) = cmd.strip_prefix("\x01ARITH:") {
@@ -858,6 +873,7 @@ impl Shell {
             &mut cmd_sub,
         );
         crate::expand::clear_procsub_runner();
+        crate::expand::clear_cmd_sub_runner();
         result
     }
 
@@ -2181,24 +2197,20 @@ impl Shell {
                                 if has_global_flag && !self.local_scopes.is_empty() {
                                     // Look for the saved nameref in outer scopes
                                     // (the global value before it was localized).
-                                    let saved_nameref = self
-                                        .local_scopes
+                                    self.local_scopes
                                         .iter()
                                         .find_map(|s| s.get(name).and_then(|sv| sv.nameref.clone()))
-                                        .and_then(|t| if t.is_empty() { None } else { Some(t) });
-                                    saved_nameref
+                                        .and_then(|t| if t.is_empty() { None } else { Some(t) })
                                 } else {
                                     Some(self.resolve_nameref(name))
                                 }
                             } else if !has_nameref_flag && has_global_flag {
                                 // No local nameref, but -g is set — check if
                                 // a global nameref was saved in scopes.
-                                let saved_nameref = self
-                                    .local_scopes
+                                self.local_scopes
                                     .iter()
                                     .find_map(|s| s.get(name).and_then(|sv| sv.nameref.clone()))
-                                    .and_then(|t| if t.is_empty() { None } else { Some(t) });
-                                saved_nameref
+                                    .and_then(|t| if t.is_empty() { None } else { Some(t) })
                             } else {
                                 None
                             };
@@ -2762,12 +2774,9 @@ impl Shell {
                                 if let Some(arr) = self.arrays.get(assign_target).cloned() {
                                     let evaluated: Vec<Option<String>> = arr
                                         .into_iter()
-                                        .map(|v| {
-                                            v.map(|s| self.eval_arith_expr(&s).to_string())
-                                        })
+                                        .map(|v| v.map(|s| self.eval_arith_expr(&s).to_string()))
                                         .collect();
-                                    self.arrays
-                                        .insert(assign_target.to_string(), evaluated);
+                                    self.arrays.insert(assign_target.to_string(), evaluated);
                                 }
                             }
                             new_args.push(name.to_string());

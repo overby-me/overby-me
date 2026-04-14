@@ -2,13 +2,13 @@
 
 ## Current State
 
-**75/77 nix tests consistently passing** (Phase 98), ~69/83 local tests passing (0 diff, sequential). Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available). **array** ~6 nix diff (array27.sub only), **nameref** ~76 nix diff. See `CHANGELOG.md` for full fix history (300+ fixes across 98 phases).
+**75/77 nix tests consistently passing** (Phase 99), ~69/83 local tests passing (0 diff, sequential). Goal: full drop-in bash replacement (keeping readline builtins like `compgen`/`complete` available). **array** ~6 nix diff (array27.sub only), **nameref** ~59 nix diff (reduced from ~76 in Phase 99). See `CHANGELOG.md` for full fix history (300+ fixes across 99 phases).
 
-### Nix test results (75/77 consistently passing — Phase 98)
+### Nix test results (75/77 consistently passing — Phase 99)
 
 Verified passing (75/77): alias, appendop, arith, arith-for, array2, assoc, attr, braces, builtins, case, casemod, comsub, comsub-eof, comsub-posix, comsub2, cond, coproc, cprint, dirstack, dollars, dynvar, errors, execscript, exp-tests, exportfunc, extglob, extglob2, extglob3, func, getopts, glob-bracket, glob-test, globstar, heredoc, herestr, ifs, ifs-posix, input-test, invert, iquote, lastpipe, mapfile, more-exp, new-exp, nquote, nquote1, nquote2, nquote3, nquote4, nquote5, parser, posix2, posixexp, posixexp2, posixpat, posixpipe, precedence, printf, procsub, quote, quotearray, read, redir, rhs-exp, set-e, set-x, shopt, strip, test, tilde, tilde2, trap, type, varenv, vredir.
 
-Verified failing (2/77): array (~6 nix diff), nameref (~76 nix diff).
+Verified failing (2/77): array (~6 nix diff), nameref (~59 nix diff).
 
 ### Local test results (~69/83 passing, 0 diff sequential — Phase 98)
 
@@ -68,16 +68,16 @@ Suggested nix timeout: 30s for most tests, 120s for trap.
 
 Passes locally (0 diff). Only array27.sub remains — `A[]]` bracket handling for double-quoted `"A[$k]"` where `k=]`; bash uses `W_ARRAYREF` pre-expansion flag to distinguish unquoted `A[$rkey]` (works via `rfind(']')`) from double-quoted `"A[$k]"` (fails with first-`]` matching); we lack quoting context at builtin level. Would need `W_ARRAYREF`-like quoting context threading to fix.
 
-### nameref (~76 nix diff)
+### nameref (~59 nix diff)
 
-PID-only locally. Remaining sub-test estimates: nameref11 (~22), nameref15 (~12), nameref10 (~6), nameref8 (~4), nameref18 (~2), others (~30).
+PID-only locally. Remaining sub-test estimates: nameref11 (~22), nameref15 (~12), nameref8 (~2), nameref18 (~1), others (~22).
 
 Remaining open issues:
 
 - (d) `coproc` interaction with namerefs (nameref11: coproc on namerefs/readonly vars)
 - (e) nameref18.sub subscripted nameref targets in builtins (`mapfile ref`, `read -a ref`, compound assignment through subscripted namerefs)
-- (i) circular nameref line number tracking (nameref8.sub, off by 2 in nix)
-- (o) command substitution in nameref subscript targets (nameref10.sub — `$(echo 0)` in nameref target subscript not expanded; requires `cmd_sub` callback threading into `lookup_var`)
+- (i) circular nameref line number tracking (nameref8.sub, off by 2 in nix — warning emitted at assignment line instead of declaration line)
+- ~~(o) command substitution in nameref subscript targets~~ ✅ **Fixed in Phase 99** (nameref10.sub — `cmd_sub` runner thread-local for `lookup_var`)
 
 ### Local-only failing tests (not in nix harness)
 
@@ -125,7 +125,7 @@ These exist in `/tmp/bash-5.3/tests/` but not in the nix test list:
 
 ### Nix test improvements
 
-1. **Continue reducing nameref nix diffs (~76 lines)** — See remaining open issues above. Biggest wins: nameref11 (~22 lines, coproc interaction), nameref15 (~12 lines), nameref10 (~6 lines, comsub in subscript targets).
+1. **Continue reducing nameref nix diffs (~59 lines)** — See remaining open issues above. Biggest wins: nameref11 (~22 lines, coproc interaction), nameref15 (~12 lines).
 
 2. **Fix remaining array nix diffs (~6 lines)** — Only array27.sub. Would need `W_ARRAYREF`-like quoting context threading from word expansion into builtins. Low priority since it's a narrow edge case.
 
@@ -138,6 +138,14 @@ These exist in `/tmp/bash-5.3/tests/` but not in the nix test list:
 5. **Implement restricted shell mode (`-r` flag)** — Needed for rsh tests (local-only). (~26 diff lines)
 
 6. **Performance: optimize hot loops** — `ifs-posix` takes ~4 minutes vs bash's ~1s. `arith` takes ~2s vs bash's 0.035s. Profiling needed.
+
+## Recent Fixes (Phase 99)
+
+- **Command substitution expansion in nameref subscript targets** (`src/expand/params.rs`, `src/expand/mod.rs`, `src/interpreter/commands.rs`) — When a nameref target contains `$(...)` in its subscript (e.g. `declare -n foo='x[$(echo 0)]'`), the command substitution is now expanded before the subscript is evaluated arithmetically. Added `CMD_SUB_RUNNER` thread-local in the expand layer (similar to `PROCSUB_RUNNER`) that `lookup_var` uses to invoke the interpreter's `capture_output` for comsub expansion. Registered in both `expand_word_fields` and `expand_word_single`. nameref10.sub flipped to 0 nix diff (was ~6 lines).
+
+- **Command substitution expansion in array subscripts** (`src/expand/params.rs`) — Direct array subscript access like `${x[i=0$(echo comsub >&2)]}` now expands `$(...)` in the subscript via `expand_comsubs_in_arith_expr` before arithmetic evaluation. Previously, `$(...)` in subscripts was passed literally to `eval_arith_full_with_assoc` which couldn't handle command substitutions.
+
+- **Circular nameref warning during expansion** (`src/expand/mod.rs`) — When `$x` is expanded and `x` is part of a circular nameref chain (e.g. `v→w→x→v`), the expand-layer `resolve_nameref` now emits `warning: x: circular name reference` to stderr, matching bash behavior. Added `resolve_nameref_warn_expand` variant that reports circularity; used only in `lookup_var`'s nameref resolution path. nameref8.sub improved (missing warning on line 68 fixed).
 
 ## Recent Fixes (Phase 98)
 

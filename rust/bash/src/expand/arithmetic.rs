@@ -475,10 +475,8 @@ fn resolve_arith_vars(
                     && name != "SRANDOM"
                 {
                     // Resolve namerefs
-                    let resolved_name = namerefs
-                        .get(&name)
-                        .cloned()
-                        .unwrap_or_else(|| name.clone());
+                    let resolved_name =
+                        namerefs.get(&name).cloned().unwrap_or_else(|| name.clone());
                     let exists = vars.contains_key(&resolved_name)
                         || arrays.contains_key(&resolved_name)
                         || assoc_arrays.contains_key(&resolved_name)
@@ -489,8 +487,7 @@ fn resolve_arith_vars(
                             .or_else(|| positional.first())
                             .map(|s| s.as_str())
                             .unwrap_or("bash");
-                        let lineno =
-                            vars.get("LINENO").map(|s| s.as_str()).unwrap_or("0");
+                        let lineno = vars.get("LINENO").map(|s| s.as_str()).unwrap_or("0");
                         eprintln!(
                             "{}: line {}: {}: unbound variable",
                             sname, lineno, resolved_name

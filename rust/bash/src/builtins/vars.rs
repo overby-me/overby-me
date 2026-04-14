@@ -1442,8 +1442,7 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
                     name
                 };
                 let trimmed_val = value.trim();
-                let looks_compound_int =
-                    trimmed_val.starts_with('(') && trimmed_val.ends_with(')');
+                let looks_compound_int = trimmed_val.starts_with('(') && trimmed_val.ends_with(')');
                 if looks_compound_int {
                     // Compound assignment with integer attribute — create array
                     // and evaluate each element as arithmetic
@@ -1459,9 +1458,7 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
                         .collect();
                     shell.arrays.insert(target_for_int.to_string(), evaluated);
                     shell.vars.remove(target_for_int);
-                } else if value.is_empty()
-                    && shell.arrays.contains_key(target_for_int)
-                {
+                } else if value.is_empty() && shell.arrays.contains_key(target_for_int) {
                     // Target already has an array (from pre-processing compound
                     // assignment) — just ensure integer attribute is applied,
                     // don't overwrite with scalar.
@@ -1629,10 +1626,7 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
                     .local_scopes
                     .last()
                     .is_some_and(|s| s.contains_key(name_arg));
-                if !flag_nameref
-                    && shell.namerefs.contains_key(name_arg)
-                    && nameref_already_local
-                {
+                if !flag_nameref && shell.namerefs.contains_key(name_arg) && nameref_already_local {
                     let target = shell.resolve_nameref(name_arg);
                     shell.integer_vars.insert(target);
                 } else {

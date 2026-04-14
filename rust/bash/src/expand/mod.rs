@@ -98,6 +98,11 @@ thread_local! {
     /// a new shell). Set by the interpreter before word expansion.
     #[allow(clippy::type_complexity)]
     static PROCSUB_RUNNER: RefCell<Option<*mut dyn FnMut(&str) -> i32>> = const { RefCell::new(None) };
+    /// Callback for running command substitutions from lookup_var (nameref subscript
+    /// targets containing $(...) need this to expand the comsub). Set by the
+    /// interpreter before word expansion alongside PROCSUB_RUNNER.
+    #[allow(clippy::type_complexity)]
+    static CMD_SUB_RUNNER: RefCell<Option<*mut dyn FnMut(&str) -> String>> = const { RefCell::new(None) };
 }
 
 /// Set the process substitution runner callback (called from the interpreter)
@@ -112,6 +117,36 @@ pub fn clear_procsub_runner() {
     PROCSUB_RUNNER.with(|r| {
         *r.borrow_mut() = None;
     });
+}
+
+/// Set the command substitution runner callback (called from the interpreter)
+/// Safety: caller must ensure the pointer remains valid until expansion completes
+pub fn set_cmd_sub_runner(f: *mut dyn FnMut(&str) -> String) {
+    CMD_SUB_RUNNER.with(|r| {
+        *r.borrow_mut() = Some(f);
+    });
+}
+
+pub fn clear_cmd_sub_runner() {
+    CMD_SUB_RUNNER.with(|r| {
+        *r.borrow_mut() = None;
+    });
+}
+
+/// Run a command substitution using the registered runner (for nameref subscript
+/// targets that contain $(...) and need expansion from lookup_var).
+pub fn run_cmd_sub(cmd: &str) -> Option<String> {
+    let runner = CMD_SUB_RUNNER.with(|r| r.borrow_mut().take());
+    if let Some(ptr) = runner {
+        let f = unsafe { &mut *ptr };
+        let result = f(cmd);
+        CMD_SUB_RUNNER.with(|r| {
+            *r.borrow_mut() = Some(ptr);
+        });
+        Some(result)
+    } else {
+        None
+    }
 }
 
 /// Called by the interpreter after a funsub/valuesub executes to store
@@ -572,10 +607,28 @@ thread_local! {
 
 impl ExpCtx<'_> {
     fn resolve_nameref(&self, name: &str) -> String {
+        self.resolve_nameref_inner(name, false)
+    }
+
+    fn resolve_nameref_warn_expand(&self, name: &str) -> String {
+        self.resolve_nameref_inner(name, true)
+    }
+
+    fn resolve_nameref_inner(&self, name: &str, warn: bool) -> String {
         let mut resolved = name.to_string();
         let mut seen = std::collections::HashSet::new();
         while let Some(target) = self.namerefs.get(&resolved) {
-            if seen.contains(target) {
+            if target.is_empty() || seen.contains(target) {
+                if warn && seen.contains(target) {
+                    // Emit circular nameref warning matching bash
+                    let prefix = EXPAND_ERROR_PREFIX.with(|p| {
+                        let p = p.borrow();
+                        if p.is_empty() { None } else { Some(p.clone()) }
+                    });
+                    if let Some(prefix) = prefix {
+                        eprintln!("{}: warning: {}: circular name reference", prefix, name);
+                    }
+                }
                 break;
             }
             seen.insert(target.clone());
@@ -3081,7 +3134,7 @@ fn expand_arith(expr: &str, ctx: &ExpCtx, cmd_sub: CmdSubFn) -> String {
 /// Expand command substitutions and funsubs within an arithmetic expression string.
 /// This is used by the expand layer (which doesn't have Shell access) to pre-process
 /// $(...), ${ ...; }, and ${| ...; } before passing to eval_arith_full.
-fn expand_comsubs_in_arith_expr(expr: &str, cmd_sub: CmdSubFn) -> String {
+pub fn expand_comsubs_in_arith_expr(expr: &str, cmd_sub: CmdSubFn) -> String {
     let chars: Vec<char> = expr.chars().collect();
     let mut result = String::new();
     let mut i = 0;

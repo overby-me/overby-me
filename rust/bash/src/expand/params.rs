@@ -576,13 +576,22 @@ pub(super) fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
                             }
                         }
                         // Numeric index for indexed arrays — use arithmetic evaluation
+                        // If subscript contains $(...), expand it first via cmd_sub runner
+                        let idx_str = if idx_str.contains("$(") {
+                            std::borrow::Cow::Owned(crate::expand::expand_comsubs_in_arith_expr(
+                                idx_str,
+                                &mut |cmd| crate::expand::run_cmd_sub(cmd).unwrap_or_default(),
+                            ))
+                        } else {
+                            std::borrow::Cow::Borrowed(idx_str)
+                        };
                         let raw_idx: i64 = if idx_str.trim().is_empty() {
                             0
                         } else if let Ok(v) = idx_str.trim().parse::<i64>() {
                             v
                         } else {
                             crate::expand::arithmetic::eval_arith_full_with_assoc(
-                                idx_str,
+                                &idx_str,
                                 ctx.vars,
                                 ctx.arrays,
                                 ctx.assoc_arrays,
@@ -636,13 +645,39 @@ pub(super) fn lookup_var(name: &str, ctx: &ExpCtx) -> String {
                 return String::new();
             }
 
-            // Resolve namerefs
-            let resolved = ctx.resolve_nameref(name);
+            // Resolve namerefs (with warnings for circular references)
+            let resolved = ctx.resolve_nameref_warn_expand(name);
 
             // If the resolved nameref target contains '[', re-dispatch as a
             // subscript lookup.  This handles `declare -n nref='assoc[@]'`
             // where `$nref` should expand to all values of the array.
             if resolved.find('[').is_some() {
+                // If the subscript contains $(...) command substitution,
+                // expand it via the registered cmd_sub runner before lookup.
+                let resolved = if resolved.contains("$(") {
+                    if let Some(bracket_pos) = resolved.find('[') {
+                        let base = &resolved[..bracket_pos];
+                        let subscript_with_brackets = &resolved[bracket_pos..];
+                        // Extract subscript content between [ and ]
+                        if let (Some(open), Some(close)) = (
+                            subscript_with_brackets.find('['),
+                            subscript_with_brackets.rfind(']'),
+                        ) {
+                            let subscript = &subscript_with_brackets[open + 1..close];
+                            let expanded_sub = crate::expand::expand_comsubs_in_arith_expr(
+                                subscript,
+                                &mut |cmd| crate::expand::run_cmd_sub(cmd).unwrap_or_default(),
+                            );
+                            format!("{}[{}]", base, expanded_sub)
+                        } else {
+                            resolved
+                        }
+                    } else {
+                        resolved
+                    }
+                } else {
+                    resolved
+                };
                 // Re-enter lookup_var with the resolved subscripted name
                 return lookup_var(&resolved, ctx);
             }
