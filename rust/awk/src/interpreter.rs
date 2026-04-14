@@ -1501,8 +1501,22 @@ impl Interpreter {
                     let mut saved_arrays: Vec<(String, Option<HashMap<String, Value>>)> =
                         Vec::new();
 
-                    // Evaluate args before modifying scope
-                    let arg_vals: Vec<Value> = args.iter().map(|a| self.eval_expr(a)).collect();
+                    // Collect argument info: (value, array_name if it's an array ref)
+                    let mut arg_vals: Vec<Value> = Vec::new();
+                    let mut arg_arrays: Vec<Option<(String, HashMap<String, Value>)>> = Vec::new();
+                    for arg in args {
+                        if let Expr::Var(var_name) = arg {
+                            if self.arrays.contains_key(var_name) {
+                                // Pass array by reference: copy array data
+                                let arr = self.arrays.get(var_name).cloned().unwrap_or_default();
+                                arg_vals.push(Value::Uninitialized);
+                                arg_arrays.push(Some((var_name.clone(), arr)));
+                                continue;
+                            }
+                        }
+                        arg_vals.push(self.eval_expr(arg));
+                        arg_arrays.push(None);
+                    }
 
                     for (i, param) in func.params.iter().enumerate() {
                         // Save old value
@@ -1510,7 +1524,12 @@ impl Interpreter {
                         saved_arrays.push((param.clone(), self.arrays.remove(param)));
 
                         if i < arg_vals.len() {
-                            self.set_var(param, arg_vals[i].clone());
+                            if let Some(Some((_, arr_data))) = arg_arrays.get(i) {
+                                // Pass array by reference
+                                self.arrays.insert(param.clone(), arr_data.clone());
+                            } else {
+                                self.set_var(param, arg_vals[i].clone());
+                            }
                         } else {
                             // Extra params are local variables, initialized to 0/""
                             self.set_var(param, Value::Uninitialized);
@@ -1521,6 +1540,17 @@ impl Interpreter {
                         ControlFlow::Return(val) => val,
                         _ => Value::Uninitialized,
                     };
+
+                    // Copy back arrays to original names (for pass-by-reference)
+                    for (i, _arg) in args.iter().enumerate() {
+                        if let Some(Some((orig_name, _))) = arg_arrays.get(i) {
+                            if let Some(param) = func.params.get(i) {
+                                if let Some(arr) = self.arrays.get(param).cloned() {
+                                    self.arrays.insert(orig_name.clone(), arr);
+                                }
+                            }
+                        }
+                    }
 
                     // Restore scope
                     for (name, old_val) in saved_vars {
