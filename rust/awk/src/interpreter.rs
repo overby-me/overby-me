@@ -733,6 +733,66 @@ impl Interpreter {
         }
     }
 
+    /// Compile a regex, handling awk-specific patterns that Rust's regex crate
+    /// might reject (e.g., leading +, *, ? which awk treats as literals).
+    fn compile_regex(pattern: &str) -> Option<Regex> {
+        // Pre-process: in awk, quantifiers (+, *, ?) after anchors (^) or at
+        // start of alternatives (|, () are literals. Fix before compiling.
+        let fixed = Self::fix_awk_regex(pattern);
+        Regex::new(&fixed).ok()
+    }
+
+    fn fix_awk_regex(pattern: &str) -> String {
+        let chars: Vec<char> = pattern.chars().collect();
+        let mut result = String::new();
+        let mut i = 0;
+        while i < chars.len() {
+            if chars[i] == '\\' && i + 1 < chars.len() {
+                // Escaped char — pass through
+                result.push(chars[i]);
+                i += 1;
+                result.push(chars[i]);
+                i += 1;
+            } else if chars[i] == '[' {
+                // Character class — pass through until closing ]
+                result.push(chars[i]);
+                i += 1;
+                // Handle ] as first char in class
+                if i < chars.len() && chars[i] == '^' {
+                    result.push(chars[i]);
+                    i += 1;
+                }
+                if i < chars.len() && chars[i] == ']' {
+                    result.push(chars[i]);
+                    i += 1;
+                }
+                while i < chars.len() && chars[i] != ']' {
+                    if chars[i] == '\\' && i + 1 < chars.len() {
+                        result.push(chars[i]);
+                        i += 1;
+                    }
+                    result.push(chars[i]);
+                    i += 1;
+                }
+                if i < chars.len() {
+                    result.push(chars[i]); // ]
+                    i += 1;
+                }
+            } else if (chars[i] == '+' || chars[i] == '*' || chars[i] == '?')
+                && (i == 0 || matches!(chars[i - 1], '^' | '|' | '('))
+            {
+                // Quantifier in invalid position — treat as literal
+                result.push('\\');
+                result.push(chars[i]);
+                i += 1;
+            } else {
+                result.push(chars[i]);
+                i += 1;
+            }
+        }
+        result
+    }
+
     /// Extract a regex pattern from an expression.
     /// Handles both Expr::Regex(r) and Expr::Match($0, Regex(r)) which is
     /// how the parser wraps bare /regex/ literals.
@@ -955,24 +1015,26 @@ impl Interpreter {
             }
             Expr::Match(left, right) => {
                 let s = self.eval_expr(left).to_string_val();
-                let pattern = match right.as_ref() {
-                    Expr::Regex(r) => r.clone(),
-                    _ => self.eval_expr(right).to_string_val(),
+                let pattern = if let Some(r) = self.extract_regex_pattern(right) {
+                    r
+                } else {
+                    self.eval_expr(right).to_string_val()
                 };
-                match Regex::new(&pattern) {
-                    Ok(re) => Value::Num(if re.is_match(&s) { 1.0 } else { 0.0 }),
-                    Err(_) => Value::Num(0.0),
+                match Self::compile_regex(&pattern) {
+                    Some(re) => Value::Num(if re.is_match(&s) { 1.0 } else { 0.0 }),
+                    None => Value::Num(0.0),
                 }
             }
             Expr::NotMatch(left, right) => {
                 let s = self.eval_expr(left).to_string_val();
-                let pattern = match right.as_ref() {
-                    Expr::Regex(r) => r.clone(),
-                    _ => self.eval_expr(right).to_string_val(),
+                let pattern = if let Some(r) = self.extract_regex_pattern(right) {
+                    r
+                } else {
+                    self.eval_expr(right).to_string_val()
                 };
-                match Regex::new(&pattern) {
-                    Ok(re) => Value::Num(if re.is_match(&s) { 0.0 } else { 1.0 }),
-                    Err(_) => Value::Num(1.0),
+                match Self::compile_regex(&pattern) {
+                    Some(re) => Value::Num(if re.is_match(&s) { 0.0 } else { 1.0 }),
+                    None => Value::Num(1.0),
                 }
             }
             Expr::Ternary(cond, then_expr, else_expr) => {
@@ -1150,8 +1212,8 @@ impl Interpreter {
                 let target_val = self.eval_expr(&target_expr).to_string_val();
                 let is_global = name == "gsub";
 
-                match Regex::new(&pattern) {
-                    Ok(re) => {
+                match Self::compile_regex(&pattern) {
+                    Some(re) => {
                         let mut count = 0;
                         let result = if is_global {
                             let r = re.replace_all(&target_val, |caps: &regex::Captures| {
@@ -1169,7 +1231,7 @@ impl Interpreter {
                         self.assign_to(&target_expr, Value::Str(result));
                         Value::Num(count as f64)
                     }
-                    Err(_) => Value::Num(0.0),
+                    None => Value::Num(0.0),
                 }
             }
             "gensub" => {
@@ -1192,8 +1254,8 @@ impl Interpreter {
 
                 let is_global = how == "g" || how == "G";
 
-                match Regex::new(&pattern) {
-                    Ok(re) => {
+                match Self::compile_regex(&pattern) {
+                    Some(re) => {
                         let result = if is_global {
                             re.replace_all(&target, |caps: &regex::Captures| {
                                 gensub_replace(&replacement, caps)
@@ -1214,7 +1276,7 @@ impl Interpreter {
                         };
                         Value::Str(result)
                     }
-                    Err(_) => Value::Str(target),
+                    None => Value::Str(target),
                 }
             }
             "match" => {
@@ -1227,8 +1289,8 @@ impl Interpreter {
                 } else {
                     self.eval_expr(&args[1]).to_string_val()
                 };
-                match Regex::new(&pattern) {
-                    Ok(re) => {
+                match Self::compile_regex(&pattern) {
+                    Some(re) => {
                         if let Some(m) = re.find(&s) {
                             let start = s[..m.start()].chars().count() + 1;
                             let length = m.as_str().chars().count();
@@ -1241,7 +1303,7 @@ impl Interpreter {
                             Value::Num(0.0)
                         }
                     }
-                    Err(_) => {
+                    None => {
                         self.set_var("RSTART", Value::Num(0.0));
                         self.set_var("RLENGTH", Value::Num(-1.0));
                         Value::Num(0.0)
