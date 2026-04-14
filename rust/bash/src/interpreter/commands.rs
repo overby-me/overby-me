@@ -6075,6 +6075,11 @@ impl Shell {
                 );
             }
             if exited {
+                // Clean up _PID variable (force remove even if readonly)
+                let pid_key = format!("{}_PID", name);
+                self.vars.remove(&pid_key);
+                self.readonly_vars.remove(&pid_key);
+                self.declared_unset.remove(&pid_key);
                 self.coproc_info = None;
             }
         }

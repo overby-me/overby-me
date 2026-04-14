@@ -759,12 +759,20 @@ fn cleanup_reaped_coprocs(shell: &mut crate::interpreter::Shell) {
     // the PID variable (so coproc_names above is empty)
     if let Some((name, pid)) = shell.coproc_info.take() {
         let alive = kill(Pid::from_raw(pid), None).is_ok();
-        if !alive && shell.readonly_vars.contains(name.as_str()) {
-            eprintln!(
-                "{}: {}: cannot unset: readonly variable",
-                shell.error_prefix(),
-                name
-            );
+        if !alive {
+            if shell.readonly_vars.contains(name.as_str()) {
+                eprintln!(
+                    "{}: {}: cannot unset: readonly variable",
+                    shell.error_prefix(),
+                    name
+                );
+            }
+            // Also clean up the _PID variable (force remove even if readonly,
+            // since coproc cleanup in bash removes _PID unconditionally)
+            let pid_key = format!("{}_PID", name);
+            shell.vars.remove(&pid_key);
+            shell.readonly_vars.remove(&pid_key);
+            shell.declared_unset.remove(&pid_key);
         }
     }
 }
