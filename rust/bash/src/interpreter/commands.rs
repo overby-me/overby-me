@@ -5268,25 +5268,35 @@ impl Shell {
                 print_menu = false;
             }
 
-            // Print prompt to stderr
+            // Read first byte to check for EOF before printing prompt.
+            // This avoids printing "#? " right before EOF on here-strings.
+            let mut first_buf = [0u8; 1];
+            let first_n = unsafe { libc::read(0, first_buf.as_mut_ptr() as *mut _, 1) };
+            if first_n <= 0 {
+                return status; // EOF
+            }
+
+            // Print prompt to stderr (after confirming input is available)
             eprint!("{}", ps3);
             let _ = std::io::stderr().flush();
 
-            // Read a line from stdin using raw read (fd 0) to avoid
-            // buffering issues with stdin lock across iterations
+            // Build the line from the first byte + remaining
             let mut line = String::new();
-            let mut buf = [0u8; 1];
-            loop {
-                let n = unsafe { libc::read(0, buf.as_mut_ptr() as *mut _, 1) };
-                if n <= 0 {
-                    // EOF
-                    return status;
-                }
-                let ch = buf[0] as char;
-                if ch == '\n' {
-                    break;
-                }
+            let ch = first_buf[0] as char;
+            if ch != '\n' {
                 line.push(ch);
+                let mut buf = [0u8; 1];
+                loop {
+                    let n = unsafe { libc::read(0, buf.as_mut_ptr() as *mut _, 1) };
+                    if n <= 0 {
+                        break; // EOF mid-line
+                    }
+                    let ch = buf[0] as char;
+                    if ch == '\n' {
+                        break;
+                    }
+                    line.push(ch);
+                }
             }
 
             // Set REPLY to the input line
