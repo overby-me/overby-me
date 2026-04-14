@@ -2,7 +2,16 @@
 
 ## Current Status
 
-**104/241 tests passing** (43%) — BASIC_TESTS from the GNU gawk 5.3.2 test suite.
+**~110/241 tests passing** (46%) — BASIC_TESTS from the GNU gawk 5.3.2 test suite.
+
+### Recent fixes
+
+- Split main.rs into modules: lexer, ast, parser, value, format, interpreter
+- Fixed `printf`/`print` with parenthesized args: `printf(fmt, args...)`
+- Fixed `%d`/`%i` with precision (`%8.5d`), `%.0d` with zero, `%#o`/`%#x` prefix
+- Fixed zero-flag ignored when precision given for integers (POSIX)
+- Fixed `%c` to prefer string's first char over numeric conversion
+- Fixed array auto-vivification on element read
 
 Tests compare rust-awk output against reference gawk output in a Nix sandbox.
 
