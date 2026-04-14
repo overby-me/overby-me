@@ -4342,8 +4342,42 @@ impl Shell {
                                     }
                                     NamerefResolveResult::CircularExact => {
                                         // Self-referential (e.g. local -n a=a; a=X)
-                                        // Emit depth-exceeded warning and continue
+                                        // Emit depth-exceeded warning and assign to both
+                                        // current array AND saved scope
                                         self.resolve_nameref_warn_depth_only(&assign.name);
+                                        let final_value =
+                                            if self.integer_vars.contains(&resolved) {
+                                                self.eval_arith_expr(&value).to_string()
+                                            } else {
+                                                value
+                                            };
+                                        // Assign to current array
+                                        self.declared_unset.remove(&resolved);
+                                        let arr =
+                                            self.arrays.entry(resolved.clone()).or_default();
+                                        if arr.is_empty() {
+                                            arr.push(Some(final_value.clone()));
+                                        } else {
+                                            arr[0] = Some(final_value.clone());
+                                        }
+                                        // Also update the saved scope so the value
+                                        // persists after function return
+                                        for scope in self.local_scopes.iter_mut().rev() {
+                                            if let Some(saved) = scope.get_mut(&resolved) {
+                                                if let Some(ref mut arr) = saved.array {
+                                                    if arr.is_empty() {
+                                                        arr.push(Some(final_value));
+                                                    } else {
+                                                        arr[0] = Some(final_value);
+                                                    }
+                                                } else {
+                                                    saved.array =
+                                                        Some(vec![Some(final_value)]);
+                                                }
+                                                break;
+                                            }
+                                        }
+                                        return;
                                     }
                                     NamerefResolveResult::Resolved => {}
                                 }
