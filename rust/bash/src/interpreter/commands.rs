@@ -121,13 +121,22 @@ impl Shell {
 
         let coproc_name = name.unwrap_or("COPROC");
 
-        // Validate coproc name is a valid identifier
+        // Validate coproc name is a valid identifier.
+        // If the name is a nameref, also validate the resolved target.
         if !is_valid_identifier(coproc_name) {
             eprintln!(
                 "{}: `{}': not a valid identifier",
                 self.error_prefix(),
                 coproc_name
             );
+        } else if let Some(target) = self.namerefs.get(coproc_name) {
+            if !target.is_empty() && !is_valid_identifier(target) {
+                eprintln!(
+                    "{}: `{}': not a valid identifier",
+                    self.error_prefix(),
+                    target
+                );
+            }
         }
 
         // If coproc name is a nameref with empty target, remove nameref
