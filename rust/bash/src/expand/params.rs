@@ -1679,9 +1679,11 @@ pub(super) fn expand_param(expr: &ParamExpr, ctx: &ExpCtx, cmd_sub: CmdSubFn) ->
     };
 
     // For $@ and $* with operations, apply per-element
+    // Include offset=0 case which needs $0 even with no positional args
     if (expr.name == "@" || expr.name == "*")
         && !matches!(expr.op, ParamOp::None | ParamOp::Length)
-        && ctx.positional.len() > 1
+        && (ctx.positional.len() > 1
+            || (matches!(&expr.op, ParamOp::Substring(..)) && !ctx.positional.is_empty()))
     {
         let sep = ifs_join_sep(expr.name == "*");
 

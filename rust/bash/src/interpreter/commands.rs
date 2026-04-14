@@ -121,6 +121,15 @@ impl Shell {
 
         let coproc_name = name.unwrap_or("COPROC");
 
+        // Validate coproc name is a valid identifier
+        if !is_valid_identifier(coproc_name) {
+            eprintln!(
+                "{}: `{}': not a valid identifier",
+                self.error_prefix(),
+                coproc_name
+            );
+        }
+
         // Check if coproc name is readonly — bash emits two errors:
         // "readonly variable" (can't create array) and "cannot unset"
         // (can't clear existing readonly value to make room)

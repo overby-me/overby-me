@@ -2544,7 +2544,7 @@ fn expand_part(part: &WordPart, ctx: &ExpCtx, out: &mut Vec<Segment>, cmd_sub: C
                 // which then doesn't split correctly when IFS is non-default.
                 if (expr.name == "@" || expr.name == "*")
                     && let ParamOp::Substring(ref offset_str, ref length_str) = expr.op
-                    && ctx.positional.len() > 1
+                    && !ctx.positional.is_empty()
                 {
                     let offset: i64 =
                         parse_arith_offset(offset_str.trim(), &expr.name, ctx, cmd_sub);
