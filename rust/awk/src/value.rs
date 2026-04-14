@@ -32,6 +32,24 @@ impl Value {
         }
     }
 
+    /// Format a number using OFMT/CONVFMT format string
+    pub fn to_string_with_fmt(&self, fmt: &str) -> String {
+        match self {
+            Value::Num(n) => {
+                let n = *n;
+                // If it's an integer, print as integer (no OFMT needed)
+                if n.fract() == 0.0 && n.abs() < 1e16 && !n.is_nan() && !n.is_infinite() {
+                    format!("{}", n as i64)
+                } else {
+                    use crate::format::sprintf_impl;
+                    sprintf_impl(&[Value::Str(fmt.to_string()), Value::Num(n)])
+                }
+            }
+            Value::Str(s) => s.clone(),
+            Value::Uninitialized => String::new(),
+        }
+    }
+
     pub fn to_bool(&self) -> bool {
         match self {
             Value::Num(n) => *n != 0.0,
@@ -60,9 +78,37 @@ pub fn parse_num(s: &str) -> f64 {
     if s.is_empty() {
         return 0.0;
     }
+    let chars: Vec<char> = s.chars().collect();
+
+    // Check for hex: 0x or 0X
+    let mut start = 0;
+    let neg = if !chars.is_empty() && chars[0] == '-' {
+        start = 1;
+        true
+    } else if !chars.is_empty() && chars[0] == '+' {
+        start = 1;
+        false
+    } else {
+        false
+    };
+
+    if start + 1 < chars.len()
+        && chars[start] == '0'
+        && (chars[start + 1] == 'x' || chars[start + 1] == 'X')
+    {
+        let mut end = start + 2;
+        while end < chars.len() && chars[end].is_ascii_hexdigit() {
+            end += 1;
+        }
+        if end > start + 2 {
+            let hex_str: String = chars[start + 2..end].iter().collect();
+            let val = i64::from_str_radix(&hex_str, 16).unwrap_or(0) as f64;
+            return if neg { -val } else { val };
+        }
+    }
+
     // Parse as much of the leading part as possible
     let mut end = 0;
-    let chars: Vec<char> = s.chars().collect();
     if end < chars.len() && (chars[end] == '+' || chars[end] == '-') {
         end += 1;
     }

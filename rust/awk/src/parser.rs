@@ -627,6 +627,12 @@ impl Parser {
 
     fn parse_unary(&mut self) -> Expr {
         match self.peek() {
+            Token::Plus => {
+                self.advance();
+                let expr = self.parse_unary();
+                // Unary plus: coerce to number by adding 0
+                Expr::Binop(Box::new(expr), BinOp::Add, Box::new(Expr::Number(0.0)))
+            }
             Token::Minus => {
                 self.advance();
                 let expr = self.parse_unary();

@@ -78,15 +78,18 @@ pub fn sprintf_impl(vals: &[Value]) -> String {
             };
             arg_idx += 1;
 
-            let width_num: usize = width.parse().unwrap_or(0);
+            let width_val: i64 = width.parse().unwrap_or(0);
+            let width_num: usize = width_val.unsigned_abs() as usize;
             let prec_num: usize = precision.parse().unwrap_or(6);
-            let left_align = flags.contains('-');
+            // Negative width from * means left-align
+            let left_align = flags.contains('-') || width_val < 0;
             // Zero flag is ignored when precision is given for integer conversions
             let zero_pad = flags.contains('0')
                 && !left_align
                 && !(has_precision && matches!(conv, 'd' | 'i' | 'o' | 'x' | 'X' | 'u'));
             let plus_sign = flags.contains('+');
             let space_sign = flags.contains(' ');
+            let alt_form = flags.contains('#');
 
             let formatted = match conv {
                 'd' | 'i' => {
@@ -188,8 +191,30 @@ pub fn sprintf_impl(vals: &[Value]) -> String {
                 }
                 'f' => {
                     let n = val.to_num();
+                    if n.is_nan() {
+                        "nan".to_string()
+                    } else if n.is_infinite() {
+                        if n < 0.0 { "-inf".to_string() } else { "inf".to_string() }
+                    } else {
+                        let p = if has_precision { prec_num } else { 6 };
+                        let mut s = format!("{n:.prec$}", prec = p);
+                        // # flag: always show decimal point
+                        if alt_form && p == 0 && !s.contains('.') {
+                            s.push('.');
+                        }
+                        if plus_sign && n >= 0.0 {
+                            format!("+{s}")
+                        } else if space_sign && n >= 0.0 {
+                            format!(" {s}")
+                        } else {
+                            s
+                        }
+                    }
+                }
+                'e' => {
+                    let n = val.to_num();
                     let p = if has_precision { prec_num } else { 6 };
-                    let s = format!("{n:.prec$}", prec = p);
+                    let s = format_scientific(n, p, false);
                     if plus_sign && n >= 0.0 {
                         format!("+{s}")
                     } else if space_sign && n >= 0.0 {
@@ -198,20 +223,34 @@ pub fn sprintf_impl(vals: &[Value]) -> String {
                         s
                     }
                 }
-                'e' => {
-                    let n = val.to_num();
-                    let p = if has_precision { prec_num } else { 6 };
-                    format_scientific(n, p, false)
-                }
                 'E' => {
                     let n = val.to_num();
                     let p = if has_precision { prec_num } else { 6 };
-                    format_scientific(n, p, true)
+                    let s = format_scientific(n, p, true);
+                    if plus_sign && n >= 0.0 {
+                        format!("+{s}")
+                    } else if space_sign && n >= 0.0 {
+                        format!(" {s}")
+                    } else {
+                        s
+                    }
                 }
                 'g' | 'G' => {
                     let n = val.to_num();
                     let p = if has_precision { prec_num.max(1) } else { 6 };
-                    format_g(n, p, conv == 'G')
+                    let s = if alt_form {
+                        // # flag: don't strip trailing zeros
+                        format_g_alt(n, p, conv == 'G')
+                    } else {
+                        format_g(n, p, conv == 'G')
+                    };
+                    if plus_sign && n >= 0.0 {
+                        format!("+{s}")
+                    } else if space_sign && n >= 0.0 {
+                        format!(" {s}")
+                    } else {
+                        s
+                    }
                 }
                 _ => format!("%{conv}"),
             };
@@ -312,6 +351,13 @@ pub fn awk_replace(replacement: &str, caps: &regex::Captures) -> String {
 }
 
 pub fn format_scientific(n: f64, prec: usize, upper: bool) -> String {
+    if n.is_nan() {
+        return if upper { "NAN".to_string() } else { "nan".to_string() };
+    }
+    if n.is_infinite() {
+        let s = if upper { "INF" } else { "inf" };
+        return if n < 0.0 { format!("-{s}") } else { s.to_string() };
+    }
     if n == 0.0 {
         let e_char = if upper { 'E' } else { 'e' };
         return format!("0.{:0>width$}{e_char}+00", "", width = prec);
@@ -330,14 +376,17 @@ pub fn format_scientific(n: f64, prec: usize, upper: bool) -> String {
 }
 
 pub fn format_g(n: f64, prec: usize, upper: bool) -> String {
+    if n.is_nan() {
+        return if upper { "NAN".to_string() } else { "nan".to_string() };
+    }
+    if n.is_infinite() {
+        let s = if upper { "INF" } else { "inf" };
+        return if n < 0.0 { format!("-{s}") } else { s.to_string() };
+    }
     if n == 0.0 {
         return "0".to_string();
     }
-    let exp = if n == 0.0 {
-        0
-    } else {
-        n.abs().log10().floor() as i32
-    };
+    let exp = n.abs().log10().floor() as i32;
     if exp >= -(prec as i32) && exp < prec as i32 {
         // Use fixed notation
         let decimal_places = if prec as i32 - 1 - exp > 0 {
@@ -356,6 +405,38 @@ pub fn format_g(n: f64, prec: usize, upper: bool) -> String {
         }
     } else {
         // Use scientific notation
+        let p = if prec > 0 { prec - 1 } else { 0 };
+        format_scientific(n, p, upper)
+    }
+}
+
+/// Like format_g but with # flag: don't strip trailing zeros, always show decimal point
+pub fn format_g_alt(n: f64, prec: usize, upper: bool) -> String {
+    if n.is_nan() {
+        return if upper { "NAN".to_string() } else { "nan".to_string() };
+    }
+    if n.is_infinite() {
+        let s = if upper { "INF" } else { "inf" };
+        return if n < 0.0 { format!("-{s}") } else { s.to_string() };
+    }
+    if n == 0.0 {
+        return format!("0.{:0>width$}", "", width = prec.saturating_sub(1).max(1));
+    }
+    let exp = n.abs().log10().floor() as i32;
+    if exp >= -(prec as i32) && exp < prec as i32 {
+        let decimal_places = if prec as i32 - 1 - exp > 0 {
+            (prec as i32 - 1 - exp) as usize
+        } else {
+            0
+        };
+        let s = format!("{n:.prec$}", prec = decimal_places);
+        // # flag: keep trailing zeros and decimal point
+        if !s.contains('.') {
+            format!("{s}.")
+        } else {
+            s
+        }
+    } else {
         let p = if prec > 0 { prec - 1 } else { 0 };
         format_scientific(n, p, upper)
     }

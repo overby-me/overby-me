@@ -397,12 +397,17 @@ impl Interpreter {
                     .get("ORS")
                     .map(|v| v.to_string_val())
                     .unwrap_or("\n".to_string());
+                let ofmt = self
+                    .globals
+                    .get("OFMT")
+                    .map(|v| v.to_string_val())
+                    .unwrap_or("%.6g".to_string());
 
                 let output = if args.is_empty() {
                     self.get_field(0)
                 } else {
                     args.iter()
-                        .map(|a| self.eval_expr(a).to_string_val())
+                        .map(|a| self.eval_expr(a).to_string_with_fmt(&ofmt))
                         .collect::<Vec<_>>()
                         .join(&ofs)
                 };
@@ -962,8 +967,15 @@ impl Interpreter {
                 }
             }
             Expr::Concat(left, right) => {
-                let ls = self.eval_expr(left).to_string_val();
-                let rs = self.eval_expr(right).to_string_val();
+                let convfmt = self
+                    .globals
+                    .get("CONVFMT")
+                    .map(|v| v.to_string_val())
+                    .unwrap_or("%.6g".to_string());
+                let lv = self.eval_expr(left);
+                let rv = self.eval_expr(right);
+                let ls = lv.to_string_with_fmt(&convfmt);
+                let rs = rv.to_string_with_fmt(&convfmt);
                 Value::Str(format!("{ls}{rs}"))
             }
             Expr::In(expr, array) => {
