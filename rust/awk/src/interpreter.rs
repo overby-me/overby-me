@@ -1206,8 +1206,20 @@ impl Interpreter {
                         .map(|p| p.to_string())
                         .collect()
                 } else {
-                    match Regex::new(&fs) {
-                        Ok(re) => re.split(&s).map(|p| p.to_string()).collect(),
+                    let fixed_fs = Self::fix_awk_regex(&fs);
+                    match Regex::new(&fixed_fs) {
+                        Ok(re) => {
+                            let mut parts: Vec<String> =
+                                re.split(&s).map(|p| p.to_string()).collect();
+                            // Remove leading/trailing empty strings from anchor matches
+                            if parts.first().is_some_and(|p| p.is_empty()) && parts.len() > 1 {
+                                parts.remove(0);
+                            }
+                            if parts.last().is_some_and(|p| p.is_empty()) && parts.len() > 1 {
+                                parts.pop();
+                            }
+                            parts
+                        }
                         Err(_) => s.split(&fs).map(|p| p.to_string()).collect(),
                     }
                 };
@@ -1225,8 +1237,8 @@ impl Interpreter {
                 let pattern = if let Some(r) = self.extract_regex_pattern(&args[0]) {
                     r
                 } else {
-                    let v = self.eval_expr(&args[0]);
-                    regex::escape(&v.to_string_val())
+                    // String patterns are used as regex in sub/gsub (not escaped)
+                    self.eval_expr(&args[0]).to_string_val()
                 };
                 let replacement = self.eval_expr(&args[1]).to_string_val();
 
