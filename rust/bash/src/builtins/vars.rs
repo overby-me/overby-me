@@ -423,18 +423,21 @@ pub(super) fn builtin_unset(shell: &mut Shell, args: &[String]) -> i32 {
                 status = 1;
                 continue;
             }
-            shell.namerefs.remove(name);
-            shell.vars.remove(name);
-            shell.arrays.remove(name);
-            shell.assoc_arrays.remove(name);
-            shell.exports.remove(name);
-            shell.integer_vars.remove(name);
-            shell.uppercase_vars.remove(name);
-            shell.lowercase_vars.remove(name);
-            shell.capitalize_vars.remove(name);
-            if !name.is_empty() {
-                unsafe { std::env::remove_var(name) };
+            if shell.namerefs.remove(name).is_some() {
+                // Was a nameref: fully unset
+                shell.vars.remove(name);
+                shell.arrays.remove(name);
+                shell.assoc_arrays.remove(name);
+                shell.exports.remove(name);
+                shell.integer_vars.remove(name);
+                shell.uppercase_vars.remove(name);
+                shell.lowercase_vars.remove(name);
+                shell.capitalize_vars.remove(name);
+                if !name.is_empty() {
+                    unsafe { std::env::remove_var(name) };
+                }
             }
+            // If NOT a nameref, `unset -n` is a no-op (bash behavior)
         } else if shell.namerefs.contains_key(name) {
             // unset through nameref: unset the target variable, keep the nameref
             let resolved = shell.resolve_nameref(name);
