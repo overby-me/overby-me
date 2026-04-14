@@ -55,6 +55,17 @@ pub struct Common {
     /// -P InvocationID` can read it even while the service state write-lock
     /// is held during `activate` → `wait_for_service`.
     pub invocation_id: std::sync::Mutex<String>,
+    /// Lock-free MainPID readable without the per-service state lock.
+    /// Updated by start_service after forking, so `systemctl show -P MainPID`
+    /// can read it even while the service state write-lock is held during
+    /// oneshot activation.  0 means no main process.
+    pub main_pid: std::sync::atomic::AtomicI32,
+    /// Lock-free ExecMainPID readable without the per-service state lock.
+    /// Set when the main process is forked, persists after exit for property queries.
+    pub main_exit_pid: std::sync::atomic::AtomicI32,
+    /// Lock-free ExecMainStatus readable without the per-service state lock.
+    /// Set by the exit handler when the main process exits.  -1 means unset.
+    pub main_exit_status: std::sync::atomic::AtomicI32,
 }
 
 /// Lifecycle timestamps for a unit, tracking when it transitions between
@@ -314,18 +325,11 @@ impl ServiceState {
         status: &RwLock<UnitStatus>,
         run_info: &RuntimeInfo,
         source: ActivationSource,
-        common_invocation_id: &std::sync::Mutex<String>,
+        common: &Common,
     ) -> Result<UnitStatus, UnitOperationError> {
         let start_res = self
             .srvc
-            .start(
-                conf,
-                id.clone(),
-                &id.name,
-                run_info,
-                source,
-                common_invocation_id,
-            )
+            .start(conf, id.clone(), &id.name, run_info, source, common)
             .map_err(|e| UnitOperationError {
                 unit_name: id.name.clone(),
                 unit_id: id.clone(),
@@ -541,7 +545,7 @@ impl ServiceState {
         status: &RwLock<UnitStatus>,
         run_info: &RuntimeInfo,
         source: ActivationSource,
-        common_invocation_id: &std::sync::Mutex<String>,
+        common: &Common,
     ) -> Result<(), UnitOperationError> {
         // Mark the unit as Stopping before killing so that the exit handler
         // recognises the SIGKILL as intentional and doesn't flip the status
@@ -632,14 +636,7 @@ impl ServiceState {
         // Restart and set the status according to the result
         let start_res = self
             .srvc
-            .start(
-                conf,
-                id.clone(),
-                &id.name,
-                run_info,
-                source,
-                common_invocation_id,
-            )
+            .start(conf, id.clone(), &id.name, run_info, source, common)
             .map_err(|e| UnitOperationError {
                 unit_name: id.name.clone(),
                 unit_id: id.clone(),
@@ -1501,7 +1498,7 @@ impl Unit {
                     &self.common.status,
                     run_info,
                     source,
-                    &self.common.invocation_id,
+                    &self.common,
                 )
             }
             LockedState::Mount(_, conf) => activate_mount(&self.id, conf, &self.common.status),
@@ -1745,7 +1742,7 @@ impl Unit {
                         &self.common.status,
                         run_info,
                         source,
-                        &self.common.invocation_id,
+                        &self.common,
                     )
                 }
                 LockedState::Mount(_, conf) => {
@@ -1814,7 +1811,7 @@ impl Unit {
                             &self.common.status,
                             run_info,
                             source,
-                            &self.common.invocation_id,
+                            &self.common,
                         )
                         .map(|_| ())
                 }

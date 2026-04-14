@@ -435,7 +435,7 @@ impl Service {
         name: &str,
         run_info: &RuntimeInfo,
         source: ActivationSource,
-        common_invocation_id: &std::sync::Mutex<String>,
+        common: &crate::units::Common,
     ) -> Result<StartResult, ServiceErrorReason> {
         if let Some(pid) = self.pid {
             return Err(ServiceErrorReason::AlreadyHasPID(pid));
@@ -472,6 +472,13 @@ impl Service {
         self.main_exit_status = None;
         self.extend_timeout_usec = None;
         self.extend_timeout_timestamp = None;
+        // Reset lock-free atomics for the new invocation.
+        common
+            .main_pid
+            .store(0, std::sync::atomic::Ordering::Release);
+        common
+            .main_exit_status
+            .store(-1, std::sync::atomic::Ordering::Release);
 
         super::prepare_service::prepare_service(
             self,
@@ -593,7 +600,18 @@ impl Service {
                 // `systemctl show -P InvocationID` can read it even while
                 // the service state write-lock is held during wait_for_service.
                 if let Some(ref inv_id) = self.invocation_id {
-                    *common_invocation_id.lock().unwrap() = inv_id.clone();
+                    *common.invocation_id.lock().unwrap() = inv_id.clone();
+                }
+
+                // Copy MainPID to the lock-free Common field so that
+                // `systemctl show -P MainPID` works during oneshot activation.
+                if let Some(pid) = self.pid {
+                    common
+                        .main_pid
+                        .store(pid.as_raw(), std::sync::atomic::Ordering::Release);
+                    common
+                        .main_exit_pid
+                        .store(pid.as_raw(), std::sync::atomic::Ordering::Release);
                 }
 
                 // Only wait for the service if it was actually spawned (has a PID).

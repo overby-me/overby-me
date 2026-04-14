@@ -394,11 +394,34 @@ pub fn collect_properties(unit: &Unit) -> PropertyMap {
                 );
             } else {
                 // State lock is contended (service is activating).
-                // Provide sensible defaults so `systemctl show` doesn't hang.
+                // Read lock-free atomics so `systemctl show` returns real values.
                 insert(&mut props, "NotifyAccess", "none");
-                insert(&mut props, "MainPID", "0");
-                insert(&mut props, "ExecMainPID", "0");
-                insert(&mut props, "ExecMainStatus", "0");
+                {
+                    let pid = unit
+                        .common
+                        .main_pid
+                        .load(std::sync::atomic::Ordering::Acquire);
+                    insert(&mut props, "MainPID", &pid.to_string());
+                }
+                {
+                    let exit_pid = unit
+                        .common
+                        .main_exit_pid
+                        .load(std::sync::atomic::Ordering::Acquire);
+                    insert(&mut props, "ExecMainPID", &exit_pid.to_string());
+                }
+                {
+                    let exit_status = unit
+                        .common
+                        .main_exit_status
+                        .load(std::sync::atomic::Ordering::Acquire);
+                    // -1 means unset → report as 0
+                    insert(
+                        &mut props,
+                        "ExecMainStatus",
+                        &(if exit_status < 0 { 0 } else { exit_status }).to_string(),
+                    );
+                }
                 {
                     let status = unit.common.status.read_poisoned();
                     let result = match &*status {

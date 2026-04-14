@@ -913,6 +913,9 @@ fn make_common_from_parsed(
         deactivation_irreversible: std::sync::atomic::AtomicBool::new(false),
         start_requested_during_deactivation: std::sync::atomic::AtomicBool::new(false),
         invocation_id: std::sync::Mutex::new(String::new()),
+        main_pid: std::sync::atomic::AtomicI32::new(0),
+        main_exit_pid: std::sync::atomic::AtomicI32::new(0),
+        main_exit_status: std::sync::atomic::AtomicI32::new(-1),
     })
 }
 

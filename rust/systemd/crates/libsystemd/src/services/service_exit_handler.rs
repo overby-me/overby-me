@@ -610,6 +610,17 @@ pub(crate) fn service_exit_handler(
         state.srvc.main_exit_status = Some(exit_code);
         state.srvc.main_exit_pid = Some(pid);
         state.srvc.exec_main_exit_timestamp = Some(crate::units::UnitTimestamps::now_usec());
+        // Update lock-free atomics so property queries work without the state lock.
+        unit.common
+            .main_exit_status
+            .store(exit_code, std::sync::atomic::Ordering::Release);
+        unit.common
+            .main_exit_pid
+            .store(pid.as_raw(), std::sync::atomic::Ordering::Release);
+        // Clear MainPID since the process has exited.
+        unit.common
+            .main_pid
+            .store(0, std::sync::atomic::Ordering::Release);
     }
 
     let success_exit_status = get_success_exit_status(unit);
