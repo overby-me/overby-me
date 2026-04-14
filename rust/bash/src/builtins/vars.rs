@@ -1335,6 +1335,11 @@ pub(super) fn builtin_local(shell: &mut Shell, args: &[String]) -> i32 {
                         shell.error_prefix(),
                         name
                     );
+                    eprintln!(
+                        "{}: warning: {}: circular name reference",
+                        shell.error_prefix(),
+                        name
+                    );
                 } else {
                     shell.namerefs.insert(name.to_string(), value.to_string());
                 }
@@ -3364,6 +3369,12 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                                 cmd_name,
                                 name
                             );
+                            // Also emit non-prefixed warning (bash's find_nameref_value)
+                            eprintln!(
+                                "{}: warning: {}: circular name reference",
+                                shell.error_prefix(),
+                                name
+                            );
                             // Still create the nameref (bash behavior in function scope)
                             shell.vars.remove(name);
                             if !flag_integer {
@@ -4187,8 +4198,8 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                 let is_subscripted_nameref = had_subscript;
                 let is_existing_array =
                     shell.arrays.contains_key(name) || shell.assoc_arrays.contains_key(name);
-                let is_existing_readonly = !shell.namerefs.contains_key(name)
-                    && shell.readonly_vars.contains(name);
+                let is_existing_readonly =
+                    !shell.namerefs.contains_key(name) && shell.readonly_vars.contains(name);
                 if is_existing_readonly {
                     eprintln!(
                         "{}: {}: {}: readonly variable",
@@ -4252,6 +4263,13 @@ pub(super) fn builtin_declare(shell: &mut Shell, args: &[String]) -> i32 {
                                     "{}: {}: warning: {}: circular name reference",
                                     shell.error_prefix(),
                                     cmd_name,
+                                    name
+                                );
+                                // Also emit the non-prefixed warning matching bash's
+                                // find_nameref_value call during bind_nameref_value
+                                eprintln!(
+                                    "{}: warning: {}: circular name reference",
+                                    shell.error_prefix(),
                                     name
                                 );
                                 // Still create the nameref in function scope

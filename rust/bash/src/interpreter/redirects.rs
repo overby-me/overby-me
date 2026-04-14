@@ -611,7 +611,9 @@ impl Shell {
                 // Check for nameref with empty target: if name is a nameref but
                 // resolve_nameref returned the same name (empty target), then there
                 // is no valid variable to assign to — emit exec error.
-                let is_empty_nameref = self.namerefs.get(name.as_str())
+                let is_empty_nameref = self
+                    .namerefs
+                    .get(name.as_str())
                     .map(|t| t.is_empty())
                     .unwrap_or(false);
 

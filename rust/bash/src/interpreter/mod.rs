@@ -1061,6 +1061,17 @@ impl Shell {
     /// then "maximum nameref depth (8) exceeded" when depth limit is hit.
     /// Returns the resolved name (which may be the original if circular).
     pub fn resolve_nameref_warn(&self, name: &str) -> String {
+        self.resolve_nameref_warn_inner(name, true)
+    }
+
+    /// Like resolve_nameref_warn but skips the "circular name reference"
+    /// warning (only emits "maximum nameref depth exceeded"). Used when
+    /// the circular warning was already emitted at declaration time.
+    pub fn resolve_nameref_warn_depth_only(&self, name: &str) -> String {
+        self.resolve_nameref_warn_inner(name, false)
+    }
+
+    fn resolve_nameref_warn_inner(&self, name: &str, emit_circular: bool) -> String {
         const MAX_NAMEREF_DEPTH: usize = 8;
         let mut resolved = name.to_string();
         let mut seen = HashSet::new();
@@ -1080,18 +1091,14 @@ impl Shell {
                 break;
             }
             if seen.contains(target) && !warned_circular {
-                eprintln!(
-                    "{}: warning: {}: circular name reference",
-                    self.error_prefix(),
-                    name
-                );
+                if emit_circular {
+                    eprintln!(
+                        "{}: warning: {}: circular name reference",
+                        self.error_prefix(),
+                        name
+                    );
+                }
                 warned_circular = true;
-                // For self-references (target == resolved, e.g. v→v),
-                // continue iterating up to MAX_NAMEREF_DEPTH like bash does,
-                // which will then emit "maximum depth exceeded".
-                // For multi-node cycles (target != resolved, e.g. v→w→x→v),
-                // break immediately — bash only emits "circular name reference"
-                // without continuing to max depth.
                 if target != &resolved {
                     break;
                 }
@@ -1229,7 +1236,17 @@ impl Shell {
             self.namerefs.insert(name.to_string(), value);
             return;
         }
-        let resolved = self.resolve_nameref_warn(name);
+        // For circular namerefs in function scope, the "circular name reference"
+        // warning was already emitted at declaration time (typeset/local/declare).
+        // Only emit the "maximum nameref depth exceeded" warning here.
+        let is_circular_in_func = self.namerefs.contains_key(name)
+            && self.is_circular_nameref(name)
+            && !self.local_scopes.is_empty();
+        let resolved = if is_circular_in_func {
+            self.resolve_nameref_warn_depth_only(name)
+        } else {
+            self.resolve_nameref_warn(name)
+        };
         // Reject assignment through nameref to var[@] or var[*]
         if self.namerefs.contains_key(name) && resolved.contains('[') && resolved.ends_with(']') {
             let bracket = resolved.find('[').unwrap();
