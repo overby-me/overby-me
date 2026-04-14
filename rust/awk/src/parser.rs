@@ -576,6 +576,21 @@ impl Parser {
 
     fn parse_concatenation(&mut self) -> Expr {
         let mut left = self.parse_addition();
+
+        // Check for pipe-getline: expr | getline [var]
+        if matches!(self.peek(), Token::Pipe) {
+            let saved = self.pos;
+            self.advance(); // skip |
+            if matches!(self.peek(), Token::Getline) {
+                self.advance(); // skip getline
+                let var = self.parse_getline_var();
+                let getline_expr = Expr::Getline(var, None, GetlineSource::Pipe);
+                left = Expr::Pipe(Box::new(left), Box::new(getline_expr));
+            } else {
+                self.pos = saved;
+            }
+        }
+
         // Concatenation by juxtaposition: if the next token can start an expression
         // but is not an operator, it's concatenation
         while let Token::Number(_)
@@ -591,6 +606,20 @@ impl Parser {
             left = Expr::Concat(Box::new(left), Box::new(right));
         }
         left
+    }
+
+    fn parse_getline_var(&mut self) -> Option<Box<Expr>> {
+        if matches!(self.peek(), Token::Ident(_)) {
+            let saved = self.pos;
+            if let Token::Ident(v) = self.advance() {
+                // Variable for getline if followed by terminator/operator (not function call)
+                if !matches!(self.peek(), Token::LParen | Token::LBracket) {
+                    return Some(Box::new(Expr::Var(v)));
+                }
+            }
+            self.pos = saved;
+        }
+        None
     }
 
     fn parse_addition(&mut self) -> Expr {
