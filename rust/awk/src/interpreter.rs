@@ -22,6 +22,10 @@ pub struct Interpreter {
     pub nr: i64,
     pub fnr: i64,
     pub exit_code: i32,
+    /// Lines from current input stream for bare getline
+    input_lines: Vec<String>,
+    /// Current position in input_lines (next line to process)
+    input_line_idx: usize,
 }
 
 impl Interpreter {
@@ -55,6 +59,8 @@ impl Interpreter {
             nr: 0,
             fnr: 0,
             exit_code: 0,
+            input_lines: Vec::new(),
+            input_line_idx: 0,
         }
     }
 
@@ -242,112 +248,75 @@ impl Interpreter {
             .map(|v| v.to_string_val())
             .unwrap_or("\n".to_string());
 
-        if rs == "\n" {
-            // Line-by-line reading (default RS)
-            let mut buf = String::new();
-            loop {
-                buf.clear();
-                match reader.read_line(&mut buf) {
-                    Ok(0) => break,
-                    Ok(_) => {
-                        if buf.ends_with('\n') {
-                            buf.pop();
-                        }
-                        if buf.ends_with('\r') {
-                            buf.pop();
-                        }
-                        self.nr += 1;
-                        self.fnr += 1;
-                        self.globals
-                            .insert("NR".to_string(), Value::Num(self.nr as f64));
-                        self.globals
-                            .insert("FNR".to_string(), Value::Num(self.fnr as f64));
-                        self.set_record(&buf);
+        // Read all input and split into records
+        let mut all = String::new();
+        reader.read_to_string(&mut all).ok();
 
-                        if let ControlFlow::Exit(code) = self.process_rules(program) {
-                            self.exit_code = code;
-                            return;
-                        }
-                    }
-                    Err(_) => break,
-                }
-            }
+        let records: Vec<String> = if rs == "\n" {
+            all.split('\n')
+                .map(|s| {
+                    let s = s.strip_suffix('\r').unwrap_or(s);
+                    s.to_string()
+                })
+                .collect()
         } else if rs.len() == 1 {
-            // Single-char RS (not newline) — read all and split
             let sep = rs.chars().next().unwrap();
-            let mut all = String::new();
-            reader.read_to_string(&mut all).ok();
-            // Remove trailing newline if present
+            // Remove trailing newline before splitting
             if all.ends_with('\n') {
                 all.pop();
             }
-            let records: Vec<&str> = all.split(sep).collect();
-            for rec in &records {
-                if rec.is_empty() && records.len() > 1 {
-                    continue;
-                }
-                self.nr += 1;
-                self.fnr += 1;
-                self.globals
-                    .insert("NR".to_string(), Value::Num(self.nr as f64));
-                self.globals
-                    .insert("FNR".to_string(), Value::Num(self.fnr as f64));
-                self.set_record(rec);
-
-                if let ControlFlow::Exit(code) = self.process_rules(program) {
-                    self.exit_code = code;
-                    return;
+            all.split(sep).map(|s| s.to_string()).collect()
+        } else if rs.is_empty() {
+            // Paragraph mode
+            let mut result = Vec::new();
+            for para in all.split("\n\n") {
+                let para = para.trim_matches('\n');
+                if !para.is_empty() {
+                    result.push(para.to_string());
                 }
             }
-        } else if rs.is_empty() {
-            // Paragraph mode: empty RS means split on blank lines
-            let mut all = String::new();
-            reader.read_to_string(&mut all).ok();
-            // Split on one or more blank lines
-            let paragraphs: Vec<&str> = all.split("\n\n").collect();
-            for para in paragraphs {
-                let para = para.trim_matches('\n');
-                if para.is_empty() {
-                    continue;
-                }
-                self.nr += 1;
-                self.fnr += 1;
-                self.globals
-                    .insert("NR".to_string(), Value::Num(self.nr as f64));
-                self.globals
-                    .insert("FNR".to_string(), Value::Num(self.fnr as f64));
-                self.set_record(para);
+            result
+        } else {
+            // Multi-char RS as regex
+            match Regex::new(&rs) {
+                Ok(re) => re.split(&all).map(|s| s.to_string()).collect(),
+                Err(_) => all.split(&rs).map(|s| s.to_string()).collect(),
+            }
+        };
 
-                if let ControlFlow::Exit(code) = self.process_rules(program) {
-                    self.exit_code = code;
-                    return;
-                }
+        // Remove trailing empty record (from trailing newline)
+        let records: Vec<String> = if rs == "\n" {
+            if records.last().is_some_and(|s| s.is_empty()) {
+                records[..records.len() - 1].to_vec()
+            } else {
+                records
             }
         } else {
-            // Multi-char RS: use as regex
-            let mut all = String::new();
-            reader.read_to_string(&mut all).ok();
-            let records: Vec<&str> = match Regex::new(&rs) {
-                Ok(re) => re.split(&all).collect(),
-                Err(_) => all.split(&rs).collect(),
-            };
-            let records_len = records.len();
-            for rec in records {
-                if rec.is_empty() && records_len > 1 {
-                    continue;
-                }
-                self.nr += 1;
-                self.fnr += 1;
-                self.globals
-                    .insert("NR".to_string(), Value::Num(self.nr as f64));
-                self.globals
-                    .insert("FNR".to_string(), Value::Num(self.fnr as f64));
-                self.set_record(rec);
+            records
+                .into_iter()
+                .filter(|s| !s.is_empty())
+                .collect()
+        };
 
-                if let ControlFlow::Exit(code) = self.process_rules(program) {
-                    self.exit_code = code;
-                    return;
-                }
+        // Store for bare getline access
+        self.input_lines = records;
+        self.input_line_idx = 0;
+
+        while self.input_line_idx < self.input_lines.len() {
+            let rec = self.input_lines[self.input_line_idx].clone();
+            self.input_line_idx += 1;
+
+            self.nr += 1;
+            self.fnr += 1;
+            self.globals
+                .insert("NR".to_string(), Value::Num(self.nr as f64));
+            self.globals
+                .insert("FNR".to_string(), Value::Num(self.fnr as f64));
+            self.set_record(&rec);
+
+            if let ControlFlow::Exit(code) = self.process_rules(program) {
+                self.exit_code = code;
+                return;
             }
         }
     }
@@ -645,27 +614,46 @@ impl Interpreter {
     ) -> Value {
         match source {
             GetlineSource::Stdin => {
-                let mut line = String::new();
-                match io::stdin().lock().read_line(&mut line) {
-                    Ok(0) => Value::Num(0.0),
-                    Ok(_) => {
-                        if line.ends_with('\n') {
-                            line.pop();
-                        }
-                        if line.ends_with('\r') {
-                            line.pop();
-                        }
-                        if let Some(var_expr) = var {
-                            self.assign_to(var_expr, Value::StrNum(line.clone()));
-                        } else {
-                            self.set_record(&line);
-                        }
-                        self.nr += 1;
-                        self.globals
-                            .insert("NR".to_string(), Value::Num(self.nr as f64));
-                        Value::Num(1.0)
+                // Bare getline reads from current input stream
+                if self.input_line_idx < self.input_lines.len() {
+                    let line = self.input_lines[self.input_line_idx].clone();
+                    self.input_line_idx += 1;
+                    self.nr += 1;
+                    self.fnr += 1;
+                    self.globals
+                        .insert("NR".to_string(), Value::Num(self.nr as f64));
+                    self.globals
+                        .insert("FNR".to_string(), Value::Num(self.fnr as f64));
+                    if let Some(var_expr) = var {
+                        self.assign_to(var_expr, Value::StrNum(line));
+                    } else {
+                        self.set_record(&line);
                     }
-                    Err(_) => Value::Num(-1.0),
+                    Value::Num(1.0)
+                } else {
+                    // No more input — try stdin directly (for interactive/pipe)
+                    let mut line = String::new();
+                    match io::stdin().lock().read_line(&mut line) {
+                        Ok(0) => Value::Num(0.0),
+                        Ok(_) => {
+                            if line.ends_with('\n') {
+                                line.pop();
+                            }
+                            if line.ends_with('\r') {
+                                line.pop();
+                            }
+                            self.nr += 1;
+                            self.globals
+                                .insert("NR".to_string(), Value::Num(self.nr as f64));
+                            if let Some(var_expr) = var {
+                                self.assign_to(var_expr, Value::StrNum(line));
+                            } else {
+                                self.set_record(&line);
+                            }
+                            Value::Num(1.0)
+                        }
+                        Err(_) => Value::Num(-1.0),
+                    }
                 }
             }
             GetlineSource::File => {
