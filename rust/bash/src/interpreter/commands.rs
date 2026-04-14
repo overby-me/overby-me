@@ -4039,7 +4039,10 @@ impl Shell {
                 } else if let Some(ref nref_sub) = nameref_subscript {
                     // Non-append assignment through subscripted nameref target
                     // (e.g. `b=X` where `declare -n b='a[0]'`)
-                    // Check for subscript-circular namerefs in function scope
+                    // Check for subscript-circular namerefs in function scope.
+                    // Only reject when the target variable existed in the outer scope
+                    // (genuine circular reference). If the outer scope doesn't have
+                    // the variable, the nameref creates a new one (not circular).
                     if self.namerefs.contains_key(&assign.name)
                         && !self.local_scopes.is_empty()
                         && matches!(
@@ -4047,14 +4050,27 @@ impl Shell {
                             NamerefResolveResult::CircularSubscript(_)
                         )
                     {
-                        let target = self.namerefs.get(&assign.name).cloned().unwrap_or_default();
-                        eprintln!(
-                            "{}: `{}': not a valid identifier",
-                            self.error_prefix(),
-                            target
-                        );
-                        self.last_status = 1;
-                        return;
+                        // Check if the target variable existed in the saved scope
+                        let target_existed_in_outer = self.local_scopes.iter().any(|scope| {
+                            if let Some(saved) = scope.get(&assign.name) {
+                                saved.scalar.is_some()
+                                    || saved.array.is_some()
+                                    || saved.assoc.is_some()
+                            } else {
+                                false
+                            }
+                        });
+                        if target_existed_in_outer {
+                            let target =
+                                self.namerefs.get(&assign.name).cloned().unwrap_or_default();
+                            eprintln!(
+                                "{}: `{}': not a valid identifier",
+                                self.error_prefix(),
+                                target
+                            );
+                            self.last_status = 1;
+                            return;
+                        }
                     }
                     if self.assoc_arrays.contains_key(&resolved_base) {
                         let is_int = self.integer_vars.contains(&resolved_base);
