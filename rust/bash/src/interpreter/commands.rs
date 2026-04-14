@@ -3755,6 +3755,9 @@ impl Shell {
                         && self.is_circular_nameref(base_name)
                         && !self.local_scopes.is_empty()
                     {
+                        // Emit depth-exceeded warning (circular warning already
+                        // emitted at declaration time)
+                        self.resolve_nameref_warn_depth_only(base_name);
                         // Compute final value with integer/case transforms
                         let mut existing = String::new();
                         for scope in self.local_scopes.iter().rev() {
