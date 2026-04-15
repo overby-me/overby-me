@@ -160,7 +160,12 @@ impl Lexer {
                         'v' => s.push('\x0B'),
                         '/' => s.push('/'),
                         _ => {
-                            if self.warned_escapes.insert(esc) {
+                            // Only warn for escapes that are truly unknown
+                            // Skip digits, regex metachar escapes, and common chars
+                            if !"0123456789[](){}|.^$*+?&-<>=#;:!~%"
+                                .contains(esc)
+                                && self.warned_escapes.insert(esc)
+                            {
                                 if esc == 'u' || esc == 'U' {
                                     eprintln!("awk: warning: no hex digits in `\\{esc}' escape sequence");
                                 } else {
@@ -194,7 +199,7 @@ impl Lexer {
                         s.push('/');
                     } else {
                         // Warn about unknown regex escapes at parse time (like gawk)
-                        if !"dDwWsStbnrfax0123456789.^$*+?()[]{}|\\/&-\""
+                        if !"dDwWsStbnrfax0123456789.^$*+?()[]{}|\\/&-"
                             .contains(next)
                             && self.warned_escapes.insert(next)
                         {
