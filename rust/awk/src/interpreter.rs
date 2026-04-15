@@ -17,6 +17,8 @@ pub struct Interpreter {
     open_read_files: HashMap<String, Box<dyn BufRead>>,
     open_pipes: HashMap<String, Box<dyn Write>>,
     open_read_pipes: HashMap<String, Box<dyn BufRead>>,
+    /// Child processes for pipes, keyed by command string
+    pipe_children: HashMap<String, std::process::Child>,
     pub rng_state: u64,
     range_active: HashMap<usize, bool>,
     pub nr: i64,
@@ -59,6 +61,7 @@ impl Interpreter {
             nr: 0,
             fnr: 0,
             exit_code: 0,
+            pipe_children: HashMap::new(),
             input_lines: Vec::new(),
             input_line_idx: 0,
         }
@@ -608,6 +611,7 @@ impl Interpreter {
                         Ok(mut child) => {
                             if let Some(stdin) = child.stdin.take() {
                                 self.open_pipes.insert(cmd.clone(), Box::new(stdin));
+                                self.pipe_children.insert(cmd.clone(), child);
                             }
                         }
                         Err(e) => {
@@ -728,6 +732,7 @@ impl Interpreter {
                                 if let Some(stdout) = child.stdout.take() {
                                     self.open_read_pipes
                                         .insert(cmd.clone(), Box::new(BufReader::new(stdout)));
+                                    self.pipe_children.insert(cmd.clone(), child);
                                 }
                             }
                             Err(_) => return Value::Num(-1.0),
@@ -1272,7 +1277,10 @@ impl Interpreter {
                             });
                             r.to_string()
                         };
-                        self.assign_to(&target_expr, Value::Str(result));
+                        // Only assign back if replacements were made
+                        if count > 0 {
+                            self.assign_to(&target_expr, Value::Str(result));
+                        }
                         Value::Num(count as f64)
                     }
                     None => Value::Num(0.0),
@@ -1471,14 +1479,22 @@ impl Interpreter {
                 if self.open_files.remove(&name).is_some() {
                     found = true;
                 }
+                // Drop pipe handles first so child can finish
                 if self.open_pipes.remove(&name).is_some() {
+                    found = true;
+                }
+                if self.open_read_pipes.remove(&name).is_some() {
                     found = true;
                 }
                 if self.open_read_files.remove(&name).is_some() {
                     found = true;
                 }
-                if self.open_read_pipes.remove(&name).is_some() {
-                    found = true;
+                // Wait for child process and get exit status
+                if let Some(mut child) = self.pipe_children.remove(&name) {
+                    if let Ok(status) = child.wait() {
+                        let code = status.code().unwrap_or(-1);
+                        return Value::Num(code as f64);
+                    }
                 }
                 Value::Num(if found { 0.0 } else { -1.0 })
             }
