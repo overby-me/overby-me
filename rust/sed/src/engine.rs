@@ -1,4 +1,5 @@
 use regex::Regex;
+use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 
 use crate::types::*;
@@ -7,6 +8,7 @@ use crate::util::escape_string;
 pub struct Engine {
     commands: Vec<SedCommand>,
     quiet: bool,
+    posix: bool,
     pattern_space: String,
     hold_space: String,
     line_number: usize,
@@ -21,15 +23,18 @@ pub struct Engine {
     input_lines: Vec<String>,
     input_index: usize,
     pub current_filename: Option<String>,
+    pub line_wrap_width: usize, // default line width for `l` command
     range_active: Vec<bool>,
+    read_line_positions: HashMap<String, usize>, // for R command: track line offset per file
 }
 
 impl Engine {
-    pub fn new(commands: Vec<SedCommand>, quiet: bool) -> Self {
+    pub fn new(commands: Vec<SedCommand>, quiet: bool, posix: bool) -> Self {
         let num_cmds = count_commands(&commands);
         Engine {
             commands,
             quiet,
+            posix,
             pattern_space: String::new(),
             hold_space: String::new(),
             line_number: 0,
@@ -44,7 +49,9 @@ impl Engine {
             input_lines: Vec::new(),
             input_index: 0,
             current_filename: None,
+            line_wrap_width: 70,
             range_active: vec![false; num_cmds],
+            read_line_positions: HashMap::new(),
         }
     }
 
@@ -301,10 +308,31 @@ impl Engine {
                 Flow::Continue
             }
 
-            Command::PrintEscaped => {
+            Command::PrintEscaped(width) => {
                 let escaped = escape_string(&self.pattern_space);
-                self.output.extend_from_slice(escaped.as_bytes());
-                self.output.push(b'$');
+                let line_width = width.unwrap_or(self.line_wrap_width);
+                let full = format!("{escaped}$");
+                if line_width == 0 {
+                    // No wrapping
+                    self.output.extend_from_slice(full.as_bytes());
+                } else {
+                    let bytes = full.as_bytes();
+                    let mut pos = 0;
+                    while pos < bytes.len() {
+                        let remaining = bytes.len() - pos;
+                        if remaining <= line_width {
+                            self.output.extend_from_slice(&bytes[pos..]);
+                            break;
+                        } else {
+                            // Continuation: (line_width - 1) data bytes + '\'
+                            self.output
+                                .extend_from_slice(&bytes[pos..pos + line_width - 1]);
+                            self.output.push(b'\\');
+                            self.output.push(b'\n');
+                            pos += line_width - 1;
+                        }
+                    }
+                }
                 self.output.push(b'\n');
                 Flow::Continue
             }
@@ -385,9 +413,12 @@ impl Engine {
                     self.pattern_space.push_str(&next_line);
                     Flow::Continue
                 } else {
-                    if !self.quiet {
-                        self.write_pattern_space();
+                    // No more input
+                    if self.posix || self.quiet {
+                        // POSIX/quiet mode: exit without printing
+                        self.suppress_default_print = true;
                     }
+                    // GNU extension: default print happens via normal cycle end
                     Flow::Quit
                 }
             }
@@ -458,10 +489,12 @@ impl Engine {
             }
 
             Command::ReadLine(file) => {
-                if let Ok(content) = std::fs::read_to_string(file)
-                    && let Some(line) = content.lines().next()
-                {
-                    self.append_queue.push(line.to_string());
+                if let Ok(content) = std::fs::read_to_string(file) {
+                    let pos = self.read_line_positions.entry(file.clone()).or_insert(0);
+                    if let Some(line) = content.lines().nth(*pos) {
+                        self.append_queue.push(line.to_string());
+                        *pos += 1;
+                    }
                 }
                 Flow::Continue
             }

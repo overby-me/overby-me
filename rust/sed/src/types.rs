@@ -38,7 +38,7 @@ pub enum Command {
     DeleteFirstLine, // D
     Print,
     PrintFirstLine, // P
-    PrintEscaped,   // l
+    PrintEscaped(Option<usize>), // l [width]
     PrintLineNum,   // =
     Quit(Option<i32>),
     QuitNoprint(Option<i32>), // Q

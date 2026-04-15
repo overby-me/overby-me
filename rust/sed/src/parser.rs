@@ -271,12 +271,14 @@ impl<'a> Parser<'a> {
             b'P' => Ok(Command::PrintFirstLine),
             b'l' => {
                 // l may have optional line width: l80, l1, etc.
-                if let Some(ch) = self.peek()
+                let width = if let Some(ch) = self.peek()
                     && ch.is_ascii_digit()
                 {
-                    let _ = self.parse_number(); // consume width (ignored for now)
-                }
-                Ok(Command::PrintEscaped)
+                    Some(self.parse_number()?)
+                } else {
+                    None
+                };
+                Ok(Command::PrintEscaped(width))
             }
             b'=' => Ok(Command::PrintLineNum),
             b'q' => {
@@ -749,27 +751,56 @@ impl<'a> Parser<'a> {
 
     fn parse_text_arg(&mut self) -> String {
         let mut text = String::new();
-        let mut first = true;
         loop {
-            match self.peek() {
-                None => break,
-                Some(b'\n') => {
-                    if !first {
-                        text.push('\n');
-                    }
-                    self.advance();
-                    break;
-                }
-                Some(ch) => {
-                    self.advance();
-                    if ch == b'\\' && matches!(self.peek(), Some(b'n') | Some(b'\n')) {
+            // Read one line
+            let mut line = String::new();
+            let mut ends_with_backslash = false;
+            loop {
+                match self.peek() {
+                    None => break,
+                    Some(b'\n') => {
                         self.advance();
-                        text.push('\n');
-                    } else {
-                        text.push(ch as char);
+                        break;
                     }
-                    first = false;
+                    Some(b'\\') => {
+                        self.advance();
+                        match self.peek() {
+                            Some(b'n') => {
+                                self.advance();
+                                line.push('\n');
+                            }
+                            Some(b'\n') => {
+                                // Continuation: \ at end of line
+                                self.advance();
+                                ends_with_backslash = true;
+                                break;
+                            }
+                            None => {
+                                // \ at end of input — treat as continuation (empty next line)
+                                ends_with_backslash = false;
+                                break;
+                            }
+                            Some(ch) => {
+                                line.push('\\');
+                                line.push(ch as char);
+                                self.advance();
+                            }
+                        }
+                    }
+                    Some(ch) => {
+                        self.advance();
+                        line.push(ch as char);
+                    }
                 }
+            }
+
+            if !text.is_empty() {
+                text.push('\n');
+            }
+            text.push_str(&line);
+
+            if !ends_with_backslash {
+                break;
             }
         }
         text

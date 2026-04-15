@@ -11,15 +11,27 @@ use engine::Engine;
 use parser::Parser;
 use types::Options;
 
+/// Format an IO error like GNU sed (strip Rust's "(os error N)" suffix)
+fn fmt_io_err(e: &io::Error) -> String {
+    let msg = e.to_string();
+    if let Some(code) = e.raw_os_error() {
+        msg.strip_suffix(&format!(" (os error {code})"))
+            .unwrap_or(&msg)
+            .to_string()
+    } else {
+        msg
+    }
+}
+
 fn read_script_file(path: &str) -> Result<String, String> {
     if path == "-" {
         let mut buf = String::new();
         io::stdin()
             .read_to_string(&mut buf)
-            .map_err(|e| format!("sed: -: {e}"))?;
+            .map_err(|e| format!("sed: -: {}", fmt_io_err(&e)))?;
         Ok(buf)
     } else {
-        std::fs::read_to_string(path).map_err(|e| format!("sed: {path}: {e}"))
+        std::fs::read_to_string(path).map_err(|e| format!("sed: {path}: {}", fmt_io_err(&e)))
     }
 }
 
@@ -205,7 +217,7 @@ fn parse_options() -> Options {
                 process::exit(2);
             }
             _ => {
-                if opts.expressions.is_empty() && opts.in_place.is_none() {
+                if opts.expressions.is_empty() {
                     opts.expressions.push(args[i].clone());
                 } else {
                     opts.files.push(args[i].clone());
@@ -245,6 +257,7 @@ fn main() {
     }
 
     let quiet = opts.quiet || hash_n_quiet;
+    let posix = opts.posix || std::env::var("POSIXLY_CORRECT").is_ok();
 
     let stdout = io::stdout();
     let mut out = stdout.lock();
@@ -259,29 +272,35 @@ fn main() {
             let content = match std::fs::read_to_string(file) {
                 Ok(c) => c,
                 Err(e) => {
-                    eprintln!("sed: {file}: {e}");
+                    eprintln!("sed: {file}: {}", fmt_io_err(&e));
                     continue;
                 }
             };
 
             if !suffix.is_empty() {
-                let backup = format!("{file}{suffix}");
+                let backup = if suffix.contains('*') {
+                    suffix.replace('*', file)
+                } else {
+                    format!("{file}{suffix}")
+                };
                 if let Err(e) = std::fs::copy(file, &backup) {
-                    eprintln!("sed: cannot create backup {backup}: {e}");
-                    continue;
+                    eprintln!("sed: cannot rename {file}: {}", fmt_io_err(&e));
+                    process::exit(4);
                 }
             }
 
+            // Each file gets a fresh engine in in-place mode
+            let mut engine = Engine::new(commands.clone(), quiet, posix);
+            engine.current_filename = Some(file.clone());
             let reader = io::BufReader::new(content.as_bytes());
             let mut output = Vec::new();
-            let mut engine = Engine::new(commands.clone(), quiet);
             let code = engine.run(reader, &mut output).unwrap_or_else(|e| {
-                eprintln!("sed: {file}: {e}");
+                eprintln!("sed: {file}: {}", fmt_io_err(&e));
                 1
             });
 
             if let Err(e) = std::fs::write(file, &output) {
-                eprintln!("sed: {file}: {e}");
+                eprintln!("sed: {file}: {}", fmt_io_err(&e));
             }
 
             if code != 0 {
@@ -291,14 +310,14 @@ fn main() {
     } else if opts.files.is_empty() || (opts.files.len() == 1 && opts.files[0] == "-") {
         let stdin = io::stdin();
         let reader = stdin.lock();
-        let mut engine = Engine::new(commands, quiet);
+        let mut engine = Engine::new(commands, quiet, posix);
         let code = engine.run(reader, &mut out).unwrap_or_else(|e| {
             eprintln!("sed: {e}");
             1
         });
         process::exit(code);
     } else {
-        let mut engine = Engine::new(commands, quiet);
+        let mut engine = Engine::new(commands, quiet, posix);
         for file in &opts.files {
             let content = if file == "-" {
                 let mut buf = String::new();
@@ -308,7 +327,7 @@ fn main() {
                 match std::fs::read_to_string(file) {
                     Ok(c) => c,
                     Err(e) => {
-                        eprintln!("sed: {file}: {e}");
+                        eprintln!("sed: {file}: {}", fmt_io_err(&e));
                         continue;
                     }
                 }
@@ -317,7 +336,7 @@ fn main() {
             engine.current_filename = Some(file.clone());
             let reader = io::BufReader::new(content.as_bytes());
             if let Err(e) = engine.run(reader, &mut out) {
-                eprintln!("sed: {file}: {e}");
+                eprintln!("sed: {file}: {}", fmt_io_err(&e));
             }
         }
     }
