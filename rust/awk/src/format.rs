@@ -80,7 +80,11 @@ pub fn sprintf_impl(vals: &[Value]) -> String {
 
             let width_val: i64 = width.parse().unwrap_or(0);
             let width_num: usize = width_val.unsigned_abs() as usize;
-            let prec_num: usize = precision.parse().unwrap_or(6);
+            let prec_num: usize = if has_precision {
+                precision.parse().unwrap_or(0)
+            } else {
+                6 // default precision when no . is present
+            };
             // Negative width from * means left-align
             let left_align = flags.contains('-') || width_val < 0;
             // Zero flag is ignored when precision is given for integer conversions
@@ -180,7 +184,19 @@ pub fn sprintf_impl(vals: &[Value]) -> String {
                         }
                     }
                 }
-                'u' => format!("{}", val.to_num() as u64),
+                'u' => {
+                    let n = val.to_num() as u64;
+                    if has_precision && prec_num == 0 && n == 0 {
+                        String::new()
+                    } else {
+                        let s = format!("{n}");
+                        if has_precision && s.len() < prec_num {
+                            format!("{s:0>width$}", width = prec_num)
+                        } else {
+                            s
+                        }
+                    }
+                }
                 'c' => {
                     // If the value is a string, use first character
                     match val {
@@ -208,12 +224,13 @@ pub fn sprintf_impl(vals: &[Value]) -> String {
                         s
                     }
                 }
-                'f' => {
+                'f' | 'F' => {
                     let n = val.to_num();
                     if n.is_nan() {
-                        "nan".to_string()
+                        if conv == 'F' { "NAN".to_string() } else { "nan".to_string() }
                     } else if n.is_infinite() {
-                        if n < 0.0 { "-inf".to_string() } else { "inf".to_string() }
+                        let s = if conv == 'F' { "INF" } else { "inf" };
+                        if n < 0.0 { format!("-{s}") } else { s.to_string() }
                     } else {
                         let p = if has_precision { prec_num } else { 6 };
                         let mut s = format!("{n:.prec$}", prec = p);

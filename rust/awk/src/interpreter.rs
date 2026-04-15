@@ -916,19 +916,19 @@ impl Interpreter {
                         BinOp::Sub => Value::Num(lv.to_num() - rv.to_num()),
                         BinOp::Mul => Value::Num(lv.to_num() * rv.to_num()),
                         BinOp::Div => {
+                            let n = lv.to_num();
                             let d = rv.to_num();
                             if d == 0.0 {
-                                eprintln!("awk: division by zero");
-                                Value::Num(0.0)
+                                // gawk produces inf/-inf for division by zero
+                                Value::Num(n / d)
                             } else {
-                                Value::Num(lv.to_num() / d)
+                                Value::Num(n / d)
                             }
                         }
                         BinOp::Mod => {
                             let d = rv.to_num();
                             if d == 0.0 {
-                                eprintln!("awk: division by zero");
-                                Value::Num(0.0)
+                                Value::Num(f64::NAN)
                             } else {
                                 Value::Num(lv.to_num() % d)
                             }
@@ -1030,18 +1030,10 @@ impl Interpreter {
                     BinOp::Add => lv + rv,
                     BinOp::Sub => lv - rv,
                     BinOp::Mul => lv * rv,
-                    BinOp::Div => {
-                        if rv == 0.0 {
-                            eprintln!("awk: division by zero");
-                            0.0
-                        } else {
-                            lv / rv
-                        }
-                    }
+                    BinOp::Div => lv / rv,
                     BinOp::Mod => {
                         if rv == 0.0 {
-                            eprintln!("awk: division by zero");
-                            0.0
+                            f64::NAN
                         } else {
                             lv % rv
                         }
