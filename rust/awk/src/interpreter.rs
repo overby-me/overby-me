@@ -500,6 +500,16 @@ impl Interpreter {
                 }
             }
             Stmt::ForIn(var, array, body) => {
+                // Check if the variable is a scalar (not an array)
+                if !self.arrays.contains_key(array)
+                    && self.globals.contains_key(array)
+                    && !matches!(self.globals.get(array), Some(Value::Uninitialized))
+                {
+                    eprintln!(
+                        "awk: fatal: attempt to use scalar `{array}' as an array"
+                    );
+                    std::process::exit(2);
+                }
                 let keys: Vec<String> = self
                     .arrays
                     .get(array)
@@ -1205,6 +1215,14 @@ impl Interpreter {
                 Value::Str(format!("{ls}{rs}"))
             }
             Expr::In(expr, array) => {
+                // Check scalar-as-array
+                if !self.arrays.contains_key(array)
+                    && self.globals.contains_key(array)
+                    && !matches!(self.globals.get(array), Some(Value::Uninitialized))
+                {
+                    eprintln!("awk: fatal: attempt to use scalar `{array}' as an array");
+                    std::process::exit(2);
+                }
                 let key = self.eval_expr(expr).to_string_val();
                 let exists = self.arrays.get(array).is_some_and(|a| a.contains_key(&key));
                 Value::Num(if exists { 1.0 } else { 0.0 })
