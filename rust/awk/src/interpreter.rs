@@ -223,8 +223,14 @@ impl Interpreter {
             }
         }
 
-        // Process input
-        if files.is_empty() {
+        // Check if there are any non-BEGIN/END rules that need input
+        let has_input_rules = program
+            .rules
+            .iter()
+            .any(|r| !matches!(r.pattern, Some(Pattern::Begin) | Some(Pattern::End)));
+
+        // Process input (skip if only BEGIN/END rules and no files specified)
+        if files.is_empty() && has_input_rules {
             self.process_stream(program, &mut io::stdin().lock(), "-");
         } else {
             for file in files {
