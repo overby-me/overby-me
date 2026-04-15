@@ -916,19 +916,17 @@ impl Interpreter {
                         BinOp::Sub => Value::Num(lv.to_num() - rv.to_num()),
                         BinOp::Mul => Value::Num(lv.to_num() * rv.to_num()),
                         BinOp::Div => {
-                            let n = lv.to_num();
                             let d = rv.to_num();
                             if d == 0.0 {
-                                // gawk produces inf/-inf for division by zero
-                                Value::Num(n / d)
+                                Value::Num(0.0)
                             } else {
-                                Value::Num(n / d)
+                                Value::Num(lv.to_num() / d)
                             }
                         }
                         BinOp::Mod => {
                             let d = rv.to_num();
                             if d == 0.0 {
-                                Value::Num(f64::NAN)
+                                Value::Num(0.0)
                             } else {
                                 Value::Num(lv.to_num() % d)
                             }
@@ -1030,10 +1028,12 @@ impl Interpreter {
                     BinOp::Add => lv + rv,
                     BinOp::Sub => lv - rv,
                     BinOp::Mul => lv * rv,
-                    BinOp::Div => lv / rv,
+                    BinOp::Div => {
+                        if rv == 0.0 { 0.0 } else { lv / rv }
+                    }
                     BinOp::Mod => {
                         if rv == 0.0 {
-                            f64::NAN
+                            0.0
                         } else {
                             lv % rv
                         }
@@ -1490,6 +1490,12 @@ impl Interpreter {
                         let code = status.code().unwrap_or(-1);
                         return Value::Num(code as f64);
                     }
+                }
+                if !found {
+                    self.set_var(
+                        "ERRNO",
+                        Value::Str("close of redirection that was never opened".to_string()),
+                    );
                 }
                 Value::Num(if found { 0.0 } else { -1.0 })
             }
