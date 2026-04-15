@@ -2,9 +2,18 @@
 
 ## Current Status
 
-**164/241 tests passing** (68%) — BASIC_TESTS from the GNU gawk 5.3.2 test suite.
+**~164/241 tests passing** (68%) — BASIC_TESTS from the GNU gawk 5.3.2 test suite.
 
 Note: ~2 tests are flaky due to `for-in` hash iteration order (forref, delarpm2).
+
+### Remaining failure categories (~77 tests)
+
+- **Error detection (~27)**: Tests expect gawk-compatible error messages we don't produce (scalar/array conflicts, duplicate params, syntax errors, etc.)
+- **Array aliasing (~14)**: Need true reference semantics for nested function calls with shared arrays
+- **Other (~15)**: CONVFMT caching, operator precedence, ARGV-based file processing, backslash handling, pipe close, etc.
+- **Regex (~7)**: Character class edge cases (`---`, `[^]]`), Rust vs POSIX regex differences
+- **Getline (~4)**: Complex forms (getline with array subscript side effects, pipe getline with expressions)
+- **Printf (~2)**: Comprehensive flag combinations (hsprint), infinity formatting edge cases
 
 ### Recent fixes
 
