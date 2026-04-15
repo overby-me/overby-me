@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**160/241 tests passing** (66%) — BASIC_TESTS from the GNU gawk 5.3.2 test suite.
+**163/241 tests passing** (68%) — BASIC_TESTS from the GNU gawk 5.3.2 test suite.
 
 ### Recent fixes
 
