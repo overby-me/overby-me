@@ -305,18 +305,11 @@ impl Interpreter {
             }
         };
 
-        // Remove trailing empty record (from trailing newline)
-        let records: Vec<String> = if rs == "\n" {
-            if records.last().is_some_and(|s| s.is_empty()) {
-                records[..records.len() - 1].to_vec()
-            } else {
-                records
-            }
+        // Remove trailing empty record (artifact of splitting with trailing separator)
+        let records: Vec<String> = if records.last().is_some_and(|s| s.is_empty()) {
+            records[..records.len() - 1].to_vec()
         } else {
             records
-                .into_iter()
-                .filter(|s| !s.is_empty())
-                .collect()
         };
 
         // Store for bare getline access
