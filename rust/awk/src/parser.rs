@@ -591,20 +591,6 @@ impl Parser {
     fn parse_concatenation(&mut self) -> Expr {
         let mut left = self.parse_addition();
 
-        // Check for pipe-getline: expr | getline [var]
-        if matches!(self.peek(), Token::Pipe) {
-            let saved = self.pos;
-            self.advance(); // skip |
-            if matches!(self.peek(), Token::Getline) {
-                self.advance(); // skip getline
-                let var = self.parse_getline_var();
-                let getline_expr = Expr::Getline(var, None, GetlineSource::Pipe);
-                left = Expr::Pipe(Box::new(left), Box::new(getline_expr));
-            } else {
-                self.pos = saved;
-            }
-        }
-
         // Concatenation by juxtaposition: if the next token can start an expression
         // but is not an operator, it's concatenation
         while let Token::Number(_)
@@ -619,6 +605,37 @@ impl Parser {
             let right = self.parse_addition();
             left = Expr::Concat(Box::new(left), Box::new(right));
         }
+
+        // Check for pipe-getline AFTER concatenation:
+        // "echo " "date" | getline → ("echo " "date") | getline
+        if matches!(self.peek(), Token::Pipe) {
+            let saved = self.pos;
+            self.advance();
+            if matches!(self.peek(), Token::Getline) {
+                self.advance();
+                let var = self.parse_getline_var();
+                let getline_expr = Expr::Getline(var, None, GetlineSource::Pipe);
+                left = Expr::Pipe(Box::new(left), Box::new(getline_expr));
+
+                // Continue concatenation after pipe-getline:
+                // cmd | getline x y → (cmd | getline x) concat y
+                while let Token::Number(_)
+                | Token::StringLit(_)
+                | Token::Ident(_)
+                | Token::Dollar
+                | Token::LParen
+                | Token::Not
+                | Token::Increment
+                | Token::Decrement = self.peek()
+                {
+                    let right = self.parse_addition();
+                    left = Expr::Concat(Box::new(left), Box::new(right));
+                }
+            } else {
+                self.pos = saved;
+            }
+        }
+
         left
     }
 
