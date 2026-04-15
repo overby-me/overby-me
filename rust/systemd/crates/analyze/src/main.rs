@@ -120,8 +120,12 @@ enum Command {
         files: Vec<String>,
 
         /// Also check man page references
-        #[arg(long)]
-        man: bool,
+        #[arg(long, num_args = 0..=1, default_missing_value = "yes")]
+        man: Option<String>,
+
+        /// Control recursive error checking
+        #[arg(long, value_name = "MODE")]
+        recursive_errors: Option<String>,
 
         /// Also check generator output
         #[arg(long)]
