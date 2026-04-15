@@ -108,6 +108,12 @@ fn main() {
         std::process::exit(1);
     }
 
+    // Check for NUL bytes in source
+    if program_text.contains('\0') {
+        eprintln!("awk: fatal: error: invalid character '\\000' in source code");
+        std::process::exit(2);
+    }
+
     // Tokenize and parse
     let mut lexer = Lexer::new(&program_text);
     let tokens = lexer.tokenize();

@@ -108,6 +108,18 @@ impl Parser {
                     );
                     std::process::exit(1);
                 }
+                // Check for special variable used as parameter
+                const SPECIAL_VARS: &[&str] = &[
+                    "FS", "RS", "OFS", "ORS", "NR", "NF", "FNR", "FILENAME",
+                    "SUBSEP", "RSTART", "RLENGTH", "OFMT", "CONVFMT", "ARGC", "ARGV",
+                    "ENVIRON", "ERRNO", "RT",
+                ];
+                if SPECIAL_VARS.contains(&s.as_str()) {
+                    eprintln!(
+                        "awk: error: function `{name}': parameter `{s}': POSIX disallows using a special variable as a function parameter"
+                    );
+                    has_errors = true;
+                }
                 seen_params.entry(s.clone()).or_insert(params.len() + 1);
                 params.push(s);
             }
