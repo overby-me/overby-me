@@ -129,8 +129,10 @@ impl Interpreter {
         self.fields[idx] = val;
         let nf = (self.fields.len() - 1) as f64;
         self.globals.insert("NF".to_string(), Value::Num(nf));
-        if idx > 0 && changed {
-            self.rebuild_record();
+        if idx > 0 {
+            if changed {
+                self.rebuild_record();
+            }
         } else {
             // Re-split if $0 was assigned
             let line = self.fields[0].to_string_val();
