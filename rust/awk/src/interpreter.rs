@@ -1228,7 +1228,7 @@ impl Interpreter {
 
                 let count = parts.len();
                 for (i, part) in parts.into_iter().enumerate() {
-                    self.set_array(&arr_name, &(i + 1).to_string(), Value::Str(part));
+                    self.set_array(&arr_name, &(i + 1).to_string(), Value::StrNum(part));
                 }
                 Value::Num(count as f64)
             }

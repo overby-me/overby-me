@@ -94,13 +94,7 @@ impl Value {
                 let s = s.trim();
                 !s.is_empty()
             }
-            Value::Str(s) => {
-                let s = s.trim();
-                if s.is_empty() {
-                    return false;
-                }
-                s.parse::<f64>().is_ok()
-            }
+            Value::Str(_) => false,
             Value::Uninitialized => false,
         }
     }
