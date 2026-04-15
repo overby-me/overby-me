@@ -779,9 +779,7 @@ impl Interpreter {
     /// Compile a regex, handling awk-specific patterns that Rust's regex crate
     /// might reject (e.g., leading +, *, ? which awk treats as literals).
     fn compile_regex(pattern: &str) -> Option<Regex> {
-        // Pre-process: in awk, quantifiers (+, *, ?) after anchors (^) or at
-        // start of alternatives (|, () are literals. Fix before compiling.
-        let fixed = Self::fix_awk_regex(pattern);
+        let fixed = Self::fix_awk_regex_warn(pattern);
         if let Ok(re) = Regex::new(&fixed) {
             return Some(re);
         }
@@ -845,6 +843,44 @@ impl Interpreter {
             }
         }
         result
+    }
+
+    fn fix_awk_regex_warn(pattern: &str) -> String {
+        use std::sync::Mutex;
+        static WARNED: Mutex<Option<std::collections::HashSet<String>>> = Mutex::new(None);
+        let mut warned = WARNED.lock().unwrap();
+        let warned = warned.get_or_insert_with(std::collections::HashSet::new);
+
+        let chars: Vec<char> = pattern.chars().collect();
+        let mut i = 0;
+        while i < chars.len() {
+            if chars[i] == '\\' && i + 1 < chars.len() {
+                let next = chars[i + 1];
+                if !"dDwWsStbnrfaevx01234567.^$*+?()[]{}|\\/&"
+                    .contains(next)
+                {
+                    let key = format!("\\{next}");
+                    if warned.insert(key) {
+                        eprintln!(
+                            "awk: warning: regexp escape sequence `\\{next}' treated as plain `{next}'"
+                        );
+                    }
+                }
+                i += 2;
+            } else if chars[i] == '[' {
+                i += 1;
+                if i < chars.len() && chars[i] == '^' { i += 1; }
+                if i < chars.len() && chars[i] == ']' { i += 1; }
+                while i < chars.len() && chars[i] != ']' {
+                    if chars[i] == '\\' { i += 1; }
+                    i += 1;
+                }
+                if i < chars.len() { i += 1; }
+            } else {
+                i += 1;
+            }
+        }
+        Self::fix_awk_regex(pattern)
     }
 
     fn fix_awk_regex(pattern: &str) -> String {
