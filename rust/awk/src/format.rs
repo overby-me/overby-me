@@ -328,21 +328,36 @@ pub fn sprintf_impl(vals: &[Value]) -> String {
             i += 1;
             if i < chars.len() {
                 match chars[i] {
-                    'n' => result.push('\n'),
-                    't' => result.push('\t'),
-                    'r' => result.push('\r'),
-                    '\\' => result.push('\\'),
-                    '"' => result.push('"'),
-                    'a' => result.push('\x07'),
-                    'b' => result.push('\x08'),
-                    'f' => result.push('\x0C'),
-                    '/' => result.push('/'),
+                    'n' => { result.push('\n'); i += 1; }
+                    't' => { result.push('\t'); i += 1; }
+                    'r' => { result.push('\r'); i += 1; }
+                    '\\' => { result.push('\\'); i += 1; }
+                    '"' => { result.push('"'); i += 1; }
+                    'a' => { result.push('\x07'); i += 1; }
+                    'b' => { result.push('\x08'); i += 1; }
+                    'f' => { result.push('\x0C'); i += 1; }
+                    '/' => { result.push('/'); i += 1; }
+                    '0'..='7' => {
+                        let mut oct = (chars[i] as u32) - ('0' as u32);
+                        i += 1;
+                        for _ in 0..2 {
+                            if i < chars.len() && chars[i] >= '0' && chars[i] <= '7' {
+                                oct = oct * 8 + (chars[i] as u32 - '0' as u32);
+                                i += 1;
+                            } else {
+                                break;
+                            }
+                        }
+                        if let Some(ch) = char::from_u32(oct) {
+                            result.push(ch);
+                        }
+                    }
                     _ => {
                         result.push('\\');
                         result.push(chars[i]);
+                        i += 1;
                     }
                 }
-                i += 1;
             }
         } else {
             result.push(chars[i]);
