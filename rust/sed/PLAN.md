@@ -1,17 +1,14 @@
 # rust-sed: Plan to Pass Upstream GNU sed Tests
 
-## Overview
+## Current Status
 
-Integrate the GNU sed 4.9 test suite to validate rust-sed against the reference implementation, following the same pattern as rust-awk's upstream gawk test integration.
+**17/60 tests passing** (28%) — shell tests from the GNU sed 4.9 test suite.
 
 ### Test infrastructure approach
 
-GNU sed's test suite differs from gawk's: tests are **shell scripts** (using gnulib's `init.sh` framework) and a **Perl test harness** (`misc.pl`), rather than simple program+input file pairs. This requires a two-pronged strategy:
+GNU sed's test suite differs from gawk's: tests are **shell scripts** (using gnulib's `init.sh` framework) and a **Perl test harness** (`misc.pl`), rather than simple program+input file pairs. Each test script defines its own expected output and checks internally.
 
-1. **Shell-based tests** (~60 `.sh` files): Run each script in a Nix sandbox with rust-sed prepended to `PATH`, using the upstream test framework directly.
-2. **Perl-based tests** (`misc.pl` with ~50 test cases, `debug.pl`): Run via Perl with rust-sed in `PATH`.
-
-Tests compare rust-sed behaviour against expected output defined within each test script (not against a reference GNU sed run). This is different from the awk approach where both implementations run and outputs are diffed.
+Tests run in a Nix sandbox (`testsuite.nix`) with rust-sed as `sed` in PATH, using the upstream test framework directly. The harness sets `abs_top_srcdir`, `srcdir`, `LC_ALL=C`, and other TESTS_ENVIRONMENT variables from the GNU sed Makefile.
 
 Run a test: `nix build .#checks.x86_64-linux.rust-sed-test-{name}`
 View failure: `nix log .#checks.x86_64-linux.rust-sed-test-{name}`
@@ -390,6 +387,27 @@ debug.pl   (debug/trace output tests)
 - `sandbox` - `--sandbox` flag (GNU extension, may not implement)
 - `invalid-mb-seq-UMR` - Requires specific locale setup
 
-### Status: TBD
+### Current Status
 
-Initial test run not yet performed. Pass/fail counts will be updated after Phase 1 infrastructure is complete.
+**17/60 tests passing** (28%) — shell tests from the GNU sed 4.9 test suite.
+
+Note: Some tests excluded from the Nix harness (`8bit`, `badenc`, `newjis`, `utf8-ru`, `invalid-mb-seq-UMR` — require specific locale setups or non-UTF-8 binary input files; `help-version` — requires exact GNU version strings). `inplace-selinux` passes by skipping (no SELinux in sandbox).
+
+### Passing (17 tests)
+
+bsd, bug32082, bug32271-1, bug32271-2, inplace-selinux (skip), madding,
+mb-bad-delim, mb-charclass-non-utf8, mb-match-slash, mb-y-translate,
+newline-dfa-bug, posix-mode-ERE, regex-max-int, stdin, subst-mb-incomplete,
+title-case, word-delim
+
+### Failing (43 tests)
+
+8to7, binary, bsd-wrapper, cmd-0r, cmd-l, cmd-R, colon-with-no-label,
+command-endings, comment-n, compile-errors, compile-tests, convert-number,
+dc, distrib, eval, execute-tests, follow-symlinks, follow-symlinks-stdin,
+help, in-place-hyphen, in-place-suffix-backup, inplace-hold, mac-mf,
+missing-filename, normalize-text, nulldata, obinary, panic-tests,
+posix-char-class, posix-mode-addr, posix-mode-bad-ref, posix-mode-N,
+posix-mode-s, range-overlap, recursive-escape-c, regex-errors, sandbox,
+stdin-prog, subst-options, subst-replacement, temp-file-cleanup, unbuffered,
+uniq, xemacs
