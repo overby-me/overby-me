@@ -436,7 +436,7 @@
 | ✅ | Sandboxing | [Hakoniwa 🦀](https://github.com/souk4711/hakoniwa) | | [Bubblewrap-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/bubblewrap) | [Bubblewrap 💣](https://github.com/containers/bubblewrap) |
 | 🚧 | Bootloader | [systemd-boot 💣](https://www.freedesktop.org/wiki/Software/systemd/systemd-boot/) | [Systemd-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/systemd) | 🆗 | [GRUB 💣](https://www.gnu.org/software/grub/) |
 | ✅ | Display Manager | [cosmic-greeter 🦀](https://github.com/pop-os/cosmic-greeter) | | 🆗 | [GDM 💣](https://wiki.gnome.org/Projects/GDM) |
-| 🚧 | Security Framework | [SELinux 💣](https://github.com/SELinuxProject/selinux) | | 🆗 | [AppArmor 💣](https://apparmor.net) |
+| 🚧 | Mandatory Access Control | [SELinux 💣](https://github.com/SELinuxProject/selinux) | | 🆗 | [AppArmor 💣](https://apparmor.net) |
 | 🚧 | Time Synchronization | [systemd-timesyncd 💣](https://www.freedesktop.org/software/systemd/man/latest/systemd-timesyncd.service.html) | [ntpd-rs 🦀](https://github.com/pendulum-project/ntpd-rs) | [NTP 📖](https://en.wikipedia.org/wiki/Network_Time_Protocol) | |
 
 </details>
