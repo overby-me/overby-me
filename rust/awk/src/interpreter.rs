@@ -121,11 +121,15 @@ impl Interpreter {
         while self.fields.len() <= idx {
             self.fields.push(Value::StrNum(String::new()));
         }
+        // Check if value actually changed (avoid unnecessary $0 rebuild)
+        let old_str = self.fields[idx].to_string_val();
+        let new_str = val.to_string_val();
+        let changed = old_str != new_str;
         let is_str = matches!(val, Value::Str(_));
         self.fields[idx] = val;
         let nf = (self.fields.len() - 1) as f64;
         self.globals.insert("NF".to_string(), Value::Num(nf));
-        if idx > 0 {
+        if idx > 0 && changed {
             self.rebuild_record();
         } else {
             // Re-split if $0 was assigned
@@ -1007,6 +1011,14 @@ impl Interpreter {
                 self.get_field(idx)
             }
             Expr::ArrayRef(name, indices) => {
+                // Check scalar-as-array
+                if !self.arrays.contains_key(name)
+                    && self.globals.contains_key(name)
+                    && !matches!(self.globals.get(name), Some(Value::Uninitialized))
+                {
+                    eprintln!("awk: fatal: attempt to use scalar `{name}' as an array");
+                    std::process::exit(2);
+                }
                 let vals: Vec<Value> = indices.iter().map(|i| self.eval_expr(i)).collect();
                 let key = self.array_key(&vals);
                 // Auto-vivify: reading an array element creates it
@@ -1405,10 +1417,7 @@ impl Interpreter {
                             });
                             r.to_string()
                         };
-                        // Only assign back if replacements were made
-                        if count > 0 {
-                            self.assign_to(&target_expr, Value::Str(result));
-                        }
+                        self.assign_to(&target_expr, Value::Str(result));
                         Value::Num(count as f64)
                     }
                     None => Value::Num(0.0),
