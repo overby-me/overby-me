@@ -77,38 +77,38 @@
 
 | Project | Description |
 |-|-|
-| [NixOS-rs 🦀❄️](https://tangled.org/@overby.me/overby.me/tree/main/rust/nixos) | NixOS distribution with Rust user space |
-| [Nixpkgs-rs 🦀❄️](https://tangled.org/@overby.me/overby.me/tree/main/rust/nixpkgs) | Rust-based C toolchain replacements for Nix package builds |
-| [Systemd-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/systemd) | Systemd replacement |
-| [GCC-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/gcc) | GCC-compatible C compiler written in Rust |
+| [Awk-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/awk) | GNU awk-compatible pattern processing tool |
 | [Bash-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/bash) | Bash-compatible shell written in Rust |
-| [Make-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/make) | GNU Make-compatible build system driver |
-| [Meson-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/meson) | Meson build system compatible implementation |
-| [Direnv-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/direnv) | Direnv reimplementation |
+| [Binutils-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/binutils) | GNU binutils-compatible binary utilities |
+| [Bison-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/bison) | POSIX yacc/bison-compatible parser generator |
+| [Bubblewrap-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/bubblewrap) | Bubblewrap-compatible unprivileged sandboxing tool |
+| [Bzip2-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/bzip2) | bzip2-compatible compression tool |
 | [Cachix-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/cachix) | Cachix CLI reimplementation |
 | [Curl-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/curl) | curl-compatible HTTP client using Rustls |
-| [Flatpak-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/flatpak) | Flatpak-compatible application sandboxing and distribution tool |
-| [Bubblewrap-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/bubblewrap) | Bubblewrap-compatible unprivileged sandboxing tool |
-| [Grep-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/grep) | GNU grep-compatible pattern matching tool |
-| [Sed-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/sed) | GNU sed-compatible stream editor |
-| [Awk-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/awk) | GNU awk-compatible pattern processing tool |
 | [Diffutils-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/diffutils) | GNU diffutils-compatible file comparison tools |
-| [Patch-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/patch) | GNU patch-compatible patch application tool |
-| [Tar-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/tar) | GNU tar-compatible tape archive tool |
-| [Gzip-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/gzip) | gzip-compatible compression tool |
-| [Bzip2-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/bzip2) | bzip2-compatible compression tool |
-| [Xz-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/xz) | xz-compatible compression tool |
-| [Binutils-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/binutils) | GNU binutils-compatible binary utilities |
-| [Strip-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/strip) | binutils strip-compatible symbol stripping tool |
-| [Patchelf-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/patchelf) | patchelf-compatible ELF binary patching tool |
-| [Pkg-config-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/pkg-config) | pkg-config reimplementation |
-| [Bison-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/bison) | POSIX yacc/bison-compatible parser generator |
+| [Direnv-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/direnv) | Direnv reimplementation |
 | [File-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/file) | GNU file-compatible file type detection tool |
-| [Help2man-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/help2man) | GNU help2man-compatible man page generator |
-| [Texinfo-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/texinfo) | GNU makeinfo-compatible Texinfo processor |
+| [Flatpak-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/flatpak) | Flatpak-compatible application sandboxing and distribution tool |
+| [GCC-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/gcc) | GCC-compatible C compiler written in Rust |
+| [Grep-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/grep) | GNU grep-compatible pattern matching tool |
+| [Gzip-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/gzip) | gzip-compatible compression tool |
 | [H264-decoder-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/h264-decoder) | Pure Rust H.264 decoder library and CLI |
 | [H265-decoder-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/h265-decoder) | Pure Rust H.265/HEVC decoder library |
 | [H26xtoav1-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/h26xtoav1) | CLI tool for transcoding H.264/H.265 video to AV1 |
+| [Help2man-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/help2man) | GNU help2man-compatible man page generator |
+| [Make-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/make) | GNU Make-compatible build system driver |
+| [Meson-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/meson) | Meson build system compatible implementation |
+| [NixOS-rs 🦀❄️](https://tangled.org/@overby.me/overby.me/tree/main/rust/nixos) | NixOS distribution with Rust user space |
+| [Nixpkgs-rs 🦀❄️](https://tangled.org/@overby.me/overby.me/tree/main/rust/nixpkgs) | Rust-based C toolchain replacements for Nix package builds |
+| [Patch-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/patch) | GNU patch-compatible patch application tool |
+| [Patchelf-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/patchelf) | patchelf-compatible ELF binary patching tool |
+| [Pkg-config-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/pkg-config) | pkg-config reimplementation |
+| [Sed-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/sed) | GNU sed-compatible stream editor |
+| [Strip-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/strip) | binutils strip-compatible symbol stripping tool |
+| [Systemd-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/systemd) | Systemd replacement |
+| [Tar-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/tar) | GNU tar-compatible tape archive tool |
+| [Texinfo-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/texinfo) | GNU makeinfo-compatible Texinfo processor |
+| [Xz-rs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/rust/xz) | xz-compatible compression tool |
 
 #### Mojo
 
