@@ -1163,7 +1163,27 @@ impl Interpreter {
                 val
             }
             Expr::OpAssign(lhs, op, rhs) => {
-                let lv = self.eval_expr(lhs).to_num();
+                // For array refs with side effects (a[b++] += 1),
+                // evaluate the index once and cache the resolved target
+                let (lv, resolved_target) = match lhs.as_ref() {
+                    Expr::ArrayRef(name, indices) => {
+                        let vals: Vec<Value> =
+                            indices.iter().map(|i| self.eval_expr(i)).collect();
+                        let key = self.array_key(&vals);
+                        let cur = self.get_array(name, &key).to_num();
+                        (cur, Some((name.clone(), key)))
+                    }
+                    Expr::FieldRef(idx_expr) => {
+                        let idx = self.eval_expr(idx_expr).to_num() as usize;
+                        let cur = self.get_field(idx).to_num();
+                        // Store index for later assignment
+                        (cur, None) // will use assign_to below
+                    }
+                    _ => {
+                        let cur = self.eval_expr(lhs).to_num();
+                        (cur, None)
+                    }
+                };
                 let rv = self.eval_expr(rhs).to_num();
                 let result = match op {
                     BinOp::Add => lv + rv,
@@ -1183,7 +1203,11 @@ impl Interpreter {
                     _ => lv,
                 };
                 let val = Value::Num(result);
-                self.assign_to(lhs, val.clone());
+                if let Some((name, key)) = resolved_target {
+                    self.set_array(&name, &key, val.clone());
+                } else {
+                    self.assign_to(lhs, val.clone());
+                }
                 val
             }
             Expr::Match(left, right) => {
