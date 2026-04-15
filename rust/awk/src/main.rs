@@ -139,7 +139,12 @@ fn main() {
     }
 
     // Set up ARGV and ARGC
-    interp.set_array("ARGV", "0", Value::Str(args[0].clone()));
+    // Use just the binary name for ARGV[0], not full path
+    let argv0 = std::path::Path::new(&args[0])
+        .file_name()
+        .map(|f| f.to_string_lossy().to_string())
+        .unwrap_or_else(|| args[0].clone());
+    interp.set_array("ARGV", "0", Value::Str(argv0));
     for (i, file) in input_files.iter().enumerate() {
         interp.set_array("ARGV", &(i + 1).to_string(), Value::Str(file.clone()));
     }
