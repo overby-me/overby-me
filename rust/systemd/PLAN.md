@@ -31,7 +31,7 @@ Run a test: `nix build .#checks.x86_64-linux.rust-systemd-test-<name>`
 
 ### 07-PID1 (most pass, ~60 subtests)
 
-- PASS: condition-negation, condition-virt, daemon-reload, drop-in-override, enable-disable, exec-context, exec-reload, exec-reload-failure, exec-start-pre-post, exec-start-pre-post-order, exec-stop-post, exec-stop-post-failure, exec-timestamps, forking-pidfile, is-enabled, issue-14566, issue-16115, issue-1981, issue-27953, issue-3166, issue-31752, issue-33672, issue-2467, issue-3171, kill-mode, list-units, multi-exec-start, on-failure, ordering, poll-limit, pr-31351, private-network, private-users, protect-hostname, remain-after-exit, requires-mounts-for, resource-limits, restart-behavior, runtime-directory, service-dependencies, set-environment, socket-pass-fds, standard-output-file, start-limit, state-logs-directory, success-exit-status, success-exit-status-custom, systemctl-kill, systemctl-restart, systemctl-show, systemctl-show-props, systemd-run-exit-code, target-ordering, timeout-stop, type-exec-parallel, umask, wantedby-target, working-directory-custom, working-directory
+- PASS: condition-negation, condition-virt, daemon-reload, drop-in-override, enable-disable, exec-context, exec-reload, exec-reload-failure, exec-start-pre-post, exec-start-pre-post-order, exec-stop-post, exec-stop-post-failure, exec-timestamps, forking-pidfile, is-enabled, issue-14566, issue-16115, issue-1981, issue-27953, issue-3166, issue-31752, issue-33672, issue-2467, issue-3171, kill-mode, list-units, mask, multi-exec-start, on-failure, ordering, poll-limit, pr-31351, private-network, private-users, protect-hostname, remain-after-exit, requires-mounts-for, resource-limits, restart-behavior, restart-on-failure-oneshot, runtime-directory, service-dependencies, set-environment, socket-pass-fds, standard-output-file, start-limit, state-logs-directory, success-exit-status, success-exit-status-custom, systemctl-kill, systemctl-restart, systemctl-show, systemctl-show-props, systemd-run-exit-code, target-ordering, timeout-stop, transient, type-exec-parallel, umask, wantedby-target, working-directory-custom, working-directory
 
 ### 19-CGROUP (all pass)
 
@@ -51,10 +51,11 @@ Run a test: `nix build .#checks.x86_64-linux.rust-systemd-test-<name>`
 - PASS: debug-generator, getty-generator, run-generator (after --man=no fix), system-update-generator
 - FAIL: fstab-generator (D-Bus)
 
-### 74-AUX-UTILS (partially tested, ~151 tests)
+### 74-AUX-UTILS (63/151 tested, batch in progress)
 
-- PASS so far: systemctl-basics, detect-virt, escape, id128, path, analyze-timespan, analyze-timestamp, add-wants, after-timestamp
-- Most remaining untested (need batch run)
+- PASS (59): add-wants, after-timestamp, analyze-cal-iter, analyze-calendar, analyze-calendar-more, analyze-edge, analyze-standalone, analyze-timespan, analyze-timestamp, analyze-unit-paths, can-operations, cat, cat-content, cat-dropin, cat-dropin-content, cat-single, cg-options, cgtop, control-pid, daemon-reload, default-deps, delta, dep-props, description-check, detect-virt, enable-disable, enable-wantedby, enter-timestamp, environment, env-manager, escape, exec-main-props, exec-status, exec-timestamps, fragment-path, get-default, id128, invocation-id, is-active-states, is-enabled-patterns, is-queries, isolate-target, journal-json, journal-ops, journal-vacuum, kill-signal, list-dependencies, list-deps-advanced, list-deps-basic, list-failed, list-jobs, list-sockets, list-uf-pattern, list-unit-files, list-units, list-units-pattern, load-state, log-level, machine-id-setup
+- FAIL (transient, pass on retry): cgls, delta, is-system-running
+- Remaining ~88 tests being batched
 
 ## Failing Tests — Categorized by Root Cause
 
@@ -85,11 +86,6 @@ Type=notify services expect the main process to send `READY=1` via sd_notify bef
 **Fix complexity:** Medium-high — Type=notify basics work for sd_notify READY=1, but advanced notification states (RELOADING, STOPPING) and proper timeout handling for services that never send READY=1 need implementation.
 
 ### 3. Missing Service Features
-
-**Restart=on-failure for oneshot:**
-
-- 07-pid1-restart-on-failure-oneshot
-- Fix: Implement restart logic for oneshot service type
 
 **Upholds= directive:**
 
@@ -184,7 +180,7 @@ All 23 udev tests fail because the C `udevadm` binary in the overlay lacks featu
 
 ### Priority 2: Medium Effort Features
 
-- [ ] Implement Restart=on-failure for oneshot services
+- [x] Implement Restart=on-failure for oneshot services (already works)
 - [ ] Fix systemd-run --wait to track ExecStopPost properly
 - [ ] Implement Upholds= dependency directive
 - [ ] Implement StateDirectory=/ConfigurationDirectory=
