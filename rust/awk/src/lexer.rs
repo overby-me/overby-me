@@ -92,6 +92,7 @@ pub struct Lexer {
     input: Vec<char>,
     pos: usize,
     tokens: Vec<Token>,
+    warned_escapes: std::collections::HashSet<char>,
 }
 
 impl Lexer {
@@ -100,6 +101,7 @@ impl Lexer {
             input: input.chars().collect(),
             pos: 0,
             tokens: Vec::new(),
+            warned_escapes: std::collections::HashSet::new(),
         }
     }
 
@@ -158,13 +160,14 @@ impl Lexer {
                         'v' => s.push('\x0B'),
                         '/' => s.push('/'),
                         _ => {
-                            // Warn about unknown escape sequences (like gawk)
-                            if esc == 'u' || esc == 'U' {
-                                eprintln!("awk: warning: no hex digits in `\\{esc}' escape sequence");
-                            } else {
-                                eprintln!(
-                                    "awk: warning: regexp escape sequence `\\{esc}' is not a known regexp operator"
-                                );
+                            if self.warned_escapes.insert(esc) {
+                                if esc == 'u' || esc == 'U' {
+                                    eprintln!("awk: warning: no hex digits in `\\{esc}' escape sequence");
+                                } else {
+                                    eprintln!(
+                                        "awk: warning: regexp escape sequence `\\{esc}' is not a known regexp operator"
+                                    );
+                                }
                             }
                             s.push('\\');
                             s.push(esc);
@@ -191,12 +194,12 @@ impl Lexer {
                         s.push('/');
                     } else {
                         // Warn about unknown regex escapes at parse time (like gawk)
-                        // Skip digits 8-9 — those are warned at runtime with "treated as plain" message
-                        if !"dDwWsStbnrfax0123456789.^$*+?()[]{}|\\/&"
+                        if !"dDwWsStbnrfax0123456789.^$*+?()[]{}|\\/&-\""
                             .contains(next)
+                            && self.warned_escapes.insert(next)
                         {
-                            if next == 'u' || next == 'U' {
-                                eprintln!("awk: warning: no hex digits in `\\{next}' escape sequence");
+                            if next == 'u' {
+                                eprintln!("awk: warning: no hex digits in `\\u' escape sequence");
                             } else {
                                 eprintln!(
                                     "awk: warning: regexp escape sequence `\\{next}' is not a known regexp operator"
