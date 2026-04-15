@@ -976,13 +976,31 @@ impl Interpreter {
                     result.push(chars[i]);
                     i += 1;
                 }
+                let class_start = result.len();
                 while i < chars.len() && chars[i] != ']' {
                     if chars[i] == '\\' && i + 1 < chars.len() {
                         result.push(chars[i]);
                         i += 1;
+                        result.push(chars[i]);
+                        i += 1;
+                    } else if chars[i] == '-' {
+                        // Check context: escape dashes that would create ambiguous ranges
+                        let at_start = result.len() == class_start;
+                        let at_end = i + 1 < chars.len() && chars[i + 1] == ']';
+                        let after_dash = result.ends_with('-') || result.ends_with("\\-");
+                        let before_dash = i + 1 < chars.len() && chars[i + 1] == '-';
+                        if at_start || at_end || after_dash || before_dash {
+                            result.push('\\');
+                            result.push('-');
+                            i += 1;
+                        } else {
+                            result.push(chars[i]);
+                            i += 1;
+                        }
+                    } else {
+                        result.push(chars[i]);
+                        i += 1;
                     }
-                    result.push(chars[i]);
-                    i += 1;
                 }
                 if i < chars.len() {
                     result.push(chars[i]); // ]
