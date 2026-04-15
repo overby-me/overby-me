@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**17/60 tests passing** (28%) — shell tests from the GNU sed 4.9 test suite.
+**31/61 tests passing** (51%) — shell tests from the GNU sed 4.9 test suite.
 
 ### Test infrastructure approach
 
@@ -389,25 +389,25 @@ debug.pl   (debug/trace output tests)
 
 ### Current Status
 
-**17/60 tests passing** (28%) — shell tests from the GNU sed 4.9 test suite.
+**31/61 tests passing** (51%) — shell tests from the GNU sed 4.9 test suite.
 
 Note: Some tests excluded from the Nix harness (`8bit`, `badenc`, `newjis`, `utf8-ru`, `invalid-mb-seq-UMR` — require specific locale setups or non-UTF-8 binary input files; `help-version` — requires exact GNU version strings). `inplace-selinux` passes by skipping (no SELinux in sandbox).
 
-### Passing (17 tests)
+### Passing (31 tests)
 
-bsd, bug32082, bug32271-1, bug32271-2, inplace-selinux (skip), madding,
-mb-bad-delim, mb-charclass-non-utf8, mb-match-slash, mb-y-translate,
-newline-dfa-bug, posix-mode-ERE, regex-max-int, stdin, subst-mb-incomplete,
-title-case, word-delim
+bsd, bug32082, bug32271-1, bug32271-2, cmd-R, command-endings, comment-n,
+distrib, eval, in-place-hyphen, in-place-suffix-backup, inplace-hold,
+inplace-selinux (skip), madding, mb-bad-delim, mb-charclass-non-utf8,
+mb-match-slash, mb-y-translate, newline-dfa-bug, posix-mode-ERE,
+posix-mode-N, range-overlap, regex-max-int, stdin, stdin-prog,
+subst-mb-incomplete, subst-options, subst-replacement, title-case,
+word-delim, xemacs
 
-### Failing (43 tests)
+### Failing (30 tests)
 
-8to7, binary, bsd-wrapper, cmd-0r, cmd-l, cmd-R, colon-with-no-label,
-command-endings, comment-n, compile-errors, compile-tests, convert-number,
-dc, distrib, eval, execute-tests, follow-symlinks, follow-symlinks-stdin,
-help, in-place-hyphen, in-place-suffix-backup, inplace-hold, mac-mf,
-missing-filename, normalize-text, nulldata, obinary, panic-tests,
-posix-char-class, posix-mode-addr, posix-mode-bad-ref, posix-mode-N,
-posix-mode-s, range-overlap, recursive-escape-c, regex-errors, sandbox,
-stdin-prog, subst-options, subst-replacement, temp-file-cleanup, unbuffered,
-uniq, xemacs
+8to7, binary, bsd-wrapper, cmd-0r, cmd-l, colon-with-no-label,
+compile-errors, compile-tests, convert-number, dc, execute-tests,
+follow-symlinks, follow-symlinks-stdin, help, mac-mf, missing-filename,
+normalize-text, nulldata, obinary, panic-tests, posix-char-class,
+posix-mode-addr, posix-mode-bad-ref, posix-mode-s, recursive-escape-c,
+regex-errors, sandbox, temp-file-cleanup, unbuffered, uniq
