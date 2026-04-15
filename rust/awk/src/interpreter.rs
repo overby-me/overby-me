@@ -1342,17 +1342,50 @@ impl Interpreter {
                 } else {
                     self.eval_expr(&args[1]).to_string_val()
                 };
+                // Get optional array name for capture groups (3rd arg)
+                let arr_name = if args.len() >= 3 {
+                    match &args[2] {
+                        Expr::Var(n) => Some(n.clone()),
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
                 match Self::compile_regex(&pattern) {
                     Some(re) => {
-                        if let Some(m) = re.find(&s) {
+                        if let Some(caps) = re.captures(&s) {
+                            let m = caps.get(0).unwrap();
                             let start = s[..m.start()].chars().count() + 1;
                             let length = m.as_str().chars().count();
                             self.set_var("RSTART", Value::Num(start as f64));
                             self.set_var("RLENGTH", Value::Num(length as f64));
+                            // Populate capture array if provided
+                            if let Some(ref arr) = arr_name {
+                                self.arrays.remove(arr);
+                                // arr[0] = entire match
+                                self.set_array(
+                                    arr,
+                                    "0",
+                                    Value::Str(m.as_str().to_string()),
+                                );
+                                // arr[1..n] = capture groups
+                                for i in 1..caps.len() {
+                                    if let Some(g) = caps.get(i) {
+                                        self.set_array(
+                                            arr,
+                                            &i.to_string(),
+                                            Value::Str(g.as_str().to_string()),
+                                        );
+                                    }
+                                }
+                            }
                             Value::Num(start as f64)
                         } else {
                             self.set_var("RSTART", Value::Num(0.0));
                             self.set_var("RLENGTH", Value::Num(-1.0));
+                            if let Some(ref arr) = arr_name {
+                                self.arrays.remove(arr);
+                            }
                             Value::Num(0.0)
                         }
                     }
