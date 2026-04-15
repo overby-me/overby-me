@@ -617,6 +617,24 @@ impl Parser {
                 let getline_expr = Expr::Getline(var, None, GetlineSource::Pipe);
                 left = Expr::Pipe(Box::new(left), Box::new(getline_expr));
 
+                // Handle addition/subtraction after pipe-getline:
+                // cmd | getline x + 1 → (cmd | getline x) + 1
+                loop {
+                    match self.peek() {
+                        Token::Plus => {
+                            self.advance();
+                            let right = self.parse_multiplication();
+                            left = Expr::Binop(Box::new(left), BinOp::Add, Box::new(right));
+                        }
+                        Token::Minus => {
+                            self.advance();
+                            let right = self.parse_multiplication();
+                            left = Expr::Binop(Box::new(left), BinOp::Sub, Box::new(right));
+                        }
+                        _ => break,
+                    }
+                }
+
                 // Continue concatenation after pipe-getline:
                 // cmd | getline x y → (cmd | getline x) concat y
                 while let Token::Number(_)
