@@ -156,7 +156,12 @@ impl Interpreter {
             "NR" => self.nr = val.to_num() as i64,
             "FNR" => self.fnr = val.to_num() as i64,
             "NF" => {
-                let nf = val.to_num() as usize;
+                let nf_val = val.to_num();
+                if nf_val < 0.0 {
+                    eprintln!("awk: fatal: NF set to negative value");
+                    std::process::exit(2);
+                }
+                let nf = nf_val as usize;
                 while self.fields.len() <= nf {
                     self.fields.push(Value::StrNum(String::new()));
                 }

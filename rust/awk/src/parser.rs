@@ -82,10 +82,33 @@ impl Parser {
             Token::Ident(s) => s,
             _ => String::new(),
         };
+        // Check for redefining builtin functions
+        if BUILTIN_FUNCTIONS.contains(&name.as_str()) {
+            eprintln!("awk: `{name}' is a built-in function, it cannot be redefined");
+            std::process::exit(1);
+        }
         self.expect(&Token::LParen);
         let mut params = Vec::new();
+        let mut seen_params: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut has_errors = false;
         while !matches!(self.peek(), Token::RParen | Token::Eof) {
             if let Token::Ident(s) = self.advance() {
+                // Check for duplicate parameter names
+                if let Some(&first_idx) = seen_params.get(&s) {
+                    eprintln!(
+                        "awk: error: function `{name}': parameter #{}, `{s}', duplicates parameter #{first_idx}",
+                        params.len() + 1
+                    );
+                    has_errors = true;
+                }
+                // Check for function name used as parameter
+                if s == name {
+                    eprintln!(
+                        "awk: error: function `{name}': cannot use function name as parameter name"
+                    );
+                    std::process::exit(1);
+                }
+                seen_params.entry(s.clone()).or_insert(params.len() + 1);
                 params.push(s);
             }
             if matches!(self.peek(), Token::Comma) {
@@ -93,6 +116,9 @@ impl Parser {
             }
         }
         self.expect(&Token::RParen);
+        if has_errors {
+            std::process::exit(1);
+        }
         self.skip_terminators();
         let body = self.parse_action();
         FuncDef { name, params, body }

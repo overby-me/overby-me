@@ -45,6 +45,10 @@ pkgs.runCommand "rust-awk-test-${name}" {
   # Normalize any remaining nix store paths
   sed -i -E 's|/nix/store/[a-z0-9]{32}-[^/]+|NIXPATH|g' "$TMPDIR/expected" "$TMPDIR/actual"
 
+  # Normalize error message prefixes: "gawk:" → "awk:" and strip source locations
+  sed -i 's|^gawk: |awk: |g' "$TMPDIR/expected"
+  sed -i -E 's|^awk: \./[^:]+:[0-9]+: |awk: |g' "$TMPDIR/expected" "$TMPDIR/actual"
+
   # Compare
   if diff --text "$TMPDIR/actual" "$TMPDIR/expected"; then
     touch $out
