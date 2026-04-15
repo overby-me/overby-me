@@ -25,14 +25,15 @@
     retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep 1; done; "$@"; }
 
     : "Restart=on-failure restarts oneshot on failure"
-    # This service fails on first two runs, succeeds on third
-    cat > /run/systemd/system/restart-oneshot-test.service << EOF
+    # This service fails on first two runs, succeeds on third.
+    # Use $$ to escape $ for systemd's env var expansion in ExecStart.
+    cat > /run/systemd/system/restart-oneshot-test.service << 'EOF'
     [Service]
     Type=oneshot
     RemainAfterExit=yes
     Restart=on-failure
     RestartSec=1
-    ExecStart=bash -c 'COUNT=0; [[ -f /tmp/restart-oneshot-count ]] && COUNT=\$(cat /tmp/restart-oneshot-count); echo \$((COUNT + 1)) > /tmp/restart-oneshot-count; [[ \$COUNT -ge 2 ]]'
+    ExecStart=bash -c 'COUNT=0; [[ -f /tmp/restart-oneshot-count ]] && COUNT=$$(cat /tmp/restart-oneshot-count); echo $$((COUNT + 1)) > /tmp/restart-oneshot-count; [[ $$COUNT -ge 2 ]]'
     EOF
     retry systemctl daemon-reload
     rm -f /tmp/restart-oneshot-count

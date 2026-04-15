@@ -488,7 +488,7 @@ fn handle_pending_restart(restart: PendingRestart, arc_run_info: &ArcMutRuntimeI
         // Oneshot reactivation blocks in wait_for_service until the new
         // process exits. Spawn on a separate thread so we don't hold
         // the read lock for the entire duration.
-        info!("Restarting oneshot service {name}");
+        trace!("Restarting oneshot service {name}");
         drop(run_info);
         let arc_ri = arc_run_info.clone();
         let restart_id = srvc_id.clone();
@@ -502,8 +502,9 @@ fn handle_pending_restart(restart: PendingRestart, arc_run_info: &ArcMutRuntimeI
                     }
                 }
             };
-            if let Err(e) = crate::units::reactivate_unit(restart_id, &ri) {
-                error!("Failed to restart oneshot service: {e}");
+            match crate::units::reactivate_unit(restart_id, &ri) {
+                Ok(()) => trace!("Restarted oneshot service {name}"),
+                Err(e) => error!("Failed to restart oneshot service {}: {e}", name),
             }
         });
     } else {
@@ -782,11 +783,6 @@ pub(crate) fn service_exit_handler(
             }
 
             // For failed oneshot services, check if we should restart.
-            trace!(
-                "Oneshot service {name} exit handler: success={}, restart_policy={:?}",
-                success_exit_status.is_success(&code),
-                srvc.conf.restart
-            );
             let oneshot_should_restart = if !success_exit_status.is_success(&code) {
                 let prevent_restart = {
                     let rps = &srvc.conf.restart_prevent_exit_status;
