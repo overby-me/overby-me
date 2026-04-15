@@ -2,6 +2,94 @@
 
 All notable fixes to the bash test suite are documented here, grouped by phase.
 
+## Phase 117 — Array bracket matching for `read`/`printf -v` (77/77 nix tests passing)
+
+- **`W_ARRAYREF`-like unquoted bracket detection** — Fixed `A[]]` bracket matching for `read`/`printf -v` by implementing quoting context detection. Added `UNQUOTED_ARRAYREF` thread-local set during word expansion: when a command word has an unquoted `[` (in a `Literal` AST part), `rfind(']')` is used for bracket matching (accepts `]` as key). When the `[` was inside double quotes, first-`]` forward scan is used (rejects `A[]]` as invalid). This distinguishes `read A[$rkey]` (unquoted, accepts) from `read "A[$k]"` (quoted, rejects). **array test now passes (0 nix diff).**
+
+## Phase 116 — Coproc PID cleanup on reap (nameref 0 nix diff)
+
+- **Coproc `_PID` cleanup on reap** — Force-remove the `_PID` variable (including readonly) when the coproc process is reaped. Fixes `declare -p RO_PID` showing stale value after coproc cleanup. **nameref test now passes (0 nix diff).**
+
+## Phase 115 — DISCARD for invalid nameref target
+
+- **DISCARD for invalid nameref target** — `foo=7*6` through a nameref with empty target now skips remaining `;`-separated commands on the same line (matching bash's DISCARD). Only fires for simple assignments, not arithmetic `(( ))` or expansion `${=}` contexts.
+
+## Phase 114 — Readonly assignment DISCARD
+
+- **Readonly assignment DISCARD** — Assigning to a readonly variable (`X=2` when `X` is readonly) now skips remaining commands on the same `;`-separated line, matching bash's `jump_to_top_level(DISCARD)` behavior.
+
+## Phase 113 — `unset -n` on non-nameref is a no-op
+
+- **`unset -n` on non-nameref is a no-op** — `unset -n y` when `y` is NOT a nameref now preserves the variable (bash behavior). Previously it fully unset the variable. This fixed the `typeset -n y; y=2` error format issue (error now appears on the `typeset` line, not the `y=2` line) and several other accumulated-state issues.
+
+## Phase 112 — Circular nameref array assignment to saved scope
+
+- **Circular nameref array assignment to saved scope** — `local -n a=a; a=X` where `a` is an outer array now correctly assigns `X` to the outer array element [0] by updating the saved scope entry during the circular nameref assignment.
+
+## Phase 103 — Select loop EOF handling
+
+- **Select loop EOF handling** (`src/interpreter/commands.rs`) — Select loop now reads one byte before printing the `#?` prompt, detecting EOF without printing an extra prompt. Fixes `select r in /; do :; done <<< 1; echo x` producing `#? x` instead of `x`.
+
+## Phase 102 — Coproc name validation, `${@:0}` fix
+
+- **Coproc name validation** (`src/interpreter/commands.rs`) — `coproc @ { :; }` now rejects `@` as invalid identifier, matching bash.
+- **`${@:0}` includes `$0` with no positional args** (`src/expand/mod.rs`, `src/expand/params.rs`) — `echo ${@:0}` with no positional parameters now includes `$0` (the shell name). Fixed guard from `positional.len() > 1` to `!positional.is_empty()` for Substring operations.
+
+## Phase 101 — Readonly nameref declaration, exec vredir empty nameref
+
+- **Readonly nameref declaration** (`src/builtins/vars.rs`) — `declare -n RO` on a readonly variable now correctly rejects with `"declare: RO: readonly variable"` and `"RO: readonly variable"`, matching bash. Previously silently allowed.
+- **Exec vredir empty nameref** (`src/interpreter/redirects.rs`) — `exec {r}>/dev/null` where `r` is a nameref with empty target now reports `"exec: '10': not a valid identifier"` and `"r: cannot assign fd to variable"`, matching bash.
+
+## Phase 100 — Select loop, coproc readonly protection, indirect expansion, empty nameref validation
+
+- **Select loop implementation** (`src/ast.rs`, `src/parser.rs`, `src/interpreter/commands.rs`) — Added `is_select` flag to `ForClause` AST and implemented `run_select_inner` with numbered menu printing to stderr, `#?` prompt (from `$PS3`), stdin reading, and `REPLY` variable. Previously, `select` was silently executed as a `for` loop.
+- **Coproc readonly variable protection** (`src/interpreter/commands.rs`, `src/builtins/trap.rs`) — `coproc ROVAR { :; }` when ROVAR is readonly now emits both `"ROVAR: readonly variable"` and `"ROVAR: cannot unset: readonly variable"` matching bash. Also prevents overwriting readonly vars in coproc array/PID assignment, old coproc cleanup, and coproc reaping. Added `cleanup_reaped_coprocs` called after `wait`.
+- **Invalid indirect expansion through nameref** (`src/expand/params.rs`) — `${!foo[2]}` where `foo` is a nameref to an unset variable now correctly reports `"foo[2]: invalid indirect expansion"`. When the nameref target exists, the subscript silently returns empty (matching bash). `${!bar}` where `bar` is completely unset also now reports `"bar: invalid indirect expansion"`.
+- **Empty nameref target validation** (`src/builtins/vars.rs`) — `r=""; declare -n r` now correctly rejects empty string as invalid nameref target with `"invalid variable name for name reference"`, matching bash. Distinguishes explicit `r=""` (invalid) from truly unset variables (creates unbound nameref).
+
+## Phase 99 — Command substitution in nameref/array subscripts, circular nameref warnings
+
+- **Command substitution expansion in nameref subscript targets** (`src/expand/params.rs`, `src/expand/mod.rs`, `src/interpreter/commands.rs`) — When a nameref target contains `$(...)` in its subscript (e.g. `declare -n foo='x[$(echo 0)]'`), the command substitution is now expanded before the subscript is evaluated arithmetically. Added `CMD_SUB_RUNNER` thread-local in the expand layer (similar to `PROCSUB_RUNNER`) that `lookup_var` uses to invoke the interpreter's `capture_output` for comsub expansion. Registered in both `expand_word_fields` and `expand_word_single`.
+- **Command substitution expansion in array subscripts** (`src/expand/params.rs`) — Direct array subscript access like `${x[i=0$(echo comsub >&2)]}` now expands `$(...)` in the subscript via `expand_comsubs_in_arith_expr` before arithmetic evaluation. Previously, `$(...)` in subscripts was passed literally to `eval_arith_full_with_assoc` which couldn't handle command substitutions.
+- **Circular nameref warning during expansion** (`src/expand/mod.rs`) — When `$x` is expanded and `x` is part of a circular nameref chain (e.g. `v→w→x→v`), the expand-layer `resolve_nameref` now emits `warning: x: circular name reference` to stderr, matching bash behavior. Added `resolve_nameref_warn_expand` variant that reports circularity; used only in `lookup_var`'s nameref resolution path.
+
+## Phase 98 — Subscripted nameref target validation in compound/declare assignments
+
+- **Subscripted nameref target validation in compound assignments** (`src/interpreter/commands.rs`) — When `ref+=([2]=x)` is a bare compound assignment and `ref` is a nameref to `XXX[0]`, the assignment is now rejected with `'XXX[0]': not a valid identifier`. Added the check in `execute_assignment` before the `match &assign.value` dispatch, catching `AssignValue::Array` with subscripted resolved bases.
+- **Subscripted nameref target validation in pre-processing compound assignments** (`src/interpreter/commands.rs`) — When `declare ref=(X)` is pre-processed and `ref` resolves to a subscripted nameref target like `XXX[0]`, the compound assignment is now rejected with `'XXX[0]': not a valid identifier` instead of creating an array on the subscripted name.
+- **Declare attribute application uses base name for subscripted nameref targets** (`src/builtins/vars.rs`) — When `declare -A ref` is called and `ref` is a nameref to `XXX[0]`, the `-A` flag is now applied to `XXX` (the base name), not `XXX[0]` (the full subscripted target).
+
+## Phase 97 — Double-subscript and `read -a` nameref rejection
+
+- **Reject subscripted nameref targets in double-subscript assignments** (`src/interpreter/commands.rs`) — When `ref[foo]=bar` is assigned and `ref` is a nameref to `XXX[0]`, the resulting target `XXX[0][foo]` is invalid (double subscript). Now rejected with `'XXX[0]': not a valid identifier`.
+- **Reject subscripted nameref targets in `read -a`** (`src/builtins/io.rs`) — When `read -a ref` is used and `ref` is a nameref to `XXX[0]`, the operation is now rejected with `read: 'XXX[0]': not a valid identifier`.
+
+## Phase 96 — Circular nameref assignment at global scope
+
+- **Circular nameref assignment at global scope** (`src/interpreter/mod.rs`) — When `x=4` is attempted through a circular nameref chain (`v→w→x→v`) at global scope, the assignment now silently fails (no-op) after the circular warning is emitted.
+
+## Phase 95 — Nameref self-reference `+=` error prefix, `[@]`/`[*]` assignment rejection
+
+- **Nameref self-reference `+=` append error prefix** (`src/builtins/vars.rs`) — When `typeset -n ref=re ref+=f` creates a self-reference, the error message now omits the command name prefix (matching bash). Direct self-references like `typeset -n x=x` still include it.
+- **Reject `var[@]`/`var[*]` assignment through namerefs** (`src/interpreter/mod.rs`) — When a nameref resolves to a target with `[@]` or `[*]` subscript, the assignment is rejected with `bad array subscript` error.
+
+## Phase 94 — Integer attribute through namerefs in compound assignment
+
+- **Integer attribute through namerefs in compound assignment pre-processing** (`src/interpreter/commands.rs`) — When `local -i ref=([1]=)` is processed and `ref` is a nameref, the `-i` flag is now detected during compound assignment pre-processing via `has_integer_flag`. Array elements are evaluated as arithmetic.
+- **Integer flag on bare nameref in `builtin_local`** (`src/builtins/vars.rs`) — When `local -i ref` is called without a value and `ref` is a nameref already in local scope, the integer attribute is now applied to the target variable (not the nameref itself).
+
+## Phase 93 — Nounset nameref subscript reporting
+
+- **Nounset nameref subscript reporting** (`src/expand/arithmetic.rs`, `src/expand/mod.rs`, `src/expand/params.rs`) — When `declare -n r='a[k]'; : "$r"` is expanded with nounset and `k` is unbound, the error now correctly reports `k: unbound variable` instead of `r: unbound variable`. Added `is_nounset_error()` to prevent double-reporting.
+
+## Phase 92 — Compound assignment through namerefs and scope management
+
+- **Compound assignment through namerefs in `run_simple_command` pre-processing** (`src/interpreter/commands.rs`) — `declare ref=(X)` where `ref` is a nameref to `var` now correctly creates `var` as an indexed array; the compound assignment pre-processing now resolves through namerefs before performing the array assignment, using `assign_target` instead of the raw variable name for all array/assoc insert operations.
+- **`declare -g` uses global scope nameref** (`src/builtins/vars.rs`) — `declare -g ref=(X)` inside a function where there's both a local nameref (`ref→var`) and a global nameref (`ref→foo`) now correctly resolves through the global nameref (saved in `local_scopes`), creating `foo` as an array; previously it used the local nameref and created `var`.
+- **`declare_local` for nameref targets in `builtin_declare`** (`src/builtins/vars.rs`) — When attributes are applied through a nameref in function scope (e.g. `declare -a ref` where `ref→var`), the target variable is now also `declare_local`'d so it gets saved/restored on scope exit; prevents target variables from leaking out of function scope.
+- **`local -A`/`-a` through existing local namerefs** (`src/builtins/vars.rs`) — `local -A ref=([1]=)` where `ref` is an existing local nameref now correctly resolves through the nameref and creates the associative array on the target; the fix distinguishes between namerefs already in the current local scope (resolve through them) vs namerefs inherited from global scope (shadow them with a new local).
+- **Compound assignment through namerefs in `builtin_declare` else-branch** (`src/builtins/vars.rs`) — When `declare ref=(X)` falls through to the no-flag else-branch and the resolved target doesn't yet exist as an array, a new indexed array is now created on the target (matching bash behavior). nameref20.sub flipped to 0 diff (was ~14 lines); nameref21.sub reduced from ~8 to ~4.
+
 ## Phase 91 — Subscript-circular nameref detection, "removing nameref attribute", declare-i scalar preservation (fixes 297–299)
 
 1. **Subscript-circular nameref detection** (`src/interpreter/mod.rs`) — Nameref chains like `a→b→a[1]` are now detected as circular by checking the **base name** (before `[`) against previously seen names in the resolution chain. Three functions updated: `is_circular_nameref` (adds `seen_bases` HashSet tracking base names), `resolve_nameref_warn` (same base-name tracking, breaks immediately on circular detection instead of continuing to max depth), and new `resolve_nameref_for_assign` (returns `NamerefResolveResult` enum distinguishing `Resolved`, `CircularExact` for exact cycles like `a→b→a`, and `CircularSubscript(target)` for subscript cycles like `a→b→a[1]`). Previously, only exact name matches were checked, so subscripted targets whose base name matched an earlier variable in the chain were not detected as circular. The 3-node circular chain `v→w→x→v` now correctly reports "circular name reference" instead of "maximum nameref depth (8) exceeded".
