@@ -1,6 +1,6 @@
 {
   name = "17-UDEV";
   testEnv = {
-    TEST_MATCH_SUBTEST = "\\.02\\.sh$";
+    TEST_MATCH_SUBTEST = "\\.TAG\\.sh$";
   };
 }
