@@ -777,7 +777,69 @@ impl Interpreter {
         // Pre-process: in awk, quantifiers (+, *, ?) after anchors (^) or at
         // start of alternatives (|, () are literals. Fix before compiling.
         let fixed = Self::fix_awk_regex(pattern);
-        Regex::new(&fixed).ok()
+        if let Ok(re) = Regex::new(&fixed) {
+            return Some(re);
+        }
+        // Second attempt: escape problematic chars in character classes
+        let fixed2 = Self::fix_char_classes(&fixed);
+        Regex::new(&fixed2).ok()
+    }
+
+    /// Fix problematic character class patterns (e.g., [---] → [\-])
+    fn fix_char_classes(pattern: &str) -> String {
+        let chars: Vec<char> = pattern.chars().collect();
+        let mut result = String::new();
+        let mut i = 0;
+        while i < chars.len() {
+            if chars[i] == '[' {
+                result.push('[');
+                i += 1;
+                // Handle negation
+                if i < chars.len() && chars[i] == '^' {
+                    result.push('^');
+                    i += 1;
+                }
+                // Handle ] as first char
+                if i < chars.len() && chars[i] == ']' {
+                    result.push(']');
+                    i += 1;
+                }
+                // Process character class contents
+                while i < chars.len() && chars[i] != ']' {
+                    if chars[i] == '-' {
+                        // Check if dash can be a range operator
+                        let is_start = result.ends_with('[') || result.ends_with('^');
+                        let is_end = i + 1 < chars.len() && chars[i + 1] == ']';
+                        let is_consecutive = i + 1 < chars.len() && chars[i + 1] == '-';
+                        if is_start || is_end || is_consecutive {
+                            result.push_str("\\-");
+                        } else {
+                            result.push('-');
+                        }
+                    } else if chars[i] == '\\' && i + 1 < chars.len() {
+                        result.push(chars[i]);
+                        i += 1;
+                        result.push(chars[i]);
+                    } else {
+                        result.push(chars[i]);
+                    }
+                    i += 1;
+                }
+                if i < chars.len() {
+                    result.push(']');
+                    i += 1;
+                }
+            } else if chars[i] == '\\' && i + 1 < chars.len() {
+                result.push(chars[i]);
+                i += 1;
+                result.push(chars[i]);
+                i += 1;
+            } else {
+                result.push(chars[i]);
+                i += 1;
+            }
+        }
+        result
     }
 
     fn fix_awk_regex(pattern: &str) -> String {
