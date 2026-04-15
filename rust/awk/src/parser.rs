@@ -488,7 +488,8 @@ impl Parser {
         let mut left = self.parse_and();
         while matches!(self.peek(), Token::Or) {
             self.advance();
-            let right = self.parse_and();
+            // Right operand of || allows assignment (e.g., expr || $0 = $1)
+            let right = self.parse_assignment();
             left = Expr::Binop(Box::new(left), BinOp::Or, Box::new(right));
         }
         left
@@ -498,7 +499,8 @@ impl Parser {
         let mut left = self.parse_in_expr();
         while matches!(self.peek(), Token::And) {
             self.advance();
-            let right = self.parse_in_expr();
+            // Right operand of && allows assignment (e.g., gsub() && $0 = $1)
+            let right = self.parse_assignment();
             left = Expr::Binop(Box::new(left), BinOp::And, Box::new(right));
         }
         left

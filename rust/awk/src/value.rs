@@ -58,11 +58,18 @@ impl Value {
             Value::Num(n) => *n != 0.0,
             Value::Str(s) => !s.is_empty(),
             Value::StrNum(s) => {
-                // Input strings use numeric comparison for boolean
+                // Input strings: if the string looks numeric, use numeric truth
                 if s.is_empty() {
-                    false
-                } else {
+                    return false;
+                }
+                let trimmed = s.trim();
+                // Only use numeric comparison if the string actually starts with
+                // a digit, sign, or decimal point (i.e., parse_num would find digits)
+                if trimmed.starts_with(|c: char| c.is_ascii_digit() || c == '+' || c == '-' || c == '.') {
                     parse_num(s) != 0.0
+                } else {
+                    // Non-numeric string: non-empty is true
+                    true
                 }
             }
             Value::Uninitialized => false,
