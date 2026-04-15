@@ -828,7 +828,13 @@ impl Interpreter {
         }
         // Second attempt: escape problematic chars in character classes
         let fixed2 = Self::fix_char_classes(&fixed);
-        Regex::new(&fixed2).ok()
+        match Regex::new(&fixed2) {
+            Ok(re) => Some(re),
+            Err(_) => {
+                eprintln!("awk: error: Invalid regular expression: /{pattern}/");
+                std::process::exit(2);
+            }
+        }
     }
 
     /// Fix problematic character class patterns (e.g., [---] → [\-])
