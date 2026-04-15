@@ -191,9 +191,14 @@ impl Interpreter {
             .get("SUBSEP")
             .map(|v| v.to_string_val())
             .unwrap_or("\x1c".to_string());
+        let convfmt = self
+            .globals
+            .get("CONVFMT")
+            .map(|v| v.to_string_val())
+            .unwrap_or("%.6g".to_string());
         indices
             .iter()
-            .map(|v| v.to_string_val())
+            .map(|v| v.to_string_with_fmt(&convfmt))
             .collect::<Vec<_>>()
             .join(&subsep)
     }
