@@ -7973,7 +7973,34 @@ pub fn execute_command(
                 // still be in Starting state.  Poll until it leaves Starting
                 // (either becomes Started after READY=1 or fails/stops).
                 if is_notify {
-                    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(90);
+                    // Use the service's TimeoutStartSec (default 90s) for
+                    // the polling deadline.  This ensures `systemctl start`
+                    // returns promptly when a short timeout is configured
+                    // (e.g. NotifyAccess=none with TimeoutStartSec=3).
+                    let timeout_secs = {
+                        let ri = run_info.read_poisoned();
+                        ri.unit_table
+                            .get(&id)
+                            .and_then(|u| {
+                                if let crate::units::Specific::Service(svc) = &u.specific {
+                                    svc.conf
+                                        .starttimeout
+                                        .as_ref()
+                                        .or(svc.conf.generaltimeout.as_ref())
+                                        .and_then(|t| match t {
+                                            crate::units::Timeout::Duration(d) => {
+                                                Some(d.as_secs().max(1))
+                                            }
+                                            crate::units::Timeout::Infinity => None,
+                                        })
+                                } else {
+                                    None
+                                }
+                            })
+                            .unwrap_or(90)
+                    };
+                    let deadline = std::time::Instant::now()
+                        + std::time::Duration::from_secs(timeout_secs);
                     loop {
                         let still_starting = {
                             let ri = run_info.read_poisoned();
@@ -7992,14 +8019,27 @@ pub fn execute_command(
                         }
                         std::thread::sleep(std::time::Duration::from_millis(100));
                     }
-                    // Check if the service ended up in a failed state
+                    // Check if the service ended up in a failed state.
+                    // Also treat Restarting as a failure for the original
+                    // `systemctl start` — the first start attempt failed
+                    // (process exited without READY=1), even though
+                    // Restart=always will retry automatically.  This matches
+                    // C systemd where the start job fails independently of
+                    // the restart policy.
                     let ri = run_info.read_poisoned();
                     if let Some(unit) = ri.unit_table.get(&id) {
                         let st = unit.common.status.read_poisoned();
-                        if let UnitStatus::Stopped(_, errors) = &*st
-                            && !errors.is_empty()
-                        {
-                            return Err(format!("Unit {} failed to start", id.name));
+                        match &*st {
+                            UnitStatus::Stopped(_, errors) if !errors.is_empty() => {
+                                return Err(format!("Unit {} failed to start", id.name));
+                            }
+                            UnitStatus::Restarting => {
+                                return Err(format!(
+                                    "Unit {} failed to start (restarting)",
+                                    id.name
+                                ));
+                            }
+                            _ => {}
                         }
                     }
                 }

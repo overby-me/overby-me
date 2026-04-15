@@ -333,13 +333,17 @@ pub fn service_exit_handler_new_thread(
         // units without holding any lock, so the trigger thread can freely
         // acquire write locks (e.g. in find_or_load_unit) without causing
         // writer-preferring RwLock starvation.
-        if let Some(trigger) = pending_trigger {
+        if let Some(trigger) = &pending_trigger {
+            trace!(
+                "Exit handler: dispatching {} trigger for {} → {:?}",
+                trigger.kind, trigger.source_name, trigger.targets
+            );
             trigger_on_success_failure_units(
                 &trigger.targets,
                 &trigger.source_name,
                 &trigger.kind,
                 &run_info,
-                trigger.monitor_env,
+                trigger.monitor_env.clone(),
             );
         }
         // Handle pending restart AFTER the read lock is dropped.
@@ -1293,7 +1297,7 @@ pub(crate) fn service_exit_handler(
         };
 
         if !was_replaced_or_stopping {
-            trace!("Recursively killing all services requiring service {name}");
+            trace!("Recursively deactivating service {name} (non-restart path)");
             loop {
                 let res = crate::units::deactivate_unit_recursive(&srvc_id, run_info);
                 let retry = if let Err(e) = &res {
@@ -1309,7 +1313,14 @@ pub(crate) fn service_exit_handler(
                     false
                 };
                 if !retry {
-                    res.map_err(|e| format!("{e}"))?;
+                    if let Err(e) = &res {
+                        warn!(
+                            "Exit handler: deactivate_unit_recursive for {name} failed: {e}, continuing to trigger collection"
+                        );
+                    }
+                    // Don't propagate the error — we still need to collect
+                    // OnSuccess=/OnFailure= triggers even if deactivation had
+                    // non-fatal errors (e.g. process already exited).
                     break;
                 }
             }
@@ -1428,6 +1439,10 @@ pub(crate) fn service_exit_handler(
                 || was_replaced_or_stopping
                 || success_exit_status.is_clean_signal(&code);
             if effective_success && !unit.common.unit.on_success.is_empty() {
+                trace!(
+                    "Exit handler: collecting OnSuccess trigger for {name}: {:?}",
+                    unit.common.unit.on_success
+                );
                 pending_trigger = Some(PendingTrigger {
                     targets: unit.common.unit.on_success.clone(),
                     source_name: name.to_string(),
@@ -1435,6 +1450,10 @@ pub(crate) fn service_exit_handler(
                     monitor_env: build_monitor_env(name, &code, true),
                 });
             } else if !effective_success && !unit.common.unit.on_failure.is_empty() {
+                trace!(
+                    "Exit handler: collecting OnFailure trigger for {name}: {:?}",
+                    unit.common.unit.on_failure
+                );
                 pending_trigger = Some(PendingTrigger {
                     targets: unit.common.unit.on_failure.clone(),
                     source_name: name.to_string(),

@@ -692,6 +692,7 @@ fn start_service_with_filedescriptors(
         ambient_capabilities: conf.exec_config.ambient_capabilities.clone(),
 
         // Security & sandboxing directives
+        dynamic_user: conf.exec_config.dynamic_user,
         no_new_privileges: conf.exec_config.no_new_privileges,
         umask: conf.exec_config.umask,
         nice: conf.exec_config.nice,

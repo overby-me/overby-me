@@ -2393,8 +2393,9 @@ fn send_with_retry(
 }
 
 fn send_unix(path: &str, payload: &str) -> Result<Value, Box<dyn std::error::Error>> {
-    // Retry on EAGAIN/WouldBlock — PID 1's listen backlog may be
-    // temporarily full when many commands are processed concurrently.
+    // Retry on EAGAIN/WouldBlock/Interrupted — PID 1's listen backlog may be
+    // temporarily full when many commands are processed concurrently, or the
+    // control socket may be briefly unavailable during daemon-reload.
     let mut stream = {
         let mut last_err = None;
         let mut connected = None;
@@ -2404,7 +2405,14 @@ fn send_unix(path: &str, payload: &str) -> Result<Value, Box<dyn std::error::Err
                     connected = Some(s);
                     break;
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::WouldBlock
+                            | std::io::ErrorKind::Interrupted
+                            | std::io::ErrorKind::ConnectionRefused
+                    ) || e.raw_os_error() == Some(libc::EAGAIN) =>
+                {
                     last_err = Some(e);
                     std::thread::sleep(std::time::Duration::from_millis(100));
                 }

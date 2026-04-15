@@ -369,6 +369,13 @@ pub struct ExecHelperConfig {
     pub ambient_capabilities: Vec<String>,
 
     // ── Security & sandboxing directives ───────────────────────────────
+    /// DynamicUser= — when true, directories (Runtime/State/Cache/Logs)
+    /// are created under a `private/` subdirectory with symlinks from the
+    /// standard paths. E.g. `/run/private/<name>` with symlink
+    /// `/run/<name>` → `/run/private/<name>`.
+    #[serde(default)]
+    pub dynamic_user: bool,
+
     /// NoNewPrivileges= — if true, ensures that the service process and all
     /// its children can never gain new privileges through execve() (e.g.
     /// via setuid/setgid bits or file capabilities). Applied via
@@ -1645,112 +1652,95 @@ pub fn run_exec_helper() {
     // then bind-mounts these directories read-write. This matches real
     // systemd's ordering: directories are created first, then the mount
     // namespace is applied with those directories whitelisted as writable.
-    if !config.state_directory.is_empty() {
-        let base = Path::new("/var/lib");
-        let mode = config.state_directory_mode.unwrap_or(0o755);
-        let mut full_paths = Vec::new();
-        for dir_name in &config.state_directory {
-            let full_path = base.join(dir_name);
-            if let Err(e) = std::fs::create_dir_all(&full_path) {
-                log::error!("Failed to create state directory {:?}: {}", full_path, e);
-                std::process::exit(1);
-            }
-            // Apply StateDirectoryMode=
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let perms = std::fs::Permissions::from_mode(mode);
-                if let Err(e) = std::fs::set_permissions(&full_path, perms) {
-                    log::warn!(
-                        "Failed to set mode {:o} on state directory {:?}: {}",
-                        mode,
+    // Helper: create a managed directory, with DynamicUser=yes support.
+    // When dynamic_user is true, create under <base>/private/<name> and
+    // symlink <base>/<name> → private/<name> (matching real systemd).
+    // Returns the path the service should use (the symlink for dynamic,
+    // the direct path otherwise).
+    let create_managed_dir =
+        |base: &Path, dir_name: &str, mode: u32, dynamic: bool| -> String {
+            let uid = nix::unistd::Uid::from_raw(config.user);
+            let gid = nix::unistd::Gid::from_raw(config.group);
+            if dynamic {
+                let private_dir = base.join("private");
+                let _ = std::fs::create_dir_all(&private_dir);
+                let full_path = private_dir.join(dir_name);
+                if let Err(e) = std::fs::create_dir_all(&full_path) {
+                    log::error!(
+                        "Failed to create private directory {:?}: {}",
                         full_path,
                         e
                     );
+                    std::process::exit(1);
                 }
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let perms = std::fs::Permissions::from_mode(mode);
+                    let _ = std::fs::set_permissions(&full_path, perms);
+                }
+                if let Err(e) = nix::unistd::chown(&full_path, Some(uid), Some(gid)) {
+                    log::error!("Failed to chown directory {:?}: {}", full_path, e);
+                    std::process::exit(1);
+                }
+                // Create symlink: <base>/<name> → private/<name>
+                let link_path = base.join(dir_name);
+                let _ = std::fs::remove_file(&link_path); // remove stale symlink
+                let target = Path::new("private").join(dir_name);
+                if let Err(e) = std::os::unix::fs::symlink(&target, &link_path) {
+                    log::warn!("Failed to create symlink {:?} → {:?}: {}", link_path, target, e);
+                }
+                full_path.to_string_lossy().into_owned()
+            } else {
+                let full_path = base.join(dir_name);
+                if let Err(e) = std::fs::create_dir_all(&full_path) {
+                    log::error!("Failed to create directory {:?}: {}", full_path, e);
+                    std::process::exit(1);
+                }
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let perms = std::fs::Permissions::from_mode(mode);
+                    let _ = std::fs::set_permissions(&full_path, perms);
+                }
+                if let Err(e) = nix::unistd::chown(&full_path, Some(uid), Some(gid)) {
+                    log::error!("Failed to chown directory {:?}: {}", full_path, e);
+                    std::process::exit(1);
+                }
+                full_path.to_string_lossy().into_owned()
             }
-            // Set ownership to the service user/group
-            let uid = nix::unistd::Uid::from_raw(config.user);
-            let gid = nix::unistd::Gid::from_raw(config.group);
-            if let Err(e) = nix::unistd::chown(&full_path, Some(uid), Some(gid)) {
-                log::error!("Failed to chown state directory {:?}: {}", full_path, e);
-                std::process::exit(1);
-            }
-            full_paths.push(full_path.to_string_lossy().into_owned());
-        }
-        // TODO: Audit that the environment access only happens in single-threaded code.
+        };
+
+    let dynamic = config.dynamic_user;
+
+    if !config.state_directory.is_empty() {
+        let base = Path::new("/var/lib");
+        let mode = config.state_directory_mode.unwrap_or(0o755);
+        let full_paths: Vec<String> = config
+            .state_directory
+            .iter()
+            .map(|d| create_managed_dir(base, d, mode, dynamic))
+            .collect();
         unsafe { std::env::set_var("STATE_DIRECTORY", full_paths.join(":")) };
     }
 
     if !config.logs_directory.is_empty() {
         let base = Path::new("/var/log");
         let mode = config.logs_directory_mode.unwrap_or(0o755);
-        let mut full_paths = Vec::new();
-        for dir_name in &config.logs_directory {
-            let full_path = base.join(dir_name);
-            if let Err(e) = std::fs::create_dir_all(&full_path) {
-                log::error!("Failed to create logs directory {:?}: {}", full_path, e);
-                std::process::exit(1);
-            }
-            // Apply LogsDirectoryMode=
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let perms = std::fs::Permissions::from_mode(mode);
-                if let Err(e) = std::fs::set_permissions(&full_path, perms) {
-                    log::error!(
-                        "Failed to set mode {:o} on logs directory {:?}: {}",
-                        mode,
-                        full_path,
-                        e
-                    );
-                    std::process::exit(1);
-                }
-            }
-            // Set ownership to the service user/group
-            let uid = nix::unistd::Uid::from_raw(config.user);
-            let gid = nix::unistd::Gid::from_raw(config.group);
-            if let Err(e) = nix::unistd::chown(&full_path, Some(uid), Some(gid)) {
-                log::error!("Failed to chown logs directory {:?}: {}", full_path, e);
-                std::process::exit(1);
-            }
-            full_paths.push(full_path.to_string_lossy().into_owned());
-        }
-        // TODO: Audit that the environment access only happens in single-threaded code.
+        let full_paths: Vec<String> = config
+            .logs_directory
+            .iter()
+            .map(|d| create_managed_dir(base, d, mode, dynamic))
+            .collect();
         unsafe { std::env::set_var("LOGS_DIRECTORY", full_paths.join(":")) };
     }
 
     if !config.runtime_directory.is_empty() {
         let base = Path::new("/run");
         let mode = config.runtime_directory_mode.unwrap_or(0o755);
-        let mut full_paths = Vec::new();
-        for dir_name in &config.runtime_directory {
-            let full_path = base.join(dir_name);
-            if let Err(e) = std::fs::create_dir_all(&full_path) {
-                log::error!("Failed to create runtime directory {:?}: {}", full_path, e);
-                std::process::exit(1);
-            }
-            // Apply RuntimeDirectoryMode=
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let perms = std::fs::Permissions::from_mode(mode);
-                if let Err(e) = std::fs::set_permissions(&full_path, perms) {
-                    log::warn!(
-                        "Failed to set mode {:o} on runtime directory {:?}: {}",
-                        mode,
-                        full_path,
-                        e
-                    );
-                }
-            }
-            // Set ownership to the service user/group
-            let uid = nix::unistd::Uid::from_raw(config.user);
-            let gid = nix::unistd::Gid::from_raw(config.group);
-            if let Err(e) = nix::unistd::chown(&full_path, Some(uid), Some(gid)) {
-                log::error!("Failed to chown runtime directory {:?}: {}", full_path, e);
-                std::process::exit(1);
-            }
-            full_paths.push(full_path.to_string_lossy().into_owned());
-        }
-        // TODO: Audit that the environment access only happens in single-threaded code.
+        let full_paths: Vec<String> = config
+            .runtime_directory
+            .iter()
+            .map(|d| create_managed_dir(base, d, mode, dynamic))
+            .collect();
         unsafe { std::env::set_var("RUNTIME_DIRECTORY", full_paths.join(":")) };
     }
 
@@ -1758,80 +1748,24 @@ pub fn run_exec_helper() {
     if !config.cache_directory.is_empty() {
         let base = Path::new("/var/cache");
         let mode = config.cache_directory_mode.unwrap_or(0o755);
-        let mut full_paths = Vec::new();
-        for dir_name in &config.cache_directory {
-            let full_path = base.join(dir_name);
-            if let Err(e) = std::fs::create_dir_all(&full_path) {
-                log::error!("Failed to create cache directory {:?}: {}", full_path, e);
-                std::process::exit(1);
-            }
-            // Apply CacheDirectoryMode=
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let perms = std::fs::Permissions::from_mode(mode);
-                if let Err(e) = std::fs::set_permissions(&full_path, perms) {
-                    log::warn!(
-                        "Failed to set mode {:o} on cache directory {:?}: {}",
-                        mode,
-                        full_path,
-                        e
-                    );
-                }
-            }
-            // Set ownership to the service user/group
-            let uid = nix::unistd::Uid::from_raw(config.user);
-            let gid = nix::unistd::Gid::from_raw(config.group);
-            if let Err(e) = nix::unistd::chown(&full_path, Some(uid), Some(gid)) {
-                log::error!("Failed to chown cache directory {:?}: {}", full_path, e);
-                std::process::exit(1);
-            }
-            full_paths.push(full_path.to_string_lossy().into_owned());
-        }
-        // TODO: Audit that the environment access only happens in single-threaded code.
+        let full_paths: Vec<String> = config
+            .cache_directory
+            .iter()
+            .map(|d| create_managed_dir(base, d, mode, dynamic))
+            .collect();
         unsafe { std::env::set_var("CACHE_DIRECTORY", full_paths.join(":")) };
     }
 
     // ── Create ConfigurationDirectory= directories under /etc/ ────────
+    // ConfigurationDirectory never uses private/ even with DynamicUser=yes.
     if !config.configuration_directory.is_empty() {
         let base = Path::new("/etc");
         let mode = config.configuration_directory_mode.unwrap_or(0o755);
-        let mut full_paths = Vec::new();
-        for dir_name in &config.configuration_directory {
-            let full_path = base.join(dir_name);
-            if let Err(e) = std::fs::create_dir_all(&full_path) {
-                log::error!(
-                    "Failed to create configuration directory {:?}: {}",
-                    full_path,
-                    e
-                );
-                std::process::exit(1);
-            }
-            // Apply ConfigurationDirectoryMode=
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let perms = std::fs::Permissions::from_mode(mode);
-                if let Err(e) = std::fs::set_permissions(&full_path, perms) {
-                    log::warn!(
-                        "Failed to set mode {:o} on configuration directory {:?}: {}",
-                        mode,
-                        full_path,
-                        e
-                    );
-                }
-            }
-            // Set ownership to the service user/group
-            let uid = nix::unistd::Uid::from_raw(config.user);
-            let gid = nix::unistd::Gid::from_raw(config.group);
-            if let Err(e) = nix::unistd::chown(&full_path, Some(uid), Some(gid)) {
-                log::error!(
-                    "Failed to chown configuration directory {:?}: {}",
-                    full_path,
-                    e
-                );
-                std::process::exit(1);
-            }
-            full_paths.push(full_path.to_string_lossy().into_owned());
-        }
+        let full_paths: Vec<String> = config
+            .configuration_directory
+            .iter()
+            .map(|d| create_managed_dir(base, d, mode, false))
+            .collect();
         // TODO: Audit that the environment access only happens in single-threaded code.
         unsafe { std::env::set_var("CONFIGURATION_DIRECTORY", full_paths.join(":")) };
     }
