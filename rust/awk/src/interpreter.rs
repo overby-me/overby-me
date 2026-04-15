@@ -263,6 +263,16 @@ impl Interpreter {
         }
 
         self.run_end_blocks(program);
+
+        // Close all open pipes and files to flush output
+        self.open_pipes.clear();
+        self.open_files.clear();
+        self.open_read_pipes.clear();
+        self.open_read_files.clear();
+        // Wait for all child processes
+        for (_, mut child) in self.pipe_children.drain() {
+            child.wait().ok();
+        }
     }
 
     fn run_end_blocks(&mut self, program: &Program) {
