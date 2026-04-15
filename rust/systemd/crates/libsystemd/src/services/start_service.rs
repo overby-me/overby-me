@@ -376,6 +376,10 @@ fn start_service_with_filedescriptors(
         }
     }
 
+    // For Type=simple, user/group resolution errors are deferred to the
+    // child process (the parent returns success, matching real systemd).
+    let mut deferred_exec_error: Option<i32> = None;
+
     // We first exec into our own executable again and apply this config
     // We transfer the config via a anonymous shared memory file
     let mut exec_helper_conf = crate::entrypoints::ExecHelperConfig {
@@ -557,17 +561,38 @@ fn start_service_with_filedescriptors(
             // DynamicUser=yes: UID/GID are set together below
             0 // placeholder, overwritten below
         } else {
-            resolve_gid_with_user_fallback(&conf.exec_config.group, &conf.exec_config.user)
-                .map_err(|e| RunCmdError::SpawnError(name.to_owned(), e))?
+            match resolve_gid_with_user_fallback(&conf.exec_config.group, &conf.exec_config.user) {
+                Ok(gid) => gid,
+                Err(e) => {
+                    // For Type=simple/idle, defer the error to the child process
+                    // so the parent returns success (matching real systemd).
+                    if matches!(conf.srcv_type, crate::units::ServiceType::Simple | crate::units::ServiceType::Idle) {
+                        deferred_exec_error = Some(216); // EXIT_GROUP
+                        0
+                    } else {
+                        return Err(RunCmdError::SpawnError(name.to_owned(), e));
+                    }
+                }
+            }
         },
         supplementary_groups: resolve_supplementary_gids(&conf.exec_config.supplementary_groups)
             .map_err(|e| RunCmdError::SpawnError(name.to_owned(), e))?,
         user: if conf.exec_config.dynamic_user && conf.exec_config.user.is_none() {
             0 // placeholder, overwritten below
         } else {
-            resolve_uid(&conf.exec_config.user)
-                .map_err(|e| RunCmdError::SpawnError(name.to_owned(), e))?
+            match resolve_uid(&conf.exec_config.user) {
+                Ok(uid) => uid,
+                Err(e) => {
+                    if matches!(conf.srcv_type, crate::units::ServiceType::Simple | crate::units::ServiceType::Idle) {
+                        deferred_exec_error = Some(217); // EXIT_USER
+                        0
+                    } else {
+                        return Err(RunCmdError::SpawnError(name.to_owned(), e));
+                    }
+                }
+            }
         },
+        deferred_exec_error,
 
         working_directory: conf.exec_config.working_directory.clone(),
         root_directory: conf.exec_config.root_directory.clone(),

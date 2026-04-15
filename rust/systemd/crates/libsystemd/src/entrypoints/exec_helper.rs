@@ -223,6 +223,13 @@ pub struct ExecHelperConfig {
     pub supplementary_groups: Vec<libc::gid_t>,
     pub user: libc::uid_t,
 
+    /// When set, the exec helper exits immediately with this error code.
+    /// Used for Type=simple services where user/group resolution fails:
+    /// the parent returns success (matching real systemd) while the child
+    /// reports the error.
+    #[serde(default)]
+    pub deferred_exec_error: Option<i32>,
+
     pub working_directory: Option<PathBuf>,
 
     /// RootDirectory= — sets the root directory for the executed process.
@@ -1427,6 +1434,17 @@ pub fn run_exec_helper() {
     crate::kmsg_log::KmsgLogger::init(&config.name, manager_level);
 
     log::trace!("config parsed OK");
+
+    // Deferred exec error: when user/group resolution failed for Type=simple,
+    // the parent process already returned success. The child exits with the
+    // appropriate error code (e.g. 217 for user resolution failure).
+    if let Some(exit_code) = config.deferred_exec_error {
+        log::error!(
+            "Deferred exec error for {}: exiting with code {exit_code}",
+            config.name
+        );
+        std::process::exit(exit_code);
+    }
 
     nix::unistd::close(libc::STDIN_FILENO).expect("I want to be able to close this fd!");
 
