@@ -199,9 +199,10 @@ impl Lexer {
         let mut s = String::new();
         if self.peek() == Some('0')
             && (self.peek_at(1) == Some('x') || self.peek_at(1) == Some('X'))
+            && self.peek_at(2).is_some_and(|c| c.is_ascii_hexdigit())
         {
-            s.push(self.advance().unwrap());
-            s.push(self.advance().unwrap());
+            s.push(self.advance().unwrap()); // 0
+            s.push(self.advance().unwrap()); // x
             while let Some(ch) = self.peek() {
                 if ch.is_ascii_hexdigit() {
                     s.push(self.advance().unwrap());
@@ -211,13 +212,33 @@ impl Lexer {
             }
             return i64::from_str_radix(&s[2..], 16).unwrap_or(0) as f64;
         }
+        let mut has_dot = false;
+        let mut has_exp = false;
         while let Some(ch) = self.peek() {
-            if ch.is_ascii_digit() || ch == '.' {
+            if ch.is_ascii_digit() {
                 s.push(self.advance().unwrap());
-            } else if ch == 'e' || ch == 'E' {
+            } else if ch == '.' && !has_dot && !has_exp {
+                has_dot = true;
                 s.push(self.advance().unwrap());
-                if self.peek() == Some('+') || self.peek() == Some('-') {
-                    s.push(self.advance().unwrap());
+            } else if (ch == 'e' || ch == 'E') && !has_exp
+                && !s.is_empty()
+                && s.chars().last().is_some_and(|c| c.is_ascii_digit())
+            {
+                // Only consume 'e'/'E' if followed by digits or sign+digits
+                let next = self.peek_at(1);
+                let has_exp_digits = if next == Some('+') || next == Some('-') {
+                    self.peek_at(2).is_some_and(|c| c.is_ascii_digit())
+                } else {
+                    next.is_some_and(|c| c.is_ascii_digit())
+                };
+                if has_exp_digits {
+                    has_exp = true;
+                    s.push(self.advance().unwrap()); // e/E
+                    if self.peek() == Some('+') || self.peek() == Some('-') {
+                        s.push(self.advance().unwrap());
+                    }
+                } else {
+                    break;
                 }
             } else {
                 break;
