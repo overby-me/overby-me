@@ -94,9 +94,15 @@ pub fn sprintf_impl(vals: &[Value]) -> String {
             let formatted = match conv {
                 'd' | 'i' => {
                     let n = val.to_num() as i64;
-                    // Handle precision: %.0d with 0 produces empty string
+                    // Handle precision: %.0d with 0 produces empty string (or just sign)
                     if has_precision && prec_num == 0 && n == 0 {
-                        String::new()
+                        if plus_sign {
+                            "+".to_string()
+                        } else if space_sign {
+                            " ".to_string()
+                        } else {
+                            String::new()
+                        }
                     } else {
                         let abs_str = if has_precision {
                             let s = format!("{}", n.unsigned_abs());
@@ -121,44 +127,57 @@ pub fn sprintf_impl(vals: &[Value]) -> String {
                 }
                 'o' => {
                     let n = val.to_num() as u64;
-                    let s = format!("{n:o}");
-                    let s = if has_precision && s.len() < prec_num {
-                        format!("{s:0>width$}", width = prec_num)
+                    if has_precision && prec_num == 0 && n == 0 {
+                        // %.0o with 0: empty, but # flag gives "0"
+                        if alt_form { "0".to_string() } else { String::new() }
                     } else {
-                        s
-                    };
-                    if flags.contains('#') && !s.starts_with('0') && n != 0 {
-                        format!("0{s}")
-                    } else {
-                        s
+                        let s = format!("{n:o}");
+                        let s = if has_precision && s.len() < prec_num {
+                            format!("{s:0>width$}", width = prec_num)
+                        } else {
+                            s
+                        };
+                        if alt_form && !s.starts_with('0') {
+                            format!("0{s}")
+                        } else {
+                            s
+                        }
                     }
                 }
                 'x' => {
                     let n = val.to_num() as u64;
-                    let s = format!("{n:x}");
-                    let s = if has_precision && s.len() < prec_num {
-                        format!("{s:0>width$}", width = prec_num)
+                    if has_precision && prec_num == 0 && n == 0 {
+                        String::new()
                     } else {
-                        s
-                    };
-                    if flags.contains('#') && n != 0 {
-                        format!("0x{s}")
-                    } else {
-                        s
+                        let s = format!("{n:x}");
+                        let s = if has_precision && s.len() < prec_num {
+                            format!("{s:0>width$}", width = prec_num)
+                        } else {
+                            s
+                        };
+                        if alt_form && n != 0 {
+                            format!("0x{s}")
+                        } else {
+                            s
+                        }
                     }
                 }
                 'X' => {
                     let n = val.to_num() as u64;
-                    let s = format!("{n:X}");
-                    let s = if has_precision && s.len() < prec_num {
-                        format!("{s:0>width$}", width = prec_num)
+                    if has_precision && prec_num == 0 && n == 0 {
+                        String::new()
                     } else {
-                        s
-                    };
-                    if flags.contains('#') && n != 0 {
-                        format!("0X{s}")
-                    } else {
-                        s
+                        let s = format!("{n:X}");
+                        let s = if has_precision && s.len() < prec_num {
+                            format!("{s:0>width$}", width = prec_num)
+                        } else {
+                            s
+                        };
+                        if alt_form && n != 0 {
+                            format!("0X{s}")
+                        } else {
+                            s
+                        }
                     }
                 }
                 'u' => format!("{}", val.to_num() as u64),
