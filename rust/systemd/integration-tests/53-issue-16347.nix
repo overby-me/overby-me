@@ -1,1 +1,6 @@
-{name = "53-ISSUE-16347";}
+{
+  name = "53-TIMER";
+  testEnv = {
+    TEST_MATCH_SUBTEST = "\\.issue-16347\\.sh$";
+  };
+}
