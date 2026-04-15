@@ -32,6 +32,9 @@ struct SubstFlags {
     print: bool,
     write_file: Option<String>,
     case_insensitive: bool,
+    multiline: bool,     // m/M flag
+    execute: bool,       // e flag — execute result as shell command
+    print_before_exec: bool, // p came before e in flags
 }
 
 #[derive(Debug, Clone)]
@@ -68,6 +71,8 @@ enum Command {
     ReadLine(String),                    // R file
     WriteFile(String),                   // w file
     WriteFirstLine(String),              // W file
+    Execute(Option<String>),             // e [command]
+    Filename,                            // F
     Noop,
     Block(Vec<SedCommand>),
 }
@@ -103,6 +108,7 @@ struct Parser<'a> {
     input: &'a [u8],
     pos: usize,
     extended: bool,
+    hash_n_quiet: bool, // set if #n is found as first line of first script
 }
 
 impl<'a> Parser<'a> {
@@ -111,6 +117,7 @@ impl<'a> Parser<'a> {
             input: input.as_bytes(),
             pos: 0,
             extended,
+            hash_n_quiet: false,
         }
     }
 
@@ -140,15 +147,22 @@ impl<'a> Parser<'a> {
         self.pos >= self.input.len()
     }
 
-    fn parse_all(&mut self) -> Result<Vec<SedCommand>, String> {
+    fn parse_all(&mut self, is_first_script: bool) -> Result<Vec<SedCommand>, String> {
         let mut commands = Vec::new();
+        let mut first_comment = is_first_script;
         while !self.at_end() {
             self.skip_blanks_and_newlines();
             if self.at_end() {
                 break;
             }
             if self.peek() == Some(b'#') {
-                // Comment — skip to end of line
+                self.advance(); // consume '#'
+                // Check for #n at start of first script — activates quiet mode
+                if first_comment && self.peek() == Some(b'n') {
+                    self.hash_n_quiet = true;
+                }
+                first_comment = false;
+                // Skip to end of line
                 while let Some(ch) = self.advance() {
                     if ch == b'\n' {
                         break;
@@ -156,6 +170,7 @@ impl<'a> Parser<'a> {
                 }
                 continue;
             }
+            first_comment = false;
             if let Some(cmd) = self.parse_command()? {
                 commands.push(cmd);
             }
@@ -354,7 +369,15 @@ impl<'a> Parser<'a> {
             b'D' => Ok(Command::DeleteFirstLine),
             b'p' => Ok(Command::Print),
             b'P' => Ok(Command::PrintFirstLine),
-            b'l' => Ok(Command::PrintEscaped),
+            b'l' => {
+                // l may have optional line width: l80, l1, etc.
+                if let Some(ch) = self.peek()
+                    && ch.is_ascii_digit()
+                {
+                    let _ = self.parse_number(); // consume width (ignored for now)
+                }
+                Ok(Command::PrintEscaped)
+            }
             b'=' => Ok(Command::PrintLineNum),
             b'q' => {
                 self.skip_whitespace();
@@ -391,6 +414,9 @@ impl<'a> Parser<'a> {
             b':' => {
                 self.skip_whitespace();
                 let label = self.parse_label();
+                if label.is_empty() {
+                    return Err("\":\" lacks a label".into());
+                }
                 Ok(Command::Label(label))
             }
             b'b' => {
@@ -428,7 +454,48 @@ impl<'a> Parser<'a> {
                 let file = self.parse_filename();
                 Ok(Command::WriteFirstLine(file))
             }
-            b'\n' | b';' => Ok(Command::Noop),
+            b'e' => {
+                // e without argument: execute pattern space as command
+                // e with text: execute given command, output result
+                if self.peek() == Some(b'\n')
+                    || self.peek() == Some(b';')
+                    || self.at_end()
+                {
+                    Ok(Command::Execute(None))
+                } else {
+                    // Anything else is the command to execute
+                    self.skip_whitespace();
+                    let cmd_text = self.parse_text_arg();
+                    if cmd_text.is_empty() {
+                        Ok(Command::Execute(None))
+                    } else {
+                        Ok(Command::Execute(Some(cmd_text)))
+                    }
+                }
+            }
+            b'F' => Ok(Command::Filename),
+            b'v' => {
+                // v VERSION — check version, we just accept anything
+                self.skip_whitespace();
+                // Skip to end of command
+                while let Some(ch) = self.peek() {
+                    if ch == b'\n' || ch == b';' {
+                        break;
+                    }
+                    self.advance();
+                }
+                Ok(Command::Noop)
+            }
+            b'#' => {
+                // Inline comment — skip to end of line
+                while let Some(ch) = self.advance() {
+                    if ch == b'\n' {
+                        break;
+                    }
+                }
+                Ok(Command::Noop)
+            }
+            b'\n' | b';' | b'}' => Ok(Command::Noop),
             _ => Err(format!("unknown command: '{}'", char::from(ch))),
         }
     }
@@ -449,8 +516,12 @@ impl<'a> Parser<'a> {
             bre_to_ere(&pattern_str)
         };
 
-        if flags.case_insensitive {
+        if flags.case_insensitive && flags.multiline {
+            re_pattern = format!("(?im){re_pattern}");
+        } else if flags.case_insensitive {
             re_pattern = format!("(?i){re_pattern}");
+        } else if flags.multiline {
+            re_pattern = format!("(?m){re_pattern}");
         }
 
         let re = if pattern_str.is_empty() {
@@ -496,7 +567,106 @@ impl<'a> Parser<'a> {
                         match ch {
                             b'n' => result.push('\n'),
                             b'a' => result.push('\x07'),
+                            b'r' => result.push('\r'),
                             b't' => result.push('\t'),
+                            b'f' => result.push('\x0c'),
+                            b'v' => result.push('\x0b'),
+                            b'b' => result.push('\x08'),
+                            b'c' => {
+                                // \cX = control character (X XOR 0x40)
+                                // If next char is \, consume the escaped char
+                                if let Some(next) = self.peek() {
+                                    if next == delim {
+                                        // \c at end of replacement — produce literal backslash
+                                        result.push('\\');
+                                    } else if next == b'\\' {
+                                        // \c\\ means \c applied to escaped backslash
+                                        self.advance(); // consume first \
+                                        if let Some(next2) = self.peek() {
+                                            if next2 == b'\\' || next2 == delim {
+                                                self.advance(); // consume second \ or delim
+                                            }
+                                        }
+                                        // The argument to \c is \  (0x5C)
+                                        result.push(ctrl_char(b'\\') as char);
+                                    } else {
+                                        self.advance();
+                                        result.push(ctrl_char(next) as char);
+                                    }
+                                } else {
+                                    result.push('\\');
+                                }
+                            }
+                            b'd' => {
+                                // \dNNN = decimal escape
+                                let mut n: u32 = 0;
+                                let mut count = 0;
+                                for _ in 0..3 {
+                                    if let Some(d) = self.peek()
+                                        && d.is_ascii_digit()
+                                    {
+                                        n = n * 10 + (d - b'0') as u32;
+                                        self.advance();
+                                        count += 1;
+                                    } else {
+                                        break;
+                                    }
+                                }
+                                if count > 0 {
+                                    result.push(char::from_u32(n).unwrap_or('\0'));
+                                } else {
+                                    // \d not followed by digits — literal 'd'
+                                    result.push('d');
+                                }
+                            }
+                            b'o' => {
+                                // \oNNN = octal escape
+                                let mut n: u32 = 0;
+                                let mut count = 0;
+                                for _ in 0..3 {
+                                    if let Some(d) = self.peek()
+                                        && d >= b'0'
+                                        && d <= b'7'
+                                    {
+                                        n = n * 8 + (d - b'0') as u32;
+                                        self.advance();
+                                        count += 1;
+                                    } else {
+                                        break;
+                                    }
+                                }
+                                if count > 0 {
+                                    result.push(char::from_u32(n).unwrap_or('\0'));
+                                } else {
+                                    result.push('o');
+                                }
+                            }
+                            b'x' => {
+                                // \xNN = hex escape
+                                let mut n: u32 = 0;
+                                let mut count = 0;
+                                for _ in 0..2 {
+                                    if let Some(d) = self.peek()
+                                        && d.is_ascii_hexdigit()
+                                    {
+                                        let val = if d.is_ascii_digit() {
+                                            d - b'0'
+                                        } else {
+                                            (d | 0x20) - b'a' + 10
+                                        };
+                                        n = n * 16 + val as u32;
+                                        self.advance();
+                                        count += 1;
+                                    } else {
+                                        break;
+                                    }
+                                }
+                                if count > 0 {
+                                    result.push(char::from_u32(n).unwrap_or('\0'));
+                                } else {
+                                    result.push('x');
+                                }
+                            }
                             _ => {
                                 if ch != delim {
                                     result.push('\\');
@@ -534,11 +704,26 @@ impl<'a> Parser<'a> {
                     self.advance();
                     flags.case_insensitive = true;
                 }
+                Some(b'e') => {
+                    self.advance();
+                    if flags.print && !flags.execute {
+                        flags.print_before_exec = true;
+                    }
+                    flags.execute = true;
+                }
+                Some(b'm') | Some(b'M') => {
+                    self.advance();
+                    flags.multiline = true;
+                }
                 Some(b'w') => {
                     self.advance();
                     self.skip_whitespace();
                     flags.write_file = Some(self.parse_filename());
                     break;
+                }
+                Some(b'\r') => {
+                    // Ignore trailing \r (Windows line endings in script files)
+                    self.advance();
                 }
                 Some(ch) if ch.is_ascii_digit() => {
                     let n = self.parse_number()?;
@@ -569,9 +754,84 @@ impl<'a> Parser<'a> {
             let ch = self.advance().ok_or("unterminated y command")?;
             if escaped {
                 match ch {
-                    b'n' => chars.push('\n'),
+                    b'n' | b'\n' => chars.push('\n'),
                     b'a' => chars.push('\x07'),
+                    b'b' => chars.push('\x08'),
+                    b'f' => chars.push('\x0c'),
+                    b'r' => chars.push('\r'),
                     b't' => chars.push('\t'),
+                    b'v' => chars.push('\x0b'),
+                    b'c' => {
+                        // \cX = control character (X XOR 0x40)
+                        if let Some(next) = self.peek() {
+                            if next == delim {
+                                // \c at end of set — incomplete, don't consume delimiter
+                            } else if next == b'\\' {
+                                // \c\\ = \c applied to escaped backslash
+                                self.advance();
+                                if let Some(next2) = self.peek() {
+                                    if next2 == b'\\' || next2 == delim {
+                                        self.advance();
+                                    }
+                                }
+                                chars.push(ctrl_char(b'\\') as char);
+                            } else {
+                                self.advance();
+                                chars.push(ctrl_char(next) as char);
+                            }
+                        }
+                    }
+                    b'd' => {
+                        // \dNNN = decimal escape
+                        let mut n: u32 = 0;
+                        for _ in 0..3 {
+                            if let Some(d) = self.peek()
+                                && d.is_ascii_digit()
+                            {
+                                n = n * 10 + (d - b'0') as u32;
+                                self.advance();
+                            } else {
+                                break;
+                            }
+                        }
+                        chars.push(char::from_u32(n).unwrap_or('\0'));
+                    }
+                    b'o' => {
+                        // \oNNN = octal escape
+                        let mut n: u32 = 0;
+                        for _ in 0..3 {
+                            if let Some(d) = self.peek()
+                                && d >= b'0'
+                                && d <= b'7'
+                            {
+                                n = n * 8 + (d - b'0') as u32;
+                                self.advance();
+                            } else {
+                                break;
+                            }
+                        }
+                        chars.push(char::from_u32(n).unwrap_or('\0'));
+                    }
+                    b'x' => {
+                        // \xNN = hex escape
+                        let mut n: u32 = 0;
+                        for _ in 0..2 {
+                            if let Some(d) = self.peek()
+                                && d.is_ascii_hexdigit()
+                            {
+                                let val = if d.is_ascii_digit() {
+                                    d - b'0'
+                                } else {
+                                    (d | 0x20) - b'a' + 10
+                                };
+                                n = n * 16 + val as u32;
+                                self.advance();
+                            } else {
+                                break;
+                            }
+                        }
+                        chars.push(char::from_u32(n).unwrap_or('\0'));
+                    }
                     _ => {
                         if ch == delim {
                             chars.push(ch as char);
@@ -604,15 +864,13 @@ impl<'a> Parser<'a> {
     }
 
     fn skip_optional_backslash_newline(&mut self) {
-        // GNU sed allows `a\` followed by newline, or `a ` text
+        // GNU sed allows `a\` followed by newline, or `a ` text, or `a\` at EOF
         if self.peek() == Some(b'\\') {
-            let saved = self.pos;
-            self.advance();
+            self.advance(); // consume backslash
             if self.peek() == Some(b'\n') {
-                self.advance();
-            } else {
-                self.pos = saved;
+                self.advance(); // consume newline
             }
+            // If at EOF after backslash, that's fine — text will be empty
         } else if self.peek() == Some(b' ') || self.peek() == Some(b'\t') {
             self.skip_whitespace();
         }
@@ -889,10 +1147,13 @@ struct Engine {
     suppress_default_print: bool,
     input_lines: Vec<String>,
     input_index: usize,
+    current_filename: Option<String>,
+    range_active: Vec<bool>, // per-command range tracking
 }
 
 impl Engine {
     fn new(commands: Vec<SedCommand>, quiet: bool) -> Self {
+        let num_cmds = count_commands(&commands);
         Engine {
             commands,
             quiet,
@@ -909,6 +1170,8 @@ impl Engine {
             suppress_default_print: false,
             input_lines: Vec::new(),
             input_index: 0,
+            current_filename: None,
+            range_active: vec![false; num_cmds],
         }
     }
 
@@ -928,7 +1191,7 @@ impl Engine {
             self.suppress_default_print = false;
 
             let cmds = self.commands.clone();
-            self.execute_commands(&cmds);
+            self.execute_commands_with_offset(&cmds, 0);
 
             if self.quit {
                 if !self.quiet && !self.suppress_default_print {
@@ -969,18 +1232,19 @@ impl Engine {
         Ok(())
     }
 
-    fn execute_commands(&mut self, commands: &[SedCommand]) {
+    fn execute_commands_with_offset(&mut self, commands: &[SedCommand], range_offset: usize) {
         let mut i = 0;
         while i < commands.len() {
             if self.quit {
                 return;
             }
             let cmd = &commands[i];
-            let matched = self.address_matches(&cmd.address);
+            let range_idx = range_offset + i;
+            let matched = self.address_matches(&cmd.address, range_idx);
             let should_run = if cmd.negated { !matched } else { matched };
 
             if should_run {
-                match self.execute_one(&cmd.command, commands, i) {
+                match self.execute_one(&cmd.command, commands, i, range_offset) {
                     Flow::Continue => {}
                     Flow::Restart => {
                         i = 0;
@@ -1012,14 +1276,33 @@ impl Engine {
         }
     }
 
-    fn address_matches(&mut self, addr: &AddressRange) -> bool {
+    fn address_matches(&mut self, addr: &AddressRange, range_idx: usize) -> bool {
         match addr {
             AddressRange::None => true,
             AddressRange::Single(a) => self.addr_matches_single(a),
             AddressRange::Range(a, b) => {
-                // Simplified range: match if within range
-                // A proper implementation would track range state per command
-                self.addr_matches_single(a) || self.addr_matches_single(b) || self.in_range(a, b)
+                // Ensure range_active is large enough
+                if range_idx >= self.range_active.len() {
+                    self.range_active.resize(range_idx + 1, false);
+                }
+                if self.range_active[range_idx] {
+                    // We're inside a range — check if end address matches
+                    if self.addr_matches_single(b) {
+                        self.range_active[range_idx] = false;
+                    }
+                    true
+                } else if self.addr_matches_single(a) {
+                    // Start of range
+                    // Check if end also matches on same line
+                    if self.addr_matches_single(b) {
+                        // Single-line range — don't enter range mode
+                    } else {
+                        self.range_active[range_idx] = true;
+                    }
+                    true
+                } else {
+                    false
+                }
             }
         }
     }
@@ -1047,12 +1330,6 @@ impl Engine {
         }
     }
 
-    fn in_range(&mut self, _start: &Address, _end: &Address) -> bool {
-        // For a full implementation, range state would be tracked per-command
-        // This simplified version just checks both endpoints
-        false
-    }
-
     fn find_label(commands: &[SedCommand], label: &str) -> Option<usize> {
         for (i, cmd) in commands.iter().enumerate() {
             if let Command::Label(l) = &cmd.command
@@ -1077,6 +1354,7 @@ impl Engine {
         cmd: &Command,
         _all_commands: &[SedCommand],
         _cmd_idx: usize,
+        range_offset: usize,
     ) -> Flow {
         match cmd {
             Command::Noop => Flow::Continue,
@@ -1103,7 +1381,26 @@ impl Engine {
                 let result = self.do_substitute(&re, replacement, flags);
                 if result {
                     self.sub_happened = true;
-                    if flags.print {
+                    // If p before e: print, then execute
+                    if flags.print && flags.print_before_exec {
+                        self.write_pattern_space();
+                    }
+                    if flags.execute {
+                        if let Ok(output) = std::process::Command::new("sh")
+                            .arg("-c")
+                            .arg(&self.pattern_space)
+                            .output()
+                        {
+                            let mut text =
+                                String::from_utf8_lossy(&output.stdout).into_owned();
+                            if text.ends_with('\n') {
+                                text.pop();
+                            }
+                            self.pattern_space = text;
+                        }
+                    }
+                    // If p after e (or p without e): print after execution
+                    if flags.print && !flags.print_before_exec {
                         self.write_pattern_space();
                     }
                     if let Some(ref file) = flags.write_file {
@@ -1121,8 +1418,11 @@ impl Engine {
             Command::DeleteFirstLine => {
                 if let Some(pos) = self.pattern_space.find('\n') {
                     self.pattern_space = self.pattern_space[pos + 1..].to_string();
+                    self.suppress_default_print = true;
                     Flow::Restart
                 } else {
+                    // No newline — behaves like `d` (delete entire pattern space)
+                    self.suppress_default_print = true;
                     Flow::EndOfCycle
                 }
             }
@@ -1331,8 +1631,55 @@ impl Engine {
                 Flow::Continue
             }
 
+            Command::Execute(cmd_text) => {
+                match cmd_text {
+                    Some(cmd_str) => {
+                        // Execute the given command and insert output before current line
+                        if let Ok(output) = std::process::Command::new("sh")
+                            .arg("-c")
+                            .arg(cmd_str)
+                            .output()
+                        {
+                            let text = String::from_utf8_lossy(&output.stdout).into_owned();
+                            if !text.is_empty() {
+                                self.output.extend_from_slice(text.as_bytes());
+                                // Ensure newline termination
+                                if !text.ends_with('\n') {
+                                    self.output.push(b'\n');
+                                }
+                            }
+                        }
+                        Flow::Continue
+                    }
+                    None => {
+                        // Execute pattern space as a command, replace it with output
+                        if let Ok(output) = std::process::Command::new("sh")
+                            .arg("-c")
+                            .arg(&self.pattern_space)
+                            .output()
+                        {
+                            let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
+                            if text.ends_with('\n') {
+                                text.pop();
+                            }
+                            self.pattern_space = text;
+                        }
+                        Flow::Continue
+                    }
+                }
+            }
+
+            Command::Filename => {
+                let name = self.current_filename.as_deref().unwrap_or("-");
+                let s = format!("{name}\n");
+                self.output.extend_from_slice(s.as_bytes());
+                Flow::Continue
+            }
+
             Command::Block(cmds) => {
-                self.execute_commands(cmds);
+                // Commands inside blocks get their own range offset
+                let block_offset = range_offset + _all_commands.len();
+                self.execute_commands_with_offset(cmds, block_offset);
                 if self.quit {
                     Flow::Quit
                 } else {
@@ -1402,21 +1749,73 @@ impl Engine {
     }
 }
 
+/// Convert a byte to its control character equivalent.
+/// For ASCII letters, uppercases first so \ca == \cA.
+/// For other chars, XOR with 0x40.
+fn ctrl_char(b: u8) -> u8 {
+    if b.is_ascii_lowercase() {
+        b.to_ascii_uppercase() ^ 0x40
+    } else {
+        b ^ 0x40
+    }
+}
+
+fn count_commands(commands: &[SedCommand]) -> usize {
+    let mut n = commands.len();
+    for cmd in commands {
+        if let Command::Block(ref inner) = cmd.command {
+            n += count_commands(inner);
+        }
+    }
+    n
+}
+
 fn build_replacement(caps: &regex::Captures, replacement: &str) -> String {
     let mut result = String::new();
     let chars: Vec<char> = replacement.chars().collect();
     let mut i = 0;
+
+    // Case conversion state: 'U' = uppercase all, 'L' = lowercase all,
+    // 'u' = uppercase next char, 'l' = lowercase next char, '\0' = none
+    let mut case_mode: char = '\0';
+    let mut next_char_mode: char = '\0'; // for \u and \l (single-char)
+
+    let apply_case = |s: &str, result: &mut String, case_mode: &mut char, next_char_mode: &mut char| {
+        for ch in s.chars() {
+            let converted = if *next_char_mode == 'u' {
+                *next_char_mode = '\0';
+                ch.to_uppercase().collect::<String>()
+            } else if *next_char_mode == 'l' {
+                *next_char_mode = '\0';
+                ch.to_lowercase().collect::<String>()
+            } else if *case_mode == 'U' {
+                ch.to_uppercase().collect::<String>()
+            } else if *case_mode == 'L' {
+                ch.to_lowercase().collect::<String>()
+            } else {
+                ch.to_string()
+            };
+            result.push_str(&converted);
+        }
+    };
+
     while i < chars.len() {
         if chars[i] == '&' {
-            // & in replacement = entire match
-            result.push_str(caps.get(0).map_or("", |m| m.as_str()));
+            let matched = caps.get(0).map_or("", |m| m.as_str());
+            apply_case(matched, &mut result, &mut case_mode, &mut next_char_mode);
             i += 1;
         } else if chars[i] == '\\' && i + 1 < chars.len() {
             match chars[i + 1] {
+                '0' => {
+                    // \0 = entire match (same as &)
+                    let matched = caps.get(0).map_or("", |m| m.as_str());
+                    apply_case(matched, &mut result, &mut case_mode, &mut next_char_mode);
+                    i += 2;
+                }
                 '1'..='9' => {
                     let n = (chars[i + 1] as u32 - '0' as u32) as usize;
                     if let Some(m) = caps.get(n) {
-                        result.push_str(m.as_str());
+                        apply_case(m.as_str(), &mut result, &mut case_mode, &mut next_char_mode);
                     }
                     i += 2;
                 }
@@ -1425,20 +1824,45 @@ fn build_replacement(caps: &regex::Captures, replacement: &str) -> String {
                     i += 2;
                 }
                 '\\' => {
-                    result.push('\\');
+                    apply_case("\\", &mut result, &mut case_mode, &mut next_char_mode);
                     i += 2;
                 }
                 '&' => {
-                    result.push('&');
+                    apply_case("&", &mut result, &mut case_mode, &mut next_char_mode);
+                    i += 2;
+                }
+                'U' => {
+                    case_mode = 'U';
+                    next_char_mode = '\0';
+                    i += 2;
+                }
+                'L' => {
+                    case_mode = 'L';
+                    next_char_mode = '\0';
+                    i += 2;
+                }
+                'u' => {
+                    next_char_mode = 'u';
+                    i += 2;
+                }
+                'l' => {
+                    next_char_mode = 'l';
+                    i += 2;
+                }
+                'E' => {
+                    case_mode = '\0';
+                    next_char_mode = '\0';
                     i += 2;
                 }
                 _ => {
-                    result.push(chars[i + 1]);
+                    let s = chars[i + 1].to_string();
+                    apply_case(&s, &mut result, &mut case_mode, &mut next_char_mode);
                     i += 2;
                 }
             }
         } else {
-            result.push(chars[i]);
+            let s = chars[i].to_string();
+            apply_case(&s, &mut result, &mut case_mode, &mut next_char_mode);
             i += 1;
         }
     }
@@ -1481,6 +1905,18 @@ enum Flow {
 // ---------------------------------------------------------------------------
 // Argument parsing & main
 // ---------------------------------------------------------------------------
+
+fn read_script_file(path: &str) -> Result<String, String> {
+    if path == "-" {
+        let mut buf = String::new();
+        io::stdin()
+            .read_to_string(&mut buf)
+            .map_err(|e| format!("sed: -: {e}"))?;
+        Ok(buf)
+    } else {
+        std::fs::read_to_string(path).map_err(|e| format!("sed: {path}: {e}"))
+    }
+}
 
 fn parse_options() -> Options {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -1547,10 +1983,10 @@ fn parse_options() -> Options {
             "-f" => {
                 i += 1;
                 if i < args.len() {
-                    match std::fs::read_to_string(&args[i]) {
+                    match read_script_file(&args[i]) {
                         Ok(content) => opts.expressions.push(content),
                         Err(e) => {
-                            eprintln!("sed: {}: {e}", args[i]);
+                            eprintln!("{e}");
                             process::exit(2);
                         }
                     }
@@ -1587,10 +2023,10 @@ fn parse_options() -> Options {
             }
             arg if arg.starts_with("-f") => {
                 let file = &arg[2..];
-                match std::fs::read_to_string(file) {
+                match read_script_file(file) {
                     Ok(content) => opts.expressions.push(content),
                     Err(e) => {
-                        eprintln!("sed: {file}: {e}");
+                        eprintln!("{e}");
                         process::exit(2);
                     }
                 }
@@ -1634,10 +2070,10 @@ fn parse_options() -> Options {
                                 }
                             };
                             if !file.is_empty() {
-                                match std::fs::read_to_string(&file) {
+                                match read_script_file(&file) {
                                     Ok(content) => opts.expressions.push(content),
                                     Err(e) => {
-                                        eprintln!("sed: {file}: {e}");
+                                        eprintln!("{e}");
                                         process::exit(2);
                                     }
                                 }
@@ -1687,26 +2123,26 @@ fn parse_options() -> Options {
 fn main() {
     let opts = parse_options();
 
-    // Combine all expressions
-    let script = opts.expressions.join("\n");
-
-    // Debug: log failing scripts
-    if std::env::var("SED_DEBUG").is_ok() {
-        eprintln!("sed debug: script = {:?}", script);
+    // Parse each expression separately to detect #n in the first one
+    let mut commands = Vec::new();
+    let mut hash_n_quiet = false;
+    for (idx, expr) in opts.expressions.iter().enumerate() {
+        let mut parser = Parser::new(expr, opts.extended);
+        match parser.parse_all(idx == 0) {
+            Ok(cmds) => {
+                if idx == 0 && parser.hash_n_quiet {
+                    hash_n_quiet = true;
+                }
+                commands.extend(cmds);
+            }
+            Err(e) => {
+                eprintln!("sed: {e}");
+                process::exit(2);
+            }
+        }
     }
 
-    // Parse
-    let mut parser = Parser::new(&script, opts.extended);
-    let commands = match parser.parse_all() {
-        Ok(cmds) => cmds,
-        Err(e) => {
-            if std::env::var("SED_DEBUG").is_ok() {
-                eprintln!("sed debug: parse error for script: {:?}", script);
-            }
-            eprintln!("sed: {e}");
-            process::exit(2);
-        }
-    };
+    let quiet = opts.quiet || hash_n_quiet;
 
     let stdout = io::stdout();
     let mut out = stdout.lock();
@@ -1738,7 +2174,7 @@ fn main() {
 
             let reader = io::BufReader::new(content.as_bytes());
             let mut output = Vec::new();
-            let mut engine = Engine::new(commands.clone(), opts.quiet);
+            let mut engine = Engine::new(commands.clone(), quiet);
             let code = engine.run(reader, &mut output).unwrap_or_else(|e| {
                 eprintln!("sed: {file}: {e}");
                 1
@@ -1756,7 +2192,7 @@ fn main() {
         // Read from stdin
         let stdin = io::stdin();
         let reader = stdin.lock();
-        let mut engine = Engine::new(commands, opts.quiet);
+        let mut engine = Engine::new(commands, quiet);
         let code = engine.run(reader, &mut out).unwrap_or_else(|e| {
             eprintln!("sed: {e}");
             1
@@ -1764,7 +2200,7 @@ fn main() {
         process::exit(code);
     } else {
         // Process files
-        let mut engine = Engine::new(commands, opts.quiet);
+        let mut engine = Engine::new(commands, quiet);
         for file in &opts.files {
             let content = if file == "-" {
                 let mut buf = String::new();
@@ -1780,6 +2216,7 @@ fn main() {
                 }
             };
 
+            engine.current_filename = Some(file.clone());
             let reader = io::BufReader::new(content.as_bytes());
             if let Err(e) = engine.run(reader, &mut out) {
                 eprintln!("sed: {file}: {e}");
