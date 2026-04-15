@@ -870,7 +870,7 @@ impl Interpreter {
         while i < chars.len() {
             if chars[i] == '\\' && i + 1 < chars.len() {
                 let next = chars[i + 1];
-                if !"dDwWsStbnrfaevx01234567.^$*+?()[]{}|\\/&"
+                if !"dDwWsStbnrfax01234567.^$*+?()[]{}|\\/&"
                     .contains(next)
                 {
                     let key = format!("\\{next}");
@@ -878,6 +878,10 @@ impl Interpreter {
                         if next == '8' || next == '9' {
                             eprintln!(
                                 "awk: warning: regexp escape sequence `\\{next}' treated as plain `{next}'"
+                            );
+                        } else if next == 'u' || next == 'U' {
+                            eprintln!(
+                                "awk: warning: no hex digits in `\\{next}' escape sequence"
                             );
                         } else {
                             eprintln!(
@@ -911,7 +915,7 @@ impl Interpreter {
             if chars[i] == '\\' && i + 1 < chars.len() {
                 let next = chars[i + 1];
                 // Known regex escapes — pass through
-                if "dDwWsStbnrfaevx01234567.^$*+?()[]{}|\\/"
+                if "dDwWsStbnrfax01234567.^$*+?()[]{}|\\/"
                     .contains(next)
                 {
                     result.push(chars[i]);

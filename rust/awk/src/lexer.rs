@@ -158,6 +158,14 @@ impl Lexer {
                         'v' => s.push('\x0B'),
                         '/' => s.push('/'),
                         _ => {
+                            // Warn about unknown escape sequences (like gawk)
+                            if esc == 'u' || esc == 'U' {
+                                eprintln!("awk: warning: no hex digits in `\\{esc}' escape sequence");
+                            } else {
+                                eprintln!(
+                                    "awk: warning: regexp escape sequence `\\{esc}' is not a known regexp operator"
+                                );
+                            }
                             s.push('\\');
                             s.push(esc);
                         }
@@ -182,6 +190,19 @@ impl Lexer {
                     if next == '/' {
                         s.push('/');
                     } else {
+                        // Warn about unknown regex escapes at parse time (like gawk)
+                        // Skip digits 8-9 — those are warned at runtime with "treated as plain" message
+                        if !"dDwWsStbnrfax0123456789.^$*+?()[]{}|\\/&"
+                            .contains(next)
+                        {
+                            if next == 'u' || next == 'U' {
+                                eprintln!("awk: warning: no hex digits in `\\{next}' escape sequence");
+                            } else {
+                                eprintln!(
+                                    "awk: warning: regexp escape sequence `\\{next}' is not a known regexp operator"
+                                );
+                            }
+                        }
                         s.push('\\');
                         s.push(next);
                     }
