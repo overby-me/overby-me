@@ -284,7 +284,7 @@
 
 | Status | Component | Current | Research & Development | Compatibility | Legacy |
 |:-:|-|-|-|-|-|
-| 🚧 | Architecture | [X86-64 🔒](https://en.wikipedia.org/wiki/X86-64) | [RISC-V 📖](https://en.wikipedia.org/wiki/RISC-V), [ARM 🔒](https://en.wikipedia.org/wiki/ARM_architecture_family) | [FEX-Emu](https://fex-emu.com/), [felix86](https://felix86.com/) | |
+| 🚧 | Architecture | [X86-64 🔒](https://en.wikipedia.org/wiki/X86-64) | [RISC-V 📖](https://en.wikipedia.org/wiki/RISC-V), [ARM 🔒🇯🇵🇬🇧](https://en.wikipedia.org/wiki/ARM_architecture_family) | [FEX-Emu](https://fex-emu.com/), [felix86](https://felix86.com/) | |
 | 🚧 | Firmware | [Thinkpad UEFI 🔒](https://en.wikipedia.org/wiki/UEFI) | [Coreboot 💣](https://coreboot.org), [Oreboot 🦀](https://github.com/oreboot/oreboot) | [UEFI 📖](https://en.wikipedia.org/wiki/UEFI) | |
 
 #### Connectivity & Interfaces
