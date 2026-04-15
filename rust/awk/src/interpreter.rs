@@ -780,11 +780,21 @@ impl Interpreter {
         let mut i = 0;
         while i < chars.len() {
             if chars[i] == '\\' && i + 1 < chars.len() {
-                // Escaped char — pass through
-                result.push(chars[i]);
-                i += 1;
-                result.push(chars[i]);
-                i += 1;
+                let next = chars[i + 1];
+                // Known regex escapes — pass through
+                if "dDwWsStbnrfaevx01234567.^$*+?()[]{}|\\/"
+                    .contains(next)
+                {
+                    result.push(chars[i]);
+                    i += 1;
+                    result.push(chars[i]);
+                    i += 1;
+                } else {
+                    // Unknown escape (like \8, \@, etc.) — treat as literal char
+                    i += 1; // skip backslash
+                    result.push(chars[i]);
+                    i += 1;
+                }
             } else if chars[i] == '[' {
                 // Character class — pass through until closing ]
                 result.push(chars[i]);
