@@ -872,7 +872,7 @@ impl Interpreter {
         while i < chars.len() {
             if chars[i] == '\\' && i + 1 < chars.len() {
                 let next = chars[i + 1];
-                if !"dDwWsStbnrfax01234567.^$*+?()[]{}|\\/&"
+                if !"dDwWsSbBtbnrfax01234567.^$*+?()[]{}|\\/&"
                     .contains(next)
                 {
                     let key = format!("\\{next}");
@@ -917,7 +917,7 @@ impl Interpreter {
             if chars[i] == '\\' && i + 1 < chars.len() {
                 let next = chars[i + 1];
                 // Known regex escapes — pass through
-                if "dDwWsStbnrfax01234567.^$*+?()[]{}|\\/"
+                if "dDwWsSbBtbnrfax01234567.^$*+?()[]{}|\\/"
                     .contains(next)
                 {
                     result.push(chars[i]);

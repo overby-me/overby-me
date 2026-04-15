@@ -199,7 +199,7 @@ impl Lexer {
                         s.push('/');
                     } else {
                         // Warn about unknown regex escapes at parse time (like gawk)
-                        if !"dDwWsStbnrfax0123456789.^$*+?()[]{}|\\/&-"
+                        if !"dDwWsSbBtbnrfax0123456789.^$*+?()[]{}|\\/&-"
                             .contains(next)
                             && self.warned_escapes.insert(next)
                         {

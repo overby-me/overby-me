@@ -366,7 +366,6 @@ pub fn awk_replace(replacement: &str, matched: &str) -> String {
                 } else if chars[i] == '\\' {
                     result.push('\\');
                 } else {
-                    // In POSIX sub/gsub, \x where x is not & or \ produces \x
                     result.push('\\');
                     result.push(chars[i]);
                 }
