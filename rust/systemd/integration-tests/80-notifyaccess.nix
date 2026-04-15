@@ -26,7 +26,7 @@
     [Service]
     Type=notify
     NotifyAccess=all
-    ExecStart=bash -c 'systemd-notify --ready && sleep infinity'
+    ExecStart=/usr/bin/bash -c 'systemd-notify --ready && sleep infinity'
     EOF
     systemctl daemon-reload
     systemctl start testnotify-all.service
@@ -39,7 +39,7 @@
     [Service]
     Type=notify
     NotifyAccess=main
-    ExecStart=bash -c 'systemd-notify --ready && sleep infinity'
+    ExecStart=/usr/bin/bash -c 'systemd-notify --ready && sleep infinity'
     EOF
     systemctl daemon-reload
     systemctl start testnotify-main.service
@@ -53,7 +53,7 @@
     Type=notify
     NotifyAccess=none
     TimeoutStartSec=3
-    ExecStart=bash -c 'systemd-notify --ready && sleep infinity'
+    ExecStart=/usr/bin/bash -c 'systemd-notify --ready && sleep infinity'
     EOF
     systemctl daemon-reload
     (! systemctl start testnotify-none.service)
@@ -65,7 +65,7 @@
     [Service]
     Type=notify
     NotifyAccess=exec
-    ExecStart=bash -c 'systemd-notify --ready && sleep infinity'
+    ExecStart=/usr/bin/bash -c 'systemd-notify --ready && sleep infinity'
     EOF
     systemctl daemon-reload
     systemctl start testnotify-exec.service

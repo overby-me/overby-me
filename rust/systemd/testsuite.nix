@@ -375,7 +375,15 @@ in
               -e 's|^ExecStop=sh |ExecStop=/bin/sh |' \
               -e 's|^ExecReload=bash |ExecReload=/usr/bin/bash |' \
               -e 's|^ExecStartPre=bash |ExecStartPre=/usr/bin/bash |' \
+              -e 's|^ExecStartPre=true|ExecStartPre=/usr/bin/true|' \
+              -e 's|^ExecStartPre=echo |ExecStartPre=/usr/bin/echo |' \
+              -e 's|^ExecStartPre=sleep |ExecStartPre=/usr/bin/sleep |' \
               -e 's|^ExecStartPost=bash |ExecStartPost=/usr/bin/bash |' \
+              -e 's|^ExecStartPost=sh |ExecStartPost=/bin/sh |' \
+              -e 's|^ExecStopPost=bash |ExecStopPost=/usr/bin/bash |' \
+              -e 's|^ExecStopPost=touch |ExecStopPost=/usr/bin/touch |' \
+              -e 's|^ExecStopPost=echo |ExecStopPost=/usr/bin/echo |' \
+              -e 's|^ExecStopPost=sh |ExecStopPost=/bin/sh |' \
               "$svc"
           done
         }
