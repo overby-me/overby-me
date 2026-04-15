@@ -1492,6 +1492,71 @@ impl Interpreter {
                 // Minimal strftime
                 Value::Str(String::new())
             }
+            "typeof" => {
+                if args.is_empty() {
+                    return Value::Str("uninitialized".to_string());
+                }
+                // Check if arg is an array name
+                if let Expr::Var(name) = &args[0] {
+                    if self.arrays.contains_key(name) {
+                        return Value::Str("array".to_string());
+                    }
+                }
+                let val = self.eval_expr(&args[0]);
+                let t = match &val {
+                    Value::Num(_) => "number",
+                    Value::Str(_) => "string",
+                    Value::StrNum(_) => "strnum",
+                    Value::Uninitialized => "uninitialized",
+                };
+                Value::Str(t.to_string())
+            }
+            "asort" | "asorti" => {
+                if args.is_empty() {
+                    return Value::Num(0.0);
+                }
+                let arr_name = match &args[0] {
+                    Expr::Var(n) => n.clone(),
+                    _ => return Value::Num(0.0),
+                };
+                let dest_name = if args.len() >= 2 {
+                    match &args[1] {
+                        Expr::Var(n) => n.clone(),
+                        _ => arr_name.clone(),
+                    }
+                } else {
+                    arr_name.clone()
+                };
+
+                let arr = match self.arrays.get(&arr_name) {
+                    Some(a) => a.clone(),
+                    None => return Value::Num(0.0),
+                };
+
+                let mut items: Vec<(String, Value)> = arr.into_iter().collect();
+                if name == "asort" {
+                    items.sort_by(|a, b| {
+                        let sa = a.1.to_string_val();
+                        let sb = b.1.to_string_val();
+                        sa.cmp(&sb)
+                    });
+                } else {
+                    // asorti: sort by indices
+                    items.sort_by(|a, b| a.0.cmp(&b.0));
+                }
+
+                let count = items.len();
+                let mut new_arr = HashMap::new();
+                for (i, (key, val)) in items.into_iter().enumerate() {
+                    if name == "asort" {
+                        new_arr.insert((i + 1).to_string(), val);
+                    } else {
+                        new_arr.insert((i + 1).to_string(), Value::Str(key));
+                    }
+                }
+                self.arrays.insert(dest_name, new_arr);
+                Value::Num(count as f64)
+            }
             _ => {
                 // User-defined function
                 let func = self.functions.get(name).cloned();
@@ -1501,21 +1566,22 @@ impl Interpreter {
                     let mut saved_arrays: Vec<(String, Option<HashMap<String, Value>>)> =
                         Vec::new();
 
-                    // Collect argument info: (value, array_name if it's an array ref)
+                    // Collect argument info: (value, variable_name for array pass-by-ref)
                     let mut arg_vals: Vec<Value> = Vec::new();
-                    let mut arg_arrays: Vec<Option<(String, HashMap<String, Value>)>> = Vec::new();
+                    let mut arg_var_names: Vec<Option<String>> = Vec::new();
                     for arg in args {
                         if let Expr::Var(var_name) = arg {
                             if self.arrays.contains_key(var_name) {
-                                // Pass array by reference: copy array data
-                                let arr = self.arrays.get(var_name).cloned().unwrap_or_default();
+                                // Pass existing array by reference
                                 arg_vals.push(Value::Uninitialized);
-                                arg_arrays.push(Some((var_name.clone(), arr)));
-                                continue;
+                            } else {
+                                arg_vals.push(self.eval_expr(arg));
                             }
+                            arg_var_names.push(Some(var_name.clone()));
+                        } else {
+                            arg_vals.push(self.eval_expr(arg));
+                            arg_var_names.push(None);
                         }
-                        arg_vals.push(self.eval_expr(arg));
-                        arg_arrays.push(None);
                     }
 
                     for (i, param) in func.params.iter().enumerate() {
@@ -1524,12 +1590,15 @@ impl Interpreter {
                         saved_arrays.push((param.clone(), self.arrays.remove(param)));
 
                         if i < arg_vals.len() {
-                            if let Some(Some((_, arr_data))) = arg_arrays.get(i) {
-                                // Pass array by reference
-                                self.arrays.insert(param.clone(), arr_data.clone());
-                            } else {
-                                self.set_var(param, arg_vals[i].clone());
+                            // Check if this arg is a variable with an array
+                            if let Some(Some(var_name)) = arg_var_names.get(i) {
+                                if let Some(arr) = self.arrays.get(var_name).cloned() {
+                                    // Pass array by reference
+                                    self.arrays.insert(param.clone(), arr);
+                                    continue;
+                                }
                             }
+                            self.set_var(param, arg_vals[i].clone());
                         } else {
                             // Extra params are local variables, initialized to 0/""
                             self.set_var(param, Value::Uninitialized);
@@ -1541,12 +1610,15 @@ impl Interpreter {
                         _ => Value::Uninitialized,
                     };
 
-                    // Copy back arrays to original names (for pass-by-reference)
+                    // Copy back arrays to original variable names (pass-by-reference)
                     for (i, _arg) in args.iter().enumerate() {
-                        if let Some(Some((orig_name, _))) = arg_arrays.get(i) {
+                        if let Some(Some(orig_name)) = arg_var_names.get(i) {
                             if let Some(param) = func.params.get(i) {
                                 if let Some(arr) = self.arrays.get(param).cloned() {
                                     self.arrays.insert(orig_name.clone(), arr);
+                                } else {
+                                    // Function may have deleted the array
+                                    self.arrays.remove(orig_name);
                                 }
                             }
                         }
