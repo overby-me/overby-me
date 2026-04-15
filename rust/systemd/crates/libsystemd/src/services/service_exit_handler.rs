@@ -757,6 +757,27 @@ pub(crate) fn service_exit_handler(
                 return Ok((None, None));
             }
 
+            // Run ExecStopPost= commands for oneshot services. In real
+            // systemd these always run when a service process exits,
+            // regardless of exit status.
+            if !srvc.conf.stoppost.is_empty() {
+                let name = &unit.id.name;
+                trace!("Running ExecStopPost for oneshot service {name}");
+                let mut state = srvc.state.write_poisoned();
+                let timeout = state.srvc.get_stop_timeout(&srvc.conf);
+                let cmds = srvc.conf.stoppost.clone();
+                if let Err(e) = state.srvc.run_all_cmds(
+                    &cmds,
+                    srvc_id.clone(),
+                    name,
+                    timeout,
+                    run_info,
+                    srvc.conf.exec_config.working_directory.as_ref(),
+                ) {
+                    warn!("ExecStopPost for oneshot service {name} failed: {e:?}");
+                }
+            }
+
             // RemainAfterExit=no (default): deactivate the oneshot service
             // after its main process exits. This ensures `systemctl is-active`
             // correctly reports "inactive" (issue #27953).

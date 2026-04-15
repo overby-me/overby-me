@@ -2381,7 +2381,9 @@ fn cmd_inspect_elf(files: &[String]) {
 // ── FD store ──────────────────────────────────────────────────────────────
 
 fn cmd_fdstore(unit: &str) {
-    // Attempt to query fd store via the runtime state directory
+    // Attempt to query fd store via the runtime state directory.
+    // Exit with code 1 when no fdstore entries exist (matching real
+    // systemd's behavior that tests rely on).
     let fdstore_dir = format!("/run/rust-systemd/fdstore/{unit}");
     let path = Path::new(&fdstore_dir);
 
@@ -2394,6 +2396,10 @@ fn cmd_fdstore(unit: &str) {
             && let Ok(entries) = fs::read_dir(&systemd_path)
         {
             let fds: Vec<_> = entries.flatten().collect();
+            if fds.is_empty() {
+                println!("    FD Store: (no entries)");
+                std::process::exit(1);
+            }
             println!("    FD Store: {} entries", fds.len());
             for entry in &fds {
                 let name = entry.file_name().to_string_lossy().to_string();
@@ -2404,11 +2410,8 @@ fn cmd_fdstore(unit: &str) {
             return;
         }
 
-        println!("    FD Store: (no entries)");
-        println!();
-        println!("No file descriptor store data found for {unit}.");
-        println!("The service must be running with FileDescriptorStoreMax= set to a value > 0.");
-        return;
+        eprintln!("No file descriptor store data found for {unit}.");
+        std::process::exit(1);
     }
 
     match fs::read_dir(path) {
@@ -2416,6 +2419,7 @@ fn cmd_fdstore(unit: &str) {
             let fds: Vec<_> = entries.flatten().collect();
             if fds.is_empty() {
                 println!("    FD Store: (empty)");
+                std::process::exit(1);
             } else {
                 println!("    FD Store: {} entries", fds.len());
                 println!();
@@ -2437,7 +2441,8 @@ fn cmd_fdstore(unit: &str) {
             }
         }
         Err(e) => {
-            println!("    FD Store: error reading: {e}");
+            eprintln!("    FD Store: error reading: {e}");
+            std::process::exit(1);
         }
     }
 }
