@@ -71,7 +71,13 @@ impl Engine {
             self.suppress_default_print = false;
 
             let cmds = self.commands.clone();
-            self.execute_commands_with_offset(&cmds, 0);
+            let flow = self.execute_commands_with_offset(&cmds, 0);
+            match flow {
+                Flow::EndOfCycle => {
+                    self.suppress_default_print = true;
+                }
+                _ => {}
+            }
 
             if self.quit {
                 if !self.quiet && !self.suppress_default_print {
@@ -112,11 +118,15 @@ impl Engine {
         Ok(())
     }
 
-    fn execute_commands_with_offset(&mut self, commands: &[SedCommand], range_offset: usize) {
+    fn execute_commands_with_offset(
+        &mut self,
+        commands: &[SedCommand],
+        range_offset: usize,
+    ) -> Flow {
         let mut i = 0;
         while i < commands.len() {
             if self.quit {
-                return;
+                return Flow::Quit;
             }
             let cmd = &commands[i];
             let range_idx = range_offset + i;
@@ -130,27 +140,29 @@ impl Engine {
                         i = 0;
                         continue;
                     }
-                    Flow::Branch(label) => {
-                        if let Some(target) = Self::find_label(commands, &label) {
+                    Flow::Branch(ref label) => {
+                        if let Some(target) = Self::find_label(commands, label) {
                             i = target + 1;
                             continue;
                         }
-                        return;
+                        // Label not found at this level — propagate up
+                        return Flow::Branch(label.clone());
                     }
-                    Flow::EndOfCycle => return,
+                    flow @ Flow::EndOfCycle => return flow,
                     Flow::Quit => {
                         self.quit = true;
-                        return;
+                        return Flow::Quit;
                     }
                     Flow::QuitNoprint => {
                         self.quit = true;
                         self.pattern_space.clear();
-                        return;
+                        return Flow::QuitNoprint;
                     }
                 }
             }
             i += 1;
         }
+        Flow::Continue
     }
 
     fn address_matches(&mut self, addr: &AddressRange, range_idx: usize) -> bool {
@@ -561,11 +573,10 @@ impl Engine {
 
             Command::Block(cmds) => {
                 let block_offset = range_offset + _all_commands.len();
-                self.execute_commands_with_offset(cmds, block_offset);
-                if self.quit {
-                    Flow::Quit
-                } else {
-                    Flow::Continue
+                let flow = self.execute_commands_with_offset(cmds, block_offset);
+                match flow {
+                    Flow::Continue => Flow::Continue,
+                    other => other, // Propagate Branch, EndOfCycle, Quit, etc.
                 }
             }
         }

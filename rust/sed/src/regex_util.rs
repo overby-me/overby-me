@@ -78,6 +78,7 @@ pub fn bre_to_ere(bre: &str) -> String {
                 i += 1;
             }
             // Copy until closing ]
+            // In POSIX BRE, \ inside [] is literal, but Rust regex treats it as escape
             while i < chars.len() && chars[i] != ']' {
                 // Handle POSIX classes like [:alpha:]
                 if chars[i] == '[' && i + 1 < chars.len() && chars[i + 1] == ':' {
@@ -94,6 +95,29 @@ pub fn bre_to_ere(bre: &str) -> String {
                         result.push(chars[i]);
                         i += 1;
                     }
+                } else if chars[i] == '\\' && i + 1 < chars.len() {
+                    // In POSIX BRE, \ inside [] is literal
+                    // But Rust regex uses \ for escapes inside [] too
+                    // If followed by a char Rust regex recognizes as escape, pass through
+                    let next = chars[i + 1];
+                    if "dDsSwWtnrfvp0".contains(next)
+                        || next == '\\'
+                        || next == ']'
+                    {
+                        // Known Rust regex escape — pass through as-is
+                        result.push('\\');
+                        result.push(next);
+                        i += 2;
+                    } else {
+                        // Unknown escape in Rust regex — treat \ as literal
+                        result.push_str("\\\\");
+                        result.push(next);
+                        i += 2;
+                    }
+                } else if chars[i] == '\\' {
+                    // \ at end of char class — literal backslash
+                    result.push_str("\\\\");
+                    i += 1;
                 } else {
                     result.push(chars[i]);
                     i += 1;
