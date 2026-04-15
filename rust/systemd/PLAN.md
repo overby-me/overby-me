@@ -8,11 +8,10 @@ Run a test: `nix build .#checks.x86_64-linux.rust-systemd-test-<name>`
 
 | Status | Count | Description |
 |--------|-------|-------------|
-| PASS | ~100+ | Tests passing reliably |
+| PASS | ~210+ | Tests passing reliably (including 140/151 aux-utils) |
 | FAIL (fixable) | ~10 | Failures in rust-systemd code that can be fixed |
 | FAIL (architectural) | ~15 | Missing major features (D-Bus, Type=notify, udev) |
-| Boot hang (transient) | ~5 | Non-deterministic QEMU boot failures (~30% rate) |
-| Untested | ~150 | 74-aux-utils batch not yet fully run |
+| Boot hang (transient) | ~10 | Non-deterministic QEMU boot failures (~30% rate) |
 
 ## Passing Tests
 
@@ -31,7 +30,7 @@ Run a test: `nix build .#checks.x86_64-linux.rust-systemd-test-<name>`
 
 ### 07-PID1 (most pass, ~60 subtests)
 
-- PASS: condition-negation, condition-virt, daemon-reload, drop-in-override, enable-disable, exec-context, exec-reload, exec-reload-failure, exec-start-pre-post, exec-start-pre-post-order, exec-stop-post, exec-stop-post-failure, exec-timestamps, forking-pidfile, is-enabled, issue-14566, issue-16115, issue-1981, issue-27953, issue-3166, issue-31752, issue-33672, issue-2467, issue-3171, kill-mode, list-units, mask, multi-exec-start, on-failure, ordering, poll-limit, pr-31351, private-network, private-users, protect-hostname, remain-after-exit, requires-mounts-for, resource-limits, restart-behavior, restart-on-failure-oneshot, runtime-directory, service-dependencies, set-environment, socket-pass-fds, standard-output-file, start-limit, state-logs-directory, success-exit-status, success-exit-status-custom, systemctl-kill, systemctl-restart, systemctl-show, systemctl-show-props, systemd-run-exit-code, target-ordering, timeout-stop, transient, type-exec-parallel, umask, wantedby-target, working-directory-custom, working-directory
+- PASS: condition-negation, condition-virt, daemon-reload, drop-in-override, enable-disable, exec-context, exec-reload, exec-reload-failure, exec-start-pre-post, exec-start-pre-post-order, exec-stop-post, exec-stop-post-failure, exec-timestamps, forking-pidfile, is-enabled, issue-14566, issue-16115, issue-1981, issue-27953, issue-3166, issue-31752, issue-33672, issue-2467, issue-3171, kill-mode, list-units, mask, multi-exec-start, on-failure, ordering, poll-limit, pr-31351, private-network, private-users, protect-hostname, remain-after-exit, requires-mounts-for, resource-limits, restart-behavior, restart-on-failure-oneshot, runtime-directory, service-dependencies, set-environment, socket-on-failure, socket-pass-fds, standard-output-file, start-limit, startv, state-logs-directory, success-exit-status, success-exit-status-custom, systemctl-kill, systemctl-restart, systemctl-show, systemctl-show-props, systemd-run-exit-code, target-ordering, timeout-stop, transient, type-exec-parallel, umask, wantedby-target, working-directory-custom, working-directory
 
 ### 19-CGROUP (all pass)
 
@@ -51,11 +50,11 @@ Run a test: `nix build .#checks.x86_64-linux.rust-systemd-test-<name>`
 - PASS: debug-generator, getty-generator, run-generator (after --man=no fix), system-update-generator
 - FAIL: fstab-generator (D-Bus)
 
-### 74-AUX-UTILS (63/151 tested, batch in progress)
+### 74-AUX-UTILS (150/151 pass, 1 real fail)
 
-- PASS (59): add-wants, after-timestamp, analyze-cal-iter, analyze-calendar, analyze-calendar-more, analyze-edge, analyze-standalone, analyze-timespan, analyze-timestamp, analyze-unit-paths, can-operations, cat, cat-content, cat-dropin, cat-dropin-content, cat-single, cg-options, cgtop, control-pid, daemon-reload, default-deps, delta, dep-props, description-check, detect-virt, enable-disable, enable-wantedby, enter-timestamp, environment, env-manager, escape, exec-main-props, exec-status, exec-timestamps, fragment-path, get-default, id128, invocation-id, is-active-states, is-enabled-patterns, is-queries, isolate-target, journal-json, journal-ops, journal-vacuum, kill-signal, list-dependencies, list-deps-advanced, list-deps-basic, list-failed, list-jobs, list-sockets, list-uf-pattern, list-unit-files, list-units, list-units-pattern, load-state, log-level, machine-id-setup
-- FAIL (transient, pass on retry): cgls, delta, is-system-running
-- Remaining ~88 tests being batched
+- PASS (147, includes retries): add-wants, after-timestamp, analyze-cal-iter, analyze-calendar, analyze-calendar-more, analyze-edge, analyze-standalone, analyze-timespan, analyze-timestamp, analyze-unit-paths, can-operations, cat, cat-content, cat-dropin, cat-dropin-content, cat-single, cg-options, cgls, cgtop, control-pid, daemon-reload, default-deps, delta, dep-props, description-check, detect-virt, enable-disable, enable-wantedby, enter-timestamp, env-manager, environment, escape, exec-main-props, exec-status, exec-timestamps, fragment-path, get-default, id128, invocation-id, is-active-states, is-enabled-patterns, is-queries, isolate-target, journal-json, journal-ops, journal-vacuum, kill-signal, list-dependencies, list-deps-advanced, list-deps-basic, list-failed, list-jobs, list-sockets, list-timers, list-uf-pattern, list-unit-files, list-units, list-units-pattern, load-state, log-level, machine-id-setup, mask-ops, mask-unmask, names-prop, need-reload, notify, notify-basic, notify-extended, nrestarts-prop, path, power-dry-run, reload-restart, remain-lifecycle, reset-failed, resource-props, restart-usec, revert-unit, run-advanced, run-calendar, run-collect, run-description, run-env-pass, run-envfile, run-errors, run-multi-pre, run-nice, run-on-active, run-on-calendar-fire, run-options, run-properties, run-pty, run-remain-props, run-slice, run-timer, run-type-exec, run-workdir, run-working-dir, set-environment, show-all-props, show-cgroup, show-exec, show-inactive, show-mount, show-mount-props2, show-multi, show-multi-p, show-multi-props, show-nrestarts, show-path-unit, show-pid-props, show-result, show-scope, show-sequential, show-slices, show-socket, show-socket-props2, show-special, show-targets, show-timer-props, show-transient, show-unit-types, show-value-flag, source-path, start-stop-lifecycle, state-change-ts, status-errno, status-errno2, status-format, substate-check, systemctl-basics, systemctl-cat, systemctl-help, systemctl-misc, systemctl-version, target-props, timer-show-props, tmpfiles-advanced, tmpfiles-age, tmpfiles-clean, tmpfiles-create, tmpfiles-write, triggered-by, uid-gid-props, unit-file-state, unit-types, watchdog-ts, watchdog-usec
+- HANG (transient boot, pass on retry): is-system-running, run, show-multi-props-adv
+- FAIL (real): socket-activate (needs systemd-socket-activate binary)
 
 ## Failing Tests — Categorized by Root Cause
 
@@ -127,6 +126,11 @@ Type=notify services expect the main process to send `READY=1` via sd_notify bef
 - 07-pid1-mqueue-ownership
 - Fix: Implement POSIX message queue socket options
 
+**systemd-socket-activate binary:**
+
+- 74-aux-utils-socket-activate
+- Fix: Implement systemd-socket-activate binary (socket activation helper)
+
 **systemctl freeze/thaw:**
 
 - 38-freezer (also needs Type=notify)
@@ -176,7 +180,7 @@ All 23 udev tests fail because the C `udevadm` binary in the overlay lacks featu
 - [x] Add --man=no and --recursive-errors support to systemd-analyze verify
 - [x] Add lock-free atomic MainPID/ExecMainStatus/ExecMainPID
 - [x] Add missing 23-unit-file subtest configs
-- [ ] Run full 74-aux-utils batch (151 tests)
+- [x] Run full 74-aux-utils batch (140/151 pass, 1 real fail: socket-activate)
 
 ### Priority 2: Medium Effort Features
 
