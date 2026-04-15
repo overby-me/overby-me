@@ -648,6 +648,21 @@ impl Interpreter {
         }
     }
 
+    /// Evaluate an expression's side effects without using the result
+    /// (e.g., evaluate array index with ++c even when getline fails)
+    fn eval_side_effects(&mut self, expr: &Expr) {
+        match expr {
+            Expr::ArrayRef(_, indices) => {
+                for idx in indices {
+                    self.eval_expr(idx);
+                }
+            }
+            _ => {
+                self.eval_expr(expr);
+            }
+        }
+    }
+
     fn eval_getline(
         &mut self,
         var: Option<&Expr>,
@@ -676,7 +691,11 @@ impl Interpreter {
                     // No more input — try stdin directly (for interactive/pipe)
                     let mut line = String::new();
                     match io::stdin().lock().read_line(&mut line) {
-                        Ok(0) => Value::Num(0.0),
+                        Ok(0) => {
+                            // Evaluate target side effects even on EOF
+                            if let Some(v) = var { self.eval_side_effects(v); }
+                            Value::Num(0.0)
+                        }
                         Ok(_) => {
                             if line.ends_with('\n') {
                                 line.pop();
@@ -717,7 +736,11 @@ impl Interpreter {
                         return Value::Num(-1.0);
                     };
                     match result {
-                        Ok(0) => Value::Num(0.0),
+                        Ok(0) => {
+                            // Evaluate target side effects even on EOF
+                            if let Some(v) = var { self.eval_side_effects(v); }
+                            Value::Num(0.0)
+                        }
                         Ok(_) => {
                             if line.ends_with('\n') {
                                 line.pop();
@@ -765,7 +788,11 @@ impl Interpreter {
                         return Value::Num(-1.0);
                     };
                     match result {
-                        Ok(0) => Value::Num(0.0),
+                        Ok(0) => {
+                            // Evaluate target side effects even on EOF
+                            if let Some(v) = var { self.eval_side_effects(v); }
+                            Value::Num(0.0)
+                        }
                         Ok(_) => {
                             if line.ends_with('\n') {
                                 line.pop();
