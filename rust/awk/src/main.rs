@@ -133,7 +133,7 @@ fn main() {
     }
 
     // Set up ARGV and ARGC
-    interp.set_array("ARGV", "0", Value::Str("awk".to_string()));
+    interp.set_array("ARGV", "0", Value::Str(args[0].clone()));
     for (i, file) in input_files.iter().enumerate() {
         interp.set_array("ARGV", &(i + 1).to_string(), Value::Str(file.clone()));
     }

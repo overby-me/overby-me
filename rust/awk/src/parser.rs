@@ -587,7 +587,6 @@ impl Parser {
     fn parse_getline_var(&mut self) -> Option<Box<Expr>> {
         if matches!(self.peek(), Token::Dollar) {
             // $expr as getline target
-            let saved = self.pos;
             self.advance(); // $
             let expr = self.parse_primary();
             return Some(Box::new(Expr::FieldRef(Box::new(expr))));
