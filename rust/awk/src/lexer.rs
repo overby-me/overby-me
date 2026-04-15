@@ -159,6 +159,7 @@ impl Lexer {
                         'f' => s.push('\x0C'),
                         'v' => s.push('\x0B'),
                         '/' => s.push('/'),
+                        '0' => s.push('\0'),
                         _ => {
                             // Only warn for escapes that are truly unknown
                             // Skip digits, regex metachar escapes, and common chars
