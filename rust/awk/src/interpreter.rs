@@ -861,9 +861,15 @@ impl Interpreter {
                 {
                     let key = format!("\\{next}");
                     if warned.insert(key) {
-                        eprintln!(
-                            "awk: warning: regexp escape sequence `\\{next}' treated as plain `{next}'"
-                        );
+                        if next == '8' || next == '9' {
+                            eprintln!(
+                                "awk: warning: regexp escape sequence `\\{next}' treated as plain `{next}'"
+                            );
+                        } else {
+                            eprintln!(
+                                "awk: warning: regexp escape sequence `\\{next}' is not a known regexp operator"
+                            );
+                        }
                     }
                 }
                 i += 2;
