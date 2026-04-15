@@ -132,6 +132,16 @@ fn main() {
         interp.set_var(name, Value::Str(val.clone()));
     }
 
+    // Set up ARGV and ARGC
+    interp.set_array("ARGV", "0", Value::Str("awk".to_string()));
+    for (i, file) in input_files.iter().enumerate() {
+        interp.set_array("ARGV", &(i + 1).to_string(), Value::Str(file.clone()));
+    }
+    interp.set_var(
+        "ARGC",
+        Value::Num((input_files.len() + 1) as f64),
+    );
+
     // Seed RNG
     interp.rng_state = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

@@ -181,7 +181,7 @@ impl Interpreter {
             .unwrap_or(Value::Uninitialized)
     }
 
-    fn set_array(&mut self, name: &str, key: &str, val: Value) {
+    pub fn set_array(&mut self, name: &str, key: &str, val: Value) {
         self.arrays
             .entry(name.to_string())
             .or_default()

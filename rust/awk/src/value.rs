@@ -40,8 +40,18 @@ impl Value {
         match self {
             Value::Num(n) => {
                 let n = *n;
+                if n.is_nan() {
+                    return "nan".to_string();
+                }
+                if n.is_infinite() {
+                    return if n > 0.0 {
+                        "+inf".to_string()
+                    } else {
+                        "-inf".to_string()
+                    };
+                }
                 // If it's an integer, print as integer (no OFMT needed)
-                if n.fract() == 0.0 && n.abs() < 1e16 && !n.is_nan() && !n.is_infinite() {
+                if n.fract() == 0.0 && n.abs() < 1e16 {
                     format!("{}", n as i64)
                 } else {
                     use crate::format::sprintf_impl;
@@ -79,7 +89,11 @@ impl Value {
     pub fn is_numeric_string(&self) -> bool {
         match self {
             Value::Num(_) => true,
-            Value::StrNum(_) => true,
+            Value::StrNum(s) => {
+                // Empty StrNum is not numeric (for comparison purposes)
+                let s = s.trim();
+                !s.is_empty()
+            }
             Value::Str(s) => {
                 let s = s.trim();
                 if s.is_empty() {
@@ -135,7 +149,17 @@ pub fn parse_num(s: &str) -> f64 {
 }
 
 pub fn format_number(n: f64) -> String {
-    if n.fract() == 0.0 && n.abs() < 1e16 && !n.is_nan() && !n.is_infinite() {
+    if n.is_nan() {
+        return "nan".to_string();
+    }
+    if n.is_infinite() {
+        return if n > 0.0 {
+            "+inf".to_string()
+        } else {
+            "-inf".to_string()
+        };
+    }
+    if n.fract() == 0.0 && n.abs() < 1e16 {
         format!("{}", n as i64)
     } else {
         // Use %.6g style formatting like awk
