@@ -159,7 +159,51 @@ impl Lexer {
                         'f' => s.push('\x0C'),
                         'v' => s.push('\x0B'),
                         '/' => s.push('/'),
-                        '0' => s.push('\0'),
+                        // Hex escape: \xNN
+                        'x' => {
+                            let mut hex = 0u32;
+                            let mut count = 0;
+                            while count < 2 {
+                                if let Some(c) = self.peek() {
+                                    if c.is_ascii_hexdigit() {
+                                        hex = hex * 16
+                                            + c.to_digit(16).unwrap();
+                                        self.advance();
+                                        count += 1;
+                                    } else {
+                                        break;
+                                    }
+                                } else {
+                                    break;
+                                }
+                            }
+                            if count > 0 {
+                                if let Some(ch) = char::from_u32(hex) {
+                                    s.push(ch);
+                                }
+                            } else {
+                                s.push('\\');
+                                s.push('x');
+                            }
+                        }
+                        // Octal escapes: \0, \NNN
+                        '0'..='7' => {
+                            let mut oct = (esc as u32) - ('0' as u32);
+                            // Read up to 2 more octal digits
+                            for _ in 0..2 {
+                                if let Some(c) = self.peek() {
+                                    if c >= '0' && c <= '7' {
+                                        oct = oct * 8 + (c as u32 - '0' as u32);
+                                        self.advance();
+                                    } else {
+                                        break;
+                                    }
+                                }
+                            }
+                            if let Some(ch) = char::from_u32(oct) {
+                                s.push(ch);
+                            }
+                        }
                         _ => {
                             // Only warn for escapes that are truly unknown
                             // Skip digits, regex metachar escapes, and common chars
