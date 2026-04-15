@@ -308,6 +308,15 @@ impl Lexer {
                     | Token::Printf
                     | Token::Return
                     | Token::Pipe
+                    | Token::Assign
+                    | Token::PlusAssign
+                    | Token::MinusAssign
+                    | Token::StarAssign
+                    | Token::SlashAssign
+                    | Token::PercentAssign
+                    | Token::CaretAssign
+                    | Token::Colon
+                    | Token::Question
             )
         } else {
             true // beginning of input
