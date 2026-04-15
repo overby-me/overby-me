@@ -386,7 +386,7 @@
 | Status | Component | Current | Research & Development | Compatibility | Legacy |
 |:-:|-|-|-|-|-|
 | ✅ | Symmetric Encryption | [AES-GCM 📖](https://en.wikipedia.org/wiki/Galois/Counter_Mode), [ChaCha20-Poly1305 📖](https://en.wikipedia.org/wiki/ChaCha20-Poly1305) | | 🆗 | |
-| ✅ | Asymmetric Encryption | [age 🦀](https://github.com/str4d/rage) | | 🆗 | [GPG 📖](https://en.wikipedia.org/wiki/GNU_Privacy_Guard) |
+| ✅ | Asymmetric Encryption | [age 📖](https://age-encryption.org/v1) | | 🆗 | [GPG 📖](https://en.wikipedia.org/wiki/GNU_Privacy_Guard) |
 | ✅ | Key Derivation | [Argon2 📖](https://en.wikipedia.org/wiki/Argon2) | | 🆗 | |
 | ✅ | Signing | [Ed25519 📖](https://en.wikipedia.org/wiki/EdDSA#Ed25519) | | 🆗 | |
 
