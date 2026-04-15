@@ -1627,21 +1627,24 @@ impl Interpreter {
                     let mut saved_arrays: Vec<(String, Option<HashMap<String, Value>>)> =
                         Vec::new();
 
-                    // Collect argument info: (value, variable_name for array pass-by-ref)
+                    // Collect argument info
                     let mut arg_vals: Vec<Value> = Vec::new();
                     let mut arg_var_names: Vec<Option<String>> = Vec::new();
+                    let mut arg_was_array: Vec<bool> = Vec::new();
                     for arg in args {
                         if let Expr::Var(var_name) = arg {
-                            if self.arrays.contains_key(var_name) {
-                                // Pass existing array by reference
+                            let is_array = self.arrays.contains_key(var_name);
+                            if is_array {
                                 arg_vals.push(Value::Uninitialized);
                             } else {
                                 arg_vals.push(self.eval_expr(arg));
                             }
                             arg_var_names.push(Some(var_name.clone()));
+                            arg_was_array.push(is_array);
                         } else {
                             arg_vals.push(self.eval_expr(arg));
                             arg_var_names.push(None);
+                            arg_was_array.push(false);
                         }
                     }
 
@@ -1671,15 +1674,15 @@ impl Interpreter {
                         _ => Value::Uninitialized,
                     };
 
-                    // Copy back arrays to original variable names (pass-by-reference)
+                    // Save array state BEFORE restoring scope (for copy-back)
+                    // Only copy back for args that were arrays when the function was called
+                    let mut copyback: Vec<(String, Option<HashMap<String, Value>>)> = Vec::new();
                     for (i, _arg) in args.iter().enumerate() {
                         if let Some(Some(orig_name)) = arg_var_names.get(i) {
-                            if let Some(param) = func.params.get(i) {
-                                if let Some(arr) = self.arrays.get(param).cloned() {
-                                    self.arrays.insert(orig_name.clone(), arr);
-                                } else {
-                                    // Function may have deleted the array
-                                    self.arrays.remove(orig_name);
+                            if arg_was_array.get(i).copied().unwrap_or(false) {
+                                if let Some(param) = func.params.get(i) {
+                                    let arr = self.arrays.get(param).cloned();
+                                    copyback.push((orig_name.clone(), arr));
                                 }
                             }
                         }
@@ -1696,6 +1699,15 @@ impl Interpreter {
                         self.arrays.remove(&name);
                         if let Some(arr) = old_arr {
                             self.arrays.insert(name, arr);
+                        }
+                    }
+
+                    // Copy back arrays AFTER restoring scope
+                    for (orig_name, arr_opt) in copyback {
+                        if let Some(arr) = arr_opt {
+                            self.arrays.insert(orig_name, arr);
+                        } else {
+                            self.arrays.remove(&orig_name);
                         }
                     }
 

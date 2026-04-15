@@ -585,11 +585,29 @@ impl Parser {
     }
 
     fn parse_getline_var(&mut self) -> Option<Box<Expr>> {
+        if matches!(self.peek(), Token::Dollar) {
+            // $expr as getline target
+            let saved = self.pos;
+            self.advance(); // $
+            let expr = self.parse_primary();
+            return Some(Box::new(Expr::FieldRef(Box::new(expr))));
+        }
         if matches!(self.peek(), Token::Ident(_)) {
             let saved = self.pos;
             if let Token::Ident(v) = self.advance() {
-                // Variable for getline if followed by terminator/operator (not function call)
-                if !matches!(self.peek(), Token::LParen | Token::LBracket) {
+                if matches!(self.peek(), Token::LBracket) {
+                    // Array reference: a[expr]
+                    self.advance(); // [
+                    let mut indices = vec![self.parse_expr()];
+                    while matches!(self.peek(), Token::Comma) {
+                        self.advance();
+                        indices.push(self.parse_expr());
+                    }
+                    self.expect(&Token::RBracket);
+                    return Some(Box::new(Expr::ArrayRef(v, indices)));
+                }
+                // Simple variable (not function call)
+                if !matches!(self.peek(), Token::LParen) {
                     return Some(Box::new(Expr::Var(v)));
                 }
             }
@@ -764,33 +782,7 @@ impl Parser {
             Token::Getline => {
                 self.advance();
                 // getline [var] [< file]
-                let var = if matches!(self.peek(), Token::Ident(_)) {
-                    let saved = self.pos;
-                    if let Token::Ident(v) = self.advance() {
-                        // Check if this looks like a variable for getline
-                        if matches!(self.peek(), Token::Lt)
-                            || matches!(
-                                self.peek(),
-                                Token::Newline
-                                    | Token::Semicolon
-                                    | Token::RBrace
-                                    | Token::Eof
-                                    | Token::RParen
-                                    | Token::Pipe
-                            )
-                        {
-                            Some(Box::new(Expr::Var(v)))
-                        } else {
-                            self.pos = saved;
-                            None
-                        }
-                    } else {
-                        self.pos = saved;
-                        None
-                    }
-                } else {
-                    None
-                };
+                let var = self.parse_getline_var();
 
                 if matches!(self.peek(), Token::Lt) {
                     self.advance();
