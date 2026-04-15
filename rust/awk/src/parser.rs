@@ -5,6 +5,7 @@ pub struct Parser {
     tokens: Vec<Token>,
     pos: usize,
     function_names: std::collections::HashSet<String>,
+    in_print_context: bool,
 }
 
 const BUILTIN_FUNCTIONS: &[&str] = &[
@@ -32,6 +33,7 @@ impl Parser {
             tokens,
             pos: 0,
             function_names,
+            in_print_context: false,
         }
     }
 
@@ -464,7 +466,12 @@ impl Parser {
     }
 
     fn parse_non_assign_expr(&mut self) -> Expr {
-        self.parse_ternary()
+        // In print context, parse without consuming > as comparison
+        // (it might be a redirect)
+        self.in_print_context = true;
+        let result = self.parse_ternary();
+        self.in_print_context = false;
+        result
     }
 
     fn parse_assignment(&mut self) -> Expr {
@@ -578,9 +585,11 @@ impl Parser {
             Token::Eq => BinOp::Eq,
             Token::Ne => BinOp::Ne,
             Token::Lt => BinOp::Lt,
-            Token::Gt => BinOp::Gt,
+            // In print context, > and >= could be redirects, skip them
+            Token::Gt if !self.in_print_context => BinOp::Gt,
+            Token::Ge if !self.in_print_context => BinOp::Ge,
+            Token::Gt | Token::Ge if self.in_print_context => return left,
             Token::Le => BinOp::Le,
-            Token::Ge => BinOp::Ge,
             _ => return left,
         };
         self.advance();
