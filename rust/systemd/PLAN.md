@@ -188,6 +188,8 @@ All 23 udev tests fail because the C `udevadm` binary in the overlay lacks featu
 ### Priority 3: Major Features
 
 - [x] RELOADING=1 notification handling (deferred_notify_wait recognizes reload as started)
+- [x] MEMORY_PRESSURE_WATCH env var for MemoryPressureWatch= directive
+- [ ] ProtectControlGroupsEx= directive (blocks protect-control-groups test)
 - [ ] Complete Type=notify lifecycle (STOPPING notification, Restart=on-abort after SIGABRT)
 - [ ] Implement PrivatePIDs= (PID namespace)
 - [ ] Implement OpenFile= directive
