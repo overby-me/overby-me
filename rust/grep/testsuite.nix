@@ -48,9 +48,14 @@ pkgs.runCommand "rust-grep-test-${name}" {
   # Run the test script
   # Exit codes: 0 = pass, 77 = skip (also pass), 1+ = fail
   set +e
-  bash "./${name}" 9>&2 > "$TMPDIR/stdout" 2>&1
+  timeout 120 bash "./${name}" 9>&2 > "$TMPDIR/stdout" 2>&1
   rc=$?
   set -e
+
+  # If timeout killed the test (exit 124), treat as failure
+  if [ "$rc" -eq 124 ]; then
+    echo "TIMEOUT after 120s"
+  fi
 
   cat "$TMPDIR/stdout"
 

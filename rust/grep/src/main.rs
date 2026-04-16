@@ -1908,16 +1908,30 @@ fn collect_files(opts: &Options, default_dir: bool) -> Vec<PathBuf> {
                 }
             }
         } else {
-            // Apply --exclude to non-recursive file arguments too
-            if !opts.exclude_glob.is_empty() {
-                let name = path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
-                let path_str = path.to_string_lossy();
-                if opts.exclude_glob.iter().any(|g| {
+            let name = path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
+            let path_str = path.to_string_lossy();
+
+            // Apply --include filter for non-recursive files
+            if !opts.include_glob.is_empty() && opts.include_is_strict {
+                if !opts.include_glob.iter().any(|g| {
                     matches_glob(&name, g) || matches_glob(&path_str, g)
                 }) {
                     continue;
                 }
             }
+
+            // Apply --exclude to non-recursive file arguments too
+            if opts.exclude_glob.iter().any(|g| {
+                matches_glob(&name, g) || matches_glob(&path_str, g)
+            }) {
+                continue;
+            }
+
+            // Skip directories when --directories=skip
+            if opts.skip_directories && path.is_dir() {
+                continue;
+            }
+
             files.push(path.clone());
         }
     }
