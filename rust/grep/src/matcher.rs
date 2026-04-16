@@ -2,6 +2,7 @@ use std::process;
 
 use fancy_regex::{Regex as FancyRegex, RegexBuilder as FancyRegexBuilder};
 use regex::Regex;
+use rust_pcre2::Regex as Pcre2Regex;
 
 use crate::args::Options;
 use crate::pattern::{
@@ -12,6 +13,7 @@ use crate::pattern::{
 enum MatcherInner {
     Regex(Regex),
     Fancy(FancyRegex),
+    Pcre2(Pcre2Regex),
     Fixed(Vec<String>, bool), // patterns, ignore_case
 }
 
@@ -69,6 +71,7 @@ impl Matcher {
             MatcherInner::Fixed(patterns, _) => patterns.iter().any(|p| p.is_empty()),
             MatcherInner::Regex(re) => re.is_match(""),
             MatcherInner::Fancy(re) => re.is_match("").unwrap_or(false),
+            MatcherInner::Pcre2(re) => re.is_match(b"").unwrap_or(false),
         }
     }
 
@@ -80,6 +83,18 @@ impl Matcher {
                 Err(e) => {
                     let msg = format!("{e}");
                     if msg.contains("backtrack") {
+                        eprintln!("grep: exceeded PCRE's backtracking limit");
+                    } else {
+                        eprintln!("grep: PCRE error: {e}");
+                    }
+                    process::exit(2);
+                }
+            },
+            MatcherInner::Pcre2(re) => match re.is_match(text.as_bytes()) {
+                Ok(b) => b,
+                Err(e) => {
+                    let msg = format!("{e}");
+                    if msg.contains("match limit") || msg.contains("depth limit") {
                         eprintln!("grep: exceeded PCRE's backtracking limit");
                     } else {
                         eprintln!("grep: PCRE error: {e}");
@@ -147,6 +162,34 @@ impl Matcher {
                         Err(e) => {
                             let msg = format!("{e}");
                             if msg.contains("backtrack") {
+                                eprintln!("grep: exceeded PCRE's backtracking limit");
+                            } else {
+                                eprintln!("grep: PCRE error: {e}");
+                            }
+                            process::exit(2);
+                        }
+                    }
+                }
+                matches
+            }
+            MatcherInner::Pcre2(re) => {
+                let mut matches = Vec::new();
+                let bytes = text.as_bytes();
+                let mut start = 0;
+                while start < bytes.len() {
+                    match re.find_at(bytes, start) {
+                        Ok(Some(m)) => {
+                            if m.start() == m.end() {
+                                start = m.end() + 1;
+                                continue;
+                            }
+                            matches.push((m.start(), m.end()));
+                            start = m.end();
+                        }
+                        Ok(None) => break,
+                        Err(e) => {
+                            let msg = format!("{e}");
+                            if msg.contains("match limit") || msg.contains("depth limit") {
                                 eprintln!("grep: exceeded PCRE's backtracking limit");
                             } else {
                                 eprintln!("grep: PCRE error: {e}");
@@ -311,7 +354,35 @@ pub(crate) fn build_matcher(opts: &Options) -> Matcher {
         }
     }
 
-    let inner = if opts.perl_regexp || has_backrefs {
+    let inner = if opts.perl_regexp {
+        // Use rust-pcre2 for -P mode (true PCRE2 semantics with backtrack limits)
+        let mut compile_opts = rust_pcre2::CompileOptions::default();
+        compile_opts.caseless = opts.ignore_case;
+        compile_opts.multiline = false; // grep handles line-by-line
+        // Remove (?i) prefix since we set it via compile options
+        let pcre_pattern = if opts.ignore_case {
+            pattern.strip_prefix("(?i)").unwrap_or(&pattern).to_string()
+        } else {
+            pattern.clone()
+        };
+        match Pcre2Regex::with_options(&pcre_pattern, compile_opts) {
+            Ok(mut re) => {
+                re.set_match_limit(10_000);
+                MatcherInner::Pcre2(re)
+            }
+            Err(e) => {
+                let msg = format!("{e}");
+                let clean = if msg.contains("back reference") || msg.contains("subpattern") {
+                    "reference to non-existent subpattern".to_string()
+                } else {
+                    msg
+                };
+                eprintln!("grep: {clean}");
+                process::exit(2);
+            }
+        }
+    } else if has_backrefs {
+        // Use fancy-regex for BRE/ERE backreferences
         match FancyRegexBuilder::new(&pattern)
             .backtrack_limit(10_000)
             .build()
@@ -319,9 +390,7 @@ pub(crate) fn build_matcher(opts: &Options) -> Matcher {
             Ok(re) => MatcherInner::Fancy(re),
             Err(e) => {
                 let msg = format!("{e}");
-                // Extract a GNU grep-compatible error message
                 let clean_msg = if let Some(inner) = msg.strip_prefix("Error compiling regex: ") {
-                    // Convert fancy-regex messages to GNU grep style
                     if inner.contains("back reference") {
                         "reference to non-existent subpattern"
                     } else {

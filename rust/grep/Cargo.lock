@@ -95,8 +95,13 @@ dependencies = [
  "libc",
  "memmap2",
  "regex",
+ "rust-pcre2",
  "walkdir",
 ]
+
+[[package]]
+name = "rust-pcre2"
+version = "0.1.0"
 
 [[package]]
 name = "same-file"

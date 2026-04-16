@@ -9,13 +9,18 @@
         version = "0.1.0";
 
         src = lib.fileset.toSource {
-          root = ./.;
+          root = ./..;
           fileset = lib.fileset.unions [
             ./Cargo.toml
             ./Cargo.lock
             ./src
+            ./../pcre2/Cargo.toml
+            ./../pcre2/Cargo.lock
+            ./../pcre2/src
           ];
         };
+
+        sourceRoot = "source/grep";
 
         cargoLock.lockFile = ./Cargo.lock;
 
