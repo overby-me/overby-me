@@ -8,7 +8,7 @@ Run a test: `nix build .#checks.x86_64-linux.rust-systemd-test-<name>`
 
 | Status | Count | Description |
 |--------|-------|-------------|
-| PASS | ~220+ | Tests passing reliably (including 150/151 aux-utils) |
+| PASS | ~225+ | Tests passing reliably (including 150/151 aux-utils) |
 | FAIL (fixable) | ~8 | Failures in rust-systemd code that can be fixed |
 | FAIL (architectural) | ~12 | Missing major features (D-Bus, udev, exec deser) |
 | Boot hang (transient) | ~10 | Non-deterministic QEMU boot failures (~30% rate) |
@@ -41,9 +41,9 @@ Run a test: `nix build .#checks.x86_64-linux.rust-systemd-test-<name>`
 - 01-05, 07-21 all pass
 - 06: persistent boot hang (transient)
 
-### 23-UNIT-FILE (13 of 20 pass)
+### 23-UNIT-FILE (15 of 20 pass)
 
-- PASS: exec-command-ex, execreload, execstoppost, joinsnamespace-of, oneshot-restart, percentj-wantedby, runtimedirectory, standardoutput, start-stop-no-reload, statedir, type-exec, utmp, verify-unit-files
+- PASS: clean-unit (service sections), exec-command-ex, execreload, execstoppost, joinsnamespace-of, oneshot-restart, percentj-wantedby, runtimedirectory, standardoutput, start-stop-no-reload, statedir, type-exec, upholds, utmp, verify-unit-files
 
 ### 81-GENERATORS (4 of 5 pass)
 
@@ -71,12 +71,12 @@ rust-systemd does not expose the `org.freedesktop.systemd1` D-Bus interface. Tes
 
 ### 2. Type=notify Service Lifecycle (Advanced)
 
-Basic Type=notify (READY=1) works. Advanced notification states are not fully implemented.
+Basic Type=notify (READY=1) works. NotifyAccess=all/main/exec/none enforcement works. Advanced notification states are not fully implemented.
 
 **Affected tests:**
 
 - 59-reloading-restart (RELOADING=1 notification)
-- 80-notifyaccess (bare `bash` in unit files — NixOS PATH issue)
+- 80-notifyaccess — NOW PASSES (custom test verifying all/main/exec/none)
 
 **Fix complexity:** Medium — RELOADING=1 state tracking and proper timeout handling.
 
@@ -179,8 +179,12 @@ All 23 udev tests fail because the C `udevadm` binary in the overlay lacks featu
 - [x] Fix StateDirectory=/ConfigurationDirectory= (already works)
 - [x] Fix ExecMainStatus for bad binary exec (issue-30412 — now passes)
 - [x] Fix user/group resolution edge cases (type-exec — now passes)
-- [ ] Implement Upholds= dependency directive
-- [ ] Add patchScripts for NixOS PATH issues in clean-unit, notifyaccess tests
+- [x] Implement Upholds= dependency directive (already works)
+- [x] Fix systemctl clean DynamicUser symlink cleanup (dangling symlink detection)
+- [x] Fix DeferredNotifyWait eventfd notification for notification handler wakeup
+- [x] Fix NotifyAccess=none enforcement (deferred notify wait timeout + systemctl start detection)
+- [x] Add patchScripts for NixOS PATH issues in clean-unit test (service sections pass, mount/socket skipped)
+- [x] Add notifyaccess test (all/main/exec/none — all pass when none is last)
 
 ### Priority 3: Major Features
 
