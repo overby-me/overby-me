@@ -199,14 +199,17 @@ impl Parser {
             }
             Token::Return => {
                 self.pos += 1;
-                let expr = if self.at(&Token::Semi) || self.at(&Token::RBrace) {
+                let expr = if self.at(&Token::Semi)
+                    || self.at(&Token::RBrace)
+                    || self.at(&Token::If)
+                    || self.at(&Token::Unless)
+                {
                     None
                 } else {
                     Some(self.parse_expr())
                 };
                 let stmt = Stmt::Return(expr);
-                self.eat(&Token::Semi);
-                return Some(stmt);
+                return Some(self.maybe_postfix(stmt));
             }
             Token::Print | Token::Say => {
                 let is_say = matches!(self.tok(), Token::Say);
