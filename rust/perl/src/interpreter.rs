@@ -1321,11 +1321,20 @@ impl Interpreter {
             }
             UnaryOp::LogNot => {
                 let val = self.eval_expr(expr);
-                Value::Num(if val.to_bool() { 0.0 } else { 1.0 })
+                // Perl's ! returns "" (empty string) for true, 1 for false
+                if val.to_bool() {
+                    Value::Str(String::new())
+                } else {
+                    Value::Num(1.0)
+                }
             }
             UnaryOp::Not => {
                 let val = self.eval_expr(expr);
-                Value::Num(if val.to_bool() { 0.0 } else { 1.0 })
+                if val.to_bool() {
+                    Value::Str(String::new())
+                } else {
+                    Value::Num(1.0)
+                }
             }
             UnaryOp::BitNot => {
                 let val = self.eval_expr(expr);
