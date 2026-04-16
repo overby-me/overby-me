@@ -1761,13 +1761,15 @@ impl Interpreter {
             _ => {
                 // Check user-defined subs
                 if let Some((params, body)) = self.subs.get(name).cloned() {
-                    let arg_vals: Vec<Value> = args.iter().map(|a| self.eval_expr(a)).collect();
+                    let arg_vals: Vec<Value> =
+                        args.iter().flat_map(|a| self.eval_list(a)).collect();
                     self.call_sub(&body, &arg_vals)
                 } else {
                     // Try package-qualified name
                     let qualified = format!("{}::{}", self.package, name);
                     if let Some((params, body)) = self.subs.get(&qualified).cloned() {
-                        let arg_vals: Vec<Value> = args.iter().map(|a| self.eval_expr(a)).collect();
+                        let arg_vals: Vec<Value> =
+                            args.iter().flat_map(|a| self.eval_list(a)).collect();
                         self.call_sub(&body, &arg_vals)
                     } else {
                         Value::Undef
