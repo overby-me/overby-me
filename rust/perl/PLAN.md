@@ -6,17 +6,16 @@ Rewrite Perl in Rust, verified against the upstream Perl 5 test suite (`t/` dire
 
 ## Current Status
 
-**9/68 Nix tests passing** (13%) — selected tests from the upstream Perl test suite.
+**10/68 Nix tests passing** (14.7%) — selected tests from the upstream Perl test suite.
 
 Passing: base/if, base/cond, base/while, base/pat, base/num (56 tests),
 base/translate (257 tests), base/term (7 tests), cmd/elsif (4 tests),
-cmd/mod (15 tests).
+cmd/mod (15 tests), opbasic/qq (30 tests).
 
 Near-passing (local test counts):
 
-- opbasic/arith: 174/183 (integer overflow edge cases)
+- opbasic/arith: 173/183 (integer overflow edge cases)
 - opbasic/concat: 228/254 (Unicode concat)
-- opbasic/qq: 15/30 (\\o{} octal escapes)
 - cmd/for: 14/16 (Internals::stack_refcounted)
 - cmd/subval: 19/36 (caller, wantarray, file I/O)
 
@@ -286,12 +285,12 @@ This is the largest phase. Key clusters:
 
 **re (3):** pat, regexp, subst
 
-### Passing (9)
+### Passing (10)
 
 base/cond, base/if, base/num, base/pat, base/term, base/translate, base/while,
-cmd/elsif, cmd/mod
+cmd/elsif, cmd/mod, opbasic/qq
 
-### Failing (59)
+### Failing (58)
 
 base/lex, base/rs, cmd/for, cmd/subval, cmd/switch,
 opbasic/arith, opbasic/cmp, opbasic/concat, opbasic/magic_phase, opbasic/qq,
