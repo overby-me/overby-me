@@ -536,6 +536,19 @@ impl Interpreter {
                 if self.current_params.contains(&array.to_string()) {
                     self.array_params.insert(array.to_string());
                 }
+                // The loop variable is used as scalar — check array→scalar conflict
+                if self.current_params.contains(&var.to_string()) {
+                    if self.arrays.contains_key(var) || self.array_params.contains(var) {
+                        let prov = if let Some(origin) = self.param_origins.get(var) {
+                            format!("`{var} (from {origin})'")
+                        } else {
+                            format!("`{var}'")
+                        };
+                        eprintln!("awk: fatal: attempt to use array {prov} in a scalar context");
+                        std::process::exit(2);
+                    }
+                    self.scalar_params.insert(var.to_string());
+                }
                 // Check if the variable is a scalar (not an array)
                 if !self.arrays.contains_key(array)
                     && self.globals.contains_key(array)
