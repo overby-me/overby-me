@@ -2007,6 +2007,8 @@ pub fn run_exec_helper() {
     // with CLONE_NEWPID in start_service). We just need to remount /proc to
     // reflect the new namespace.
     if config.private_pids && !config.privileged_prefix {
+        // Unmount old /proc first to avoid stacking mounts
+        unsafe { libc::umount2(c"/proc".as_ptr(), libc::MNT_DETACH) };
         let ret = unsafe {
             libc::mount(
                 c"proc".as_ptr(),
