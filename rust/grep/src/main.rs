@@ -212,6 +212,18 @@ fn parse_args() -> Options {
             continue;
         }
 
+        // Handle -NUM shorthand for -C NUM (e.g., -3 means -C 3)
+        if arg.starts_with('-') && arg.len() > 1 && arg[1..].chars().all(|c| c.is_ascii_digit()) {
+            if let Ok(n) = arg[1..].parse::<usize>() {
+                opts.context = n;
+                opts.after_context = n;
+                opts.before_context = n;
+                opts.context_requested = true;
+            }
+            i += 1;
+            continue;
+        }
+
         if arg.starts_with('-') && arg.len() > 1 {
             let chars: Vec<char> = arg[1..].chars().collect();
             let mut j = 0;
@@ -234,10 +246,12 @@ fn parse_args() -> Options {
                     'n' => opts.line_number = true,
                     'H' => {
                         opts.with_filename = true;
+                        opts.no_filename = false;
                         explicit_filename = Some(true);
                     }
                     'h' => {
                         opts.no_filename = true;
+                        opts.with_filename = false;
                         explicit_filename = Some(false);
                     }
                     'b' => opts.byte_offset = true,
@@ -394,18 +408,66 @@ fn parse_args() -> Options {
     opts
 }
 
-enum Matcher {
+enum MatcherInner {
     Regex(Regex),
     Fancy(FancyRegex),
     Fixed(Vec<String>, bool), // patterns, ignore_case
 }
 
+struct Matcher {
+    inner: MatcherInner,
+    word_regexp: bool,
+    line_regexp: bool,
+}
+
+fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
+fn is_word_boundary(text: &str, start: usize, end: usize) -> bool {
+    let before = if start == 0 {
+        false
+    } else {
+        text[..start].chars().last().map_or(false, is_word_char)
+    };
+    let after = text[end..].chars().next().map_or(false, is_word_char);
+    let match_start_word = if start == 0 {
+        true
+    } else {
+        !before
+    };
+    let match_end_word = !after;
+
+    // Also check that the match itself starts/ends with a word char
+    // (or is empty, which matches at word boundaries on empty lines)
+    let match_text = &text[start..end];
+    if match_text.is_empty() {
+        return !before && !after;
+    }
+    let first_is_word = match_text.chars().next().map_or(false, is_word_char);
+    let last_is_word = match_text.chars().last().map_or(false, is_word_char);
+
+    match_start_word && first_is_word && match_end_word && last_is_word
+}
+
 impl Matcher {
     fn is_match(&self, text: &str) -> bool {
-        match self {
-            Matcher::Regex(re) => re.is_match(text),
-            Matcher::Fancy(re) => re.is_match(text).unwrap_or(false),
-            Matcher::Fixed(patterns, ic) => {
+        if self.line_regexp {
+            // For line regexp, the entire line must match
+            return self.find_line_match(text);
+        }
+        if self.word_regexp {
+            // For word regexp, find matches at word boundaries
+            return !self.find_matches(text).is_empty();
+        }
+        self.raw_is_match(text)
+    }
+
+    fn raw_is_match(&self, text: &str) -> bool {
+        match &self.inner {
+            MatcherInner::Regex(re) => re.is_match(text),
+            MatcherInner::Fancy(re) => re.is_match(text).unwrap_or(false),
+            MatcherInner::Fixed(patterns, ic) => {
                 if *ic {
                     let lower = text.to_lowercase();
                     patterns.iter().any(|p| lower.contains(&p.to_lowercase()))
@@ -416,10 +478,35 @@ impl Matcher {
         }
     }
 
+    fn find_line_match(&self, text: &str) -> bool {
+        match &self.inner {
+            MatcherInner::Fixed(patterns, ic) => {
+                if *ic {
+                    let lower = text.to_lowercase();
+                    patterns.iter().any(|p| lower == p.to_lowercase())
+                } else {
+                    patterns.iter().any(|p| text == p.as_str())
+                }
+            }
+            _ => self.raw_is_match(text),
+        }
+    }
+
     fn find_matches(&self, text: &str) -> Vec<(usize, usize)> {
-        match self {
-            Matcher::Regex(re) => re.find_iter(text).map(|m| (m.start(), m.end())).collect(),
-            Matcher::Fancy(re) => {
+        let raw = self.raw_find_matches(text);
+        if self.word_regexp {
+            raw.into_iter()
+                .filter(|&(s, e)| is_word_boundary(text, s, e))
+                .collect()
+        } else {
+            raw
+        }
+    }
+
+    fn raw_find_matches(&self, text: &str) -> Vec<(usize, usize)> {
+        match &self.inner {
+            MatcherInner::Regex(re) => re.find_iter(text).map(|m| (m.start(), m.end())).collect(),
+            MatcherInner::Fancy(re) => {
                 let mut matches = Vec::new();
                 let mut start = 0;
                 while start < text.len() {
@@ -437,8 +524,8 @@ impl Matcher {
                 }
                 matches
             }
-            Matcher::Fixed(patterns, ic) => {
-                let mut matches = Vec::new();
+            MatcherInner::Fixed(patterns, ic) => {
+                let mut all_matches = Vec::new();
                 for p in patterns {
                     let haystack = if *ic {
                         text.to_lowercase()
@@ -446,15 +533,28 @@ impl Matcher {
                         text.to_string()
                     };
                     let needle = if *ic { p.to_lowercase() } else { p.to_string() };
+                    if needle.is_empty() {
+                        continue;
+                    }
                     let mut start = 0;
                     while let Some(pos) = haystack[start..].find(&needle) {
                         let abs_start = start + pos;
-                        matches.push((abs_start, abs_start + needle.len()));
-                        start = abs_start + needle.len();
+                        all_matches.push((abs_start, abs_start + needle.len()));
+                        start = abs_start + 1; // advance by 1 to find overlapping matches
                     }
                 }
-                matches.sort_by_key(|m| m.0);
-                matches
+                // Sort by position, then prefer longest match at same position
+                all_matches.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| b.1.cmp(&a.1)));
+                // Deduplicate: keep longest non-overlapping matches
+                let mut result = Vec::new();
+                let mut last_end = 0;
+                for (s, e) in all_matches {
+                    if s >= last_end {
+                        result.push((s, e));
+                        last_end = e;
+                    }
+                }
+                result
             }
         }
     }
@@ -462,7 +562,11 @@ impl Matcher {
 
 fn build_matcher(opts: &Options) -> Matcher {
     if opts.fixed_strings {
-        return Matcher::Fixed(opts.patterns.clone(), opts.ignore_case);
+        return Matcher {
+            inner: MatcherInner::Fixed(opts.patterns.clone(), opts.ignore_case),
+            word_regexp: opts.word_regexp,
+            line_regexp: opts.line_regexp,
+        };
     }
 
     // For BRE mode, convert each individual pattern before combining.
@@ -481,11 +585,14 @@ fn build_matcher(opts: &Options) -> Matcher {
         })
         .collect();
 
-    // Build combined pattern
+    // Build combined pattern — sort longer patterns first so that alternation
+    // prefers the longest match at each position (regex uses leftmost-first).
     let combined = if converted_patterns.len() == 1 {
         converted_patterns[0].clone()
     } else {
-        converted_patterns
+        let mut sorted = converted_patterns.clone();
+        sorted.sort_by(|a, b| b.len().cmp(&a.len()));
+        sorted
             .iter()
             .map(|p| format!("(?:{p})"))
             .collect::<Vec<_>>()
@@ -506,9 +613,9 @@ fn build_matcher(opts: &Options) -> Matcher {
         pattern = format!("(?i){pattern}");
     }
 
-    if opts.perl_regexp {
+    let inner = if opts.perl_regexp {
         match FancyRegex::new(&pattern) {
-            Ok(re) => Matcher::Fancy(re),
+            Ok(re) => MatcherInner::Fancy(re),
             Err(e) => {
                 eprintln!("grep: invalid Perl regex: {e}");
                 process::exit(2);
@@ -518,7 +625,7 @@ fn build_matcher(opts: &Options) -> Matcher {
         // BRE conversion already applied per-pattern above, so use the
         // combined ERE pattern directly.
         match Regex::new(&pattern) {
-            Ok(re) => Matcher::Regex(re),
+            Ok(re) => MatcherInner::Regex(re),
             Err(e) => {
                 if is_bre {
                     eprintln!("grep: invalid BRE pattern: {e}");
@@ -528,6 +635,13 @@ fn build_matcher(opts: &Options) -> Matcher {
                 process::exit(2);
             }
         }
+    };
+
+    Matcher {
+        inner,
+        // For regex mode, word/line matching is already in the pattern
+        word_regexp: false,
+        line_regexp: false,
     }
 }
 
@@ -602,6 +716,37 @@ fn convert_bre_to_ere(bre: &str) -> String {
     result
 }
 
+/// Apply color highlighting to a line by wrapping matched portions in ANSI escape codes.
+fn colorize_line(line: &str, matcher: &Matcher) -> String {
+    const COLOR_START: &str = "\x1b[01;31m\x1b[K";
+    const COLOR_END: &str = "\x1b[m\x1b[K";
+
+    let matches: Vec<_> = matcher
+        .find_matches(line)
+        .into_iter()
+        .filter(|(s, e)| s != e) // skip empty matches
+        .collect();
+    if matches.is_empty() {
+        return line.to_string();
+    }
+
+    let mut result = String::with_capacity(line.len() + matches.len() * 20);
+    let mut last_end = 0;
+
+    for (start, end) in matches {
+        if start < last_end {
+            continue; // skip overlapping matches
+        }
+        result.push_str(&line[last_end..start]);
+        result.push_str(COLOR_START);
+        result.push_str(&line[start..end]);
+        result.push_str(COLOR_END);
+        last_end = end;
+    }
+    result.push_str(&line[last_end..]);
+    result
+}
+
 fn grep_reader<R: BufRead>(
     reader: R,
     matcher: &Matcher,
@@ -616,10 +761,11 @@ fn grep_reader<R: BufRead>(
     let show_filename = opts.with_filename && !opts.no_filename;
     let separator = if opts.null_separator { '\0' } else { ':' };
     let fname_sep = if opts.null_separator { '\0' } else { ':' };
+    let use_color = opts.color == ColorMode::Always;
 
     let has_context = opts.context_requested || opts.before_context > 0 || opts.after_context > 0;
 
-    if has_context && !opts.count && !opts.files_with_matches && !opts.files_without_match {
+    if has_context && !opts.count && !opts.files_with_matches && !opts.files_without_match && !opts.only_matching {
         // Context mode: collect all lines first
         let lines: Vec<String> = reader.lines().map_while(Result::ok).collect();
         let mut remaining_after: usize = 0;
@@ -666,7 +812,11 @@ fn grep_reader<R: BufRead>(
                 if opts.line_number {
                     let _ = write!(out, "{}{separator}", line_idx + 1);
                 }
-                let _ = writeln!(out, "{line}");
+                if use_color {
+                    let _ = writeln!(out, "{}", colorize_line(line, matcher));
+                } else {
+                    let _ = writeln!(out, "{line}");
+                }
                 last_printed = Some(line_idx);
                 remaining_after = opts.after_context;
             } else if remaining_after > 0 {
@@ -712,7 +862,11 @@ fn grep_reader<R: BufRead>(
 
             if !opts.count {
                 if opts.only_matching && !opts.invert_match {
-                    let found = matcher.find_matches(&line);
+                    let found: Vec<_> = matcher
+                        .find_matches(&line)
+                        .into_iter()
+                        .filter(|(s, e)| s != e) // skip empty matches
+                        .collect();
                     for (start, end) in found {
                         if show_filename {
                             let _ = write!(out, "{filename}{fname_sep}");
@@ -723,7 +877,15 @@ fn grep_reader<R: BufRead>(
                         if opts.byte_offset {
                             let _ = write!(out, "{}{separator}", byte_offset + start);
                         }
-                        let _ = writeln!(out, "{}", &line[start..end]);
+                        if use_color {
+                            let _ = writeln!(
+                                out,
+                                "\x1b[01;31m\x1b[K{}\x1b[m\x1b[K",
+                                &line[start..end]
+                            );
+                        } else {
+                            let _ = writeln!(out, "{}", &line[start..end]);
+                        }
                     }
                 } else {
                     if show_filename {
@@ -735,7 +897,11 @@ fn grep_reader<R: BufRead>(
                     if opts.byte_offset {
                         let _ = write!(out, "{byte_offset}{separator}");
                     }
-                    let _ = writeln!(out, "{line}");
+                    if use_color {
+                        let _ = writeln!(out, "{}", colorize_line(&line, matcher));
+                    } else {
+                        let _ = writeln!(out, "{line}");
+                    }
                 }
             }
         }
