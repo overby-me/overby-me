@@ -1123,12 +1123,8 @@ impl Interpreter {
                         BinOp::Sub => Value::Num(lv.to_num() - rv.to_num()),
                         BinOp::Mul => Value::Num(lv.to_num() * rv.to_num()),
                         BinOp::Div => {
-                            let d = rv.to_num();
-                            if d == 0.0 {
-                                Value::Num(0.0)
-                            } else {
-                                Value::Num(lv.to_num() / d)
-                            }
+                            // Division by zero returns inf (like gawk)
+                            Value::Num(lv.to_num() / rv.to_num())
                         }
                         BinOp::Mod => {
                             let d = rv.to_num();
@@ -1253,9 +1249,7 @@ impl Interpreter {
                     BinOp::Add => lv + rv,
                     BinOp::Sub => lv - rv,
                     BinOp::Mul => lv * rv,
-                    BinOp::Div => {
-                        if rv == 0.0 { 0.0 } else { lv / rv }
-                    }
+                    BinOp::Div => lv / rv,
                     BinOp::Mod => {
                         if rv == 0.0 {
                             0.0
