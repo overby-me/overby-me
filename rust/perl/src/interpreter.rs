@@ -394,11 +394,16 @@ impl Interpreter {
             Stmt::Next(label) => Flow::Next(label.clone()),
             Stmt::Redo(_) => Flow::None, // TODO
             Stmt::Return(expr) => {
-                let val = expr
-                    .as_ref()
-                    .map(|e| self.eval_expr(e))
-                    .unwrap_or(Value::Undef);
-                Flow::Return(val)
+                if let Some(e) = expr {
+                    // Store list result for list-context returns
+                    let list = self.eval_list(e);
+                    self.last_list_val = Some(list.clone());
+                    let val = list.last().cloned().unwrap_or(Value::Undef);
+                    self.last_expr_val = val.clone();
+                    Flow::Return(val)
+                } else {
+                    Flow::Return(Value::Undef)
+                }
             }
 
             Stmt::Block(stmts) | Stmt::BareBlock(stmts) => {
@@ -1966,8 +1971,13 @@ impl Interpreter {
             }
         }
 
-        let result = if let Some(v) = return_val {
-            vec![v]
+        let result = if return_val.is_some() {
+            // Check if the return also set a list value
+            if let Some(list) = self.last_list_val.take() {
+                list
+            } else {
+                vec![return_val.unwrap()]
+            }
         } else if let Some(list) = self.last_list_val.take() {
             list
         } else {
