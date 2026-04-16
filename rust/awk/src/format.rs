@@ -420,42 +420,9 @@ pub fn sprintf_impl_with_convfmt(vals: &[Value], convfmt: &str) -> String {
             } else {
                 result.push_str(&formatted);
             }
-        } else if chars[i] == '\\' {
-            i += 1;
-            if i < chars.len() {
-                match chars[i] {
-                    'n' => { result.push('\n'); i += 1; }
-                    't' => { result.push('\t'); i += 1; }
-                    'r' => { result.push('\r'); i += 1; }
-                    '\\' => { result.push('\\'); i += 1; }
-                    '"' => { result.push('"'); i += 1; }
-                    'a' => { result.push('\x07'); i += 1; }
-                    'b' => { result.push('\x08'); i += 1; }
-                    'f' => { result.push('\x0C'); i += 1; }
-                    '/' => { result.push('/'); i += 1; }
-                    '0'..='7' => {
-                        let mut oct = (chars[i] as u32) - ('0' as u32);
-                        i += 1;
-                        for _ in 0..2 {
-                            if i < chars.len() && chars[i] >= '0' && chars[i] <= '7' {
-                                oct = oct * 8 + (chars[i] as u32 - '0' as u32);
-                                i += 1;
-                            } else {
-                                break;
-                            }
-                        }
-                        if let Some(ch) = char::from_u32(oct) {
-                            result.push(ch);
-                        }
-                    }
-                    _ => {
-                        result.push('\\');
-                        result.push(chars[i]);
-                        i += 1;
-                    }
-                }
-            }
         } else {
+            // No backslash escape processing in format strings at runtime
+            // (escapes are already processed by the lexer for string literals)
             result.push(chars[i]);
             i += 1;
         }
