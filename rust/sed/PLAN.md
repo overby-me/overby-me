@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**56/61 tests passing** (92%) — shell tests from the GNU sed 4.9 test suite.
+**57/61 tests passing** (93%) — shell tests from the GNU sed 4.9 test suite.
 
 Run a test: `nix build .#checks.x86_64-linux.rust-sed-test-{name}`
 View failure: `nix log .#checks.x86_64-linux.rust-sed-test-{name}`
@@ -81,7 +81,7 @@ View failure: `nix log .#checks.x86_64-linux.rust-sed-test-{name}`
 
 ---
 
-## Remaining Failures (5 tests)
+## Remaining Failures (4 tests)
 
 ### Category 1: fancy-regex performance (2 tests)
 
@@ -142,7 +142,7 @@ Fix execute-tests $fail issue, bsd-wrapper path layout.
 
 ## Test Inventory
 
-### Passing (56 tests)
+### Passing (57 tests)
 
 bsd, bug32082, bug32271-1, bug32271-2, cmd-0r, cmd-l, cmd-R,
 colon-with-no-label, command-endings, comment-n, distrib, eval,
@@ -156,17 +156,16 @@ recursive-escape-c, regex-errors, regex-max-int, sandbox, stdin,
 stdin-prog, subst-mb-incomplete, subst-options, subst-replacement,
 8to7, compile-errors, compile-tests, convert-number, posix-char-class,
 temp-file-cleanup, title-case,
-unbuffered, uniq, word-delim, xemacs
+obinary (skip), unbuffered, uniq, word-delim, xemacs
 
-### Failing (5 tests)
+### Failing (4 tests)
 
 | Test | Primary blocker |
 |-|-|
 | binary | fancy-regex performance (catastrophic backtracking) |
-| bsd-wrapper | 5 remaining output differences (append ordering, `l` binary bytes, range edge cases) |
+| bsd-wrapper | 3 remaining output differences (append ordering, branch-into-block, `l` binary bytes) |
 | dc | fancy-regex performance (catastrophic backtracking) |
 | mac-mf | Sed script contains non-UTF-8 bytes (needs byte-mode parser) |
-| obinary | Platform skip (already works) |
 
 ### Tests excluded from harness (6 tests)
 
