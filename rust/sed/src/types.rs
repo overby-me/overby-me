@@ -14,7 +14,7 @@ impl SedRegex {
             Err(_) => {
                 // Fall back to fancy-regex (supports backreferences)
                 fancy_regex::RegexBuilder::new(pattern)
-                    .backtrack_limit(10_000_000)
+                    .backtrack_limit(1_000_000)
                     .build()
                     .map(SedRegex::Fancy)
                     .map_err(|e| {

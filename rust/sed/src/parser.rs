@@ -346,7 +346,7 @@ impl<'a> Parser<'a> {
                 self.advance();
                 let pattern = self.parse_regex_delimited(b'/')?;
                 // Check for regex modifiers (I/M) after closing delimiter
-                let has_modifiers = matches!(self.peek(), Some(b'I') | Some(b'M') | Some(b'i') | Some(b'm'));
+                let has_modifiers = matches!(self.peek(), Some(b'I') | Some(b'M'));
                 if pattern.is_empty() {
                     if has_modifiers {
                         return Err(self.err_at(
@@ -366,7 +366,7 @@ impl<'a> Parser<'a> {
                 self.advance();
                 let delim = self.advance().ok_or_else(|| self.err("expected delimiter after \\"))?;
                 let pattern = self.parse_regex_delimited(delim)?;
-                let has_modifiers = matches!(self.peek(), Some(b'I') | Some(b'M') | Some(b'i') | Some(b'm'));
+                let has_modifiers = matches!(self.peek(), Some(b'I') | Some(b'M'));
                 if pattern.is_empty() {
                     if has_modifiers {
                         return Err(self.err_at(
@@ -390,13 +390,13 @@ impl<'a> Parser<'a> {
         let mut flags = String::new();
         loop {
             match self.peek() {
-                Some(b'I') | Some(b'i') => {
+                Some(b'I') => {
                     self.advance();
                     if !flags.contains('i') {
                         flags.push('i');
                     }
                 }
-                Some(b'M') | Some(b'm') => {
+                Some(b'M') => {
                     self.advance();
                     if !flags.contains('m') {
                         flags.push('m');
