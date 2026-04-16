@@ -390,8 +390,16 @@ pub fn sprintf_impl_with_convfmt(vals: &[Value], convfmt: &str) -> String {
                 } else if zero_pad
                     && matches!(conv, 'd' | 'i' | 'o' | 'x' | 'X' | 'u' | 'f' | 'e' | 'E' | 'g' | 'G')
                 {
-                    // Put sign before zeros
-                    if formatted.starts_with('-') || formatted.starts_with('+') {
+                    // Put sign/prefix before zeros
+                    if formatted.starts_with("0x") || formatted.starts_with("0X") {
+                        result.push_str(&formatted[..2]);
+                        for _ in 0..pad {
+                            result.push('0');
+                        }
+                        result.push_str(&formatted[2..]);
+                    } else if formatted.starts_with('-') || formatted.starts_with('+')
+                        || formatted.starts_with(' ')
+                    {
                         result.push(formatted.chars().next().unwrap());
                         for _ in 0..pad {
                             result.push('0');
