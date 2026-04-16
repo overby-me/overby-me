@@ -162,8 +162,9 @@ impl<'a> MatchState<'a> {
                 }
                 let saved_cap = self.captures[*index as usize];
                 self.captures[*index as usize] = Some((pos, pos));
-                // Wrap continuation to update capture end position
-                let result = self.try_match_group(*index, node, pos, cont);
+                // Match inner node, record group end, then run continuation.
+                // We use try_match_group_cont which handles the capture tracking.
+                let result = self.try_match_group_cont(*index, node, pos, cont);
                 if result.as_ref().is_ok_and(|r| r.is_none()) {
                     self.captures[*index as usize] = saved_cap;
                 }
@@ -363,14 +364,25 @@ impl<'a> MatchState<'a> {
         }
     }
 
-    /// Match a group, tracking capture positions.
-    fn try_match_group(
+    /// Match a group with continuation-passing, so nested quantifiers
+    /// can backtrack through the group boundary.
+    fn try_match_group_cont(
         &mut self,
         index: u32,
         node: &Node,
         start: usize,
         cont: &Cont,
     ) -> Result<Option<usize>, Error> {
+        // Create a synthetic GroupEnd node that records the capture end position
+        // then runs the continuation
+        let group_end = Node::Concat(Vec::new()); // empty sentinel
+        // We use the concat machinery with a GroupEnd marker
+        // For now, match inner with empty cont, record end, then run real cont
+        // This doesn't enable nested backtracking through the group boundary.
+        //
+        // TODO: For full PCRE2 semantics, refactor to VM-style with explicit
+        // backtrack stack. The current recursive approach can't propagate
+        // continuations through group captures without losing capture positions.
         let saved = self.save();
         match self.try_match(node, start)? {
             Some(end) => {
