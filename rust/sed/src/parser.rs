@@ -193,15 +193,24 @@ impl<'a> Parser<'a> {
             Some(b'/') => {
                 self.advance();
                 let pattern = self.parse_regex_delimited(b'/')?;
-                let re = self.compile_regex(&pattern)?;
-                Ok(Some(Address::Regex(re)))
+                if pattern.is_empty() {
+                    // Empty regex — reuse last
+                    Ok(Some(Address::LastRegex))
+                } else {
+                    let re = self.compile_regex(&pattern)?;
+                    Ok(Some(Address::Regex(re)))
+                }
             }
             Some(b'\\') => {
                 self.advance();
                 let delim = self.advance().ok_or_else(|| self.err("expected delimiter after \\"))?;
                 let pattern = self.parse_regex_delimited(delim)?;
-                let re = self.compile_regex(&pattern)?;
-                Ok(Some(Address::Regex(re)))
+                if pattern.is_empty() {
+                    Ok(Some(Address::LastRegex))
+                } else {
+                    let re = self.compile_regex(&pattern)?;
+                    Ok(Some(Address::Regex(re)))
+                }
             }
             _ => Ok(None),
         }

@@ -73,13 +73,7 @@ impl Engine {
             self.suppress_default_print = false;
 
             let cmds = self.commands.clone();
-            let flow = self.execute_commands_with_offset(&cmds, 0);
-            match flow {
-                Flow::EndOfCycle => {
-                    self.suppress_default_print = true;
-                }
-                _ => {}
-            }
+            self.execute_commands_with_offset(&cmds, 0);
 
             if self.quit {
                 if !self.quiet && !self.suppress_default_print {
@@ -94,6 +88,9 @@ impl Engine {
             }
 
             for text in self.append_queue.clone() {
+                if text.is_empty() {
+                    continue;
+                }
                 self.output.extend_from_slice(text.as_bytes());
                 if !text.ends_with('\n') {
                     self.output.push(b'\n');
@@ -207,7 +204,7 @@ impl Engine {
 
     fn addr_matches_single(&mut self, addr: &Address) -> bool {
         match addr {
-            Address::Line(0) => self.line_number == 1, // addr 0 matches line 1 as single addr
+            Address::Line(0) => self.line_number == 1,
             Address::Line(n) => self.line_number == *n,
             Address::Last => self.last_line,
             Address::Regex(re) => {
@@ -216,6 +213,19 @@ impl Engine {
                     self.last_regex = Some(re.clone());
                 }
                 matched
+            }
+            Address::LastRegex => {
+                // Reuse last regex
+                if let Some(ref re) = self.last_regex {
+                    re.is_match(&self.pattern_space)
+                } else {
+                    eprintln!(
+                        "sed: -e expression #1, char 0: no previous regular expression"
+                    );
+                    self.exit_code = 1;
+                    self.quit = true;
+                    false
+                }
             }
             Address::Step(first, step) => {
                 if *step == 0 {
@@ -316,7 +326,8 @@ impl Engine {
             Command::DeleteFirstLine => {
                 if let Some(pos) = self.pattern_space.find('\n') {
                     self.pattern_space = self.pattern_space[pos + 1..].to_string();
-                    self.suppress_default_print = true;
+                    // Don't suppress default print on restart — the restarted cycle
+                    // may end with b or fall through, which should print
                     Flow::Restart
                 } else {
                     self.suppress_default_print = true;

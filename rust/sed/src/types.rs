@@ -13,7 +13,9 @@ impl SedRegex {
             Ok(re) => Ok(SedRegex::Fast(re)),
             Err(_) => {
                 // Fall back to fancy-regex (supports backreferences)
-                fancy_regex::Regex::new(pattern)
+                fancy_regex::RegexBuilder::new(pattern)
+                    .backtrack_limit(10_000_000)
+                    .build()
                     .map(SedRegex::Fancy)
                     .map_err(|e| format!("{e}"))
             }
@@ -97,8 +99,9 @@ impl<'t> SedCaptures<'t> {
 #[derive(Debug, Clone)]
 pub enum Address {
     Line(usize),
-    Last, // $
+    Last,        // $
     Regex(SedRegex),
+    LastRegex,   // // — reuse last regex
     Step(usize, usize), // first~step
 }
 
