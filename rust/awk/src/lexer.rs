@@ -147,6 +147,7 @@ impl Lexer {
 
     fn read_string(&mut self) -> String {
         let mut s = String::new();
+        let mut terminated = false;
         // skip opening quote
         self.advance();
         while let Some(ch) = self.advance() {
@@ -229,10 +230,34 @@ impl Lexer {
                     }
                 }
             } else if ch == '"' {
+                terminated = true;
+                break;
+            } else if ch == '\n' {
+                // Newline inside string = unterminated
                 break;
             } else {
                 s.push(ch);
             }
+        }
+        if !terminated {
+            // Get the source line for context
+            let src_line = self.input[..self.pos]
+                .iter()
+                .collect::<String>()
+                .lines()
+                .last()
+                .unwrap_or("")
+                .to_string();
+            let full_line = if !src_line.is_empty() {
+                // Find the full line
+                let line_start = self.input[..self.pos].iter().rposition(|&c| c == '\n').map(|p| p + 1).unwrap_or(0);
+                self.input[line_start..].iter().take_while(|&&c| c != '\n').collect::<String>()
+            } else {
+                String::new()
+            };
+            eprintln!("awk: {full_line}");
+            eprintln!("awk:         ^ unterminated string");
+            std::process::exit(2);
         }
         s
     }
