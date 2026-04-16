@@ -294,6 +294,19 @@ pub fn sprintf_impl_with_convfmt(vals: &[Value], convfmt: &str) -> String {
                         s
                     }
                 }
+                'a' | 'A' => {
+                    let n = val.to_num();
+                    if n.is_nan() {
+                        let s = if conv == 'A' { "NAN" } else { "nan" };
+                        if n.is_sign_negative() { format!("-{s}") } else { s.to_string() }
+                    } else if n.is_infinite() {
+                        let s = if conv == 'A' { "INF" } else { "inf" };
+                        if n < 0.0 { format!("-{s}") } else { s.to_string() }
+                    } else {
+                        // Basic hex float (not fully compliant)
+                        format!("%{conv}")
+                    }
+                }
                 _ => format!("%{conv}"),
             };
 
