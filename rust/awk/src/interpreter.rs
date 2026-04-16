@@ -32,6 +32,10 @@ pub struct Interpreter {
     current_params: Vec<String>,
     /// Parameters that have been used as scalars in current function call
     scalar_params: std::collections::HashSet<String>,
+    /// Parameters that have been used as arrays in current function call
+    array_params: std::collections::HashSet<String>,
+    /// Map from parameter name to origin variable name (for error provenance)
+    param_origins: HashMap<String, String>,
 }
 
 impl Interpreter {
@@ -70,6 +74,8 @@ impl Interpreter {
             input_line_idx: 0,
             current_params: Vec::new(),
             scalar_params: std::collections::HashSet::new(),
+            array_params: std::collections::HashSet::new(),
+            param_origins: HashMap::new(),
         }
     }
 
@@ -526,6 +532,10 @@ impl Interpreter {
                 }
             }
             Stmt::ForIn(var, array, body) => {
+                // Track parameter used as array
+                if self.current_params.contains(&array.to_string()) {
+                    self.array_params.insert(array.to_string());
+                }
                 // Check if the variable is a scalar (not an array)
                 if !self.arrays.contains_key(array)
                     && self.globals.contains_key(array)
@@ -563,6 +573,10 @@ impl Interpreter {
                 return ControlFlow::Exit(code);
             }
             Stmt::Delete(name, indices) => {
+                // Track parameter used as array
+                if self.current_params.contains(&name.to_string()) {
+                    self.array_params.insert(name.to_string());
+                }
                 if self.functions.contains_key(name) {
                     eprintln!(
                         "awk: error: function `{name}' called with space between name and `(',"
@@ -1091,6 +1105,18 @@ impl Interpreter {
                     eprintln!("or used as a variable or an array");
                     std::process::exit(1);
                 }
+                // Check array→scalar conflict for parameters
+                if self.current_params.contains(&name.to_string())
+                    && self.array_params.contains(name)
+                {
+                    let prov = if let Some(origin) = self.param_origins.get(name) {
+                        format!("`{name} (from {origin})'")
+                    } else {
+                        format!("`{name}'")
+                    };
+                    eprintln!("awk: fatal: attempt to use array {prov} in a scalar context");
+                    std::process::exit(2);
+                }
                 self.set_var(name, val);
             }
             Expr::FieldRef(idx_expr) => {
@@ -1098,6 +1124,10 @@ impl Interpreter {
                 self.set_field(idx, val);
             }
             Expr::ArrayRef(name, indices) => {
+                // Track parameter used as array
+                if self.current_params.contains(&name.to_string()) {
+                    self.array_params.insert(name.to_string());
+                }
                 // Check scalar-as-array conflict
                 if !self.arrays.contains_key(name) && self.scalar_params.contains(name) {
                     let kind = if self.current_params.contains(&name.to_string()) {
@@ -1136,8 +1166,17 @@ impl Interpreter {
                     eprintln!("or used as a variable or an array");
                     std::process::exit(1);
                 }
-                // Track parameter used as scalar
+                // Track parameter used as scalar and check for array→scalar conflict
                 if self.current_params.contains(&name.to_string()) {
+                    if self.array_params.contains(name) {
+                        let prov = if let Some(origin) = self.param_origins.get(name) {
+                            format!("`{name} (from {origin})'")
+                        } else {
+                            format!("`{name}'")
+                        };
+                        eprintln!("awk: fatal: attempt to use array {prov} in a scalar context");
+                        std::process::exit(2);
+                    }
                     self.scalar_params.insert(name.to_string());
                 }
                 self.get_var(name)
@@ -1169,6 +1208,10 @@ impl Interpreter {
                         eprintln!("awk: fatal: attempt to use {kind} `{name}' as an array");
                         std::process::exit(2);
                     }
+                }
+                // Track parameter used as array
+                if self.current_params.contains(&name.to_string()) {
+                    self.array_params.insert(name.to_string());
                 }
                 let vals: Vec<Value> = indices.iter().map(|i| self.eval_expr(i)).collect();
                 let key = self.array_key(&vals);
@@ -1393,6 +1436,16 @@ impl Interpreter {
                 Value::Str(format!("{ls}{rs}"))
             }
             Expr::In(expr, array) => {
+                // Track parameter used as array
+                if self.current_params.contains(&array.to_string()) {
+                    if self.scalar_params.contains(array) {
+                        eprintln!(
+                            "awk: fatal: attempt to use scalar parameter `{array}' as an array"
+                        );
+                        std::process::exit(2);
+                    }
+                    self.array_params.insert(array.to_string());
+                }
                 // Check scalar-as-array
                 if !self.arrays.contains_key(array)
                     && self.globals.contains_key(array)
@@ -1601,7 +1654,9 @@ impl Interpreter {
                             });
                             r.to_string()
                         };
-                        if count > 0 {
+                        // Always assign for vars (marks type), skip for field refs when no match
+                        // to avoid unnecessary $0 rebuild
+                        if count > 0 || !matches!(target_expr, Expr::FieldRef(_)) {
                             self.assign_to(&target_expr, Value::Str(result));
                         }
                         Value::Num(count as f64)
@@ -1997,12 +2052,30 @@ impl Interpreter {
                     let saved_params =
                         std::mem::replace(&mut self.current_params, func.params.clone());
                     let saved_scalar_params = std::mem::take(&mut self.scalar_params);
+                    let saved_array_params = std::mem::take(&mut self.array_params);
+                    let saved_param_origins = std::mem::take(&mut self.param_origins);
+                    // Build param origin map
+                    for (i, param) in func.params.iter().enumerate() {
+                        if let Some(Some(orig_name)) = arg_var_names.get(i) {
+                            // Chain: if orig was itself a param with origin, build chain
+                            if let Some(prev_origin) = saved_param_origins.get(orig_name) {
+                                self.param_origins.insert(
+                                    param.clone(),
+                                    format!("{orig_name}, from {prev_origin}"),
+                                );
+                            } else {
+                                self.param_origins.insert(param.clone(), orig_name.clone());
+                            }
+                        }
+                    }
                     let result = match self.exec_stmts(&func.body) {
                         ControlFlow::Return(val) => val,
                         _ => Value::Uninitialized,
                     };
                     self.current_params = saved_params;
                     self.scalar_params = saved_scalar_params;
+                    self.array_params = saved_array_params;
+                    self.param_origins = saved_param_origins;
 
                     // Save param state BEFORE restoring scope (for copy-back)
                     let mut arr_copyback: Vec<(String, Option<HashMap<String, Value>>)> =
