@@ -2986,34 +2986,34 @@ fn setup_mount_namespace(config: &ExecHelperConfig) {
     // ── ProtectControlGroups= / ProtectControlGroupsEx= ──────────────
     // ProtectControlGroupsEx supersedes ProtectControlGroups when set.
     match config.protect_control_groups_ex.as_str() {
-        "yes" => {
-            // Read-only cgroups, host namespace
-            remount_read_only("/sys/fs/cgroup", config);
-        }
-        "private" | "strict" => {
-            // New cgroup namespace
-            let ret = unsafe { libc::unshare(libc::CLONE_NEWCGROUP) };
-            if ret != 0 {
-                log::warn!(
-                    "mount_ns: unshare(CLONE_NEWCGROUP) failed: {}",
-                    std::io::Error::last_os_error()
-                );
+        "yes" | "private" | "strict" => {
+            // Create new cgroup namespace for private/strict
+            if config.protect_control_groups_ex != "yes" {
+                let ret = unsafe { libc::unshare(libc::CLONE_NEWCGROUP) };
+                if ret != 0 {
+                    log::warn!(
+                        "mount_ns: unshare(CLONE_NEWCGROUP) failed: {}",
+                        std::io::Error::last_os_error()
+                    );
+                }
             }
-            // Remount /sys/fs/cgroup with a fresh cgroup2 mount in the new namespace.
-            // First unmount the old mount, then mount fresh cgroup2 with proper flags.
-            let cgroup_path =
-                std::ffi::CString::new("/sys/fs/cgroup").unwrap();
+            // Remount /sys/fs/cgroup with a fresh cgroup2 mount.
+            // For private/strict: in the new namespace, the service sees itself at root.
+            // For yes: host namespace, but cgroup hierarchy becomes read-only.
+            let cgroup_path = std::ffi::CString::new("/sys/fs/cgroup").unwrap();
             let cgroup2 = std::ffi::CString::new("cgroup2").unwrap();
             let mount_data =
                 std::ffi::CString::new("nsdelegate,memory_recursiveprot").unwrap();
             // Unmount the old cgroup mount
             unsafe { libc::umount2(cgroup_path.as_ptr(), libc::MNT_DETACH) };
-            // Mount fresh cgroup2
-            let mount_flags = libc::MS_NOSUID | libc::MS_NODEV | libc::MS_NOEXEC
-                | if config.protect_control_groups_ex == "strict" {
-                    libc::MS_RDONLY
+            // Mount fresh cgroup2 with appropriate flags
+            let mount_flags = libc::MS_NOSUID
+                | libc::MS_NODEV
+                | libc::MS_NOEXEC
+                | if config.protect_control_groups_ex != "private" {
+                    libc::MS_RDONLY // yes and strict are read-only
                 } else {
-                    0
+                    0 // private is read-write
                 };
             let ret = unsafe {
                 libc::mount(
