@@ -167,6 +167,9 @@ impl<'a> Parser<'a> {
         let negated = if self.peek() == Some(b'!') {
             self.advance();
             self.skip_whitespace();
+            if self.peek() == Some(b'!') {
+                return Err(self.err("multiple `!'s"));
+            }
             true
         } else {
             false
@@ -186,9 +189,31 @@ impl<'a> Parser<'a> {
                 self.advance();
                 return Err(self.err(": doesn't want any addresses"));
             }
+            if self.peek() == Some(b'#') {
+                self.advance();
+                return Err(self.err("comments don't accept any addresses"));
+            }
         }
 
         let cmd = self.parse_command_char()?;
+
+        // POSIX mode: some commands only accept one address (not a range)
+        if self.posix && matches!(address, AddressRange::Range(_, _)) {
+            let one_addr_only = matches!(
+                cmd,
+                Command::Append(_)
+                    | Command::Insert(_)
+                    | Command::PrintEscaped(_)
+                    | Command::PrintLineNum
+                    | Command::Quit(_)
+                    | Command::QuitNoprint(_)
+                    | Command::ReadFile(_)
+                    | Command::ReadLine(_)
+            );
+            if one_addr_only {
+                return Err(self.err("command only uses one address"));
+            }
+        }
 
         Ok(Some(SedCommand {
             address,
@@ -200,6 +225,9 @@ impl<'a> Parser<'a> {
     fn parse_address_range(&mut self) -> Result<AddressRange, String> {
         let first = self.try_parse_address()?;
         match first {
+            Some(Address::Relative(_)) | Some(Address::Multiple(_)) => {
+                return Err(self.err("invalid usage of +N or ~N as first address"));
+            }
             None => Ok(AddressRange::None),
             Some(addr) => {
                 if self.peek() == Some(b',') {
@@ -474,20 +502,18 @@ impl<'a> Parser<'a> {
                 let code = self.try_parse_exit_code();
                 Ok(Command::QuitNoprint(code))
             }
-            b'a' => {
+            b'a' | b'i' | b'c' => {
+                if self.posix && self.peek() != Some(b'\\') {
+                    return Err(self.err("expected \\ after `a', `c' or `i'"));
+                }
                 self.skip_optional_backslash_newline();
                 let text = self.parse_text_arg();
-                Ok(Command::Append(text))
-            }
-            b'i' => {
-                self.skip_optional_backslash_newline();
-                let text = self.parse_text_arg();
-                Ok(Command::Insert(text))
-            }
-            b'c' => {
-                self.skip_optional_backslash_newline();
-                let text = self.parse_text_arg();
-                Ok(Command::Change(text))
+                match ch {
+                    b'a' => Ok(Command::Append(text)),
+                    b'i' => Ok(Command::Insert(text)),
+                    b'c' => Ok(Command::Change(text)),
+                    _ => unreachable!(),
+                }
             }
             b'n' => Ok(Command::Next),
             b'N' => Ok(Command::NextAppend),
