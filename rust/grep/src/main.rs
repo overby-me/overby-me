@@ -161,6 +161,7 @@ fn parse_args() -> Options {
                 "only-matching" => opts.only_matching = true,
                 "quiet" | "silent" => opts.quiet = true,
                 "no-messages" => opts.no_messages = true,
+                "line-buffered" => {} // accepted but no-op (stdout is already line-buffered)
                 "line-number" => opts.line_number = true,
                 "with-filename" => {
                     opts.with_filename = true;
