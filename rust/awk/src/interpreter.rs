@@ -707,8 +707,14 @@ impl Interpreter {
                         self.set_record(&line);
                     }
                     Value::Num(1.0)
+                } else if !self.input_lines.is_empty() {
+                    // Had pre-read input that's now exhausted — return EOF
+                    if let Some(v) = var {
+                        self.eval_side_effects(v);
+                    }
+                    Value::Num(0.0)
                 } else {
-                    // No more input — try stdin directly (for interactive/pipe)
+                    // No pre-read input — try stdin directly (for interactive/pipe)
                     let mut line = String::new();
                     match io::stdin().lock().read_line(&mut line) {
                         Ok(0) => {
