@@ -250,6 +250,7 @@
         ./rust/nixpkgs
         ./rust/patch
         ./rust/patchelf
+        ./rust/pcre2
         ./rust/perl
         ./rust/pkg-config
         ./rust/sed

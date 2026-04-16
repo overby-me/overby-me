@@ -1,0 +1,18 @@
+[package]
+name = "rust-pcre2"
+version = "0.1.0"
+edition = "2024"
+description = "A pure Rust implementation of PCRE2 (Perl Compatible Regular Expressions)"
+license = "MIT"
+
+[lib]
+name = "rust_pcre2"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pcre2test"
+path = "src/bin/pcre2test.rs"
+
+[profile.release]
+lto = true
+strip = true
