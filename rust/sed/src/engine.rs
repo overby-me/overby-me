@@ -22,18 +22,20 @@ pub struct Engine {
     suppress_default_print: bool,
     input_lines: Vec<String>,
     input_index: usize,
+    input_had_trailing_newline: bool,
     pub current_filename: Option<String>,
     addr0_active: bool, // true when current command matched via address 0
     pub line_wrap_width: usize,
     #[allow(dead_code)]
     sandbox: bool,
+    null_data: bool,
     range_active: Vec<bool>,
     range_start: Vec<usize>, // line number when range became active
     read_line_positions: HashMap<String, usize>, // for R command: track line offset per file
 }
 
 impl Engine {
-    pub fn new(commands: Vec<SedCommand>, quiet: bool, posix: bool, sandbox: bool, line_length: usize) -> Self {
+    pub fn new(commands: Vec<SedCommand>, quiet: bool, posix: bool, sandbox: bool, line_length: usize, null_data: bool) -> Self {
         let num_cmds = count_commands(&commands);
         Engine {
             commands,
@@ -53,18 +55,52 @@ impl Engine {
             suppress_default_print: false,
             input_lines: Vec::new(),
             input_index: 0,
+            input_had_trailing_newline: true,
             current_filename: None,
             addr0_active: false,
             line_wrap_width: line_length,
             sandbox,
+            null_data,
             range_active: vec![false; num_cmds],
             range_start: vec![0; num_cmds],
             read_line_positions: HashMap::new(),
         }
     }
 
-    pub fn run<R: BufRead, W: Write>(&mut self, reader: R, writer: &mut W) -> io::Result<i32> {
-        self.input_lines = reader.lines().collect::<io::Result<Vec<_>>>()?;
+    pub fn run<R: BufRead, W: Write>(&mut self, mut reader: R, writer: &mut W) -> io::Result<i32> {
+        if self.null_data {
+            // Split on NUL bytes instead of newlines
+            let mut data = Vec::new();
+            reader.read_to_end(&mut data)?;
+            self.input_lines = data
+                .split(|&b| b == 0)
+                .map(|chunk| String::from_utf8_lossy(chunk).into_owned())
+                .collect();
+            // Remove trailing empty element if data ended with NUL
+            if self.input_lines.last().map_or(false, |s| s.is_empty()) {
+                self.input_lines.pop();
+            }
+        } else {
+            // Read all input and check for trailing newline
+            let mut data = Vec::new();
+            reader.read_to_end(&mut data)?;
+            self.input_had_trailing_newline = data.last() == Some(&b'\n');
+            // Split on newlines (like BufRead::lines but preserving NUL bytes)
+            self.input_lines = if data.is_empty() {
+                Vec::new()
+            } else {
+                let s = String::from_utf8_lossy(&data).into_owned();
+                let mut lines: Vec<String> =
+                    s.split('\n').map(|l| l.to_string()).collect();
+                // Remove trailing empty element if input ended with \n
+                if self.input_had_trailing_newline
+                    && lines.last().map_or(false, |s| s.is_empty())
+                {
+                    lines.pop();
+                }
+                lines
+            };
+        }
         self.input_index = 0;
         let total = self.input_lines.len();
 
@@ -124,7 +160,13 @@ impl Engine {
     fn write_pattern_space(&mut self) {
         self.output
             .extend_from_slice(self.pattern_space.as_bytes());
-        self.output.push(b'\n');
+        let sep = if self.null_data { b'\0' } else { b'\n' };
+        // Don't add separator after last line if input didn't end with one
+        if self.last_line && !self.input_had_trailing_newline {
+            // Skip the trailing separator
+        } else {
+            self.output.push(sep);
+        }
     }
 
     fn flush_output<W: Write>(&mut self, writer: &mut W) -> io::Result<()> {
@@ -431,12 +473,13 @@ impl Engine {
                         }
                     }
                 }
-                self.output.push(b'\n');
+                self.output.push(if self.null_data { b'\0' } else { b'\n' });
                 Flow::Continue
             }
 
             Command::PrintLineNum => {
-                let s = format!("{}\n", self.line_number);
+                let sep = if self.null_data { '\0' } else { '\n' };
+                let s = format!("{}{sep}", self.line_number);
                 self.output.extend_from_slice(s.as_bytes());
                 Flow::Continue
             }
@@ -650,6 +693,9 @@ impl Engine {
                         if text.ends_with('\n') {
                             text.pop();
                         }
+                        if self.null_data && text.ends_with('\0') {
+                            text.pop();
+                        }
                         self.pattern_space = text;
                     }
                     Flow::Continue
@@ -659,7 +705,8 @@ impl Engine {
 
             Command::Filename => {
                 let name = self.current_filename.as_deref().unwrap_or("-");
-                let s = format!("{name}\n");
+                let sep = if self.null_data { '\0' } else { '\n' };
+                let s = format!("{name}{sep}");
                 self.output.extend_from_slice(s.as_bytes());
                 Flow::Continue
             }

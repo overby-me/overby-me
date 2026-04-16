@@ -49,7 +49,8 @@ pkgs.runCommand "rust-sed-test-${name}" {
   export PATH="$SED_SRC/sed:$PATH"
 
   # Run the test script; exit codes: 0=pass, 77=skip, other=fail
-  if bash "testsuite/${name}.sh"; then
+  # Initialize fail=0 to avoid "integer expected" in tests that check $fail
+  if fail=0 bash "testsuite/${name}.sh"; then
     touch $out
   else
     rc=$?

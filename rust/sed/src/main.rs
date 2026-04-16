@@ -455,7 +455,7 @@ fn main() {
             }
 
             // Each file gets a fresh engine in in-place mode
-            let mut engine = Engine::new(commands.clone(), quiet, posix, opts.sandbox, opts.line_length);
+            let mut engine = Engine::new(commands.clone(), quiet, posix, opts.sandbox, opts.line_length, opts.null_data);
             engine.current_filename = Some(if opts.follow_symlinks {
                 resolve_symlinks(file)
             } else {
@@ -485,14 +485,14 @@ fn main() {
     } else if opts.files.is_empty() || (opts.files.len() == 1 && opts.files[0] == "-") {
         let stdin = io::stdin();
         let reader = stdin.lock();
-        let mut engine = Engine::new(commands, quiet, posix, opts.sandbox, opts.line_length);
+        let mut engine = Engine::new(commands, quiet, posix, opts.sandbox, opts.line_length, opts.null_data);
         let code = engine.run(reader, &mut out).unwrap_or_else(|e| {
             eprintln!("sed: {e}");
             1
         });
         process::exit(code);
     } else {
-        let mut engine = Engine::new(commands, quiet, posix, opts.sandbox, opts.line_length);
+        let mut engine = Engine::new(commands, quiet, posix, opts.sandbox, opts.line_length, opts.null_data);
         for file in &opts.files {
             let content = if file == "-" {
                 let mut buf = String::new();

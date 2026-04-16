@@ -686,6 +686,10 @@ impl<'a> Parser<'a> {
                                                 result.push(ctrl_char(b'\\') as char);
                                             } else if b"abcdfnortxvdox".contains(&next2) {
                                                 // \c\d, \c\n, etc — recursive escaping
+                                                // Skip to end of replacement for correct position
+                                                while let Some(c) = self.advance() {
+                                                    if c == delim { break; }
+                                                }
                                                 return Err(self.err(
                                                     "recursive escaping after \\c not allowed",
                                                 ));
