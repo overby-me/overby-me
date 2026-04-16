@@ -25,6 +25,23 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Format an error with explicit char position
+    fn err_at(&self, char_pos: usize, msg: &str) -> String {
+        match &self.source {
+            ScriptSource::Expression(n) => {
+                format!("-e expression #{n}, char {char_pos}: {msg}")
+            }
+            ScriptSource::File(name) => {
+                let line = self.input[..self.cmd_start]
+                    .iter()
+                    .filter(|&&b| b == b'\n')
+                    .count()
+                    + 1;
+                format!("file {name} line {line}: {msg}")
+            }
+        }
+    }
+
     /// Format an error with source location info
     fn err(&self, msg: &str) -> String {
         match &self.source {
@@ -159,7 +176,7 @@ impl<'a> Parser<'a> {
                                 && matches!(addr2, Address::Line(_))
                             {
                                 return Err(
-                                    self.err("invalid usage of line address 0"),
+                                    self.err_at(self.pos + 1, "invalid usage of line address 0"),
                                 );
                             }
                             Ok(AddressRange::Range(addr, addr2))

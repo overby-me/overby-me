@@ -16,12 +16,14 @@ pub struct Engine {
     sub_happened: bool,
     output: Vec<u8>,
     append_queue: Vec<String>,
+    prepend_queue: Vec<String>, // for address 0 commands — output before first line
     quit: bool,
     exit_code: i32,
     suppress_default_print: bool,
     input_lines: Vec<String>,
     input_index: usize,
     pub current_filename: Option<String>,
+    addr0_active: bool, // true when current command matched via address 0
     pub line_wrap_width: usize,
     #[allow(dead_code)]
     sandbox: bool,
@@ -44,12 +46,14 @@ impl Engine {
             sub_happened: false,
             output: Vec::new(),
             append_queue: Vec::new(),
+            prepend_queue: Vec::new(),
             quit: false,
             exit_code: 0,
             suppress_default_print: false,
             input_lines: Vec::new(),
             input_index: 0,
             current_filename: None,
+            addr0_active: false,
             line_wrap_width: line_length,
             sandbox,
             range_active: vec![false; num_cmds],
@@ -82,6 +86,18 @@ impl Engine {
                 self.flush_output(writer)?;
                 return Ok(self.exit_code);
             }
+
+            // Flush prepend queue (from address 0 commands) before default print
+            for text in self.prepend_queue.clone() {
+                if text.is_empty() {
+                    continue;
+                }
+                self.output.extend_from_slice(text.as_bytes());
+                if !text.ends_with('\n') {
+                    self.output.push(b'\n');
+                }
+            }
+            self.prepend_queue.clear();
 
             if !self.quiet && !self.suppress_default_print {
                 self.write_pattern_space();
@@ -129,6 +145,7 @@ impl Engine {
             }
             let cmd = &commands[i];
             let range_idx = range_offset + i;
+            self.addr0_active = false;
             let matched = self.address_matches(&cmd.address, range_idx);
             let should_run = if cmd.negated { !matched } else { matched };
 
@@ -204,7 +221,14 @@ impl Engine {
 
     fn addr_matches_single(&mut self, addr: &Address) -> bool {
         match addr {
-            Address::Line(0) => self.line_number == 1,
+            Address::Line(0) => {
+                if self.line_number == 1 {
+                    self.addr0_active = true;
+                    true
+                } else {
+                    false
+                }
+            }
             Address::Line(n) => self.line_number == *n,
             Address::Last => self.last_line,
             Address::Regex(re) => {
@@ -526,8 +550,13 @@ impl Engine {
 
             Command::ReadFile(file) => {
                 if let Ok(content) = std::fs::read_to_string(file) {
-                    self.append_queue.push(content);
+                    if self.addr0_active {
+                        self.prepend_queue.push(content);
+                    } else {
+                        self.append_queue.push(content);
+                    }
                 }
+                self.addr0_active = false;
                 Flow::Continue
             }
 
