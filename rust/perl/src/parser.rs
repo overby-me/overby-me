@@ -1116,8 +1116,14 @@ impl Parser {
         match self.tok() {
             Token::Match => {
                 self.pos += 1;
-                // =~ /regex/ or =~ s/pat/repl/
-                if let Token::RegexLit(pat, flags) = self.tok() {
+                // =~ /regex/ or =~ s/pat/repl/flags
+                if let Token::Substitution(pat, repl, flags) = self.tok() {
+                    let p = pat.clone();
+                    let r = repl.clone();
+                    let f = flags.clone();
+                    self.pos += 1;
+                    Expr::Substitution(Box::new(left), p, r, f)
+                } else if let Token::RegexLit(pat, flags) = self.tok() {
                     let p = pat.clone();
                     let f = flags.clone();
                     self.pos += 1;
@@ -1384,6 +1390,11 @@ impl Parser {
                 self.pos += 1;
                 // Bare /regex/ matches against $_
                 Expr::RegexMatch(Box::new(Expr::ScalarVar("_".to_string())), pat, flags)
+            }
+            Token::Substitution(pat, repl, flags) => {
+                self.pos += 1;
+                // Bare s/// applies to $_
+                Expr::Substitution(Box::new(Expr::ScalarVar("_".to_string())), pat, repl, flags)
             }
             Token::QW(words) => {
                 self.pos += 1;

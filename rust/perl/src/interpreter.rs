@@ -813,6 +813,78 @@ impl Interpreter {
                 Value::Num(if matched { 0.0 } else { 1.0 })
             }
 
+            Expr::Substitution(target, pat, repl, flags) => {
+                let text = self.eval_expr(target).to_str();
+                let case_insensitive = flags.contains('i');
+                let global = flags.contains('g');
+                let pat_str = if case_insensitive {
+                    format!("(?i){}", pat)
+                } else {
+                    pat.clone()
+                };
+                match regex::Regex::new(&pat_str) {
+                    Ok(re) => {
+                        // Process replacement: handle \-escaped sequences
+                        let replacement = repl.replace("\\#", "#").replace("\\\\", "\\");
+                        // Build a replacement that handles & (matched text)
+                        let replacement = replacement.replace("&", "${0}");
+                        let (new_text, count) = if global {
+                            let mut count = 0u64;
+                            let new = re.replace_all(&text, |caps: &regex::Captures| {
+                                count += 1;
+                                let mut result = String::new();
+                                let repl_chars: Vec<char> = replacement.chars().collect();
+                                let mut i = 0;
+                                while i < repl_chars.len() {
+                                    if repl_chars[i] == '$' && i + 1 < repl_chars.len() {
+                                        if repl_chars[i + 1] == '{' {
+                                            // ${N} reference
+                                            let mut num_str = String::new();
+                                            i += 2;
+                                            while i < repl_chars.len() && repl_chars[i] != '}' {
+                                                num_str.push(repl_chars[i]);
+                                                i += 1;
+                                            }
+                                            if i < repl_chars.len() {
+                                                i += 1; // skip }
+                                            }
+                                            if let Ok(n) = num_str.parse::<usize>() {
+                                                if let Some(m) = caps.get(n) {
+                                                    result.push_str(m.as_str());
+                                                }
+                                            }
+                                        } else if repl_chars[i + 1].is_ascii_digit() {
+                                            let n =
+                                                (repl_chars[i + 1] as u32 - '0' as u32) as usize;
+                                            if let Some(m) = caps.get(n) {
+                                                result.push_str(m.as_str());
+                                            }
+                                            i += 2;
+                                        } else {
+                                            result.push(repl_chars[i]);
+                                            i += 1;
+                                        }
+                                    } else {
+                                        result.push(repl_chars[i]);
+                                        i += 1;
+                                    }
+                                }
+                                result
+                            });
+                            (new.into_owned(), count)
+                        } else {
+                            let had_match = re.is_match(&text);
+                            let new = re.replace(&text, replacement.as_str());
+                            (new.into_owned(), if had_match { 1 } else { 0 })
+                        };
+                        // Assign modified text back to the target variable
+                        self.assign_to(target, Value::Str(new_text));
+                        Value::Num(count as f64)
+                    }
+                    Err(_) => Value::Num(0.0),
+                }
+            }
+
             Expr::Ternary(cond, then, else_) => {
                 if self.eval_expr(cond).to_bool() {
                     self.eval_expr(then)

@@ -168,6 +168,10 @@ pub enum Token {
     LBrace,
     RBrace,
 
+    // Regex operators
+    Substitution(String, String, String), // s/pattern/replacement/flags
+    Transliterate(String, String, String), // tr/from/to/flags or y/from/to/flags
+
     // Special
     Ident(String),
     Diamond(String), // <FH> or <>
@@ -561,6 +565,15 @@ impl Lexer {
                     } else if self.ch() == '!' {
                         self.pos += 1;
                         tokens.push(Token::ScalarVar("!".to_string()));
+                    } else if self.ch() == '"' {
+                        self.pos += 1;
+                        tokens.push(Token::ScalarVar("\"".to_string()));
+                    } else if self.ch() == ';' {
+                        self.pos += 1;
+                        tokens.push(Token::ScalarVar(";".to_string()));
+                    } else if self.ch() == '|' {
+                        self.pos += 1;
+                        tokens.push(Token::ScalarVar("|".to_string()));
                     } else {
                         // Unknown special var, just treat as $_
                         tokens.push(Token::ScalarVar("_".to_string()));
@@ -673,6 +686,16 @@ impl Lexer {
                         "qr" if !self.ch().is_alphanumeric() && self.ch() != '_' => {
                             let (pat, flags) = self.read_qr();
                             tokens.push(Token::RegexLit(pat, flags));
+                            continue;
+                        }
+                        "s" if !self.ch().is_alphanumeric() && self.ch() != '_' => {
+                            let (pat, repl, flags) = self.read_substitution();
+                            tokens.push(Token::Substitution(pat, repl, flags));
+                            continue;
+                        }
+                        "tr" | "y" if !self.ch().is_alphanumeric() && self.ch() != '_' => {
+                            let (from, to, flags) = self.read_transliterate();
+                            tokens.push(Token::Transliterate(from, to, flags));
                             continue;
                         }
                         _ => {}
@@ -1463,6 +1486,84 @@ impl Lexer {
         let (_, _, pat) = self.read_delimited_string();
         let flags = self.read_regex_flags();
         (pat, flags)
+    }
+
+    fn read_substitution(&mut self) -> (String, String, String) {
+        // s/pattern/replacement/flags
+        // The delimiter can be any non-alphanumeric character
+        let open = self.advance();
+        let close = Self::find_matching_delim(open);
+        let is_paired = open != close;
+
+        // Read pattern
+        let mut pat = String::new();
+        let mut depth = 1;
+        while self.pos < self.input.len() {
+            if is_paired && self.ch() == open {
+                depth += 1;
+                pat.push(self.advance());
+            } else if self.ch() == close {
+                depth -= 1;
+                if depth == 0 {
+                    self.pos += 1; // skip closing delimiter
+                    break;
+                }
+                pat.push(self.advance());
+            } else if self.ch() == '\\' {
+                pat.push(self.advance());
+                if self.pos < self.input.len() {
+                    pat.push(self.advance());
+                }
+            } else {
+                pat.push(self.advance());
+            }
+        }
+
+        // For paired delimiters like s{pat}{repl}, skip whitespace before second part
+        if is_paired {
+            self.skip_whitespace_and_comments();
+            while self.ch() == '\n' {
+                self.pos += 1;
+                self.skip_whitespace_and_comments();
+            }
+        }
+
+        // Read replacement
+        let repl_open = if is_paired { self.advance() } else { open };
+        let repl_close = Self::find_matching_delim(repl_open);
+        let repl_is_paired = repl_open != repl_close;
+
+        let mut repl = String::new();
+        let mut depth = 1;
+        while self.pos < self.input.len() {
+            if repl_is_paired && self.ch() == repl_open {
+                depth += 1;
+                repl.push(self.advance());
+            } else if self.ch() == repl_close {
+                depth -= 1;
+                if depth == 0 {
+                    self.pos += 1;
+                    break;
+                }
+                repl.push(self.advance());
+            } else if self.ch() == '\\' {
+                repl.push(self.advance());
+                if self.pos < self.input.len() {
+                    repl.push(self.advance());
+                }
+            } else {
+                repl.push(self.advance());
+            }
+        }
+
+        let flags = self.read_regex_flags();
+        (pat, repl, flags)
+    }
+
+    fn read_transliterate(&mut self) -> (String, String, String) {
+        // tr/from/to/flags or y/from/to/flags
+        // Reuse the same logic as substitution
+        self.read_substitution()
     }
 
     fn read_regex(&mut self, delim: char) -> (String, String) {
