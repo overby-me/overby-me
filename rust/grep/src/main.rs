@@ -837,6 +837,18 @@ fn build_matcher(opts: &Options) -> Matcher {
 /// Escape invalid interval expressions in ERE patterns so the regex crate
 /// treats them as literals. POSIX says invalid intervals like {, {1, {,2}
 /// should be treated as literal characters.
+/// Validate a POSIX character class name. Exits with code 2 if invalid.
+fn validate_posix_class(name: &str) {
+    const VALID_CLASSES: &[&str] = &[
+        "alnum", "alpha", "blank", "cntrl", "digit", "graph", "lower", "print", "punct", "space",
+        "upper", "xdigit",
+    ];
+    if !VALID_CLASSES.contains(&name) {
+        eprintln!("grep: Invalid character class name");
+        process::exit(2);
+    }
+}
+
 fn escape_invalid_ere_intervals(pattern: &str) -> String {
     let chars: Vec<char> = pattern.chars().collect();
     let len = chars.len();
@@ -877,13 +889,46 @@ fn escape_invalid_ere_intervals(pattern: &str) -> String {
             }
             // Process bracket content
             while i < len && chars[i] != ']' {
-                if chars[i] == '\\' {
+                if chars[i] == '[' && i + 1 < len && chars[i + 1] == ':' {
+                    // POSIX character class [:name:]
+                    let class_start = i;
+                    i += 2; // skip [:
+                    let name_start = i;
+                    // Find closing :]
+                    let mut found = false;
+                    while i + 1 < len {
+                        if chars[i] == ':' && chars[i + 1] == ']' {
+                            found = true;
+                            break;
+                        }
+                        i += 1;
+                    }
+                    if found {
+                        let class_name: String = chars[name_start..i].iter().collect();
+                        validate_posix_class(&class_name);
+                        // Output the class as-is
+                        for c in &chars[class_start..i + 2] {
+                            result.push(*c);
+                        }
+                        i += 2; // skip :]
+                    } else {
+                        // No closing :] — escape [ as literal
+                        result.push_str("\\[");
+                        result.push(':');
+                        i = class_start + 2;
+                    }
+                } else if chars[i] == '[' {
+                    // Bare [ inside bracket expr — escape for regex crate
+                    result.push_str("\\[");
+                    i += 1;
+                } else if chars[i] == '\\' {
                     // In POSIX bracket expressions, \ is literal
                     result.push_str("\\\\");
+                    i += 1;
                 } else {
                     result.push(chars[i]);
+                    i += 1;
                 }
-                i += 1;
             }
             if i < len {
                 result.push(']');
@@ -1019,16 +1064,43 @@ fn convert_bre_to_ere(bre: &str) -> String {
                 i += 1;
             }
             while i < len && chars[i] != ']' {
-                if chars[i] == '\\' {
+                if chars[i] == '[' && i + 1 < len && chars[i + 1] == ':' {
+                    // POSIX character class [:name:]
+                    let class_start = i;
+                    i += 2;
+                    let name_start = i;
+                    let mut found_close = false;
+                    while i + 1 < len {
+                        if chars[i] == ':' && chars[i + 1] == ']' {
+                            found_close = true;
+                            break;
+                        }
+                        i += 1;
+                    }
+                    if found_close {
+                        let class_name: String = chars[name_start..i].iter().collect();
+                        validate_posix_class(&class_name);
+                        for c in &chars[class_start..i + 2] {
+                            result.push(*c);
+                        }
+                        i += 2;
+                    } else {
+                        result.push_str("\\[");
+                        result.push(':');
+                        i = class_start + 2;
+                    }
+                } else if chars[i] == '[' {
+                    // Bare [ inside bracket expr — escape for regex crate
+                    result.push_str("\\[");
+                    i += 1;
+                } else if chars[i] == '\\' {
                     // In POSIX bracket expressions, \ is literal — double-escape for regex crate
                     result.push_str("\\\\");
-                } else if chars[i] == '[' && i + 1 < len && chars[i + 1] == ':' {
-                    // POSIX character class like [:alpha:] — pass through
-                    result.push('[');
+                    i += 1;
                 } else {
                     result.push(chars[i]);
+                    i += 1;
                 }
-                i += 1;
             }
             if i < len {
                 result.push(']');
