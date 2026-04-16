@@ -144,7 +144,18 @@ fn main() {
                 if !opts.silent || opts.show_error {
                     eprintln!("curl: {e}");
                 }
-                exit_code = 6; // Could not resolve / connect.
+                // Map error messages to curl exit codes.
+                if e.contains("unsupported scheme") || e.contains("unsupported protocol") {
+                    exit_code = 1; // Unsupported protocol
+                } else if e.contains("connection failed") || e.contains("Connection refused") {
+                    exit_code = 7; // Failed to connect
+                } else if e.contains("DNS resolution failed") || e.contains("resolve") {
+                    exit_code = 6; // Could not resolve host
+                } else if e.contains("maximum redirects") {
+                    exit_code = 47; // Too many redirects
+                } else {
+                    exit_code = 6;
+                }
             }
         }
     }

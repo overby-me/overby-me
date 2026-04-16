@@ -41,10 +41,26 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> Vec<u8> {
         req.push_str(&format!("Authorization: Basic {encoded}\r\n"));
     }
 
+    // Range — curl sends it early, before User-Agent.
+    if let Some(ref range) = opts.range {
+        req.push_str(&format!("Range: bytes={range}\r\n"));
+    }
+
+    // Check if custom headers override defaults.
+    let has_custom = |name: &str| {
+        opts.headers
+            .iter()
+            .any(|(k, _)| k.eq_ignore_ascii_case(name))
+    };
+
     // User-Agent.
-    let ua = opts.user_agent.as_deref().unwrap_or("curl/8.0.0");
-    req.push_str(&format!("User-Agent: {ua}\r\n"));
-    req.push_str("Accept: */*\r\n");
+    if !has_custom("user-agent") {
+        let ua = opts.user_agent.as_deref().unwrap_or("curl/8.0.0");
+        req.push_str(&format!("User-Agent: {ua}\r\n"));
+    }
+    if !has_custom("accept") {
+        req.push_str("Accept: */*\r\n");
+    }
 
     // Connection header — only send "close" when explicitly requested.
     // Real curl defaults to keep-alive (implicit in HTTP/1.1).
@@ -91,13 +107,14 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> Vec<u8> {
         // the cookie engine without sending cookies (like real curl).
     }
 
-    // Range.
-    if let Some(ref range) = opts.range {
-        req.push_str(&format!("Range: bytes={range}\r\n"));
-    }
-
     // Custom headers (may override defaults).
+    // An empty value (e.g. -H "X-Header:") removes the header entirely.
+    // A semicolon instead of colon (e.g. -H "X-Header;") sends the header with no value.
     for (key, val) in &opts.headers {
+        if val.is_empty() {
+            // Empty value = suppress this header (don't send it)
+            continue;
+        }
         req.push_str(&format!("{key}: {val}\r\n"));
     }
 
@@ -260,14 +277,25 @@ pub(crate) fn perform(url_str: &str, opts: &Options) -> Result<Response, String>
                 return Err(format!("maximum redirects ({}) followed", opts.max_redirs));
             }
             if let Some((_, location)) = resp.headers.iter().find(|(k, _)| k == "location") {
+                // Skip blank Location headers.
+                let location = location.trim();
+                if location.is_empty() {
+                    let mut final_resp = resp;
+                    final_resp.redirect_headers = redirect_headers;
+                    return Ok(final_resp);
+                }
+
                 redirects += 1;
 
                 // Collect intermediate response headers for -i output.
                 redirect_headers.extend_from_slice(&resp.header_bytes);
 
+                // Percent-encode spaces in the Location URL.
+                let location = location.replace(' ', "%20");
+
                 // Resolve relative URLs.
                 if location.starts_with("http://") || location.starts_with("https://") {
-                    current_url = location.clone();
+                    current_url = location;
                 } else if location.starts_with('/') {
                     current_url = format!("{}://{}:{}{}", url.scheme, url.host, url.port, location);
                 } else {

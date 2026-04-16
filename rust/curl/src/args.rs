@@ -38,7 +38,7 @@ pub(crate) fn parse_args() -> Options {
                 let h = next_arg(&args, i, "-H");
                 if let Some((k, v)) = h.split_once(':') {
                     opts.headers
-                        .push((k.trim().to_string(), v.trim().to_string()));
+                        .push((k.trim().to_string(), v.trim_start().to_string()));
                 }
             }
             "-d" | "--data" | "--data-ascii" => {
@@ -205,6 +205,25 @@ pub(crate) fn parse_args() -> Options {
             }
             "--no-progress-meter" => {
                 // We don't have a progress meter anyway
+            }
+            "--trace-config" => {
+                i += 1;
+                let _val = next_arg(&args, i, "--trace-config");
+            }
+            "-4" | "--ipv4" => {
+                // Default behavior — we only support IPv4 anyway
+            }
+            "-6" | "--ipv6" => {
+                // Ignored — we don't have IPv6-only mode
+            }
+            "--proto" => {
+                i += 1;
+                let _val = next_arg(&args, i, "--proto");
+                // Ignored — we only support http/https
+            }
+            "--proto-redir" => {
+                i += 1;
+                let _val = next_arg(&args, i, "--proto-redir");
             }
             _ => {
                 if arg.starts_with('-') && arg.len() > 1 && !arg.starts_with("--") {

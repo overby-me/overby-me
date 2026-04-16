@@ -147,27 +147,8 @@
 
   checks = let
     testNums = [
-      1 # HTTP GET
-      2 # HTTP GET with user and password
-      3 # HTTP POST with auth
-      7 # HTTP with cookie parser
-      10 # HTTP PUT from file
-      11 # HTTP Location following
-      13 # HTTP GET with -i
-      15 # --write-out test
-      22 # HTTP PUT with upload
-      28 # HTTP with -D dump-header
-      34 # HTTP HEAD
-      35 # HTTP GET custom header
-      47 # HTTP GET custom Host
-      49 # HTTP Expect: 100-continue
-      50 # HTTP redirect with ../../
-      52 # HTTP redirect with abs path
-      55 # HTTP redirect relative path
-      57 # HTTP GET added header
-      97 # HTTP -i response headers
-      152 # HTTP GET content-range
-      160 # HTTP GET simple
+      1 2 3 7 10 11 12 13 15 19 22 23 28 34 35 42 47 49 50 52 54 55 57
+      97 151 152 160 164 180 181 198
     ];
   in
     builtins.listToAttrs (map (num: {
