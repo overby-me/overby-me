@@ -204,11 +204,15 @@ impl<'a> Parser<'a> {
             }
         }
 
-        // POSIX mode: one-address commands with range address — check before parsing
-        if self.posix && matches!(address, AddressRange::Range(_, _)) {
-            let one_addr_cmds = b"aicl=qQrR";
+        // One-address commands with range address
+        // q/Q always reject ranges; others only in --posix mode
+        if matches!(address, AddressRange::Range(_, _)) {
             if let Some(ch) = self.peek() {
-                if one_addr_cmds.contains(&ch) {
+                let always_one_addr = b"qQ";
+                let posix_one_addr = b"aicl=rR";
+                if always_one_addr.contains(&ch)
+                    || (self.posix && posix_one_addr.contains(&ch))
+                {
                     self.advance();
                     return Err(self.err("command only uses one address"));
                 }
@@ -502,7 +506,7 @@ impl<'a> Parser<'a> {
                         break;
                     }
                     if self.at_end() {
-                        return Err(self.err("unmatched `{'"));
+                        return Err(self.err_at(0, "unmatched `{'"));
                     }
                     if let Some(cmd) = self.parse_command()? {
                         cmds.push(cmd);
@@ -548,7 +552,6 @@ impl<'a> Parser<'a> {
             b'a' | b'i' | b'c' => {
                 let next = self.peek();
                 if next.is_none() {
-                    // EOF after a/c/i — incomplete command
                     return Err(self.err("expected \\ after `a', `c' or `i'"));
                 }
                 if self.posix && next != Some(b'\\') {
@@ -968,6 +971,11 @@ impl<'a> Parser<'a> {
                 }
                 Some(b'\r') => {
                     self.advance();
+                    // \r\n (Windows line ending) is OK — skip both
+                    // \r alone is treated as unknown option
+                    if self.peek() != Some(b'\n') {
+                        return Err(self.err("unknown option to `s'"));
+                    }
                 }
                 Some(ch) if ch.is_ascii_digit() => {
                     if flags.nth.is_some() {
