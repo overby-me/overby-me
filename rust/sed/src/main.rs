@@ -575,9 +575,20 @@ fn main() {
     } else {
         let mut engine = Engine::new(commands, quiet, posix, opts.sandbox, opts.line_length, opts.null_data);
         let mut exit_code = 0i32;
-        let num_files = opts.files.len();
+        // Determine the last file with actual content for $ detection
+        let last_content_idx = {
+            let mut last = opts.files.len().saturating_sub(1);
+            for i in (0..opts.files.len()).rev() {
+                let f = &opts.files[i];
+                if f == "-" || std::fs::metadata(f).map(|m| m.len() > 0).unwrap_or(false) {
+                    last = i;
+                    break;
+                }
+            }
+            last
+        };
         for (file_idx, file) in opts.files.iter().enumerate() {
-            engine.is_last_file = file_idx == num_files - 1;
+            engine.is_last_file = file_idx >= last_content_idx;
             let raw_content = if file == "-" {
                 let mut buf = Vec::new();
                 io::stdin().read_to_end(&mut buf).unwrap_or_default();
