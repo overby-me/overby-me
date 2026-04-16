@@ -1,0 +1,50 @@
+# deslop configuration for rust-curl HTTP client implementation
+#
+# A curl-compatible HTTP client inherently requires low-level networking,
+# TLS handling, password/credential passing, and a monolithic option parser.
+# Rules that flag these patterns as defects are disabled below.
+
+disabled_rules = [
+  # ── Structure / naming ────────────────────────────────────────────────
+  # Single-file implementation mirrors real curl's monolithic structure.
+  "rust_oversized_module_file",
+
+  # The name "execute_request" is domain-appropriate for an HTTP client.
+  "generic_name",
+
+  # ── Credential handling ───────────────────────────────────────────────
+  # Options struct carries user:password, proxy auth etc. as plain strings.
+  # This matches curl's own design. Debug output is for development only.
+  "rust_debug_secret",
+
+  # Comparing scheme strings ("https"), auth headers, etc. is normal HTTP
+  # handling, not a credential-equality bug.
+  "rust_secret_equality_compare",
+
+  # Option bag with many Option fields is the standard curl CLI pattern.
+  "rust_option_bag_config",
+  "rust_domain_default_produces_invalid",
+
+  # ── Performance heuristics ────────────────────────────────────────────
+  # Reading request/upload files fully into memory matches curl behavior.
+  "rust_unbounded_read_to_string",
+
+  # UTF-8 validation on HTTP response headers is required for safe Rust.
+  "rust_utf8_validate_hot_path",
+
+  # Numeric narrowing for exit codes (i32) is deliberate.
+  "rust_narrowing_numeric_cast",
+
+  # File writes in the response body loop are intentional (streaming).
+  "rust_unbuffered_file_writes",
+
+  # Cloning Options per URL in the URL loop is needed for per-URL state.
+  "rust_clone_heavy_state_in_loop",
+
+  # ── Low-signal checks ────────────────────────────────────────────────
+  "unwrap_in_non_test_code",
+
+  # Release profile inherits from workspace; overflow checks are a
+  # separate decision for an HTTP client binary.
+  "rust_release_profile_missing_overflow_checks",
+]

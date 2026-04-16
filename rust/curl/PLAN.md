@@ -6,7 +6,9 @@ Use the upstream [curl test suite](https://github.com/curl/curl/tree/master/test
 
 ## Current Status
 
-**0/? tests passing** — test infrastructure not yet built.
+**6/200 tests passing** (3%) — tests 1, 13, 22, 97, 152, 160 from the curl 8.18.0 test suite.
+
+Test infrastructure is operational: `testsuite.nix` builds curl's C test servers from `pkgs.curl.src`, then runs `runtests.pl -c` against `rust-curl-dev`.
 
 The Rust curl implementation supports: HTTP/HTTPS GET/POST/PUT, redirects, basic auth, cookies, TLS (rustls), multipart forms, verbose output, write-out formatting, retry logic, range requests, and file upload. No HTTP/2.
 
@@ -242,10 +244,26 @@ Current gaps:
 
 ## Test Inventory
 
-### Passing tests
+### Passing tests (6)
 
-(none yet)
+1, 13, 22, 97, 152, 160
 
-### Failing tests
+### Major failure categories (from tests 1-200)
 
-(not yet enumerated — need to run test discovery first)
+Most failures (exit code 2) are due to unrecognized CLI options used by the test suite:
+
+- **`-x` / `--proxy`** — proxy support (tests 5, 30, 84, 85, ...)
+- **`-K` / `--config`** — config file from stdin (tests 56, 71, ...)
+- **`--resolve`** — custom DNS resolution (tests 46, ...)
+- **`--proxy-user`** — proxy auth (test 85, ...)
+
+Protocol/output diff failures:
+
+- **URL normalization** — `../../` in redirect paths not resolved (test 50)
+- **Redirect `-i` output** — intermediate responses not shown (test 55)
+- **Cookie handling** — cookie send/receive/jar (tests 6, 7, 8, 24, 25, ...)
+- **Auth headers** — basic auth encoding (tests 2, 3, 15, ...)
+
+### Timeouts
+
+14, 24 (likely redirect loops or server interaction issues)

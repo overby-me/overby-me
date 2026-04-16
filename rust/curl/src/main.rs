@@ -524,12 +524,15 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> Vec<u8> {
     }
 
     // User-Agent.
-    let ua = opts.user_agent.as_deref().unwrap_or("curl/8.0 (rust-curl)");
+    let ua = opts.user_agent.as_deref().unwrap_or("curl/8.0.0");
     req.push_str(&format!("User-Agent: {ua}\r\n"));
     req.push_str("Accept: */*\r\n");
 
-    // Connection — always close since we don't reuse connections.
-    req.push_str("Connection: close\r\n");
+    // Connection header — only send "close" when explicitly requested.
+    // Real curl defaults to keep-alive (implicit in HTTP/1.1).
+    if opts.no_keepalive {
+        req.push_str("Connection: close\r\n");
+    }
 
     // Accept-Encoding.
     if opts.compressed {
@@ -877,7 +880,9 @@ fn parse_args() -> Options {
                 process::exit(0);
             }
             "-V" | "--version" => {
-                println!("curl 8.0 (rust-curl 0.1.0)");
+                println!("curl 8.0.0 (rust-curl) libcurl/8.0.0 rustls/0.23");
+                println!("Protocols: http https");
+                println!("Features: HTTPS SSL");
                 process::exit(0);
             }
             "-X" | "--request" => {
@@ -1034,6 +1039,29 @@ fn parse_args() -> Options {
                 i += 1;
                 opts.urls.push(next_arg(&args, i, "--url"));
             }
+            // Flags used by the curl test suite that we accept but ignore
+            "-q" => {
+                // Disable .curlrc — we don't read it anyway
+            }
+            "--trace-ascii" => {
+                i += 1;
+                let _path = next_arg(&args, i, "--trace-ascii");
+                // TODO: implement trace output
+            }
+            "--trace-time" => {
+                // Add timestamps to trace — ignored without trace support
+            }
+            "--trace" => {
+                i += 1;
+                let _path = next_arg(&args, i, "--trace");
+                // TODO: implement trace output
+            }
+            "-n" | "--netrc" => {
+                // Ignore netrc support
+            }
+            "--no-progress-meter" => {
+                // We don't have a progress meter anyway
+            }
             _ => {
                 if arg.starts_with('-') && arg.len() > 1 && !arg.starts_with("--") {
                     // Handle combined short flags like -sSL
@@ -1050,6 +1078,8 @@ fn parse_args() -> Options {
                             'L' => opts.location = true,
                             'k' => opts.insecure = true,
                             'O' => opts.remote_name = true,
+                            'n' => {} // --netrc, ignored
+                            'q' => {} // disable .curlrc, ignored
                             '0' => opts.http_version = Some("1.0".into()),
                             // Flags that consume the rest or next arg.
                             'o' => {
