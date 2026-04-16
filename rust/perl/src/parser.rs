@@ -374,7 +374,12 @@ impl Parser {
             };
 
             self.expect(&Token::LParen);
-            let list = self.parse_expr();
+            let items = self.parse_list_expr();
+            let list = if items.len() == 1 {
+                items.into_iter().next().unwrap()
+            } else {
+                Expr::ArrayLit(items)
+            };
             self.expect(&Token::RParen);
             let body = self.parse_brace_block();
             return Stmt::Foreach {
@@ -453,7 +458,12 @@ impl Parser {
                 };
             } else {
                 // Foreach style: for (list) { }
-                let list = self.parse_expr();
+                let items = self.parse_list_expr();
+                let list = if items.len() == 1 {
+                    items.into_iter().next().unwrap()
+                } else {
+                    Expr::ArrayLit(items)
+                };
                 self.expect(&Token::RParen);
                 let body = self.parse_brace_block();
                 return Stmt::Foreach {
