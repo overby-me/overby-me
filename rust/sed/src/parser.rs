@@ -862,7 +862,8 @@ impl<'a> Parser<'a> {
                                     }
                                 }
                                 if count > 0 {
-                                    result.push(char::from_u32(n).unwrap_or('\0'));
+                                    // Truncate to byte range
+                                    result.push(char::from_u32(n & 0xFF).unwrap_or('\0'));
                                 } else {
                                     result.push('d');
                                 }
@@ -883,7 +884,7 @@ impl<'a> Parser<'a> {
                                     }
                                 }
                                 if count > 0 {
-                                    result.push(char::from_u32(n).unwrap_or('\0'));
+                                    result.push(char::from_u32(n & 0xFF).unwrap_or('\0'));
                                 } else {
                                     result.push('o');
                                 }
@@ -1083,7 +1084,7 @@ impl<'a> Parser<'a> {
                                 break;
                             }
                         }
-                        chars.push(char::from_u32(n).unwrap_or('\0'));
+                        chars.push(char::from_u32(n & 0xFF).unwrap_or('\0'));
                     }
                     b'o' => {
                         let mut n: u32 = 0;
@@ -1098,7 +1099,7 @@ impl<'a> Parser<'a> {
                                 break;
                             }
                         }
-                        chars.push(char::from_u32(n).unwrap_or('\0'));
+                        chars.push(char::from_u32(n & 0xFF).unwrap_or('\0'));
                     }
                     b'x' => {
                         let mut n: u32 = 0;

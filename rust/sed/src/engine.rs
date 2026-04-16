@@ -4,6 +4,23 @@ use std::io::{self, BufRead, Write};
 use crate::types::*;
 use crate::util::escape_string_bytes;
 
+/// Convert string to bytes using Latin-1 encoding (chars 0-255 → single bytes).
+/// This preserves byte values from \d/\o/\x replacement escapes.
+fn str_to_latin1(s: &str) -> Vec<u8> {
+    s.chars()
+        .flat_map(|c| {
+            let cp = c as u32;
+            if cp <= 0xFF {
+                vec![cp as u8]
+            } else {
+                let mut buf = [0u8; 4];
+                c.encode_utf8(&mut buf);
+                buf[..c.len_utf8()].to_vec()
+            }
+        })
+        .collect()
+}
+
 pub struct Engine {
     commands: Vec<SedCommand>,
     quiet: bool,
@@ -229,10 +246,10 @@ impl Engine {
             if *lossy == self.pattern_space {
                 self.output.extend_from_slice(raw);
             } else {
-                self.output.extend_from_slice(self.pattern_space.as_bytes());
+                self.write_pattern_as_bytes();
             }
         } else {
-            self.output.extend_from_slice(self.pattern_space.as_bytes());
+            self.write_pattern_as_bytes();
         }
         let sep = if self.null_data { b'\0' } else { b'\n' };
         // Don't add separator after last line if input didn't end with one
@@ -240,6 +257,22 @@ impl Engine {
             // Skip the trailing separator
         } else {
             self.output.push(sep);
+        }
+    }
+
+    /// Write pattern space encoding chars 0-255 as single bytes (Latin-1 style).
+    /// This preserves byte values from \d/\o/\x replacement escapes.
+    fn write_pattern_as_bytes(&mut self) {
+        for ch in self.pattern_space.chars() {
+            let cp = ch as u32;
+            if cp <= 0xFF {
+                self.output.push(cp as u8);
+            } else {
+                // Non-Latin-1 character — write as UTF-8
+                let mut buf = [0u8; 4];
+                let s = ch.encode_utf8(&mut buf);
+                self.output.extend_from_slice(s.as_bytes());
+            }
         }
     }
 
@@ -517,7 +550,7 @@ impl Engine {
                 } else {
                     &self.pattern_space
                 };
-                self.output.extend_from_slice(line.as_bytes());
+                self.output.extend_from_slice(&str_to_latin1(line));
                 self.output.push(b'\n');
                 Flow::Continue
             }
@@ -529,7 +562,11 @@ impl Engine {
                     if *lossy == self.pattern_space {
                         raw.clone()
                     } else {
-                        self.pattern_space.as_bytes().to_vec()
+                        // Latin-1 encode for modified pattern space
+                        self.pattern_space.chars().map(|c| {
+                            let cp = c as u32;
+                            if cp <= 0xFF { cp as u8 } else { b'?' }
+                        }).collect()
                     }
                 } else {
                     self.pattern_space.as_bytes().to_vec()
