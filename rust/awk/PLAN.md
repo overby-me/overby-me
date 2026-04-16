@@ -2,11 +2,11 @@
 
 ## Current Status
 
-**211/242 tests passing** (87%) — BASIC_TESTS from the GNU gawk 5.3.2 test suite.
+**214/242 tests passing** (88%) — BASIC_TESTS from the GNU gawk 5.3.2 test suite.
 
-Up from 104 at the start (+107 tests, +44 percentage points).
+Up from 104 at the start (+110 tests, +45 percentage points).
 
-### Remaining failures (31 tests)
+### Remaining failures (28 tests)
 
 - **Array aliasing (~14)**: Need true reference semantics for nested function calls (arrayparm, arryref2-5, aryprm1-8)
 - **Regex (~5)**: Rust vs POSIX regex character class differences (rebrackloc, rebt8b1, regexpbrack, regrange, range2)
