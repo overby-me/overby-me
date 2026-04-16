@@ -707,7 +707,7 @@ impl Parser {
             return exprs;
         }
         exprs.push(self.parse_expr());
-        while self.eat(&Token::Comma) {
+        while self.eat(&Token::Comma) || self.eat(&Token::FatComma) {
             if self.at(&Token::Semi)
                 || self.at(&Token::EOF)
                 || self.at(&Token::RBrace)
@@ -1729,6 +1729,21 @@ impl Parser {
                 } else if name == "1" {
                     // "1 while ..." pattern
                     Expr::IntLit(1)
+                } else if matches!(
+                    self.tok(),
+                    Token::StringLit(_)
+                        | Token::InterpString(_)
+                        | Token::Integer(_)
+                        | Token::Float(_)
+                        | Token::ScalarVar(_)
+                        | Token::ArrayVar(_)
+                        | Token::Minus
+                        | Token::LogNot
+                        | Token::Backslash
+                ) {
+                    // Function call without parentheses: func arg, ...
+                    let args = self.parse_list_expr();
+                    Expr::Call(name, args)
                 } else {
                     // Bareword — treat as string in most contexts
                     Expr::StringLit(name)

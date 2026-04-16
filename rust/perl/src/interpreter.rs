@@ -653,13 +653,27 @@ impl Interpreter {
             self.write_to_handle(&fh_name, &val);
         } else {
             let sep = self.get_var(",").to_str();
+            // Expand arrays in list context
+            let mut values: Vec<String> = Vec::new();
+            for arg in args {
+                match arg {
+                    Expr::ArrayVar(name) => {
+                        let arr = self.get_array(name);
+                        for v in &arr {
+                            values.push(v.to_str());
+                        }
+                    }
+                    _ => {
+                        values.push(self.eval_expr(arg).to_str());
+                    }
+                }
+            }
             let mut output = String::new();
-            for (i, arg) in args.iter().enumerate() {
+            for (i, val) in values.iter().enumerate() {
                 if i > 0 && !sep.is_empty() {
                     output.push_str(&sep);
                 }
-                let val = self.eval_expr(arg);
-                output.push_str(&val.to_str());
+                output.push_str(val);
             }
             self.write_to_handle(&fh_name, &output);
         }
