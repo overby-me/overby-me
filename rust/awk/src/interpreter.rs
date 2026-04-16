@@ -157,6 +157,7 @@ impl Interpreter {
         }
     }
 
+
     pub fn set_var(&mut self, name: &str, val: Value) {
         match name {
             "NR" => self.nr = val.to_num() as i64,
