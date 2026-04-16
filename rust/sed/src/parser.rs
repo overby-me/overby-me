@@ -36,6 +36,7 @@ pub struct Parser<'a> {
     cmd_start: usize,
     pub sandbox: bool,
     pub posix: bool,
+    block_depth: usize,
 }
 
 impl<'a> Parser<'a> {
@@ -49,6 +50,7 @@ impl<'a> Parser<'a> {
             cmd_start: 0,
             sandbox: false,
             posix: false,
+            block_depth: 0,
         }
     }
 
@@ -194,9 +196,11 @@ impl<'a> Parser<'a> {
                 self.advance();
                 return Err(self.err("comments don't accept any addresses"));
             }
-            if self.peek() == Some(b'}') {
-                self.advance();
-                return Err(self.err("`}' doesn't want any addresses"));
+            if self.peek() == Some(b'}') && self.block_depth > 0 {
+                return Err(self.err_at(
+                    self.pos,
+                    "`}' doesn't want any addresses",
+                ));
             }
         }
 
@@ -454,6 +458,7 @@ impl<'a> Parser<'a> {
 
         match ch {
             b'{' => {
+                self.block_depth += 1;
                 let mut cmds = Vec::new();
                 loop {
                     self.skip_blanks_and_newlines();
@@ -468,6 +473,7 @@ impl<'a> Parser<'a> {
                         cmds.push(cmd);
                     }
                 }
+                self.block_depth -= 1;
                 Ok(Command::Block(cmds))
             }
             b's' => self.parse_substitute(),
@@ -627,7 +633,16 @@ impl<'a> Parser<'a> {
                 }
                 Ok(Command::Noop)
             }
-            b'}' => Err(self.err("unexpected `}'")),
+            b'}' => {
+                if self.block_depth == 0 {
+                    Err(self.err("unexpected `}'"))
+                } else {
+                    // Inside a block, } after an address means "close block"
+                    // Put the } back so the block parser can see it
+                    self.pos -= 1;
+                    Ok(Command::Noop)
+                }
+            }
             b'\n' | b';' => Ok(Command::Noop),
             _ => Err(self.err(&format!("unknown command: `{}'", char::from(ch)))),
         }
