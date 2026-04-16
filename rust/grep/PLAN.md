@@ -2,9 +2,9 @@
 
 ## Current Status
 
-**106/119 tests passing** (89%) — from the GNU grep 3.12 test suite.
+**110/119 tests passing** (92%) — from the GNU grep 3.12 test suite.
 
-### Remaining failure categories (~13 tests)
+### Remaining failure categories (~9 tests)
 
 - **BRE/ERE regex edge cases (~3)**: Spencer test failures (literal `*` at start, bad interval expressions)
 - **PCRE edge cases (~4)**: `-P` with `-w` on non-word patterns, `-P` with `-z`, PCRE backtrack limit, PCRE context with `-z -o`
@@ -44,6 +44,10 @@
 - Full glob matching for --include/--exclude (*, ?, [...])
 - Added --directories/-d option
 - GREP_COLORS/GREP_COLOR env var support with deprecation warning
+- Raw byte I/O for non-UTF-8 input (C locale high bytes)
+- args_os() for non-UTF-8 command-line arguments
+- Stack overflow detection for deeply nested regex
+- Character class misuse warning ([:space:] vs [[:space:]])
 
 Tests compare rust-grep output against the GNU grep test suite's expected behavior in a Nix sandbox.
 
@@ -299,7 +303,7 @@ Fall back to `fancy-regex` when BRE/ERE patterns contain backreferences:
 
 ## Test Inventory
 
-### Passing (106 tests)
+### Passing (110 tests)
 
 100k-entries, backref-alt, backref-multibyte-slow, backref-word, backslash-dot,
 backslash-s-and-repetition-operators, backslash-s-vs-invalid-multibyte, big-hole, big-match,
@@ -320,15 +324,13 @@ proc, r-dot, repetition-overflow, reversed-range-endpoints, sjis-mb, skip-device
 status, surrogate-pair,
 surrogate-search, triple-backref, turkish-eyes, turkish-I, turkish-I-without-dot,
 two-chars, two-files, unibyte-binary, unibyte-bracket-expr, unibyte-negated-circumflex,
-utf8-bracket, version-pcre, word-delim-multibyte, word-multi-file, word-multibyte,
-y2038-vs-32-bit, z-anchor-newline
+utf8-bracket, version-pcre, warn-char-classes, word-delim-multibyte, word-multi-file,
+word-multibyte, y2038-vs-32-bit, z-anchor-newline
 
-### Failing (13 tests)
+### Failing (9 tests)
 
-backref, c-locale, high-bit-range,
-in-eq-out-infloop, include-exclude, max-count-overread, null-byte, pcre,
-pcre-abort, pcre-context, pcre-w, posix-bracket,
-stack-overflow, warn-char-classes, write-error-msg
+backref, in-eq-out-infloop, include-exclude, max-count-overread, null-byte,
+pcre, pcre-abort, pcre-context, pcre-w, posix-bracket, write-error-msg
 
 ### Not yet tested (5 tests)
 
