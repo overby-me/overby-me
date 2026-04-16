@@ -921,7 +921,9 @@ impl<'a> Parser<'a> {
                                 }
                             }
                             _ => {
-                                if ch != delim {
+                                if ch != delim || ch == b'&' || ch == b'\\' {
+                                    // Keep backslash for chars with special meaning
+                                    // in replacement (& and \), even if they're the delimiter
                                     result.push('\\');
                                 }
                                 result.push(ch as char);
