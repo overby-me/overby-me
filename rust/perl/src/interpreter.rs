@@ -1225,15 +1225,23 @@ impl Interpreter {
                     eprintln!("Illegal modulus zero");
                     Value::Undef
                 } else {
-                    // Perl's modulo matches sign of right operand for integers
-                    let a = l.to_num();
-                    let b = d;
+                    // Perl's % truncates operands to integers first
+                    let a = if l.to_num() >= 0.0 {
+                        l.to_num().floor() as i64
+                    } else {
+                        l.to_num().ceil() as i64
+                    };
+                    let b = if d >= 0.0 {
+                        d.floor() as i64
+                    } else {
+                        d.ceil() as i64
+                    };
                     let result = a % b;
                     // Perl adjusts: if result != 0 and signs differ, add b
-                    if result != 0.0 && (result > 0.0) != (b > 0.0) {
-                        Value::Num(result + b)
+                    if result != 0 && (result > 0) != (b > 0) {
+                        Value::Num((result + b) as f64)
                     } else {
-                        Value::Num(result)
+                        Value::Num(result as f64)
                     }
                 }
             }

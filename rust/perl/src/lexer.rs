@@ -1432,8 +1432,30 @@ impl Lexer {
                         let mut hex = String::new();
                         if self.ch() == '{' {
                             self.pos += 1;
+                            let mut last_was_underscore = false;
                             while self.pos < self.input.len() && self.ch() != '}' {
-                                hex.push(self.advance());
+                                if self.ch().is_ascii_hexdigit() {
+                                    hex.push(self.advance());
+                                    last_was_underscore = false;
+                                } else if self.ch() == ' ' {
+                                    self.pos += 1;
+                                } else if self.ch() == '_' {
+                                    if last_was_underscore {
+                                        // Double underscore — stop parsing hex digits
+                                        while self.pos < self.input.len() && self.ch() != '}' {
+                                            self.pos += 1;
+                                        }
+                                        break;
+                                    }
+                                    last_was_underscore = true;
+                                    self.pos += 1;
+                                } else {
+                                    // Non-hex char: stop parsing
+                                    while self.pos < self.input.len() && self.ch() != '}' {
+                                        self.pos += 1;
+                                    }
+                                    break;
+                                }
                             }
                             if self.ch() == '}' {
                                 self.pos += 1;
