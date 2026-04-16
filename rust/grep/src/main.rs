@@ -916,6 +916,8 @@ fn build_matcher(opts: &Options) -> Matcher {
                 let msg = format!("{e}");
                 let clean = if msg.contains("invalid character class range") {
                     "Invalid range end".to_string()
+                } else if msg.contains("nest") || pattern.len() > 1000 {
+                    "stack overflow".to_string()
                 } else {
                     msg
                 };
