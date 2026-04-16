@@ -220,11 +220,20 @@ impl<'a> Parser<'a> {
             Some(b'/') => {
                 self.advance();
                 let pattern = self.parse_regex_delimited(b'/')?;
+                // Check for regex modifiers (I/M) after closing delimiter
+                let has_modifiers = matches!(self.peek(), Some(b'I') | Some(b'M') | Some(b'i') | Some(b'm'));
                 if pattern.is_empty() {
-                    // Empty regex — reuse last
+                    if has_modifiers {
+                        return Err(self.err_at(
+                            self.pos - self.cmd_start + 1,
+                            "cannot specify modifiers on empty regexp",
+                        ));
+                    }
                     Ok(Some(Address::LastRegex))
                 } else {
-                    let re = self.compile_regex(&pattern)?;
+                    let mut pat = pattern.clone();
+                    self.parse_addr_regex_modifiers(&mut pat);
+                    let re = self.compile_regex(&pat)?;
                     Ok(Some(Address::Regex(re)))
                 }
             }
@@ -232,14 +241,47 @@ impl<'a> Parser<'a> {
                 self.advance();
                 let delim = self.advance().ok_or_else(|| self.err("expected delimiter after \\"))?;
                 let pattern = self.parse_regex_delimited(delim)?;
+                let has_modifiers = matches!(self.peek(), Some(b'I') | Some(b'M') | Some(b'i') | Some(b'm'));
                 if pattern.is_empty() {
+                    if has_modifiers {
+                        return Err(self.err_at(
+                            self.pos - self.cmd_start + 1,
+                            "cannot specify modifiers on empty regexp",
+                        ));
+                    }
                     Ok(Some(Address::LastRegex))
                 } else {
-                    let re = self.compile_regex(&pattern)?;
+                    let mut pat = pattern.clone();
+                    self.parse_addr_regex_modifiers(&mut pat);
+                    let re = self.compile_regex(&pat)?;
                     Ok(Some(Address::Regex(re)))
                 }
             }
             _ => Ok(None),
+        }
+    }
+
+    fn parse_addr_regex_modifiers(&mut self, pattern: &mut String) {
+        let mut flags = String::new();
+        loop {
+            match self.peek() {
+                Some(b'I') | Some(b'i') => {
+                    self.advance();
+                    if !flags.contains('i') {
+                        flags.push('i');
+                    }
+                }
+                Some(b'M') | Some(b'm') => {
+                    self.advance();
+                    if !flags.contains('m') {
+                        flags.push('m');
+                    }
+                }
+                _ => break,
+            }
+        }
+        if !flags.is_empty() {
+            *pattern = format!("(?{flags}){pattern}");
         }
     }
 
