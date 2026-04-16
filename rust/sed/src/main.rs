@@ -68,13 +68,14 @@ fn resolve_symlinks(path: &str) -> String {
 
 fn read_script_file(path: &str) -> Result<String, String> {
     if path == "-" {
-        let mut buf = String::new();
+        let mut buf = Vec::new();
         io::stdin()
-            .read_to_string(&mut buf)
+            .read_to_end(&mut buf)
             .map_err(|e| format!("sed: -: {}", fmt_io_err(&e)))?;
-        Ok(buf)
+        Ok(String::from_utf8_lossy(&buf).into_owned())
     } else {
-        std::fs::read_to_string(path).map_err(|e| format!("sed: {path}: {}", fmt_io_err(&e)))
+        let bytes = std::fs::read(path).map_err(|e| format!("sed: {path}: {}", fmt_io_err(&e)))?;
+        Ok(String::from_utf8_lossy(&bytes).into_owned())
     }
 }
 
@@ -402,8 +403,8 @@ fn main() {
             } else {
                 file.clone()
             };
-            let content = match std::fs::read(&actual_read) {
-                Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+            let raw_content = match std::fs::read(&actual_read) {
+                Ok(bytes) => bytes,
                 Err(e) => {
                     if opts.follow_symlinks
                         && (!std::path::Path::new(file).exists()
@@ -462,7 +463,7 @@ fn main() {
             } else {
                 file.clone()
             });
-            let reader = io::BufReader::new(content.as_bytes());
+            let reader = io::BufReader::new(raw_content.as_slice());
             let mut output = Vec::new();
             let code = engine.run(reader, &mut output).unwrap_or_else(|e| {
                 eprintln!("sed: {file}: {}", fmt_io_err(&e));
@@ -506,10 +507,10 @@ fn main() {
     } else {
         let mut engine = Engine::new(commands, quiet, posix, opts.sandbox, opts.line_length, opts.null_data);
         for file in &opts.files {
-            let content = if file == "-" {
+            let raw_content = if file == "-" {
                 let mut buf = Vec::new();
                 io::stdin().read_to_end(&mut buf).unwrap_or_default();
-                String::from_utf8_lossy(&buf).into_owned()
+                buf
             } else {
                 let actual_file = if opts.follow_symlinks {
                     resolve_symlinks(file)
@@ -517,7 +518,7 @@ fn main() {
                     file.clone()
                 };
                 match std::fs::read(&actual_file) {
-                    Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+                    Ok(bytes) => bytes,
                     Err(e) => {
                         if opts.follow_symlinks {
                             let msg = fmt_io_err(&e);
@@ -545,7 +546,7 @@ fn main() {
             } else {
                 file.clone()
             });
-            let reader = io::BufReader::new(content.as_bytes());
+            let reader = io::BufReader::new(raw_content.as_slice());
             match engine.run(reader, &mut out) {
                 Ok(code) if code != 0 => process::exit(code),
                 Err(e) => eprintln!("sed: {file}: {}", fmt_io_err(&e)),
