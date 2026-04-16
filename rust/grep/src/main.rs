@@ -560,6 +560,78 @@ impl Matcher {
     }
 }
 
+/// Check if a pattern contains backreferences (\1-\9).
+fn has_backreferences(pattern: &str) -> bool {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut i = 0;
+    let mut in_bracket = false;
+    while i < chars.len() {
+        if chars[i] == '[' && !in_bracket {
+            in_bracket = true;
+        } else if chars[i] == ']' && in_bracket {
+            in_bracket = false;
+        } else if chars[i] == '\\' && i + 1 < chars.len() && !in_bracket {
+            if chars[i + 1].is_ascii_digit() && chars[i + 1] != '0' {
+                return true;
+            }
+            i += 1; // skip escaped char
+        }
+        i += 1;
+    }
+    false
+}
+
+/// Count the number of capturing groups in a pattern (after BRE→ERE conversion).
+fn count_groups(pattern: &str) -> usize {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut count = 0;
+    let mut i = 0;
+    let mut in_bracket = false;
+    while i < chars.len() {
+        if chars[i] == '[' && !in_bracket {
+            in_bracket = true;
+        } else if chars[i] == ']' && in_bracket {
+            in_bracket = false;
+        } else if chars[i] == '\\' && i + 1 < chars.len() {
+            i += 2;
+            continue;
+        } else if chars[i] == '(' && !in_bracket {
+            // Check it's not (?:...) non-capturing group
+            if !(i + 1 < chars.len() && chars[i + 1] == '?') {
+                count += 1;
+            }
+        }
+        i += 1;
+    }
+    count
+}
+
+/// Find the highest backreference number in a pattern.
+fn max_backref(pattern: &str) -> usize {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut max = 0;
+    let mut i = 0;
+    let mut in_bracket = false;
+    while i < chars.len() {
+        if chars[i] == '[' && !in_bracket {
+            in_bracket = true;
+        } else if chars[i] == ']' && in_bracket {
+            in_bracket = false;
+        } else if chars[i] == '\\' && i + 1 < chars.len() && !in_bracket {
+            if chars[i + 1].is_ascii_digit() && chars[i + 1] != '0' {
+                let n = (chars[i + 1] as u32 - '0' as u32) as usize;
+                if n > max {
+                    max = n;
+                }
+            }
+            i += 2;
+            continue;
+        }
+        i += 1;
+    }
+    max
+}
+
 fn build_matcher(opts: &Options) -> Matcher {
     if opts.fixed_strings {
         return Matcher {
@@ -613,11 +685,45 @@ fn build_matcher(opts: &Options) -> Matcher {
         pattern = format!("(?i){pattern}");
     }
 
-    let inner = if opts.perl_regexp {
+    // Detect backreferences (\1-\9) — requires fancy-regex
+    let has_backrefs = has_backreferences(&pattern);
+
+    // When multiple patterns have backrefs, validate that backrefs don't
+    // cross pattern boundaries (each -e pattern's backrefs must reference
+    // groups within the same pattern)
+    if has_backrefs && converted_patterns.len() > 1 {
+        for (idx, p) in converted_patterns.iter().enumerate() {
+            let groups = count_groups(p);
+            let max_ref = max_backref(p);
+            if max_ref > groups {
+                eprintln!(
+                    "grep: Invalid back reference in pattern {} (has {} groups, references \\{})",
+                    idx + 1,
+                    groups,
+                    max_ref
+                );
+                process::exit(2);
+            }
+        }
+    }
+
+    let inner = if opts.perl_regexp || has_backrefs {
         match FancyRegex::new(&pattern) {
             Ok(re) => MatcherInner::Fancy(re),
             Err(e) => {
-                eprintln!("grep: invalid Perl regex: {e}");
+                let msg = format!("{e}");
+                // Extract a GNU grep-compatible error message
+                let clean_msg = if let Some(inner) = msg.strip_prefix("Error compiling regex: ") {
+                    // Convert fancy-regex messages to GNU grep style
+                    if inner.contains("back reference") {
+                        "reference to non-existent subpattern"
+                    } else {
+                        inner
+                    }
+                } else {
+                    &msg
+                };
+                eprintln!("grep: {clean_msg}");
                 process::exit(2);
             }
         }
