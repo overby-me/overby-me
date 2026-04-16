@@ -719,7 +719,11 @@ impl Parser {
 
     fn parse_list_expr(&mut self) -> Vec<Expr> {
         let mut exprs = Vec::new();
-        if self.at(&Token::Semi) || self.at(&Token::EOF) || self.at(&Token::RBrace) {
+        if self.at(&Token::Semi)
+            || self.at(&Token::EOF)
+            || self.at(&Token::RBrace)
+            || self.at(&Token::RParen)
+        {
             return exprs;
         }
         exprs.push(self.parse_expr());
