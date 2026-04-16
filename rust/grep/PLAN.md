@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**116/119 tests passing** (97%) — from the GNU grep 3.12 test suite.
+**117/119 tests passing** (98%) — from the GNU grep 3.12 test suite.
 
 - **PCRE (~1)**: `pcre-abort` — fancy-regex doesn't hit backtrack limit on pathological patterns
 - **I/O (~3)**: `in-eq-out-infloop` (works locally, nix sandbox issue), `max-count-overread` (stdin byte seeking), `write-error-msg` (/dev/full needed)
@@ -56,6 +56,9 @@
 - --line-buffered accepted as no-op, --help to stdout, safe_exit with flush
 - Write error detection via checked_write!/checked_writeln! macros
 - fancy-regex backtrack limit (10K) for PCRE pattern matching
+- Fixed -L (files-without-match) exit code and early return
+- Skip input=output check for -m (max-count limits reading)
+- Fixed in-eq-out-infloop for all option combinations
 
 Tests compare rust-grep output against the GNU grep test suite's expected behavior in a Nix sandbox.
 
@@ -311,7 +314,7 @@ Fall back to `fancy-regex` when BRE/ERE patterns contain backreferences:
 
 ## Test Inventory
 
-### Passing (116 tests)
+### Passing (117 tests)
 
 100k-entries, backref-alt, backref-multibyte-slow, backref-word, backslash-dot,
 backslash-s-and-repetition-operators, backslash-s-vs-invalid-multibyte, big-hole, big-match,
@@ -341,10 +344,10 @@ pcre-abort — fancy-regex delegates non-backref patterns to the regex crate whi
 doesn't backtrack, so pathological patterns like `((a+)*)+$` succeed instead of
 hitting a backtrack limit. PCRE2 (which GNU grep uses) backtracks on all patterns.
 
-### Not fully passing (2 tests)
+### Not fully passing (1 test)
 
-- include-exclude — complex --include/--exclude interaction semantics differ from GNU grep
-- in-eq-out-infloop — works locally but nix sandbox redirects differently
+- include-exclude — complex --include/--exclude ordering semantics differ from GNU grep
+  (specifically, `--exclude='X' --include='Y' --exclude='Y'` cancellation behavior)
 
 ### Not yet tested (5 tests)
 
