@@ -1442,6 +1442,7 @@ fn grep_reader<R: BufRead>(
     let separator = if opts.null_separator { '\0' } else { ':' };
     let fname_sep = if opts.null_separator { '\0' } else { ':' };
     let use_color = opts.color == ColorMode::Always;
+    let line_delim: u8 = if opts.null_data { b'\0' } else { b'\n' };
 
     // Binary file detection: peek at the first chunk for NUL bytes
     let mut is_binary = false;
@@ -1465,10 +1466,10 @@ fn grep_reader<R: BufRead>(
         let mut buf = Vec::new();
         loop {
             buf.clear();
-            match reader.read_until(b'\n', &mut buf) {
+            match reader.read_until(line_delim, &mut buf) {
                 Ok(0) => break,
                 Ok(_) => {
-                    if buf.last() == Some(&b'\n') {
+                    if buf.last() == Some(&line_delim) {
                         buf.pop();
                     }
                     lines.push(String::from_utf8_lossy(&buf).into_owned());
@@ -1551,15 +1552,15 @@ fn grep_reader<R: BufRead>(
     let mut line_buf = Vec::new();
     loop {
         line_buf.clear();
-        let bytes_read = match reader.read_until(b'\n', &mut line_buf) {
+        let bytes_read = match reader.read_until(line_delim, &mut line_buf) {
             Ok(n) => n,
             Err(_) => break,
         };
         if bytes_read == 0 {
             break;
         }
-        // Strip trailing newline
-        if line_buf.last() == Some(&b'\n') {
+        // Strip trailing delimiter
+        if line_buf.last() == Some(&line_delim) {
             line_buf.pop();
         }
         let line_len = line_buf.len() + 1;
@@ -1639,7 +1640,7 @@ fn grep_reader<R: BufRead>(
                     } else {
                         // Write raw bytes to preserve non-UTF-8 content
                         let _ = out.write_all(&line_buf);
-                        let _ = out.write_all(b"\n");
+                        let _ = out.write_all(if opts.null_data { b"\0" } else { b"\n" });
                     }
                 }
             }
