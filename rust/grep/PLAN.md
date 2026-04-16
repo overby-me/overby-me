@@ -2,9 +2,9 @@
 
 ## Current Status
 
-**112/119 tests passing** (94%) — from the GNU grep 3.12 test suite.
+**114/119 tests passing** (96%) — from the GNU grep 3.12 test suite.
 
-### Remaining failure categories (~7 tests)
+### Remaining failure categories (~5 tests)
 
 - **BRE/ERE regex edge cases (~3)**: Spencer test failures (literal `*` at start, bad interval expressions)
 - **PCRE edge cases (~4)**: `-P` with `-w` on non-word patterns, `-P` with `-z`, PCRE backtrack limit, PCRE context with `-z -o`
@@ -50,6 +50,9 @@
 - Character class misuse warning ([:space:] vs [[:space:]])
 - PCRE -w uses (?<!\w)/(?!\w) instead of \b
 - Per-pattern validation for unclosed bracket expressions
+- PCRE -w uses (?<!\w)/(?!\w) instead of \b
+- Implemented -z (--null-data) for NUL-delimited I/O
+- Fixed -o output terminator with -z
 
 Tests compare rust-grep output against the GNU grep test suite's expected behavior in a Nix sandbox.
 
@@ -305,7 +308,7 @@ Fall back to `fancy-regex` when BRE/ERE patterns contain backreferences:
 
 ## Test Inventory
 
-### Passing (112 tests)
+### Passing (114 tests)
 
 100k-entries, backref-alt, backref-multibyte-slow, backref-word, backslash-dot,
 backslash-s-and-repetition-operators, backslash-s-vs-invalid-multibyte, big-hole, big-match,
@@ -329,10 +332,10 @@ two-chars, two-files, unibyte-binary, unibyte-bracket-expr, unibyte-negated-circ
 utf8-bracket, version-pcre, warn-char-classes, word-delim-multibyte, word-multi-file,
 word-multibyte, y2038-vs-32-bit, z-anchor-newline
 
-### Failing (7 tests)
+### Failing (5 tests)
 
 in-eq-out-infloop, include-exclude, max-count-overread, null-byte,
-pcre, pcre-abort, pcre-context, posix-bracket, write-error-msg
+pcre-abort, posix-bracket, write-error-msg
 
 ### Not yet tested (5 tests)
 
