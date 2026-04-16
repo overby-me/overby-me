@@ -1659,7 +1659,7 @@ fn grep_reader<R: BufRead>(
                 return (match_count, true, byte_offset);
             }
 
-            if opts.files_with_matches {
+            if opts.files_with_matches || opts.files_without_match {
                 return (match_count, true, byte_offset);
             }
 
@@ -1933,7 +1933,10 @@ fn grep_file(path: &Path, matcher: &Matcher, opts: &Options) -> (usize, bool, bo
     };
 
     // Check if input file is also the output (would cause infinite loop)
-    let check_same = !opts.quiet && !opts.files_with_matches && !opts.files_without_match;
+    let check_same = !opts.quiet
+        && !opts.files_with_matches
+        && !opts.files_without_match
+        && opts.max_count.is_none();
     if check_same && path.as_os_str() != "-" && is_input_same_as_stdout(path) {
         eprintln!("grep: {}: input file is also the output", path.display());
         return (0, false, true);
@@ -2083,7 +2086,11 @@ fn main() {
     if files.is_empty() && !had_file_args {
         // Read from stdin (only if no file args were given)
         let (count, matched, errored) = grep_file(Path::new("-"), &matcher, &opts);
-        if matched {
+        if opts.files_without_match {
+            if !matched {
+                any_match = true;
+            }
+        } else if matched {
             any_match = true;
         }
         if errored {
@@ -2097,7 +2104,12 @@ fn main() {
     } else {
         for path in &files {
             let (count, matched, errored) = grep_file(path, &matcher, &opts);
-            if matched {
+            if opts.files_without_match {
+                // For -L, "success" means finding a file WITHOUT matches
+                if !matched {
+                    any_match = true;
+                }
+            } else if matched {
                 any_match = true;
             }
             if errored {
