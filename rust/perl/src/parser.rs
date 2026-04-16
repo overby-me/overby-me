@@ -1000,42 +1000,46 @@ impl Parser {
     }
 
     fn parse_relational(&mut self) -> Expr {
-        let left = self.parse_shift();
-        match self.tok() {
-            Token::NumLt => {
-                self.pos += 1;
-                Expr::BinOp(BinOp::NumLt, Box::new(left), Box::new(self.parse_shift()))
+        let mut left = self.parse_shift();
+        // Loop to handle chained comparisons like 32 <= $x <= 126
+        loop {
+            match self.tok() {
+                Token::NumLt => {
+                    self.pos += 1;
+                    left = Expr::BinOp(BinOp::NumLt, Box::new(left), Box::new(self.parse_shift()));
+                }
+                Token::NumGt => {
+                    self.pos += 1;
+                    left = Expr::BinOp(BinOp::NumGt, Box::new(left), Box::new(self.parse_shift()));
+                }
+                Token::NumLe => {
+                    self.pos += 1;
+                    left = Expr::BinOp(BinOp::NumLe, Box::new(left), Box::new(self.parse_shift()));
+                }
+                Token::NumGe => {
+                    self.pos += 1;
+                    left = Expr::BinOp(BinOp::NumGe, Box::new(left), Box::new(self.parse_shift()));
+                }
+                Token::Lt => {
+                    self.pos += 1;
+                    left = Expr::BinOp(BinOp::StrLt, Box::new(left), Box::new(self.parse_shift()));
+                }
+                Token::Gt => {
+                    self.pos += 1;
+                    left = Expr::BinOp(BinOp::StrGt, Box::new(left), Box::new(self.parse_shift()));
+                }
+                Token::Le => {
+                    self.pos += 1;
+                    left = Expr::BinOp(BinOp::StrLe, Box::new(left), Box::new(self.parse_shift()));
+                }
+                Token::Ge => {
+                    self.pos += 1;
+                    left = Expr::BinOp(BinOp::StrGe, Box::new(left), Box::new(self.parse_shift()));
+                }
+                _ => break,
             }
-            Token::NumGt => {
-                self.pos += 1;
-                Expr::BinOp(BinOp::NumGt, Box::new(left), Box::new(self.parse_shift()))
-            }
-            Token::NumLe => {
-                self.pos += 1;
-                Expr::BinOp(BinOp::NumLe, Box::new(left), Box::new(self.parse_shift()))
-            }
-            Token::NumGe => {
-                self.pos += 1;
-                Expr::BinOp(BinOp::NumGe, Box::new(left), Box::new(self.parse_shift()))
-            }
-            Token::Lt => {
-                self.pos += 1;
-                Expr::BinOp(BinOp::StrLt, Box::new(left), Box::new(self.parse_shift()))
-            }
-            Token::Gt => {
-                self.pos += 1;
-                Expr::BinOp(BinOp::StrGt, Box::new(left), Box::new(self.parse_shift()))
-            }
-            Token::Le => {
-                self.pos += 1;
-                Expr::BinOp(BinOp::StrLe, Box::new(left), Box::new(self.parse_shift()))
-            }
-            Token::Ge => {
-                self.pos += 1;
-                Expr::BinOp(BinOp::StrGe, Box::new(left), Box::new(self.parse_shift()))
-            }
-            _ => left,
         }
+        left
     }
 
     fn parse_shift(&mut self) -> Expr {

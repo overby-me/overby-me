@@ -1688,7 +1688,10 @@ impl Lexer {
     fn read_regex_flags(&mut self) -> String {
         let mut flags = String::new();
         while self.pos < self.input.len()
-            && matches!(self.ch(), 'g' | 'i' | 'm' | 's' | 'x' | 'e' | 'r' | 'n')
+            && matches!(
+                self.ch(),
+                'g' | 'i' | 'm' | 's' | 'x' | 'e' | 'r' | 'n' | 'a' | 'd' | 'l' | 'u' | 'c' | 'p'
+            )
         {
             flags.push(self.advance());
         }
