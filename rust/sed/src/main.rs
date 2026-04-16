@@ -4,7 +4,8 @@ mod regex_util;
 mod types;
 mod util;
 
-use std::io::{self, Read};
+#[allow(unused_imports)]
+use std::io::{self, Read, Write};
 use std::process;
 
 use engine::Engine;
@@ -20,6 +21,24 @@ fn fmt_io_err(e: &io::Error) -> String {
             .to_string()
     } else {
         msg
+    }
+}
+
+fn print_usage(out: &mut dyn io::Write, full: bool) {
+    let _ = writeln!(out, "Usage: sed [OPTION]... {{script}} [input-file]...");
+    let _ = writeln!(out, "  -n, --quiet, --silent    suppress automatic printing");
+    let _ = writeln!(out, "  -e script                add commands");
+    let _ = writeln!(out, "  -f file                  add commands from file");
+    let _ = writeln!(out, "  -i[SUFFIX]               edit files in place");
+    let _ = writeln!(out, "  -E, -r, --regexp-extended use extended regexes");
+    let _ = writeln!(out, "  -s, --separate           treat files as separate");
+    let _ = writeln!(out, "  -u, --unbuffered         unbuffered I/O");
+    let _ = writeln!(out, "  -z, --null-data          NUL-separated lines");
+    let _ = writeln!(out, "  --posix                  disable extensions");
+    let _ = writeln!(out, "  --version                print version");
+    let _ = writeln!(out);
+    if full {
+        let _ = writeln!(out, "E-mail bug reports to: bug-sed@gnu.org");
     }
 }
 
@@ -72,17 +91,7 @@ fn parse_options() -> Options {
                 process::exit(0);
             }
             "--help" => {
-                println!("Usage: sed [OPTION]... {{script}} [input-file]...");
-                println!("  -n, --quiet, --silent    suppress automatic printing");
-                println!("  -e script                add commands");
-                println!("  -f file                  add commands from file");
-                println!("  -i[SUFFIX]               edit files in place");
-                println!("  -E, -r, --regexp-extended use extended regexes");
-                println!("  -s, --separate           treat files as separate");
-                println!("  -u, --unbuffered         unbuffered I/O");
-                println!("  -z, --null-data          NUL-separated lines");
-                println!("  --posix                  disable extensions");
-                println!("  --version                print version");
+                print_usage(&mut io::stdout(), true);
                 process::exit(0);
             }
             "-n" | "--quiet" | "--silent" => {
@@ -290,8 +299,8 @@ fn parse_options() -> Options {
     }
 
     if opts.scripts.is_empty() {
-        eprintln!("sed: no script command has been given");
-        process::exit(2);
+        print_usage(&mut io::stderr(), false);
+        process::exit(1);
     }
 
     // COLS env var sets default line width (overridden by -l flag)
