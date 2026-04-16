@@ -98,6 +98,13 @@ impl Default for Options {
     }
 }
 
+/// Split a pattern string on newlines, as GNU grep does for -e patterns.
+fn add_patterns(patterns: &mut Vec<String>, pattern: &str) {
+    for p in pattern.split('\n') {
+        patterns.push(p.to_string());
+    }
+}
+
 fn parse_args() -> Options {
     let args: Vec<String> = env::args().collect();
     let mut opts = Options::default();
@@ -154,8 +161,10 @@ fn parse_args() -> Options {
                 "null-data" => opts.null_data = true,
                 "recursive" => opts.recursive = true,
                 _ if long.starts_with("regexp=") => {
-                    opts.patterns
-                        .push(long.strip_prefix("regexp=").unwrap().to_string());
+                    add_patterns(
+                        &mut opts.patterns,
+                        long.strip_prefix("regexp=").unwrap(),
+                    );
                     pattern_set = true;
                 }
                 _ if long.starts_with("max-count=") => {
@@ -270,10 +279,10 @@ fn parse_args() -> Options {
                         if rest.is_empty() {
                             i += 1;
                             if i < args.len() {
-                                opts.patterns.push(args[i].clone());
+                                add_patterns(&mut opts.patterns, &args[i]);
                             }
                         } else {
-                            opts.patterns.push(rest);
+                            add_patterns(&mut opts.patterns, &rest);
                         }
                         pattern_set = true;
                         j = chars.len(); // consumed rest
@@ -376,7 +385,7 @@ fn parse_args() -> Options {
 
         // Positional arguments
         if !pattern_set && opts.patterns.is_empty() {
-            opts.patterns.push(arg.clone());
+            add_patterns(&mut opts.patterns, arg);
             pattern_set = true;
         } else {
             opts.files.push(PathBuf::from(arg));
