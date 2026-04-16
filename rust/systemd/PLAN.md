@@ -153,7 +153,7 @@ All 23 udev tests fail because the C `udevadm` binary in the overlay lacks featu
 
 ~30% of test runs experience a non-deterministic boot hang where backdoor.service never starts. Retrying usually succeeds.
 
-**Affected (intermittent):** 07-pid1-user-group, 07-pid1-protect-control-groups, 07-pid1-issue-3171, 22-tmpfiles-06
+**Affected (intermittent):** 07-pid1-user-group (passes on retry), 07-pid1-protect-control-groups, 07-pid1-issue-3171, 22-tmpfiles-06
 
 ## Prioritized Fix Plan
 
