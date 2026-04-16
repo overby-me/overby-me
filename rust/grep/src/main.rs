@@ -36,9 +36,10 @@ struct Options {
     byte_offset: bool,         // -b
     null_separator: bool,      // -Z
     // Context
-    after_context: usize,  // -A
-    before_context: usize, // -B
-    context: usize,        // -C
+    after_context: usize,      // -A
+    before_context: usize,     // -B
+    context: usize,            // -C
+    context_requested: bool,   // true if -A, -B, or -C was explicitly used
     // File/directory
     recursive: bool, // -r/-R
     include_glob: Vec<String>,
@@ -84,6 +85,7 @@ impl Default for Options {
             after_context: 0,
             before_context: 0,
             context: 0,
+            context_requested: false,
             recursive: false,
             include_glob: Vec::new(),
             exclude_glob: Vec::new(),
@@ -161,14 +163,17 @@ fn parse_args() -> Options {
                 _ if long.starts_with("after-context=") => {
                     let n = long.strip_prefix("after-context=").unwrap();
                     opts.after_context = n.parse().unwrap_or(0);
+                    opts.context_requested = true;
                 }
                 _ if long.starts_with("before-context=") => {
                     let n = long.strip_prefix("before-context=").unwrap();
                     opts.before_context = n.parse().unwrap_or(0);
+                    opts.context_requested = true;
                 }
                 _ if long.starts_with("context=") => {
                     let n = long.strip_prefix("context=").unwrap();
                     opts.context = n.parse().unwrap_or(0);
+                    opts.context_requested = true;
                 }
                 _ if long.starts_with("label=") => {
                     opts.label = long.strip_prefix("label=").unwrap().to_string();
@@ -306,6 +311,7 @@ fn parse_args() -> Options {
                         } else {
                             opts.after_context = rest.parse().unwrap_or(0);
                         }
+                        opts.context_requested = true;
                         j = chars.len();
                         continue;
                     }
@@ -319,6 +325,7 @@ fn parse_args() -> Options {
                         } else {
                             opts.before_context = rest.parse().unwrap_or(0);
                         }
+                        opts.context_requested = true;
                         j = chars.len();
                         continue;
                     }
@@ -332,6 +339,7 @@ fn parse_args() -> Options {
                         } else {
                             opts.context = rest.parse().unwrap_or(0);
                         }
+                        opts.context_requested = true;
                         j = chars.len();
                         continue;
                     }
@@ -609,7 +617,7 @@ fn grep_reader<R: BufRead>(
     let separator = if opts.null_separator { '\0' } else { ':' };
     let fname_sep = if opts.null_separator { '\0' } else { ':' };
 
-    let has_context = opts.before_context > 0 || opts.after_context > 0;
+    let has_context = opts.context_requested || opts.before_context > 0 || opts.after_context > 0;
 
     if has_context && !opts.count && !opts.files_with_matches && !opts.files_without_match {
         // Context mode: collect all lines first
@@ -617,15 +625,12 @@ fn grep_reader<R: BufRead>(
         let mut remaining_after: usize = 0;
         let mut last_printed: Option<usize> = None;
 
+        let max_reached = |count: usize| opts.max_count.is_some_and(|max| count >= max);
+
         for (line_idx, line) in lines.iter().enumerate() {
             let matches = matcher.is_match(line) != opts.invert_match;
 
-            if matches {
-                if let Some(max) = opts.max_count
-                    && match_count >= max
-                {
-                    break;
-                }
+            if matches && !max_reached(match_count) {
                 match_count += 1;
 
                 // Print before context
@@ -671,6 +676,8 @@ fn grep_reader<R: BufRead>(
                 print_context_line(&mut out, line, line_idx + 1, filename, show_filename, opts);
                 last_printed = Some(line_idx);
                 remaining_after -= 1;
+            } else if max_reached(match_count) {
+                break;
             }
         }
 
