@@ -849,7 +849,12 @@ fn build_matcher(opts: &Options) -> Matcher {
     let mut pattern = combined;
     let has_empty = converted_patterns.iter().any(|p| p.is_empty());
     if opts.word_regexp && !has_empty {
-        pattern = format!(r"\b(?:{pattern})\b");
+        if opts.perl_regexp {
+            // PCRE uses negative lookahead/lookbehind for -w
+            pattern = format!(r"(?<!\w)(?:{pattern})(?!\w)");
+        } else {
+            pattern = format!(r"\b(?:{pattern})\b");
+        }
     }
     if opts.line_regexp && !has_empty {
         pattern = format!("^(?:{pattern})$");
