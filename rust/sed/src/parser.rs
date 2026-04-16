@@ -168,6 +168,7 @@ impl<'a> Parser<'a> {
             self.advance();
             self.skip_whitespace();
             if self.peek() == Some(b'!') {
+                self.advance();
                 return Err(self.err("multiple `!'s"));
             }
             true
@@ -195,25 +196,18 @@ impl<'a> Parser<'a> {
             }
         }
 
-        let cmd = self.parse_command_char()?;
-
-        // POSIX mode: some commands only accept one address (not a range)
+        // POSIX mode: one-address commands with range address — check before parsing
         if self.posix && matches!(address, AddressRange::Range(_, _)) {
-            let one_addr_only = matches!(
-                cmd,
-                Command::Append(_)
-                    | Command::Insert(_)
-                    | Command::PrintEscaped(_)
-                    | Command::PrintLineNum
-                    | Command::Quit(_)
-                    | Command::QuitNoprint(_)
-                    | Command::ReadFile(_)
-                    | Command::ReadLine(_)
-            );
-            if one_addr_only {
-                return Err(self.err("command only uses one address"));
+            let one_addr_cmds = b"aicl=qQrR";
+            if let Some(ch) = self.peek() {
+                if one_addr_cmds.contains(&ch) {
+                    self.advance();
+                    return Err(self.err("command only uses one address"));
+                }
             }
         }
+
+        let cmd = self.parse_command_char()?;
 
         Ok(Some(SedCommand {
             address,
@@ -507,8 +501,16 @@ impl<'a> Parser<'a> {
                 Ok(Command::QuitNoprint(code))
             }
             b'a' | b'i' | b'c' => {
-                if self.posix && self.peek() != Some(b'\\') {
+                let next = self.peek();
+                if next.is_none() {
+                    // EOF after a/c/i — incomplete command
                     return Err(self.err("expected \\ after `a', `c' or `i'"));
+                }
+                if self.posix && next != Some(b'\\') {
+                    return Err(self.err_at(
+                        self.pos - self.cmd_start + 1,
+                        "expected \\ after `a', `c' or `i'",
+                    ));
                 }
                 self.skip_optional_backslash_newline();
                 let text = self.parse_text_arg();
