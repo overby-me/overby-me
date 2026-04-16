@@ -1386,6 +1386,21 @@ impl Interpreter {
                 }
                 Value::Num(1.0)
             }
+            "_list_index" => {
+                // Internal: (expr)[idx] — index into list result
+                if args.len() >= 2 {
+                    let list = self.eval_list(&args[0]);
+                    let idx = self.eval_expr(&args[1]).to_num() as i64;
+                    let idx = if idx < 0 {
+                        (list.len() as i64 + idx).max(0) as usize
+                    } else {
+                        idx as usize
+                    };
+                    list.get(idx).cloned().unwrap_or(Value::Undef)
+                } else {
+                    Value::Undef
+                }
+            }
             "scalar" => {
                 // scalar() forces scalar context
                 if let Some(arg) = args.first() {

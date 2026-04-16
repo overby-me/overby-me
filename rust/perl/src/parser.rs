@@ -221,8 +221,7 @@ impl Parser {
                 self.pos += 1;
                 let args = self.parse_list_expr();
                 let stmt = Stmt::Printf(None, args);
-                self.eat(&Token::Semi);
-                return Some(stmt);
+                return Some(self.maybe_postfix(stmt));
             }
             Token::Die => {
                 self.pos += 1;
@@ -1292,12 +1291,14 @@ impl Parser {
                     self.pos += 1;
                     let index = self.parse_expr();
                     self.expect(&Token::RBracket);
-                    match expr {
+                    match &expr {
                         Expr::ScalarVar(name) | Expr::ArrayVar(name) | Expr::MyVar(name) => {
+                            let name = name.clone();
                             expr = Expr::ArrayElement(name, Box::new(index));
                         }
                         _ => {
-                            expr = Expr::ArrayElement("_deref_".to_string(), Box::new(index));
+                            // (expr)[idx] — index into result of expression as list
+                            expr = Expr::Call("_list_index".to_string(), vec![expr, index]);
                         }
                     }
                 }
