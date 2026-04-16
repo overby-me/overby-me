@@ -46,6 +46,7 @@ pub struct Engine {
     pub is_last_file: bool,
     cumulative_lines: usize, // line offset from previous files
     addr0_active: bool, // true when current command matched via address 0
+    in_range_middle: bool, // true when matched inside range but not at the closing line
     pub line_wrap_width: usize,
     #[allow(dead_code)]
     sandbox: bool,
@@ -83,6 +84,7 @@ impl Engine {
             is_last_file: true,
             cumulative_lines: 0,
             addr0_active: false,
+            in_range_middle: false,
             line_wrap_width: line_length,
             sandbox,
             null_data,
@@ -302,6 +304,7 @@ impl Engine {
             let cmd = &commands[i];
             let range_idx = range_offset + i;
             self.addr0_active = false;
+            self.in_range_middle = false;
             let matched = self.address_matches(&cmd.address, range_idx);
             let should_run = if cmd.negated { !matched } else { matched };
 
@@ -375,6 +378,8 @@ impl Engine {
                     };
                     if end_matches {
                         self.range_active[range_idx] = false;
+                    } else {
+                        self.in_range_middle = true;
                     }
                     true
                 } else if self.addr_matches_single(a) {
@@ -396,9 +401,10 @@ impl Engine {
                         false // don't check end on start line
                     };
                     if end_matches {
-                        // Single-line range
+                        // Single-line range — not in middle
                     } else {
                         self.range_active[range_idx] = true;
+                        self.in_range_middle = true;
                     }
                     true
                 } else {
@@ -642,11 +648,15 @@ impl Engine {
             }
 
             Command::Change(text) => {
-                self.pattern_space = text.clone();
-                self.output.extend_from_slice(text.as_bytes());
-                if !text.ends_with('\n') {
-                    self.output.push(b'\n');
+                // c command: output text only at end of range (or with single/no address)
+                // In the middle of a range, just suppress the line
+                if !self.in_range_middle {
+                    self.output.extend_from_slice(text.as_bytes());
+                    if !text.ends_with('\n') {
+                        self.output.push(b'\n');
+                    }
                 }
+                self.suppress_default_print = true;
                 Flow::EndOfCycle
             }
 
