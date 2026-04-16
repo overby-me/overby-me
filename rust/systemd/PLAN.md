@@ -8,8 +8,8 @@ Run a test: `nix build .#checks.x86_64-linux.rust-systemd-test-<name>`
 
 | Status | Count | Description |
 |--------|-------|-------------|
-| PASS | ~228+ | Tests passing reliably (including 150/151 aux-utils) |
-| FAIL (fixable) | ~8 | Failures in rust-systemd code that can be fixed |
+| PASS | ~230+ | Tests passing reliably (including 150/151 aux-utils) |
+| FAIL (fixable) | ~6 | Failures in rust-systemd code that can be fixed |
 | FAIL (architectural) | ~12 | Missing major features (D-Bus, udev, exec deser) |
 | Boot hang (transient) | ~10 | Non-deterministic QEMU boot failures (~30% rate) |
 
@@ -180,6 +180,7 @@ All 23 udev tests fail because the C `udevadm` binary in the overlay lacks featu
 - [x] Implement Upholds= dependency directive (already works)
 - [x] Fix systemctl clean DynamicUser symlink cleanup (dangling symlink detection)
 - [x] Fix DeferredNotifyWait eventfd notification for notification handler wakeup
+- [x] Fix notification handler blocking read → try_read (eliminates sequential Type=notify race)
 - [x] Fix NotifyAccess=none enforcement (deferred notify wait timeout + systemctl start detection)
 - [x] Add patchScripts for NixOS PATH issues in clean-unit test (service sections pass, mount/socket skipped)
 - [x] Add notifyaccess test (all/main/exec/none — all pass when none is last)
