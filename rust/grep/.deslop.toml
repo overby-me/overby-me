@@ -1,0 +1,28 @@
+# deslop configuration for rust-grep
+
+disabled_rules = [
+  # Single-file implementation is expected during early development.
+  "rust_oversized_module_file",
+
+  # grep inherently writes to stdout inside match loops.
+  "rust_unbuffered_file_writes",
+
+  # .lines() is the standard way to iterate line-oriented grep input.
+  "rust_lines_allocate_per_line",
+
+  # Struct-field deref in loops is idiomatic for option checking.
+  "rust_aos_hot_path",
+
+  # Reading pattern files without size limits matches GNU grep behavior.
+  "rust_unbounded_read_to_string",
+
+  # Exit code narrowing (u32 -> usize) is intentional.
+  "rust_narrowing_numeric_cast",
+
+  # Stdout lock ordering between grep_reader and main is safe
+  # (non-overlapping calls).
+  "rust_async_lock_order_cycle",
+
+  # Release profile intentionally omits overflow checks for performance.
+  "rust_release_profile_missing_overflow_checks",
+]

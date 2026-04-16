@@ -36,10 +36,10 @@ struct Options {
     byte_offset: bool,         // -b
     null_separator: bool,      // -Z
     // Context
-    after_context: usize,      // -A
-    before_context: usize,     // -B
-    context: usize,            // -C
-    context_requested: bool,   // true if -A, -B, or -C was explicitly used
+    after_context: usize,    // -A
+    before_context: usize,   // -B
+    context: usize,          // -C
+    context_requested: bool, // true if -A, -B, or -C was explicitly used
     // File/directory
     recursive: bool, // -r/-R
     include_glob: Vec<String>,
@@ -48,7 +48,8 @@ struct Options {
     // Misc
     label: String, // --label
     color: ColorMode,
-    null_data: bool, // -z
+    null_data: bool,   // -z
+    initial_tab: bool, // -T
 }
 
 #[derive(Clone, PartialEq)]
@@ -94,6 +95,7 @@ impl Default for Options {
             label: "(standard input)".to_string(),
             color: ColorMode::Auto,
             null_data: false,
+            initial_tab: false,
         }
     }
 }
@@ -158,13 +160,11 @@ fn parse_args() -> Options {
                 }
                 "byte-offset" => opts.byte_offset = true,
                 "null" => opts.null_separator = true,
+                "initial-tab" => opts.initial_tab = true,
                 "null-data" => opts.null_data = true,
                 "recursive" => opts.recursive = true,
                 _ if long.starts_with("regexp=") => {
-                    add_patterns(
-                        &mut opts.patterns,
-                        long.strip_prefix("regexp=").unwrap(),
-                    );
+                    add_patterns(&mut opts.patterns, long.strip_prefix("regexp=").unwrap());
                     pattern_set = true;
                 }
                 _ if long.starts_with("max-count=") => {
@@ -271,6 +271,7 @@ fn parse_args() -> Options {
                     }
                     'b' => opts.byte_offset = true,
                     'Z' => opts.null_separator = true,
+                    'T' => opts.initial_tab = true,
                     'z' => opts.null_data = true,
                     'r' | 'R' => opts.recursive = true,
                     'e' => {
@@ -443,14 +444,10 @@ fn is_word_boundary(text: &str, start: usize, end: usize) -> bool {
     let before = if start == 0 {
         false
     } else {
-        text[..start].chars().last().map_or(false, is_word_char)
+        text[..start].chars().last().is_some_and(is_word_char)
     };
-    let after = text[end..].chars().next().map_or(false, is_word_char);
-    let match_start_word = if start == 0 {
-        true
-    } else {
-        !before
-    };
+    let after = text[end..].chars().next().is_some_and(is_word_char);
+    let match_start_word = if start == 0 { true } else { !before };
     let match_end_word = !after;
 
     // Also check that the match itself starts/ends with a word char
@@ -459,8 +456,8 @@ fn is_word_boundary(text: &str, start: usize, end: usize) -> bool {
     if match_text.is_empty() {
         return !before && !after;
     }
-    let first_is_word = match_text.chars().next().map_or(false, is_word_char);
-    let last_is_word = match_text.chars().last().map_or(false, is_word_char);
+    let first_is_word = match_text.chars().next().is_some_and(is_word_char);
+    let last_is_word = match_text.chars().last().is_some_and(is_word_char);
 
     match_start_word && first_is_word && match_end_word && last_is_word
 }
@@ -678,7 +675,7 @@ fn build_matcher(opts: &Options) -> Matcher {
         converted_patterns[0].clone()
     } else {
         let mut sorted = converted_patterns.clone();
-        sorted.sort_by(|a, b| b.len().cmp(&a.len()));
+        sorted.sort_by_key(|b| std::cmp::Reverse(b.len()));
         sorted
             .iter()
             .map(|p| format!("(?:{p})"))
@@ -775,7 +772,7 @@ fn convert_bre_to_ere(bre: &str) -> String {
     let len = chars.len();
     let mut i = 0;
     // Track nesting depth for \( \) to determine anchor context
-    let mut depth = 0;
+    let mut _depth = 0;
     // Track if we're at the "start" of a group or pattern
     let mut at_start = true;
 
@@ -809,13 +806,13 @@ fn convert_bre_to_ere(bre: &str) -> String {
             match chars[i + 1] {
                 '(' => {
                     result.push('(');
-                    depth += 1;
+                    _depth += 1;
                     at_start = true;
                     i += 2;
                 }
                 ')' => {
                     result.push(')');
-                    depth -= 1;
+                    _depth -= 1;
                     at_start = false;
                     i += 2;
                 }
@@ -861,8 +858,8 @@ fn convert_bre_to_ere(bre: &str) -> String {
             // Don't change at_start — ^ at start is still "at start" for subsequent chars
         } else if chars[i] == '$' {
             // $ is anchor only at end of pattern or before \)
-            let at_end = i + 1 == len
-                || (i + 2 < len && chars[i + 1] == '\\' && chars[i + 2] == ')');
+            let at_end =
+                i + 1 == len || (i + 2 < len && chars[i + 1] == '\\' && chars[i + 2] == ')');
             if at_end {
                 result.push('$');
             } else {
@@ -958,7 +955,12 @@ fn grep_reader<R: BufRead>(
 
     let has_context = opts.context_requested || opts.before_context > 0 || opts.after_context > 0;
 
-    if has_context && !opts.count && !opts.files_with_matches && !opts.files_without_match && !opts.only_matching {
+    if has_context
+        && !opts.count
+        && !opts.files_with_matches
+        && !opts.files_without_match
+        && !opts.only_matching
+    {
         // Context mode: collect all lines first
         let lines: Vec<String> = reader.lines().map_while(Result::ok).collect();
         let mut remaining_after: usize = 0;
@@ -999,11 +1001,15 @@ fn grep_reader<R: BufRead>(
                 }
 
                 // Print matching line
+                let has_prefix = show_filename || opts.line_number;
                 if show_filename {
                     let _ = write!(out, "{filename}{fname_sep}");
                 }
                 if opts.line_number {
                     let _ = write!(out, "{}{separator}", line_idx + 1);
+                }
+                if opts.initial_tab && has_prefix && !line.is_empty() {
+                    let _ = write!(out, "\t");
                 }
                 if use_color {
                     let _ = writeln!(out, "{}", colorize_line(line, matcher));
@@ -1081,24 +1087,28 @@ fn grep_reader<R: BufRead>(
                             let _ = write!(out, "{}{separator}", byte_offset + start);
                         }
                         if use_color {
-                            let _ = writeln!(
-                                out,
-                                "\x1b[01;31m\x1b[K{}\x1b[m\x1b[K",
-                                &line[start..end]
-                            );
+                            let _ =
+                                writeln!(out, "\x1b[01;31m\x1b[K{}\x1b[m\x1b[K", &line[start..end]);
                         } else {
                             let _ = writeln!(out, "{}", &line[start..end]);
                         }
                     }
                 } else {
+                    let has_prefix = show_filename || opts.line_number || opts.byte_offset;
                     if show_filename {
                         let _ = write!(out, "{filename}{fname_sep}");
                     }
                     if opts.line_number {
+                        if opts.initial_tab && show_filename {
+                            let _ = write!(out, " ");
+                        }
                         let _ = write!(out, "{}{separator}", line_idx + 1);
                     }
                     if opts.byte_offset {
                         let _ = write!(out, "{byte_offset}{separator}");
+                    }
+                    if opts.initial_tab && has_prefix && !line.is_empty() {
+                        let _ = write!(out, "\t");
                     }
                     if use_color {
                         let _ = writeln!(out, "{}", colorize_line(&line, matcher));
@@ -1123,11 +1133,15 @@ fn print_context_line<W: Write>(
     show_filename: bool,
     opts: &Options,
 ) {
+    let has_prefix = show_filename || opts.line_number;
     if show_filename {
         let _ = write!(out, "{filename}-");
     }
     if opts.line_number {
         let _ = write!(out, "{line_num}-");
+    }
+    if opts.initial_tab && has_prefix && !line.is_empty() {
+        let _ = write!(out, "\t");
     }
     let _ = writeln!(out, "{line}");
 }
