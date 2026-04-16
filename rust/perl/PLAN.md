@@ -15,11 +15,15 @@ cmd/mod (15 tests), opbasic/qq (30 tests).
 Near-passing (local test counts):
 
 - opbasic/arith: 173/183 (integer overflow edge cases)
-- opbasic/concat: 228/254 (Unicode concat)
+- opbasic/concat: 230/254 (Unicode concat)
 - cmd/for: 14/16 (Internals::stack_refcounted)
 - cmd/subval: 19/36 (caller, wantarray, file I/O)
+- op/not: 8/24 (22/24 running, Config.pm missing)
+- op/bop: 196/510 (bitwise operators)
+- op/local: 96/319 (local scoping)
 
-test.pl integration working: plan/ok/is/printf produce TAP output.
+test.pl integration fully working: plan/ok/is/pass/note/printf produce correct
+TAP output with test names. Function calls in argument lists fixed.
 
 Tests compare rust-perl output against reference perl output in a Nix sandbox.
 
