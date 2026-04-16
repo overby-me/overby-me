@@ -53,6 +53,7 @@
 - Prevent stdin fallback when file args were given but all excluded
 - Ahead-peek binary detection for late NUL bytes in files
 - lseek stdin after -m to prevent overread by subsequent pipeline processes
+- --line-buffered accepted as no-op, --help to stdout, safe_exit with flush
 
 Tests compare rust-grep output against the GNU grep test suite's expected behavior in a Nix sandbox.
 
