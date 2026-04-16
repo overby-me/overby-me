@@ -8004,7 +8004,7 @@ pub fn execute_command(
                             })
                             .unwrap_or(90)
                     };
-                    let deadline =
+                    let mut deadline =
                         std::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
                     loop {
                         let still_starting = {
@@ -8012,6 +8012,21 @@ pub fn execute_command(
                             ri.unit_table
                                 .get(&id)
                                 .map(|u| {
+                                    // Check EXTEND_TIMEOUT_USEC — if the service has
+                                    // extended its timeout, push the deadline forward.
+                                    if let crate::units::Specific::Service(svc) = &u.specific {
+                                        let state = svc.state.read_poisoned();
+                                        if let (Some(usec), Some(ts)) = (
+                                            state.srvc.extend_timeout_usec,
+                                            state.srvc.extend_timeout_timestamp,
+                                        ) {
+                                            let new_deadline =
+                                                ts + std::time::Duration::from_micros(usec);
+                                            if new_deadline > deadline {
+                                                deadline = new_deadline;
+                                            }
+                                        }
+                                    }
                                     matches!(
                                         &*u.common.status.read_poisoned(),
                                         UnitStatus::Starting

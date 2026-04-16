@@ -1172,10 +1172,31 @@ fn deferred_notify_wait_and_dispatch(
     loop {
         std::thread::sleep(std::time::Duration::from_millis(100));
 
-        // Check timeout
-        if let Some(timeout) = timeout
-            && start_time.elapsed() > timeout
-        {
+        // Check timeout, respecting EXTEND_TIMEOUT_USEC if set.
+        let timed_out = if let Some(timeout) = timeout {
+            // Check if the service sent EXTEND_TIMEOUT_USEC
+            if let Ok(ri) = run_info.try_read()
+                && let Some(unit) = ri.unit_table.get(&id)
+                && let Specific::Service(svc) = &unit.specific
+            {
+                let state = svc.state.read_poisoned();
+                match (
+                    state.srvc.extend_timeout_usec,
+                    state.srvc.extend_timeout_timestamp,
+                ) {
+                    (Some(usec), Some(ts)) => {
+                        let ext_dur = std::time::Duration::from_micros(usec);
+                        ts.elapsed() > ext_dur
+                    }
+                    _ => start_time.elapsed() > timeout,
+                }
+            } else {
+                start_time.elapsed() > timeout
+            }
+        } else {
+            false
+        };
+        if timed_out {
             warn!(
                 "deferred_notify_wait: {} timed out after {:?} waiting for READY=1",
                 name, timeout
