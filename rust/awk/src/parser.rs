@@ -68,9 +68,24 @@ impl Parser {
 
     fn syntax_error_at_current(&self) -> ! {
         let pos = self.pos.min(self.token_lines.len().saturating_sub(1));
+        // If at Eof or Newline, back up to the last meaningful token
+        let mut pos = pos;
+        while pos > 0
+            && matches!(
+                self.tokens.get(pos),
+                Some(Token::Eof) | Some(Token::Newline) | None
+            )
+        {
+            pos -= 1;
+        }
         let line = self.token_lines.get(pos).copied().unwrap_or(1);
         let col = self.token_cols.get(pos).copied().unwrap_or(1);
-        if let Some(src) = self.source_lines.get(line.saturating_sub(1)) {
+        // Try current line, fall back to last source line (for EOF errors)
+        let src = self
+            .source_lines
+            .get(line.saturating_sub(1))
+            .or_else(|| self.source_lines.last());
+        if let Some(src) = src {
             eprintln!("awk: {src}");
             eprintln!("awk: {:>width$} syntax error", "^", width = col);
         } else {
