@@ -32,6 +32,11 @@ pkgs.runCommand "rust-sed-test-${name}" {
   mkdir -p "$SED_SRC/sed"
   ln -s "$rustSed/bin/sed" "$SED_SRC/sed/sed"
 
+  # Also create sed symlink in /tmp/sed/ for tests that use ../sed/sed
+  # from temp dirs created in /tmp by init.sh's mktempd_
+  mkdir -p /tmp/sed
+  ln -s "$rustSed/bin/sed" /tmp/sed/sed
+
   cd "$SED_SRC"
 
   # Set up TESTS_ENVIRONMENT variables (from testsuite/local.mk)
