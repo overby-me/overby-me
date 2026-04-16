@@ -503,7 +503,10 @@ pub fn format_g_alt(n: f64, prec: usize, upper: bool) -> String {
         return if n < 0.0 { format!("-{s}") } else { s.to_string() };
     }
     if n == 0.0 {
-        return format!("0.{:0>width$}", "", width = prec.saturating_sub(1).max(1));
+        if prec <= 1 {
+            return "0.".to_string();
+        }
+        return format!("0.{:0>width$}", "", width = prec - 1);
     }
     let exp = n.abs().log10().floor() as i32;
     if exp >= -(prec as i32) && exp < prec as i32 {
