@@ -213,6 +213,7 @@ pub struct Options {
     pub unbuffered: bool,   // -u
     pub null_data: bool,    // -z
     pub separate: bool,     // -s
-    pub sandbox: bool,      // --sandbox
-    pub line_length: usize, // -l N (default line width for `l` command)
+    pub sandbox: bool,          // --sandbox
+    pub follow_symlinks: bool,  // --follow-symlinks
+    pub line_length: usize,     // -l N (default line width for `l` command)
 }

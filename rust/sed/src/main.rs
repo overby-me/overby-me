@@ -42,6 +42,28 @@ fn print_usage(out: &mut dyn io::Write, full: bool) {
     }
 }
 
+fn resolve_symlinks(path: &str) -> String {
+    let mut current = std::path::PathBuf::from(path);
+    for _ in 0..40 {
+        // limit to prevent infinite loops
+        match std::fs::read_link(&current) {
+            Ok(target) => {
+                if target.is_relative() {
+                    if let Some(parent) = current.parent() {
+                        current = parent.join(&target);
+                    } else {
+                        current = target;
+                    }
+                } else {
+                    current = target;
+                }
+            }
+            Err(_) => break, // not a symlink or error
+        }
+    }
+    current.to_string_lossy().into_owned()
+}
+
 fn read_script_file(path: &str) -> Result<String, String> {
     if path == "-" {
         let mut buf = String::new();
@@ -68,6 +90,7 @@ fn parse_options() -> Options {
         null_data: false,
         separate: false,
         sandbox: false,
+        follow_symlinks: false,
         line_length: 70,
     };
 
@@ -154,7 +177,7 @@ fn parse_options() -> Options {
                 i += 1;
             }
             "--follow-symlinks" => {
-                // Accepted but ignored (Linux-only GNU extension)
+                opts.follow_symlinks = true;
                 i += 1;
             }
             "-l" => {
@@ -356,9 +379,26 @@ fn main() {
             process::exit(2);
         }
         for file in &opts.files {
-            let content = match std::fs::read_to_string(file) {
+            let actual_read = if opts.follow_symlinks {
+                resolve_symlinks(file)
+            } else {
+                file.clone()
+            };
+            let content = match std::fs::read_to_string(&actual_read) {
                 Ok(c) => c,
                 Err(e) => {
+                    if opts.follow_symlinks
+                        && (!std::path::Path::new(file).exists()
+                            || e.raw_os_error() == Some(40))
+                    {
+                        let msg = fmt_io_err(&e);
+                        if msg.is_empty() {
+                            eprintln!("sed: couldn't readlink {file}:");
+                        } else {
+                            eprintln!("sed: couldn't readlink {file}: {msg}");
+                        }
+                        process::exit(4);
+                    }
                     eprintln!("sed: {file}: {}", fmt_io_err(&e));
                     continue;
                 }
@@ -378,7 +418,11 @@ fn main() {
 
             // Each file gets a fresh engine in in-place mode
             let mut engine = Engine::new(commands.clone(), quiet, posix, opts.sandbox, opts.line_length);
-            engine.current_filename = Some(file.clone());
+            engine.current_filename = Some(if opts.follow_symlinks {
+                resolve_symlinks(file)
+            } else {
+                file.clone()
+            });
             let reader = io::BufReader::new(content.as_bytes());
             let mut output = Vec::new();
             let code = engine.run(reader, &mut output).unwrap_or_else(|e| {
@@ -411,16 +455,41 @@ fn main() {
                 io::stdin().read_to_string(&mut buf).unwrap_or_default();
                 buf
             } else {
-                match std::fs::read_to_string(file) {
+                // With --follow-symlinks, resolve before reading
+                let actual_file = if opts.follow_symlinks {
+                    resolve_symlinks(file)
+                } else {
+                    file.clone()
+                };
+                match std::fs::read_to_string(&actual_file) {
                     Ok(c) => c,
                     Err(e) => {
+                        if opts.follow_symlinks {
+                            let msg = fmt_io_err(&e);
+                            // Non-existent file or symlink loop
+                            if !std::path::Path::new(file).exists()
+                                || e.raw_os_error() == Some(40)
+                            {
+                                // 40 = ELOOP on Linux
+                                if msg.is_empty() {
+                                    eprintln!("sed: couldn't readlink {file}:");
+                                } else {
+                                    eprintln!("sed: couldn't readlink {file}: {msg}");
+                                }
+                                process::exit(4);
+                            }
+                        }
                         eprintln!("sed: {file}: {}", fmt_io_err(&e));
                         continue;
                     }
                 }
             };
 
-            engine.current_filename = Some(file.clone());
+            engine.current_filename = Some(if opts.follow_symlinks {
+                resolve_symlinks(file)
+            } else {
+                file.clone()
+            });
             let reader = io::BufReader::new(content.as_bytes());
             if let Err(e) = engine.run(reader, &mut out) {
                 eprintln!("sed: {file}: {}", fmt_io_err(&e));
