@@ -2,9 +2,9 @@
 
 ## Current Status
 
-**102/119 tests passing** (86%) — from the GNU grep 3.12 test suite.
+**105/119 tests passing** (88%) — from the GNU grep 3.12 test suite.
 
-### Remaining failure categories (~17 tests)
+### Remaining failure categories (~14 tests)
 
 - **BRE/ERE regex edge cases (~3)**: Spencer test failures (literal `*` at start, bad interval expressions)
 - **PCRE edge cases (~4)**: `-P` with `-w` on non-word patterns, `-P` with `-z`, PCRE backtrack limit, PCRE context with `-z -o`
@@ -38,6 +38,11 @@
 - Formatted regex error messages to match GNU grep style
 - Major BRE/ERE regex conformance: literal `*` at start, interval validation,
   bracket expression `\` handling, unmatched paren detection, leading `*` in ERE
+- POSIX character class validation (exit 2 for invalid names)
+- Escape `[` inside bracket expressions for regex crate compatibility
+- Input-is-output detection to prevent infinite loops
+- Full glob matching for --include/--exclude (*, ?, [...])
+- Added --directories/-d option
 
 Tests compare rust-grep output against the GNU grep test suite's expected behavior in a Nix sandbox.
 
@@ -293,7 +298,7 @@ Fall back to `fancy-regex` when BRE/ERE patterns contain backreferences:
 
 ## Test Inventory
 
-### Passing (102 tests)
+### Passing (105 tests)
 
 100k-entries, backref-alt, backref-multibyte-slow, backref-word, backslash-dot,
 backslash-s-and-repetition-operators, backslash-s-vs-invalid-multibyte, big-hole, big-match,
@@ -310,16 +315,16 @@ mb-dot-newline, mb-non-UTF8-overrun, mb-non-UTF8-word-boundary, multibyte-white-
 multiple-begin-or-end-line, no-perl, options, pcre-ascii-digits, pcre-count,
 pcre-infloop, pcre-invalid-utf8-infloop, pcre-invalid-utf8-input, pcre-jitstack, pcre-o,
 pcre-utf8, pcre-utf8-bug224, pcre-utf8-w, pcre-wx-backref, pcre-z, prefix-of-multibyte,
-proc, r-dot, repetition-overflow, reversed-range-endpoints, sjis-mb, skip-device,
-spencer1, status, surrogate-pair,
+proc, r-dot, repetition-overflow, reversed-range-endpoints, sjis-mb, skip-device, spencer1,
+status, surrogate-pair,
 surrogate-search, triple-backref, turkish-eyes, turkish-I, turkish-I-without-dot,
 two-chars, two-files, unibyte-binary, unibyte-bracket-expr, unibyte-negated-circumflex,
 utf8-bracket, version-pcre, word-delim-multibyte, word-multi-file, word-multibyte,
 y2038-vs-32-bit, z-anchor-newline
 
-### Failing (17 tests)
+### Failing (14 tests)
 
-backref, c-locale, color-colors, ere, high-bit-range,
+backref, c-locale, color-colors, high-bit-range,
 in-eq-out-infloop, include-exclude, max-count-overread, null-byte, pcre,
 pcre-abort, pcre-context, pcre-w, posix-bracket,
 stack-overflow, warn-char-classes, write-error-msg
