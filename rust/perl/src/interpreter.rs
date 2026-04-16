@@ -47,6 +47,8 @@ pub struct Interpreter {
     package: String,
     // Exit code
     pub exit_code: i32,
+    // Last expression value (for implicit sub return)
+    last_expr_val: Value,
     // Saved $@ for eval
     eval_error: String,
     // Saved local variables for restore
@@ -100,6 +102,7 @@ impl Interpreter {
             end_blocks: Vec::new(),
             package: "main".to_string(),
             exit_code: 0,
+            last_expr_val: Value::Undef,
             eval_error: String::new(),
             local_saves: Vec::new(),
             local_array_saves: Vec::new(),
@@ -160,7 +163,7 @@ impl Interpreter {
             Stmt::Nop => Flow::None,
 
             Stmt::Expr(expr) => {
-                self.eval_expr(expr);
+                self.last_expr_val = self.eval_expr(expr);
                 Flow::None
             }
 
@@ -1526,32 +1529,33 @@ impl Interpreter {
         // Set @_ to args
         self.set_array("_", args.to_vec());
 
-        let mut last_val = Value::Undef;
+        // Save and reset last_expr_val
+        let saved_last = std::mem::replace(&mut self.last_expr_val, Value::Undef);
+
+        let mut return_val = None;
         for stmt in body {
             match self.exec_stmt(stmt) {
                 Flow::Return(v) => {
-                    last_val = v;
+                    return_val = Some(v);
                     break;
                 }
                 Flow::Die(msg) => {
+                    self.last_expr_val = saved_last;
                     self.restore_locals();
                     self.pop_scope();
                     self.set_global_var("@", Value::Str(msg.clone()));
                     return Value::Undef;
                 }
-                Flow::None => {
-                    // Track last expression value
-                    if let Stmt::Expr(e) = stmt {
-                        last_val = self.eval_expr(e);
-                    }
-                }
+                Flow::None => {}
                 _ => {}
             }
         }
 
+        let result = return_val.unwrap_or_else(|| self.last_expr_val.clone());
+        self.last_expr_val = saved_last;
         self.restore_locals();
         self.pop_scope();
-        last_val
+        result
     }
 
     fn restore_locals(&mut self) {

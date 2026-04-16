@@ -1178,6 +1178,26 @@ impl Parser {
                 let expr = self.parse_unary();
                 Expr::Ref(Box::new(expr))
             }
+            Token::BitAnd => {
+                // &func() call syntax
+                self.pos += 1;
+                if let Token::Ident(name) = self.tok() {
+                    let name = name.clone();
+                    self.pos += 1;
+                    let args = if self.eat(&Token::LParen) {
+                        let a = self.parse_list_expr();
+                        self.expect(&Token::RParen);
+                        a
+                    } else {
+                        Vec::new()
+                    };
+                    Expr::Call(name, args)
+                } else {
+                    // Regular bitwise-and as unary (take address)
+                    let expr = self.parse_unary();
+                    Expr::Ref(Box::new(expr))
+                }
+            }
             Token::Defined => {
                 self.pos += 1;
                 let has_paren = self.eat(&Token::LParen);
