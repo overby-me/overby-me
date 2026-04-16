@@ -36,6 +36,7 @@ pub struct Parser<'a> {
     cmd_start: usize,
     pub sandbox: bool,
     pub posix: bool,
+    pub is_last_script: bool,
     block_depth: usize,
 }
 
@@ -50,6 +51,7 @@ impl<'a> Parser<'a> {
             cmd_start: 0,
             sandbox: false,
             posix: false,
+            is_last_script: true,
             block_depth: 0,
         }
     }
@@ -552,7 +554,11 @@ impl<'a> Parser<'a> {
             b'a' | b'i' | b'c' => {
                 let next = self.peek();
                 if next.is_none() {
-                    return Err(self.err("expected \\ after `a', `c' or `i'"));
+                    if self.is_last_script {
+                        return Err(self.err("expected \\ after `a', `c' or `i'"));
+                    } else {
+                        return Err(self.err("incomplete command"));
+                    }
                 }
                 if self.posix && next != Some(b'\\') {
                     return Err(self.err_at(
