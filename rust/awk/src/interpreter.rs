@@ -1996,8 +1996,8 @@ impl Interpreter {
 
                     result
                 } else {
-                    eprintln!("awk: unknown function {name}");
-                    Value::Uninitialized
+                    eprintln!("awk: error: attempt to use non-function `{name}' in function call");
+                    std::process::exit(1);
                 }
             }
         }

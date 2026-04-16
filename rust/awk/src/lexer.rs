@@ -407,6 +407,7 @@ impl Lexer {
                     | Token::CaretAssign
                     | Token::Colon
                     | Token::Question
+                    | Token::Dollar
             )
         } else {
             true // beginning of input

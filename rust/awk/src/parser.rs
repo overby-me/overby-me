@@ -956,8 +956,17 @@ impl Parser {
             }
             Token::Ident(name) => {
                 self.advance();
-                if matches!(self.peek(), Token::LParen) && self.function_names.contains(&name) {
-                    // Function call (only if name is a known function)
+                if matches!(self.peek(), Token::LParen)
+                    && (self.function_names.contains(&name) || {
+                        // Check if ( is adjacent (no whitespace) - then it's a function call
+                        // even if the name isn't a known function
+                        let cur_col = self.token_cols.get(self.pos).copied().unwrap_or(0);
+                        let prev_end =
+                            self.token_cols.get(self.pos - 1).copied().unwrap_or(0) + name.len();
+                        cur_col == prev_end
+                    })
+                {
+                    // Function call
                     self.advance();
                     let mut args = Vec::new();
                     self.skip_terminators(); // skip newlines before first arg
