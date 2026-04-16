@@ -461,6 +461,7 @@ impl Parser {
                 args.push(first);
                 while matches!(self.peek(), Token::Comma) {
                     self.advance();
+                    self.skip_terminators(); // skip newlines between args
                     args.push(self.parse_expr());
                 }
                 self.expect(&Token::RParen);
