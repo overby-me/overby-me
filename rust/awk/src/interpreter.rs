@@ -30,6 +30,8 @@ pub struct Interpreter {
     input_line_idx: usize,
     /// Currently active function parameter names (for error messages)
     current_params: Vec<String>,
+    /// Parameters that have been used as scalars in current function call
+    scalar_params: std::collections::HashSet<String>,
 }
 
 impl Interpreter {
@@ -67,6 +69,7 @@ impl Interpreter {
             input_lines: Vec::new(),
             input_line_idx: 0,
             current_params: Vec::new(),
+            scalar_params: std::collections::HashSet::new(),
         }
     }
 
@@ -1095,6 +1098,16 @@ impl Interpreter {
                 self.set_field(idx, val);
             }
             Expr::ArrayRef(name, indices) => {
+                // Check scalar-as-array conflict
+                if !self.arrays.contains_key(name) && self.scalar_params.contains(name) {
+                    let kind = if self.current_params.contains(&name.to_string()) {
+                        "scalar parameter"
+                    } else {
+                        "scalar"
+                    };
+                    eprintln!("awk: fatal: attempt to use {kind} `{name}' as an array");
+                    std::process::exit(2);
+                }
                 let vals: Vec<Value> = indices.iter().map(|i| self.eval_expr(i)).collect();
                 let key = self.array_key(&vals);
                 self.set_array(name, &key, val);
@@ -1123,6 +1136,10 @@ impl Interpreter {
                     eprintln!("or used as a variable or an array");
                     std::process::exit(1);
                 }
+                // Track parameter used as scalar
+                if self.current_params.contains(&name.to_string()) {
+                    self.scalar_params.insert(name.to_string());
+                }
                 self.get_var(name)
             }
             Expr::FieldRef(idx_expr) => {
@@ -1138,18 +1155,20 @@ impl Interpreter {
                     eprintln!("or used as a variable or an array");
                     std::process::exit(1);
                 }
-                // Check scalar-as-array
-                if !self.arrays.contains_key(name)
-                    && self.globals.contains_key(name)
-                    && !matches!(self.globals.get(name), Some(Value::Uninitialized))
-                {
-                    let kind = if self.current_params.contains(&name.to_string()) {
-                        "scalar parameter"
-                    } else {
-                        "scalar"
-                    };
-                    eprintln!("awk: fatal: attempt to use {kind} `{name}' as an array");
-                    std::process::exit(2);
+                // Check scalar-as-array (including params tracked as scalar)
+                if !self.arrays.contains_key(name) {
+                    let is_scalar_param = self.scalar_params.contains(name);
+                    let is_scalar_global = self.globals.contains_key(name)
+                        && !matches!(self.globals.get(name), Some(Value::Uninitialized));
+                    if is_scalar_param || is_scalar_global {
+                        let kind = if self.current_params.contains(&name.to_string()) {
+                            "scalar parameter"
+                        } else {
+                            "scalar"
+                        };
+                        eprintln!("awk: fatal: attempt to use {kind} `{name}' as an array");
+                        std::process::exit(2);
+                    }
                 }
                 let vals: Vec<Value> = indices.iter().map(|i| self.eval_expr(i)).collect();
                 let key = self.array_key(&vals);
@@ -1975,11 +1994,13 @@ impl Interpreter {
 
                     let saved_params =
                         std::mem::replace(&mut self.current_params, func.params.clone());
+                    let saved_scalar_params = std::mem::take(&mut self.scalar_params);
                     let result = match self.exec_stmts(&func.body) {
                         ControlFlow::Return(val) => val,
                         _ => Value::Uninitialized,
                     };
                     self.current_params = saved_params;
+                    self.scalar_params = saved_scalar_params;
 
                     // Save param state BEFORE restoring scope (for copy-back)
                     let mut arr_copyback: Vec<(String, Option<HashMap<String, Value>>)> =
