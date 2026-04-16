@@ -48,8 +48,9 @@ struct Options {
     // Misc
     label: String, // --label
     color: ColorMode,
-    null_data: bool,   // -z
-    initial_tab: bool, // -T
+    null_data: bool,     // -z
+    initial_tab: bool,   // -T
+    text_mode: bool,     // -a (treat binary as text)
 }
 
 #[derive(Clone, PartialEq)]
@@ -96,6 +97,7 @@ impl Default for Options {
             color: ColorMode::Auto,
             null_data: false,
             initial_tab: false,
+            text_mode: false,
         }
     }
 }
@@ -160,7 +162,20 @@ fn parse_args() -> Options {
                 }
                 "byte-offset" => opts.byte_offset = true,
                 "null" => opts.null_separator = true,
+                "text" => opts.text_mode = true,
                 "initial-tab" => opts.initial_tab = true,
+                _ if long.starts_with("binary-files=") => {
+                    let val = long.strip_prefix("binary-files=").unwrap();
+                    match val {
+                        "text" => opts.text_mode = true,
+                        "without-match" => {} // suppress binary matches
+                        _ => {}               // "binary" is the default
+                    }
+                }
+                _ if long.starts_with("devices=") => {
+                    // --devices=ACTION: skip, read (default)
+                    // Silently accept for compatibility
+                }
                 "null-data" => opts.null_data = true,
                 "recursive" => opts.recursive = true,
                 _ if long.starts_with("regexp=") => {
@@ -271,6 +286,16 @@ fn parse_args() -> Options {
                     }
                     'b' => opts.byte_offset = true,
                     'Z' => opts.null_separator = true,
+                    'a' => opts.text_mode = true,
+                    'D' => {
+                        // -D ACTION: skip or read device files
+                        let rest: String = chars[j + 1..].iter().collect();
+                        if rest.is_empty() {
+                            i += 1; // consume next arg
+                        }
+                        j = chars.len();
+                        continue;
+                    }
                     'T' => opts.initial_tab = true,
                     'z' => opts.null_data = true,
                     'r' | 'R' => opts.recursive = true,
@@ -946,7 +971,7 @@ fn grep_reader<R: BufRead>(
 
     // Binary file detection: peek at the first chunk for NUL bytes
     let mut is_binary = false;
-    if !opts.null_data {
+    if !opts.null_data && !opts.text_mode {
         let buf = reader.fill_buf().unwrap_or(&[]);
         if buf.contains(&0) {
             is_binary = true;
@@ -1042,7 +1067,7 @@ fn grep_reader<R: BufRead>(
         let line_len = line.len() + 1; // +1 for newline
 
         // Check for binary content in this line
-        if !is_binary && !opts.null_data && line.contains('\0') {
+        if !is_binary && !opts.null_data && !opts.text_mode && line.contains('\0') {
             is_binary = true;
         }
 
