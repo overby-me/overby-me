@@ -232,7 +232,8 @@ pub fn sprintf_impl_with_convfmt(vals: &[Value], convfmt: &str) -> String {
                 'f' | 'F' => {
                     let n = val.to_num();
                     if n.is_nan() {
-                        if conv == 'F' { "NAN".to_string() } else { "nan".to_string() }
+                        let s = if conv == 'F' { "NAN" } else { "nan" };
+                        if n.is_sign_negative() { format!("-{s}") } else { s.to_string() }
                     } else if n.is_infinite() {
                         let s = if conv == 'F' { "INF" } else { "inf" };
                         if n < 0.0 { format!("-{s}") } else { s.to_string() }
@@ -435,7 +436,8 @@ pub fn gensub_replace(replacement: &str, caps: &regex::Captures) -> String {
 
 pub fn format_scientific(n: f64, prec: usize, upper: bool) -> String {
     if n.is_nan() {
-        return if upper { "NAN".to_string() } else { "nan".to_string() };
+        let s = if upper { "NAN" } else { "nan" };
+        return if n.is_sign_negative() { format!("-{s}") } else { s.to_string() };
     }
     if n.is_infinite() {
         let s = if upper { "INF" } else { "inf" };
@@ -460,7 +462,8 @@ pub fn format_scientific(n: f64, prec: usize, upper: bool) -> String {
 
 pub fn format_g(n: f64, prec: usize, upper: bool) -> String {
     if n.is_nan() {
-        return if upper { "NAN".to_string() } else { "nan".to_string() };
+        let s = if upper { "NAN" } else { "nan" };
+        return if n.is_sign_negative() { format!("-{s}") } else { s.to_string() };
     }
     if n.is_infinite() {
         let s = if upper { "INF" } else { "inf" };
@@ -496,7 +499,8 @@ pub fn format_g(n: f64, prec: usize, upper: bool) -> String {
 /// Like format_g but with # flag: don't strip trailing zeros, always show decimal point
 pub fn format_g_alt(n: f64, prec: usize, upper: bool) -> String {
     if n.is_nan() {
-        return if upper { "NAN".to_string() } else { "nan".to_string() };
+        let s = if upper { "NAN" } else { "nan" };
+        return if n.is_sign_negative() { format!("-{s}") } else { s.to_string() };
     }
     if n.is_infinite() {
         let s = if upper { "INF" } else { "inf" };

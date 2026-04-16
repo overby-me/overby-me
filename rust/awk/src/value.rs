@@ -105,8 +105,21 @@ pub fn parse_num(s: &str) -> f64 {
     if s.is_empty() {
         return 0.0;
     }
+    // Handle special values: nan, inf, -nan, -inf
+    let lower = s.to_lowercase();
+    if lower == "nan" || lower == "+nan" {
+        return f64::NAN;
+    }
+    if lower == "-nan" {
+        return -f64::NAN;
+    }
+    if lower == "inf" || lower == "+inf" || lower == "infinity" || lower == "+infinity" {
+        return f64::INFINITY;
+    }
+    if lower == "-inf" || lower == "-infinity" {
+        return f64::NEG_INFINITY;
+    }
     // Note: hex (0x...) is NOT parsed here — only in lexer for numeric literals.
-    // POSIX awk does not convert hex strings to numbers (gawk requires --non-decimal-data).
     let chars: Vec<char> = s.chars().collect();
 
     // Parse as much of the leading part as possible
@@ -144,7 +157,7 @@ pub fn parse_num(s: &str) -> f64 {
 
 pub fn format_number(n: f64) -> String {
     if n.is_nan() {
-        return "nan".to_string();
+        return if n.is_sign_negative() { "-nan".to_string() } else { "nan".to_string() };
     }
     if n.is_infinite() {
         return if n > 0.0 {
