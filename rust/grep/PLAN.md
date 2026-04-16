@@ -2,7 +2,7 @@
 
 ## Current Status
 
-**114/119 tests passing** (96%) — from the GNU grep 3.12 test suite.
+**115/119 tests passing** (97%) — from the GNU grep 3.12 test suite.
 
 - **PCRE (~1)**: `pcre-abort` — fancy-regex doesn't hit backtrack limit on pathological patterns
 - **I/O (~3)**: `in-eq-out-infloop` (works locally, nix sandbox issue), `max-count-overread` (stdin byte seeking), `write-error-msg` (/dev/full needed)
@@ -51,6 +51,8 @@
 - Ahead-peek binary detection (catches late NUL bytes)
 - --directories=skip, --exclude-dir path matching with ./ stripping
 - Prevent stdin fallback when file args were given but all excluded
+- Ahead-peek binary detection for late NUL bytes in files
+- lseek stdin after -m to prevent overread by subsequent pipeline processes
 
 Tests compare rust-grep output against the GNU grep test suite's expected behavior in a Nix sandbox.
 
@@ -306,7 +308,7 @@ Fall back to `fancy-regex` when BRE/ERE patterns contain backreferences:
 
 ## Test Inventory
 
-### Passing (114 tests)
+### Passing (115 tests)
 
 100k-entries, backref-alt, backref-multibyte-slow, backref-word, backslash-dot,
 backslash-s-and-repetition-operators, backslash-s-vs-invalid-multibyte, big-hole, big-match,
@@ -330,9 +332,9 @@ two-chars, two-files, unibyte-binary, unibyte-bracket-expr, unibyte-negated-circ
 utf8-bracket, version-pcre, warn-char-classes, word-delim-multibyte, word-multi-file,
 word-multibyte, y2038-vs-32-bit, z-anchor-newline
 
-### Failing (3 tests)
+### Failing (2 tests)
 
-max-count-overread, pcre-abort, write-error-msg
+pcre-abort, write-error-msg
 
 ### Not fully passing (2 tests)
 
