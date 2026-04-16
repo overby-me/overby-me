@@ -526,11 +526,13 @@ impl Interpreter {
                     );
                     std::process::exit(2);
                 }
-                let keys: Vec<String> = self
+                let mut keys: Vec<String> = self
                     .arrays
                     .get(array)
                     .map(|a| a.keys().cloned().collect())
                     .unwrap_or_default();
+                // Sort keys for deterministic for-in ordering
+                keys.sort();
                 for key in keys {
                     self.set_var(var, Value::Str(key));
                     match self.exec_stmt(body) {
