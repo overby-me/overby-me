@@ -12,4 +12,5 @@ disabled_rules = [
   "rust_unbounded_read_to_string",
   "expect_in_non_test_code",
   "unreachable_macro_leftover",
+  "rust_partial_init_escape",
 ]

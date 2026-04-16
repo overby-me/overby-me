@@ -49,6 +49,8 @@ pub struct Interpreter {
     pub exit_code: i32,
     // Last expression value (for implicit sub return)
     last_expr_val: Value,
+    // Last list value (for sub returning list in list context)
+    last_list_val: Option<Vec<Value>>,
     // Saved $@ for eval
     eval_error: String,
     // Saved local variables for restore
@@ -111,6 +113,7 @@ impl Interpreter {
             package: "main".to_string(),
             exit_code: 0,
             last_expr_val: Value::Undef,
+            last_list_val: None,
             eval_error: String::new(),
             local_saves: Vec::new(),
             local_array_saves: Vec::new(),
@@ -172,7 +175,32 @@ impl Interpreter {
             Stmt::Nop => Flow::None,
 
             Stmt::Expr(expr) => {
-                self.last_expr_val = self.eval_expr(expr);
+                // Check if expression produces a list (for sub list-context return)
+                match expr {
+                    Expr::ArrayLit(items) => {
+                        let list: Vec<Value> =
+                            items.iter().flat_map(|item| self.eval_list(item)).collect();
+                        if let Some(last) = list.last() {
+                            self.last_expr_val = last.clone();
+                        } else {
+                            self.last_expr_val = Value::Undef;
+                        }
+                        self.last_list_val = Some(list);
+                    }
+                    Expr::ArrayVar(name) => {
+                        let list = self.get_array(name);
+                        if let Some(last) = list.last() {
+                            self.last_expr_val = last.clone();
+                        } else {
+                            self.last_expr_val = Value::Undef;
+                        }
+                        self.last_list_val = Some(list);
+                    }
+                    _ => {
+                        self.last_expr_val = self.eval_expr(expr);
+                        self.last_list_val = None;
+                    }
+                }
                 Flow::None
             }
 
@@ -310,29 +338,55 @@ impl Interpreter {
                 body,
                 label,
             } => {
+                // Detect if iterating over an array variable (for aliasing)
+                let source_array = match list {
+                    Expr::ArrayVar(name) => Some(name.clone()),
+                    _ => None,
+                };
                 let items = self.eval_list(list);
+
+                // Save the loop variable's current value for restoration
+                let saved_var = self.get_var(var);
+
                 self.push_scope();
-                for item in items {
+                for (i, item) in items.into_iter().enumerate() {
                     self.set_var(var, item);
-                    match self.exec_stmts(body) {
+                    let flow = self.exec_stmts(body);
+
+                    // If iterating over an array, write modifications back
+                    if let Some(ref arr_name) = source_array {
+                        let modified_val = self.get_var(var);
+                        let mut arr = self.get_array(arr_name);
+                        if i < arr.len() {
+                            arr[i] = modified_val;
+                            self.set_array(arr_name, arr);
+                        }
+                    }
+
+                    match flow {
                         Flow::Last(l) if l.is_none() || l == *label => break,
                         Flow::Next(l) if l.is_none() || l == *label => continue,
                         Flow::Return(v) => {
                             self.pop_scope();
+                            self.set_var(var, saved_var);
                             return Flow::Return(v);
                         }
                         Flow::Die(msg) => {
                             self.pop_scope();
+                            self.set_var(var, saved_var);
                             return Flow::Die(msg);
                         }
                         Flow::Exit(code) => {
                             self.pop_scope();
+                            self.set_var(var, saved_var);
                             return Flow::Exit(code);
                         }
                         _ => {}
                     }
                 }
                 self.pop_scope();
+                // Restore the loop variable to its pre-loop value
+                self.set_var(var, saved_var);
                 Flow::None
             }
 
@@ -1397,17 +1451,8 @@ impl Interpreter {
                 let sep = self.eval_expr(&args[0]).to_str();
                 let items: Vec<String> = args[1..]
                     .iter()
-                    .flat_map(|a| {
-                        let v = self.eval_expr(a);
-                        match a {
-                            Expr::ArrayVar(name) => self
-                                .get_array(name)
-                                .iter()
-                                .map(|v| v.to_str())
-                                .collect::<Vec<_>>(),
-                            _ => vec![v.to_str()],
-                        }
-                    })
+                    .flat_map(|a| self.eval_list(a))
+                    .map(|v| v.to_str())
                     .collect();
                 Value::Str(items.join(&sep))
             }
@@ -1787,8 +1832,9 @@ impl Interpreter {
         // Set @_ to args
         self.set_array("_", args.to_vec());
 
-        // Save and reset last_expr_val
+        // Save and reset last_expr_val and last_list_val
         let saved_last = std::mem::replace(&mut self.last_expr_val, Value::Undef);
+        let saved_list = std::mem::take(&mut self.last_list_val);
 
         let mut return_val = None;
         for stmt in body {
@@ -1799,6 +1845,7 @@ impl Interpreter {
                 }
                 Flow::Die(msg) => {
                     self.last_expr_val = saved_last;
+                    self.last_list_val = saved_list;
                     self.restore_locals();
                     self.pop_scope();
                     self.set_global_var("@", Value::Str(msg.clone()));
@@ -1811,6 +1858,55 @@ impl Interpreter {
 
         let result = return_val.unwrap_or_else(|| self.last_expr_val.clone());
         self.last_expr_val = saved_last;
+        self.last_list_val = saved_list;
+        self.restore_locals();
+        self.pop_scope();
+        result
+    }
+
+    /// Call a sub and return the list result (for list context)
+    fn call_sub_list(&mut self, body: &[Stmt], args: &[Value]) -> Vec<Value> {
+        self.push_scope();
+        self.local_saves.push(Vec::new());
+        self.local_array_saves.push(Vec::new());
+
+        // Set @_ to args
+        self.set_array("_", args.to_vec());
+
+        // Save and reset last_expr_val and last_list_val
+        let saved_last = std::mem::replace(&mut self.last_expr_val, Value::Undef);
+        let saved_list = std::mem::take(&mut self.last_list_val);
+
+        let mut return_val = None;
+        for stmt in body {
+            match self.exec_stmt(stmt) {
+                Flow::Return(v) => {
+                    return_val = Some(v);
+                    break;
+                }
+                Flow::Die(msg) => {
+                    self.last_expr_val = saved_last;
+                    self.last_list_val = saved_list;
+                    self.restore_locals();
+                    self.pop_scope();
+                    self.set_global_var("@", Value::Str(msg.clone()));
+                    return vec![Value::Undef];
+                }
+                Flow::None => {}
+                _ => {}
+            }
+        }
+
+        let result = if let Some(v) = return_val {
+            vec![v]
+        } else if let Some(list) = self.last_list_val.take() {
+            list
+        } else {
+            vec![self.last_expr_val.clone()]
+        };
+
+        self.last_expr_val = saved_last;
+        self.last_list_val = saved_list;
         self.restore_locals();
         self.pop_scope();
         result
@@ -2093,8 +2189,22 @@ impl Interpreter {
                         }
                     }
                     _ => {
-                        let val = self.eval_call(name, args);
-                        vec![val]
+                        // For user-defined subs, return list in list context
+                        if let Some((_params, body)) = self.subs.get(name.as_str()).cloned() {
+                            let arg_vals: Vec<Value> =
+                                args.iter().flat_map(|a| self.eval_list(a)).collect();
+                            self.call_sub_list(&body, &arg_vals)
+                        } else {
+                            let qualified = format!("{}::{}", self.package, name);
+                            if let Some((_params, body)) = self.subs.get(&qualified).cloned() {
+                                let arg_vals: Vec<Value> =
+                                    args.iter().flat_map(|a| self.eval_list(a)).collect();
+                                self.call_sub_list(&body, &arg_vals)
+                            } else {
+                                let val = self.eval_call(name, args);
+                                vec![val]
+                            }
+                        }
                     }
                 }
             }
