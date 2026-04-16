@@ -54,6 +54,9 @@ View failure: `nix log .#checks.x86_64-linux.rust-sed-test-{name}`
 - `}` with address rejection
 - `a`/`c`/`i` at EOF detection
 - `!` position tracking for multiple `!` error
+- Block depth tracking for `}` context awareness
+- `}` with address rejection inside blocks
+- `v` version comparison against 4.9
 
 ---
 
@@ -79,7 +82,7 @@ These tests require processing non-UTF-8 binary data. Our engine uses `String` (
 
 **Tests:** compile-errors, compile-tests, recursive-escape-c
 
-- `compile-errors` — Remaining 5 sub-tests: `-f` file error format (sandbox issue), `q`/`Q` one-addr (sandbox issue), unmatched `{` char position (0 vs 2), extra chars after command (needs separator enforcement), incomplete `a`/`c`/`i` across `-e` boundaries
+- `compile-errors` — Remaining sub-tests: sandbox-related (2: `-f` error, `q`/`Q` one-addr work locally but not in nix), unmatched `{` char position (0 vs 2), extra chars after command (4: needs separator enforcement after `=`/`y`/`{}`/`l`), incomplete `a`/`c`/`i` across `-e` boundaries (3)
 - `compile-tests` — `s/[[:]]//'` (POSIX class `[:]` parsing edge case)
 
 ### Category 4: Test-specific issues (1 test)
