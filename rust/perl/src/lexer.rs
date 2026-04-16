@@ -1379,21 +1379,52 @@ impl Lexer {
                         s.push('\x02'); // placeholder for literal @
                         self.pos += 1;
                     }
-                    '0' => {
+                    '0'..='7' => {
+                        // Octal escape: \0, \012, \377, \400, etc.
+                        let mut oct = String::new();
+                        oct.push(self.ch());
                         self.pos += 1;
-                        if self.ch().is_ascii_digit() {
-                            let mut oct = String::new();
-                            oct.push('0');
-                            while self.pos < self.input.len()
-                                && self.ch().is_ascii_digit()
-                                && oct.len() < 3
-                            {
-                                oct.push(self.advance());
-                            }
-                            let v = u8::from_str_radix(&oct, 8).unwrap_or(0);
-                            s.push(v as char);
-                        } else {
+                        while self.pos < self.input.len()
+                            && self.ch() >= '0'
+                            && self.ch() <= '7'
+                            && oct.len() < 3
+                        {
+                            oct.push(self.advance());
+                        }
+                        if oct == "0"
+                            && (self.pos >= self.input.len() || self.ch() < '0' || self.ch() > '7')
+                        {
                             s.push('\0');
+                        } else {
+                            let v = u32::from_str_radix(&oct, 8).unwrap_or(0);
+                            if let Some(c) = char::from_u32(v) {
+                                s.push(c);
+                            }
+                        }
+                    }
+                    'o' => {
+                        // \o{NNN} octal escape
+                        self.pos += 1;
+                        if self.ch() == '{' {
+                            self.pos += 1;
+                            let mut oct = String::new();
+                            while self.pos < self.input.len() && self.ch() != '}' {
+                                if self.ch() != ' ' {
+                                    oct.push(self.advance());
+                                } else {
+                                    self.pos += 1;
+                                }
+                            }
+                            if self.ch() == '}' {
+                                self.pos += 1;
+                            }
+                            let v = u32::from_str_radix(&oct, 8).unwrap_or(0);
+                            if let Some(c) = char::from_u32(v) {
+                                s.push(c);
+                            }
+                        } else {
+                            s.push('\\');
+                            s.push('o');
                         }
                     }
                     'x' => {
@@ -1763,7 +1794,46 @@ fn process_escapes(s: &str) -> String {
                 '"' => result.push('"'),
                 '$' => result.push('$'),
                 '@' => result.push('@'),
-                '0' => result.push('\0'),
+                '0'..='7' => {
+                    let mut oct = String::new();
+                    oct.push(chars[i]);
+                    while i + 1 < chars.len()
+                        && chars[i + 1] >= '0'
+                        && chars[i + 1] <= '7'
+                        && oct.len() < 3
+                    {
+                        i += 1;
+                        oct.push(chars[i]);
+                    }
+                    if oct == "0" {
+                        result.push('\0');
+                    } else {
+                        let v = u32::from_str_radix(&oct, 8).unwrap_or(0);
+                        if let Some(c) = char::from_u32(v) {
+                            result.push(c);
+                        }
+                    }
+                }
+                'o' => {
+                    if i + 1 < chars.len() && chars[i + 1] == '{' {
+                        i += 2; // skip o{
+                        let mut oct = String::new();
+                        while i < chars.len() && chars[i] != '}' {
+                            if chars[i] != ' ' {
+                                oct.push(chars[i]);
+                            }
+                            i += 1;
+                        }
+                        // i now points at } or end
+                        let v = u32::from_str_radix(&oct, 8).unwrap_or(0);
+                        if let Some(c) = char::from_u32(v) {
+                            result.push(c);
+                        }
+                    } else {
+                        result.push('\\');
+                        result.push('o');
+                    }
+                }
                 'a' => result.push('\x07'),
                 'b' => result.push('\x08'),
                 'f' => result.push('\x0C'),
