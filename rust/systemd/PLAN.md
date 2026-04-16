@@ -191,7 +191,7 @@ All 23 udev tests fail because the C `udevadm` binary in the overlay lacks featu
 - [x] MEMORY_PRESSURE_WATCH env var for MemoryPressureWatch= directive
 - [x] ProtectControlGroupsEx= directive (no/yes/private/strict with cgroup namespace + mount)
 - [ ] Complete Type=notify lifecycle (STOPPING notification, Restart=on-abort after SIGABRT)
-- [ ] Implement PrivatePIDs= (PID namespace)
+- [x] PrivatePIDs= — PID namespace with /proc remount (already implemented, fixed stacked mount)
 - [ ] Implement OpenFile= directive
 - [ ] Implement ExtraFileDescriptors= directive
 - [ ] Implement runtime BindPaths= / BindReadOnlyPaths=
