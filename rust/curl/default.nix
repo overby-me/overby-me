@@ -150,23 +150,23 @@
       1 # HTTP GET
       2 # HTTP GET with user and password
       3 # HTTP POST with auth
-      7 # HTTP with cookie parser and header recording
-      10 # simple HTTP PUT from file
-      11 # simple HTTP Location following
+      7 # HTTP with cookie parser
+      10 # HTTP PUT from file
+      11 # HTTP Location following
       13 # HTTP GET with -i
       15 # --write-out test
-      22 # HTTP PUT with upload file
+      22 # HTTP PUT with upload
       28 # HTTP with -D dump-header
-      34 # HTTP with --head
-      35 # HTTP GET with custom header
-      47 # HTTP GET with custom Host
-      49 # HTTP with Expect: 100-continue
-      50 # HTTP follow redirect with ../../
-      52 # HTTP follow redirect with abs path
-      55 # HTTP follow redirect with relative path
-      57 # HTTP GET with added header
-      97 # HTTP with -i response headers
-      152 # HTTP GET with content-range
+      34 # HTTP HEAD
+      35 # HTTP GET custom header
+      47 # HTTP GET custom Host
+      49 # HTTP Expect: 100-continue
+      50 # HTTP redirect with ../../
+      52 # HTTP redirect with abs path
+      55 # HTTP redirect relative path
+      57 # HTTP GET added header
+      97 # HTTP -i response headers
+      152 # HTTP GET content-range
       160 # HTTP GET simple
     ];
   in
