@@ -254,7 +254,7 @@ fn parse_args() -> Options {
                 }
                 "help" => {
                     print_usage();
-                    process::exit(0);
+                    safe_exit(0);
                 }
                 _ => {
                     eprintln!("grep: unrecognized option '--{long}'");
@@ -1957,38 +1957,61 @@ fn grep_file(path: &Path, matcher: &Matcher, opts: &Options) -> (usize, bool, bo
     (count, matched, false)
 }
 
+/// Exit with proper write error handling — flush stdout and detect errors.
+fn safe_exit(code: i32) -> ! {
+    let stdout = io::stdout();
+    let mut out = stdout.lock();
+    if out.flush().is_err() {
+        drop(out);
+        eprintln!("grep: write error: {}", io::Error::last_os_error());
+        process::exit(2);
+    }
+    process::exit(code);
+}
+
 fn print_usage() {
-    eprintln!("Usage: grep [OPTION]... PATTERN [FILE]...");
-    eprintln!("Search for PATTERN in each FILE or standard input.");
-    eprintln!();
-    eprintln!("Pattern selection:");
-    eprintln!("  -E, --extended-regexp     PATTERN is an extended regular expression");
-    eprintln!("  -F, --fixed-strings       PATTERN is a set of newline-separated strings");
-    eprintln!("  -G, --basic-regexp        PATTERN is a basic regular expression (default)");
-    eprintln!("  -P, --perl-regexp         PATTERN is a Perl regular expression");
-    eprintln!("  -e, --regexp=PATTERN      use PATTERN for matching");
-    eprintln!("  -f, --file=FILE           obtain PATTERN from FILE");
-    eprintln!("  -i, --ignore-case         ignore case distinctions");
-    eprintln!("  -w, --word-regexp         match only whole words");
-    eprintln!("  -x, --line-regexp         match only whole lines");
-    eprintln!();
-    eprintln!("Output control:");
-    eprintln!("  -c, --count               print only a count of matching lines per FILE");
-    eprintln!("  -l, --files-with-matches  print only names of FILEs with matches");
-    eprintln!("  -L, --files-without-match print only names of FILEs without matches");
-    eprintln!("  -m, --max-count=NUM       stop after NUM matches");
-    eprintln!("  -n, --line-number         print line number with output lines");
-    eprintln!("  -o, --only-matching       show only the part of a line matching PATTERN");
-    eprintln!("  -q, --quiet, --silent     suppress all normal output");
-    eprintln!("  -v, --invert-match        select non-matching lines");
-    eprintln!("  -H, --with-filename       print the file name for each match");
-    eprintln!("  -h, --no-filename         suppress the file name prefix");
-    eprintln!("  -b, --byte-offset         print the byte offset with output lines");
-    eprintln!("  -Z, --null                print 0 byte after FILE name");
-    eprintln!("  -r, -R, --recursive       search directories recursively");
-    eprintln!("  -A, --after-context=NUM   print NUM lines of trailing context");
-    eprintln!("  -B, --before-context=NUM  print NUM lines of leading context");
-    eprintln!("  -C, --context=NUM         print NUM lines of output context");
+    let stdout = io::stdout();
+    let mut out = stdout.lock();
+    macro_rules! outln {
+        () => { let _ = writeln!(out); };
+        ($($arg:tt)*) => { let _ = writeln!(out, $($arg)*); }
+    }
+    outln!("Usage: grep [OPTION]... PATTERN [FILE]...");
+    outln!("Search for PATTERN in each FILE or standard input.");
+    outln!();
+    outln!("Pattern selection:");
+    outln!("  -E, --extended-regexp     PATTERN is an extended regular expression");
+    outln!("  -F, --fixed-strings       PATTERN is a set of newline-separated strings");
+    outln!("  -G, --basic-regexp        PATTERN is a basic regular expression (default)");
+    outln!("  -P, --perl-regexp         PATTERN is a Perl regular expression");
+    outln!("  -e, --regexp=PATTERN      use PATTERN for matching");
+    outln!("  -f, --file=FILE           obtain PATTERN from FILE");
+    outln!("  -i, --ignore-case         ignore case distinctions");
+    outln!("  -w, --word-regexp         match only whole words");
+    outln!("  -x, --line-regexp         match only whole lines");
+    outln!();
+    outln!("Output control:");
+    outln!("  -c, --count               print only a count of matching lines per FILE");
+    outln!("  -l, --files-with-matches  print only names of FILEs with matches");
+    outln!("  -L, --files-without-match print only names of FILEs without matches");
+    outln!("  -m, --max-count=NUM       stop after NUM matches");
+    outln!("  -n, --line-number         print line number with output lines");
+    outln!("  -o, --only-matching       show only the part of a line matching PATTERN");
+    outln!("  -q, --quiet, --silent     suppress all normal output");
+    outln!("  -v, --invert-match        select non-matching lines");
+    outln!("  -H, --with-filename       print the file name for each match");
+    outln!("  -h, --no-filename         suppress the file name prefix");
+    outln!("  -b, --byte-offset         print the byte offset with output lines");
+    outln!("  -Z, --null                print 0 byte after FILE name");
+    outln!("  -r, -R, --recursive       search directories recursively");
+    outln!("  -A, --after-context=NUM   print NUM lines of trailing context");
+    outln!("  -B, --before-context=NUM  print NUM lines of leading context");
+    outln!("  -C, --context=NUM         print NUM lines of output context");
+    if out.flush().is_err() {
+        drop(out);
+        eprintln!("grep: write error: {}", io::Error::last_os_error());
+        process::exit(2);
+    }
 }
 
 fn main() {
@@ -2058,10 +2081,10 @@ fn main() {
     }
 
     if any_match {
-        process::exit(0);
+        safe_exit(0);
     } else if had_error {
-        process::exit(2);
+        safe_exit(2);
     } else {
-        process::exit(1);
+        safe_exit(1);
     }
 }
