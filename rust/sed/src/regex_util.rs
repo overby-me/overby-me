@@ -2,6 +2,14 @@
 /// In POSIX, `[]...]` means a class containing `]` — the `]` right after `[` or `[^`
 /// is a literal. Rust regex doesn't support this, so we transform it.
 pub fn fix_posix_char_class(pattern: &str) -> String {
+    fix_posix_char_class_opts(pattern, false)
+}
+
+pub fn fix_posix_char_class_posix(pattern: &str) -> String {
+    fix_posix_char_class_opts(pattern, true)
+}
+
+fn fix_posix_char_class_opts(pattern: &str, posix: bool) -> String {
     let mut result = String::with_capacity(pattern.len() + 8);
     let chars: Vec<char> = pattern.chars().collect();
     let mut i = 0;
@@ -27,8 +35,14 @@ pub fn fix_posix_char_class(pattern: &str) -> String {
             let mut class_content = String::new();
             while i < chars.len() && chars[i] != ']' {
                 if chars[i] == '\\' && i + 1 < chars.len() {
-                    class_content.push(chars[i]);
-                    class_content.push(chars[i + 1]);
+                    if posix {
+                        // POSIX: \ is literal inside [] — double it for Rust regex
+                        class_content.push_str("\\\\");
+                        class_content.push(chars[i + 1]);
+                    } else {
+                        class_content.push(chars[i]);
+                        class_content.push(chars[i + 1]);
+                    }
                     i += 2;
                 } else if chars[i] == '[' && !(i + 1 < chars.len() && chars[i + 1] == ':') {
                     // Bare [ that's not a POSIX class like [:alpha:]
@@ -98,7 +112,6 @@ pub fn bre_to_ere(bre: &str) -> String {
                 } else if chars[i] == '\\' && i + 1 < chars.len() {
                     // In POSIX BRE, \ inside [] is literal
                     // But Rust regex uses \ for escapes inside [] too
-                    // If followed by a char Rust regex recognizes as escape, pass through
                     let next = chars[i + 1];
                     if "dDsSwWtnrfvp0".contains(next)
                         || next == '\\'

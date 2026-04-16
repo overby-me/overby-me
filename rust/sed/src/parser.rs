@@ -1,4 +1,4 @@
-use crate::regex_util::{bre_to_ere, fix_posix_char_class};
+use crate::regex_util::{bre_to_ere, fix_posix_char_class, fix_posix_char_class_posix};
 use crate::types::*;
 use crate::util::ctrl_char;
 
@@ -436,7 +436,11 @@ impl<'a> Parser<'a> {
             bre_to_ere(pattern)
         };
 
-        let pat = fix_posix_char_class(&pat);
+        let pat = if self.posix {
+            fix_posix_char_class_posix(&pat)
+        } else {
+            fix_posix_char_class(&pat)
+        };
         SedRegex::new(&pat).map_err(|e| self.err(&format!("{e}")))
     }
 
@@ -635,7 +639,11 @@ impl<'a> Parser<'a> {
             None
         } else {
             Some(
-                SedRegex::new(&fix_posix_char_class(&re_pattern))
+                SedRegex::new(&if self.posix {
+                    fix_posix_char_class_posix(&re_pattern)
+                } else {
+                    fix_posix_char_class(&re_pattern)
+                })
                     .map_err(|e| self.err(&e))?,
             )
         };
