@@ -382,9 +382,6 @@ impl Lexer {
                     | Token::Printf
                     | Token::Return
                     | Token::Pipe
-                    | Token::Plus
-                    | Token::Minus
-                    | Token::Star
                     | Token::Assign
                     | Token::PlusAssign
                     | Token::MinusAssign
