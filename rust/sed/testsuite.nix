@@ -14,7 +14,7 @@ pkgs.runCommand "rust-sed-test-${name}" {
   nativeBuildInputs = [
     pkgs.coreutils
     pkgs.diffutils
-    pkgs.gnused # needed by init.cfg's remove_cr_inplace and init.sh internals
+    pkgs.gnused # needed by init.cfg's remove_cr_inplace
     pkgs.gnugrep
     pkgs.bash
     pkgs.gawk # some tests use AWK variable
