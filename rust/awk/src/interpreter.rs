@@ -1240,6 +1240,14 @@ impl Interpreter {
                         std::process::exit(2);
                     }
                     self.scalar_params.insert(name.to_string());
+                } else {
+                    // If this global is the origin of a param, mark params with that origin as scalar
+                    for (param, origin) in &self.param_origins {
+                        let origin_root = origin.split(", from ").last().unwrap_or(origin);
+                        if origin_root == name {
+                            self.scalar_params.insert(param.clone());
+                        }
+                    }
                 }
                 self.get_var(name)
             }
