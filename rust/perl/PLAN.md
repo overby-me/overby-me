@@ -12,6 +12,10 @@ Passing: base/if, base/cond, base/while, base/pat, base/num (56 tests),
 base/translate (257 tests), base/term (7 tests), cmd/elsif (4 tests),
 cmd/mod (15 tests).
 
+test.pl integration working: plan/ok/is produce TAP output. op/ tests
+partially running but need fixes for: $1 capture variables, `\o{}`
+octal escapes, `_diag` output leaking, caller() function.
+
 Tests compare rust-perl output against reference perl output in a Nix sandbox.
 
 Run a test: `nix build .#checks.x86_64-linux.rust-perl-test-{category}-{name}`
@@ -31,6 +35,13 @@ View failure diff: `nix log .#checks.x86_64-linux.rust-perl-test-{category}-{nam
 - Postfix modifiers (if/unless/while/until/for), die/warn with postfix
 - BEGIN/END blocks, eval string, &func() call syntax
 - Variable scoping fix: non-my variables default to global scope
+- s/// substitution with g/i flags
+- require for loading Perl files, %INC tracking
+- map/grep/sort { BLOCK } LIST parsing
+- Hash-vs-block disambiguation with look-ahead scan
+- Function args expand @arrays in list context
+- return accepts postfix if/unless modifiers
+- All builtin keywords in expects_operand for regex-after-keyword
 
 ---
 
