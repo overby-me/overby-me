@@ -65,6 +65,11 @@ View failure: `nix log .#checks.x86_64-linux.rust-sed-test-{name}`
 - Missing command after address at EOF detection
 - Unterminated `s///` replacement detection
 - File read error exit code propagation
+- Multi-file cumulative line numbering (`$` matches only last file's last line)
+- Range end-past-start detection (e.g., `12,3p` = single line)
+- `c` command range-middle suppression (output only at range end)
+- Undefined branch label validation (compile-time error)
+- `#` as label name terminator
 - Unexpected `}` detection at top level
 - `v` version check against 4.9
 - `}` with address rejection
@@ -158,7 +163,7 @@ unbuffered, uniq, word-delim, xemacs
 | Test | Primary blocker |
 |-|-|
 | binary | fancy-regex performance (catastrophic backtracking) |
-| bsd-wrapper | Multi-file line number accumulation + a few address edge cases |
+| bsd-wrapper | 5 remaining output differences (append ordering, `l` binary bytes, range edge cases) |
 | dc | fancy-regex performance (catastrophic backtracking) |
 | mac-mf | Sed script contains non-UTF-8 bytes (needs byte-mode parser) |
 | obinary | Platform skip (already works) |
