@@ -802,11 +802,13 @@ fn build_matcher(opts: &Options) -> Matcher {
         match Regex::new(&pattern) {
             Ok(re) => MatcherInner::Regex(re),
             Err(e) => {
-                if is_bre {
-                    eprintln!("grep: invalid BRE pattern: {e}");
+                let msg = format!("{e}");
+                let clean = if msg.contains("invalid character class range") {
+                    "Invalid range end".to_string()
                 } else {
-                    eprintln!("grep: invalid regex: {e}");
-                }
+                    msg
+                };
+                eprintln!("grep: {clean}");
                 process::exit(2);
             }
         }
