@@ -433,6 +433,7 @@ impl Parser {
             args.push(self.parse_non_assign_expr());
             while matches!(self.peek(), Token::Comma) {
                 self.advance();
+                self.skip_terminators(); // skip newlines between args
                 args.push(self.parse_non_assign_expr());
             }
         }
@@ -479,6 +480,7 @@ impl Parser {
             args.push(self.parse_non_assign_expr());
             while matches!(self.peek(), Token::Comma) {
                 self.advance();
+                self.skip_terminators(); // skip newlines between args
                 args.push(self.parse_non_assign_expr());
             }
         }
