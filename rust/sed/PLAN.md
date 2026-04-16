@@ -49,6 +49,11 @@ View failure: `nix log .#checks.x86_64-linux.rust-sed-test-{name}`
 - POSIX one-address command validation (`a`, `i`, `l`, `=`, `q`, `Q`, `r`, `R`)
 - Unbuffered I/O (`-u`): byte-by-byte stdin reads via raw fd
 - POSIX char class: `\` is literal inside `[]` in POSIX mode
+- Unexpected `}` detection at top level
+- `v` version check against 4.9
+- `}` with address rejection
+- `a`/`c`/`i` at EOF detection
+- `!` position tracking for multiple `!` error
 
 ---
 
@@ -74,7 +79,7 @@ These tests require processing non-UTF-8 binary data. Our engine uses `String` (
 
 **Tests:** compile-errors, compile-tests, recursive-escape-c
 
-- `compile-errors` — Needs many validation checks: one-address commands (`a`, `i`, `l`, `=`, `q`, `Q`), `#` with addresses, `}` without `{`, `v` version check, `a`/`c`/`i` require `\` in POSIX mode, incomplete `a`/`c`/`i` across `-e` boundaries, `~N`/`+N` as first address, multiple `!`
+- `compile-errors` — Remaining 5 sub-tests: `-f` file error format (sandbox issue), `q`/`Q` one-addr (sandbox issue), unmatched `{` char position (0 vs 2), extra chars after command (needs separator enforcement), incomplete `a`/`c`/`i` across `-e` boundaries
 - `compile-tests` — `s/[[:]]//'` (POSIX class `[:]` parsing edge case)
 
 ### Category 4: Test-specific issues (1 test)
