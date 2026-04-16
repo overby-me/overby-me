@@ -28,6 +28,8 @@ pub struct Interpreter {
     input_lines: Vec<String>,
     /// Current position in input_lines (next line to process)
     input_line_idx: usize,
+    /// Currently active function parameter names (for error messages)
+    current_params: Vec<String>,
 }
 
 impl Interpreter {
@@ -64,6 +66,7 @@ impl Interpreter {
             pipe_children: HashMap::new(),
             input_lines: Vec::new(),
             input_line_idx: 0,
+            current_params: Vec::new(),
         }
     }
 
@@ -1112,7 +1115,12 @@ impl Interpreter {
                     && self.globals.contains_key(name)
                     && !matches!(self.globals.get(name), Some(Value::Uninitialized))
                 {
-                    eprintln!("awk: fatal: attempt to use scalar `{name}' as an array");
+                    let kind = if self.current_params.contains(&name.to_string()) {
+                        "scalar parameter"
+                    } else {
+                        "scalar"
+                    };
+                    eprintln!("awk: fatal: attempt to use {kind} `{name}' as an array");
                     std::process::exit(2);
                 }
                 let vals: Vec<Value> = indices.iter().map(|i| self.eval_expr(i)).collect();
@@ -1926,10 +1934,13 @@ impl Interpreter {
                         }
                     }
 
+                    let saved_params =
+                        std::mem::replace(&mut self.current_params, func.params.clone());
                     let result = match self.exec_stmts(&func.body) {
                         ControlFlow::Return(val) => val,
                         _ => Value::Uninitialized,
                     };
+                    self.current_params = saved_params;
 
                     // Save array state BEFORE restoring scope (for copy-back)
                     let mut copyback: Vec<(String, Option<HashMap<String, Value>>)> = Vec::new();
@@ -1951,9 +1962,7 @@ impl Interpreter {
                                 // always copy back since param and orig share the name
                                 let arr = self.arrays.get(param).cloned();
                                 copyback.push((orig_name.clone(), arr));
-                            } else if param_has_array
-                                && !self.arrays.contains_key(orig_name)
-                            {
+                            } else if param_has_array && !self.arrays.contains_key(orig_name) {
                                 // Different-name param: only copy back if orig doesn't
                                 // currently have an array (avoid overwriting independent changes)
                                 let arr = self.arrays.get(param).cloned();

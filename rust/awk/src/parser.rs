@@ -38,10 +38,10 @@ impl Parser {
             BUILTIN_FUNCTIONS.iter().map(|s| s.to_string()).collect();
         let mut i = 0;
         while i < tokens.len() {
-            if matches!(tokens[i], Token::Function) {
-                if let Some(Token::Ident(name)) = tokens.get(i + 1) {
-                    function_names.insert(name.clone());
-                }
+            if matches!(tokens[i], Token::Function)
+                && let Some(Token::Ident(name)) = tokens.get(i + 1)
+            {
+                function_names.insert(name.clone());
             }
             i += 1;
         }
@@ -548,9 +548,9 @@ impl Parser {
 
     fn parse_non_assign_expr(&mut self) -> Expr {
         // In print context, parse without consuming > as comparison
-        // (it might be a redirect)
+        // (it might be a redirect) but allow assignments like print b += 1
         self.in_print_context = true;
-        let result = self.parse_ternary();
+        let result = self.parse_assignment();
         self.in_print_context = false;
         result
     }
@@ -918,7 +918,7 @@ impl Parser {
             }
             Token::Dollar => {
                 self.advance();
-                let expr = self.parse_primary();
+                let expr = self.parse_unary();
                 Expr::FieldRef(Box::new(expr))
             }
             Token::LParen => {

@@ -477,17 +477,33 @@ pub fn sprintf_impl_with_convfmt(vals: &[Value], convfmt: &str) -> String {
 
 /// Replacement for sub/gsub: only & and \\ and \& are special
 pub fn awk_replace(replacement: &str, matched: &str) -> String {
+    // Gawk-compatible replacement processing for sub/gsub:
+    // Only \ before & is special (\& → literal &)
+    // \\ before & is also special (\\& → literal \ + matched text)
+    // All other characters including \ pass through literally.
     let mut result = String::new();
     let chars: Vec<char> = replacement.chars().collect();
     let mut i = 0;
     while i < chars.len() {
-        if chars[i] == '\\' && i + 1 < chars.len() && chars[i + 1] == '&' {
+        if chars[i] == '\\' && i + 1 < chars.len() && chars[i + 1] == '\\' {
+            if i + 2 < chars.len() && chars[i + 2] == '&' {
+                // \\& → literal \ + matched text
+                result.push('\\');
+                result.push_str(matched);
+                i += 3;
+            } else if i + 2 < chars.len() {
+                // \\ followed by more chars → literal \ (consume pair)
+                result.push('\\');
+                i += 2;
+            } else {
+                // \\ at end of replacement → keep both (gawk compat)
+                result.push('\\');
+                result.push('\\');
+                i += 2;
+            }
+        } else if chars[i] == '\\' && i + 1 < chars.len() && chars[i + 1] == '&' {
             // \& → literal &
             result.push('&');
-            i += 2;
-        } else if chars[i] == '\\' && i + 1 < chars.len() && chars[i + 1] == '\\' {
-            // \\ → single \
-            result.push('\\');
             i += 2;
         } else if chars[i] == '&' {
             // & → matched text
