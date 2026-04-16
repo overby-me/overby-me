@@ -881,57 +881,126 @@ impl Interpreter {
                 match regex::Regex::new(&pat_str) {
                     Ok(re) => {
                         // Process replacement: handle \-escaped sequences
-                        let replacement = repl.replace("\\#", "#").replace("\\\\", "\\");
-                        // Build a replacement that handles & (matched text)
-                        let replacement = replacement.replace("&", "${0}");
-                        let (new_text, count) = if global {
-                            let mut count = 0u64;
-                            let new = re.replace_all(&text, |caps: &regex::Captures| {
-                                count += 1;
-                                let mut result = String::new();
-                                let repl_chars: Vec<char> = replacement.chars().collect();
-                                let mut i = 0;
-                                while i < repl_chars.len() {
-                                    if repl_chars[i] == '$' && i + 1 < repl_chars.len() {
-                                        if repl_chars[i + 1] == '{' {
-                                            // ${N} reference
-                                            let mut num_str = String::new();
-                                            i += 2;
-                                            while i < repl_chars.len() && repl_chars[i] != '}' {
-                                                num_str.push(repl_chars[i]);
-                                                i += 1;
-                                            }
-                                            if i < repl_chars.len() {
-                                                i += 1; // skip }
-                                            }
-                                            if let Ok(n) = num_str.parse::<usize>() {
-                                                if let Some(m) = caps.get(n) {
-                                                    result.push_str(m.as_str());
-                                                }
-                                            }
-                                        } else if repl_chars[i + 1].is_ascii_digit() {
-                                            let n =
-                                                (repl_chars[i + 1] as u32 - '0' as u32) as usize;
+                        let mut replacement = String::new();
+                        let repl_bytes: Vec<char> = repl.chars().collect();
+                        let mut ri = 0;
+                        while ri < repl_bytes.len() {
+                            if repl_bytes[ri] == '\\' && ri + 1 < repl_bytes.len() {
+                                match repl_bytes[ri + 1] {
+                                    'n' => {
+                                        replacement.push('\n');
+                                        ri += 2;
+                                    }
+                                    't' => {
+                                        replacement.push('\t');
+                                        ri += 2;
+                                    }
+                                    '\\' => {
+                                        replacement.push('\\');
+                                        ri += 2;
+                                    }
+                                    '#' => {
+                                        replacement.push('#');
+                                        ri += 2;
+                                    }
+                                    _ => {
+                                        replacement.push(repl_bytes[ri]);
+                                        ri += 1;
+                                    }
+                                }
+                            } else {
+                                replacement.push(repl_bytes[ri]);
+                                ri += 1;
+                            }
+                        }
+
+                        // Helper closure to expand $N and ${N} references in replacement
+                        let expand_replacement = |caps: &regex::Captures,
+                                                  replacement: &str|
+                         -> String {
+                            let mut result = String::new();
+                            let repl_chars: Vec<char> = replacement.chars().collect();
+                            let mut i = 0;
+                            while i < repl_chars.len() {
+                                if repl_chars[i] == '$' && i + 1 < repl_chars.len() {
+                                    if repl_chars[i + 1] == '{' {
+                                        // ${N} reference
+                                        let mut num_str = String::new();
+                                        i += 2;
+                                        while i < repl_chars.len() && repl_chars[i] != '}' {
+                                            num_str.push(repl_chars[i]);
+                                            i += 1;
+                                        }
+                                        if i < repl_chars.len() {
+                                            i += 1; // skip }
+                                        }
+                                        if let Ok(n) = num_str.parse::<usize>() {
                                             if let Some(m) = caps.get(n) {
                                                 result.push_str(m.as_str());
                                             }
-                                            i += 2;
-                                        } else {
-                                            result.push(repl_chars[i]);
+                                        }
+                                    } else if repl_chars[i + 1].is_ascii_digit() {
+                                        // $N reference (multi-digit)
+                                        let mut num_str = String::new();
+                                        i += 1;
+                                        while i < repl_chars.len() && repl_chars[i].is_ascii_digit()
+                                        {
+                                            num_str.push(repl_chars[i]);
                                             i += 1;
+                                        }
+                                        if let Ok(n) = num_str.parse::<usize>() {
+                                            if let Some(m) = caps.get(n) {
+                                                result.push_str(m.as_str());
+                                            }
                                         }
                                     } else {
                                         result.push(repl_chars[i]);
                                         i += 1;
                                     }
+                                } else if repl_chars[i] == '&' {
+                                    // & means whole match
+                                    if let Some(m) = caps.get(0) {
+                                        result.push_str(m.as_str());
+                                    }
+                                    i += 1;
+                                } else {
+                                    result.push(repl_chars[i]);
+                                    i += 1;
                                 }
-                                result
+                            }
+                            result
+                        };
+
+                        // Store capture groups from first match
+                        if let Some(caps) = re.captures(&text) {
+                            for i in 1..caps.len() {
+                                if let Some(m) = caps.get(i) {
+                                    self.set_global_var(
+                                        &i.to_string(),
+                                        Value::Str(m.as_str().to_string()),
+                                    );
+                                } else {
+                                    self.set_global_var(&i.to_string(), Value::Undef);
+                                }
+                            }
+                        }
+
+                        let (new_text, count) = if global {
+                            let mut count = 0u64;
+                            let new = re.replace_all(&text, |caps: &regex::Captures| {
+                                count += 1;
+                                expand_replacement(caps, &replacement)
                             });
                             (new.into_owned(), count)
                         } else {
-                            let had_match = re.is_match(&text);
-                            let new = re.replace(&text, replacement.as_str());
-                            (new.into_owned(), if had_match { 1 } else { 0 })
+                            if re.is_match(&text) {
+                                let new = re.replace(&text, |caps: &regex::Captures| {
+                                    expand_replacement(caps, &replacement)
+                                });
+                                (new.into_owned(), 1)
+                            } else {
+                                (text, 0)
+                            }
                         };
                         // Assign modified text back to the target variable
                         self.assign_to(target, Value::Str(new_text));
@@ -2101,7 +2170,7 @@ impl Interpreter {
 
     // --- Regex ---
 
-    fn regex_match(&self, text: &str, pattern: &str, flags: &str) -> bool {
+    fn regex_match(&mut self, text: &str, pattern: &str, flags: &str) -> bool {
         let case_insensitive = flags.contains('i');
         let pat = if case_insensitive {
             format!("(?i){}", pattern)
@@ -2109,7 +2178,21 @@ impl Interpreter {
             pattern.to_string()
         };
         match regex::Regex::new(&pat) {
-            Ok(re) => re.is_match(text),
+            Ok(re) => {
+                if let Some(caps) = re.captures(text) {
+                    // Store capture groups as $1, $2, etc.
+                    for i in 1..caps.len() {
+                        if let Some(m) = caps.get(i) {
+                            self.set_global_var(&i.to_string(), Value::Str(m.as_str().to_string()));
+                        } else {
+                            self.set_global_var(&i.to_string(), Value::Undef);
+                        }
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
             Err(_) => false,
         }
     }

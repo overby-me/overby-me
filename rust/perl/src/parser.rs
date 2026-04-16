@@ -1874,6 +1874,7 @@ fn parse_interp_string(s: &str) -> Expr {
             // Variable interpolation
             if chars[i + 1] == '_'
                 || chars[i + 1].is_ascii_alphabetic()
+                || chars[i + 1].is_ascii_digit()
                 || chars[i + 1] == '{'
                 || chars[i + 1] == '^'
             {

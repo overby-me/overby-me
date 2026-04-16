@@ -20,7 +20,8 @@
     clippy::map_clone,
     clippy::useless_format,
     clippy::manual_strip,
-    clippy::unnecessary_sort_by
+    clippy::unnecessary_sort_by,
+    clippy::collapsible_else_if
 )]
 
 mod ast;
