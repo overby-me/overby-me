@@ -1589,9 +1589,15 @@ fn grep_reader<R: BufRead>(
         let line_len = line_buf.len() + 1;
         let line = String::from_utf8_lossy(&line_buf);
 
-        // Check for binary content in this line
-        if !is_binary && !opts.null_data && !opts.text_mode && line_buf.contains(&0) {
-            is_binary = true;
+        // Check for binary content in this line and upcoming data
+        if !is_binary && !opts.null_data && !opts.text_mode {
+            if line_buf.contains(&0) {
+                is_binary = true;
+            } else if let Ok(upcoming) = reader.fill_buf() {
+                if upcoming.contains(&0) {
+                    is_binary = true;
+                }
+            }
         }
 
         let matches = matcher.is_match(&line) != opts.invert_match;
