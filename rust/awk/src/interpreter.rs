@@ -915,7 +915,7 @@ impl Interpreter {
         while i < chars.len() {
             if chars[i] == '\\' && i + 1 < chars.len() {
                 let next = chars[i + 1];
-                if !"dDwWsSbBtbnrfax01234567.^$*+?()[]{}|\\/"
+                if !"dDwWsSbBtbnrfax01234567.^$*+?()[]{}|\\/\""
                     .contains(next)
                 {
                     let key = format!("\\{next}");
