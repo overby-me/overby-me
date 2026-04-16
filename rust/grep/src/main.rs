@@ -45,6 +45,7 @@ struct Options {
     include_glob: Vec<String>,
     exclude_glob: Vec<String>,
     exclude_dir_glob: Vec<String>,
+    skip_devices: bool, // -D skip
     // Misc
     label: String, // --label
     color: ColorMode,
@@ -93,6 +94,7 @@ impl Default for Options {
             include_glob: Vec::new(),
             exclude_glob: Vec::new(),
             exclude_dir_glob: Vec::new(),
+            skip_devices: false,
             label: "(standard input)".to_string(),
             color: ColorMode::Auto,
             null_data: false,
@@ -173,8 +175,10 @@ fn parse_args() -> Options {
                     }
                 }
                 _ if long.starts_with("devices=") => {
-                    // --devices=ACTION: skip, read (default)
-                    // Silently accept for compatibility
+                    let val = long.strip_prefix("devices=").unwrap();
+                    if val == "skip" {
+                        opts.skip_devices = true;
+                    }
                 }
                 "null-data" => opts.null_data = true,
                 "recursive" => opts.recursive = true,
@@ -290,8 +294,14 @@ fn parse_args() -> Options {
                     'D' => {
                         // -D ACTION: skip or read device files
                         let rest: String = chars[j + 1..].iter().collect();
-                        if rest.is_empty() {
-                            i += 1; // consume next arg
+                        let action = if rest.is_empty() {
+                            i += 1;
+                            if i < args.len() { args[i].as_str() } else { "read" }
+                        } else {
+                            &rest
+                        };
+                        if action == "skip" {
+                            opts.skip_devices = true;
                         }
                         j = chars.len();
                         continue;
@@ -1277,6 +1287,16 @@ fn grep_file(path: &Path, matcher: &Matcher, opts: &Options) -> (usize, bool, bo
         let reader = stdin.lock();
         let (count, matched) = grep_reader(reader, matcher, opts, &filename);
         return (count, matched, false);
+    }
+
+    // Skip device files when -D skip is used
+    if opts.skip_devices && path.as_os_str() != "-" {
+        if let Ok(metadata) = fs::metadata(path) {
+            let ft = metadata.file_type();
+            if !ft.is_file() && !ft.is_dir() && !ft.is_symlink() {
+                return (0, false, false);
+            }
+        }
     }
 
     let file = match fs::File::open(path) {
