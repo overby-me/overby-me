@@ -1239,8 +1239,12 @@ fn deferred_notify_wait_and_dispatch(
         }
 
         // Check if the global notification handler has set signaled_ready.
+        // Also check if the service is in reloading state — RELOADING=1
+        // implies the service previously sent READY=1, so it should be
+        // considered started even though signaled_ready was cleared.
         let ready = if let Specific::Service(svc) = &unit.specific {
-            svc.state.read_poisoned().srvc.signaled_ready
+            let state = svc.state.read_poisoned();
+            state.srvc.signaled_ready || state.srvc.reloading
         } else {
             return;
         };
