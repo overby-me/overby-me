@@ -4,6 +4,8 @@
 
 **187/241 tests passing** (78%) — BASIC_TESTS from the GNU gawk 5.3.2 test suite.
 
+Up from 104 at the start (+83 tests, +35 percentage points).
+
 ### Remaining failure categories (~77 tests)
 
 - **Error detection (~27)**: Tests expect gawk-compatible error messages we don't produce (scalar/array conflicts, duplicate params, syntax errors, etc.)
