@@ -2088,7 +2088,7 @@ impl Interpreter {
                             if is_array {
                                 arg_vals.push(Value::Uninitialized);
                             } else {
-                                arg_vals.push(self.eval_expr(arg));
+                                arg_vals.push(self.get_var(var_name));
                             }
                             arg_var_names.push(Some(var_name.clone()));
                             arg_was_array.push(is_array);
