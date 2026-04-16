@@ -1611,11 +1611,16 @@ fn grep_reader<R: BufRead>(
                         if opts.byte_offset {
                             let _ = write!(out, "{}{separator}", byte_offset + start);
                         }
+                        let line_end = if opts.null_data { "\0" } else { "\n" };
                         if use_color {
-                            let _ =
-                                writeln!(out, "\x1b[{}m\x1b[K{}\x1b[m\x1b[K", opts.match_color, &line[start..end]);
+                            let _ = write!(
+                                out,
+                                "\x1b[{}m\x1b[K{}\x1b[m\x1b[K{line_end}",
+                                opts.match_color,
+                                &line[start..end]
+                            );
                         } else {
-                            let _ = writeln!(out, "{}", &line[start..end]);
+                            let _ = write!(out, "{}{line_end}", &line[start..end]);
                         }
                     }
                 } else {
