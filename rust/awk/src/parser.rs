@@ -432,6 +432,11 @@ impl Parser {
             Some(Box::new(self.parse_stmt()))
         };
         self.expect(&Token::RParen);
+        // Don't skip terminators - a lone `;` after `)` is a valid empty body
+        if matches!(self.peek(), Token::Semicolon) {
+            self.advance(); // empty body
+            return Stmt::For(init, cond, update, Box::new(Stmt::Block(vec![])));
+        }
         self.skip_terminators();
         let body = self.parse_stmt();
         Stmt::For(init, cond, update, Box::new(body))

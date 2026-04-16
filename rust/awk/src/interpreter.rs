@@ -1068,7 +1068,18 @@ impl Interpreter {
 
     fn assign_to(&mut self, expr: &Expr, val: Value) {
         match expr {
-            Expr::Var(name) => self.set_var(name, val),
+            Expr::Var(name) => {
+                if self.functions.contains_key(name)
+                    && !self.current_params.contains(&name.to_string())
+                {
+                    eprintln!(
+                        "awk: error: function `{name}' called with space between name and `(',"
+                    );
+                    eprintln!("or used as a variable or an array");
+                    std::process::exit(1);
+                }
+                self.set_var(name, val);
+            }
             Expr::FieldRef(idx_expr) => {
                 let idx = self.eval_expr(idx_expr).to_num() as usize;
                 self.set_field(idx, val);
@@ -1090,7 +1101,20 @@ impl Interpreter {
                 // Bare regex - shouldn't appear standalone normally
                 Value::Str(String::new())
             }
-            Expr::Var(name) => self.get_var(name),
+            Expr::Var(name) => {
+                // Check function-as-variable
+                if self.functions.contains_key(name)
+                    && !self.globals.contains_key(name)
+                    && !self.current_params.contains(&name.to_string())
+                {
+                    eprintln!(
+                        "awk: error: function `{name}' called with space between name and `(',"
+                    );
+                    eprintln!("or used as a variable or an array");
+                    std::process::exit(1);
+                }
+                self.get_var(name)
+            }
             Expr::FieldRef(idx_expr) => {
                 let idx = self.eval_expr(idx_expr).to_num() as usize;
                 self.get_field(idx)
@@ -1513,6 +1537,17 @@ impl Interpreter {
 
                 // Target: either specified or $0
                 let target_expr = if args.len() >= 3 {
+                    // Check if target is a function name used as variable
+                    if let Expr::Var(tname) = &args[2]
+                        && self.functions.contains_key(tname)
+                        && !self.current_params.contains(&tname.to_string())
+                    {
+                        eprintln!(
+                            "awk: error: function `{tname}' called with space between name and `(',"
+                        );
+                        eprintln!("or used as a variable or an array");
+                        std::process::exit(1);
+                    }
                     args[2].clone()
                 } else {
                     Expr::FieldRef(Box::new(Expr::Number(0.0)))
