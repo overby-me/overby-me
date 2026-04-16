@@ -2,9 +2,9 @@
 
 ## Current Status
 
-**189/241 tests passing** (78%) — BASIC_TESTS from the GNU gawk 5.3.2 test suite.
+**190/241 tests passing** (79%) — BASIC_TESTS from the GNU gawk 5.3.2 test suite.
 
-Up from 104 at the start (+85 tests, +35 percentage points).
+Up from 104 at the start (+86 tests, +36 percentage points).
 
 ### Remaining failure categories (~77 tests)
 
