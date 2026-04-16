@@ -98,7 +98,11 @@ impl Parser {
         };
         // Check for redefining builtin functions
         if BUILTIN_FUNCTIONS.contains(&name.as_str()) {
-            eprintln!("awk: `{name}' is a built-in function, it cannot be redefined");
+            let line = self.token_lines.get(self.pos.saturating_sub(1)).copied().unwrap_or(1);
+            if let Some(src) = self.source_lines.get(line.saturating_sub(1)) {
+                eprintln!("awk: {src}");
+            }
+            eprintln!("awk:          ^ `{name}' is a built-in function, it cannot be redefined");
             std::process::exit(1);
         }
         self.expect(&Token::LParen);
