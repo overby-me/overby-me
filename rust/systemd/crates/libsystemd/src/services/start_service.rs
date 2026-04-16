@@ -553,8 +553,19 @@ fn start_service_with_filedescriptors(
                     MemoryPressureWatch::Off | MemoryPressureWatch::Skip => false,
                 };
                 if should_set {
-                    let pressure_path =
-                        conf.platform_specific.cgroup_path.join("memory.pressure");
+                    // When ProtectControlGroupsEx=private or strict, the service
+                    // runs in a new cgroup namespace where it sees itself at the
+                    // cgroup root. Use /sys/fs/cgroup/memory.pressure instead of
+                    // the full host cgroup path.
+                    let pressure_path = if matches!(
+                        conf.exec_config.protect_control_groups_ex,
+                        crate::units::ProtectControlGroupsEx::Private
+                            | crate::units::ProtectControlGroupsEx::Strict
+                    ) {
+                        std::path::PathBuf::from("/sys/fs/cgroup/memory.pressure")
+                    } else {
+                        conf.platform_specific.cgroup_path.join("memory.pressure")
+                    };
                     env.push((
                         "MEMORY_PRESSURE_WATCH".to_owned(),
                         pressure_path.to_string_lossy().into_owned(),
