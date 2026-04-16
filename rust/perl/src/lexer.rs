@@ -1084,7 +1084,11 @@ impl Lexer {
                     self.pos += 1;
                     let s = self.read_double_quoted_string('`');
                     tokens.push(Token::Ident("backtick".to_string()));
-                    tokens.push(Token::StringLit(s));
+                    if s.contains('$') || s.contains('@') {
+                        tokens.push(Token::InterpString(s));
+                    } else {
+                        tokens.push(Token::StringLit(s));
+                    }
                 }
 
                 _ => {

@@ -225,15 +225,13 @@ impl Parser {
                 self.pos += 1;
                 let args = self.parse_list_expr();
                 let stmt = Stmt::Die(args);
-                self.eat(&Token::Semi);
-                return Some(stmt);
+                return Some(self.maybe_postfix(stmt));
             }
             Token::Warn => {
                 self.pos += 1;
                 let args = self.parse_list_expr();
                 let stmt = Stmt::Warn(args);
-                self.eat(&Token::Semi);
-                return Some(stmt);
+                return Some(self.maybe_postfix(stmt));
             }
             Token::Eval => {
                 self.pos += 1;
@@ -662,6 +660,28 @@ impl Parser {
                         self.pos = saved;
                         None
                     }
+                } else {
+                    self.pos = saved;
+                    None
+                }
+            } else if let Token::ScalarVar(name) = self.tok() {
+                // print $fh EXPR — scalar var as filehandle if followed by an expression
+                // (not by an operator like comma, semicolon, etc.)
+                let saved = self.pos;
+                let var_name = name.clone();
+                self.pos += 1;
+                let next_is_expr = matches!(
+                    self.tok(),
+                    Token::StringLit(_)
+                        | Token::InterpString(_)
+                        | Token::ScalarVar(_)
+                        | Token::ArrayVar(_)
+                        | Token::Integer(_)
+                        | Token::Float(_)
+                        | Token::LParen
+                );
+                if next_is_expr {
+                    Some(Expr::ScalarVar(var_name))
                 } else {
                     self.pos = saved;
                     None
@@ -1665,6 +1685,21 @@ impl Parser {
                 let name = name.clone();
                 self.pos += 1;
 
+                // Check for backtick execution: Ident("backtick") followed by StringLit
+                if name == "backtick" {
+                    if let Token::StringLit(cmd) = self.tok() {
+                        let cmd = cmd.clone();
+                        self.pos += 1;
+                        return Expr::Backtick(cmd);
+                    } else if let Token::InterpString(cmd) = self.tok() {
+                        let cmd = cmd.clone();
+                        self.pos += 1;
+                        // Parse the interpolated string and wrap in Backtick-like handling
+                        // We'll store it as a special call
+                        return Expr::BacktickInterp(Box::new(parse_interp_string(&cmd)));
+                    }
+                }
+
                 // Check for function call
                 if self.at(&Token::LParen) {
                     self.pos += 1;
@@ -1704,7 +1739,11 @@ fn parse_interp_string(s: &str) -> Expr {
     while i < chars.len() {
         if chars[i] == '$' && i + 1 < chars.len() {
             // Variable interpolation
-            if chars[i + 1] == '_' || chars[i + 1].is_ascii_alphabetic() || chars[i + 1] == '{' {
+            if chars[i + 1] == '_'
+                || chars[i + 1].is_ascii_alphabetic()
+                || chars[i + 1] == '{'
+                || chars[i + 1] == '^'
+            {
                 // Flush literal
                 if !lit.is_empty() {
                     parts.push(InterpPart::Lit(std::mem::take(&mut lit)));

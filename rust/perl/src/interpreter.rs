@@ -1,5 +1,6 @@
 use std::collections::HashMap;
-use std::io::{self, BufRead, Write};
+use std::fs::File;
+use std::io::{self, BufRead, BufReader, BufWriter, Write};
 
 use crate::ast::*;
 use crate::value::{Value, format_number};
@@ -52,6 +53,12 @@ pub struct Interpreter {
     local_saves: Vec<Vec<(String, Value)>>,
     // Local array saves
     local_array_saves: Vec<Vec<(String, Vec<Value>)>>,
+    // File handles for reading
+    read_handles: HashMap<String, BufReader<File>>,
+    // File handles for writing
+    write_handles: HashMap<String, BufWriter<File>>,
+    // Counter for generating anonymous filehandle names
+    fh_counter: usize,
 }
 
 impl Interpreter {
@@ -76,6 +83,15 @@ impl Interpreter {
         globals
             .vars
             .insert("!".to_string(), Value::Str(String::new()));
+        // $^X — path to the Perl executable (we use our own binary path)
+        globals.vars.insert(
+            "^X".to_string(),
+            Value::Str(
+                std::env::current_exe()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|_| "perl".to_string()),
+            ),
+        );
 
         Interpreter {
             scopes: Vec::new(),
@@ -87,7 +103,16 @@ impl Interpreter {
             eval_error: String::new(),
             local_saves: Vec::new(),
             local_array_saves: Vec::new(),
+            read_handles: HashMap::new(),
+            write_handles: HashMap::new(),
+            fh_counter: 0,
         }
+    }
+
+    pub fn set_special_var(&mut self, name: &str, val: &str) {
+        self.globals
+            .vars
+            .insert(name.to_string(), Value::Str(val.to_string()));
     }
 
     pub fn run(&mut self, program: &[Stmt]) {
@@ -592,13 +617,22 @@ impl Interpreter {
         }
     }
 
-    fn write_to_handle(&self, fh_name: &Option<String>, text: &str) {
+    fn write_to_handle(&mut self, fh_name: &Option<String>, text: &str) {
         match fh_name.as_deref() {
             Some("STDERR") => {
                 let _ = io::stderr().write_all(text.as_bytes());
             }
-            _ => {
+            Some("STDOUT") | None => {
                 let _ = io::stdout().write_all(text.as_bytes());
+            }
+            Some(name) => {
+                // Try writing to a file handle
+                if let Some(writer) = self.write_handles.get_mut(name) {
+                    let _ = writer.write_all(text.as_bytes());
+                } else {
+                    // Fall back to stdout
+                    let _ = io::stdout().write_all(text.as_bytes());
+                }
             }
         }
     }
@@ -758,9 +792,15 @@ impl Interpreter {
             }
 
             Expr::Diamond(name) => {
-                // <FH> reads a line
-                // For now just handle STDIN/<>
+                // <FH> reads a line from the named filehandle
                 self.readline(name)
+            }
+
+            Expr::Backtick(cmd) => self.run_backtick(cmd),
+
+            Expr::BacktickInterp(expr) => {
+                let cmd = self.eval_expr(expr).to_str();
+                self.run_backtick(&cmd)
             }
 
             Expr::MyVar(name) => {
@@ -1386,14 +1426,25 @@ impl Interpreter {
             }
             "caller" => Value::Undef,
             "eof" => {
-                Value::Num(1.0) // simplified
+                // Check if filehandle is at EOF
+                if let Some(arg) = args.first() {
+                    let name = self.eval_expr(arg).to_str();
+                    if let Some(reader) = self.read_handles.get_mut(&name) {
+                        let buf = reader.fill_buf().unwrap_or(&[]);
+                        Value::Num(if buf.is_empty() { 1.0 } else { 0.0 })
+                    } else {
+                        Value::Num(1.0)
+                    }
+                } else {
+                    Value::Num(1.0)
+                }
             }
-            "open" => {
-                // Simplified: always return 1 (success)
-                // TODO: actual file handling
+            "open" => self.eval_open(args),
+            "close" => self.eval_close(args),
+            "binmode" => {
+                // No-op — we don't distinguish binary/text mode
                 Value::Num(1.0)
             }
-            "close" => Value::Num(1.0),
             "unlink" => {
                 let mut count = 0;
                 for arg in args {
@@ -1724,12 +1775,168 @@ impl Interpreter {
 
     // --- I/O ---
 
-    fn readline(&self, _handle: &str) -> Value {
-        let stdin = io::stdin();
-        let mut line = String::new();
-        match stdin.lock().read_line(&mut line) {
-            Ok(0) => Value::Undef, // EOF
-            Ok(_) => Value::Str(line),
+    fn readline(&mut self, handle: &str) -> Value {
+        // Handle <$fh> — variable containing filehandle name
+        let effective_handle = if handle.starts_with('$') {
+            let var_name = &handle[1..];
+            self.get_var(var_name).to_str()
+        } else {
+            handle.to_string()
+        };
+
+        // <> or <STDIN> reads from stdin
+        if effective_handle.is_empty() || effective_handle == "STDIN" {
+            let stdin = io::stdin();
+            let mut line = String::new();
+            return match stdin.lock().read_line(&mut line) {
+                Ok(0) => Value::Undef, // EOF
+                Ok(_) => Value::Str(line),
+                Err(_) => Value::Undef,
+            };
+        }
+
+        // Read from named filehandle
+        if let Some(reader) = self.read_handles.get_mut(&effective_handle) {
+            let mut line = String::new();
+            match reader.read_line(&mut line) {
+                Ok(0) => Value::Undef, // EOF
+                Ok(_) => Value::Str(line),
+                Err(_) => Value::Undef,
+            }
+        } else {
+            Value::Undef
+        }
+    }
+
+    fn eval_open(&mut self, args: &[Expr]) -> Value {
+        if args.is_empty() {
+            return Value::Undef;
+        }
+
+        // Determine filehandle name and filename
+        // Forms:
+        //   open(FH, "file")  — bareword FH
+        //   open(FH, "<file") — read mode
+        //   open(FH, ">file") — write mode
+        //   open(FH, ">>file") — append mode
+        //   open(FH, "<", "file") — 3-arg form
+        //   open(FH, ">", "file") — 3-arg form
+        //   open(my $fh, ...) — lexical filehandle
+
+        let fh_name: String;
+        let filename: String;
+        let mut write_mode = false;
+        let mut append_mode = false;
+
+        // First arg: filehandle (can be bareword Ident/StringLit or MyVar)
+        match &args[0] {
+            Expr::MyVar(name) => {
+                // Generate a unique filehandle name and store it in the variable
+                self.fh_counter += 1;
+                fh_name = format!("__anon_fh_{}", self.fh_counter);
+                self.set_var(name, Value::Str(fh_name.clone()));
+            }
+            Expr::ScalarVar(name) => {
+                let val = self.get_var(name);
+                if val.is_undef() {
+                    // Auto-vivify: generate a name
+                    self.fh_counter += 1;
+                    fh_name = format!("__anon_fh_{}", self.fh_counter);
+                    self.set_var(name, Value::Str(fh_name.clone()));
+                } else {
+                    fh_name = val.to_str();
+                }
+            }
+            _ => {
+                fh_name = self.eval_expr(&args[0]).to_str();
+            }
+        }
+
+        if args.len() == 1 {
+            // open(FH) — not very useful without a filename
+            return Value::Undef;
+        }
+
+        if args.len() >= 3 {
+            // 3-arg form: open(FH, MODE, FILE)
+            let mode = self.eval_expr(&args[1]).to_str();
+            filename = self.eval_expr(&args[2]).to_str();
+            match mode.as_str() {
+                ">" => write_mode = true,
+                ">>" => {
+                    write_mode = true;
+                    append_mode = true;
+                }
+                "<" | "" => {} // read mode (default)
+                _ => {}
+            }
+        } else {
+            // 2-arg form: open(FH, "mode+file")
+            let raw = self.eval_expr(&args[1]).to_str();
+            if let Some(rest) = raw.strip_prefix(">>") {
+                filename = rest.to_string();
+                write_mode = true;
+                append_mode = true;
+            } else if let Some(rest) = raw.strip_prefix('>') {
+                filename = rest.to_string();
+                write_mode = true;
+            } else if let Some(rest) = raw.strip_prefix('<') {
+                filename = rest.to_string();
+            } else {
+                filename = raw;
+            }
+        }
+
+        if write_mode {
+            let file = if append_mode {
+                std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&filename)
+            } else {
+                File::create(&filename)
+            };
+            match file {
+                Ok(f) => {
+                    self.write_handles.insert(fh_name, BufWriter::new(f));
+                    Value::Num(1.0)
+                }
+                Err(e) => {
+                    self.set_global_var("!", Value::Str(e.to_string()));
+                    Value::Undef
+                }
+            }
+        } else {
+            match File::open(&filename) {
+                Ok(f) => {
+                    self.read_handles.insert(fh_name, BufReader::new(f));
+                    Value::Num(1.0)
+                }
+                Err(e) => {
+                    self.set_global_var("!", Value::Str(e.to_string()));
+                    Value::Undef
+                }
+            }
+        }
+    }
+
+    fn eval_close(&mut self, args: &[Expr]) -> Value {
+        if args.is_empty() {
+            return Value::Num(1.0);
+        }
+        let name = self.eval_expr(&args[0]).to_str();
+        // Flush and remove write handles
+        if let Some(mut writer) = self.write_handles.remove(&name) {
+            let _ = writer.flush();
+        }
+        self.read_handles.remove(&name);
+        Value::Num(1.0)
+    }
+
+    fn run_backtick(&self, cmd: &str) -> Value {
+        use std::process::Command;
+        match Command::new("sh").arg("-c").arg(cmd).output() {
+            Ok(output) => Value::Str(String::from_utf8_lossy(&output.stdout).to_string()),
             Err(_) => Value::Undef,
         }
     }

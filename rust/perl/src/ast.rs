@@ -46,7 +46,8 @@ pub enum Expr {
 
     // Special
     Diamond(String),            // <FH> or <>
-    Backtick(String),           // `command`
+    Backtick(String),           // `command` (literal)
+    BacktickInterp(Box<Expr>),  // `command` with interpolation
     Ref(Box<Expr>),             // \expr
     Deref(Box<Expr>),           // $$ref, @$ref, %$ref
     ArrayRef(Vec<Expr>),        // [expr, ...]

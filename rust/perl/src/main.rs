@@ -18,7 +18,8 @@
     clippy::clone_on_copy,
     clippy::needless_range_loop,
     clippy::map_clone,
-    clippy::useless_format
+    clippy::useless_format,
+    clippy::manual_strip
 )]
 
 mod ast;
@@ -39,6 +40,7 @@ fn main() {
     let mut program_text = String::new();
     let mut script_file = String::new();
     let mut include_dirs: Vec<String> = Vec::new();
+    let mut auto_newline = false; // -l flag
 
     let mut i = 1;
     while i < args.len() {
@@ -56,11 +58,30 @@ fn main() {
                     program_text.push_str(&args[i]);
                 }
             }
-            s if s.starts_with("-e") => {
-                if !program_text.is_empty() {
-                    program_text.push('\n');
+            s if s.starts_with("-") && s.contains('e') && !s.starts_with("-I") && s.len() > 1 => {
+                // Handle combined flags like -le, -lwe, -wle, etc.
+                // Everything after -e is the program text (if any), otherwise next arg
+                let e_pos = s.find('e').unwrap();
+                let after_e = &s[e_pos + 1..];
+                if !after_e.is_empty() {
+                    if !program_text.is_empty() {
+                        program_text.push('\n');
+                    }
+                    program_text.push_str(after_e);
+                } else {
+                    i += 1;
+                    if i < args.len() {
+                        if !program_text.is_empty() {
+                            program_text.push('\n');
+                        }
+                        program_text.push_str(&args[i]);
+                    }
                 }
-                program_text.push_str(&s[2..]);
+                // Parse flags before -e
+                let before_e = &s[1..e_pos];
+                if before_e.contains('l') {
+                    auto_newline = true;
+                }
             }
             "-I" => {
                 i += 1;
@@ -73,6 +94,9 @@ fn main() {
             }
             "-w" | "-W" => {
                 // Warnings — ignore for now
+            }
+            "-l" => {
+                auto_newline = true;
             }
             s if s.starts_with("-")
                 && s.len() > 1
@@ -122,6 +146,11 @@ fn main() {
 
     // Execute
     let mut interp = Interpreter::new();
+    if auto_newline {
+        // -l flag: set $\ (output record separator) to \n
+        // and auto-chomp on input
+        interp.set_special_var("\\", "\n");
+    }
     interp.run(&program);
 
     std::process::exit(interp.exit_code);
