@@ -2990,8 +2990,8 @@ fn setup_mount_namespace(config: &ExecHelperConfig) {
             // Read-only cgroups, host namespace
             remount_read_only("/sys/fs/cgroup", config);
         }
-        "private" => {
-            // New cgroup namespace, writable
+        "private" | "strict" => {
+            // New cgroup namespace
             let ret = unsafe { libc::unshare(libc::CLONE_NEWCGROUP) };
             if ret != 0 {
                 log::warn!(
@@ -2999,17 +2999,37 @@ fn setup_mount_namespace(config: &ExecHelperConfig) {
                     std::io::Error::last_os_error()
                 );
             }
-        }
-        "strict" => {
-            // New cgroup namespace, read-only
-            let ret = unsafe { libc::unshare(libc::CLONE_NEWCGROUP) };
+            // Remount /sys/fs/cgroup with a fresh cgroup2 mount in the new namespace.
+            // First unmount the old mount, then mount fresh cgroup2 with proper flags.
+            let cgroup_path =
+                std::ffi::CString::new("/sys/fs/cgroup").unwrap();
+            let cgroup2 = std::ffi::CString::new("cgroup2").unwrap();
+            let mount_data =
+                std::ffi::CString::new("nsdelegate,memory_recursiveprot").unwrap();
+            // Unmount the old cgroup mount
+            unsafe { libc::umount2(cgroup_path.as_ptr(), libc::MNT_DETACH) };
+            // Mount fresh cgroup2
+            let mount_flags = libc::MS_NOSUID | libc::MS_NODEV | libc::MS_NOEXEC
+                | if config.protect_control_groups_ex == "strict" {
+                    libc::MS_RDONLY
+                } else {
+                    0
+                };
+            let ret = unsafe {
+                libc::mount(
+                    cgroup2.as_ptr(),
+                    cgroup_path.as_ptr(),
+                    cgroup2.as_ptr(),
+                    mount_flags as libc::c_ulong,
+                    mount_data.as_ptr() as *const libc::c_void,
+                )
+            };
             if ret != 0 {
                 log::warn!(
-                    "mount_ns: unshare(CLONE_NEWCGROUP) failed: {}",
+                    "mount_ns: mount cgroup2 failed: {}",
                     std::io::Error::last_os_error()
                 );
             }
-            remount_read_only("/sys/fs/cgroup", config);
         }
         _ => {
             // "no" or unset — fall back to boolean ProtectControlGroups
