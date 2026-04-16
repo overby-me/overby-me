@@ -1130,6 +1130,20 @@ impl Interpreter {
                     eprintln!("awk: fatal: attempt to use array {prov} in a scalar context");
                     std::process::exit(2);
                 }
+                // Check if a parameter with this global as origin was used as array
+                if !self.current_params.contains(&name.to_string()) {
+                    for ap in &self.array_params {
+                        if let Some(origin) = self.param_origins.get(ap) {
+                            let origin_root = origin.split(", from ").last().unwrap_or(origin);
+                            if origin_root == name {
+                                eprintln!(
+                                    "awk: fatal: attempt to use array `{name}' in a scalar context"
+                                );
+                                std::process::exit(2);
+                            }
+                        }
+                    }
+                }
                 self.set_var(name, val);
             }
             Expr::FieldRef(idx_expr) => {
@@ -1151,6 +1165,20 @@ impl Interpreter {
                                 );
                                 std::process::exit(2);
                             }
+                        }
+                        // Also check if the origin variable is now a scalar global
+                        let origin_root = my_origin.split(", from ").last().unwrap_or(&my_origin);
+                        if self.globals.contains_key(origin_root)
+                            && !self.arrays.contains_key(origin_root)
+                            && !matches!(
+                                self.globals.get(origin_root),
+                                Some(Value::Uninitialized) | None
+                            )
+                        {
+                            eprintln!(
+                                "awk: fatal: attempt to use scalar parameter `{name}' as an array"
+                            );
+                            std::process::exit(2);
                         }
                     }
                     self.array_params.insert(name.to_string());
@@ -1236,8 +1264,24 @@ impl Interpreter {
                         std::process::exit(2);
                     }
                 }
-                // Track parameter used as array
+                // Track parameter used as array and check origin conflicts
                 if self.current_params.contains(&name.to_string()) {
+                    if let Some(my_origin) = self.param_origins.get(name).cloned() {
+                        // Check if origin variable is now a scalar global
+                        let origin_root = my_origin.split(", from ").last().unwrap_or(&my_origin);
+                        if self.globals.contains_key(origin_root)
+                            && !self.arrays.contains_key(origin_root)
+                            && !matches!(
+                                self.globals.get(origin_root),
+                                Some(Value::Uninitialized) | None
+                            )
+                        {
+                            eprintln!(
+                                "awk: fatal: attempt to use scalar parameter `{name}' as an array"
+                            );
+                            std::process::exit(2);
+                        }
+                    }
                     self.array_params.insert(name.to_string());
                 }
                 let vals: Vec<Value> = indices.iter().map(|i| self.eval_expr(i)).collect();
