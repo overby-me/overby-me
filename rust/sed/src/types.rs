@@ -17,7 +17,17 @@ impl SedRegex {
                     .backtrack_limit(10_000_000)
                     .build()
                     .map(SedRegex::Fancy)
-                    .map_err(|e| format!("{e}"))
+                    .map_err(|e| {
+                        // Clean up fancy-regex error messages to match GNU sed format
+                        let msg = format!("{e}");
+                        // Strip "Parsing error at position N: " prefix
+                        if let Some(rest) = msg.strip_prefix("Parsing error at position ") {
+                            if let Some(colon_pos) = rest.find(": ") {
+                                return rest[colon_pos + 2..].to_string();
+                            }
+                        }
+                        msg
+                    })
             }
         }
     }

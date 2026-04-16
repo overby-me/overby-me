@@ -647,6 +647,36 @@ impl Engine {
     fn do_substitute(&mut self, re: &SedRegex, replacement: &str, flags: &SubstFlags) -> bool {
         let input = self.pattern_space.clone();
 
+        // In POSIX mode, \l \u \L \U \E are not case-conversion — treat as literal
+        let replacement = if self.posix {
+            let mut r = String::new();
+            let chars: Vec<char> = replacement.chars().collect();
+            let mut i = 0;
+            while i < chars.len() {
+                if chars[i] == '\\' && i + 1 < chars.len() {
+                    match chars[i + 1] {
+                        'l' | 'u' | 'L' | 'U' | 'E' => {
+                            // In POSIX mode, just output the letter literally
+                            r.push(chars[i + 1]);
+                            i += 2;
+                        }
+                        _ => {
+                            r.push(chars[i]);
+                            r.push(chars[i + 1]);
+                            i += 2;
+                        }
+                    }
+                } else {
+                    r.push(chars[i]);
+                    i += 1;
+                }
+            }
+            r
+        } else {
+            replacement.to_string()
+        };
+        let replacement = &replacement;
+
         if flags.global {
             let result = re.replace_all(&input, |caps: &SedCaptures| {
                 build_replacement(caps, replacement)

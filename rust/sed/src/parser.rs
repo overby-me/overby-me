@@ -10,6 +10,7 @@ pub struct Parser<'a> {
     source: ScriptSource,
     cmd_start: usize,
     pub sandbox: bool,
+    pub posix: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -22,6 +23,7 @@ impl<'a> Parser<'a> {
             source,
             cmd_start: 0,
             sandbox: false,
+            posix: false,
         }
     }
 
@@ -154,6 +156,14 @@ impl<'a> Parser<'a> {
         }
 
         let cmd = self.parse_command_char()?;
+
+        // Validate: some commands don't accept addresses
+        if !matches!(address, AddressRange::None) {
+            if matches!(cmd, Command::Label(_)) {
+                return Err(self.err(": doesn't want any addresses"));
+            }
+        }
+
         Ok(Some(SedCommand {
             address,
             negated,
@@ -333,10 +343,16 @@ impl<'a> Parser<'a> {
             b'p' => Ok(Command::Print),
             b'P' => Ok(Command::PrintFirstLine),
             b'l' => {
-                // l may have optional line width: l80, l1, etc.
+                // l may have optional line width: l80, l1, etc. (GNU extension)
                 let width = if let Some(ch) = self.peek()
                     && ch.is_ascii_digit()
                 {
+                    if self.posix {
+                        return Err(self.err_at(
+                            self.pos - self.cmd_start + 1,
+                            "extra characters after command",
+                        ));
+                    }
                     Some(self.parse_number()?)
                 } else {
                     None
@@ -658,10 +674,16 @@ impl<'a> Parser<'a> {
                 }
                 Some(b'i') | Some(b'I') => {
                     self.advance();
+                    if self.posix {
+                        return Err(self.err("unknown option to `s'"));
+                    }
                     flags.case_insensitive = true;
                 }
                 Some(b'e') => {
                     self.advance();
+                    if self.posix {
+                        return Err(self.err("unknown option to `s'"));
+                    }
                     if self.sandbox {
                         return Err(self.err("e/r/w commands disabled in sandbox mode"));
                     }
@@ -672,6 +694,9 @@ impl<'a> Parser<'a> {
                 }
                 Some(b'm') | Some(b'M') => {
                     self.advance();
+                    if self.posix {
+                        return Err(self.err("unknown option to `s'"));
+                    }
                     flags.multiline = true;
                 }
                 Some(b'w') => {

@@ -319,6 +319,7 @@ fn main() {
     for (idx, script) in opts.scripts.iter().enumerate() {
         let mut parser = Parser::new(&script.content, opts.extended, script.source.clone());
         parser.sandbox = opts.sandbox;
+        parser.posix = opts.posix; // only --posix flag, not POSIXLY_CORRECT
         match parser.parse_all(idx == 0) {
             Ok(cmds) => {
                 if idx == 0 && parser.hash_n_quiet {
