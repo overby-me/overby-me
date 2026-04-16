@@ -108,14 +108,20 @@ fn build_request(url: &ParsedUrl, opts: &Options) -> Vec<u8> {
     }
 
     // Custom headers (may override defaults).
-    // An empty value (e.g. -H "X-Header:") removes the header entirely.
-    // A semicolon instead of colon (e.g. -H "X-Header;") sends the header with no value.
+    // - Empty value (e.g. -H "X-Header:") removes/suppresses the header entirely.
+    // - "\x00" marker (from -H "X-Header;") sends header with no value.
+    // - Normal value sends "Key: value\r\n".
     for (key, val) in &opts.headers {
         if val.is_empty() {
             // Empty value = suppress this header (don't send it)
             continue;
         }
-        req.push_str(&format!("{key}: {val}\r\n"));
+        if val == "\x00" {
+            // No-value header (from semicolon syntax)
+            req.push_str(&format!("{key}:\r\n"));
+        } else {
+            req.push_str(&format!("{key}: {val}\r\n"));
+        }
     }
 
     // Body handling.
@@ -172,10 +178,10 @@ fn build_body(opts: &Options) -> Option<Vec<u8>> {
                         .and_then(|f| f.to_str())
                         .unwrap_or("file")
                 });
-                let ct = field
-                    .content_type
-                    .as_deref()
-                    .unwrap_or("application/octet-stream");
+                let ct = field.content_type.as_deref().unwrap_or_else(|| {
+                    // Guess content type from file extension (like curl does)
+                    guess_content_type(filename)
+                });
                 body.extend_from_slice(
                     format!(
                         "Content-Disposition: form-data; name=\"{}\"; filename=\"{filename}\"\r\n\
@@ -212,6 +218,33 @@ fn build_body(opts: &Options) -> Option<Vec<u8>> {
     }
 
     None
+}
+
+fn guess_content_type(filename: &str) -> &'static str {
+    let lower = filename.to_lowercase();
+    if lower.ends_with(".txt") || lower.ends_with(".text") || lower.ends_with(".log") {
+        "text/plain"
+    } else if lower.ends_with(".html") || lower.ends_with(".htm") {
+        "text/html"
+    } else if lower.ends_with(".xml") {
+        "application/xml"
+    } else if lower.ends_with(".json") {
+        "application/json"
+    } else if lower.ends_with(".jpg") || lower.ends_with(".jpeg") {
+        "image/jpeg"
+    } else if lower.ends_with(".png") {
+        "image/png"
+    } else if lower.ends_with(".gif") {
+        "image/gif"
+    } else if lower.ends_with(".css") {
+        "text/css"
+    } else if lower.ends_with(".js") {
+        "application/javascript"
+    } else if lower.ends_with(".pdf") {
+        "application/pdf"
+    } else {
+        "application/octet-stream"
+    }
 }
 
 fn multipart_boundary(_opts: &Options) -> String {

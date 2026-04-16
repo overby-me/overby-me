@@ -36,10 +36,7 @@ pub(crate) fn parse_args() -> Options {
             "-H" | "--header" => {
                 i += 1;
                 let h = next_arg(&args, i, "-H");
-                if let Some((k, v)) = h.split_once(':') {
-                    opts.headers
-                        .push((k.trim().to_string(), v.trim_start().to_string()));
-                }
+                parse_custom_header(&mut opts, &h);
             }
             "-d" | "--data" | "--data-ascii" => {
                 i += 1;
@@ -328,10 +325,7 @@ pub(crate) fn parse_args() -> Options {
                             'H' => {
                                 i += 1;
                                 let h = next_arg(&args, i, "-H");
-                                if let Some((k, v)) = h.split_once(':') {
-                                    opts.headers
-                                        .push((k.trim().to_string(), v.trim().to_string()));
-                                }
+                                parse_custom_header(&mut opts, &h);
                                 j = chars.len();
                                 continue;
                             }
@@ -440,6 +434,22 @@ pub(crate) fn parse_args() -> Options {
     }
 
     opts
+}
+
+/// Parse a custom -H header string.
+/// - "Name: value" → adds header
+/// - "Name:" → empty value (suppresses/removes default header)
+/// - "Name;" → sends header with no colon-value (like "Name:\r\n")
+fn parse_custom_header(opts: &mut Options, h: &str) {
+    if let Some((k, v)) = h.split_once(':') {
+        // "Name: value" or "Name:" (empty value)
+        opts.headers
+            .push((k.trim().to_string(), v.trim_start().to_string()));
+    } else if let Some(k) = h.strip_suffix(';') {
+        // "Name;" — send header with empty value (no-value header)
+        // Store with a special marker so request.rs sends "Name:\r\n"
+        opts.headers.push((k.trim().to_string(), "\x00".to_string()));
+    }
 }
 
 fn next_arg(args: &[String], i: usize, flag: &str) -> String {
